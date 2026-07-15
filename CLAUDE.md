@@ -93,7 +93,7 @@ npm run build                               # must pass with zero errors
 
 | Layer | Technology |
 |---|---|
-| Frontend + API | Next.js 14.2.5, React 18.3, App Router (`app/` directory — NOT `pages/`) |
+| Frontend + API | Next.js 14.2.35, React 18.3, App Router (`app/` directory — NOT `pages/`) |
 | Auth | next-auth 4.24.7, standalone (no suite SSO dependency) |
 | Database | PostgreSQL 16, `pg` module (pool pattern) |
 | Runtime | Node.js v20 |
@@ -133,7 +133,8 @@ secvault/
 │       └── settings/
 ├── lib/
 │   ├── db.js                        ← PostgreSQL pool singleton
-│   ├── schema.sql                   ← full schema (CREATE TABLE IF NOT EXISTS)
+│   ├── schema.sql                   ← tables (CREATE TABLE IF NOT EXISTS, runs as secvault_user)
+│   ├── schema-grants.sql            ← readonly roles + per-table grants (runs as postgres superuser)
 │   ├── migrate.js                   ← runs schema.sql
 │   ├── credStore.js                 ← AES-256-GCM credential encryption
 │   ├── feeds/
@@ -160,7 +161,9 @@ secvault/
 └── installer/
     ├── Install-SecVault.ps1
     ├── Update-SecVault.ps1
-    └── Uninstall-SecVault.ps1
+    ├── Uninstall-SecVault.ps1
+    └── dependencies/                ← bundled prerequisite installers (gitignored except README.txt)
+        └── README.txt
 ```
 
 ---
@@ -183,8 +186,11 @@ module.exports = { pool };
 ### Schema Migration
 
 - `lib/schema.sql` uses `CREATE TABLE IF NOT EXISTS` on every table — safe to re-run
-- `lib/migrate.js` runs `schema.sql` via `psql` or `pg` client
-- Update script runs migration BEFORE restarting services (see Update script section)
+- `lib/migrate.js` runs `schema.sql` via the `pg` client, connected as `secvault_user`
+- `lib/schema-grants.sql` (readonly role creation + per-table grants) is a **separate file**, applied
+  separately by `Install-SecVault.ps1` under the `postgres` superuser — **not** run by `migrate.js` and
+  **not** part of the Update script. See "Readonly Access for Diagnostics" below for why.
+- Update script runs `migrate.js` (schema.sql only) BEFORE restarting services (see Update script section)
 - Never use `DROP TABLE` in schema.sql — destructive and irreversible in production
 
 ### Primary Keys
@@ -405,6 +411,27 @@ Rate limiting: SMC API has no documented rate limit but batch requests on slow l
 
 Forcepoint has NO public PSIRT API, RSS feed, or advisory endpoint. NVD is the only automated source.
 
+### ⚠️ NVD API Parameter — Critical Bug Fixed in MVP Build
+
+**Use `virtualMatchString`, NOT `cpeName`, for wildcard CPE queries.**
+
+The NVD API 2.0 documentation lists `cpeName`, but live-testing against the real endpoint during
+the MVP build proved it returns **HTTP 404** on wildcard/version-less CPE strings (e.g.
+`cpe:2.3:a:forcepoint:next_generation_firewall:*:*:*:*:*:*:*:*`). `virtualMatchString` is the
+correct parameter for pattern-based CPE matching and was confirmed live (HTTP 200, real Forcepoint
+CVEs returned).
+
+```javascript
+// WRONG — 404s on wildcard CPEs (despite being in the documented spec):
+const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?cpeName=${cpeString}`;
+
+// CORRECT — verified against the live NVD API:
+const url = `https://services.nvd.nist.gov/rest/json/cves/2.0?virtualMatchString=${cpeString}`;
+```
+
+Had this shipped as documented, every feed sync would fail outright (404) with no advisory data
+and no obvious error. Never revert to `cpeName` for wildcard queries. See `lib/feeds/nvd.js`.
+
 ### Dual-CPE Query (critical — covers pre/post v7.1 rebrand)
 
 ```javascript
@@ -412,7 +439,8 @@ const CPE_STRINGS = [
   'cpe:2.3:a:forcepoint:next_generation_firewall:*:*:*:*:*:*:*:*',  // pre-7.1
   'cpe:2.3:a:forcepoint:flexedge_secure_sd-wan:*:*:*:*:*:*:*:*'     // 7.1+ rebrand
 ];
-// Run both queries. Deduplicate by cve_id before inserting.
+// Run both queries using the virtualMatchString parameter (see above).
+// Deduplicate by cve_id before inserting.
 // Verify exact CPE vendor/product strings via NVD CPE dictionary:
 // https://services.nvd.nist.gov/rest/json/cpes/2.0?keywordSearch=forcepoint
 ```
@@ -517,6 +545,34 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 
 ## Installer Scripts
 
+### Bundled Dependencies (`installer/dependencies/`)
+
+`Install-SecVault.ps1` follows the same convention as the NocVault suite installer
+(`Install-NocVault-Suite.ps1`): it does **not** assume Git, Node.js, PostgreSQL, or NSSM are
+already on the target server, and it does **not** download them from the internet either. Instead
+it installs each one, silently/unattended, from a local installer file placed in
+`installer\dependencies\` next to the script — skipping any tool that's already present. See
+`installer/dependencies/README.txt` for the exact files required:
+
+```
+installer/dependencies/
+  node-v20.19.0-x64.msi            (required)
+  postgresql-16.x-windows-x64.exe  (required)
+  nssm-2.24.zip                    (required)
+  Git-2.54.0-64-bit.exe            (used if Git not already present)
+  VC_redist.x64.exe                (installed if present; skipped if not)
+```
+
+These binaries are **not committed to git** (too large, not source) — the `.gitignore` excludes
+everything in that folder except `README.txt`. Copy them from the existing NocVault-Suite-v1.1
+distribution package rather than re-downloading; same versions are reused across the whole suite.
+
+NSSM is extracted from the bundled zip into `C:\Apps\SecVault\nssm\nssm-2.24\win64\nssm.exe` at
+install time — the installer always references this exact path (`$NssmExe`), never assumes `nssm`
+is on `PATH`. **Uninstall does not need this path at all** — `Uninstall-SecVault.ps1` removes the
+services via `sc.exe delete` (works on any NSSM-registered service, no `nssm.exe` required), matching
+the pattern used by the NocVault suite uninstaller.
+
 ### Update Script — Exact Order (do not change without testing)
 
 ```powershell
@@ -537,18 +593,21 @@ all NocVault suite apps.
 
 ### NSSM Service Registration
 
+`$NssmExe` below is the bundled copy extracted at install time (`C:\Apps\SecVault\nssm\nssm-2.24\win64\nssm.exe`)
+— see "Bundled Dependencies" above. Never assume `nssm` is on `PATH`.
+
 ```powershell
 # SecVault-App
-nssm install SecVault-App node
-nssm set SecVault-App AppParameters "node_modules\.bin\next start -p 3010"
-nssm set SecVault-App AppDirectory "C:\Apps\SecVault"
-nssm set SecVault-App AppEnvironmentExtra "NODE_ENV=production"
+& $NssmExe install SecVault-App node
+& $NssmExe set SecVault-App AppParameters "node_modules\.bin\next start -p 3010"
+& $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault"
+& $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production"
 
 # SecVault-Engine
-nssm install SecVault-Engine node
-nssm set SecVault-Engine AppParameters "services\engine-worker.js"
-nssm set SecVault-Engine AppDirectory "C:\Apps\SecVault"
-nssm set SecVault-Engine AppEnvironmentExtra "NODE_ENV=production"
+& $NssmExe install SecVault-Engine node
+& $NssmExe set SecVault-Engine AppParameters "services\engine-worker.js"
+& $NssmExe set SecVault-Engine AppDirectory "C:\Apps\SecVault"
+& $NssmExe set SecVault-Engine AppEnvironmentExtra "NODE_ENV=production"
 ```
 
 **⚠️ NSSM casing bug (from suite experience):** `AppEnvironmentExtra` path casing must match the actual filesystem case. Wrong casing causes duplicate React instances and silent rendering failures. Double-check paths.
@@ -680,15 +739,57 @@ These patterns proved themselves in the suite apps and are directly inherited:
 
 ## Known Issues & Gotchas
 
+### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
+
+Real production traps discovered during the Phase 1+2 build — documented here so they are never
+reintroduced.
+
+**1. NVD API parameter: `virtualMatchString` not `cpeName` for wildcard queries.**
+The NVD 2.0 spec documents `cpeName`, but live testing proved it 404s on wildcard CPE strings.
+`virtualMatchString` is correct. See "Forcepoint CVE Data" above. Would have silently broken every
+feed sync with zero advisory data and no obvious error.
+
+**2. Next.js static prerendering of DB-hitting API routes.**
+Every API route handler under `app/api/` that calls `pool.query()` must export:
+```javascript
+export const dynamic = 'force-dynamic';
+```
+Without it, `npm run build` tries to statically prerender that route, hits the DB at build time
+(before the DB necessarily exists/is reachable), and the build crashes. Add this export to every
+route that touches the database.
+
+**3. Schema privilege split: `schema.sql` + `lib/schema-grants.sql`.**
+The original `schema.sql` tried to create readonly diagnostic roles (`claude_readonly`,
+`nocvault_readonly`) inline. `secvault_user` (the account `lib/migrate.js` connects as) has no
+`CREATEROLE` privilege — and because PostgreSQL treats a multi-statement `pool.query()` call as one
+implicit transaction, that permission failure would have rolled back every `CREATE TABLE` in the
+same call, silently breaking every fresh install. Fixed by splitting into two files — see "Schema
+Migration" and "Readonly Access for Diagnostics" above.
+
+**4. `next` 14.2.5 → 14.2.35 (critical npm vulnerability).**
+Bumped during the MVP build to close a critical advisory set (same 14.2.x minor line, no breaking
+changes). One remaining **moderate** vulnerability in `uuid` (pulled in via `next-auth`/`node-cron`)
+requires a breaking major-version bump — deferred at the MVP deadline. Resolve before first
+customer deployment.
+
 ### SMC API
 - **Field names vary between SMC 6.x and 7.x.** The software version field is not consistently named. Always log raw element responses on first integration test, then update `parser.js`.
 - **Pagination**: SMC lists can return partial results with a `paging.next` href. Always follow pagination for engine lists — some large environments have 50+ engines.
 - **HATEOAS**: never construct URLs from element IDs. Use the `href` from the list response.
+- **Live SMC field verification still pending** — the MVP was built without a live SMC instance. The first real connection to a Forcepoint 6.x or 7.x SMC will require checking the raw engine element response (already logged via `console.log('[SMC Debug] ...')` in `smc.js`) and updating `lib/adapters/forcepoint/parser.js` field-name fallbacks accordingly.
 
 ### NVD CPE Matching
+- **Use `virtualMatchString` for wildcard queries** — see MVP bug #1 above. Never revert to `cpeName`.
 - **CPE strings are approximate.** The exact vendor/product strings in NVD CPE dictionary may differ from what is documented. Verify via: `https://services.nvd.nist.gov/rest/json/cpes/2.0?keywordSearch=forcepoint`
 - **Forcepoint rebrand coverage**: Some NVD entries for FlexEdge versions may still reference the NGFW CPE string (vendors are inconsistent about updating CVE records after rebrand). Query both strings always.
 - **Version ranges in NVD**: `versionEndIncluding` means the vulnerability affects UP TO AND INCLUDING that version. `versionEndExcluding` means UP TO BUT NOT INCLUDING. Get this backwards and you'll mark patched devices as vulnerable.
+
+### Next.js API Routes
+- **Every API route that hits the DB must export `dynamic = 'force-dynamic'`** — see MVP bug #2 above. Without it, `npm run build`'s prerendering step will crash on any route calling `pool.query()`.
+
+### Schema Files
+- **Two schema files, two privilege levels** — see MVP bug #3 above. Never merge `schema-grants.sql` back into `schema.sql` — doing so will break fresh installs.
+- Every new table added to `schema.sql` needs a corresponding `GRANT SELECT` added to `schema-grants.sql`, then reapplied (`psql -U postgres -d secvault -f lib/schema-grants.sql`) — this does not happen automatically as part of `Update-SecVault.ps1`.
 
 ### Rule Shadow Analysis
 - Shadow detection is O(n²) against rule count. For large rulesets (500+ rules), cap at 1000 rules or run off-hours. Log a warning when ruleset size exceeds threshold.

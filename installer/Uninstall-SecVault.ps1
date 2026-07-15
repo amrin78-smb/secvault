@@ -4,17 +4,29 @@
     directory) from this server.
 
 .DESCRIPTION
-    Written for PowerShell 5.1  -  see CLAUDE.md "PowerShell (PS5 compatibility)".
-    Never uses Start-Service/Stop-Service/Get-Service  -  sc.exe only.
-    Never pipes directly out of try/catch  -  always `$out = cmd; $out | Write-Host`.
+    Written for PowerShell 5.1 -- see CLAUDE.md "PowerShell (PS5 compatibility)".
+    Never uses Start-Service/Stop-Service/Get-Service -- sc.exe only.
+    Never pipes directly out of try/catch -- always `$out = cmd; $out | Write-Host`.
+
+    Services are removed via `sc.exe delete` (not `nssm remove`) -- once a
+    service is registered with NSSM, the Windows Service Control Manager can
+    remove it directly with no dependency on locating nssm.exe, matching the
+    pattern used by the NocVault suite uninstaller.
 
 .PARAMETER DropDatabase
     If set, also drops the `secvault` database and `secvault_user` role.
+
+.PARAMETER PgAdminPassword
+    PostgreSQL `postgres` superuser password. Only needed when -DropDatabase
+    is set. Must match the value used at install time (see Install-SecVault.ps1
+    -PgAdminPassword).
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$DropDatabase
+    [switch]$DropDatabase,
+
+    [string]$PgAdminPassword = 'SecV@ult_Pg#2026'
 )
 
 $InstallRoot = 'C:\Apps\SecVault'
@@ -39,7 +51,7 @@ if (-not ($confirm -eq 'y' -or $confirm -eq 'Y')) {
 }
 
 # -----------------------------------------------------------------------
-# 2. Stop services (sc.exe only  -  never Start-Service/Stop-Service)
+# 2. Stop services (sc.exe only -- never Start-Service/Stop-Service)
 # -----------------------------------------------------------------------
 Write-Step 'Stopping services...'
 
@@ -49,20 +61,18 @@ $out | Write-Host
 $out = sc.exe stop SecVault-Engine
 $out | Write-Host
 
-# -----------------------------------------------------------------------
-# 3. Remove NSSM services
-# -----------------------------------------------------------------------
-Write-Step 'Removing NSSM services...'
+Start-Sleep -Seconds 2
 
-if (Get-Command nssm -ErrorAction SilentlyContinue) {
-    $out = & nssm remove SecVault-App confirm 2>&1
-    $out | Write-Host
+# -----------------------------------------------------------------------
+# 3. Remove services (sc.exe delete -- no nssm.exe dependency)
+# -----------------------------------------------------------------------
+Write-Step 'Removing services...'
 
-    $out = & nssm remove SecVault-Engine confirm 2>&1
-    $out | Write-Host
-} else {
-    Write-Host '[WARN] nssm was not found on PATH  -  skipping service removal. Remove the services manually if they still exist.' -ForegroundColor Yellow
-}
+$out = sc.exe delete SecVault-App
+$out | Write-Host
+
+$out = sc.exe delete SecVault-Engine
+$out | Write-Host
 
 # -----------------------------------------------------------------------
 # 4. Optionally drop database + user
@@ -70,10 +80,7 @@ if (Get-Command nssm -ErrorAction SilentlyContinue) {
 if ($DropDatabase) {
     Write-Step 'Dropping database and user...'
 
-    # NOTE: see the same assumption documented in Install-SecVault.ps1 -- there
-    # is no parameter carrying the `postgres` superuser password; 'postgres'
-    # is assumed as the default local superuser password. Override if needed.
-    $env:PGPASSWORD = 'postgres'
+    $env:PGPASSWORD = $PgAdminPassword
 
     $out = & psql -U postgres -h localhost -c "DROP DATABASE IF EXISTS secvault" 2>&1
     $out | Write-Host
@@ -95,16 +102,16 @@ if ($DropDatabase) {
 }
 
 # -----------------------------------------------------------------------
-# 5. Optionally delete install directory
+# 5. Optionally delete install directory (includes the bundled NSSM copy)
 # -----------------------------------------------------------------------
-$deleteConfirm = Read-Host "Also delete $InstallRoot entirely? This is IRREVERSIBLE DATA LOSS (logs, config, .env.local). [y/N]"
+$deleteConfirm = Read-Host "Also delete $InstallRoot entirely? This is IRREVERSIBLE DATA LOSS (logs, config, .env.local, bundled NSSM). [y/N]"
 if ($deleteConfirm -eq 'y' -or $deleteConfirm -eq 'Y') {
     Write-Step "Deleting $InstallRoot..."
     if (Test-Path $InstallRoot) {
         Remove-Item -Recurse -Force -Confirm:$false -Path $InstallRoot
         Write-Step "$InstallRoot deleted."
     } else {
-        Write-Step "$InstallRoot does not exist  -  nothing to delete."
+        Write-Step "$InstallRoot does not exist -- nothing to delete."
     }
 } else {
     Write-Step "Leaving $InstallRoot in place."

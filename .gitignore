@@ -28,3 +28,8 @@ Thumbs.db
 # misc
 .claude-web-files/
 .claude-web-images/
+
+# bundled installer prerequisites (large binaries, not source -- see
+# installer/dependencies/README.txt for what belongs here)
+installer/dependencies/*
+!installer/dependencies/README.txt
