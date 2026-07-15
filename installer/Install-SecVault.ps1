@@ -217,8 +217,18 @@ if ($hasGithubHostKey) {
 # Verify the key actually authenticates before attempting to clone --
 # fail clearly now rather than letting `git clone` fail with a more
 # confusing generic permission-denied error later.
+#
+# GitHub's -T handshake always writes "successfully authenticated" to
+# stderr (never stdout), even on success. Capturing that with `2>&1`
+# turns it into an ErrorRecord on the success/error stream, which under
+# $ErrorActionPreference = 'Stop' surfaces as a NativeCommandError and
+# halts the script. Route stderr to a temp file instead so it never
+# touches the pipeline.
 Write-Step 'Testing SSH authentication against GitHub...'
-$sshTest = & ssh -i $deployKeyDest -T git@github.com 2>&1
+$tmpFile = [System.IO.Path]::GetTempFileName()
+& ssh -i $deployKeyDest -T git@github.com 2>$tmpFile | Out-Null
+$sshTest = Get-Content $tmpFile -Raw -ErrorAction SilentlyContinue
+Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
 $sshTest | Write-Host
 if ($sshTest -notmatch 'successfully authenticated') {
     Write-Host '[FAIL] SSH authentication to github.com did not succeed.' -ForegroundColor Red
