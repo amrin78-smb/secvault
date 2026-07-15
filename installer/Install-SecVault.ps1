@@ -1,4 +1,5 @@
-﻿<#
+﻿#Requires -RunAsAdministrator
+<#
 .SYNOPSIS
     Installs SecVault: provisions all prerequisites (Git, Node.js, PostgreSQL,
     NSSM, VC++ Redistributable) from a bundled dependencies folder, configures
@@ -106,6 +107,30 @@ function Invoke-Native {
     } finally {
         $ErrorActionPreference = $prevEAP
     }
+}
+
+# `sc.exe start`/`sc.exe stop` return as soon as the SCM accepts the
+# request, not once the service has actually reached the target state --
+# polling avoids racing a fixed sleep against however long this specific
+# service actually takes. Read-only Get-Service polling here, not
+# Start-Service/Stop-Service -- CLAUDE.md's "never use PowerShell service
+# cmdlets" is about the state-changing ones (they can hang under WinRM);
+# querying .Status is the same safe pattern already used to detect
+# $PgSvcName elsewhere in this script.
+function Wait-ServiceStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServiceName,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$TimeoutSeconds = 30
+    )
+    $waited = 0
+    while ($waited -lt $TimeoutSeconds) {
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq $Status) { return $true }
+        Start-Sleep -Seconds 1
+        $waited++
+    }
+    return $false
 }
 
 Write-Host '=================================================='
@@ -293,14 +318,26 @@ if ($pgAlreadyInstalled) {
     $resetOk = $false
     try {
         Invoke-Native { sc.exe stop $PgSvcName } | Out-Null
-        Start-Sleep -Seconds 3
+        Wait-ServiceStatus -ServiceName $PgSvcName -Status 'Stopped' -TimeoutSeconds 30 | Out-Null
         Invoke-Native { sc.exe start $PgSvcName } | Out-Null
-        Start-Sleep -Seconds 5
+        if (-not (Wait-ServiceStatus -ServiceName $PgSvcName -Status 'Running' -TimeoutSeconds 30)) {
+            Fail "$PgSvcName did not reach the Running state within 30s after restart -- cannot proceed with the password reset."
+        }
 
+        # Service state 'Running' and the listener actually accepting TCP
+        # connections aren't quite the same instant -- retry the
+        # connection a few times with a short backoff rather than a single
+        # fixed sleep-then-try.
         $escapedPassword = $PgAdminPassword.Replace("'", "''")
-        $out = Invoke-Native { & psql -U postgres -h 127.0.0.1 -c "ALTER USER postgres WITH PASSWORD '$escapedPassword'" 2>&1 }
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            $out = Invoke-Native { & psql -U postgres -h 127.0.0.1 -c "ALTER USER postgres WITH PASSWORD '$escapedPassword'" 2>&1 }
+            if ($LASTEXITCODE -eq 0) {
+                $resetOk = $true
+                break
+            }
+            Start-Sleep -Seconds 2
+        }
         $out | Write-Host
-        $resetOk = ($LASTEXITCODE -eq 0)
     } finally {
         # Always restore the original pg_hba.conf and restart, whether or
         # not the reset succeeded -- never leave the server open to trust
@@ -308,9 +345,11 @@ if ($pgAlreadyInstalled) {
         Copy-Item -Path $pgHbaBackup -Destination $pgHbaPath -Force
         Remove-Item -Path $pgHbaBackup -Force -ErrorAction SilentlyContinue
         Invoke-Native { sc.exe stop $PgSvcName } | Out-Null
-        Start-Sleep -Seconds 3
+        Wait-ServiceStatus -ServiceName $PgSvcName -Status 'Stopped' -TimeoutSeconds 30 | Out-Null
         Invoke-Native { sc.exe start $PgSvcName } | Out-Null
-        Start-Sleep -Seconds 5
+        if (-not (Wait-ServiceStatus -ServiceName $PgSvcName -Status 'Running' -TimeoutSeconds 30)) {
+            Write-Host "[WARN] $PgSvcName did not report Running within 30s after the final restart -- check its status manually." -ForegroundColor Yellow
+        }
     }
 
     if (-not $resetOk) {
