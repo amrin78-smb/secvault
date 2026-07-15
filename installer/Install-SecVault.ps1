@@ -150,6 +150,9 @@ if (-not (Test-Path $sshDir)) {
 }
 
 $deployKeyDest = Join-Path $sshDir 'secvault_deploy'
+if (Test-Path $deployKeyDest) {
+    $out = icacls $deployKeyDest /reset 2>&1
+}
 Copy-Item -Path $DeployKeySource -Destination $deployKeyDest -Force
 Write-Host "    [OK] Deploy key copied to $deployKeyDest"
 
