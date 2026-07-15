@@ -79,7 +79,15 @@ Write-Host '=================================================='
 Write-Host ' SecVault Installer'
 Write-Host '=================================================='
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$SecVaultGitUrl = 'https://github.com/amrin78-smb/secvault.git'
+
+# The application repo is cloned into $InstallRoot itself (CLAUDE.md: "Install
+# path: C:\Apps\SecVault\" IS the repo root -- unlike some other suite apps
+# there is no separate "\app" subfolder). This installer is a standalone
+# distributable (dependencies bundled alongside it, e.g. C:\SecVault-Installer\)
+# and is NOT expected to already be sitting inside a clone of the repo -- do
+# not derive $repoRoot from $PSScriptRoot.
+$repoRoot = $InstallRoot
 $DepsDir = Join-Path $PSScriptRoot 'dependencies'
 
 # -----------------------------------------------------------------------
@@ -113,12 +121,32 @@ if (-not (Test-Path $VcRedist)) {
 }
 
 # -----------------------------------------------------------------------
-# 2. Create install directories
+# 2. Clone (or verify) the SecVault application repo into $InstallRoot
 # -----------------------------------------------------------------------
-Write-Step 'Creating install directories...'
-New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+# Deliberately does NOT create $LogDir yet -- `git clone` refuses to clone
+# into a non-empty directory, so $InstallRoot must still be empty (or not
+# yet exist) at this point.
+Write-Step 'Checking for an existing SecVault deployment...'
+
+if (Test-Path (Join-Path $InstallRoot 'package.json')) {
+    Write-Step "SecVault already present at $InstallRoot -- skipping clone. Use Update-SecVault.ps1 to pull the latest code instead of re-running this installer."
+} elseif ((Test-Path $InstallRoot) -and ((Get-ChildItem $InstallRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)) {
+    Fail "$InstallRoot exists and is not empty, but does not look like a SecVault checkout (no package.json). Refusing to clone into it -- clear it out or choose a different -ServerIp/InstallRoot and retry."
+} else {
+    Write-Step "Cloning SecVault from $SecVaultGitUrl..."
+    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+    $out = & git clone $SecVaultGitUrl $InstallRoot 2>&1
+    $out | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "git clone failed with exit code $LASTEXITCODE. Confirm this server has network access to GitHub and cached credentials for the private amrin78-smb/secvault repo (Git Credential Manager / SSH key), then retry."
+    }
+    # Mark the repo safe for the SYSTEM account (services/update jobs may run
+    # git as SYSTEM) -- same reasoning as the NocVault suite installer.
+    & git config --system --add safe.directory ($InstallRoot -replace '\\', '/') 2>$null
+    Write-Step 'SecVault cloned.'
+}
+
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-Write-Step "Created $InstallRoot"
 
 # -----------------------------------------------------------------------
 # 3. Visual C++ Redistributable (silent, best-effort)
