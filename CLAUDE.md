@@ -149,8 +149,11 @@ secvault/
 │   │       └── parser.js            ← SMC response parser
 │   └── engines/
 │       ├── versionComparator.js     ← version string → tuple + comparison
-│       ├── versionMatcher.js        ← device × advisory matching
-│       └── prioritization.js        ← priority band decision tree
+│       ├── versionMatcher.js        ← device × advisory matching (+ applicability context)
+│       ├── prioritization.js        ← priority band decision tree
+│       ├── ruleAnalysis.js          ← Phase 5: 9 rule-hygiene finding types
+│       ├── configDiff.js            ← Phase 6: snapshot diff + labeled backups
+│       └── applicability.js         ← Phase 6: advisory_conditions predicate evaluator
 ├── services/
 │   └── engine-worker.js             ← SecVault-Engine (scheduled jobs)
 ├── components/
@@ -213,13 +216,14 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `device_configs` | Config snapshots (jsonb) | 2 |
 | `firewall_rules` | Normalized rule extraction across all vendors | 2 |
 | `advisories` | Normalized CVE advisory store (all feed sources) | 1 |
-| `advisory_conditions` | Applicability predicate rules (curated data, empty until Phase 6) | 1 |
+| `advisory_conditions` | Applicability predicate rules (curated data, evaluated by Phase 6 engine) | 1 |
 | `device_cve_assessments` | Per-device CVE match results + priority bands | 3 (built in this Phase 1+2 pass ahead of schedule for the matcher/prioritization engines) |
 | `vendor_recommended_releases` | Manually-maintained mature/preferred release table | 2/3 |
 | `feed_sync_log` | Feed run history (NVD, KEV) | 1 |
-| `config_diffs` | Structured diffs between config snapshots | 6 (not yet created) |
+| `config_diffs` | Structured diffs between config snapshots | 6 ✅ |
+| `config_backups` | Labeled config snapshots (auto/manual/pre-change) for download | 6 ✅ |
+| `rule_analysis_results` | Rule hygiene findings (unused, shadow, risky, etc.) | 5 ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
-| `rule_analysis_results` | Rule hygiene findings (unused, shadow, risky, etc.) | 5 (not yet created) |
 | `audit_checks` / `audit_findings` | Compliance check library + results | 7 (not yet created) |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
@@ -493,12 +497,43 @@ When no `advisory_conditions` predicate exists for an advisory:
 - Unknown is treated **conservatively** (same as yes for prioritization)
 - NEVER default unknown to 'no' — would silently suppress CVEs with no predicates
 
+### Applicability Engine (Phase 6 — `lib/engines/applicability.js`)
+
+The predicate evaluator is now live. Semantics (do not change without documenting here first):
+- Conditions for an advisory are **ANDed**: any `'no'` → `'no'`; else any `'unknown'` → `'unknown'`; else `'yes'`
+- No conditions, or no collected config for the device → `'unknown'` (never `'no'`)
+- `evaluatePredicate()` never throws — any internal error resolves to `'unknown'`
+- Predicate types: `config_key_exists` / `config_value_equals` / `config_value_matches` (path missing → `'no'`),
+  `feature_enabled`, and `port_exposed` / `admin_access_from_zone` (deep-scan; **not found → `'unknown'`**, because
+  absence of evidence in a parsed config is not provable absence)
+- `versionMatcher.runMatchForAllDevices()` loads conditions once per vendor and the latest `config_parsed` per
+  device, and passes them into `matchDeviceToAdvisories(..., applicability)` — the 5th param is optional; legacy
+  callers omitting it get `'unknown'` everywhere
+- Admin UI: `/advisories/[cveId]/conditions` (CRUD + test-against-device); API under `/api/advisories/[cveId]/conditions`
+
 ### Advisory Conditions Are Data, Not Code
 
 Applicability predicates live in the `advisory_conditions` table.
 New CVE conditions = new DB rows via admin UI, not code changes.
 The predicate engine code should not need to change for new CVEs.
-The predicate *evaluator* itself is Phase 6 — in Phase 1+2, `config_applies` is always `'unknown'`.
+
+### Rule Analysis Engine (Phase 5 — `lib/engines/ruleAnalysis.js`)
+
+9 finding types with fixed severities: `any_any` (critical); `risky_service`, `shadow`, `reorder_candidate` (high);
+`redundant`, `overly_permissive`, `unused`, `expiring_soon` (medium); `log_disabled` (info).
+- Runs automatically after every rule pull (inside `collectAndStore`) — findings are DELETE+reinserted per device
+- `rule_analysis_results.rule_id` cascades from `firewall_rules`, which is itself rewritten each pull — safe because
+  analysis always reruns immediately after the rewrite
+- Shadow/redundant/reorder analysis is O(n²) and **skipped entirely above 1000 rules** (warning logged)
+- Optional overrides via `settings` keys: `rule_unused_days`, `rule_expiry_window_days`, `risky_ports` (JSON array)
+- Coverage tests are string-equality provable-only (no CIDR math) — deliberately conservative to avoid false shadows
+
+### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
+
+- After every config pull, `collectAndStore` diffs the two latest snapshots → `config_diffs`; an `'auto'` backup is
+  written to `config_backups` **only when something changed** (avoids duplicating every unchanged daily pull)
+- A detected config change triggers an immediate CVE re-match in the engine worker (config_applies may have flipped)
+- UI: `/devices/[id]/changes` (timeline, diff viewer, acknowledge, backups + download)
 
 ---
 
@@ -532,6 +567,9 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Feed sync (NVD + KEV) | 6 hours | `FEED_POLL_INTERVAL_HOURS` |
 | CVE match + prioritization | After each feed sync | (triggered) |
 | Rule + version pull (all devices) | 24 hours | `CONFIG_PULL_INTERVAL_HOURS` |
+| Rule analysis (Phase 5) | After each rule pull | (inside `collectAndStore`) |
+| Config diff + auto backup (Phase 6) | After each config pull | (inside `collectAndStore`) |
+| CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
 
 ### Reliability Rules (learned from LogVault collector)
 

@@ -25,6 +25,14 @@ async function getAdvisory(dbPool, cveId) {
   return result.rows[0] || null;
 }
 
+async function getConditionCount(dbPool, advisoryId) {
+  const result = await dbPool.query(
+    `SELECT COUNT(*)::int AS count FROM advisory_conditions WHERE advisory_id = $1`,
+    [advisoryId]
+  );
+  return result.rows[0]?.count || 0;
+}
+
 async function getAffectedDevices(dbPool, cveId) {
   const result = await dbPool.query(
     `SELECT d.name, d.id
@@ -55,7 +63,10 @@ export default async function AdvisoryDetailPage({ params }) {
   // These come back as a table this device may not have any assessments recorded for
   // yet, depending on integration order (matcher engine / SMC adapter may not have run
   // against every device) — handle zero rows gracefully rather than assuming data exists.
-  const devices = await getAffectedDevices(pool, cveId);
+  const [devices, conditionCount] = await Promise.all([
+    getAffectedDevices(pool, cveId),
+    getConditionCount(pool, advisory.id),
+  ]);
 
   const ranges = Array.isArray(advisory.affected_version_ranges) ? advisory.affected_version_ranges : [];
   const fixedIn = Array.isArray(advisory.fixed_in_versions) ? advisory.fixed_in_versions : [];
@@ -163,6 +174,23 @@ export default async function AdvisoryDetailPage({ params }) {
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="rounded border border-border bg-bg-surface p-4">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">
+          Applicability Conditions
+        </h2>
+        <p className="text-sm text-text-secondary">
+          {conditionCount === 0
+            ? 'No config predicates defined — config_applies resolves to "unknown" (treated conservatively).'
+            : `${conditionCount} config predicate${conditionCount === 1 ? '' : 's'} gate whether this CVE applies per device.`}
+        </p>
+        <Link
+          href={`/advisories/${encodeURIComponent(advisory.cve_id)}/conditions`}
+          className="mt-2 inline-block text-sm text-accent hover:underline"
+        >
+          Manage conditions →
+        </Link>
       </div>
 
       <div className="rounded border border-border bg-bg-surface p-4">

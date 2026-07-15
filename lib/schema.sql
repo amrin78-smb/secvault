@@ -110,6 +110,57 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_id ON firewall_rules(device_id);
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_seq ON firewall_rules(device_id, sequence_number);
 
+-- Structured diffs between consecutive device_configs snapshots (Phase 6).
+CREATE TABLE IF NOT EXISTS config_diffs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  diff JSONB NOT NULL, -- { added: [{path,value}], removed: [{path,value}], modified: [{path,old,new}] }
+  change_summary TEXT,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_config_diffs_device_id ON config_diffs(device_id);
+CREATE INDEX IF NOT EXISTS idx_config_diffs_detected_at ON config_diffs(detected_at);
+
+-- Labeled config snapshots kept for restore/download (Phase 6).
+-- 'auto' backups are only written when a config change is detected, to avoid
+-- duplicating every unchanged daily pull.
+CREATE TABLE IF NOT EXISTS config_backups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  config_raw TEXT,
+  label TEXT NOT NULL DEFAULT 'auto', -- 'auto' | 'manual' | 'pre-change'
+  backed_up_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_config_backups_device_id ON config_backups(device_id);
+
+-- ─────────────────────────────────────────
+-- RULE ANALYSIS (Phase 5)
+-- ─────────────────────────────────────────
+
+-- Rule hygiene findings, rewritten per device on each analysis run.
+-- rule_id cascades from firewall_rules, which is itself DELETE+reinserted on
+-- every rule pull — findings for a device are therefore always regenerated
+-- immediately after each pull (engine-worker ordering guarantees this).
+CREATE TABLE IF NOT EXISTS rule_analysis_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  rule_id UUID NOT NULL REFERENCES firewall_rules(id) ON DELETE CASCADE,
+  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
+  severity TEXT NOT NULL DEFAULT 'info', -- 'critical' | 'high' | 'medium' | 'info'
+  detail TEXT,
+  affected_rule_ids JSONB NOT NULL DEFAULT '[]'::jsonb, -- e.g. for shadow: the rule(s) doing the shadowing
+  remediation TEXT,
+  analyzed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rar_device_id ON rule_analysis_results(device_id);
+CREATE INDEX IF NOT EXISTS idx_rar_finding_type ON rule_analysis_results(finding_type);
+CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
+
 -- ─────────────────────────────────────────
 -- CVE / ADVISORY
 -- ─────────────────────────────────────────

@@ -30,4 +30,7 @@ GRANT SELECT ON TABLE advisory_conditions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_cve_assessments TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vendor_recommended_releases TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE feed_sync_log TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE config_diffs TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE config_backups TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE rule_analysis_results TO claude_readonly, nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users

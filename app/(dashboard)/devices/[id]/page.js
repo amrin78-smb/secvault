@@ -286,13 +286,27 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               )}
             </tbody>
           </Table>
-          <Link href={`/devices/${device.id}/rules`} className="text-sm text-accent hover:underline">
-            View all rules →
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href={`/devices/${device.id}/rules`} className="text-sm text-accent hover:underline">
+              View all rules →
+            </Link>
+            <Link href={`/devices/${device.id}/analysis`} className="text-sm text-accent hover:underline">
+              Rule analysis →
+            </Link>
+          </div>
         </div>
       )}
 
-      {tab === 'config' && <EmptyState message="Config change tracking arrives in Phase 6." />}
+      {tab === 'config' && (
+        <div className="rounded border border-border bg-bg-surface p-4">
+          <p className="text-sm text-text-secondary">
+            Configuration change tracking, diff history, and backups for this device.
+          </p>
+          <Link href={`/devices/${device.id}/changes`} className="mt-2 inline-block text-sm text-accent hover:underline">
+            View config changes &amp; backups →
+          </Link>
+        </div>
+      )}
 
       <Modal open={confirmDelete} title="Delete Device">
         <div className="space-y-4">

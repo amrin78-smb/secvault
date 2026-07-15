@@ -200,10 +200,10 @@ async function runFeedSyncAndMatchJob() {
 // small diff (one more `if`/case), not a rewrite.
 async function collectForDevice(device) {
   if (device.vendor === 'forcepoint') {
-    await collectAndStore(device, pool);
-  } else {
-    logger.warn(`Job [rule-version-pull] Skipping device ${device.id} (${device.name || 'unnamed'}) — unsupported vendor "${device.vendor}".`);
+    return collectAndStore(device, pool);
   }
+  logger.warn(`Job [rule-version-pull] Skipping device ${device.id} (${device.name || 'unnamed'}) — unsupported vendor "${device.vendor}".`);
+  return null;
 }
 
 async function runRuleVersionPullJob() {
@@ -213,15 +213,34 @@ async function runRuleVersionPullJob() {
     const { rows: devices } = await pool.query('SELECT * FROM devices WHERE active = true');
     logger.info(`Job [rule-version-pull] processing ${devices.length} active device(s).`);
 
+    let anyConfigChanged = false;
+
     for (const device of devices) {
       try {
-        await collectForDevice(device);
-        logger.info(`Job [rule-version-pull] collected device ${device.id} (${device.name || 'unnamed'}) OK.`);
+        const collectResult = await collectForDevice(device);
+        if (collectResult) {
+          if (collectResult.configChanged) anyConfigChanged = true;
+          logger.info(
+            `Job [rule-version-pull] collected device ${device.id} (${device.name || 'unnamed'}) OK — ` +
+              `rules: ${collectResult.rulesCount ?? 'n/a'}, findings: ${collectResult.analysisFindings ?? 'n/a'}, ` +
+              `configChanged: ${collectResult.configChanged}` +
+              (collectResult.errors.length ? `, partial errors: ${collectResult.errors.join('; ')}` : '')
+          );
+        }
       } catch (deviceErr) {
         logger.error(
           `Job [rule-version-pull] failed for device ${device.id} (${device.name || 'unnamed'}): ${deviceErr.stack || deviceErr.message}`
         );
       }
+    }
+
+    // Phase 6: a config change can flip config_applies on existing assessments.
+    // Re-run the CVE match immediately rather than waiting up to 6h for the
+    // next feed-sync-and-match cycle.
+    if (anyConfigChanged) {
+      logger.info('Job [rule-version-pull] config change detected — re-running CVE match/prioritization.');
+      const matchResult = await runMatchForAllDevices(pool);
+      logger.info(`Job [rule-version-pull] CVE re-match complete: ${JSON.stringify(matchResult)}`);
     }
 
     const durationMs = Date.now() - start;

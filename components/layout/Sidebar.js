@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { label: 'Dashboard', href: '/' },
   { label: 'Devices', href: '/devices' },
   { label: 'CVE Posture', href: '/cve' },
+  { label: 'Rule Analysis', href: '/analysis' },
   { label: 'Advisories', href: '/advisories' },
   { label: 'Settings', href: '/settings' },
 ];
