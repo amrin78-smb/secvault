@@ -222,16 +222,25 @@ if ($hasGithubHostKey) {
 # confusing generic permission-denied error later.
 #
 # GitHub's -T handshake always writes "successfully authenticated" to
-# stderr (never stdout), even on success. Capturing that with `2>&1`
-# turns it into an ErrorRecord on the success/error stream, which under
-# $ErrorActionPreference = 'Stop' surfaces as a NativeCommandError and
-# halts the script. Route stderr to a temp file instead so it never
-# touches the pipeline.
+# stderr (never stdout), even on success. In PS5, stderr from a native
+# executable creates error objects in the pipeline regardless of where
+# it's redirected to (even `2>$tmpFile` doesn't avoid this -- PowerShell
+# intercepts stderr before the redirection applies), and those surface as
+# a NativeCommandError under $ErrorActionPreference = 'Stop', halting the
+# script. Start-Process avoids this entirely: it runs the executable
+# outside the PowerShell pipeline, so stdout/stderr go straight to the
+# redirected files with no error-object involvement at all.
 Write-Step 'Testing SSH authentication against GitHub...'
-$tmpFile = [System.IO.Path]::GetTempFileName()
-& ssh -i $deployKeyDest -T git@github.com 2>$tmpFile | Out-Null
-$sshTest = Get-Content $tmpFile -Raw -ErrorAction SilentlyContinue
-Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+$tmpOut = [System.IO.Path]::GetTempFileName()
+$tmpErr = [System.IO.Path]::GetTempFileName()
+$proc = Start-Process -FilePath 'ssh' `
+    -ArgumentList '-i', $deployKeyDest, '-T', 'git@github.com' `
+    -RedirectStandardOutput $tmpOut `
+    -RedirectStandardError $tmpErr `
+    -NoNewWindow -Wait -PassThru
+$sshTest = (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue) +
+           (Get-Content $tmpOut -Raw -ErrorAction SilentlyContinue)
+Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
 $sshTest | Write-Host
 if ($sshTest -notmatch 'successfully authenticated') {
     Write-Host '[FAIL] SSH authentication to github.com did not succeed.' -ForegroundColor Red
