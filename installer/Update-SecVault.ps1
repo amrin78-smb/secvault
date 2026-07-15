@@ -65,6 +65,16 @@ Write-Log '=================================================='
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+# secvault is a private repo -- git pull (step 3 below) needs the SSH deploy
+# key that Install-SecVault.ps1 configures at $env:USERPROFILE\.ssh\secvault_deploy.
+# Fail fast, before touching any service, if it's missing.
+$deployKey = "$env:USERPROFILE\.ssh\secvault_deploy"
+if (-not (Test-Path $deployKey)) {
+    Write-Host "  [FAIL] SSH deploy key not found: $deployKey"
+    Write-Host "         Re-run Install-SecVault.ps1 to configure SSH credentials"
+    exit 1
+}
+
 # -----------------------------------------------------------------------
 # 1. Stop SecVault-App
 # -----------------------------------------------------------------------

@@ -559,6 +559,7 @@ installer/dependencies/
   node-v20.19.0-x64.msi            (required)
   postgresql-16.x-windows-x64.exe  (required)
   nssm-2.24.zip                    (required)
+  secvault_deploy                  (required -- SSH deploy key, see below)
   Git-2.54.0-64-bit.exe            (used if Git not already present)
   VC_redist.x64.exe                (installed if present; skipped if not)
 ```
@@ -566,6 +567,21 @@ installer/dependencies/
 These binaries are **not committed to git** (too large, not source) — the `.gitignore` excludes
 everything in that folder except `README.txt`. Copy them from the existing NocVault-Suite-v1.1
 distribution package rather than re-downloading; same versions are reused across the whole suite.
+
+**`installer/dependencies/secvault_deploy` (required) is different from the rest** — it's not a
+prerequisite installer, it's an ed25519 SSH deploy key (no passphrase, no file extension) for the
+private `amrin78-smb/secvault` repo (GitHub → repo → Settings → Deploy keys). `Install-SecVault.ps1`
+copies it to `%USERPROFILE%\.ssh\secvault_deploy`, configures an SSH config entry pinning
+`github.com` to it (`IdentityFile` set to the copied key's **absolute** path — SSH does not resolve
+relative paths in config), pre-seeds `known_hosts` via `ssh-keyscan` (not a hardcoded host key, so a
+future GitHub key rotation is picked up automatically), and tests authentication
+(`ssh -T git@github.com`, matching `successfully authenticated` in the output — GitHub's own `-T`
+handshake always exits non-zero even on success, so the text match is checked, not the exit code)
+**before** attempting `git clone`. If the key is missing or doesn't authenticate, the installer
+fails clearly rather than letting `git clone` fail with a confusing generic permission error.
+`Update-SecVault.ps1` guards on the same key path at startup (before touching any service) and
+fails with a clear message pointing back at `Install-SecVault.ps1` if it's missing — the SSH config
+and `known_hosts` set up during install are what let its `git pull` work non-interactively.
 
 NSSM is extracted from the bundled zip into `C:\Apps\SecVault\nssm\nssm-2.24\win64\nssm.exe` at
 install time — the installer always references this exact path (`$NssmExe`), never assumes `nssm`

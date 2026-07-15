@@ -1,9 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
     Installs SecVault: provisions all prerequisites (Git, Node.js, PostgreSQL,
-    NSSM, VC++ Redistributable) from a bundled dependencies folder, then
-    provisions the database, configures .env.local, builds the app, and
-    registers the NSSM services.
+    NSSM, VC++ Redistributable) from a bundled dependencies folder, configures
+    SSH authentication to GitHub via a bundled deploy key, clones the private
+    secvault repo, then provisions the database, configures .env.local,
+    builds the app, and registers the NSSM services.
 
 .DESCRIPTION
     Written for PowerShell 5.1 (Windows Server) -- see CLAUDE.md "PowerShell
@@ -79,7 +80,7 @@ Write-Host '=================================================='
 Write-Host ' SecVault Installer'
 Write-Host '=================================================='
 
-$SecVaultGitUrl = 'https://github.com/amrin78-smb/secvault.git'
+$SecVaultGitUrl = 'git@github.com:amrin78-smb/secvault.git'
 
 # The application repo is cloned into $InstallRoot itself (CLAUDE.md: "Install
 # path: C:\Apps\SecVault\" IS the repo root -- unlike some other suite apps
@@ -121,7 +122,113 @@ if (-not (Test-Path $VcRedist)) {
 }
 
 # -----------------------------------------------------------------------
-# 2. Clone (or verify) the SecVault application repo into $InstallRoot
+# 2. Configure SSH authentication for GitHub (deploy key)
+# -----------------------------------------------------------------------
+# secvault is a private repo -- git clone (below) and every future
+# git pull (Update-SecVault.ps1) must authenticate non-interactively on
+# this server. Uses a deploy key bundled with the installer package
+# rather than relying on a credential the target machine may not have.
+Write-Step 'Configuring SSH deploy key for GitHub...'
+
+$DeployKeySource = Join-Path $DepsDir 'secvault_deploy'
+if (-not (Test-Path $DeployKeySource)) {
+    Write-Host '[FAIL] dependencies\secvault_deploy not found.' -ForegroundColor Red
+    Write-Host '       Obtain the SecVault deploy private key and place it at:' -ForegroundColor Red
+    Write-Host "         $DeployKeySource" -ForegroundColor Red
+    Write-Host '       (ed25519 private key, no passphrase, no file extension -- see' -ForegroundColor Red
+    Write-Host '       github.com -> amrin78-smb/secvault -> Settings -> Deploy keys)' -ForegroundColor Red
+    exit 1
+}
+Write-Host '    [OK] Deploy key found in dependencies\.'
+
+$sshDir = Join-Path $env:USERPROFILE '.ssh'
+if (-not (Test-Path $sshDir)) {
+    New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
+    Write-Host "    [OK] Created $sshDir"
+} else {
+    Write-Host "    [OK] $sshDir already exists."
+}
+
+$deployKeyDest = Join-Path $sshDir 'secvault_deploy'
+Copy-Item -Path $DeployKeySource -Destination $deployKeyDest -Force
+Write-Host "    [OK] Deploy key copied to $deployKeyDest"
+
+# SSH refuses to use a private key with loose permissions -- lock it down
+# to read-only for the current user, inheritance removed.
+$out = icacls $deployKeyDest /inheritance:r /grant:r "${env:USERNAME}:R" 2>&1
+$out | Write-Host
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[WARN] icacls exited with code $LASTEXITCODE while locking down $deployKeyDest -- ssh may refuse this key as a result." -ForegroundColor Yellow
+} else {
+    Write-Host "    [OK] Permissions locked down on $deployKeyDest (read-only, $env:USERNAME only)."
+}
+
+# SSH config: pin github.com to this key. IdentityFile must be an absolute
+# path -- ssh does not resolve relative paths in config. accept-new (not
+# `no`) accepts the host key on first connection and verifies the
+# fingerprint on every connection after that -- better security than
+# StrictHostKeyChecking=no for a security product.
+$sshConfigPath = Join-Path $sshDir 'config'
+$sshConfigEntry = @"
+Host github.com
+    IdentityFile $deployKeyDest
+    StrictHostKeyChecking accept-new
+    IdentitiesOnly yes
+"@
+
+$needsConfigEntry = $true
+if (Test-Path $sshConfigPath) {
+    $existingConfig = Get-Content -Path $sshConfigPath -Raw
+    if ($existingConfig -and $existingConfig.Contains($deployKeyDest)) {
+        $needsConfigEntry = $false
+    }
+}
+if ($needsConfigEntry) {
+    Add-Content -Path $sshConfigPath -Value "`n$sshConfigEntry"
+    Write-Host "    [OK] SSH config entry added to $sshConfigPath"
+} else {
+    Write-Host "    [OK] SSH config already references $deployKeyDest -- skipping."
+}
+
+# Pre-seed GitHub's host key into known_hosts so the clone below is fully
+# non-interactive. Uses ssh-keyscan (not a hardcoded key) so a future
+# GitHub host key rotation is picked up automatically instead of this
+# script silently trusting a stale key forever.
+$knownHostsPath = Join-Path $sshDir 'known_hosts'
+$hasGithubHostKey = $false
+if (Test-Path $knownHostsPath) {
+    $existingKnownHosts = Get-Content -Path $knownHostsPath -Raw -ErrorAction SilentlyContinue
+    if ($existingKnownHosts -and $existingKnownHosts -match 'github\.com') {
+        $hasGithubHostKey = $true
+    }
+}
+if ($hasGithubHostKey) {
+    Write-Host '    [OK] github.com already present in known_hosts -- skipping ssh-keyscan.'
+} else {
+    $out = ssh-keyscan -t ed25519 github.com 2>$null
+    if (-not $out) {
+        Write-Host '[WARN] ssh-keyscan could not reach github.com (no network yet?) -- continuing. StrictHostKeyChecking accept-new will verify/accept the host key on the first real connection instead.' -ForegroundColor Yellow
+    } else {
+        Add-Content -Path $knownHostsPath -Value $out
+        Write-Host '    [OK] github.com ED25519 host key added to known_hosts.'
+    }
+}
+
+# Verify the key actually authenticates before attempting to clone --
+# fail clearly now rather than letting `git clone` fail with a more
+# confusing generic permission-denied error later.
+Write-Step 'Testing SSH authentication against GitHub...'
+$sshTest = & ssh -i $deployKeyDest -T git@github.com 2>&1
+$sshTest | Write-Host
+if ($sshTest -notmatch 'successfully authenticated') {
+    Write-Host '[FAIL] SSH authentication to github.com did not succeed.' -ForegroundColor Red
+    Write-Host '       Ensure the deploy key public key is added to github.com -> amrin78-smb/secvault -> Settings -> Deploy keys' -ForegroundColor Red
+    exit 1
+}
+Write-Host '    [OK] SSH authentication succeeded.'
+
+# -----------------------------------------------------------------------
+# 3. Clone (or verify) the SecVault application repo into $InstallRoot
 # -----------------------------------------------------------------------
 # Deliberately does NOT create $LogDir yet -- `git clone` refuses to clone
 # into a non-empty directory, so $InstallRoot must still be empty (or not
@@ -138,7 +245,7 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
     $out = & git clone $SecVaultGitUrl $InstallRoot 2>&1
     $out | Write-Host
     if ($LASTEXITCODE -ne 0) {
-        Fail "git clone failed with exit code $LASTEXITCODE. Confirm this server has network access to GitHub and cached credentials for the private amrin78-smb/secvault repo (Git Credential Manager / SSH key), then retry."
+        Fail "git clone failed with exit code $LASTEXITCODE. SSH authentication just succeeded above, so this is most likely a network issue reaching github.com -- check connectivity and retry."
     }
     # Mark the repo safe for the SYSTEM account (services/update jobs may run
     # git as SYSTEM) -- same reasoning as the NocVault suite installer.
@@ -149,7 +256,7 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 # -----------------------------------------------------------------------
-# 3. Visual C++ Redistributable (silent, best-effort)
+# 4. Visual C++ Redistributable (silent, best-effort)
 # -----------------------------------------------------------------------
 Write-Step 'Installing Visual C++ Redistributable...'
 if (Test-Path $VcRedist) {
@@ -160,7 +267,7 @@ if (Test-Path $VcRedist) {
 }
 
 # -----------------------------------------------------------------------
-# 4. Node.js v20 (from bundled MSI, skip if already installed)
+# 5. Node.js v20 (from bundled MSI, skip if already installed)
 # -----------------------------------------------------------------------
 Write-Step 'Checking Node.js...'
 $nodeVersion = $null
@@ -182,7 +289,7 @@ if ($nodeVersion) {
 }
 
 # -----------------------------------------------------------------------
-# 5. Git (from bundled installer, skip if already installed)
+# 6. Git (from bundled installer, skip if already installed)
 # -----------------------------------------------------------------------
 Write-Step 'Checking Git...'
 $gitVersion = $null
@@ -203,7 +310,7 @@ if ($gitVersion) {
 }
 
 # -----------------------------------------------------------------------
-# 6. PostgreSQL 16 (from bundled installer, skip if already installed)
+# 7. PostgreSQL 16 (from bundled installer, skip if already installed)
 # -----------------------------------------------------------------------
 Write-Step 'Checking PostgreSQL...'
 $PgBin = 'C:\Program Files\PostgreSQL\16\bin'
@@ -229,7 +336,7 @@ if (-not $PgSvcName) { $PgSvcName = 'postgresql-x64-16' }
 Write-Step "PostgreSQL service: $PgSvcName"
 
 # -----------------------------------------------------------------------
-# 7. NSSM (extracted from bundled zip into the install root -- not required
+# 8. NSSM (extracted from bundled zip into the install root -- not required
 #    on PATH; every later step references $NssmExe explicitly)
 # -----------------------------------------------------------------------
 Write-Step 'Extracting NSSM...'
@@ -242,7 +349,7 @@ if (-not (Test-Path $NssmExe)) {
 Write-Step "NSSM ready: $NssmExe"
 
 # -----------------------------------------------------------------------
-# 8. Create database + user via psql
+# 9. Create database + user via psql
 # -----------------------------------------------------------------------
 Write-Step 'Creating database and user...'
 
@@ -272,7 +379,7 @@ Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 Write-Step 'Database and user provisioned.'
 
 # -----------------------------------------------------------------------
-# 9. Configure .env.local
+# 10. Configure .env.local
 # -----------------------------------------------------------------------
 Write-Step 'Configuring .env.local...'
 
@@ -312,7 +419,7 @@ Set-Content -Path $envLocalPath -Value $envContent -NoNewline
 Write-Step ".env.local written to $envLocalPath"
 
 # -----------------------------------------------------------------------
-# 10. npm ci
+# 11. npm ci
 # -----------------------------------------------------------------------
 Write-Step 'Installing dependencies (npm ci)...'
 
@@ -326,7 +433,7 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 # -----------------------------------------------------------------------
-# 11. Run schema migration (tables -- as secvault_user, via node)
+# 12. Run schema migration (tables -- as secvault_user, via node)
 # -----------------------------------------------------------------------
 Write-Step 'Running schema migration (node lib/migrate.js)...'
 
@@ -340,7 +447,7 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 # -----------------------------------------------------------------------
-# 12. Apply readonly diagnostic grants (lib/schema-grants.sql -- postgres superuser)
+# 13. Apply readonly diagnostic grants (lib/schema-grants.sql -- postgres superuser)
 # -----------------------------------------------------------------------
 # CREATE ROLE requires superuser/CREATEROLE, which secvault_user does not have,
 # so this cannot be part of lib/migrate.js -- see CLAUDE.md "Readonly Access for
@@ -358,7 +465,7 @@ if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
 Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 
 # -----------------------------------------------------------------------
-# 13. Build
+# 14. Build
 # -----------------------------------------------------------------------
 Write-Step 'Building application (npm run build)...'
 
@@ -372,7 +479,7 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 # -----------------------------------------------------------------------
-# 14. Register NSSM services
+# 15. Register NSSM services
 # -----------------------------------------------------------------------
 Write-Step 'Registering NSSM services...'
 
@@ -444,7 +551,7 @@ $out | Write-Host
 Write-Step 'NSSM services registered.'
 
 # -----------------------------------------------------------------------
-# 15. Firewall rule
+# 16. Firewall rule
 # -----------------------------------------------------------------------
 Write-Step 'Configuring firewall...'
 $ruleName = "SecVault Port $AppPort"
@@ -454,7 +561,7 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
 Write-Step "Firewall rule added for port $AppPort"
 
 # -----------------------------------------------------------------------
-# 16. Start services (sc.exe only -- never Start-Service)
+# 17. Start services (sc.exe only -- never Start-Service)
 # -----------------------------------------------------------------------
 Write-Step 'Starting services...'
 
@@ -465,7 +572,7 @@ $out = sc.exe start SecVault-Engine
 $out | Write-Host
 
 # -----------------------------------------------------------------------
-# 17. Success banner
+# 18. Success banner
 # -----------------------------------------------------------------------
 Write-Host ''
 Write-Host '=================================================='

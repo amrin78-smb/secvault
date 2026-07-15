@@ -10,8 +10,16 @@ here before running Install-SecVault.ps1:
   node-v20.19.0-x64.msi         <- Node.js runtime     (required)
   postgresql-16.x-windows-x64.exe <- PostgreSQL 16     (required)
   nssm-2.24.zip                 <- Windows service mgr (required)
+  secvault_deploy                <- SSH deploy key      (required -- see below)
   Git-2.54.0-64-bit.exe         <- Git                 (used if Git not already present)
   VC_redist.x64.exe             <- Visual C++ runtime  (installed if present; skipped if not)
+
+secvault_deploy is an ed25519 private key, no passphrase, no file extension --
+a GitHub deploy key for amrin78-smb/secvault (Settings > Deploy keys). The
+installer copies it to %USERPROFILE%\.ssh\secvault_deploy, configures SSH to
+use it for github.com, and verifies authentication before cloning -- this is
+what lets `git clone`/`git pull` work non-interactively against the private
+repo on a fresh server with no other git credentials configured.
 
 These are the same versions already bundled in the NocVault-Suite-v1.1
 distribution package -- copy them from there rather than re-downloading:
