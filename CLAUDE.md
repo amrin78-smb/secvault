@@ -225,13 +225,15 @@ Two readonly users exist for Claude Code to query the live DB directly:
 - `claude_readonly` / `ClaudeRead@2026!`
 - `nocvault_readonly` / (same)
 
-**These users must NEVER have access to `device_credentials`.** Grant per-table explicitly:
+**These users must NEVER have access to `device_credentials`.** Grant per-table explicitly, in `lib/schema-grants.sql` — **NOT** in `lib/schema.sql`:
 ```sql
 -- Grant after creating each new table:
 GRANT SELECT ON TABLE new_table_name TO claude_readonly;
 GRANT SELECT ON TABLE new_table_name TO nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users
 ```
+
+**Why a separate file:** `lib/schema.sql` runs via `lib/migrate.js`, which connects as `secvault_user` — an account that only has `GRANT ALL PRIVILEGES ON DATABASE`, not `CREATEROLE`/superuser. `CREATE ROLE` inside `schema.sql` would throw a permission error, and because a multi-statement `pool.query()` call is one implicit transaction, that failure would roll back every `CREATE TABLE` in the same call — silently breaking every fresh install. `lib/schema-grants.sql` is applied separately by `Install-SecVault.ps1` under the `postgres` superuser (`psql -U postgres -d secvault -f lib/schema-grants.sql`), after the tables it grants on already exist, and its failure is logged as a warning, never fatal — these roles are diagnostic-only and not required for the app to function.
 
 ---
 
