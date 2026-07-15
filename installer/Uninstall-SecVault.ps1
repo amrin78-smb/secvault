@@ -26,7 +26,7 @@
 param(
     [switch]$DropDatabase,
 
-    [string]$PgAdminPassword = 'SecV@ult_Pg#2026'
+    [string]$PgAdminPassword = 'SecVaultPg2026Admin'
 )
 
 $InstallRoot = 'C:\Apps\SecVault'
