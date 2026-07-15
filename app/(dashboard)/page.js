@@ -3,28 +3,9 @@ import { pool } from '../../lib/db';
 import DeviceCard from '../../components/devices/DeviceCard';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
+import AutoRefresh from '../../components/dashboard/AutoRefresh';
 
 export const dynamic = 'force-dynamic';
-
-// ────────────────────────────────────────────────────────────────────────
-// NOTE on auto-refresh:
-// The spec asked for a 'use client' island (useEffect + setInterval(() =>
-// router.refresh(), 60000)) defined at module top level in this same file. That isn't
-// achievable here: 'use client' is a file-scope directive — adding it to this file
-// would turn the ENTIRE module, including the async Server Component default export
-// below (which does direct pool.query fleet aggregation), into a client bundle. `pg`
-// cannot be bundled for the browser, so that would break the build. Since only the
-// files in the frozen list may be touched (no separate AutoRefresh.js is allowed), a
-// dependency-free equivalent is used instead: a plain `<meta httpEquiv="refresh"
-// content="60">` tag. Next.js App Router hoists <title>/<meta>/<link> elements
-// rendered by a Server Component into <head>; even in the unlikely case a given
-// browser doesn't hoist it, `<meta http-equiv="refresh">` is honored by all major
-// engines regardless of where it sits in the document. This delivers the same
-// "dashboard reflects the DB every 60s" outcome without violating the server/client
-// module boundary and without adding a file outside the ones this task owns. See
-// app/(dashboard)/advisories/page.js for the same reasoning applied to a different
-// constraint (a Server Action instead of a client "Sync Now" button island).
-// ────────────────────────────────────────────────────────────────────────
 
 async function getFleetSummary(dbPool) {
   const result = await dbPool.query(
@@ -105,7 +86,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <meta httpEquiv="refresh" content="60" />
+      <AutoRefresh intervalMs={60000} />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-bg-surface p-4">

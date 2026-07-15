@@ -1,4 +1,4 @@
-import * as smc from '../../../../lib/adapters/forcepoint/smc';
+import { getApiInfo, getEngines } from '../../../../lib/adapters/forcepoint/smc';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,11 +25,11 @@ export async function POST(request) {
   };
 
   try {
-    await smc.getApiInfo(conn);
+    await getApiInfo(conn);
 
     let engineCount = null;
     try {
-      const engines = await smc.getEngines(conn);
+      const engines = await getEngines(conn);
       engineCount = engines.length;
     } catch (_err) {
       // Connectivity succeeded but engine listing failed — still report ok, just
