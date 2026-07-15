@@ -810,7 +810,14 @@ Invoke-Native { & $NssmExe remove SecVault-App confirm 2>&1 } | Out-Null
 
 $out = Invoke-Native { & $NssmExe install SecVault-App node 2>&1 }
 $out | Write-Host
-$out = Invoke-Native { & $NssmExe set SecVault-App AppParameters "node_modules\.bin\next start -p $AppPort" 2>&1 }
+# NOT node_modules\.bin\next -- that's npm's generated POSIX shell-script
+# wrapper (`basedir=$(dirname ...)`, actual bash, not JavaScript). `node`
+# tries to parse it as JS and crashes immediately with a SyntaxError on
+# every start attempt (NSSM then marks the service Paused after enough
+# rapid failures). node_modules\next\dist\bin\next is the real Next.js CLI
+# entry point -- an actual JS file with a #!/usr/bin/env node shebang --
+# safe to run directly with node, bypassing the wrapper entirely.
+$out = Invoke-Native { & $NssmExe set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p $AppPort" 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault" 2>&1 }
 $out | Write-Host

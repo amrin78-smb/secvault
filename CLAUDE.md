@@ -615,7 +615,7 @@ all NocVault suite apps.
 ```powershell
 # SecVault-App
 & $NssmExe install SecVault-App node
-& $NssmExe set SecVault-App AppParameters "node_modules\.bin\next start -p 3010"
+& $NssmExe set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"
 & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault"
 & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production"
 
@@ -627,6 +627,8 @@ all NocVault suite apps.
 ```
 
 **⚠️ NSSM casing bug (from suite experience):** `AppEnvironmentExtra` path casing must match the actual filesystem case. Wrong casing causes duplicate React instances and silent rendering failures. Double-check paths.
+
+**⚠️ Never point AppParameters at `node_modules\.bin\next`.** That file is npm's generated POSIX shell-script wrapper (`basedir=$(dirname ...)` — actual bash, not JavaScript). `node` tries to parse it as JS and crashes immediately with a `SyntaxError` on every start attempt; NSSM marks the service `Paused` after enough rapid failures, and `sc.exe start` still reports success (it only confirms the SCM accepted the start request, not that the process stayed up) — the install can complete and print success while the app never actually comes up. Use `node_modules\next\dist\bin\next` instead — the real Next.js CLI entry point, an actual JS file with a `#!/usr/bin/env node` shebang, safe to run directly with `node`.
 
 ---
 
