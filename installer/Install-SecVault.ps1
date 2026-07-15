@@ -889,11 +889,35 @@ $out = sc.exe start SecVault-Engine
 $out | Write-Host
 
 # -----------------------------------------------------------------------
-# 18. Success banner
+# 18. Verify the services actually stayed running
+# -----------------------------------------------------------------------
+# `sc.exe start` returns as soon as the SCM accepts the request, not once
+# the process has actually stayed up -- a process that starts then
+# immediately crashes (misconfiguration, missing dependency, etc.) still
+# shows as briefly START_PENDING/RUNNING right after the start call. Don't
+# declare success on that; poll for a few seconds and check what's
+# actually true before printing the final banner.
+Write-Step 'Verifying services stayed running...'
+$appRunning = Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15
+$engineRunning = Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Running' -TimeoutSeconds 15
+
+# -----------------------------------------------------------------------
+# 19. Success banner
 # -----------------------------------------------------------------------
 Write-Host ''
 Write-Host '=================================================='
-Write-Host ' SecVault installed successfully.'
-Write-Host " URL: http://$($ServerIp):$($AppPort)"
-Write-Host ' Default login: admin / changeme (change immediately via Settings)'
+if ($appRunning -and $engineRunning) {
+    Write-Host ' SecVault installed successfully.'
+    Write-Host " URL: http://$($ServerIp):$($AppPort)"
+    Write-Host ' Default login: admin / changeme (change immediately via Settings)'
+} else {
+    Write-Host ' SecVault installed, but one or more services did not stay running.' -ForegroundColor Yellow
+    if (-not $appRunning) {
+        Write-Host " SecVault-App is NOT running -- check $LogDir\app-error.log for the actual startup error." -ForegroundColor Yellow
+    }
+    if (-not $engineRunning) {
+        Write-Host " SecVault-Engine is NOT running -- check $LogDir\engine-stderr.log for the actual startup error." -ForegroundColor Yellow
+    }
+    Write-Host " Everything else (dependencies, database, build) completed successfully -- this is a runtime startup issue, not an install issue." -ForegroundColor Yellow
+}
 Write-Host '=================================================='
