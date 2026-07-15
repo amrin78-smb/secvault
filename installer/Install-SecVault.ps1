@@ -247,6 +247,41 @@ if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+# If PostgreSQL was already installed here (the [SKIP] branch above -- this
+# script did not just set its superuser password), -PgAdminPassword is only
+# a guess: the real password was set whenever Postgres was FIRST installed
+# on this server, by whatever installed it. Probe known candidates and
+# adopt whichever one actually authenticates, instead of ploughing ahead
+# with a guess and failing confusingly three separate psql calls later.
+# 'NocV@ult_Pg#2026' is the NocVault Suite installer's own PostgreSQL
+# superuser default -- worth trying since PostgreSQL is a single shared
+# instance per server and this box may have had the suite installed first.
+$pgPasswordCandidates = @($PgAdminPassword, 'NocV@ult_Pg#2026') | Select-Object -Unique
+$pgAuthOk = $false
+foreach ($candidate in $pgPasswordCandidates) {
+    $env:PGPASSWORD = $candidate
+    $testOut = Invoke-Native { & psql -U postgres -h localhost -c 'SELECT 1' 2>&1 }
+    if ($LASTEXITCODE -eq 0) {
+        if ($candidate -ne $PgAdminPassword) {
+            Write-Host "    [OK] Authenticated to the existing PostgreSQL instance using a fallback candidate password -- this server's postgres superuser password was set by an earlier install, not by -PgAdminPassword."
+        }
+        $PgAdminPassword = $candidate
+        $pgAuthOk = $true
+        break
+    }
+}
+if (-not $pgAuthOk) {
+    Fail @"
+Could not authenticate to PostgreSQL as the 'postgres' superuser with any known
+candidate password (tried -PgAdminPassword '$($pgPasswordCandidates[0])' and the
+NocVault Suite's default). PostgreSQL was already installed on this server (step
+1d skipped a fresh install), so its actual superuser password was set whenever it
+was FIRST installed here. Re-run with the correct password: -PgAdminPassword
+'<actual password>', or reset it manually (e.g. via a temporary trust connection
+in pg_hba.conf) before retrying.
+"@
+}
+
 # --- 1e. NSSM ---
 $NssmZip = (Get-ChildItem (Join-Path $DepsDir 'nssm-*.zip') -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
 if (-not $NssmZip) {
@@ -534,8 +569,28 @@ Write-Step 'Creating database and user...'
 
 $env:PGPASSWORD = $PgAdminPassword
 
+# A nonzero psql exit code here isn't always "already exists" -- it's just
+# as often "wrong -PgAdminPassword", which used to get silently lumped in
+# with the harmless case and produce three confusing, misleading warnings
+# before failing on GRANT with no real explanation. If PostgreSQL was
+# already installed on this server (step 1d skipped a fresh install), its
+# superuser password was set whenever it was FIRST installed here -- not
+# necessarily the current -PgAdminPassword default -- so check for this
+# specific failure and fail immediately with an actionable message instead
+# of repeating the same wrong password two more times.
 $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE secvault" 2>&1 }
 $out | Write-Host
+if (($out -join "`n") -match 'password authentication failed') {
+    Fail @"
+PostgreSQL rejected -PgAdminPassword ('$PgAdminPassword') for the 'postgres' superuser.
+PostgreSQL was already installed on this server (step 1d skipped a fresh install), so its
+superuser password was set whenever it was FIRST installed here, not necessarily the current
+-PgAdminPassword default. Re-run with the actual password: -PgAdminPassword '<actual password>'.
+If this server previously had the NocVault Suite installed, its installer's default PostgreSQL
+superuser password is 'NocV@ult_Pg#2026' -- try that first. If the real password is unknown,
+reset it manually (e.g. via a temporary trust connection in pg_hba.conf) before retrying.
+"@
+}
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] CREATE DATABASE exited with code $LASTEXITCODE (may already exist) -- continuing." -ForegroundColor Yellow
 }
