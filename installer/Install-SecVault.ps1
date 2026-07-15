@@ -223,7 +223,13 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command 
 # (see the -DbPassword comment above for why). It's persisted to .env.local
 # as PG_ADMIN_PASSWORD purely for later manual reference -- the app itself
 # never uses it, only ever connecting as secvault_user.
-$pgPassBytes = (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes(24)
+# .NET Framework's RNGCryptoServiceProvider.GetBytes only has the
+# GetBytes(byte[]) overload -- it fills a pre-allocated array in place and
+# returns void. Passing an int (as if calling a GetBytes(count) that
+# returns a new array) gets PowerShell to coerce it into a 1-element byte
+# array and silently return $null -- allocate the array explicitly first.
+$pgPassBytes = New-Object byte[] 24
+(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($pgPassBytes)
 $PgAdminPassword = (([Convert]::ToBase64String($pgPassBytes) -replace '[^a-zA-Z0-9]', '') + 'Aa1Bb2').Substring(0, 24)
 $PgDataDir = 'C:\Program Files\PostgreSQL\16\data'
 
@@ -646,10 +652,14 @@ if (-not (Test-Path $envExamplePath)) {
 
 Copy-Item -Path $envExamplePath -Destination $envLocalPath -Force
 
-$credKeyBytes = (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes(32)
+# See the $pgPassBytes comment in step 1d above: GetBytes needs a
+# pre-allocated array, not an int -- passing an int silently yields $null.
+$credKeyBytes = New-Object byte[] 32
+(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($credKeyBytes)
 $credKey = [System.BitConverter]::ToString($credKeyBytes).Replace('-', '').ToLower()
 
-$secretBytes = (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes(32)
+$secretBytes = New-Object byte[] 32
+(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($secretBytes)
 $nextAuthSecret = [Convert]::ToBase64String($secretBytes)
 
 $databaseUrl = "postgresql://secvault_user:$DbPassword@$ServerIp:5432/secvault"
