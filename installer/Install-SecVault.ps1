@@ -92,33 +92,166 @@ $repoRoot = $InstallRoot
 $DepsDir = Join-Path $PSScriptRoot 'dependencies'
 
 # -----------------------------------------------------------------------
-# 1. Validate the bundled dependencies folder (fail fast, list what's missing)
+# 1. Install prerequisites from dependencies\ (idempotent: skip whatever is
+#    already installed; otherwise install silently, add to PATH, verify)
 # -----------------------------------------------------------------------
-Write-Step 'Validating installer package...'
+# Order matters: Git must be ready before the clone step below (section 3);
+# Node.js, PostgreSQL, and NSSM are needed by later steps in this script.
+# $VcRedist/$GitInstaller/$NodeMsi/$PgInstaller/$NssmZip are also read by
+# sections 4-8 further down -- keep them defined even on the "already
+# installed" branches below so those later checks never see a null path.
+Write-Step 'Installing dependencies...'
 
-$NodeMsi      = Join-Path $DepsDir 'node-v20.19.0-x64.msi'
-$NssmZip      = Join-Path $DepsDir 'nssm-2.24.zip'
-$PgInstaller  = (Get-ChildItem (Join-Path $DepsDir 'postgresql-16*windows-x64.exe') -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+# --- 1a. Visual C++ Redistributable ---
+$VcRedist = Join-Path $DepsDir 'VC_redist.x64.exe'
+$vcKey = 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64'
+if (Test-Path $vcKey) {
+    Write-Host '    [SKIP] VC++ Redistributable already installed.'
+} else {
+    if (-not (Test-Path $VcRedist)) {
+        Write-Host '[FAIL] dependencies\VC_redist.x64.exe not found.' -ForegroundColor Red
+        exit 1
+    }
+    $proc = Start-Process -FilePath $VcRedist -ArgumentList '/install', '/quiet', '/norestart' -NoNewWindow -Wait -PassThru
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Host "[FAIL] VC++ Redistributable installer exited with code $($proc.ExitCode)." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host '    [OK] VC++ Redistributable installed.'
+}
+
+# --- 1b. Git ---
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if (-not $gitCmd) {
+    if (Test-Path 'C:\Program Files\Git\cmd\git.exe') {
+        $env:Path += ';C:\Program Files\Git\cmd'
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    }
+}
 $GitInstaller = Join-Path $DepsDir 'Git-2.54.0-64-bit.exe'
-$VcRedist     = Join-Path $DepsDir 'VC_redist.x64.exe'
-
-$missing = @()
-if (-not (Test-Path $NodeMsi)) { $missing += 'dependencies\node-v20.19.0-x64.msi' }
-if (-not (Test-Path $NssmZip)) { $missing += 'dependencies\nssm-2.24.zip' }
-if (-not $PgInstaller)         { $missing += 'dependencies\postgresql-16*-windows-x64.exe' }
-if ($missing.Count -gt 0) {
-    Write-Host "`n  Missing required files:" -ForegroundColor Red
-    $missing | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
-    Write-Host "`n  Place the missing files in $DepsDir and retry. See dependencies\README.txt.`n" -ForegroundColor Red
+if ($gitCmd) {
+    Write-Host "    [SKIP] Git already installed: $(& git --version)"
+} else {
+    $gitInstallerFile = Get-ChildItem (Join-Path $DepsDir 'Git-*.exe') -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $gitInstallerFile) {
+        Write-Host '[FAIL] No Git installer found in dependencies\ (expected Git-*.exe).' -ForegroundColor Red
+        exit 1
+    }
+    $GitInstaller = $gitInstallerFile.FullName
+    $proc = Start-Process -FilePath $GitInstaller `
+        -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL /SUPPRESSMSGBOXES /COMPONENTS="icons,ext\reg\shellhere,assoc,assoc_sh"' `
+        -NoNewWindow -Wait -PassThru
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Host "[FAIL] Git installer exited with code $($proc.ExitCode)." -ForegroundColor Red
+        exit 1
+    }
+    $env:Path += ';C:\Program Files\Git\cmd'
+    Write-Host '    [OK] Git installed.'
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host '[FAIL] git is still not available after install -- cannot continue.' -ForegroundColor Red
     exit 1
 }
-Write-Step 'All required dependency files present.'
 
-if (-not (Test-Path $GitInstaller)) {
-    Write-Host '[WARN] Git-2.54.0-64-bit.exe not found in dependencies\ -- will fall back to a PATH-installed git, and fail later if git is also not already installed.' -ForegroundColor Yellow
+# --- 1c. Node.js ---
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCmd) {
+    if (Test-Path 'C:\Program Files\nodejs\node.exe') {
+        $env:Path += ';C:\Program Files\nodejs'
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    }
 }
-if (-not (Test-Path $VcRedist)) {
-    Write-Host '[WARN] VC_redist.x64.exe not found in dependencies\ -- skipping (Node.js/PostgreSQL may still need it if not already present from another install).' -ForegroundColor Yellow
+$NodeMsi = Join-Path $DepsDir 'node-v20.19.0-x64.msi'
+if ($nodeCmd) {
+    Write-Host "    [SKIP] Node.js already installed: $(& node -v)"
+} else {
+    $nodeMsiFile = Get-ChildItem (Join-Path $DepsDir 'node-*.msi') -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nodeMsiFile) {
+        Write-Host '[FAIL] No Node.js MSI found in dependencies\ (expected node-*.msi).' -ForegroundColor Red
+        exit 1
+    }
+    $NodeMsi = $nodeMsiFile.FullName
+    $proc = Start-Process -FilePath 'msiexec' -ArgumentList "/i `"$NodeMsi`" /qn /norestart ADDLOCAL=ALL" -NoNewWindow -Wait -PassThru
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Host "[FAIL] Node.js installer exited with code $($proc.ExitCode)." -ForegroundColor Red
+        exit 1
+    }
+    $env:Path += ';C:\Program Files\nodejs'
+    Write-Host '    [OK] Node.js installed.'
+}
+if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    Write-Host '[FAIL] node/npm still not available after install -- cannot continue.' -ForegroundColor Red
+    exit 1
+}
+
+# --- 1d. PostgreSQL ---
+# Uses $PgAdminPassword (the script's own -PgAdminPassword parameter, already
+# defined above) for --superpassword/--servicepassword/PGPASSWORD -- NOT a
+# hardcoded literal -- so it stays the same value sections 9/13 further down
+# use for every `psql -U postgres` call. A hardcoded password here would
+# silently mismatch those and break the whole install on a fresh server.
+$psqlCmd = Get-Command psql -ErrorAction SilentlyContinue
+if (-not $psqlCmd) {
+    if (Test-Path 'C:\Program Files\PostgreSQL\16\bin\psql.exe') {
+        $env:Path += ';C:\Program Files\PostgreSQL\16\bin'
+        $psqlCmd = Get-Command psql -ErrorAction SilentlyContinue
+    }
+}
+$PgInstaller = (Get-ChildItem (Join-Path $DepsDir 'postgresql-16*windows-x64.exe') -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+if ($psqlCmd) {
+    Write-Host "    [SKIP] PostgreSQL already installed: $(& psql --version)"
+} else {
+    $pgInstallerFile = Get-ChildItem (Join-Path $DepsDir 'postgresql-*.exe') -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $pgInstallerFile) {
+        Write-Host '[FAIL] No PostgreSQL installer found in dependencies\ (expected postgresql-*.exe).' -ForegroundColor Red
+        exit 1
+    }
+    $PgInstaller = $pgInstallerFile.FullName
+    $proc = Start-Process -FilePath $PgInstaller `
+        -ArgumentList "--mode unattended --unattendedmodeui none --superpassword `"$PgAdminPassword`" --servicename postgresql-x64-16 --servicepassword `"$PgAdminPassword`" --install_runtimes 0" `
+        -NoNewWindow -Wait -PassThru
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Host "[FAIL] PostgreSQL installer exited with code $($proc.ExitCode)." -ForegroundColor Red
+        exit 1
+    }
+    $env:Path += ';C:\Program Files\PostgreSQL\16\bin'
+    Write-Host '    [OK] PostgreSQL installed.'
+}
+$env:PGPASSWORD = $PgAdminPassword
+if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+    Write-Host '[FAIL] psql still not available after install -- cannot continue.' -ForegroundColor Red
+    exit 1
+}
+
+# --- 1e. NSSM ---
+$NssmZip = (Get-ChildItem (Join-Path $DepsDir 'nssm-*.zip') -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+if (-not $NssmZip) {
+    Write-Host '[FAIL] No NSSM zip found in dependencies\ (expected nssm-*.zip).' -ForegroundColor Red
+    exit 1
+}
+$nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+if (-not $nssmCmd) {
+    if (Test-Path 'C:\Windows\System32\nssm.exe') {
+        $nssmCmd = Get-Item 'C:\Windows\System32\nssm.exe'
+    }
+}
+if ($nssmCmd) {
+    Write-Host '    [SKIP] NSSM already installed.'
+} else {
+    $nssmTemp = Join-Path $env:TEMP 'nssm-extract'
+    Expand-Archive -Path $NssmZip -DestinationPath $nssmTemp -Force
+    $nssmExtracted = Get-ChildItem $nssmTemp -Recurse -Filter 'nssm.exe' | Where-Object { $_.FullName -like '*win64*' } | Select-Object -First 1
+    if (-not $nssmExtracted) {
+        Write-Host '[FAIL] nssm.exe not found inside the extracted NSSM zip (expected a win64 subfolder).' -ForegroundColor Red
+        exit 1
+    }
+    Copy-Item -Path $nssmExtracted.FullName -Destination 'C:\Windows\System32\nssm.exe' -Force
+    Remove-Item $nssmTemp -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host '    [OK] NSSM installed.'
+}
+if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
+    Write-Host '[FAIL] nssm still not available after install -- cannot continue.' -ForegroundColor Red
+    exit 1
 }
 
 # -----------------------------------------------------------------------
