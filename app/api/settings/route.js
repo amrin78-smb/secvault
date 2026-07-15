@@ -37,6 +37,13 @@ export async function PUT(request) {
       );
     }
 
+    if (newPassword.length < 8) {
+      return NextResponse.json(
+        { error: 'New password must be at least 8 characters' },
+        { status: 400 }
+      );
+    }
+
     const hashResult = await pool.query(
       "SELECT value FROM settings WHERE key = 'admin_password_hash'",
       []
