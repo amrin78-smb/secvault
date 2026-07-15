@@ -56,7 +56,7 @@ const winston = require('winston');
 const { pool } = require('../lib/db');
 const { runFullSync } = require('../lib/feeds');
 const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
-const { collectAndStore } = require('../lib/adapters/forcepoint');
+const { collectAndStore, SUPPORTED_VENDORS } = require('../lib/adapters');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -196,13 +196,14 @@ async function runFeedSyncAndMatchJob() {
   }
 }
 
-// Dispatch on device.vendor. Structured so adding new vendors later is a
-// small diff (one more `if`/case), not a rewrite.
+// Vendor dispatch lives in lib/adapters (getAdapter inside collectAndStore) —
+// this wrapper only guards against unknown vendors so the job loop logs a
+// warning instead of an error for them.
 async function collectForDevice(device) {
-  if (device.vendor === 'forcepoint') {
+  if (SUPPORTED_VENDORS.includes(device.vendor)) {
     return collectAndStore(device, pool);
   }
-  logger.warn(`Job [rule-version-pull] Skipping device ${device.id} (${device.name || 'unnamed'}) — unsupported vendor "${device.vendor}".`);
+  logger.warn(`Job [rule-version-pull] Skipping device ${device.id} (${device.name || 'unnamed'}) — unsupported vendor "${device.vendor}". Supported: ${SUPPORTED_VENDORS.join(', ')}.`);
   return null;
 }
 

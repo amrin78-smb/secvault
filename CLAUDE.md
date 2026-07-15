@@ -330,6 +330,36 @@ Default: disabled. Do not implement suite SSO as a default code path.
 
 ---
 
+## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch
+
+Six vendors are implemented. The slug is load-bearing: it must match across `devices.vendor`,
+`VENDOR_PARSERS` in `lib/engines/versionComparator.js`, `ADAPTERS` in `lib/adapters/index.js`,
+`VENDOR_CPES` in `lib/feeds/nvd.js`, and `VENDOR_META` in `components/devices/vendorMeta.js`.
+Never invent a new spelling.
+
+| slug | Access | Connection fields | credential_type | Credential plaintext |
+|---|---|---|---|---|
+| `forcepoint` | SMC REST :8082 | `smc_host` + `smc_port` | `smc_api` | raw API key string |
+| `fortinet` | REST API | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | raw API token string |
+| `paloalto` | XML API | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | raw API key string |
+| `checkpoint` | Mgmt API (mgmt server IP, not gateway) | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | JSON `{"username","password"}` or `{"api_key"}` |
+| `cisco_asa` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password","enable_password"?}` |
+| `sangfor` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password"}` |
+
+Rules that keep this working:
+- **Adapters implement ONLY the FirewallAdapter interface** (testConnectivity/getVersion/getRules/getConfig).
+  The shared persistence pipeline — device_versions, firewall_rules, device_configs, Phase 5 rule analysis,
+  Phase 6 diff/backup — lives ONCE in `lib/adapters/index.js` (`collectAndStore`). Never copy it into a vendor folder.
+- New vendor = adapter folder + `ADAPTERS` entry + `VENDOR_PARSERS` entry + `VENDOR_CPES` entry + `VENDOR_META` entry.
+- SSH vendors share `lib/adapters/sshClient.js` (`runCommands`, `parseJsonCredential`) — ssh2 shell channel with
+  legacy-algorithm compat for old ASA images. Don't open raw ssh2 connections in adapters.
+- `mgmt_port` is nullable — every adapter applies its own default (443 API / 22 SSH / 8082 SMC) when NULL.
+- **None of the five new adapters has been verified against a live device yet** (same as the original SMC build).
+  Every parser logs raw responses via `console.log('[<Vendor> Debug] ...')` — on first real connection, check the
+  logs and fix field mappings in that vendor's `parser.js`. Documentation lies; this step is not optional.
+- Cross-vendor NVD limitation: `advisories.cve_id` is UNIQUE with a single `vendor` — a CVE affecting two vendors
+  stays with whichever vendor ingested it first.
+
 ## Forcepoint SMC Integration
 
 ### Core Rule
@@ -460,15 +490,16 @@ This is curated data, not code.
 
 ## CVE Engine Architecture
 
-### Version Scheme (Forcepoint)
+### Version Schemes (per vendor — `lib/engines/versionComparator.js`)
 
-```
-"6.10.21" → tuple [6, 10, 21]
-"7.1.0"   → tuple [7, 1, 0]
-```
-
-Simple semver-like. No hotfix suffixes (unlike PAN-OS `-h3`).
-Version 7.1+ = FlexEdge SD-WAN (rebranded) — same comparator applies.
+| Vendor slug | Example | Tuple |
+|---|---|---|
+| `forcepoint` | `6.10.21` | `[6, 10, 21]` (7.1+ = FlexEdge rebrand, same scheme) |
+| `fortinet` | `v7.4.3,build2573` | `[7, 4, 3, 0]` (leading `v` and `,build…` stripped) |
+| `paloalto` | `11.1.2-h3` | `[11, 1, 2, 3]` (hotfix = 4th segment) |
+| `cisco_asa` | `9.18(4)15` | `[9, 18, 4, 15]` (interim = 4th segment) |
+| `checkpoint` | `R81.20 Take 41` | `[81, 20, 41, 0]` (R stripped, Take = 3rd segment) |
+| `sangfor` | `8.0.85` | `[8, 0, 85]` (plain dot-split) |
 
 ### Priority Decision Tree (strict order — do not reorder)
 
@@ -541,7 +572,7 @@ The predicate engine code should not need to change for new CVEs.
 
 | Feed | URL | Schedule | Notes |
 |---|---|---|---|
-| NVD API 2.0 | `https://services.nvd.nist.gov/rest/json/cves/2.0` | Every 6h | Rate: 1 req/6s without key, 5 req/30s with `NVD_API_KEY` |
+| NVD API 2.0 | `https://services.nvd.nist.gov/rest/json/cves/2.0` | Every 6h | Rate: 1 req/6s without key, 5 req/30s with `NVD_API_KEY`. Multi-vendor: `VENDOR_CPES` in `lib/feeds/nvd.js` maps every vendor slug to live-verified CPE strings (cisco_asa needs BOTH `o:` and `a:` part variants — NVD is split). Always `virtualMatchString`, never `cpeName`. |
 | CISA KEV | `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` | Every 6h | Full download, cross-reference by cve_id |
 
 ### NVD Rate Limiting

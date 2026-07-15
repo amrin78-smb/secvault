@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS device_versions (
   collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Tier 1 multi-vendor support: generic management port (API vendors default to
+-- 443, SSH vendors to 22, applied in the adapter when NULL). smc_port remains
+-- Forcepoint-specific. ADD COLUMN IF NOT EXISTS is idempotent — safe to re-run.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS mgmt_port INTEGER;
+
 CREATE INDEX IF NOT EXISTS idx_device_versions_device_id ON device_versions(device_id);
 CREATE INDEX IF NOT EXISTS idx_device_versions_collected_at ON device_versions(collected_at);
 

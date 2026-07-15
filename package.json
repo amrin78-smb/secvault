@@ -1,6 +1,6 @@
 {
   "name": "secvault",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",
@@ -9,20 +9,22 @@
     "migrate": "node lib/migrate.js"
   },
   "dependencies": {
-    "next": "14.2.35",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "next-auth": "^4.24.7",
-    "pg": "^8.12.0",
     "bcryptjs": "^2.4.3",
+    "fast-xml-parser": "^4.5.7",
     "ldapjs": "^3.0.7",
+    "next": "14.2.35",
+    "next-auth": "^4.24.7",
     "node-cron": "^3.0.3",
     "node-fetch": "^2.7.0",
+    "pg": "^8.12.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "ssh2": "^1.17.0",
     "winston": "^3.14.0"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.0",
     "autoprefixer": "^10.4.0",
-    "postcss": "^8.4.0"
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0"
   }
 }

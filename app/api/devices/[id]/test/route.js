@@ -1,9 +1,10 @@
 import { pool } from '../../../../../lib/db';
-import { ForcepointAdapter } from '../../../../../lib/adapters/forcepoint';
+import { getAdapter } from '../../../../../lib/adapters';
 
 export const dynamic = 'force-dynamic';
 
-// POST /api/devices/[id]/test — test connectivity to an already-saved device's SMC.
+// POST /api/devices/[id]/test — test connectivity to an already-saved device,
+// any supported vendor.
 export async function POST(request, { params }) {
   const { id } = params;
 
@@ -14,10 +15,20 @@ export async function POST(request, { params }) {
 
   const device = deviceResult.rows[0];
 
-  // testConnectivity() must always receive `pool` via the adapter constructor — see
-  // CLAUDE.md's Pool Warning. Never construct this adapter without { pool }.
-  const adapter = new ForcepointAdapter({ device, pool });
-  const result = await adapter.testConnectivity();
+  try {
+    // testConnectivity() must always receive `pool` via the adapter constructor —
+    // see CLAUDE.md's Pool Warning. Never construct an adapter without { pool }.
+    const adapter = getAdapter(device, pool);
+    const result = await adapter.testConnectivity();
 
-  return Response.json(result);
+    // Persist the outcome so the device list/detail StatusDot reflects reality.
+    await pool.query(
+      'UPDATE devices SET last_connectivity_ok = $1, last_connectivity_checked_at = now(), updated_at = now() WHERE id = $2',
+      [result.ok === true, id]
+    );
+
+    return Response.json(result);
+  } catch (err) {
+    return Response.json({ error: err.message }, { status: 500 });
+  }
 }

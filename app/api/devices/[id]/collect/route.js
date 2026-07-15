@@ -1,11 +1,11 @@
 import { pool } from '../../../../../lib/db';
-import { collectAndStore } from '../../../../../lib/adapters/forcepoint';
+import { collectAndStore } from '../../../../../lib/adapters';
 
 export const dynamic = 'force-dynamic';
 
 // POST /api/devices/[id]/collect — on-demand version + rules + config pull for a
-// single device. The same collectAndStore(device, pool) function is also invoked by
-// services/engine-worker.js on the scheduled daily pull job.
+// single device, any supported vendor. The same collectAndStore(device, pool)
+// function is also invoked by services/engine-worker.js on the scheduled pull job.
 export async function POST(request, { params }) {
   const { id } = params;
 

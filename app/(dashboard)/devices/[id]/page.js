@@ -197,8 +197,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
         <div className="mt-3 grid grid-cols-1 gap-4 text-sm sm:grid-cols-4">
           <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">SMC Host</div>
-            <div className="text-text-primary">{device.smc_host || '—'}</div>
+            <div className="text-xs uppercase tracking-wide text-text-muted">
+              {device.vendor === 'forcepoint' ? 'SMC Host' : 'Management IP'}
+            </div>
+            <div className="text-text-primary">
+              {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
+            </div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-text-muted">Version</div>
@@ -215,8 +219,8 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </div>
 
         <div className="mt-4 border-t border-border pt-4">
-          <h2 className="mb-2 text-sm font-medium text-text-primary">Rotate SMC API Key</h2>
-          <CredentialForm deviceId={device.id} />
+          <h2 className="mb-2 text-sm font-medium text-text-primary">Rotate Credentials</h2>
+          <CredentialForm deviceId={device.id} vendor={device.vendor} />
         </div>
       </div>
 
