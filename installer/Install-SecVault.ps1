@@ -76,6 +76,30 @@ function Fail {
     exit 1
 }
 
+# PS5 converts ANY stderr output from a native executable into a
+# non-terminating ErrorRecord the moment a `2>` redirection operator is
+# used on it (2>&1, 2>$file, 2>$null -- the target doesn't matter, PS
+# converts stderr to an ErrorRecord before routing it to that target).
+# With $ErrorActionPreference = 'Stop' in effect, that ErrorRecord
+# immediately becomes a script-halting NativeCommandError -- even when the
+# "error" is just normal progress/notice text, not a real failure (git
+# clone's "Cloning into ..." line, ssh's "successfully authenticated"
+# banner, psql NOTICEs, npm warnings, nssm's "service does not exist"
+# message on a first install, etc). Route every such native command
+# through this so its own stderr can never halt the script; $LASTEXITCODE
+# is still set normally by the underlying call for real failure detection
+# at each call site.
+function Invoke-Native {
+    param([Parameter(Mandatory = $true)][scriptblock]$Command)
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 Write-Host '=================================================='
 Write-Host ' SecVault Installer'
 Write-Host '=================================================='
@@ -284,14 +308,14 @@ if (-not (Test-Path $sshDir)) {
 
 $deployKeyDest = Join-Path $sshDir 'secvault_deploy'
 if (Test-Path $deployKeyDest) {
-    $out = icacls $deployKeyDest /reset 2>&1
+    $out = Invoke-Native { icacls $deployKeyDest /reset 2>&1 }
 }
 Copy-Item -Path $DeployKeySource -Destination $deployKeyDest -Force
 Write-Host "    [OK] Deploy key copied to $deployKeyDest"
 
 # SSH refuses to use a private key with loose permissions -- lock it down
 # to read-only for the current user, inheritance removed.
-$out = icacls $deployKeyDest /inheritance:r /grant:r "${env:USERNAME}:R" 2>&1
+$out = Invoke-Native { icacls $deployKeyDest /inheritance:r /grant:r "${env:USERNAME}:R" 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[WARN] icacls exited with code $LASTEXITCODE while locking down $deployKeyDest -- ssh may refuse this key as a result." -ForegroundColor Yellow
@@ -341,7 +365,7 @@ if (Test-Path $knownHostsPath) {
 if ($hasGithubHostKey) {
     Write-Host '    [OK] github.com already present in known_hosts -- skipping ssh-keyscan.'
 } else {
-    $out = ssh-keyscan -t ed25519 github.com 2>$null
+    $out = Invoke-Native { ssh-keyscan -t ed25519 github.com 2>$null }
     if (-not $out) {
         Write-Host '[WARN] ssh-keyscan could not reach github.com (no network yet?) -- continuing. StrictHostKeyChecking accept-new will verify/accept the host key on the first real connection instead.' -ForegroundColor Yellow
     } else {
@@ -397,14 +421,14 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
 } else {
     Write-Step "Cloning SecVault from $SecVaultGitUrl..."
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-    $out = & git clone $SecVaultGitUrl $InstallRoot 2>&1
+    $out = Invoke-Native { & git clone $SecVaultGitUrl $InstallRoot 2>&1 }
     $out | Write-Host
     if ($LASTEXITCODE -ne 0) {
         Fail "git clone failed with exit code $LASTEXITCODE. SSH authentication just succeeded above, so this is most likely a network issue reaching github.com -- check connectivity and retry."
     }
     # Mark the repo safe for the SYSTEM account (services/update jobs may run
     # git as SYSTEM) -- same reasoning as the NocVault suite installer.
-    & git config --system --add safe.directory ($InstallRoot -replace '\\', '/') 2>$null
+    Invoke-Native { & git config --system --add safe.directory ($InstallRoot -replace '\\', '/') 2>$null } | Out-Null
     Write-Step 'SecVault cloned.'
 }
 
@@ -510,20 +534,20 @@ Write-Step 'Creating database and user...'
 
 $env:PGPASSWORD = $PgAdminPassword
 
-$out = & "$PgBin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE secvault" 2>&1
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE secvault" 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] CREATE DATABASE exited with code $LASTEXITCODE (may already exist) -- continuing." -ForegroundColor Yellow
 }
 
 $createUserSql = "CREATE USER secvault_user WITH PASSWORD '$DbPassword'"
-$out = & "$PgBin\psql.exe" -U postgres -h localhost -c $createUserSql 2>&1
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c $createUserSql 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] CREATE USER exited with code $LASTEXITCODE (may already exist) -- continuing." -ForegroundColor Yellow
 }
 
-$out = & "$PgBin\psql.exe" -U postgres -h localhost -c "GRANT ALL PRIVILEGES ON DATABASE secvault TO secvault_user" 2>&1
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c "GRANT ALL PRIVILEGES ON DATABASE secvault TO secvault_user" 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Fail "GRANT ALL PRIVILEGES failed with exit code $LASTEXITCODE."
@@ -579,7 +603,7 @@ Write-Step ".env.local written to $envLocalPath"
 Write-Step 'Installing dependencies (npm ci)...'
 
 Push-Location $repoRoot
-$out = & npm ci 2>&1
+$out = Invoke-Native { & npm ci 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0) {
     Pop-Location
@@ -593,7 +617,7 @@ Pop-Location
 Write-Step 'Running schema migration (node lib/migrate.js)...'
 
 Push-Location $repoRoot
-$out = & node lib\migrate.js 2>&1
+$out = Invoke-Native { & node lib\migrate.js 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0) {
     Pop-Location
@@ -612,7 +636,7 @@ Write-Step 'Applying readonly diagnostic grants (lib/schema-grants.sql)...'
 
 $env:PGPASSWORD = $PgAdminPassword
 $grantsPath = Join-Path $repoRoot 'lib\schema-grants.sql'
-$out = & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -f $grantsPath 2>&1
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -f $grantsPath 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] Readonly grants script exited with code $LASTEXITCODE -- claude_readonly/nocvault_readonly may not be fully configured. This does not affect application function." -ForegroundColor Yellow
@@ -625,7 +649,7 @@ Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 Write-Step 'Building application (npm run build)...'
 
 Push-Location $repoRoot
-$out = & npm run build 2>&1
+$out = Invoke-Native { & npm run build 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0) {
     Pop-Location
@@ -643,64 +667,64 @@ Write-Step 'Registering NSSM services...'
 # where mismatched AppEnvironmentExtra path casing silently causes duplicate
 # React instances.
 
-& $NssmExe stop SecVault-App confirm 2>&1 | Out-Null
-& $NssmExe remove SecVault-App confirm 2>&1 | Out-Null
+Invoke-Native { & $NssmExe stop SecVault-App confirm 2>&1 } | Out-Null
+Invoke-Native { & $NssmExe remove SecVault-App confirm 2>&1 } | Out-Null
 
-$out = & $NssmExe install SecVault-App node 2>&1
+$out = Invoke-Native { & $NssmExe install SecVault-App node 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppParameters "node_modules\.bin\next start -p $AppPort" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppParameters "node_modules\.bin\next start -p $AppPort" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App DisplayName "SecVault - Firewall Security Platform" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App DisplayName "SecVault - Firewall Security Platform" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App Start SERVICE_AUTO_START 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App Start SERVICE_AUTO_START 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App DependOnService $PgSvcName 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App DependOnService $PgSvcName 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppStdout "$LogDir\app.log" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppStdout "$LogDir\app.log" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppStderr "$LogDir\app-error.log" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppStderr "$LogDir\app-error.log" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppRotateFiles 1 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppRotateFiles 1 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppRotateBytes 10485760 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppRotateBytes 10485760 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppRotateOnline 1 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppRotateOnline 1 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-App AppRestartDelay 3000 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-App AppRestartDelay 3000 2>&1 }
 $out | Write-Host
 
-& $NssmExe stop SecVault-Engine confirm 2>&1 | Out-Null
-& $NssmExe remove SecVault-Engine confirm 2>&1 | Out-Null
+Invoke-Native { & $NssmExe stop SecVault-Engine confirm 2>&1 } | Out-Null
+Invoke-Native { & $NssmExe remove SecVault-Engine confirm 2>&1 } | Out-Null
 
-$out = & $NssmExe install SecVault-Engine node 2>&1
+$out = Invoke-Native { & $NssmExe install SecVault-Engine node 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppParameters "services\engine-worker.js" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppParameters "services\engine-worker.js" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppDirectory "C:\Apps\SecVault" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppDirectory "C:\Apps\SecVault" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppEnvironmentExtra "NODE_ENV=production" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppEnvironmentExtra "NODE_ENV=production" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine DisplayName "SecVault - Engine (scheduled jobs)" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine DisplayName "SecVault - Engine (scheduled jobs)" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine Start SERVICE_AUTO_START 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine Start SERVICE_AUTO_START 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine DependOnService $PgSvcName 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine DependOnService $PgSvcName 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppStdout "$LogDir\engine-stdout.log" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppStdout "$LogDir\engine-stdout.log" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppStderr "$LogDir\engine-stderr.log" 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppStderr "$LogDir\engine-stderr.log" 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppRotateFiles 1 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppRotateFiles 1 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppRotateBytes 10485760 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppRotateBytes 10485760 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppRotateOnline 1 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppRotateOnline 1 2>&1 }
 $out | Write-Host
-$out = & $NssmExe set SecVault-Engine AppRestartDelay 3000 2>&1
+$out = Invoke-Native { & $NssmExe set SecVault-Engine AppRestartDelay 3000 2>&1 }
 $out | Write-Host
 
 Write-Step 'NSSM services registered.'
