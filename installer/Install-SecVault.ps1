@@ -673,6 +673,19 @@ if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Fail "GRANT ALL PRIVILEGES failed with exit code $LASTEXITCODE."
 }
 
+# GRANT ALL PRIVILEGES ON DATABASE (above) does NOT include CREATE on the
+# public schema -- PostgreSQL 15+ revoked that default PUBLIC grant on the
+# public schema for security, so a role that isn't the schema owner gets
+# "permission denied for schema public" the moment it tries CREATE TABLE
+# (exactly what lib/migrate.js does). Schema privileges are per-database,
+# so this must run with -d secvault specifically, not the cluster-level
+# connection above. GRANT is idempotent -- safe to run on every install.
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -c "GRANT ALL ON SCHEMA public TO secvault_user" 2>&1 }
+$out | Write-Host
+if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
+    Fail "GRANT ALL ON SCHEMA public failed with exit code $LASTEXITCODE."
+}
+
 Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 
 Write-Step 'Database and user provisioned.'
