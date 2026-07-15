@@ -26,6 +26,23 @@
 [CmdletBinding()]
 param()
 
+# Set explicitly rather than left inherited from the caller's session. This
+# script is invoked directly by an admin ("& Update-SecVault.ps1" per
+# CLAUDE.md), so the ambient $ErrorActionPreference is whatever that
+# session/profile happens to have -- if it were ever 'Stop' (a common
+# hardening default in some admin profiles), every native call below that
+# uses `2>&1` (git pull, npm ci, node lib\migrate.js, npm run build) would
+# have its normal stderr output (progress text, warnings -- not necessarily
+# real failures) converted into a script-halting NativeCommandError before
+# the explicit $LASTEXITCODE check below it ever runs -- see CLAUDE.md
+# "PowerShell (PS5 compatibility)" / Install-SecVault.ps1's Invoke-Native.
+# Setting 'Stop' here (matching Install-SecVault.ps1) makes the script's
+# behavior deterministic regardless of caller context, and Invoke-Native
+# below still lets each native call's own stderr be inspected without that
+# escalation -- $LASTEXITCODE is unaffected either way and remains the
+# actual failure signal.
+$ErrorActionPreference = 'Stop'
+
 $InstallRoot = 'C:\Apps\SecVault'
 $LogDir = 'C:\Apps\SecVault\logs'
 $LogFile = Join-Path $LogDir 'update.log'
@@ -40,6 +57,49 @@ function Write-Log {
     $line = "[$ts] $Message"
     $line | Write-Host
     Add-Content -Path $LogFile -Value $line
+}
+
+# See the $ErrorActionPreference comment above -- routes native calls that
+# use `2>&1` through a temporary 'Continue' window so their own stderr can
+# never escalate into a script-halting NativeCommandError. $LASTEXITCODE is
+# still set normally by the underlying call for real failure detection at
+# each call site. Copied from Install-SecVault.ps1 (proven against a real
+# server this session).
+function Invoke-Native {
+    param([Parameter(Mandatory = $true)][scriptblock]$Command)
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
+# `sc.exe start`/`sc.exe stop` return as soon as the SCM accepts the
+# request, not once the service has actually reached that state. Used below
+# after stopping SecVault-App/SecVault-Engine so npm ci / npm run build
+# don't race a still-shutting-down node.exe process that may still hold
+# open handles on files under node_modules\ or .next\ (Windows locks these
+# for the process's lifetime -- e.g. loaded native addon .node files --
+# causing intermittent EBUSY/EPERM errors if npm touches them mid-shutdown).
+# Read-only Get-Service polling, not Start-Service/Stop-Service -- see
+# CLAUDE.md "Never use PowerShell service cmdlets". Copied from
+# Install-SecVault.ps1 (proven against a real server this session).
+function Wait-ServiceStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServiceName,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$TimeoutSeconds = 30
+    )
+    $waited = 0
+    while ($waited -lt $TimeoutSeconds) {
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq $Status) { return $true }
+        Start-Sleep -Seconds 1
+        $waited++
+    }
+    return $false
 }
 
 function Invoke-Step {
@@ -82,6 +142,9 @@ Invoke-Step 'sc.exe stop SecVault-App' {
     $out = sc.exe stop SecVault-App
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Stopped' -TimeoutSeconds 30)) {
+        Write-Log '  [WARN] SecVault-App did not reach Stopped state within 30s -- proceeding anyway.'
+    }
 }
 
 # -----------------------------------------------------------------------
@@ -91,6 +154,9 @@ Invoke-Step 'sc.exe stop SecVault-Engine' {
     $out = sc.exe stop SecVault-Engine
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Stopped' -TimeoutSeconds 30)) {
+        Write-Log '  [WARN] SecVault-Engine did not reach Stopped state within 30s -- proceeding anyway.'
+    }
 }
 
 # -----------------------------------------------------------------------
@@ -98,7 +164,7 @@ Invoke-Step 'sc.exe stop SecVault-Engine' {
 # -----------------------------------------------------------------------
 Invoke-Step 'git pull origin main' {
     Push-Location $repoRoot
-    $out = git pull origin main 2>&1
+    $out = Invoke-Native { git pull origin main 2>&1 }
     Pop-Location
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
@@ -112,7 +178,7 @@ Invoke-Step 'git pull origin main' {
 # -----------------------------------------------------------------------
 Invoke-Step 'npm ci' {
     Push-Location $repoRoot
-    $out = npm ci 2>&1
+    $out = Invoke-Native { npm ci 2>&1 }
     Pop-Location
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
@@ -126,7 +192,7 @@ Invoke-Step 'npm ci' {
 # -----------------------------------------------------------------------
 Invoke-Step 'node lib\migrate.js' {
     Push-Location $repoRoot
-    $out = node lib\migrate.js 2>&1
+    $out = Invoke-Native { node lib\migrate.js 2>&1 }
     Pop-Location
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
@@ -140,7 +206,7 @@ Invoke-Step 'node lib\migrate.js' {
 # -----------------------------------------------------------------------
 Invoke-Step 'npm run build' {
     Push-Location $repoRoot
-    $out = npm run build 2>&1
+    $out = Invoke-Native { npm run build 2>&1 }
     Pop-Location
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
@@ -156,6 +222,9 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
     $out = sc.exe start SecVault-Engine
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Running' -TimeoutSeconds 15)) {
+        Write-Log '  [WARN] SecVault-Engine did not reach Running state within 15s -- check logs\engine-stderr.log.'
+    }
 }
 
 # -----------------------------------------------------------------------
@@ -165,6 +234,9 @@ Invoke-Step 'sc.exe start SecVault-App' {
     $out = sc.exe start SecVault-App
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15)) {
+        Write-Log '  [WARN] SecVault-App did not reach Running state within 15s -- check logs\app-error.log.'
+    }
 }
 
 Write-Log '=================================================='
