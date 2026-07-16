@@ -20,7 +20,25 @@ BEGIN
 END
 $$;
 
-GRANT SELECT ON TABLE settings TO claude_readonly, nocvault_readonly;
+-- settings stores the local admin's bcrypt hash under key='admin_password_hash'
+-- (app/api/settings/route.js). A blanket table grant would let claude_readonly/
+-- nocvault_readonly read it directly via SQL, bypassing the API's own
+-- HIDDEN_KEYS filter entirely (that filter only applies to the HTTP GET
+-- handler, never to raw SQL access) -- found in a full-app audit (2026-07-16).
+-- CLAUDE.md's own rule is that device_credentials is the sole table these
+-- roles never see in full; settings holding an equivalent secret needed the
+-- same treatment. Grant a view excluding that one row instead of the table.
+-- REVOKE is required, not just omitting the old GRANT line below -- this file
+-- is re-run on every update (see Update-SecVault.ps1), and REVOKE is the only
+-- statement that undoes a privilege a PREVIOUS run already granted on a
+-- live database; simply removing a GRANT line here does not retroactively
+-- revoke it.
+REVOKE SELECT ON TABLE settings FROM claude_readonly, nocvault_readonly;
+
+CREATE OR REPLACE VIEW settings_readonly AS
+  SELECT key, value, updated_at FROM settings WHERE key <> 'admin_password_hash';
+
+GRANT SELECT ON settings_readonly TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE devices TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_versions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_configs TO claude_readonly, nocvault_readonly;

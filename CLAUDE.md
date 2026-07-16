@@ -248,6 +248,16 @@ GRANT SELECT ON TABLE new_table_name TO nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users
 ```
 
+**Second exception: `settings`, granted via a VIEW, never the base table.** `settings` stores the
+local admin's bcrypt hash under `key='admin_password_hash'` — the app's own `HIDDEN_KEYS` filter
+(`app/api/settings/route.js`) only hides that row from the HTTP API, not from raw SQL. A blanket
+`GRANT SELECT ON TABLE settings` was found in a full-app audit (2026-07-16) to let these roles read
+the hash directly. Fixed with `REVOKE SELECT ON TABLE settings ...` (required, not just deleting the
+old `GRANT` line — this file is re-applied on every update, and only `REVOKE` undoes a privilege a
+previous run already granted on a live database) plus a `settings_readonly` view excluding that one
+row, granted instead of the table. Any new secret-bearing row added to `settings` in the future needs
+the same treatment — a view excluding it, not a bare table grant.
+
 **Why a separate file:** `lib/schema.sql` runs via `lib/migrate.js`, which connects as `secvault_user` — an account that only has `GRANT ALL PRIVILEGES ON DATABASE`, not `CREATEROLE`/superuser. `CREATE ROLE` inside `schema.sql` would throw a permission error, and because a multi-statement `pool.query()` call is one implicit transaction, that failure would roll back every `CREATE TABLE` in the same call — silently breaking every fresh install. `lib/schema-grants.sql` is applied separately, under the `postgres` superuser (`psql -U postgres -d secvault -f lib/schema-grants.sql`), after the tables it grants on already exist, and its failure is logged as a warning, never fatal — these roles are diagnostic-only and not required for the app to function.
 
 **Applied automatically by both installer scripts** — no manual step needed after adding a new table's `GRANT SELECT` line. `Install-SecVault.ps1` runs it with the just-generated superuser password (still in scope at that point in the script); `Update-SecVault.ps1` runs it too, reading the same password back out of the already-deployed `.env.local`'s `PG_ADMIN_PASSWORD` value (originally persisted there "for later reference" — this is that reference, used programmatically). Safe to re-run unconditionally on every update because every statement in the file is idempotent. If `.env.local` predates `PG_ADMIN_PASSWORD` (an install from before this was added) or the value is empty, the Update step logs a warning and skips — it never fails the update.
