@@ -400,11 +400,52 @@ Rules that keep this working:
 - SSH vendors share `lib/adapters/sshClient.js` (`runCommands`, `parseJsonCredential`) — ssh2 shell channel with
   legacy-algorithm compat for old ASA images. Don't open raw ssh2 connections in adapters.
 - `mgmt_port` is nullable — every adapter applies its own default (443 API / 22 SSH / 8082 SMC) when NULL.
-- **None of the five new adapters has been verified against a live device yet** (same as the original SMC build).
-  Every parser logs raw responses via `console.log('[<Vendor> Debug] ...')` — on first real connection, check the
-  logs and fix field mappings in that vendor's `parser.js`. Documentation lies; this step is not optional.
 - Cross-vendor NVD limitation: `advisories.cve_id` is UNIQUE with a single `vendor` — a CVE affecting two vendors
   stays with whichever vendor ingested it first.
+
+### Live Validation Status — READ BEFORE TRUSTING ANY VENDOR DATA
+
+**Every adapter, including Forcepoint, was built against documentation and synthetic data. NONE has
+been run against real hardware.** Every endpoint path, field name and auth flow below is doc-derived.
+Per CLAUDE.md's "documentation lies" rule this is expected, not an oversight — but it means the first
+live connection to each vendor is a *verification step*, not a smoke test.
+
+Each adapter logs its raw response on first use. Grep the engine log for these exact prefixes:
+
+| Prefix | Adapter |
+|---|---|
+| `[SMC Debug]` | Forcepoint SMC engine element |
+| `[Fortinet Debug]` | FortiOS REST API + session login |
+| `[PaloAlto Debug]` | PAN-OS XML API |
+| `[PaloAlto SSH Debug]` | PAN-OS SSH (`set`-format config) |
+| `[CheckPoint Debug]` | Mgmt API gateway/package resolution |
+| `[CiscoASA Debug]` | ASA SSH show output |
+| `[Sangfor Debug]` | Sangfor SSH output |
+
+On first connect: compare the raw response against what that vendor's `parser.js` expects, fix the
+field mappings, then **record the verified field names here** so the next person doesn't re-derive them.
+Adapters are written to fail loudly on an unexpected shape rather than return wrong data — a loud
+failure on first connect is the design working, not a regression.
+
+### Known Limitations (by design — documented, not bugs)
+
+- **Fortinet over SSH has no hit counts.** The CLI has no reliable per-rule hit-count equivalent, so
+  `hit_count` is 0 for every rule. Phase 5 flags a zero-hit rule as `unused`, so an SSH-collected
+  FortiGate will report **every rule unused**. Use the REST transport if unused-rule findings matter.
+  Same limitation applies to Sangfor.
+- **Shadow analysis is not VDOM-aware.** `ruleAnalysis` orders by `sequence_number` per *device*, with
+  no VDOM dimension, so identical rules in different Fortinet VDOMs can false-positive as `shadow`.
+  Fixing this needs a schema + engine change (a VDOM column on `firewall_rules`).
+- **Check Point in a distributed deployment**: `mgmt_ip` is the *management server*, so gateway identity
+  rests on `devices.name` matching the gateway object's name. Where it doesn't, a multi-package server
+  now **hard-fails** rather than importing another gateway's rules — that's the intended bar. The error
+  names the candidate gateways; fix by aligning the device name.
+- **Check Point `getVersion()`/`getConfig()` still use `findGateway()`'s "first gateway" fallback**, so
+  on a name mismatch they can report another gateway's version/config. Less destructive than the
+  `packages[0]` rules bug (which is fixed), but the same class. Open.
+- **PAN-OS XML `getRules()` returns `[]` (does not throw) when a reachable device reports an empty
+  rulebase** — it can't distinguish "genuinely empty" from "wrong xpath" without live verification.
+  The any-vsys fallback narrows it; the ambiguity remains until first live connect.
 
 ## Forcepoint SMC Integration
 
