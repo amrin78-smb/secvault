@@ -345,7 +345,17 @@ async function shutdown(signal) {
   }
 
   const pollIntervalMs = 500;
-  const hardCeilingMs = 30000;
+  // Was 30000ms, sized for the original single lightweight SMC-only adapter.
+  // The Tier-1 SSH adapters (Fortinet, Palo Alto, Cisco ASA, Sangfor) now
+  // legitimately run a single config pull up to 120000ms, and devices are
+  // collected sequentially in one job — a stop landing mid-pull used to be
+  // hard-killed well before that pull could finish, silently truncating the
+  // scheduled run for every device still queued behind it (found in a
+  // follow-up bug sweep, 2026-07-17; the DELETE+reinsert itself is already
+  // transaction-safe, so this was never a data-corruption risk, only a
+  // "finish current job then exit" contract violation). Raised past the
+  // largest single-adapter timeout so a mid-pull stop can actually finish.
+  const hardCeilingMs = 150000;
   let waited = 0;
   while (isJobRunning && waited < hardCeilingMs) {
     // eslint-disable-next-line no-await-in-loop

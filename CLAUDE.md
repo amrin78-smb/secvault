@@ -1233,6 +1233,133 @@ surfaces all vendors — check every `<select>`/filter/column that touches `devi
 `advisories.vendor` against the full 6-slug list (`forcepoint`, `fortinet`, `paloalto`,
 `checkpoint`, `cisco_asa`, `sangfor`), not just against "does the query work."
 
+### ⚠️ Bug-sweep fixes (2026-07-17) — a follow-up audit, all confirmed and fixed
+
+A second full-app bug sweep (independent finders per subsystem, then adversarially re-verified
+against the actual code before anything was reported as real) found and fixed the following. Two
+reported items were investigated and found NOT to be real bugs — noted at the end so they aren't
+re-investigated.
+
+**Security (secrets):**
+- `lib/adapters/sangfor/parser.js`'s `getRules()` built `raw_rule.text` from the UNREDACTED cached
+  config text (the caching itself is correct — field extraction needs real tokens — but the STORED
+  `raw_rule` didn't go through `redactConfig()` the way `getConfig()`'s output already did).
+  `firewall_rules` is whole-table `GRANT SELECT`'d to `claude_readonly`/`nocvault_readonly`, so a
+  rule block that happened to also contain a secret-bearing line (plausible on Sangfor's
+  undocumented, varying firmware dialects) could persist a secret in the clear. Fixed: `redactConfig()`
+  is now applied to `blockText` at the point `raw_rule` is constructed — field extraction still reads
+  the original unredacted lines, only the stored copy is redacted.
+- `lib/adapters/fortinet/cliParser.js`: `redactConfig()`'s multi-line-quote tracking (`inMultilineSecret`)
+  only activated for KEY-recognized-as-secret values. A non-secret multi-line value (a `replacemsg`
+  body, banner, description field) whose body happened to contain a line that trimmed to exactly `end`
+  could desync `blockPath`, causing a LATER genuinely-secret line (e.g. an SNMP community) to be
+  misjudged as outside its secret context and left unredacted. Fixed: multi-line-quote suspension is
+  now generic (tracked for ANY `set key "..."` value via unescaped-quote counting), not gated on the
+  key being secret-shaped — reproduced the exact leak against the pre-fix code, confirmed fixed.
+- `lib/adapters/sshClient.js`: `enablePassword` is written verbatim to an interactive privileged shell
+  (unlike the login password, which is authenticated at the SSH protocol level, never as shell text).
+  An embedded `\r`/`\n` in a malformed/corrupted stored credential would inject extra commands into a
+  root shell. Now refused with a clear error before being sent, rather than silently written.
+- `lib/adapters/cisco_asa/parser.js`: `redactConfig()` was missing the single-line
+  `radius-common-pw <secret>` AAA form (the multi-line `key <secret>` sub-mode form was already
+  covered). Added.
+
+**Silent data loss:**
+- `lib/adapters/paloalto/sshParser.js`: `parseBraceBlock`'s root-level call had no way to distinguish
+  "a real nested block's closing `}`" from "a stray/unmatched `}` anywhere in a truncated or corrupted
+  SSH dump" — the latter silently ended parsing right there, discarding everything after it, including
+  a rulebase that might appear later. Fixed via an `isRoot` flag: a stray `}` at the root is now
+  skipped like any other unrecognized token (matching this function's existing "skip and keep going"
+  philosophy for nested content), while a real block's `}` still terminates it correctly. Chained fix
+  in `lib/adapters/paloalto/ssh.js`: `getRules()` previously could not distinguish "no rulebase
+  container found anywhere in the tree" (a structural failure that must THROW, per this file's own
+  rule) from "a container was found and is genuinely empty" (`parseSecurityRules` now returns
+  `{ rules, containersFound }` so `getRules()` can tell them apart) — closes the path where the brace
+  truncation above would previously warn-and-return-`[]`, letting `collectAndStore` silently wipe a
+  device's real ruleset.
+- `lib/adapters/fortinet/ssh.js`: multi-VDOM collection captured and validated the
+  `show firewall policy` output per VDOM, but discarded the preceding `edit <vdom>` command's own
+  output entirely — a failed `edit` (renamed/deleted VDOM, VDOM-scoped admin, transient CLI rejection)
+  would leave the shell in the wrong VDOM's context with no error, storing that VDOM's real policies
+  under the WRONG VDOM's label. Fixed: `edit <vdom>`'s own output is now captured and checked for a
+  known FortiOS failure string (`CLI_ERROR_REGEX`, extended with `entry not found`) before its paired
+  policy output is trusted; throws (no try/catch, matching this file's existing fail-loud posture for
+  the equivalent REST-transport risk) if the switch can't be confirmed.
+
+**Correctness / concurrency:**
+- `lib/engines/versionMatcher.js`: `runMatchForAllDevices()` has three independent call sites that can
+  run concurrently for the same device (the "Assess Now" button, the scheduled feed-sync-and-match
+  job, and the config-change-triggered re-match) with no locking — an overlapping run computed from
+  stale data could DELETE+INSERT after a newer, correct run already removed a since-patched CVE's row,
+  resurrecting a stale `patch_now` assessment. Fixed: the DELETE+INSERT+prioritization write phase for
+  each device now runs inside its own transaction holding
+  `pg_advisory_xact_lock(hashtext(device_id))` — auto-released at COMMIT/ROLLBACK, so a crash can't
+  leave it held. The read phase above stays unlocked (cheap; staleness there just means slightly older
+  source data, not a correctness bug).
+- `lib/feeds/kev.js` had no fetch timeout at all — the exact node-fetch@2-hangs-forever bug fixed the
+  same day in `nvd.js`'s CIRCL-fallback work, just missed in this sibling file. Since `runFullSync`
+  awaits NVD then KEV sequentially, a blocked KEV request could stall the entire feed-sync cycle
+  indefinitely. Now uses the same `FETCH_TIMEOUT_MS` as `nvd.js`. No CIRCL-style fallback added —
+  CISA KEV has no equivalent alternate source; failing cleanly on timeout is sufficient.
+- `lib/feeds/nvd.js`: three refinements to the CIRCL fallback logic. (1) A malformed-JSON response on
+  an HTTP 200 (corrupted/truncated body) was satisfying the same `err.status == null` check used to
+  detect "NVD unreachable," misclassifying a reachable-but-corrupted response as a network outage —
+  now tagged separately (`err.nvdJsonParseError`) and excluded from the CIRCL trigger. (2) A genuine
+  timeout/DNS/connection-refused error fell to CIRCL on the very first failure with zero NVD retries,
+  asymmetric with the 429 branch's one-retry-then-backoff; added a single short-delay retry against
+  NVD first. (3) When a vendor's multiple CPE strings (forcepoint, checkpoint, cisco_asa) mix NVD- and
+  CIRCL-sourced results for the same `cve_id` within one sync run, a later CIRCL record could silently
+  overwrite an earlier, more precise NVD record; the merge now tags each entry's source and refuses to
+  let CIRCL clobber an existing NVD entry.
+- `lib/activityLog.js`'s `logActivity()` claims to "NEVER throw," but destructured its second
+  parameter with a default that only applies to `undefined`, not `null` — `logActivity(pool, null)`
+  would throw before the try block. No current call site does this, but the contract is unconditional.
+  Fixed by destructuring from `entry || {}` inside the function body instead.
+- `lib/adapters/checkpoint/index.js`: `getVersion()` already threw when no gateway object could be
+  found at all (not the documented "first gateway" fallback case, which remains open and unchanged —
+  see "Known Limitations" above — but the case where there's no fallback candidate either). `getConfig()`
+  had no equivalent check and silently persisted a near-empty config as a successful collection. Now
+  throws the same way, naming candidate gateway objects found on the server (via the same
+  `describeGatewayCandidates()` helper `_resolvePolicyPackage()` already uses).
+- `services/engine-worker.js`: the SIGTERM/SIGINT shutdown hard ceiling (30s) was sized for the
+  original single lightweight SMC adapter. The Tier-1 SSH adapters now legitimately run a single
+  config pull up to 120s, and devices collect sequentially in one job — a stop landing mid-pull was
+  hard-killed well before that pull could finish, silently truncating the run for every device still
+  queued behind it. (Not a data-corruption risk — `collectAndStore`'s rule rewrite is already
+  transaction-safe — just a "finish current job then exit" contract violation.) Raised to 150s.
+- Malformed UUID path params (`/api/devices/foo`) across the `devices/[id]` route family threw a raw
+  Postgres type-cast error caught only by each route's generic 500 handler, leaking an internal error
+  message for what should be a clean 400. New `lib/apiUtils.js` exports `isValidUuid()`; applied as an
+  early guard in `devices/[id]/route.js`, `devices/[id]/acknowledgements/route.js`,
+  `devices/[id]/analysis/route.js`, and `devices/[id]/diffs/[diffId]/route.js`.
+- `components/analysis/AcknowledgeControl.js` seeded its local `status` from the `currentStatus` prop
+  only on mount, with no resync when the prop changed on a later render for a reason other than this
+  control's own save (e.g. a `router.refresh()` from editing a different row). Added a
+  `useEffect` resyncing on `currentStatus` change, deliberately skipped while a save is in flight (see
+  the component's own comment — resyncing during `saving` would stomp the just-applied optimistic
+  value with the still-stale prop before the refresh lands, causing a visible flicker).
+
+**Installer (PS5, `installer/*.ps1`):**
+- `Install-SecVault.ps1`'s superuser-password-reset retry loop checked `$LASTEXITCODE -eq 0`, the only
+  `psql` call site in either script that didn't also accept `-1` as success per the documented WinRM
+  stderr quirk — could hard-fail an install that actually succeeded. Fixed to match every other call
+  site's `-eq 0 -or -eq -1` pattern.
+- Both scripts' docstrings claimed "Never uses ... Get-Service," while the bodies use it for read-only
+  `.Status` polling (deliberate — CLAUDE.md's actual rule is about the state-changing cmdlets, which
+  can hang a WinRM session; read-only polling is a different, already-tested operation). Docstrings
+  corrected to state the real, narrower rule; no executable code changed — the Get-Service polling
+  itself was already correct and stays.
+- A `Fail` message echoed the generated superuser password in plaintext, which would persist to disk
+  under output redirection/transcription. Removed the literal password from the message.
+
+**Investigated, found NOT to be bugs (do not re-investigate without new evidence):**
+- Fortinet REST's `_discoverVdoms()` catching an enumeration failure and falling back to the implicit
+  single-VDOM request is a deliberate, correctly-reasoned tradeoff (older firmware / VDOM-scoped admin
+  tokens routinely can't enumerate VDOMs; hard-failing every such box would break far more devices than
+  it protects) — not the "any error → silent partial ruleset" bug an initial pass described. The
+  explicit multi-VDOM loop (once VDOMs ARE known) has no try/catch on purpose and correctly throws
+  whole on any single VDOM's failure.
+
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
 Real production traps discovered during the Phase 1+2 build — documented here so they are never

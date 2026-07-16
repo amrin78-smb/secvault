@@ -2,6 +2,7 @@ import { pool } from '../../../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../../lib/activityLog';
+import { isValidUuid } from '../../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(request, { params }) {
   try {
     const { id, diffId } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
+    if (!isValidUuid(diffId)) {
+      return Response.json({ error: 'Invalid diff id' }, { status: 400 });
+    }
 
     const { rows } = await pool.query(
       `SELECT * FROM config_diffs WHERE id = $1 AND device_id = $2`,
@@ -33,6 +41,13 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     const { id, diffId } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
+    if (!isValidUuid(diffId)) {
+      return Response.json({ error: 'Invalid diff id' }, { status: 400 });
+    }
 
     // Resolved defensively: acknowledgedBy feeds the PRIMARY update below, not
     // just the audit trail, so a getServerSession hiccup must degrade to

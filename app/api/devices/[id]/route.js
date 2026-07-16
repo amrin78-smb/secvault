@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
+import { isValidUuid } from '../../../../lib/apiUtils';
 import {
   VENDOR_META,
   VENDOR_SLUGS,
@@ -39,6 +40,9 @@ function coercePort(value) {
 }
 
 export async function GET(request, { params }) {
+  if (!isValidUuid(params.id)) {
+    return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+  }
   try {
     const result = await pool.query('SELECT * FROM devices WHERE id = $1', [params.id]);
     if (result.rows.length === 0) {
@@ -66,6 +70,9 @@ export async function GET(request, { params }) {
 // (400 if the vendor doesn't support it). The vendor used for that check is the
 // one in the body when it is being changed, otherwise the device's stored vendor.
 export async function PUT(request, { params }) {
+  if (!isValidUuid(params.id)) {
+    return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+  }
   const body = await request.json().catch(() => ({}));
   const { smc_api_key, credential, credential_type, mgmt_method, ...rest } = body || {};
 
@@ -198,6 +205,9 @@ export async function PUT(request, { params }) {
 // DELETE /api/devices/[id] — related rows (device_versions, device_credentials,
 // firewall_rules, device_cve_assessments, ...) cascade via ON DELETE CASCADE in schema.sql.
 export async function DELETE(request, { params }) {
+  if (!isValidUuid(params.id)) {
+    return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+  }
   try {
     await pool.query('DELETE FROM devices WHERE id = $1', [params.id]);
     return NextResponse.json({ ok: true });

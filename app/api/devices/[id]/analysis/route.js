@@ -4,6 +4,7 @@ import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
     const [{ rows }, { rows: actionRows }] = await Promise.all([
       pool.query(
@@ -91,6 +96,11 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
+
     const result = await runAnalysisForDevice(id, pool);
 
     // Audit logging is best-effort and must never turn a successful analysis

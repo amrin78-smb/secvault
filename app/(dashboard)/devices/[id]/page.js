@@ -97,6 +97,27 @@ async function getTopRules(dbPool, id) {
   return result.rows;
 }
 
+// Module-top-level so a future refactor toward client-side interactive tabs
+// can't accidentally turn this into a component defined inside a component
+// (see CLAUDE.md's "NEVER define a React component inside another React
+// component" rule). Currently invoked as a plain function call ({tabLink(...)}),
+// not a JSX tag, so it isn't a component today -- but this keeps it that way
+// even if a later change starts rendering it as <TabLink/>. Takes the
+// previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
+// on closure.
+function tabLink(deviceId, activeTab, key, label) {
+  return (
+    <Link
+      href={`/devices/${deviceId}?tab=${key}`}
+      className={`px-3 py-2 text-sm ${
+        activeTab === key ? 'border-b-2 border-accent text-text-primary' : 'text-text-secondary hover:text-text-primary'
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default async function DeviceDetailPage({ params, searchParams }) {
   const device = await getDevice(pool, params.id);
 
@@ -122,19 +143,6 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
   const status =
     device.last_connectivity_ok === true ? 'green' : device.last_connectivity_ok === false ? 'red' : 'grey';
-
-  function tabLink(key, label) {
-    return (
-      <Link
-        href={`/devices/${device.id}?tab=${key}`}
-        className={`px-3 py-2 text-sm ${
-          tab === key ? 'border-b-2 border-accent text-text-primary' : 'text-text-secondary hover:text-text-primary'
-        }`}
-      >
-        {label}
-      </Link>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -199,9 +207,9 @@ export default async function DeviceDetailPage({ params, searchParams }) {
       </div>
 
       <div className="flex items-center gap-1 border-b border-border">
-        {tabLink('cve', 'CVE Posture')}
-        {tabLink('rules', 'Rules')}
-        {tabLink('config', 'Config Changes')}
+        {tabLink(device.id, tab, 'cve', 'CVE Posture')}
+        {tabLink(device.id, tab, 'rules', 'Rules')}
+        {tabLink(device.id, tab, 'config', 'Config Changes')}
       </div>
 
       {tab === 'cve' && <CVETable rows={cveRows} showDeviceColumn={false} />}

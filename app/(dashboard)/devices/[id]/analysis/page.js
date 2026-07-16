@@ -156,6 +156,29 @@ function StatCard({ label, value, colorClass = 'text-text-primary' }) {
   );
 }
 
+// Module-top-level so a future refactor toward client-side interactive tabs
+// can't accidentally turn this into a component defined inside a component
+// (see CLAUDE.md's "NEVER define a React component inside another React
+// component" rule). Currently invoked as a plain function call ({tabLink(...)}),
+// not a JSX tag, so it isn't a component today -- but this keeps it that way
+// even if a later change starts rendering it as <TabLink/>. Takes the
+// previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
+// on closure.
+function tabLink(deviceId, activeTab, key, label) {
+  return (
+    <Link
+      href={`/devices/${deviceId}/analysis?tab=${key}`}
+      className={`px-3 py-2 text-sm ${
+        activeTab === key
+          ? 'border-b-2 border-accent text-text-primary'
+          : 'text-text-secondary hover:text-text-primary'
+      }`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default async function DeviceAnalysisPage({ params, searchParams }) {
   const device = await getDevice(pool, params.id);
 
@@ -196,21 +219,6 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
   const riskScore = computeRiskScoreFromCounts(severitySummary);
 
-  function tabLink(key, label) {
-    return (
-      <Link
-        href={`/devices/${device.id}/analysis?tab=${key}`}
-        className={`px-3 py-2 text-sm ${
-          tab === key
-            ? 'border-b-2 border-accent text-text-primary'
-            : 'text-text-secondary hover:text-text-primary'
-        }`}
-      >
-        {label}
-      </Link>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -230,14 +238,14 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       </div>
 
       <div className="flex items-center gap-1 border-b border-border">
-        {tabLink('summary', 'Summary')}
-        {tabLink('rules', `Security Rules ${ruleStats.total_rules}`)}
-        {tabLink('findings', `Findings ${severitySummary.total}`)}
-        {tabLink('cleanup', 'Cleanup')}
-        {tabLink('optimization', 'Optimization')}
-        {tabLink('reorder', 'Reorder')}
-        {tabLink('risk', 'Risk')}
-        {tabLink('tracking', 'Tracking')}
+        {tabLink(device.id, tab, 'summary', 'Summary')}
+        {tabLink(device.id, tab, 'rules', `Security Rules ${ruleStats.total_rules}`)}
+        {tabLink(device.id, tab, 'findings', `Findings ${severitySummary.total}`)}
+        {tabLink(device.id, tab, 'cleanup', 'Cleanup')}
+        {tabLink(device.id, tab, 'optimization', 'Optimization')}
+        {tabLink(device.id, tab, 'reorder', 'Reorder')}
+        {tabLink(device.id, tab, 'risk', 'Risk')}
+        {tabLink(device.id, tab, 'tracking', 'Tracking')}
       </div>
 
       {tab === 'summary' && (

@@ -2,6 +2,7 @@ import { pool } from '../../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,10 @@ const STATUSES = new Set(['new', 'acknowledged', 'dismissed', 'actioned']);
 export async function POST(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
     const deviceResult = await pool.query('SELECT id FROM devices WHERE id = $1', [id]);
     if (deviceResult.rows.length === 0) {

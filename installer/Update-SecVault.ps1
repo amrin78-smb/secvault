@@ -16,7 +16,10 @@
       8. sc.exe start SecVault-App
 
     Written for PowerShell 5.1  -  see CLAUDE.md "PowerShell (PS5 compatibility)".
-    Never uses Start-Service/Stop-Service/Get-Service  -  sc.exe only.
+    Service state changes (start/stop) are sc.exe only  -  never Start-Service/
+    Stop-Service (they can hang a WinRM session). Read-only Get-Service polling
+    (`.Status` checks only, e.g. Wait-ServiceStatus below) is fine and used
+    deliberately  -  it doesn't change service state and doesn't carry that hang risk.
     Never pipes directly out of try/catch  -  always `$out = cmd; $out | Write-Host`.
 
     On any step failure: the error is logged, but this script still attempts

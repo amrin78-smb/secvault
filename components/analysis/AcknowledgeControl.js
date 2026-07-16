@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 // Per-row status control for Cleanup/Optimization/Reorder tabs (Rule Analysis
@@ -27,6 +27,29 @@ export default function AcknowledgeControl({ deviceId, ruleIdVendor, findingType
   const [status, setStatus] = useState(currentStatus);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  // Resync local `status` whenever the server-authoritative `currentStatus`
+  // prop changes for a reason OTHER than this control's own save (e.g. a
+  // router.refresh() triggered by editing a different row, or a concurrent
+  // edit to this same finding from another tab/user). Without this, the
+  // <select> would silently keep showing a stale value forever after mount.
+  //
+  // Deliberately depends on [currentStatus] only (not `saving`) -- `saving`
+  // is read as a guard, not a trigger. If it were also a dependency, this
+  // effect would re-fire on the saving:true->false transition inside
+  // handleChange's `finally`, which happens *before* router.refresh() has
+  // brought back the fresh currentStatus -- that would momentarily stomp the
+  // just-applied optimistic value with the still-stale prop and flicker the
+  // select back to the old status for a moment. Skipping while saving is
+  // true, and only resyncing when currentStatus itself actually changes,
+  // avoids that: the in-flight request's own success/revert handling stays
+  // the sole source of truth for its own edit, and this effect only takes
+  // over once that settles (a later currentStatus change re-fires it).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (saving) return; // in-flight save owns `status` until it settles
+    setStatus(currentStatus);
+  }, [currentStatus]);
 
   async function handleChange(e) {
     const next = e.target.value;

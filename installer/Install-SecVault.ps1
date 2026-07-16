@@ -13,7 +13,10 @@
       - No `try { cmd | Write-Host } catch {}` -- always `$out = cmd; $out | Write-Host`.
       - No `-Parallel` on ForEach-Object, no `-TimeoutSeconds` on Test-Connection.
       - Never use `$PID` (reserved) -- use `$procPid`.
-      - Service control is `sc.exe` only -- never Start-Service/Stop-Service/Get-Service.
+      - Service state changes are `sc.exe` only -- never Start-Service/Stop-Service
+        (they can hang a WinRM session). Read-only Get-Service polling (`.Status`
+        checks only, e.g. Wait-ServiceStatus below) is fine and used deliberately --
+        it doesn't change service state and doesn't carry that hang risk.
 
     Follows the same bundled-dependencies convention as the NocVault suite
     installer (Install-NocVault-Suite.ps1): required prerequisite installers
@@ -333,7 +336,7 @@ if ($pgAlreadyInstalled) {
         $escapedPassword = $PgAdminPassword.Replace("'", "''")
         for ($attempt = 1; $attempt -le 5; $attempt++) {
             $out = Invoke-Native { & psql -U postgres -h 127.0.0.1 -c "ALTER USER postgres WITH PASSWORD '$escapedPassword'" 2>&1 }
-            if ($LASTEXITCODE -eq 0) {
+            if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1) {
                 $resetOk = $true
                 break
             }
@@ -656,7 +659,7 @@ $env:PGPASSWORD = $PgAdminPassword
 $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE secvault" 2>&1 }
 $out | Write-Host
 if (($out -join "`n") -match 'password authentication failed') {
-    Fail "PostgreSQL rejected -PgAdminPassword ('$PgAdminPassword') for the 'postgres' superuser, despite step 1d having authenticated successfully with it moments ago. Something reconfigured PostgreSQL's auth in between -- investigate before retrying."
+    Fail "PostgreSQL rejected the generated PostgreSQL superuser password for the 'postgres' superuser, despite step 1d having authenticated successfully with it moments ago. Something reconfigured PostgreSQL's auth in between -- investigate before retrying (check the psql output above)."
 }
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] CREATE DATABASE exited with code $LASTEXITCODE (may already exist) -- continuing." -ForegroundColor Yellow

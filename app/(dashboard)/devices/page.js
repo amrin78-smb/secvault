@@ -82,23 +82,31 @@ async function getDevices(dbPool, sortKey) {
   return result.rows;
 }
 
+// Module-top-level so a future refactor toward client-side interactive sort
+// controls can't accidentally turn this into a component defined inside a
+// component (see CLAUDE.md's "NEVER define a React component inside another
+// React component" rule). Currently invoked as a plain function call
+// ({sortLink(...)}), not a JSX tag, so it isn't a component today -- but this
+// keeps it that way even if a later change starts rendering it as
+// <SortLink/>. Takes the previously-closed-over `sortKey` explicitly instead
+// of relying on closure.
+function sortLink(activeSortKey, key, label) {
+  return (
+    <Link
+      href={`/devices?sort=${key}`}
+      className={activeSortKey === key ? 'font-medium text-accent underline' : 'text-text-secondary hover:underline'}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export default async function DevicesPage({ searchParams }) {
   const sortKey = searchParams?.sort && SORT_OPTIONS[searchParams.sort] ? searchParams.sort : 'name';
   const devices = await getDevices(pool, sortKey);
 
   const confirmDeleteId = searchParams?.confirmDelete || null;
   const confirmDevice = confirmDeleteId ? devices.find((d) => d.id === confirmDeleteId) : null;
-
-  function sortLink(key, label) {
-    return (
-      <Link
-        href={`/devices?sort=${key}`}
-        className={sortKey === key ? 'font-medium text-accent underline' : 'text-text-secondary hover:underline'}
-      >
-        {label}
-      </Link>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -114,9 +122,9 @@ export default async function DevicesPage({ searchParams }) {
 
       <div className="flex items-center gap-3 text-sm">
         <span className="text-text-muted">Sort by:</span>
-        {sortLink('name', 'Name')}
-        {sortLink('cve_count', 'CVE Count')}
-        {sortLink('last_collected', 'Last Collected')}
+        {sortLink(sortKey, 'name', 'Name')}
+        {sortLink(sortKey, 'cve_count', 'CVE Count')}
+        {sortLink(sortKey, 'last_collected', 'Last Collected')}
       </div>
 
       {devices.length === 0 ? (
