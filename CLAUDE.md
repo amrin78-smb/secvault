@@ -228,6 +228,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `config_diffs` | Structured diffs between config snapshots | 6 ✅ |
 | `config_backups` | Labeled config snapshots (auto/manual/pre-change) for download | 6 ✅ |
 | `rule_analysis_results` | Rule hygiene findings (unused, shadow, risky, etc.) | 5 ✅ |
+| `finding_acknowledgements` | Operator status per finding (new/acknowledged/dismissed/actioned), keyed on `rule_id_vendor` not `firewall_rules.id` | Dashboard Phase 2 ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
 | `audit_checks` / `audit_findings` | Compliance check library + results | 7 (not yet created) |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
@@ -772,6 +773,41 @@ adapter gained a write-back/push-to-device capability, and none is planned — s
   Tailwind-only version (no dependency, div height as a `%`) was replaced after the user
   asked for "a proper chart plugin"; keep using `recharts` for future chart needs in this
   app rather than reintroducing a second hand-built version.
+
+#### Cleanup / Optimization / Reorder (Phase 2 — `finding_acknowledgements`)
+
+Recommend-only acknowledge-tracking for Phase 5 findings — three more tabs on
+`/devices/[id]/analysis` (`?tab=cleanup|optimization|reorder`), each a filtered view over
+specific finding types with a per-row status control (`new`/`acknowledged`/`dismissed`/`actioned`).
+No write-back to devices anywhere — same confirmed scope as the rest of this dashboard.
+
+- **`finding_acknowledgements` is keyed on `(device_id, rule_id_vendor, finding_type)`, NOT
+  `firewall_rules.id` or `rule_analysis_results.id`.** Both of those are fully DELETE+reinserted
+  on every pull (`rule_analysis_results` on every analysis run, `firewall_rules` on every
+  *collect* — collectAndStore runs on a 24h schedule), so either UUID would be a brand-new
+  random value after the very next scheduled collect, silently losing every acknowledgement.
+  `rule_id_vendor` (the vendor-native rule identifier — e.g. the PAN-OS rule name, the Fortinet
+  policy ID) stays stable across recollects as long as the rule itself isn't renamed/recreated
+  on the device. `rule_id_vendor` is nullable on `firewall_rules` for a handful of
+  already-degraded/unparseable rule shapes across adapters — acknowledgement is simply
+  unavailable for those rows (the UI omits the control) rather than accepting an ambiguous
+  NULL-keyed row, since Postgres `UNIQUE` treats multiple `NULL`s as distinct from each other.
+- `app/api/devices/[id]/acknowledgements/route.js` is **POST-only** (upsert one row) — there is
+  no GET. Every tab is a server component that `LEFT JOIN`s `finding_acknowledgements` directly
+  in its own query, the same "server components query the DB directly, API routes exist for
+  client-triggered writes" convention already used throughout this app.
+- `components/analysis/AcknowledgeControl.js` (`'use client'`): a `<select>` that auto-saves on
+  change (optimistic update, reverts on error) rather than needing a separate Save button per
+  table row — POSTs, then `router.refresh()`.
+- `components/analysis/{CleanupTab,OptimizationTab,ReorderTab}.js`: async server components,
+  each doing their own `pool.query`, each rendering the shared `Table`/`SeverityBadge`/
+  `AcknowledgeControl` components. Finding-type split: Cleanup = `unused`/`redundant`/
+  `overly_permissive`; Optimization = `risky_service`/`any_any`/`overly_permissive`; Reorder =
+  `reorder_candidate` only. `ReorderTab.js` additionally resolves each finding's
+  `affected_rule_ids` (the earlier allow rule that shadows the deny) against a same-request
+  snapshot of the device's full ruleset — that resolution is safe precisely because it's never
+  persisted, only rendered once per request; the ids themselves are NOT stable across pulls,
+  which is exactly why `finding_acknowledgements` doesn't key on them.
 
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 

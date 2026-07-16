@@ -7,6 +7,9 @@ import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
 import FindingTypeBadge from '../../../../../components/analysis/FindingTypeBadge';
 import RunAnalysisButton from '../../../../../components/analysis/RunAnalysisButton';
 import FindingsBarChart from '../../../../../components/analysis/FindingsBarChart';
+import CleanupTab from '../../../../../components/analysis/CleanupTab';
+import OptimizationTab from '../../../../../components/analysis/OptimizationTab';
+import ReorderTab from '../../../../../components/analysis/ReorderTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
@@ -165,7 +168,9 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['summary', 'rules', 'findings'].includes(searchParams?.tab)
+  const tab = ['summary', 'rules', 'findings', 'cleanup', 'optimization', 'reorder'].includes(
+    searchParams?.tab
+  )
     ? searchParams.tab
     : 'summary';
   const severityFilter = searchParams?.severity || '';
@@ -219,6 +224,9 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink('summary', 'Summary')}
         {tabLink('rules', `Security Rules ${ruleStats.total_rules}`)}
         {tabLink('findings', `Findings ${severitySummary.total}`)}
+        {tabLink('cleanup', 'Cleanup')}
+        {tabLink('optimization', 'Optimization')}
+        {tabLink('reorder', 'Reorder')}
       </div>
 
       {tab === 'summary' && (
@@ -272,6 +280,12 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
           </Link>
         </div>
       )}
+
+      {tab === 'cleanup' && <CleanupTab deviceId={device.id} />}
+
+      {tab === 'optimization' && <OptimizationTab deviceId={device.id} />}
+
+      {tab === 'reorder' && <ReorderTab deviceId={device.id} />}
 
       {tab === 'findings' && (
         <div className="space-y-3">

@@ -51,4 +51,5 @@ GRANT SELECT ON TABLE feed_sync_log TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE config_diffs TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE config_backups TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE rule_analysis_results TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE finding_acknowledgements TO claude_readonly, nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users

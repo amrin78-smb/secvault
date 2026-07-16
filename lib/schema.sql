@@ -166,6 +166,37 @@ CREATE INDEX IF NOT EXISTS idx_rar_device_id ON rule_analysis_results(device_id)
 CREATE INDEX IF NOT EXISTS idx_rar_finding_type ON rule_analysis_results(finding_type);
 CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
 
+-- Operator acknowledge/dismiss tracking for Phase 5 rule-hygiene findings
+-- (Rule Analysis Dashboard Phase 2 -- Cleanup/Optimization/Reorder tabs).
+--
+-- Deliberately NOT keyed on rule_analysis_results.id or firewall_rules.id:
+-- BOTH are fully DELETE+reinserted on every pull (rule_analysis_results on
+-- every analysis run, firewall_rules on every collect -- see
+-- lib/adapters/index.js's collectAndStore, which runs on a 24h schedule), so
+-- either UUID would be a brand-new random value after the very next
+-- scheduled collect. An acknowledgement keyed that way would silently vanish
+-- on the next pull, defeating the entire point of a table meant to survive
+-- across pulls. Keyed instead on rule_id_vendor, the vendor-native rule
+-- identifier (firewall_rules.rule_id_vendor -- e.g. the PAN-OS rule name, the
+-- Fortinet policy ID) which stays stable across recollects as long as the
+-- rule itself isn't renamed/recreated on the device. rule_id_vendor is
+-- nullable on firewall_rules for a handful of already-degraded/unparseable
+-- rule shapes across adapters -- acknowledgement is simply unavailable for
+-- those rows (the UI omits the control rather than accepting an ambiguous
+-- NULL-keyed row, since Postgres UNIQUE treats multiple NULLs as distinct).
+CREATE TABLE IF NOT EXISTS finding_acknowledgements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  rule_id_vendor TEXT NOT NULL,
+  finding_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'acknowledged' | 'dismissed' | 'actioned'
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (device_id, rule_id_vendor, finding_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fa_device_id ON finding_acknowledgements(device_id);
+
 -- ─────────────────────────────────────────
 -- CVE / ADVISORY
 -- ─────────────────────────────────────────
