@@ -6,6 +6,7 @@ import EmptyState from '../../../../../components/ui/EmptyState';
 import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
 import FindingTypeBadge from '../../../../../components/analysis/FindingTypeBadge';
 import RunAnalysisButton from '../../../../../components/analysis/RunAnalysisButton';
+import FindingsBarChart from '../../../../../components/analysis/FindingsBarChart';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
@@ -140,63 +141,6 @@ function ruleLabel(row) {
   return `${seq} ${row.rule_name || '(unnamed rule)'}`;
 }
 
-// Hand-built bar chart -- no charting library in this repo (see CLAUDE.md).
-// Bar height is a CSS % of a fixed-height container, driven by count / max
-// count; colored via the same Tailwind utility classes SeverityBadge already
-// maps finding severity to, so a critical-severity type's bar is red, etc.
-const FINDING_TYPE_SEVERITY = {
-  any_any: 'critical',
-  risky_service: 'high',
-  shadow: 'high',
-  reorder_candidate: 'high',
-  redundant: 'medium',
-  overly_permissive: 'medium',
-  unused: 'medium',
-  expiring_soon: 'medium',
-  log_disabled: 'info',
-};
-
-const BAR_COLOR_CLASS = {
-  critical: 'bg-danger',
-  high: 'bg-warning',
-  medium: 'bg-info',
-  info: 'bg-text-muted',
-};
-
-function FindingTypeBarChart({ counts }) {
-  const maxCount = Math.max(1, ...FINDING_TYPES.map((t) => counts[t] || 0));
-  return (
-    <div className="rounded-lg border border-border bg-bg-surface p-4">
-      <div className="mb-3 text-xs uppercase tracking-wide text-text-muted">Findings by Type</div>
-      <div className="flex h-40 items-end gap-3">
-        {FINDING_TYPES.map((type) => {
-          const count = counts[type] || 0;
-          const heightPct = count === 0 ? 0 : Math.max(4, Math.round((count / maxCount) * 100));
-          const colorClass = BAR_COLOR_CLASS[FINDING_TYPE_SEVERITY[type]] || 'bg-text-muted';
-          return (
-            <div key={type} className="flex flex-1 flex-col items-center gap-1">
-              <div className="flex h-32 w-full items-end justify-center">
-                <div
-                  className={`w-full max-w-[28px] rounded-t ${colorClass}`}
-                  style={{ height: `${heightPct}%` }}
-                  title={`${count}`}
-                />
-              </div>
-              <div className="text-xs font-medium text-text-primary">{count}</div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 flex gap-3 text-[10px] text-text-muted">
-        {FINDING_TYPES.map((type) => (
-          <div key={type} className="flex-1 truncate text-center" title={type}>
-            <FindingTypeBadge type={type} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function StatCard({ label, value, colorClass = 'text-text-primary' }) {
   return (
@@ -309,7 +253,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             />
           </div>
 
-          <FindingTypeBarChart counts={findingTypeCounts} />
+          <FindingsBarChart counts={findingTypeCounts} />
         </>
       )}
 

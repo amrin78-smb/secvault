@@ -751,9 +751,17 @@ adapter gained a write-back/push-to-device capability, and none is planned — s
   server-rendered query-param pattern as `/devices/[id]/page.js`) instead of one flat page —
   `summary` carries the risk badge, the stat grid (existing severity counts plus
   Allowed/Denied/Inactive/Any-Any/Logging-Disabled pulled from `firewall_rules` directly),
-  and a hand-built Tailwind-only bar chart (no charting library in this repo — see the
-  `FindingTypeBarChart` component in that page for the convention: div height as a `%`,
-  colored via the same severity→Tailwind-class mapping `SeverityBadge` already uses).
+  and a bar chart of the 9 finding types via **`recharts`** (added as a dependency —
+  `components/analysis/FindingsBarChart.js`, `'use client'`, since Recharts needs a DOM).
+  Bar fill colors are read from `app/globals.css`'s CSS custom properties at render time
+  (`getComputedStyle(document.documentElement)`, with a hardcoded hex fallback for the
+  server-render pass, where `window`/`document` don't exist) rather than hardcoding hex a
+  second time — keeps the chart in sync with `SeverityBadge`'s severity→color mapping
+  automatically if the palette ever changes. `recharts` is scoped to this one route via
+  Next.js's automatic code-splitting (not in the shared bundle) — an earlier hand-built
+  Tailwind-only version (no dependency, div height as a `%`) was replaced after the user
+  asked for "a proper chart plugin"; keep using `recharts` for future chart needs in this
+  app rather than reintroducing a second hand-built version.
 
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 
