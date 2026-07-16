@@ -427,6 +427,31 @@ field mappings, then **record the verified field names here** so the next person
 Adapters are written to fail loudly on an unexpected shape rather than return wrong data — a loud
 failure on first connect is the design working, not a regression.
 
+#### First live result — Palo Alto SSH (2026-07-16, PAN-OS 11.1.13-h5, PA-440, standalone)
+
+Confirmed broken, then fixed: `show config running` in operational mode (`>`) **ignores**
+`set cli config-output-format set` and always returns the brace tree
+(`config { mgt-config { users { ... } } }`) — never flat `set` lines, regardless of the
+preference command. `RULE_LINE_REGEX` requires a line starting with `set `, so it matched
+zero lines (confirmed via the `skipped` counter also reading 0 — the regex was never even
+attempted against a candidate line, not "attempted and failed"). Same root cause silently
+broke `getConfig()`'s `parseConfigFromSet()`, since both share one `_getConfigText()` call.
+
+Fix: enter configuration mode first — `configure` → `set cli config-output-format set` →
+bare `show` (dumps the whole tree from root, fully-qualified paths, e.g. `set devices
+localhost.localdomain vsys vsys1 rulebase security rules "Allow Web" from trust`). The
+preference only takes effect on `show` run *inside* configuration mode. See
+`lib/adapters/paloalto/ssh.js`'s `CONFIGURE_MODE` comment. `configure` needs no elevated
+role — a built-in read-only "superreader" account can enter it and run `show`, just not
+commit/edit. **The diagnosis (brace format returned) is confirmed live; the fix (the
+3-step sequence) is not yet independently reconfirmed against this device** — check the
+next `[PaloAlto SSH Debug]` preview actually starts with `set ` before trusting rule counts.
+
+Also confirmed live in the same session: `show system info` field names match this file's
+existing assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no changes
+needed there. PAN-OS API/username-password method against the same device already worked
+before this fix, confirming XML-API rule collection is sound independent of this bug.
+
 ### Known Limitations (by design — documented, not bugs)
 
 - **Fortinet over SSH has no hit counts.** The CLI has no reliable per-rule hit-count equivalent, so
