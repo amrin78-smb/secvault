@@ -55,22 +55,20 @@ export default async function TrackingTab({ deviceId }) {
         <col style={{ width: '45%' }} />
       </colgroup>
       <thead>
-        <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-          <th className="px-2 py-2">When</th>
-          <th className="px-2 py-2">Actor</th>
-          <th className="px-2 py-2">Action</th>
-          <th className="px-2 py-2">Detail</th>
+        <tr>
+          <th>When</th>
+          <th>Actor</th>
+          <th>Action</th>
+          <th>Detail</th>
         </tr>
       </thead>
       <tbody>
         {entries.map((row, idx) => (
-          <tr key={`${row.occurred_at}-${idx}`} className="border-b border-border">
-            <td className="px-2 py-2 text-text-secondary">{formatDateTime(row.occurred_at)}</td>
-            <td className="truncate px-2 py-2" title={row.actor || ''}>
-              {row.actor || '—'}
-            </td>
-            <td className="px-2 py-2">{actionLabel(row.action)}</td>
-            <td className="px-2 py-2 text-text-secondary" title={row.detail || ''}>
+          <tr key={`${row.occurred_at}-${idx}`}>
+            <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(row.occurred_at)}</td>
+            <td title={row.actor || ''}>{row.actor || '—'}</td>
+            <td>{actionLabel(row.action)}</td>
+            <td style={{ color: 'var(--text-secondary)' }} title={row.detail || ''}>
               {row.detail || '—'}
             </td>
           </tr>

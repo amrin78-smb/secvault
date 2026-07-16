@@ -33,12 +33,12 @@ export default function RunAnalysisButton({ deviceId }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <Button type="button" variant="primary" onClick={handleRun} disabled={running}>
         {running && <LoadingSpinner size={14} />}
         {running ? 'Running…' : 'Run Analysis'}
       </Button>
-      {error && <span className="text-sm text-danger">{error}</span>}
+      {error && <span style={{ fontSize: 'var(--text-sm)', color: 'var(--red)' }}>{error}</span>}
     </div>
   );
 }

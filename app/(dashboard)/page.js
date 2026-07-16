@@ -3,6 +3,7 @@ import { pool } from '../../lib/db';
 import DeviceCard from '../../components/devices/DeviceCard';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
+import StatCard from '../../components/ui/StatCard';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
 
 export const dynamic = 'force-dynamic';
@@ -85,39 +86,27 @@ export default async function DashboardPage() {
   const lastSyncTime = lastSync ? formatDateTime(lastSync.finished_at || lastSync.started_at) : null;
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <AutoRefresh intervalMs={60000} />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Devices</div>
-          <div className="mt-1 text-2xl font-semibold text-text-primary">{deviceCount}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Patch Now</div>
-          <div className="mt-1 text-2xl font-semibold text-danger">{summary.patch_now_count}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Scheduled</div>
-          <div className="mt-1 text-2xl font-semibold text-warning">{summary.scheduled_count}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Monitor</div>
-          <div className="mt-1 text-2xl font-semibold text-text-muted">{summary.monitor_count}</div>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+        <StatCard label="Devices" value={deviceCount} />
+        <StatCard label="Patch Now" value={summary.patch_now_count} color="var(--red)" />
+        <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" />
+        <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" />
       </div>
 
       <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-text-primary">Devices</h1>
-          <Link href="/devices" className="text-sm text-accent hover:underline">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <h1 style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>Devices</h1>
+          <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
             View all →
           </Link>
         </div>
         {devices.length === 0 ? (
           <EmptyState message="No devices yet. Add one from the Devices page." />
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
             {devices.map((device) => (
               <DeviceCard key={device.id} device={device} />
             ))}
@@ -125,7 +114,18 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-bg-surface px-4 py-3 text-sm text-text-secondary">
+      <div
+        className="card"
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+          padding: '12px 16px',
+          fontSize: 'var(--text-base)',
+          color: 'var(--text-secondary)',
+        }}
+      >
         {lastSync ? (
           <>
             <span>Last feed sync:</span>

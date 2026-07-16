@@ -63,30 +63,28 @@ export default async function CleanupTab({ deviceId }) {
         <col style={{ width: '14%' }} />
       </colgroup>
       <thead>
-        <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-          <th className="px-2 py-2">Severity</th>
-          <th className="px-2 py-2">Type</th>
-          <th className="px-2 py-2">Rule</th>
-          <th className="px-2 py-2">Detail</th>
-          <th className="px-2 py-2">Status</th>
+        <tr>
+          <th>Severity</th>
+          <th>Type</th>
+          <th>Rule</th>
+          <th>Detail</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {findings.map((row) => (
-          <tr key={row.finding_id} className="border-b border-border">
-            <td className="px-2 py-2">
+          <tr key={row.finding_id}>
+            <td>
               <SeverityBadge severity={row.severity} />
             </td>
-            <td className="px-2 py-2">
+            <td>
               <FindingTypeBadge type={row.finding_type} />
             </td>
-            <td className="truncate px-2 py-2" title={ruleLabel(row)}>
-              {ruleLabel(row)}
-            </td>
-            <td className="px-2 py-2 text-text-secondary" title={row.detail || ''}>
+            <td title={ruleLabel(row)}>{ruleLabel(row)}</td>
+            <td style={{ color: 'var(--text-secondary)' }} title={row.detail || ''}>
               {row.detail || '—'}
             </td>
-            <td className="px-2 py-2">
+            <td>
               {row.rule_id_vendor ? (
                 <AcknowledgeControl
                   deviceId={deviceId}
@@ -95,7 +93,7 @@ export default async function CleanupTab({ deviceId }) {
                   currentStatus={row.ack_status}
                 />
               ) : (
-                <span className="text-text-muted" title="No stable rule identifier — cannot acknowledge">
+                <span style={{ color: 'var(--text-muted)' }} title="No stable rule identifier — cannot acknowledge">
                   —
                 </span>
               )}

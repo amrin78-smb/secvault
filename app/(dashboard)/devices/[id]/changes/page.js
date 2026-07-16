@@ -3,6 +3,7 @@ import { pool } from '../../../../../lib/db';
 import Badge from '../../../../../components/ui/Badge';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import Table from '../../../../../components/ui/Table';
+import PageHeader from '../../../../../components/ui/PageHeader';
 import DiffViewer from '../../../../../components/config/DiffViewer';
 import AcknowledgeButton from '../../../../../components/config/AcknowledgeButton';
 import BackupActions from '../../../../../components/config/BackupActions';
@@ -13,6 +14,14 @@ const BACKUP_LABEL_COLORS = {
   manual: 'info',
   auto: 'muted',
   'pre-change': 'warning',
+};
+
+const SECTION_HEADING_STYLE = {
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-secondary)',
 };
 
 function formatDateTime(value) {
@@ -64,10 +73,10 @@ export default async function DeviceChangesPage({ params }) {
   if (!device) {
     return (
       <div>
-        <Link href="/devices" className="text-sm text-accent hover:underline">
+        <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
           ← Back to devices
         </Link>
-        <p className="mt-4 text-text-secondary">Device not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
     );
   }
@@ -78,37 +87,30 @@ export default async function DeviceChangesPage({ params }) {
   ]);
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
-        <Link href={`/devices/${device.id}`} className="text-sm text-accent hover:underline">
+        <Link href={`/devices/${device.id}`} style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
           ← Back to {device.name}
         </Link>
       </div>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h1 className="text-xl font-semibold text-text-primary">{device.name}</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Configuration change tracking and config backups.
-        </p>
-      </div>
+      <PageHeader title={device.name} subtitle="Configuration change tracking and config backups." />
 
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Configuration Changes
-        </h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={SECTION_HEADING_STYLE}>Configuration Changes</h2>
 
         {diffs.length === 0 ? (
           <EmptyState message="No configuration changes detected yet" />
         ) : (
-          <ul className="space-y-3">
+          <ul style={{ display: 'flex', flexDirection: 'column', gap: 12, listStyle: 'none' }}>
             {diffs.map((d) => (
-              <li key={d.id} className="rounded border border-border bg-bg-surface p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase tracking-wide text-text-muted">
+              <li key={d.id} className="card" style={{ padding: 16 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
                       {formatDateTime(d.detected_at)}
                     </div>
-                    <p className="mt-1 text-sm text-text-primary">
+                    <p style={{ marginTop: 4, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>
                       {d.change_summary || 'Configuration change detected'}
                     </p>
                   </div>
@@ -122,7 +124,7 @@ export default async function DeviceChangesPage({ params }) {
                     )}
                   </div>
                 </div>
-                <div className="mt-3 border-t border-border pt-3">
+                <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
                   <DiffViewer deviceId={device.id} diffId={d.id} />
                 </div>
               </li>
@@ -131,10 +133,8 @@ export default async function DeviceChangesPage({ params }) {
         )}
       </div>
 
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Config Backups
-        </h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={SECTION_HEADING_STYLE}>Config Backups</h2>
 
         <BackupActions deviceId={device.id} />
 
@@ -149,25 +149,25 @@ export default async function DeviceChangesPage({ params }) {
               <col style={{ width: '20%' }} />
             </colgroup>
             <thead>
-              <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-                <th className="px-2 py-2">Label</th>
-                <th className="px-2 py-2">Backed Up At</th>
-                <th className="px-2 py-2">Size</th>
-                <th className="px-2 py-2">Download</th>
+              <tr>
+                <th>Label</th>
+                <th>Backed Up At</th>
+                <th>Size</th>
+                <th>Download</th>
               </tr>
             </thead>
             <tbody>
               {backups.map((b) => (
-                <tr key={b.id} className="border-b border-border">
-                  <td className="px-2 py-2">
+                <tr key={b.id}>
+                  <td>
                     <Badge color={BACKUP_LABEL_COLORS[b.label] || 'muted'}>{b.label}</Badge>
                   </td>
-                  <td className="px-2 py-2 text-text-primary">{formatDateTime(b.backed_up_at)}</td>
-                  <td className="px-2 py-2 text-text-secondary">{formatBytes(b.size_bytes)}</td>
-                  <td className="px-2 py-2">
+                  <td>{formatDateTime(b.backed_up_at)}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{formatBytes(b.size_bytes)}</td>
+                  <td>
                     <a
                       href={`/api/devices/${device.id}/backups/${b.id}`}
-                      className="text-accent hover:underline"
+                      style={{ color: 'var(--primary)' }}
                     >
                       Download
                     </a>

@@ -52,10 +52,10 @@ function joinArray(value) {
   return value.join(', ');
 }
 
-function actionBorderClass(action) {
-  if (action === 'allow') return 'border-l-4 border-l-success';
-  if (action === 'deny' || action === 'drop' || action === 'reject') return 'border-l-4 border-l-danger';
-  return 'border-l-4 border-l-border';
+function actionBorderColor(action) {
+  if (action === 'allow') return 'var(--green)';
+  if (action === 'deny' || action === 'drop' || action === 'reject') return 'var(--red)';
+  return 'var(--border)';
 }
 
 async function getDevice(dbPool, id) {
@@ -106,12 +106,17 @@ async function getTopRules(dbPool, id) {
 // previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
 // on closure.
 function tabLink(deviceId, activeTab, key, label) {
+  const active = activeTab === key;
   return (
     <Link
       href={`/devices/${deviceId}?tab=${key}`}
-      className={`px-3 py-2 text-sm ${
-        activeTab === key ? 'border-b-2 border-accent text-text-primary' : 'text-text-secondary hover:text-text-primary'
-      }`}
+      style={{
+        padding: '8px 12px',
+        fontSize: 'var(--text-base)',
+        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+        borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
+        textDecoration: 'none',
+      }}
     >
       {label}
     </Link>
@@ -124,10 +129,10 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   if (!device) {
     return (
       <div>
-        <Link href="/devices" className="text-sm text-accent hover:underline">
+        <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
           ← Back to devices
         </Link>
-        <p className="mt-4 text-text-secondary">Device not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
     );
   }
@@ -145,56 +150,69 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     device.last_connectivity_ok === true ? 'green' : device.last_connectivity_ok === false ? 'red' : 'grey';
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
-        <Link href="/devices" className="text-sm text-accent hover:underline">
+        <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
           ← Back to devices
         </Link>
       </div>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+      <div className="card" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <StatusDot status={status} />
-            <h1 className="text-xl font-semibold text-text-primary">{device.name}</h1>
+            <div className="page-title">{device.name}</div>
             <Badge color="info">{device.vendor}</Badge>
           </div>
-          <div className="flex items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <DeviceActions deviceId={device.id} />
-            <Link
-              href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`}
-              className="inline-flex items-center justify-center rounded bg-danger px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
-            >
+            <Link href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`} className="btn btn-danger">
               Delete
             </Link>
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-4 text-sm sm:grid-cols-4">
+        <div
+          style={{
+            marginTop: 12,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: 16,
+            fontSize: 'var(--text-base)',
+          }}
+        >
           <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
               {device.vendor === 'forcepoint' ? 'SMC Host' : 'Management IP'}
             </div>
-            <div className="text-text-primary">
+            <div style={{ color: 'var(--text-primary)' }}>
               {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
             </div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Version</div>
-            <div className="text-text-primary">{version?.version_string || '—'}</div>
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Version
+            </div>
+            <div style={{ color: 'var(--text-primary)' }}>{version?.version_string || '—'}</div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Model</div>
-            <div className="text-text-primary">{version?.model || '—'}</div>
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Model
+            </div>
+            <div style={{ color: 'var(--text-primary)' }}>{version?.model || '—'}</div>
           </div>
           <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Last Collected</div>
-            <div className="text-text-primary">{formatDateTime(device.last_collected_at)}</div>
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Last Collected
+            </div>
+            <div style={{ color: 'var(--text-primary)' }}>{formatDateTime(device.last_collected_at)}</div>
           </div>
         </div>
 
-        <div className="mt-4 border-t border-border pt-4">
-          <h2 className="mb-2 text-sm font-medium text-text-primary">Rotate Credentials</h2>
+        <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
+            Rotate Credentials
+          </h2>
           {/* mgmt_method comes from the STORED row — the credential shape must follow
               the access method this device was actually saved with, not the vendor's
               default (an ssh fortinet must not be handed an API-token input). */}
@@ -206,7 +224,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-border">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {tabLink(device.id, tab, 'cve', 'CVE Posture')}
         {tabLink(device.id, tab, 'rules', 'Rules')}
         {tabLink(device.id, tab, 'config', 'Config Changes')}
@@ -215,7 +233,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
       {tab === 'cve' && <CVETable rows={cveRows} showDeviceColumn={false} />}
 
       {tab === 'rules' && (
-        <div className="space-y-2">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Table>
             <colgroup>
               <col style={{ width: '6%' }} />
@@ -229,54 +247,52 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               <col style={{ width: '9%' }} />
             </colgroup>
             <thead>
-              <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-                <th className="px-2 py-2">#</th>
-                <th className="px-2 py-2">Name</th>
-                <th className="px-2 py-2">Enabled</th>
-                <th className="px-2 py-2">Action</th>
-                <th className="px-2 py-2">Src Zones</th>
-                <th className="px-2 py-2">Dst Zones</th>
-                <th className="px-2 py-2">Services</th>
-                <th className="px-2 py-2">Log</th>
-                <th className="px-2 py-2">Hits</th>
+              <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Enabled</th>
+                <th>Action</th>
+                <th>Src Zones</th>
+                <th>Dst Zones</th>
+                <th>Services</th>
+                <th>Log</th>
+                <th>Hits</th>
               </tr>
             </thead>
             <tbody>
               {rules.map((r) => (
-                <tr key={r.id} className={`border-b border-border ${actionBorderClass(r.action)}`}>
-                  <td className="px-2 py-2 text-text-secondary">{r.sequence_number ?? '—'}</td>
-                  <td className="truncate px-2 py-2 text-text-primary" title={r.rule_name || ''}>
-                    {r.rule_name || '—'}
-                  </td>
-                  <td className="px-2 py-2 text-text-secondary">{r.enabled ? 'Yes' : 'No'}</td>
-                  <td className="px-2 py-2 text-text-secondary">{r.action || '—'}</td>
-                  <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.src_zones)}>
-                    {joinArray(r.src_zones)}
-                  </td>
-                  <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.dst_zones)}>
-                    {joinArray(r.dst_zones)}
-                  </td>
-                  <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.services)}>
-                    {joinArray(r.services)}
-                  </td>
-                  <td className="px-2 py-2 text-text-secondary">{r.log_enabled ? 'Yes' : 'No'}</td>
-                  <td className="px-2 py-2 text-text-secondary">{r.hit_count ?? 0}</td>
+                <tr key={r.id} style={{ borderLeft: `4px solid ${actionBorderColor(r.action)}` }}>
+                  <td>{r.sequence_number ?? '—'}</td>
+                  <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
+                  <td>{r.enabled ? 'Yes' : 'No'}</td>
+                  <td>{r.action || '—'}</td>
+                  <td title={joinArray(r.src_zones)}>{joinArray(r.src_zones)}</td>
+                  <td title={joinArray(r.dst_zones)}>{joinArray(r.dst_zones)}</td>
+                  <td title={joinArray(r.services)}>{joinArray(r.services)}</td>
+                  <td>{r.log_enabled ? 'Yes' : 'No'}</td>
+                  <td>{r.hit_count ?? 0}</td>
                 </tr>
               ))}
               {rules.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-2 py-6 text-center text-text-muted">
+                  <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                     No rules collected yet.
                   </td>
                 </tr>
               )}
             </tbody>
           </Table>
-          <div className="flex items-center gap-4">
-            <Link href={`/devices/${device.id}/rules`} className="text-sm text-accent hover:underline">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <Link
+              href={`/devices/${device.id}/rules`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
               View all rules →
             </Link>
-            <Link href={`/devices/${device.id}/analysis`} className="text-sm text-accent hover:underline">
+            <Link
+              href={`/devices/${device.id}/analysis`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
               Rule analysis →
             </Link>
           </div>
@@ -284,30 +300,42 @@ export default async function DeviceDetailPage({ params, searchParams }) {
       )}
 
       {tab === 'config' && (
-        <div className="rounded border border-border bg-bg-surface p-4">
-          <p className="text-sm text-text-secondary">
+        <div className="card" style={{ padding: 20 }}>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
             Configuration change tracking, diff history, and backups for this device.
           </p>
-          <Link href={`/devices/${device.id}/changes`} className="mt-2 inline-block text-sm text-accent hover:underline">
+          <Link
+            href={`/devices/${device.id}/changes`}
+            style={{
+              marginTop: 8,
+              display: 'inline-block',
+              fontSize: 'var(--text-base)',
+              color: 'var(--primary)',
+              textDecoration: 'underline',
+            }}
+          >
             View config changes &amp; backups →
           </Link>
         </div>
       )}
 
       <Modal open={confirmDelete} title="Delete Device">
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            Delete <span className="font-medium text-text-primary">{device.name}</span>? This removes all associated
-            versions, rules, credentials, and CVE assessments.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+            Delete <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{device.name}</span>? This removes
+            all associated versions, rules, credentials, and CVE assessments.
           </p>
-          <div className="flex items-center gap-3">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <form action={deleteDeviceAction}>
               <input type="hidden" name="deviceId" value={device.id} />
               <Button type="submit" variant="danger">
                 Delete
               </Button>
             </form>
-            <Link href={`/devices/${device.id}?tab=${tab}`} className="text-sm text-text-secondary hover:underline">
+            <Link
+              href={`/devices/${device.id}?tab=${tab}`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
+            >
               Cancel
             </Link>
           </div>

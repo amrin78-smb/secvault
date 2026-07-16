@@ -1,5 +1,9 @@
 import Link from 'next/link';
 import { pool } from '../../../../lib/db';
+import Badge from '../../../../components/ui/Badge';
+import Card, { CardBody } from '../../../../components/ui/Card';
+import Table from '../../../../components/ui/Table';
+import PageHeader from '../../../../components/ui/PageHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,14 +14,14 @@ function formatDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
-function cvssTextClass(score) {
-  if (score === null || score === undefined) return 'text-text-muted';
+function cvssStyle(score) {
+  if (score === null || score === undefined) return { color: 'var(--text-muted)' };
   const n = Number(score);
-  if (Number.isNaN(n)) return 'text-text-muted';
-  if (n >= 9) return 'text-danger font-semibold';
-  if (n >= 7) return 'text-warning font-semibold';
-  if (n >= 4) return 'text-text-primary';
-  return 'text-text-muted';
+  if (Number.isNaN(n)) return { color: 'var(--text-muted)' };
+  if (n >= 9) return { color: 'var(--red)', fontWeight: 600 };
+  if (n >= 7) return { color: 'var(--yellow)', fontWeight: 600 };
+  if (n >= 4) return { color: 'var(--text-primary)' };
+  return { color: 'var(--text-muted)' };
 }
 
 async function getAdvisory(dbPool, cveId) {
@@ -52,10 +56,10 @@ export default async function AdvisoryDetailPage({ params }) {
   if (!advisory) {
     return (
       <div>
-        <Link href="/advisories" className="text-sm text-accent hover:underline">
+        <Link href="/advisories" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
           ← Back to advisories
         </Link>
-        <p className="mt-4 text-text-secondary">Advisory {cveId} not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Advisory {cveId} not found.</p>
       </div>
     );
   }
@@ -72,143 +76,166 @@ export default async function AdvisoryDetailPage({ params }) {
   const fixedIn = Array.isArray(advisory.fixed_in_versions) ? advisory.fixed_in_versions : [];
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
-        <Link href="/advisories" className="text-sm text-accent hover:underline">
+        <Link href="/advisories" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
           ← Back to advisories
         </Link>
       </div>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold text-text-primary">{advisory.cve_id}</h1>
-          {advisory.kev_listed ? (
-            <span className="rounded bg-danger px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-white">
-              KEV
-            </span>
+      <PageHeader
+        title={advisory.cve_id}
+        subtitle={advisory.title}
+        actions={
+          advisory.kev_listed ? (
+            <Badge color="danger">KEV</Badge>
           ) : (
-            <span className="text-sm text-text-muted">Not KEV-listed</span>
-          )}
+            <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>Not KEV-listed</span>
+          )
+        }
+      />
+
+      <Card>
+        <CardBody>
           {advisory.kev_listed && advisory.kev_date && (
-            <span className="text-sm text-text-secondary">Added to KEV {formatDate(advisory.kev_date)}</span>
+            <p style={{ marginBottom: 12, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+              Added to KEV {formatDate(advisory.kev_date)}
+            </p>
           )}
-        </div>
-        <p className="mt-1 text-text-secondary">{advisory.title}</p>
+          <div className="form-grid-3">
+            <div>
+              <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                Vendor
+              </div>
+              <div style={{ color: 'var(--text-primary)' }}>{advisory.vendor}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                CVSS Score
+              </div>
+              <div style={cvssStyle(advisory.cvss_score)}>{advisory.cvss_score ?? '—'}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                CVSS Vector
+              </div>
+              <div style={{ wordBreak: 'break-all', color: 'var(--text-secondary)' }}>{advisory.cvss_vector || '—'}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                Published
+              </div>
+              <div style={{ color: 'var(--text-primary)' }}>{formatDate(advisory.published_at)}</div>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Vendor</div>
-            <div className="text-text-primary">{advisory.vendor}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">CVSS Score</div>
-            <div className={cvssTextClass(advisory.cvss_score)}>{advisory.cvss_score ?? '—'}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">CVSS Vector</div>
-            <div className="break-all text-text-secondary">{advisory.cvss_vector || '—'}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Published</div>
-            <div className="text-text-primary">{formatDate(advisory.published_at)}</div>
-          </div>
-        </div>
-      </div>
+      <Card>
+        <CardBody>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            Description
+          </h2>
+          <p style={{ color: 'var(--text-primary)' }}>{advisory.description || 'No description available.'}</p>
+        </CardBody>
+      </Card>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">Description</h2>
-        <p className="text-text-primary">{advisory.description || 'No description available.'}</p>
-      </div>
-
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Affected Version Ranges
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full table-fixed border-collapse text-sm" style={{ tableLayout: 'fixed' }}>
+      <Card>
+        <CardBody>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            Affected Version Ranges
+          </h2>
+          <Table>
             <colgroup>
               <col style={{ width: '30%' }} />
               <col style={{ width: '30%' }} />
               <col style={{ width: '40%' }} />
             </colgroup>
             <thead>
-              <tr className="border-b border-border text-left text-text-secondary">
-                <th className="py-1 pr-2">Min Version</th>
-                <th className="py-1 pr-2">Max Version</th>
-                <th className="py-1 pr-2">Fix Version Excluded</th>
+              <tr>
+                <th>Min Version</th>
+                <th>Max Version</th>
+                <th>Fix Version Excluded</th>
               </tr>
             </thead>
             <tbody>
               {ranges.map((r, i) => (
-                <tr key={i} className="border-b border-border">
-                  <td className="py-1 pr-2 text-text-primary">{r.min ?? '—'}</td>
-                  <td className="py-1 pr-2 text-text-primary">{r.max ?? '—'}</td>
-                  <td className="py-1 pr-2 text-text-secondary">{r.exclude_fixed ? 'Yes' : 'No'}</td>
+                <tr key={i}>
+                  <td style={{ color: 'var(--text-primary)' }}>{r.min ?? '—'}</td>
+                  <td style={{ color: 'var(--text-primary)' }}>{r.max ?? '—'}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{r.exclude_fixed ? 'Yes' : 'No'}</td>
                 </tr>
               ))}
               {ranges.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="py-2 text-text-muted">
+                  <td colSpan={3} style={{ color: 'var(--text-muted)' }}>
                     No version range data.
                   </td>
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
-      </div>
+          </Table>
+        </CardBody>
+      </Card>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">Fixed In</h2>
-        {fixedIn.length === 0 ? (
-          <p className="text-sm text-text-muted">No fixed-in version data.</p>
-        ) : (
-          <ul className="flex flex-wrap gap-2">
-            {fixedIn.map((v) => (
-              <li
-                key={v}
-                className="rounded bg-bg-elevated px-2 py-1 text-sm text-success"
-              >
-                {v}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <Card>
+        <CardBody>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            Fixed In
+          </h2>
+          {fixedIn.length === 0 ? (
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>No fixed-in version data.</p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {fixedIn.map((v) => (
+                <Badge key={v} color="success">
+                  {v}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Applicability Conditions
-        </h2>
-        <p className="text-sm text-text-secondary">
-          {conditionCount === 0
-            ? 'No config predicates defined — config_applies resolves to "unknown" (treated conservatively).'
-            : `${conditionCount} config predicate${conditionCount === 1 ? '' : 's'} gate whether this CVE applies per device.`}
-        </p>
-        <Link
-          href={`/advisories/${encodeURIComponent(advisory.cve_id)}/conditions`}
-          className="mt-2 inline-block text-sm text-accent hover:underline"
-        >
-          Manage conditions →
-        </Link>
-      </div>
+      <Card>
+        <CardBody>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            Applicability Conditions
+          </h2>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+            {conditionCount === 0
+              ? 'No config predicates defined — config_applies resolves to "unknown" (treated conservatively).'
+              : `${conditionCount} config predicate${conditionCount === 1 ? '' : 's'} gate whether this CVE applies per device.`}
+          </p>
+          <Link
+            href={`/advisories/${encodeURIComponent(advisory.cve_id)}/conditions`}
+            style={{ marginTop: 8, display: 'inline-block', fontSize: 'var(--text-base)', color: 'var(--primary)' }}
+          >
+            Manage conditions →
+          </Link>
+        </CardBody>
+      </Card>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">Affected Devices</h2>
-        {devices.length === 0 ? (
-          <p className="text-sm text-text-muted">No devices affected yet.</p>
-        ) : (
-          <ul className="space-y-1 text-sm">
-            {devices.map((d) => (
-              <li key={d.id}>
-                <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
-                  {d.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <Card>
+        <CardBody>
+          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)' }}>
+            Affected Devices
+          </h2>
+          {devices.length === 0 ? (
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>No devices affected yet.</p>
+          ) : (
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-base)' }}>
+              {devices.map((d) => (
+                <li key={d.id}>
+                  <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)' }}>
+                    {d.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
 
       {advisory.advisory_url && (
         <div>
@@ -216,7 +243,7 @@ export default async function AdvisoryDetailPage({ params }) {
             href={advisory.advisory_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm text-accent hover:underline"
+            style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}
           >
             View on NVD →
           </a>

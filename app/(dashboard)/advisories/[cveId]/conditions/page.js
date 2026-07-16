@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { pool } from '../../../../../lib/db';
 import ConditionsManager from '../../../../../components/config/ConditionsManager';
+import Card, { CardBody } from '../../../../../components/ui/Card';
+import PageHeader from '../../../../../components/ui/PageHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,28 +60,28 @@ export default async function AdvisoryConditionsPage({ params }) {
   const devices = deviceRows.map((d) => ({ id: d.id, name: d.name }));
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
         <Link
           href={`/advisories/${encodeURIComponent(advisory.cve_id)}`}
-          className="text-sm text-accent hover:underline"
+          style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}
         >
           ← Back to {advisory.cve_id}
         </Link>
       </div>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h1 className="text-xl font-semibold text-text-primary">
-          {advisory.cve_id} — Applicability Conditions
-        </h1>
-        <p className="mt-1 text-text-secondary">{advisory.title}</p>
-        <p className="mt-3 text-sm text-text-muted">
-          Conditions gate this advisory&apos;s <span className="font-mono">config_applies</span> result per
-          device (tri-state: yes / no / unknown). All conditions are ANDed together; if no conditions are
-          defined, <span className="font-mono">config_applies</span> stays{' '}
-          <span className="font-mono">unknown</span> and is treated conservatively.
-        </p>
-      </div>
+      <PageHeader title={`${advisory.cve_id} — Applicability Conditions`} subtitle={advisory.title} />
+
+      <Card>
+        <CardBody>
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>
+            Conditions gate this advisory&apos;s <span className="mono">config_applies</span> result per
+            device (tri-state: yes / no / unknown). All conditions are ANDed together; if no conditions are
+            defined, <span className="mono">config_applies</span> stays{' '}
+            <span className="mono">unknown</span> and is treated conservatively.
+          </p>
+        </CardBody>
+      </Card>
 
       <ConditionsManager cveId={params.cveId} initialConditions={initialConditions} devices={devices} />
     </div>

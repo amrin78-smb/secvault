@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import PageHeader from '../../../components/ui/PageHeader';
+import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Card';
+import Button from '../../../components/ui/Button';
 
 export default function SettingsPage() {
   const [feedPollIntervalHours, setFeedPollIntervalHours] = useState('');
@@ -75,85 +78,82 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-xl space-y-8">
-      <h1 className="text-xl font-semibold text-text-primary">Settings</h1>
+    <div style={{ maxWidth: 576, display: 'flex', flexDirection: 'column', gap: 32 }}>
+      <PageHeader title="Settings" />
 
-      <section className="rounded-lg border border-border bg-bg-surface p-6">
-        <h2 className="mb-4 text-sm font-medium text-text-primary">Feed Sync</h2>
-        <form onSubmit={handleGeneralSubmit} className="space-y-4">
-          <div>
-            <label
-              htmlFor="feed_poll_interval_hours"
-              className="mb-1 block text-sm text-text-secondary"
-            >
-              Feed poll interval (hours)
-            </label>
-            <input
-              id="feed_poll_interval_hours"
-              type="number"
-              min="1"
-              disabled={loading}
-              value={feedPollIntervalHours}
-              onChange={(e) => setFeedPollIntervalHours(e.target.value)}
-              className="w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-            />
-          </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Feed Sync</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <form onSubmit={handleGeneralSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="form-field">
+              <label htmlFor="feed_poll_interval_hours">Feed poll interval (hours)</label>
+              <input
+                id="feed_poll_interval_hours"
+                type="number"
+                min="1"
+                disabled={loading}
+                value={feedPollIntervalHours}
+                onChange={(e) => setFeedPollIntervalHours(e.target.value)}
+                className="input"
+              />
+            </div>
 
-          {generalStatus && <p className="text-sm text-text-secondary">{generalStatus}</p>}
+            {generalStatus && (
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{generalStatus}</p>
+            )}
 
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
-          >
-            Save
-          </button>
-        </form>
-      </section>
+            <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
+              Save
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
 
-      <section className="rounded-lg border border-border bg-bg-surface p-6">
-        <h2 className="mb-4 text-sm font-medium text-text-primary">Change Admin Password</h2>
-        <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="current_password" className="mb-1 block text-sm text-text-secondary">
-              Current password
-            </label>
-            <input
-              id="current_password"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-              className="w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-            />
-          </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Change Admin Password</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div className="form-field">
+              <label htmlFor="current_password">Current password</label>
+              <input
+                id="current_password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                required
+                className="input"
+              />
+            </div>
 
-          <div>
-            <label htmlFor="new_password" className="mb-1 block text-sm text-text-secondary">
-              New password
-            </label>
-            <input
-              id="new_password"
-              type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              required
-              minLength={8}
-              className="w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
-            />
-          </div>
+            <div className="form-field">
+              <label htmlFor="new_password">New password</label>
+              <input
+                id="new_password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={8}
+                className="input"
+              />
+            </div>
 
-          {passwordStatus && <p className="text-sm text-text-secondary">{passwordStatus}</p>}
+            {passwordStatus && (
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{passwordStatus}</p>
+            )}
 
-          <button
-            type="submit"
-            className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
-          >
-            Update Password
-          </button>
-        </form>
-      </section>
+            <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
+              Update Password
+            </Button>
+          </form>
+        </CardBody>
+      </Card>
     </div>
   );
 }

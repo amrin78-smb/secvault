@@ -34,11 +34,11 @@ export default function AcknowledgeButton({ deviceId, diffId }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
       <Button type="button" variant="secondary" onClick={handleAcknowledge} disabled={saving}>
         {saving ? 'Acknowledging…' : 'Acknowledge'}
       </Button>
-      {error && <span className="text-sm text-danger">{error}</span>}
+      {error && <span style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</span>}
     </span>
   );
 }

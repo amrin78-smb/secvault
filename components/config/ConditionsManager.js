@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
-import Card from '../ui/Card';
+import Card, { CardBody } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 import LoadingSpinner from '../ui/LoadingSpinner';
 
@@ -22,8 +22,29 @@ const EMPTY_FORM = {
   configText: '{}',
 };
 
-const INPUT_CLASSES =
-  'w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none';
+const SECTION_HEADING_STYLE = {
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-secondary)',
+};
+
+const FIELD_LABEL_STYLE = {
+  marginBottom: 4,
+  display: 'block',
+  fontSize: 'var(--text-xs)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-muted)',
+};
+
+const LIST_ITEM_STYLE = {
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius)',
+  background: 'var(--bg-primary)',
+  padding: 12,
+};
 
 function prettyConfig(config) {
   if (config === null || config === undefined) return '—';
@@ -190,176 +211,196 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
   }
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Conditions list */}
-      <Card className="p-4">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-            Conditions ({conditions.length})
-          </h2>
-          <Button type="button" onClick={openAddForm}>
-            Add condition
-          </Button>
-        </div>
+      <Card>
+        <CardBody>
+          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <h2 style={SECTION_HEADING_STYLE}>Conditions ({conditions.length})</h2>
+            <Button type="button" onClick={openAddForm}>
+              Add condition
+            </Button>
+          </div>
 
-        {listError && <p className="mb-3 text-sm text-danger">{listError}</p>}
+          {listError && <p style={{ marginBottom: 12, fontSize: 'var(--text-base)', color: 'var(--red)' }}>{listError}</p>}
 
-        {conditions.length === 0 ? (
-          <EmptyState message="No conditions defined — config_applies stays 'unknown' for this advisory." />
-        ) : (
-          <ul className="space-y-3">
-            {conditions.map((c) => (
-              <li key={c.id} className="rounded border border-border bg-bg-base p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge color="info">{c.predicate_type || '—'}</Badge>
+          {conditions.length === 0 ? (
+            <EmptyState message="No conditions defined — config_applies stays 'unknown' for this advisory." />
+          ) : (
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 12, listStyle: 'none' }}>
+              {conditions.map((c) => (
+                <li key={c.id} style={LIST_ITEM_STYLE}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                        <Badge color="info">{c.predicate_type || '—'}</Badge>
+                      </div>
+                      <p style={{ marginTop: 4, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>
+                        {c.condition_description || 'No description'}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-text-primary">
-                      {c.condition_description || 'No description'}
-                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Button type="button" variant="secondary" onClick={() => openEditForm(c)}>
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="danger"
+                        onClick={() => handleDelete(c)}
+                        disabled={deletingId === c.id}
+                      >
+                        {deletingId === c.id ? 'Deleting…' : 'Delete'}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button type="button" variant="secondary" onClick={() => openEditForm(c)}>
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="danger"
-                      onClick={() => handleDelete(c)}
-                      disabled={deletingId === c.id}
-                    >
-                      {deletingId === c.id ? 'Deleting…' : 'Delete'}
-                    </Button>
-                  </div>
-                </div>
-                <pre className="mt-2 overflow-x-auto rounded bg-bg-elevated p-2 font-mono text-xs text-text-secondary">
-                  {prettyConfig(c.predicate_config)}
-                </pre>
-              </li>
-            ))}
-          </ul>
-        )}
+                  <pre
+                    className="mono"
+                    style={{
+                      marginTop: 8,
+                      overflowX: 'auto',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-card)',
+                      padding: 8,
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    {prettyConfig(c.predicate_config)}
+                  </pre>
+                </li>
+              ))}
+            </ul>
+          )}
 
-        {/* Add/Edit form */}
-        {formOpen && (
-          <form onSubmit={handleSubmit} className="mt-4 space-y-3 rounded border border-border bg-bg-base p-3">
-            <h3 className="text-sm font-medium text-text-primary">
-              {editingId ? 'Edit condition' : 'Add condition'}
-            </h3>
+          {/* Add/Edit form */}
+          {formOpen && (
+            <form
+              onSubmit={handleSubmit}
+              style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12, ...LIST_ITEM_STYLE }}
+            >
+              <h3 style={{ fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
+                {editingId ? 'Edit condition' : 'Add condition'}
+              </h3>
 
-            <div>
-              <label className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
-                Description
-              </label>
-              <input
-                type="text"
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="e.g. SSM inspection enabled on any policy"
-                className={INPUT_CLASSES}
-              />
-            </div>
+              <div>
+                <label style={FIELD_LABEL_STYLE}>Description</label>
+                <input
+                  type="text"
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="e.g. SSM inspection enabled on any policy"
+                  className="input"
+                />
+              </div>
 
-            <div>
-              <label className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
-                Predicate type
-              </label>
-              <select
-                value={form.predicateType}
-                onChange={(e) => setForm((f) => ({ ...f, predicateType: e.target.value }))}
-                className={INPUT_CLASSES}
-              >
-                {PREDICATE_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label style={FIELD_LABEL_STYLE}>Predicate type</label>
+                <select
+                  value={form.predicateType}
+                  onChange={(e) => setForm((f) => ({ ...f, predicateType: e.target.value }))}
+                  className="input"
+                >
+                  {PREDICATE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <label className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
-                Predicate config (JSON)
-              </label>
-              <textarea
-                value={form.configText}
-                onChange={(e) => setForm((f) => ({ ...f, configText: e.target.value }))}
-                rows={5}
-                spellCheck={false}
-                className={`${INPUT_CLASSES} font-mono`}
-              />
-            </div>
+              <div>
+                <label style={FIELD_LABEL_STYLE}>Predicate config (JSON)</label>
+                <textarea
+                  value={form.configText}
+                  onChange={(e) => setForm((f) => ({ ...f, configText: e.target.value }))}
+                  rows={5}
+                  spellCheck={false}
+                  className="input mono"
+                />
+              </div>
 
-            {formError && <p className="text-sm text-danger">{formError}</p>}
+              {formError && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{formError}</p>}
 
-            <div className="flex items-center gap-2">
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add condition'}
-              </Button>
-              <Button type="button" variant="secondary" onClick={closeForm}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Button type="submit" disabled={saving}>
+                  {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add condition'}
+                </Button>
+                <Button type="button" variant="secondary" onClick={closeForm}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+        </CardBody>
       </Card>
 
       {/* Test panel */}
-      <Card className="p-4">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Test against device
-        </h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={testDeviceId}
-            onChange={(e) => setTestDeviceId(e.target.value)}
-            className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none"
-          >
-            <option value="">Select a device…</option>
-            {(devices || []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <Button type="button" onClick={handleTest} disabled={!testDeviceId || testing}>
-            {testing ? 'Testing…' : 'Test'}
-          </Button>
-          {testing && <LoadingSpinner size={18} />}
-        </div>
-
-        {testError && <p className="mt-3 text-sm text-danger">{testError}</p>}
-
-        {testResult && !testError && (
-          <div className="mt-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-text-secondary">Overall config_applies:</span>
-              <ApplicabilityBadge result={testResult.config_applies} />
-            </div>
-
-            {testResult.note && <p className="text-sm text-text-muted">{testResult.note}</p>}
-
-            {Array.isArray(testResult.per_condition) && testResult.per_condition.length > 0 && (
-              <ul className="space-y-2">
-                {testResult.per_condition.map((r) => (
-                  <li
-                    key={r.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-bg-base p-2"
-                  >
-                    <div className="min-w-0">
-                      <span className="text-sm text-text-primary">
-                        {r.condition_description || 'No description'}
-                      </span>
-                      <span className="ml-2 text-xs text-text-muted">{r.predicate_type}</span>
-                    </div>
-                    <ApplicabilityBadge result={r.result} />
-                  </li>
-                ))}
-              </ul>
-            )}
+      <Card>
+        <CardBody>
+          <h2 style={{ ...SECTION_HEADING_STYLE, marginBottom: 12 }}>Test against device</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <select
+              value={testDeviceId}
+              onChange={(e) => setTestDeviceId(e.target.value)}
+              className="input"
+              style={{ width: 'auto', minWidth: 200 }}
+            >
+              <option value="">Select a device…</option>
+              {(devices || []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <Button type="button" onClick={handleTest} disabled={!testDeviceId || testing}>
+              {testing ? 'Testing…' : 'Test'}
+            </Button>
+            {testing && <LoadingSpinner size={18} />}
           </div>
-        )}
+
+          {testError && <p style={{ marginTop: 12, fontSize: 'var(--text-base)', color: 'var(--red)' }}>{testError}</p>}
+
+          {testResult && !testError && (
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Overall config_applies:</span>
+                <ApplicabilityBadge result={testResult.config_applies} />
+              </div>
+
+              {testResult.note && <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>{testResult.note}</p>}
+
+              {Array.isArray(testResult.per_condition) && testResult.per_condition.length > 0 && (
+                <ul style={{ display: 'flex', flexDirection: 'column', gap: 8, listStyle: 'none' }}>
+                  {testResult.per_condition.map((r) => (
+                    <li
+                      key={r.id}
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-primary)',
+                        padding: 8,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>
+                          {r.condition_description || 'No description'}
+                        </span>
+                        <span style={{ marginLeft: 8, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                          {r.predicate_type}
+                        </span>
+                      </div>
+                      <ApplicabilityBadge result={r.result} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </CardBody>
       </Card>
     </div>
   );

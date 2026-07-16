@@ -8,6 +8,7 @@ import Button from '../../../components/ui/Button';
 import StatusDot from '../../../components/ui/StatusDot';
 import EmptyState from '../../../components/ui/EmptyState';
 import Modal from '../../../components/ui/Modal';
+import PageHeader from '../../../components/ui/PageHeader';
 import DeviceRowActions from '../../../components/devices/DeviceRowActions';
 
 export const dynamic = 'force-dynamic';
@@ -91,10 +92,15 @@ async function getDevices(dbPool, sortKey) {
 // <SortLink/>. Takes the previously-closed-over `sortKey` explicitly instead
 // of relying on closure.
 function sortLink(activeSortKey, key, label) {
+  const active = activeSortKey === key;
   return (
     <Link
       href={`/devices?sort=${key}`}
-      className={activeSortKey === key ? 'font-medium text-accent underline' : 'text-text-secondary hover:underline'}
+      style={{
+        fontWeight: active ? 600 : 400,
+        color: active ? 'var(--primary)' : 'var(--text-secondary)',
+        textDecoration: active ? 'underline' : 'none',
+      }}
     >
       {label}
     </Link>
@@ -109,19 +115,18 @@ export default async function DevicesPage({ searchParams }) {
   const confirmDevice = confirmDeleteId ? devices.find((d) => d.id === confirmDeleteId) : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-text-primary">Devices</h1>
-        <Link
-          href="/devices/new"
-          className="inline-flex items-center justify-center rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
-        >
-          Add Device
-        </Link>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PageHeader
+        title="Devices"
+        actions={
+          <Link href="/devices/new" className="btn btn-primary">
+            Add Device
+          </Link>
+        }
+      />
 
-      <div className="flex items-center gap-3 text-sm">
-        <span className="text-text-muted">Sort by:</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-base)' }}>
+        <span style={{ color: 'var(--text-muted)' }}>Sort by:</span>
         {sortLink(sortKey, 'name', 'Name')}
         {sortLink(sortKey, 'cve_count', 'CVE Count')}
         {sortLink(sortKey, 'last_collected', 'Last Collected')}
@@ -144,55 +149,56 @@ export default async function DevicesPage({ searchParams }) {
             <col style={{ width: '13%' }} />
           </colgroup>
           <thead>
-            <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-              <th className="px-2 py-2">Name</th>
-              <th className="px-2 py-2">Vendor</th>
-              <th className="px-2 py-2">Address</th>
-              <th className="px-2 py-2">Version</th>
-              <th className="px-2 py-2">Patch Now</th>
-              <th className="px-2 py-2">Scheduled</th>
-              <th className="px-2 py-2">Monitor</th>
-              <th className="px-2 py-2">Last Collected</th>
-              <th className="px-2 py-2">Status</th>
-              <th className="px-2 py-2">Actions</th>
+            <tr>
+              <th>Name</th>
+              <th>Vendor</th>
+              <th>Address</th>
+              <th>Version</th>
+              <th>Patch Now</th>
+              <th>Scheduled</th>
+              <th>Monitor</th>
+              <th>Last Collected</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {devices.map((d) => (
-              <tr key={d.id} className="border-b border-border hover:bg-bg-elevated">
-                <td className="truncate px-2 py-2">
-                  <Link href={`/devices/${d.id}`} className="font-medium text-accent hover:underline">
+              <tr key={d.id}>
+                <td>
+                  <Link href={`/devices/${d.id}`} style={{ fontWeight: 500, color: 'var(--primary)', textDecoration: 'none' }}>
                     {d.name}
                   </Link>
                 </td>
-                <td className="truncate px-2 py-2">
+                <td>
                   <Badge color="info">{d.vendor}</Badge>
                 </td>
-                <td className="truncate px-2 py-2 text-text-secondary">
-                  {d.vendor === 'forcepoint' ? d.smc_host || '—' : d.mgmt_ip || '—'}
-                </td>
-                <td className="truncate px-2 py-2 text-text-secondary">{d.version_string || '—'}</td>
-                <td className="px-2 py-2 text-danger">{d.patch_now_count}</td>
-                <td className="px-2 py-2 text-warning">{d.scheduled_count}</td>
-                <td className="px-2 py-2 text-text-muted">{d.monitor_count}</td>
-                <td className="truncate px-2 py-2 text-text-secondary">{formatDateTime(d.last_collected_at)}</td>
-                <td className="px-2 py-2">
+                <td>{d.vendor === 'forcepoint' ? d.smc_host || '—' : d.mgmt_ip || '—'}</td>
+                <td>{d.version_string || '—'}</td>
+                <td style={{ color: 'var(--red)' }}>{d.patch_now_count}</td>
+                <td style={{ color: 'var(--yellow)' }}>{d.scheduled_count}</td>
+                <td style={{ color: 'var(--text-muted)' }}>{d.monitor_count}</td>
+                <td>{formatDateTime(d.last_collected_at)}</td>
+                <td>
                   <StatusDot
                     status={
                       d.last_connectivity_ok === true ? 'green' : d.last_connectivity_ok === false ? 'red' : 'grey'
                     }
                   />
                 </td>
-                <td className="px-2 py-2">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
+                <td>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)' }}>
+                    <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
                       View
                     </Link>
                     <DeviceRowActions deviceId={d.id} />
-                    <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
+                    <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
                       Edit
                     </Link>
-                    <Link href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`} className="text-danger hover:underline">
+                    <Link
+                      href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}
+                      style={{ color: 'var(--red)', textDecoration: 'underline' }}
+                    >
                       Delete
                     </Link>
                   </div>
@@ -205,19 +211,22 @@ export default async function DevicesPage({ searchParams }) {
 
       <Modal open={Boolean(confirmDevice)} title="Delete Device">
         {confirmDevice && (
-          <div className="space-y-4">
-            <p className="text-sm text-text-secondary">
-              Delete <span className="font-medium text-text-primary">{confirmDevice.name}</span>? This removes all
-              associated versions, rules, credentials, and CVE assessments.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+              Delete <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{confirmDevice.name}</span>? This
+              removes all associated versions, rules, credentials, and CVE assessments.
             </p>
-            <div className="flex items-center gap-3">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <form action={deleteDeviceAction}>
                 <input type="hidden" name="deviceId" value={confirmDevice.id} />
                 <Button type="submit" variant="danger">
                   Delete
                 </Button>
               </form>
-              <Link href={`/devices?sort=${sortKey}`} className="text-sm text-text-secondary hover:underline">
+              <Link
+                href={`/devices?sort=${sortKey}`}
+                style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
+              >
                 Cancel
               </Link>
             </div>

@@ -40,13 +40,15 @@ export default function AssessNowButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <Button type="button" variant="primary" onClick={handleAssess} disabled={running}>
         {running && <LoadingSpinner size={14} />}
         {running ? 'Assessing…' : 'Assess Now'}
       </Button>
       {result && (
-        <span className={`text-sm ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</span>
+        <span style={{ fontSize: 'var(--text-sm)', color: result.ok ? 'var(--green)' : 'var(--red)' }}>
+          {result.text}
+        </span>
       )}
     </div>
   );

@@ -3,6 +3,9 @@ import { pool } from '../../../../../lib/db';
 import Table from '../../../../../components/ui/Table';
 import Badge from '../../../../../components/ui/Badge';
 import EmptyState from '../../../../../components/ui/EmptyState';
+import StatCard from '../../../../../components/ui/StatCard';
+import PageHeader from '../../../../../components/ui/PageHeader';
+import Card, { CardBody } from '../../../../../components/ui/Card';
 import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
 import FindingTypeBadge from '../../../../../components/analysis/FindingTypeBadge';
 import RunAnalysisButton from '../../../../../components/analysis/RunAnalysisButton';
@@ -146,16 +149,6 @@ function ruleLabel(row) {
   return `${seq} ${row.rule_name || '(unnamed rule)'}`;
 }
 
-
-function StatCard({ label, value, colorClass = 'text-text-primary' }) {
-  return (
-    <div className="rounded-lg border border-border bg-bg-surface p-4">
-      <div className="text-xs uppercase tracking-wide text-text-muted">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold ${colorClass}`}>{value}</div>
-    </div>
-  );
-}
-
 // Module-top-level so a future refactor toward client-side interactive tabs
 // can't accidentally turn this into a component defined inside a component
 // (see CLAUDE.md's "NEVER define a React component inside another React
@@ -165,14 +158,18 @@ function StatCard({ label, value, colorClass = 'text-text-primary' }) {
 // previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
 // on closure.
 function tabLink(deviceId, activeTab, key, label) {
+  const active = activeTab === key;
   return (
     <Link
+      key={key}
       href={`/devices/${deviceId}/analysis?tab=${key}`}
-      className={`px-3 py-2 text-sm ${
-        activeTab === key
-          ? 'border-b-2 border-accent text-text-primary'
-          : 'text-text-secondary hover:text-text-primary'
-      }`}
+      style={{
+        padding: '8px 12px',
+        fontSize: 'var(--text-base)',
+        color: active ? 'var(--primary)' : 'var(--text-secondary)',
+        borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
+        textDecoration: 'none',
+      }}
     >
       {label}
     </Link>
@@ -185,10 +182,10 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
   if (!device) {
     return (
       <div>
-        <Link href="/devices" className="text-sm text-accent hover:underline">
+        <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
           ← Back to devices
         </Link>
-        <p className="mt-4 text-text-secondary">Device not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
     );
   }
@@ -220,24 +217,26 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
   const riskScore = computeRiskScoreFromCounts(severitySummary);
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
-        <Link href={`/devices/${device.id}`} className="text-sm text-accent hover:underline">
+        <Link href={`/devices/${device.id}`} style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
           ← Back to {device.name}
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-text-primary">Rule Analysis — {device.name}</h1>
-          <Badge color={RISK_BAND_COLOR[riskScore.band]}>
-            Risk: {RISK_BAND_LABEL[riskScore.band]} ({riskScore.score})
-          </Badge>
-        </div>
-        <RunAnalysisButton deviceId={device.id} />
-      </div>
+      <PageHeader
+        title={`Rule Analysis — ${device.name}`}
+        actions={
+          <>
+            <Badge color={RISK_BAND_COLOR[riskScore.band]}>
+              Risk: {RISK_BAND_LABEL[riskScore.band]} ({riskScore.score})
+            </Badge>
+            <RunAnalysisButton deviceId={device.id} />
+          </>
+        }
+      />
 
-      <div className="flex items-center gap-1 border-b border-border">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {tabLink(device.id, tab, 'summary', 'Summary')}
         {tabLink(device.id, tab, 'rules', `Security Rules ${ruleStats.total_rules}`)}
         {tabLink(device.id, tab, 'findings', `Findings ${severitySummary.total}`)}
@@ -250,34 +249,32 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
       {tab === 'summary' && (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
             <StatCard label="Total Rules" value={ruleStats.total_rules} />
-            <StatCard label="Allowed Rules" value={ruleStats.allowed_count} colorClass="text-success" />
-            <StatCard label="Denied Rules" value={ruleStats.denied_count} colorClass="text-danger" />
+            <StatCard label="Allowed Rules" value={ruleStats.allowed_count} color="var(--green)" />
+            <StatCard label="Denied Rules" value={ruleStats.denied_count} color="var(--red)" />
             <StatCard label="Inactive Rules" value={ruleStats.inactive_count} />
-            <StatCard
-              label="Allowed Any-to-Any"
-              value={findingTypeCounts.any_any}
-              colorClass="text-danger"
-            />
-            <StatCard
-              label="Logging Disabled"
-              value={findingTypeCounts.log_disabled}
-              colorClass="text-text-muted"
-            />
+            <StatCard label="Allowed Any-to-Any" value={findingTypeCounts.any_any} color="var(--red)" />
+            <StatCard label="Logging Disabled" value={findingTypeCounts.log_disabled} color="var(--text-muted)" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-            <StatCard label="Critical" value={severitySummary.critical} colorClass="text-danger" />
-            <StatCard label="High" value={severitySummary.high} colorClass="text-warning" />
-            <StatCard label="Medium" value={severitySummary.medium} colorClass="text-info" />
-            <StatCard label="Info" value={severitySummary.info} colorClass="text-text-muted" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+            <StatCard label="Critical" value={severitySummary.critical} color="var(--red)" />
+            <StatCard label="High" value={severitySummary.high} color="var(--yellow)" />
+            <StatCard label="Medium" value={severitySummary.medium} color="var(--blue)" />
+            <StatCard label="Info" value={severitySummary.info} color="var(--text-muted)" />
             <StatCard label="Total Findings" value={severitySummary.total} />
-            <StatCard
-              label="Last Analyzed"
-              value={formatDateTime(severitySummary.last_analyzed_at)}
-              colorClass="text-sm font-medium text-text-primary"
-            />
+            {/* A datetime string, not a KPI number -- kept at the smaller
+                text-base size (as the original text-sm/font-medium styling
+                did) rather than StatCard's large stat-value size, which would
+                make a long timestamp string look out of place next to the
+                numeric tiles around it. */}
+            <div className="kpi-card" style={{ borderLeftColor: 'var(--border)' }}>
+              <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                {formatDateTime(severitySummary.last_analyzed_at)}
+              </div>
+              <div className="stat-label">Last Analyzed</div>
+            </div>
           </div>
 
           <FindingsBarChart counts={findingTypeCounts} />
@@ -285,19 +282,21 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       )}
 
       {tab === 'rules' && (
-        <div className="rounded border border-border bg-bg-surface p-4">
-          <p className="text-sm text-text-secondary">
-            {ruleStats.total_rules} rule{ruleStats.total_rules === 1 ? '' : 's'} collected —{' '}
-            {ruleStats.allowed_count} allowed, {ruleStats.denied_count} denied,{' '}
-            {ruleStats.inactive_count} inactive.
-          </p>
-          <Link
-            href={`/devices/${device.id}/rules`}
-            className="mt-2 inline-block text-sm text-accent hover:underline"
-          >
-            View full rule list →
-          </Link>
-        </div>
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+              {ruleStats.total_rules} rule{ruleStats.total_rules === 1 ? '' : 's'} collected —{' '}
+              {ruleStats.allowed_count} allowed, {ruleStats.denied_count} denied,{' '}
+              {ruleStats.inactive_count} inactive.
+            </p>
+            <Link
+              href={`/devices/${device.id}/rules`}
+              style={{ marginTop: 8, display: 'inline-block', fontSize: 'var(--text-base)', color: 'var(--primary)' }}
+            >
+              View full rule list →
+            </Link>
+          </CardBody>
+        </Card>
       )}
 
       {tab === 'cleanup' && <CleanupTab deviceId={device.id} />}
@@ -311,19 +310,12 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 
       {tab === 'findings' && (
-        <div className="space-y-3">
-          <form method="GET" className="flex flex-wrap items-end gap-3">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <form method="GET" className="filter-row">
             <input type="hidden" name="tab" value="findings" />
-            <div className="flex flex-col gap-1">
-              <label htmlFor="severity" className="text-xs text-text-secondary">
-                Severity
-              </label>
-              <select
-                id="severity"
-                name="severity"
-                defaultValue={severityFilter}
-                className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-              >
+            <div className="form-field">
+              <label htmlFor="severity">Severity</label>
+              <select id="severity" name="severity" defaultValue={severityFilter} className="select">
                 <option value="">All severities</option>
                 {SEVERITIES.map((s) => (
                   <option key={s} value={s}>
@@ -332,16 +324,9 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                 ))}
               </select>
             </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="finding_type" className="text-xs text-text-secondary">
-                Finding Type
-              </label>
-              <select
-                id="finding_type"
-                name="finding_type"
-                defaultValue={findingTypeFilter}
-                className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-              >
+            <div className="form-field">
+              <label htmlFor="finding_type">Finding Type</label>
+              <select id="finding_type" name="finding_type" defaultValue={findingTypeFilter} className="select">
                 <option value="">All types</option>
                 {FINDING_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -350,10 +335,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                 ))}
               </select>
             </div>
-            <button
-              type="submit"
-              className="rounded border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary hover:bg-bg-elevated"
-            >
+            <button type="submit" className="btn btn-secondary">
               Filter
             </button>
           </form>
@@ -370,32 +352,32 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                 <col style={{ width: '27%' }} />
               </colgroup>
               <thead>
-                <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-                  <th className="px-2 py-2">Severity</th>
-                  <th className="px-2 py-2">Type</th>
-                  <th className="px-2 py-2">Rule</th>
-                  <th className="px-2 py-2">Detail</th>
-                  <th className="px-2 py-2">Remediation</th>
+                <tr>
+                  <th>Severity</th>
+                  <th>Type</th>
+                  <th>Rule</th>
+                  <th>Detail</th>
+                  <th>Remediation</th>
                 </tr>
               </thead>
               <tbody>
                 {findings.map((f) => (
-                  <tr key={f.id} className="border-b border-border">
-                    <td className="px-2 py-2">
+                  <tr key={f.id}>
+                    <td>
                       <SeverityBadge severity={f.severity} />
                     </td>
-                    <td className="px-2 py-2">
+                    <td>
                       <FindingTypeBadge type={f.finding_type} />
                     </td>
-                    <td className="truncate px-2 py-2" title={ruleLabel(f)}>
-                      <Link href={`/devices/${device.id}/rules`} className="text-accent hover:underline">
+                    <td title={ruleLabel(f)}>
+                      <Link href={`/devices/${device.id}/rules`} style={{ color: 'var(--primary)' }}>
                         {ruleLabel(f)}
                       </Link>
                     </td>
-                    <td className="px-2 py-2 text-text-secondary" title={f.detail || ''}>
+                    <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
                       {f.detail || '—'}
                     </td>
-                    <td className="px-2 py-2 text-text-secondary" title={f.remediation || ''}>
+                    <td style={{ color: 'var(--text-secondary)' }} title={f.remediation || ''}>
                       {f.remediation || '—'}
                     </td>
                   </tr>

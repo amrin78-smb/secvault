@@ -2,6 +2,13 @@ import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import SyncNowButton from '../../../components/advisories/SyncNowButton';
 
+const { getLastSyncs } = require('../../../lib/feedStatus');
+import Badge from '../../../components/ui/Badge';
+import Card, { CardBody } from '../../../components/ui/Card';
+import Table from '../../../components/ui/Table';
+import PageHeader from '../../../components/ui/PageHeader';
+import EmptyState from '../../../components/ui/EmptyState';
+
 export const dynamic = 'force-dynamic';
 
 const CVSS_BAND_OPTIONS = [
@@ -43,34 +50,30 @@ function formatFixedIn(fixedInVersions) {
   return fixedInVersions.join(', ');
 }
 
-function cvssTextClass(score) {
-  if (score === null || score === undefined) return 'text-text-muted';
+function cvssStyle(score) {
+  if (score === null || score === undefined) return { color: 'var(--text-muted)' };
   const n = Number(score);
-  if (Number.isNaN(n)) return 'text-text-muted';
-  if (n >= 9) return 'text-danger font-semibold';
-  if (n >= 7) return 'text-warning font-semibold';
-  if (n >= 4) return 'text-text-primary';
-  return 'text-text-muted';
+  if (Number.isNaN(n)) return { color: 'var(--text-muted)' };
+  if (n >= 9) return { color: 'var(--red)', fontWeight: 600 };
+  if (n >= 7) return { color: 'var(--yellow)', fontWeight: 600 };
+  if (n >= 4) return { color: 'var(--text-primary)' };
+  return { color: 'var(--text-muted)' };
 }
 
 function KevBadge({ kevListed }) {
   if (!kevListed) return null;
-  return (
-    <span className="rounded bg-danger px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-      KEV
-    </span>
-  );
+  return <Badge color="danger">KEV</Badge>;
 }
 
-async function getLastSyncs(dbPool) {
-  const result = await dbPool.query(
-    `SELECT feed_name, status, started_at, finished_at
-     FROM feed_sync_log
-     ORDER BY started_at DESC
-     LIMIT 10`
-  );
-  return result.rows;
-}
+const CELL_LINK_STYLE = {
+  display: 'block',
+  padding: '12px 16px',
+  color: 'inherit',
+  textDecoration: 'none',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
 
 async function getAdvisories(dbPool, searchParams) {
   const vendor = searchParams?.vendor || '';
@@ -128,44 +131,34 @@ export default async function AdvisoriesPage({ searchParams }) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded border border-border bg-bg-surface px-4 py-3">
-        <div className="text-sm text-text-secondary">
-          <span>
-            Last NVD sync: {formatDateTime(lastNvd?.finished_at)}{' '}
-            {lastNvd ? `(${lastNvd.status})` : ''}
-          </span>
-          <span className="ml-4">
-            Last KEV sync: {formatDateTime(lastKev?.finished_at)}{' '}
-            {lastKev ? `(${lastKev.status})` : ''}
-          </span>
-        </div>
-        <SyncNowButton />
-      </div>
+      <PageHeader title="Advisories" subtitle="CVE advisories affecting the fleet, from NVD and CISA KEV." />
 
-      <form method="GET" className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="q" className="text-xs text-text-secondary">
-            Search
-          </label>
-          <input
-            id="q"
-            type="text"
-            name="q"
-            defaultValue={qValue}
-            placeholder="CVE ID or title"
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          />
+      <Card style={{ marginBottom: 16 }}>
+        <CardBody
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+        >
+          <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+            <span>
+              Last NVD sync: {formatDateTime(lastNvd?.finished_at)}{' '}
+              {lastNvd ? `(${lastNvd.status})` : ''}
+            </span>
+            <span style={{ marginLeft: 16 }}>
+              Last KEV sync: {formatDateTime(lastKev?.finished_at)}{' '}
+              {lastKev ? `(${lastKev.status})` : ''}
+            </span>
+          </div>
+          <SyncNowButton />
+        </CardBody>
+      </Card>
+
+      <form method="GET" className="filter-row">
+        <div className="form-field">
+          <label htmlFor="q">Search</label>
+          <input id="q" type="text" name="q" defaultValue={qValue} placeholder="CVE ID or title" className="input" />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="vendor" className="text-xs text-text-secondary">
-            Vendor
-          </label>
-          <select
-            id="vendor"
-            name="vendor"
-            defaultValue={vendorValue}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="vendor">Vendor</label>
+          <select id="vendor" name="vendor" defaultValue={vendorValue} className="select">
             <option value="">All vendors</option>
             <option value="forcepoint">Forcepoint</option>
             <option value="fortinet">Fortinet</option>
@@ -175,16 +168,9 @@ export default async function AdvisoriesPage({ searchParams }) {
             <option value="sangfor">Sangfor</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cvssBand" className="text-xs text-text-secondary">
-            CVSS band
-          </label>
-          <select
-            id="cvssBand"
-            name="cvssBand"
-            defaultValue={cvssBandValue}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="cvssBand">CVSS band</label>
+          <select id="cvssBand" name="cvssBand" defaultValue={cvssBandValue} className="select">
             {CVSS_BAND_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
@@ -192,20 +178,27 @@ export default async function AdvisoriesPage({ searchParams }) {
             ))}
           </select>
         </div>
-        <label className="flex items-center gap-1.5 pb-1.5 text-sm text-text-secondary">
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 'var(--text-base)',
+            color: 'var(--text-secondary)',
+          }}
+        >
           <input type="checkbox" name="kevOnly" value="1" defaultChecked={kevOnlyChecked} />
           KEV only
         </label>
-        <button
-          type="submit"
-          className="rounded border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary hover:bg-bg-elevated"
-        >
+        <button type="submit" className="btn btn-secondary">
           Filter
         </button>
       </form>
 
-      <div className="overflow-x-auto rounded border border-border">
-        <table className="w-full table-fixed border-collapse text-sm" style={{ tableLayout: 'fixed' }}>
+      {advisories.length === 0 ? (
+        <EmptyState message="No advisories found." />
+      ) : (
+        <Table>
           <colgroup>
             <col style={{ width: '14%' }} />
             <col style={{ width: '8%' }} />
@@ -216,89 +209,82 @@ export default async function AdvisoriesPage({ searchParams }) {
             <col style={{ width: '12%' }} />
           </colgroup>
           <thead>
-            <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-              <th className="px-2 py-2">CVE ID</th>
-              <th className="px-2 py-2">CVSS</th>
-              <th className="px-2 py-2">KEV</th>
-              <th className="px-2 py-2">Vendor</th>
-              <th className="px-2 py-2">Title</th>
-              <th className="px-2 py-2">Fixed In</th>
-              <th className="px-2 py-2">Published</th>
+            <tr>
+              <th>CVE ID</th>
+              <th>CVSS</th>
+              <th>KEV</th>
+              <th>Vendor</th>
+              <th>Title</th>
+              <th>Fixed In</th>
+              <th>Published</th>
             </tr>
           </thead>
           <tbody>
             {advisories.map((a) => (
-              <tr key={a.cve_id} className="border-b border-border hover:bg-bg-elevated">
-                <td className="truncate p-0">
+              <tr key={a.cve_id}>
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="block truncate px-2 py-2 font-medium text-accent hover:underline"
+                    style={{ ...CELL_LINK_STYLE, color: 'var(--primary)', fontWeight: 500 }}
                   >
                     {a.cve_id}
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className={`block truncate px-2 py-2 ${cvssTextClass(a.cvss_score)}`}
+                    style={{ ...CELL_LINK_STYLE, ...cvssStyle(a.cvss_score) }}
                   >
                     {a.cvss_score ?? '—'}
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="flex items-center px-2 py-2"
+                    style={{ ...CELL_LINK_STYLE, display: 'flex', alignItems: 'center' }}
                   >
                     <KevBadge kevListed={a.kev_listed} />
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="block truncate px-2 py-2 text-text-secondary"
+                    style={{ ...CELL_LINK_STYLE, color: 'var(--text-secondary)' }}
                   >
                     {a.vendor}
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="block truncate px-2 py-2 text-text-primary"
+                    style={{ ...CELL_LINK_STYLE, color: 'var(--text-primary)' }}
                     title={a.title || ''}
                   >
                     {a.title || '—'}
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="block truncate px-2 py-2 text-text-secondary"
+                    style={{ ...CELL_LINK_STYLE, color: 'var(--text-secondary)' }}
                     title={formatFixedIn(a.fixed_in_versions)}
                   >
                     {formatFixedIn(a.fixed_in_versions)}
                   </Link>
                 </td>
-                <td className="truncate p-0">
+                <td style={{ padding: 0 }}>
                   <Link
                     href={`/advisories/${encodeURIComponent(a.cve_id)}`}
-                    className="block truncate px-2 py-2 text-text-secondary"
+                    style={{ ...CELL_LINK_STYLE, color: 'var(--text-secondary)' }}
                   >
                     {formatDate(a.published_at)}
                   </Link>
                 </td>
               </tr>
             ))}
-            {advisories.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-2 py-6 text-center text-text-muted">
-                  No advisories found.
-                </td>
-              </tr>
-            )}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      )}
     </div>
   );
 }

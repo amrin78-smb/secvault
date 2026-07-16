@@ -17,6 +17,17 @@ import { useRouter } from 'next/navigation';
 // device-detail-page hang fixed earlier: no client JS in front of them meant
 // a genuine top-level form navigation with zero pending UI, on a call that
 // can legitimately take up to ~2 minutes on an unreachable device.
+const linkBtnStyle = (running) => ({
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: 'var(--primary)',
+  textDecoration: 'underline',
+  cursor: running ? 'not-allowed' : 'pointer',
+  opacity: running ? 0.5 : 1,
+});
+
 export default function DeviceRowActions({ deviceId }) {
   const router = useRouter();
   const [running, setRunning] = useState(null); // 'collect' | 'test' | null
@@ -44,7 +55,7 @@ export default function DeviceRowActions({ deviceId }) {
     <>
       <button
         type="button"
-        className="text-accent hover:underline disabled:opacity-50"
+        style={linkBtnStyle(running)}
         disabled={Boolean(running)}
         onClick={() => runAction('collect', `/api/devices/${deviceId}/collect`)}
       >
@@ -52,13 +63,17 @@ export default function DeviceRowActions({ deviceId }) {
       </button>
       <button
         type="button"
-        className="text-accent hover:underline disabled:opacity-50"
+        style={linkBtnStyle(running)}
         disabled={Boolean(running)}
         onClick={() => runAction('test', `/api/devices/${deviceId}/test`)}
       >
         {running === 'test' ? 'Testing…' : 'Test'}
       </button>
-      {error && <span className="text-danger" title={error}>⚠</span>}
+      {error && (
+        <span style={{ color: 'var(--red)' }} title={error}>
+          ⚠
+        </span>
+      )}
     </>
   );
 }

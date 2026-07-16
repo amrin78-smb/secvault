@@ -22,9 +22,6 @@ const AUTH_MODE_OPTIONS = [
   { value: 'userpass', label: 'Username & Password' },
 ];
 
-const inputClasses =
-  'w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none';
-
 // Add device form, driven by VENDOR_META (frozen Tier 1 vendor table).
 //
 // Two independent axes, both sourced from VENDOR_META — do not conflate them:
@@ -212,30 +209,26 @@ export default function DeviceForm({ onSubmit }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label htmlFor="device-name" className="mb-1 block text-sm text-text-secondary">
-          Name
-        </label>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="form-field">
+        <label htmlFor="device-name">Name</label>
         <input
           id="device-name"
           type="text"
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className={inputClasses}
+          className="input"
         />
       </div>
 
-      <div>
-        <label htmlFor="device-vendor" className="mb-1 block text-sm text-text-secondary">
-          Vendor
-        </label>
+      <div className="form-field">
+        <label htmlFor="device-vendor">Vendor</label>
         <select
           id="device-vendor"
           value={vendor}
           onChange={(e) => handleVendorChange(e.target.value)}
-          className={inputClasses}
+          className="input"
         >
           {VENDOR_SLUGS.map((slug) => (
             <option key={slug} value={slug}>
@@ -246,15 +239,13 @@ export default function DeviceForm({ onSubmit }) {
       </div>
 
       {showMethodSelector && (
-        <div>
-          <label htmlFor="device-access-method" className="mb-1 block text-sm text-text-secondary">
-            Access Method
-          </label>
+        <div className="form-field">
+          <label htmlFor="device-access-method">Access Method</label>
           <select
             id="device-access-method"
             value={method}
             onChange={(e) => handleAccessMethodChange(e.target.value)}
-            className={inputClasses}
+            className="input"
           >
             {Object.entries(meta.accessMethods).map(([key, cfg]) => (
               <option key={key} value={key}>
@@ -267,10 +258,8 @@ export default function DeviceForm({ onSubmit }) {
 
       {isSmc ? (
         <>
-          <div>
-            <label htmlFor="device-smc-host" className="mb-1 block text-sm text-text-secondary">
-              SMC Host
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-smc-host">SMC Host</label>
             <input
               id="device-smc-host"
               type="text"
@@ -280,14 +269,12 @@ export default function DeviceForm({ onSubmit }) {
                 setSmcHost(e.target.value);
                 invalidateTest();
               }}
-              className={inputClasses}
+              className="input"
             />
           </div>
 
-          <div>
-            <label htmlFor="device-smc-port" className="mb-1 block text-sm text-text-secondary">
-              SMC Port
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-smc-port">SMC Port</label>
             <input
               id="device-smc-port"
               type="number"
@@ -297,47 +284,41 @@ export default function DeviceForm({ onSubmit }) {
                 setSmcPort(e.target.value);
                 invalidateTest();
               }}
-              className={inputClasses}
+              className="input"
             />
           </div>
         </>
       ) : (
         <>
-          <div>
-            <label htmlFor="device-mgmt-ip" className="mb-1 block text-sm text-text-secondary">
-              Management IP / Host
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-mgmt-ip">Management IP / Host</label>
             <input
               id="device-mgmt-ip"
               type="text"
               required
               value={mgmtIp}
               onChange={(e) => setMgmtIp(e.target.value)}
-              className={inputClasses}
+              className="input"
             />
           </div>
 
-          <div>
-            <label htmlFor="device-mgmt-port" className="mb-1 block text-sm text-text-secondary">
-              Management Port
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-mgmt-port">Management Port</label>
             <input
               id="device-mgmt-port"
               type="number"
               placeholder={String(config.defaultPort)}
               value={mgmtPort}
               onChange={(e) => setMgmtPort(e.target.value)}
-              className={inputClasses}
+              className="input"
             />
           </div>
         </>
       )}
 
       {isApiKeyOrUserPass && (
-        <div>
-          <label htmlFor="device-auth-mode" className="mb-1 block text-sm text-text-secondary">
-            Authentication
-          </label>
+        <div className="form-field">
+          <label htmlFor="device-auth-mode">Authentication</label>
           <select
             id="device-auth-mode"
             value={authMode}
@@ -350,7 +331,7 @@ export default function DeviceForm({ onSubmit }) {
               setPassword('');
               invalidateTest();
             }}
-            className={inputClasses}
+            className="input"
           >
             {AUTH_MODE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -362,10 +343,8 @@ export default function DeviceForm({ onSubmit }) {
       )}
 
       {showSecretInput ? (
-        <div>
-          <label htmlFor="device-secret" className="mb-1 block text-sm text-text-secondary">
-            {config.secretLabel}
-          </label>
+        <div className="form-field">
+          <label htmlFor="device-secret">{config.secretLabel}</label>
           <input
             id="device-secret"
             type="password"
@@ -375,15 +354,13 @@ export default function DeviceForm({ onSubmit }) {
               setSecret(e.target.value);
               invalidateTest();
             }}
-            className={inputClasses}
+            className="input"
           />
         </div>
       ) : (
         <>
-          <div>
-            <label htmlFor="device-cred-username" className="mb-1 block text-sm text-text-secondary">
-              Username
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-cred-username">Username</label>
             <input
               id="device-cred-username"
               type="text"
@@ -393,14 +370,12 @@ export default function DeviceForm({ onSubmit }) {
                 setUsername(e.target.value);
                 invalidateTest();
               }}
-              className={inputClasses}
+              className="input"
             />
           </div>
 
-          <div>
-            <label htmlFor="device-cred-password" className="mb-1 block text-sm text-text-secondary">
-              Password
-            </label>
+          <div className="form-field">
+            <label htmlFor="device-cred-password">Password</label>
             <input
               id="device-cred-password"
               type="password"
@@ -410,22 +385,20 @@ export default function DeviceForm({ onSubmit }) {
                 setPassword(e.target.value);
                 invalidateTest();
               }}
-              className={inputClasses}
+              className="input"
             />
           </div>
 
           {hasEnable && (
-            <div>
-              <label htmlFor="device-cred-enable" className="mb-1 block text-sm text-text-secondary">
-                Enable Password (optional)
-              </label>
+            <div className="form-field">
+              <label htmlFor="device-cred-enable">Enable Password (optional)</label>
               <input
                 id="device-cred-enable"
                 type="password"
                 autoComplete="new-password"
                 value={enablePassword}
                 onChange={(e) => setEnablePassword(e.target.value)}
-                className={inputClasses}
+                className="input"
               />
             </div>
           )}
@@ -433,7 +406,9 @@ export default function DeviceForm({ onSubmit }) {
       )}
 
       {showSslToggle && (
-        <label className="flex items-center gap-2 text-sm text-text-secondary">
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
+        >
           <input
             type="checkbox"
             checked={allowSelfSignedSsl}
@@ -446,28 +421,24 @@ export default function DeviceForm({ onSubmit }) {
         </label>
       )}
 
-      <div>
-        <label htmlFor="device-site" className="mb-1 block text-sm text-text-secondary">
-          Site
-        </label>
+      <div className="form-field">
+        <label htmlFor="device-site">Site</label>
         <input
           id="device-site"
           type="text"
           value={site}
           onChange={(e) => setSite(e.target.value)}
-          className={inputClasses}
+          className="input"
         />
       </div>
 
-      <div>
-        <label htmlFor="device-criticality" className="mb-1 block text-sm text-text-secondary">
-          Asset Criticality
-        </label>
+      <div className="form-field">
+        <label htmlFor="device-criticality">Asset Criticality</label>
         <select
           id="device-criticality"
           value={assetCriticality}
           onChange={(e) => setAssetCriticality(e.target.value)}
-          className={inputClasses}
+          className="input"
         >
           {CRITICALITY_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -478,12 +449,21 @@ export default function DeviceForm({ onSubmit }) {
       </div>
 
       {isSmc && (
-        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 12,
+            borderTop: '1px solid var(--border)',
+            paddingTop: 16,
+          }}
+        >
           <Button type="button" variant="secondary" onClick={handleTest} disabled={testing || !smcHost}>
             {testing ? 'Testing…' : 'Test Connectivity'}
           </Button>
           {testResult && (
-            <span className={`text-sm ${testResult.ok ? 'text-success' : 'text-danger'}`}>
+            <span style={{ fontSize: 'var(--text-base)', color: testResult.ok ? 'var(--green)' : 'var(--red)' }}>
               {testResult.ok
                 ? `Connected — ${testResult.engineCount ?? 0} engines found`
                 : testResult.message}
@@ -492,13 +472,15 @@ export default function DeviceForm({ onSubmit }) {
         </div>
       )}
 
-      {submitError && <p className="text-sm text-danger">{submitError}</p>}
+      {submitError && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{submitError}</p>}
 
       <Button type="submit" variant="primary" disabled={saveBlocked || submitting}>
         {submitting ? 'Saving…' : 'Save'}
       </Button>
       {saveBlocked && (
-        <p className="text-xs text-text-muted">Run a successful connectivity test before saving.</p>
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+          Run a successful connectivity test before saving.
+        </p>
       )}
     </form>
   );

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../../../../lib/db';
 import Table from '../../../../../components/ui/Table';
 import EmptyState from '../../../../../components/ui/EmptyState';
+import PageHeader from '../../../../../components/ui/PageHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,10 @@ const SORT_OPTIONS = {
   hits: 'hit_count DESC',
 };
 
-function actionBorderClass(action) {
-  if (action === 'allow') return 'border-l-4 border-l-success';
-  if (action === 'deny' || action === 'drop' || action === 'reject') return 'border-l-4 border-l-danger';
-  return 'border-l-4 border-l-border';
+function actionBorderColor(action) {
+  if (action === 'allow') return 'var(--green)';
+  if (action === 'deny' || action === 'drop' || action === 'reject') return 'var(--red)';
+  return 'var(--border)';
 }
 
 function joinArray(value) {
@@ -104,10 +105,10 @@ export default async function DeviceRulesPage({ params, searchParams }) {
   if (!device) {
     return (
       <div>
-        <Link href="/devices" className="text-sm text-accent hover:underline">
+        <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
           ← Back to devices
         </Link>
-        <p className="mt-4 text-text-secondary">Device not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
     );
   }
@@ -118,46 +119,33 @@ export default async function DeviceRulesPage({ params, searchParams }) {
   const csvHref = `/api/devices/${device.id}/rules?format=csv&${buildQueryString(searchParams || {}, { page: undefined })}`;
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
-        <Link href={`/devices/${device.id}`} className="text-sm text-accent hover:underline">
+        <Link
+          href={`/devices/${device.id}`}
+          style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+        >
           ← Back to {device.name}
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-text-primary">Firewall Rules — {device.name}</h1>
-        <a
-          href={csvHref}
-          className="inline-flex items-center justify-center rounded border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary hover:bg-bg-elevated"
-        >
-          Export CSV
-        </a>
-      </div>
+      <PageHeader
+        title={`Firewall Rules — ${device.name}`}
+        actions={
+          <a href={csvHref} className="btn btn-secondary">
+            Export CSV
+          </a>
+        }
+      />
 
-      <form method="GET" className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="search" className="text-xs text-text-secondary">
-            Search (name / IP / port)
-          </label>
-          <input
-            id="search"
-            type="text"
-            name="search"
-            defaultValue={searchParams?.search || ''}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          />
+      <form method="GET" className="filter-row" style={{ alignItems: 'flex-end' }}>
+        <div className="form-field">
+          <label htmlFor="search">Search (name / IP / port)</label>
+          <input id="search" type="text" name="search" defaultValue={searchParams?.search || ''} className="input" />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="action" className="text-xs text-text-secondary">
-            Action
-          </label>
-          <select
-            id="action"
-            name="action"
-            defaultValue={searchParams?.action || ''}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="action">Action</label>
+          <select id="action" name="action" defaultValue={searchParams?.action || ''} className="input">
             <option value="">All actions</option>
             <option value="allow">Allow</option>
             <option value="deny">Deny</option>
@@ -165,51 +153,26 @@ export default async function DeviceRulesPage({ params, searchParams }) {
             <option value="reject">Reject</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="enabled" className="text-xs text-text-secondary">
-            Enabled
-          </label>
-          <select
-            id="enabled"
-            name="enabled"
-            defaultValue={searchParams?.enabled || ''}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="enabled">Enabled</label>
+          <select id="enabled" name="enabled" defaultValue={searchParams?.enabled || ''} className="input">
             <option value="">All</option>
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="zone" className="text-xs text-text-secondary">
-            Zone
-          </label>
-          <input
-            id="zone"
-            type="text"
-            name="zone"
-            defaultValue={searchParams?.zone || ''}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          />
+        <div className="form-field">
+          <label htmlFor="zone">Zone</label>
+          <input id="zone" type="text" name="zone" defaultValue={searchParams?.zone || ''} className="input" />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="sort" className="text-xs text-text-secondary">
-            Sort
-          </label>
-          <select
-            id="sort"
-            name="sort"
-            defaultValue={sortKey}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="sort">Sort</label>
+          <select id="sort" name="sort" defaultValue={sortKey} className="input">
             <option value="sequence">Sequence #</option>
             <option value="hits">Hit Count</option>
           </select>
         </div>
-        <button
-          type="submit"
-          className="rounded border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary hover:bg-bg-elevated"
-        >
+        <button type="submit" className="btn btn-secondary">
           Filter
         </button>
       </form>
@@ -232,61 +195,49 @@ export default async function DeviceRulesPage({ params, searchParams }) {
             <col style={{ width: '2%' }} />
           </colgroup>
           <thead>
-            <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-              <th className="px-2 py-2">#</th>
-              <th className="px-2 py-2">Name</th>
-              <th className="px-2 py-2">Enabled</th>
-              <th className="px-2 py-2">Action</th>
-              <th className="px-2 py-2">Src Zone</th>
-              <th className="px-2 py-2">Dst Zone</th>
-              <th className="px-2 py-2">Src Address</th>
-              <th className="px-2 py-2">Dst Address</th>
-              <th className="px-2 py-2">Services</th>
-              <th className="px-2 py-2">Log</th>
-              <th className="px-2 py-2">Hits</th>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Enabled</th>
+              <th>Action</th>
+              <th>Src Zone</th>
+              <th>Dst Zone</th>
+              <th>Src Address</th>
+              <th>Dst Address</th>
+              <th>Services</th>
+              <th>Log</th>
+              <th>Hits</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className={`border-b border-border ${actionBorderClass(r.action)}`}>
-                <td className="px-2 py-2 text-text-secondary">{r.sequence_number ?? '—'}</td>
-                <td className="truncate px-2 py-2 text-text-primary" title={r.rule_name || ''}>
-                  {r.rule_name || '—'}
-                </td>
-                <td className="px-2 py-2 text-text-secondary">{r.enabled ? 'Yes' : 'No'}</td>
-                <td className="px-2 py-2 text-text-secondary">{r.action || '—'}</td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.src_zones)}>
-                  {joinArray(r.src_zones)}
-                </td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.dst_zones)}>
-                  {joinArray(r.dst_zones)}
-                </td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.src_addresses)}>
-                  {joinArray(r.src_addresses)}
-                </td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.dst_addresses)}>
-                  {joinArray(r.dst_addresses)}
-                </td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={joinArray(r.services)}>
-                  {joinArray(r.services)}
-                </td>
-                <td className="px-2 py-2 text-text-secondary">{r.log_enabled ? 'Yes' : 'No'}</td>
-                <td className="px-2 py-2 text-text-secondary">{r.hit_count ?? 0}</td>
+              <tr key={r.id} style={{ borderLeft: `4px solid ${actionBorderColor(r.action)}` }}>
+                <td>{r.sequence_number ?? '—'}</td>
+                <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
+                <td>{r.enabled ? 'Yes' : 'No'}</td>
+                <td>{r.action || '—'}</td>
+                <td title={joinArray(r.src_zones)}>{joinArray(r.src_zones)}</td>
+                <td title={joinArray(r.dst_zones)}>{joinArray(r.dst_zones)}</td>
+                <td title={joinArray(r.src_addresses)}>{joinArray(r.src_addresses)}</td>
+                <td title={joinArray(r.dst_addresses)}>{joinArray(r.dst_addresses)}</td>
+                <td title={joinArray(r.services)}>{joinArray(r.services)}</td>
+                <td>{r.log_enabled ? 'Yes' : 'No'}</td>
+                <td>{r.hit_count ?? 0}</td>
               </tr>
             ))}
           </tbody>
         </Table>
       )}
 
-      <div className="flex items-center justify-between text-sm text-text-secondary">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
         <span>
           Page {page} of {totalPages} ({total} rules)
         </span>
-        <div className="flex items-center gap-3">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {page > 1 && (
             <Link
               href={`/devices/${device.id}/rules?${buildQueryString(searchParams || {}, { page: page - 1 })}`}
-              className="text-accent hover:underline"
+              style={{ color: 'var(--primary)', textDecoration: 'underline' }}
             >
               ← Prev
             </Link>
@@ -294,7 +245,7 @@ export default async function DeviceRulesPage({ params, searchParams }) {
           {page < totalPages && (
             <Link
               href={`/devices/${device.id}/rules?${buildQueryString(searchParams || {}, { page: page + 1 })}`}
-              className="text-accent hover:underline"
+              style={{ color: 'var(--primary)', textDecoration: 'underline' }}
             >
               Next →
             </Link>

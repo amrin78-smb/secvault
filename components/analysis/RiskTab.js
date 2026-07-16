@@ -46,12 +46,12 @@ export default async function RiskTab({ deviceId }) {
   const latest = rows[rows.length - 1];
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
         <Badge color={RISK_BAND_COLOR[latest.band] || 'muted'}>
           Risk: {RISK_BAND_LABEL[latest.band] || latest.band} ({latest.score})
         </Badge>
-        <span className="text-sm text-text-secondary">
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
           Latest of {rows.length} snapshot{rows.length === 1 ? '' : 's'} — as of{' '}
           {formatDateTime(latest.recorded_at)}
         </span>

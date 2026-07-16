@@ -4,9 +4,6 @@ import { useState } from 'react';
 import Button from '../ui/Button';
 import { VENDOR_META, buildCredentialPlaintext, resolveAccessMethod } from './vendorMeta';
 
-const inputClasses =
-  'rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none';
-
 const AUTH_MODE_OPTIONS = [
   { value: 'apikey', label: 'API Key / Token' },
   { value: 'userpass', label: 'Username & Password' },
@@ -87,7 +84,7 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
       {isApiKeyOrUserPass && (
         <select
           aria-label="Authentication mode"
@@ -99,7 +96,8 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
             setPassword('');
             setResult(null);
           }}
-          className={inputClasses}
+          className="input"
+          style={{ width: 'auto' }}
         >
           {AUTH_MODE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -116,7 +114,8 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           placeholder={`New ${config.secretLabel}`}
-          className={inputClasses}
+          className="input"
+          style={{ width: 'auto' }}
         />
       ) : (
         <>
@@ -126,7 +125,8 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="Username"
-            className={inputClasses}
+            className="input"
+            style={{ width: 'auto' }}
           />
           <input
             type="password"
@@ -134,7 +134,8 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
-            className={inputClasses}
+            className="input"
+            style={{ width: 'auto' }}
           />
           {hasEnable && (
             <input
@@ -143,7 +144,8 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
               value={enablePassword}
               onChange={(e) => setEnablePassword(e.target.value)}
               placeholder="Enable password (optional)"
-              className={inputClasses}
+              className="input"
+              style={{ width: 'auto' }}
             />
           )}
         </>
@@ -152,7 +154,9 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
         {saving ? 'Saving…' : showSecretInput ? `Update ${config.secretLabel}` : 'Update Credentials'}
       </Button>
       {result && (
-        <span className={`text-sm ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</span>
+        <span style={{ fontSize: 'var(--text-base)', color: result.ok ? 'var(--green)' : 'var(--red)' }}>
+          {result.text}
+        </span>
       )}
     </div>
   );

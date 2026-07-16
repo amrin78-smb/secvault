@@ -82,6 +82,7 @@
   --tint-danger:  #fef2f2;  --tint-danger-fg:  #b91c1c;
   --tint-purple:  #f5f3ff;  --tint-purple-fg:  #6d28d9;
   --tint-teal:    #ecfeff;  --tint-teal-fg:    #0e7490;
+  --tint-orange:  #ffedd5;  --tint-orange-fg:  #c2410c;
 }
 
 /* Dark theme — brand colors (--primary, --navy*, --accent-teal) and status
@@ -108,6 +109,7 @@
   --tint-danger:  rgba(220,38,38,0.13);   --tint-danger-fg:  #fca5a5;
   --tint-purple:  rgba(139,92,246,0.15);  --tint-purple-fg:  #c4b5fd;
   --tint-teal:    rgba(8,145,178,0.15);   --tint-teal-fg:    #67e8f9;
+  --tint-orange:  rgba(234,88,12,0.15);   --tint-orange-fg:  #fdba74;
 }
 
 [data-theme="dark"] th { background: rgba(255,255,255,0.03); }
@@ -174,7 +176,7 @@ tbody tr:hover td { background: var(--bg-primary); }
 .badge-red     { background: var(--tint-danger);  color: var(--tint-danger-fg); }
 .badge-blue    { background: var(--tint-info);    color: var(--tint-info-fg); }
 .badge-gray    { background: var(--surface-subtle); color: var(--text-secondary); }
-.badge-orange  { background: #ffedd5; color: #c2410c; }
+.badge-orange  { background: var(--tint-orange); color: var(--tint-orange-fg); }
 .badge-purple  { background: var(--tint-purple);  color: var(--tint-purple-fg); }
 .badge-teal    { background: var(--tint-teal);    color: var(--tint-teal-fg); }
 

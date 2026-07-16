@@ -77,13 +77,18 @@ export default function AcknowledgeControl({ deviceId, ruleIdVendor, findingType
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <select
         value={status}
         onChange={handleChange}
         disabled={saving}
         aria-label="Finding status"
-        className="rounded border border-border bg-bg-base px-1.5 py-1 text-xs text-text-primary disabled:opacity-50"
+        className="select"
+        style={{
+          fontSize: 'var(--text-xs)',
+          padding: '4px 26px 4px 8px',
+          opacity: saving ? 0.5 : 1,
+        }}
       >
         {STATUS_OPTIONS.map((opt) => (
           <option key={opt.value} value={opt.value}>
@@ -92,7 +97,7 @@ export default function AcknowledgeControl({ deviceId, ruleIdVendor, findingType
         ))}
       </select>
       {error && (
-        <span className="text-xs text-danger" title={error}>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
           ⚠
         </span>
       )}

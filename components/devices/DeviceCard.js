@@ -36,27 +36,47 @@ export default function DeviceCard({ device }) {
   return (
     <Link
       href={`/devices/${device.id}`}
-      className="block rounded-lg border border-border bg-bg-surface p-4 transition-colors hover:bg-bg-elevated"
+      className="card"
+      style={{ display: 'block', padding: 20, textDecoration: 'none', transition: 'box-shadow 0.2s, transform 0.2s' }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', minWidth: 0, alignItems: 'center', gap: 8 }}>
           <StatusDot status={status} />
-          <span className="truncate font-medium text-text-primary">{device.name}</span>
+          <span
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontWeight: 500,
+              color: 'var(--text-primary)',
+            }}
+          >
+            {device.name}
+          </span>
         </div>
         <Badge color="info">{device.vendor || 'forcepoint'}</Badge>
       </div>
 
-      <div className="mt-2 truncate text-sm text-text-secondary">
+      <div
+        style={{
+          marginTop: 8,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 'var(--text-base)',
+          color: 'var(--text-secondary)',
+        }}
+      >
         Version: {device.version_string || '—'}
       </div>
 
-      <div className="mt-3 flex items-center gap-3 text-xs">
-        <span className="text-danger">Patch Now: {device.patch_now_count ?? 0}</span>
-        <span className="text-warning">Scheduled: {device.scheduled_count ?? 0}</span>
-        <span className="text-text-muted">Monitor: {device.monitor_count ?? 0}</span>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-xs)' }}>
+        <span style={{ color: 'var(--red)' }}>Patch Now: {device.patch_now_count ?? 0}</span>
+        <span style={{ color: 'var(--yellow)' }}>Scheduled: {device.scheduled_count ?? 0}</span>
+        <span style={{ color: 'var(--text-muted)' }}>Monitor: {device.monitor_count ?? 0}</span>
       </div>
 
-      <div className="mt-2 text-xs text-text-muted">
+      <div style={{ marginTop: 8, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
         Last collected: {timeAgo(device.last_collected_at)}
       </div>
     </Link>

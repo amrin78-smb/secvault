@@ -5,10 +5,16 @@ import LoadingSpinner from '../ui/LoadingSpinner';
 
 // Renders one grouped section of a config diff (Added / Removed / Modified).
 // Defined at module top level (never nested inside DiffViewer — CLAUDE.md rule).
-const TONE_CLASSES = {
-  success: 'border-l-success bg-success/5 text-success',
-  danger: 'border-l-danger bg-danger/5 text-danger',
-  warning: 'border-l-warning bg-warning/5 text-warning',
+//
+// Visual treatment preserved from the pre-migration version: a colored left
+// border + a faint tinted background behind the row list, with the section
+// title carrying the stronger "fg" tone color and the row text staying
+// neutral. That maps directly onto the suite's tint pair tokens (tinted bg +
+// matching fg for the title) plus the solid hue for the left border accent.
+const TONE_STYLES = {
+  success: { border: 'var(--green)', bg: 'var(--tint-success)', fg: 'var(--tint-success-fg)' },
+  danger: { border: 'var(--red)', bg: 'var(--tint-danger)', fg: 'var(--tint-danger-fg)' },
+  warning: { border: 'var(--yellow)', bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)' },
 };
 
 function formatValue(value) {
@@ -19,16 +25,35 @@ function formatValue(value) {
 
 function DiffSection({ title, tone, rows, renderRow }) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
-  const toneClasses = TONE_CLASSES[tone] || TONE_CLASSES.warning;
+  const toneStyle = TONE_STYLES[tone] || TONE_STYLES.warning;
 
   return (
-    <div className={`rounded border-l-4 ${toneClasses} px-3 py-2`}>
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide">
+    <div
+      style={{
+        borderLeft: `4px solid ${toneStyle.border}`,
+        background: toneStyle.bg,
+        borderRadius: 'var(--radius-sm)',
+        padding: '8px 12px',
+      }}
+    >
+      <div
+        style={{
+          marginBottom: 4,
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: toneStyle.fg,
+        }}
+      >
         {title} ({rows.length})
       </div>
-      <ul className="space-y-0.5 font-mono text-xs text-text-primary">
+      <ul
+        className="mono"
+        style={{ display: 'flex', flexDirection: 'column', gap: 2, color: 'var(--text-primary)', listStyle: 'none' }}
+      >
         {rows.map((row, i) => (
-          <li key={i} className="break-all">
+          <li key={i} style={{ wordBreak: 'break-all' }}>
             {renderRow(row)}
           </li>
         ))}
@@ -87,21 +112,30 @@ export default function DiffViewer({ deviceId, diffId }) {
       <button
         type="button"
         onClick={handleToggle}
-        className="text-sm text-accent hover:underline"
+        style={{
+          fontSize: 'var(--text-base)',
+          color: 'var(--primary)',
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          textDecoration: 'underline',
+          fontFamily: 'inherit',
+        }}
       >
         {open ? 'Hide diff' : 'View diff'}
       </button>
 
       {open && (
-        <div className="mt-2 space-y-2">
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {loading && <LoadingSpinner size={18} />}
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</p>}
           {diff && !loading && !error && (
             <>
               <DiffSection title="Added" tone="success" rows={added} renderRow={renderAddedRow} />
               <DiffSection title="Removed" tone="danger" rows={removed} renderRow={renderRemovedRow} />
               <DiffSection title="Modified" tone="warning" rows={modified} renderRow={renderModifiedRow} />
-              {isEmpty && <p className="text-sm text-text-muted">This diff contains no entries.</p>}
+              {isEmpty && <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>This diff contains no entries.</p>}
             </>
           )}
         </div>

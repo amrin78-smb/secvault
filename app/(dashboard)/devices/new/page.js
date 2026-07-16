@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DeviceForm from '../../../../components/devices/DeviceForm';
+import PageHeader from '../../../../components/ui/PageHeader';
 
 // This page needs no server-side data fetching (a blank "add device" form has nothing
 // to pre-load from the DB), so the whole file can be a Client Component with no
@@ -29,9 +30,9 @@ export default function NewDevicePage() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
-      <h1 className="text-lg font-semibold text-text-primary">Add Device</h1>
-      {error && <p className="text-sm text-danger">{error}</p>}
+    <div style={{ maxWidth: 576, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PageHeader title="Add Device" />
+      {error && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</p>}
       <DeviceForm onSubmit={handleSubmit} />
     </div>
   );

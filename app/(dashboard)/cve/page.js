@@ -1,6 +1,9 @@
 import { pool } from '../../../lib/db';
 import CVETable from '../../../components/cve/CVETable';
 import AssessNowButton from '../../../components/cve/AssessNowButton';
+import PageHeader from '../../../components/ui/PageHeader';
+import StatCard from '../../../components/ui/StatCard';
+import Button from '../../../components/ui/Button';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,58 +101,29 @@ export default async function FleetCvePage({ searchParams }) {
   const vendorValue = searchParams?.vendor || '';
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-text-primary">Fleet CVE Posture</h1>
-        <AssessNowButton />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <PageHeader title="Fleet CVE Posture" actions={<AssessNowButton />} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+        <StatCard label="Unique CVEs" value={summary.total_cves} />
+        <StatCard label="Patch Now" value={summary.patch_now_count} color="var(--red)" />
+        <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" />
+        <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" />
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Unique CVEs</div>
-          <div className="mt-1 text-2xl font-semibold text-text-primary">{summary.total_cves}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Patch Now</div>
-          <div className="mt-1 text-2xl font-semibold text-danger">{summary.patch_now_count}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Scheduled</div>
-          <div className="mt-1 text-2xl font-semibold text-warning">{summary.scheduled_count}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Monitor</div>
-          <div className="mt-1 text-2xl font-semibold text-text-muted">{summary.monitor_count}</div>
-        </div>
-      </div>
-
-      <form method="GET" className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="priority_band" className="text-xs text-text-secondary">
-            Priority Band
-          </label>
-          <select
-            id="priority_band"
-            name="priority_band"
-            defaultValue={priorityBandValue}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+      <form method="GET" className="filter-row">
+        <div className="form-field">
+          <label htmlFor="priority_band">Priority Band</label>
+          <select id="priority_band" name="priority_band" defaultValue={priorityBandValue} className="select">
             <option value="">All bands</option>
             <option value="patch_now">Patch Now</option>
             <option value="scheduled">Scheduled</option>
             <option value="monitor">Monitor</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cvss_band" className="text-xs text-text-secondary">
-            CVSS Band
-          </label>
-          <select
-            id="cvss_band"
-            name="cvss_band"
-            defaultValue={cvssBandValue}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="cvss_band">CVSS Band</label>
+          <select id="cvss_band" name="cvss_band" defaultValue={cvssBandValue} className="select">
             <option value="">All CVSS</option>
             <option value="critical">Critical (9.0+)</option>
             <option value="high">High (7.0-8.9)</option>
@@ -157,16 +131,9 @@ export default async function FleetCvePage({ searchParams }) {
             <option value="low">Low (&lt;4.0)</option>
           </select>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="vendor" className="text-xs text-text-secondary">
-            Vendor
-          </label>
-          <select
-            id="vendor"
-            name="vendor"
-            defaultValue={vendorValue}
-            className="rounded border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-          >
+        <div className="form-field">
+          <label htmlFor="vendor">Vendor</label>
+          <select id="vendor" name="vendor" defaultValue={vendorValue} className="select">
             <option value="">All vendors</option>
             <option value="forcepoint">Forcepoint</option>
             <option value="fortinet">Fortinet</option>
@@ -176,16 +143,21 @@ export default async function FleetCvePage({ searchParams }) {
             <option value="sangfor">Sangfor</option>
           </select>
         </div>
-        <label className="flex items-center gap-1.5 pb-1.5 text-sm text-text-secondary">
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 'var(--text-base)',
+            color: 'var(--text-secondary)',
+          }}
+        >
           <input type="checkbox" name="kev_only" value="1" defaultChecked={kevOnlyChecked} />
           KEV only
         </label>
-        <button
-          type="submit"
-          className="rounded border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary hover:bg-bg-elevated"
-        >
+        <Button type="submit" variant="secondary">
           Filter
-        </button>
+        </Button>
       </form>
 
       <CVETable rows={rows} showDeviceColumn deviceColumnLabel="Devices Affected" />

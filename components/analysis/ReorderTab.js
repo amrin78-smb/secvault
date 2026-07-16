@@ -108,33 +108,28 @@ export default async function ReorderTab({ deviceId }) {
         <col style={{ width: '14%' }} />
       </colgroup>
       <thead>
-        <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-          <th className="px-2 py-2">Severity</th>
-          <th className="px-2 py-2">Shadowed Rule (Deny)</th>
-          <th className="px-2 py-2">Shadowing Rule (Allow)</th>
-          <th className="px-2 py-2">Detail</th>
-          <th className="px-2 py-2">Status</th>
+        <tr>
+          <th>Severity</th>
+          <th>Shadowed Rule (Deny)</th>
+          <th>Shadowing Rule (Allow)</th>
+          <th>Detail</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {findings.map((row) => (
-          <tr key={row.finding_id} className="border-b border-border">
-            <td className="px-2 py-2">
+          <tr key={row.finding_id}>
+            <td>
               <SeverityBadge severity={row.severity} />
             </td>
-            <td className="truncate px-2 py-2" title={ruleLabel(row)}>
-              {ruleLabel(row)}
-            </td>
-            <td
-              className="truncate px-2 py-2"
-              title={shadowingRuleLabel(row.affected_rule_ids, ruleMap)}
-            >
+            <td title={ruleLabel(row)}>{ruleLabel(row)}</td>
+            <td title={shadowingRuleLabel(row.affected_rule_ids, ruleMap)}>
               {shadowingRuleLabel(row.affected_rule_ids, ruleMap)}
             </td>
-            <td className="px-2 py-2 text-text-secondary" title={row.detail || ''}>
+            <td style={{ color: 'var(--text-secondary)' }} title={row.detail || ''}>
               {row.detail || '—'}
             </td>
-            <td className="px-2 py-2">
+            <td>
               {row.rule_id_vendor ? (
                 <AcknowledgeControl
                   deviceId={deviceId}
@@ -143,7 +138,7 @@ export default async function ReorderTab({ deviceId }) {
                   currentStatus={ackMap.get(row.rule_id_vendor) || 'new'}
                 />
               ) : (
-                <span className="text-xs text-text-muted">—</span>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>—</span>
               )}
             </td>
           </tr>

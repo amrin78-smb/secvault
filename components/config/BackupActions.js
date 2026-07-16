@@ -34,11 +34,11 @@ export default function BackupActions({ deviceId }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
       <Button type="button" onClick={handleCreateBackup} disabled={saving}>
         {saving ? 'Creating…' : 'Create backup'}
       </Button>
-      {error && <span className="text-sm text-danger">{error}</span>}
+      {error && <span style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</span>}
     </div>
   );
 }

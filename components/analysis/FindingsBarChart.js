@@ -1,6 +1,7 @@
 'use client';
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import Card, { CardBody } from '../ui/Card';
 
 // The 9 finding types in the fixed severity order CLAUDE.md documents for the
 // rule analysis engine (lib/engines/ruleAnalysis.js), each mapped to the
@@ -26,16 +27,24 @@ const FINDING_TYPE_ORDER = [
 // document.documentElement is synchronous and cheap for 4 lookups), with a
 // hardcoded fallback for the (never-expected-in-practice) case of SSR-time
 // evaluation before hydration.
+//
+// Var names match SeverityBadge.js's severity->Badge-color mapping one to
+// one (critical->danger/red, high->warning/yellow, medium->info/blue,
+// info->muted/text-muted) so this chart's bars and that badge always agree
+// on what each severity looks like. Reads the suite's solid status hues
+// directly (--red/--yellow/--blue) rather than the transitional
+// --danger/--warning/--info aliases in app/globals.css's legacy block, which
+// are slated for removal once nothing references them.
 const SEVERITY_VAR = {
-  critical: '--danger',
-  high: '--warning',
-  medium: '--info',
+  critical: '--red',
+  high: '--yellow',
+  medium: '--blue',
   info: '--text-muted',
 };
 const SEVERITY_FALLBACK_HEX = {
-  critical: '#ef4444',
-  high: '#f59e0b',
-  medium: '#3b82f6',
+  critical: '#dc2626',
+  high: '#d97706',
+  medium: '#2563eb',
   info: '#64748b',
 };
 
@@ -58,48 +67,60 @@ export default function FindingsBarChart({ counts }) {
   }));
 
   return (
-    <div className="rounded-lg border border-border bg-bg-surface p-4">
-      <div className="mb-3 text-xs uppercase tracking-wide text-text-muted">Findings by Type</div>
-      <div style={{ width: '100%', height: 260 }}>
-        <ResponsiveContainer>
-          <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-            <XAxis
-              dataKey="label"
-              tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-              axisLine={{ stroke: 'var(--border)' }}
-              tickLine={false}
-              interval={0}
-              angle={-20}
-              textAnchor="end"
-              height={50}
-            />
-            <YAxis
-              allowDecimals={false}
-              tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-              axisLine={{ stroke: 'var(--border)' }}
-              tickLine={false}
-              width={28}
-            />
-            <Tooltip
-              cursor={{ fill: 'var(--bg-elevated)' }}
-              contentStyle={{
-                background: 'var(--bg-elevated)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                fontSize: 12,
-              }}
-              labelStyle={{ color: 'var(--text-primary)' }}
-              itemStyle={{ color: 'var(--text-primary)' }}
-            />
-            <Bar dataKey="count" radius={[3, 3, 0, 0]} maxBarSize={40}>
-              {data.map((entry) => (
-                <Cell key={entry.type} fill={entry.color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <Card>
+      <CardBody>
+        <div
+          style={{
+            marginBottom: 12,
+            fontSize: 'var(--text-xs)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Findings by Type
+        </div>
+        <div style={{ width: '100%', height: 260 }}>
+          <ResponsiveContainer>
+            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                interval={0}
+                angle={-20}
+                textAnchor="end"
+                height={50}
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+                axisLine={{ stroke: 'var(--border)' }}
+                tickLine={false}
+                width={28}
+              />
+              <Tooltip
+                cursor={{ fill: 'var(--bg-card)' }}
+                contentStyle={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: 'var(--text-primary)' }}
+                itemStyle={{ color: 'var(--text-primary)' }}
+              />
+              <Bar dataKey="count" radius={[3, 3, 0, 0]} maxBarSize={40}>
+                {data.map((entry) => (
+                  <Cell key={entry.type} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </CardBody>
+    </Card>
   );
 }

@@ -3,6 +3,8 @@ import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
+import StatCard from '../../../components/ui/StatCard';
+import PageHeader from '../../../components/ui/PageHeader';
 import { computeRiskScoreFromCounts } from '../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
@@ -50,30 +52,15 @@ export default async function FleetAnalysisPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-lg font-semibold text-text-primary">Rule Health — Fleet</h1>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <PageHeader title="Rule Health — Fleet" />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Critical</div>
-          <div className="mt-1 text-2xl font-semibold text-danger">{totals.critical}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">High</div>
-          <div className="mt-1 text-2xl font-semibold text-warning">{totals.high}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Medium</div>
-          <div className="mt-1 text-2xl font-semibold text-info">{totals.medium}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Info</div>
-          <div className="mt-1 text-2xl font-semibold text-text-muted">{totals.info}</div>
-        </div>
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <div className="text-xs uppercase tracking-wide text-text-muted">Total Findings</div>
-          <div className="mt-1 text-2xl font-semibold text-text-primary">{totals.total}</div>
-        </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+        <StatCard label="Critical" value={totals.critical} color="var(--red)" />
+        <StatCard label="High" value={totals.high} color="var(--yellow)" />
+        <StatCard label="Medium" value={totals.medium} color="var(--blue)" />
+        <StatCard label="Info" value={totals.info} color="var(--text-muted)" />
+        <StatCard label="Total Findings" value={totals.total} color="var(--text-primary)" />
       </div>
 
       {rows.length === 0 ? (
@@ -92,44 +79,54 @@ export default async function FleetAnalysisPage() {
             <col style={{ width: '11%' }} />
           </colgroup>
           <thead>
-            <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
-              <th className="px-2 py-2">Device</th>
-              <th className="px-2 py-2">Vendor</th>
-              <th className="px-2 py-2">Site</th>
-              <th className="px-2 py-2">Risk</th>
-              <th className="px-2 py-2">Critical</th>
-              <th className="px-2 py-2">High</th>
-              <th className="px-2 py-2">Medium</th>
-              <th className="px-2 py-2">Info</th>
-              <th className="px-2 py-2">Total</th>
+            <tr>
+              <th>Device</th>
+              <th>Vendor</th>
+              <th>Site</th>
+              <th>Risk</th>
+              <th>Critical</th>
+              <th>High</th>
+              <th>Medium</th>
+              <th>Info</th>
+              <th>Total</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="border-b border-border">
-                <td className="truncate px-2 py-2" title={r.name}>
-                  <Link href={`/devices/${r.id}/analysis`} className="text-accent hover:underline">
+              <tr key={r.id}>
+                <td title={r.name}>
+                  <Link href={`/devices/${r.id}/analysis`} style={{ color: 'var(--primary)' }}>
                     {r.name}
                   </Link>
                 </td>
-                <td className="px-2 py-2 text-text-secondary">{r.vendor || '—'}</td>
-                <td className="truncate px-2 py-2 text-text-secondary" title={r.site || ''}>
+                <td style={{ color: 'var(--text-secondary)' }}>{r.vendor || '—'}</td>
+                <td style={{ color: 'var(--text-secondary)' }} title={r.site || ''}>
                   {r.site || '—'}
                 </td>
-                <td className="px-2 py-2">
+                <td>
                   <Badge color={RISK_BAND_COLOR[r.risk.band]}>
                     {RISK_BAND_LABEL[r.risk.band]} ({r.risk.score})
                   </Badge>
                 </td>
-                <td className={`px-2 py-2 ${r.critical > 0 ? 'font-medium text-danger' : 'text-text-muted'}`}>
+                <td
+                  style={{
+                    color: r.critical > 0 ? 'var(--red)' : 'var(--text-muted)',
+                    fontWeight: r.critical > 0 ? 600 : 400,
+                  }}
+                >
                   {r.critical}
                 </td>
-                <td className={`px-2 py-2 ${r.high > 0 ? 'font-medium text-warning' : 'text-text-muted'}`}>
+                <td
+                  style={{
+                    color: r.high > 0 ? 'var(--yellow)' : 'var(--text-muted)',
+                    fontWeight: r.high > 0 ? 600 : 400,
+                  }}
+                >
                   {r.high}
                 </td>
-                <td className={`px-2 py-2 ${r.medium > 0 ? 'text-info' : 'text-text-muted'}`}>{r.medium}</td>
-                <td className="px-2 py-2 text-text-muted">{r.info}</td>
-                <td className="px-2 py-2 text-text-primary">{r.total}</td>
+                <td style={{ color: r.medium > 0 ? 'var(--blue)' : 'var(--text-muted)' }}>{r.medium}</td>
+                <td style={{ color: 'var(--text-muted)' }}>{r.info}</td>
+                <td>{r.total}</td>
               </tr>
             ))}
           </tbody>

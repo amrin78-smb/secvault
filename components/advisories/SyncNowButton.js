@@ -42,16 +42,20 @@ export default function SyncNowButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <Button type="button" variant="primary" onClick={handleSync} disabled={running}>
         {running && <LoadingSpinner size={14} />}
         {running ? 'Syncing…' : 'Sync Now'}
       </Button>
       {result && (
-        <span className={`text-sm ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</span>
+        <span style={{ fontSize: 'var(--text-base)', color: result.ok ? 'var(--green)' : 'var(--red)' }}>
+          {result.text}
+        </span>
       )}
       {running && (
-        <span className="text-xs text-text-muted">Can take a minute or more (NVD is rate-limited).</span>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+          Can take a minute or more (NVD is rate-limited).
+        </span>
       )}
     </div>
   );

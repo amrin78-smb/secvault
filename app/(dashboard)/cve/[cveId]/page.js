@@ -4,8 +4,25 @@ import CVEBadge from '../../../../components/cve/CVEBadge';
 import PriorityBadge from '../../../../components/cve/PriorityBadge';
 import Table from '../../../../components/ui/Table';
 import EmptyState from '../../../../components/ui/EmptyState';
+import Card, { CardBody } from '../../../../components/ui/Card';
 
 export const dynamic = 'force-dynamic';
+
+const backLinkStyle = { fontSize: 'var(--text-sm)', color: 'var(--primary)' };
+const sectionLabelStyle = {
+  marginBottom: 8,
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-secondary)',
+};
+const fieldLabelStyle = {
+  fontSize: 'var(--text-xs)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-muted)',
+};
 
 function formatDate(value) {
   if (!value) return '—';
@@ -14,14 +31,14 @@ function formatDate(value) {
   return d.toISOString().slice(0, 10);
 }
 
-function cvssTextClass(score) {
-  if (score === null || score === undefined) return 'text-text-muted';
+function cvssStyle(score) {
+  if (score === null || score === undefined) return { color: 'var(--text-muted)' };
   const n = Number(score);
-  if (Number.isNaN(n)) return 'text-text-muted';
-  if (n >= 9) return 'text-danger font-semibold';
-  if (n >= 7) return 'text-warning font-semibold';
-  if (n >= 4) return 'text-text-primary';
-  return 'text-text-muted';
+  if (Number.isNaN(n)) return { color: 'var(--text-muted)' };
+  if (n >= 9) return { color: 'var(--red)', fontWeight: 600 };
+  if (n >= 7) return { color: 'var(--yellow)', fontWeight: 600 };
+  if (n >= 4) return { color: 'var(--text-primary)' };
+  return { color: 'var(--text-muted)' };
 }
 
 async function getAdvisory(dbPool, cveId) {
@@ -56,10 +73,10 @@ export default async function CveDetailPage({ params }) {
   if (!advisory) {
     return (
       <div>
-        <Link href="/cve" className="text-sm text-accent hover:underline">
+        <Link href="/cve" style={backLinkStyle}>
           ← Back to fleet CVE posture
         </Link>
-        <p className="mt-4 text-text-secondary">Advisory {cveId} not found.</p>
+        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Advisory {cveId} not found.</p>
       </div>
     );
   }
@@ -67,99 +84,114 @@ export default async function CveDetailPage({ params }) {
   const devices = await getAffectedDevices(pool, cveId);
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
-        <Link href="/cve" className="text-sm text-accent hover:underline">
+        <Link href="/cve" style={backLinkStyle}>
           ← Back to fleet CVE posture
         </Link>
       </div>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold text-text-primary">{advisory.cve_id}</h1>
-          <CVEBadge kevListed={advisory.kev_listed} />
-          {!advisory.kev_listed && <span className="text-sm text-text-muted">Not KEV-listed</span>}
-        </div>
-        {advisory.title && <p className="mt-1 text-text-secondary">{advisory.title}</p>}
-
-        <div className="mt-4 grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">CVSS Score</div>
-            <div className={cvssTextClass(advisory.cvss_score)}>{advisory.cvss_score ?? '—'}</div>
+      <Card>
+        <CardBody>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+            <h1 className="page-title" style={{ marginBottom: 0 }}>
+              {advisory.cve_id}
+            </h1>
+            <CVEBadge kevListed={advisory.kev_listed} />
+            {!advisory.kev_listed && (
+              <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>Not KEV-listed</span>
+            )}
           </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Published</div>
-            <div className="text-text-primary">{formatDate(advisory.published_at)}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-wide text-text-muted">Vendor</div>
-            <div className="text-text-primary">{advisory.vendor}</div>
-          </div>
-        </div>
-      </div>
+          {advisory.title && (
+            <p style={{ marginTop: 4, color: 'var(--text-secondary)' }}>{advisory.title}</p>
+          )}
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">Description</h2>
-        <p className="text-text-primary">{advisory.description || 'No description available.'}</p>
-      </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: 16,
+              marginTop: 16,
+              fontSize: 'var(--text-base)',
+            }}
+          >
+            <div>
+              <div style={fieldLabelStyle}>CVSS Score</div>
+              <div style={cvssStyle(advisory.cvss_score)}>{advisory.cvss_score ?? '—'}</div>
+            </div>
+            <div>
+              <div style={fieldLabelStyle}>Published</div>
+              <div style={{ color: 'var(--text-primary)' }}>{formatDate(advisory.published_at)}</div>
+            </div>
+            <div>
+              <div style={fieldLabelStyle}>Vendor</div>
+              <div style={{ color: 'var(--text-primary)' }}>{advisory.vendor}</div>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
-      <div className="rounded border border-border bg-bg-surface p-4">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">Affected Devices</h2>
-        {devices.length === 0 ? (
-          <EmptyState message="No devices assessed against this CVE yet." />
-        ) : (
-          <Table>
-            <colgroup>
-              <col style={{ width: '30%' }} />
-              <col style={{ width: '20%' }} />
-              <col style={{ width: '20%' }} />
-              <col style={{ width: '15%' }} />
-              <col style={{ width: '15%' }} />
-            </colgroup>
-            <thead>
-              <tr className="border-b border-border text-left text-text-secondary">
-                <th className="py-2 pr-2">Device</th>
-                <th className="py-2 pr-2">Current Version</th>
-                <th className="py-2 pr-2">Fixed-In</th>
-                <th className="py-2 pr-2">Priority Band</th>
-                <th className="py-2 pr-2">Recommended</th>
-              </tr>
-            </thead>
-            <tbody>
-              {devices.map((d) => (
-                <tr key={d.id} className="border-b border-border hover:bg-bg-elevated">
-                  <td className="truncate py-2 pr-2">
-                    <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
-                      {d.name}
-                    </Link>
-                  </td>
-                  <td className="truncate py-2 pr-2 text-text-secondary">{d.version_string || '—'}</td>
-                  <td className="truncate py-2 pr-2 text-text-secondary">{d.fixed_in || '—'}</td>
-                  <td className="py-2 pr-2">
-                    <PriorityBadge band={d.priority_band} />
-                  </td>
-                  <td className="py-2 pr-2">
-                    {d.is_fixed_recommended ? (
-                      <span className="text-success">Yes</span>
-                    ) : (
-                      <span className="text-text-muted">No</span>
-                    )}
-                  </td>
+      <Card>
+        <CardBody>
+          <h2 style={sectionLabelStyle}>Description</h2>
+          <p style={{ color: 'var(--text-primary)' }}>{advisory.description || 'No description available.'}</p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody>
+          <h2 style={sectionLabelStyle}>Affected Devices</h2>
+          {devices.length === 0 ? (
+            <EmptyState message="No devices assessed against this CVE yet." />
+          ) : (
+            <Table>
+              <colgroup>
+                <col style={{ width: '30%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Current Version</th>
+                  <th>Fixed-In</th>
+                  <th>Priority Band</th>
+                  <th>Recommended</th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </div>
+              </thead>
+              <tbody>
+                {devices.map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)' }}>
+                        {d.name}
+                      </Link>
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{d.version_string || '—'}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{d.fixed_in || '—'}</td>
+                    <td>
+                      <PriorityBadge band={d.priority_band} />
+                    </td>
+                    <td>
+                      {d.is_fixed_recommended ? (
+                        <span style={{ color: 'var(--green)' }}>Yes</span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>No</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </CardBody>
+      </Card>
 
       {advisory.advisory_url && (
         <div>
-          <a
-            href={advisory.advisory_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-accent hover:underline"
-          >
+          <a href={advisory.advisory_url} target="_blank" rel="noopener noreferrer" style={backLinkStyle}>
             View on NVD →
           </a>
         </div>

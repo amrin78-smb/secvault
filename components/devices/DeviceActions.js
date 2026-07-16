@@ -58,7 +58,7 @@ export default function DeviceActions({ deviceId }) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
       <Button
         type="button"
         variant="secondary"
@@ -78,10 +78,12 @@ export default function DeviceActions({ deviceId }) {
         {running === 'test' ? 'Testing…' : 'Test Connectivity'}
       </Button>
       {result && (
-        <span className={`text-sm ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</span>
+        <span style={{ fontSize: 'var(--text-base)', color: result.ok ? 'var(--green)' : 'var(--red)' }}>
+          {result.text}
+        </span>
       )}
       {running && (
-        <span className="text-xs text-text-muted">
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           This can take up to a couple of minutes on an unreachable device.
         </span>
       )}

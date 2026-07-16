@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
+import Button from '../../../components/ui/Button';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,22 +39,39 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg-base px-4">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-bg-surface p-8 shadow-lg">
-        <div className="mb-8 text-center">
-          <span className="text-2xl font-semibold tracking-tight text-text-primary">
-            Sec<span className="text-accent">Vault</span>
+    <div
+      style={{
+        display: 'flex',
+        minHeight: '100vh',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--navy)',
+        padding: '0 16px',
+      }}
+    >
+      <div
+        className="card"
+        style={{ width: '100%', maxWidth: 384, padding: 32 }}
+      >
+        <div style={{ marginBottom: 32, textAlign: 'center' }}>
+          <span
+            style={{
+              fontSize: 'var(--text-xl)',
+              fontWeight: 700,
+              letterSpacing: '-0.3px',
+              color: 'var(--text-primary)',
+            }}
+          >
+            Sec<span style={{ color: 'var(--primary)' }}>Vault</span>
           </span>
-          <p className="mt-2 text-sm text-text-secondary">
+          <p style={{ marginTop: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
             Firewall security and management platform
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="username" className="mb-1 block text-sm text-text-secondary">
-              Username
-            </label>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="form-field">
+            <label htmlFor="username">Username</label>
             <input
               id="username"
               name="username"
@@ -61,14 +80,12 @@ export default function LoginPage() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className="input"
             />
           </div>
 
-          <div>
-            <label htmlFor="password" className="mb-1 block text-sm text-text-secondary">
-              Password
-            </label>
+          <div className="form-field">
+            <label htmlFor="password">Password</label>
             <input
               id="password"
               name="password"
@@ -77,23 +94,38 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full rounded-md border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className="input"
             />
           </div>
 
           {error && (
-            <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <p
+              style={{
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--tint-danger)',
+                color: 'var(--tint-danger-fg)',
+                padding: '8px 12px',
+                fontSize: 'var(--text-base)',
+              }}
+            >
               {error}
             </p>
           )}
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={submitting}
-            className="w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60 transition-colors"
+            style={{ width: '100%', justifyContent: 'center' }}
           >
-            {submitting ? 'Signing in...' : 'Sign in'}
-          </button>
+            {submitting ? (
+              <>
+                <LoadingSpinner size={14} /> Signing in...
+              </>
+            ) : (
+              'Sign in'
+            )}
+          </Button>
         </form>
       </div>
     </div>
