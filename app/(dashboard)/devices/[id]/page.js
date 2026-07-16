@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { pool } from '../../../../lib/db';
@@ -11,48 +10,27 @@ import Modal from '../../../../components/ui/Modal';
 import Table from '../../../../components/ui/Table';
 import CVETable from '../../../../components/cve/CVETable';
 import CredentialForm from '../../../../components/devices/CredentialForm';
+import DeviceActions from '../../../../components/devices/DeviceActions';
 
 export const dynamic = 'force-dynamic';
 
 // ────────────────────────────────────────────────────────────────────────
 // NOTE on tabs + action buttons:
-// The same file-scope 'use client' constraint discussed in devices/page.js applies
-// here: this page's default export is an async Server Component doing direct
-// pool.query data-fetching, so no client useState/useEffect can live in this file, and
-// no extra "Tabs.js" / "DeviceActions.js" file is in the frozen file list to hold them.
 // Tabs are implemented as a fully server-rendered `?tab=cve|rules|config` query param —
 // clicking a tab is a normal navigation, and only the active tab's data is queried
-// (arguably more efficient than pre-fetching all three tabs up front). Collect Now /
-// Test Connectivity / Delete follow the same Server Action + internal-fetch (with the
-// session cookie forwarded, since middleware.js requires auth on every /api/* route)
-// pattern used in devices/page.js.
+// (arguably more efficient than pre-fetching all three tabs up front).
+//
+// Collect Now / Test Connectivity used to be 'use server' actions wired to plain
+// <form action={...}> elements with an internalFetch() cookie-forwarding helper.
+// That had NO client JS in front of it, so the browser did a genuine top-level
+// form navigation and sat unresponsive — no spinner, no toast — until the
+// underlying adapter call finished, which on an unreachable device can take up
+// to ~2 minutes (see lib/adapters' per-vendor REQUEST_TIMEOUT_MS). Replaced with
+// DeviceActions.js, a client component using the same fetch+spinner+router.refresh()
+// pattern as CredentialForm.js / RunAnalysisButton.js. Delete stays a Server
+// Action — it's a single fast DB delete, not a network call to a firewall, so
+// the blocking-navigation cost that motivated this change doesn't apply to it.
 // ────────────────────────────────────────────────────────────────────────
-
-function internalFetch(path, init) {
-  const h = headers();
-  const host = h.get('host');
-  const proto = h.get('x-forwarded-proto') || 'http';
-  const cookie = h.get('cookie') || '';
-  return fetch(`${proto}://${host}${path}`, {
-    ...init,
-    headers: { ...(init?.headers || {}), cookie },
-    cache: 'no-store',
-  });
-}
-
-async function collectNowAction(formData) {
-  'use server';
-  const id = formData.get('deviceId');
-  await internalFetch(`/api/devices/${id}/collect`, { method: 'POST' });
-  revalidatePath(`/devices/${id}`);
-}
-
-async function testConnectivityAction(formData) {
-  'use server';
-  const id = formData.get('deviceId');
-  await internalFetch(`/api/devices/${id}/test`, { method: 'POST' });
-  revalidatePath(`/devices/${id}`);
-}
 
 async function deleteDeviceAction(formData) {
   'use server';
@@ -174,18 +152,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             <Badge color="info">{device.vendor}</Badge>
           </div>
           <div className="flex items-center gap-2">
-            <form action={collectNowAction}>
-              <input type="hidden" name="deviceId" value={device.id} />
-              <Button type="submit" variant="secondary">
-                Collect Now
-              </Button>
-            </form>
-            <form action={testConnectivityAction}>
-              <input type="hidden" name="deviceId" value={device.id} />
-              <Button type="submit" variant="secondary">
-                Test Connectivity
-              </Button>
-            </form>
+            <DeviceActions deviceId={device.id} />
             <Link
               href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`}
               className="inline-flex items-center justify-center rounded bg-danger px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
