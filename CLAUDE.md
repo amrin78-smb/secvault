@@ -1153,6 +1153,29 @@ These patterns proved themselves in the suite apps and are directly inherited:
 
 ## Known Issues & Gotchas
 
+### ⚠️ UI vendor-scoping gap (found 2026-07-16) — backend generic ≠ UI generic
+
+The backend CVE pipeline (`lib/feeds/nvd.js`'s `VENDOR_CPES` loop, `lib/engines/versionMatcher.js`'s
+`runMatchForAllDevices`, `prioritization.js`, `applicability.js`) has been vendor-generic across all
+6 Tier 1 vendors from the start — verified by a full sweep, not assumed. The gap was entirely in the
+UI layer, in two places, both now fixed:
+- `app/(dashboard)/advisories/page.js` and `app/(dashboard)/cve/page.js`'s vendor-filter `<select>`
+  dropdowns only listed `<option value="forcepoint">Forcepoint</option>` — the underlying
+  `vendor = $N` SQL filter already worked for any of the 6 slugs, the dropdown just never offered
+  them as choices. A user filtering by vendor would see nothing wrong technically, just a dropdown
+  that silently couldn't select 5 of the 6 vendors it already had data for.
+- `app/(dashboard)/devices/page.js` (the fleet devices list) queried and displayed only `smc_host`,
+  never `mgmt_ip` — every non-Forcepoint device row rendered `—` in that column even though the
+  address was sitting right there in `mgmt_ip`. The sibling per-device page
+  (`devices/[id]/page.js`) already had the correct pattern
+  (`device.vendor === 'forcepoint' ? device.smc_host : device.mgmt_ip`) — it just was never applied
+  to the list page too.
+
+**Lesson for future vendor-facing UI:** a backend loop over all vendors does not guarantee the UI
+surfaces all vendors — check every `<select>`/filter/column that touches `devices.vendor` or
+`advisories.vendor` against the full 6-slug list (`forcepoint`, `fortinet`, `paloalto`,
+`checkpoint`, `cisco_asa`, `sangfor`), not just against "does the query work."
+
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
 Real production traps discovered during the Phase 1+2 build — documented here so they are never

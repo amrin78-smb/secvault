@@ -55,7 +55,7 @@ function formatDateTime(value) {
 async function getDevices(dbPool, sortKey) {
   const orderBy = SORT_OPTIONS[sortKey] || SORT_OPTIONS.name;
   const sql = `
-    SELECT d.id, d.name, d.vendor, d.smc_host, d.last_connectivity_ok, d.last_collected_at,
+    SELECT d.id, d.name, d.vendor, d.smc_host, d.mgmt_ip, d.last_connectivity_ok, d.last_collected_at,
            dv.version_string,
            COALESCE(band.patch_now_count, 0) AS patch_now_count,
            COALESCE(band.scheduled_count, 0) AS scheduled_count,
@@ -139,7 +139,7 @@ export default async function DevicesPage({ searchParams }) {
             <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
               <th className="px-2 py-2">Name</th>
               <th className="px-2 py-2">Vendor</th>
-              <th className="px-2 py-2">SMC Host</th>
+              <th className="px-2 py-2">Address</th>
               <th className="px-2 py-2">Version</th>
               <th className="px-2 py-2">Patch Now</th>
               <th className="px-2 py-2">Scheduled</th>
@@ -160,7 +160,9 @@ export default async function DevicesPage({ searchParams }) {
                 <td className="truncate px-2 py-2">
                   <Badge color="info">{d.vendor}</Badge>
                 </td>
-                <td className="truncate px-2 py-2 text-text-secondary">{d.smc_host || '—'}</td>
+                <td className="truncate px-2 py-2 text-text-secondary">
+                  {d.vendor === 'forcepoint' ? d.smc_host || '—' : d.mgmt_ip || '—'}
+                </td>
                 <td className="truncate px-2 py-2 text-text-secondary">{d.version_string || '—'}</td>
                 <td className="px-2 py-2 text-danger">{d.patch_now_count}</td>
                 <td className="px-2 py-2 text-warning">{d.scheduled_count}</td>

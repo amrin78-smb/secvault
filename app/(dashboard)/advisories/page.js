@@ -168,6 +168,11 @@ export default async function AdvisoriesPage({ searchParams }) {
           >
             <option value="">All vendors</option>
             <option value="forcepoint">Forcepoint</option>
+            <option value="fortinet">Fortinet</option>
+            <option value="paloalto">Palo Alto</option>
+            <option value="checkpoint">Check Point</option>
+            <option value="cisco_asa">Cisco ASA</option>
+            <option value="sangfor">Sangfor</option>
           </select>
         </div>
         <div className="flex flex-col gap-1">

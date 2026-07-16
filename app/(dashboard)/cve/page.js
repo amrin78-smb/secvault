@@ -169,6 +169,11 @@ export default async function FleetCvePage({ searchParams }) {
           >
             <option value="">All vendors</option>
             <option value="forcepoint">Forcepoint</option>
+            <option value="fortinet">Fortinet</option>
+            <option value="paloalto">Palo Alto</option>
+            <option value="checkpoint">Check Point</option>
+            <option value="cisco_asa">Cisco ASA</option>
+            <option value="sangfor">Sangfor</option>
           </select>
         </div>
         <label className="flex items-center gap-1.5 pb-1.5 text-sm text-text-secondary">
