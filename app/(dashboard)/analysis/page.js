@@ -1,9 +1,15 @@
 import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
+import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
+import { computeRiskScoreFromCounts } from '../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
+
+// Same convention as devices/[id]/analysis/page.js.
+const RISK_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger' };
+const RISK_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
 
 // One row per active device, with per-severity finding counts. LEFT JOIN so
 // devices with zero findings still appear (all counts render as 0).
@@ -29,7 +35,8 @@ async function getFleetRows(dbPool) {
 }
 
 export default async function FleetAnalysisPage() {
-  const rows = await getFleetRows(pool);
+  const rawRows = await getFleetRows(pool);
+  const rows = rawRows.map((r) => ({ ...r, risk: computeRiskScoreFromCounts(r) }));
 
   const totals = rows.reduce(
     (acc, r) => ({
@@ -74,20 +81,22 @@ export default async function FleetAnalysisPage() {
       ) : (
         <Table>
           <colgroup>
-            <col style={{ width: '26%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '11%' }} />
             <col style={{ width: '13%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '11%' }} />
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-bg-surface text-left text-text-secondary">
               <th className="px-2 py-2">Device</th>
               <th className="px-2 py-2">Vendor</th>
               <th className="px-2 py-2">Site</th>
+              <th className="px-2 py-2">Risk</th>
               <th className="px-2 py-2">Critical</th>
               <th className="px-2 py-2">High</th>
               <th className="px-2 py-2">Medium</th>
@@ -106,6 +115,11 @@ export default async function FleetAnalysisPage() {
                 <td className="px-2 py-2 text-text-secondary">{r.vendor || '—'}</td>
                 <td className="truncate px-2 py-2 text-text-secondary" title={r.site || ''}>
                   {r.site || '—'}
+                </td>
+                <td className="px-2 py-2">
+                  <Badge color={RISK_BAND_COLOR[r.risk.band]}>
+                    {RISK_BAND_LABEL[r.risk.band]} ({r.risk.score})
+                  </Badge>
                 </td>
                 <td className={`px-2 py-2 ${r.critical > 0 ? 'font-medium text-danger' : 'text-text-muted'}`}>
                   {r.critical}
