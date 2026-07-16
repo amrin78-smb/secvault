@@ -16,6 +16,21 @@ export default function HeaderSearch() {
   const inputRef = useRef(null);
   const wrapRef = useRef(null);
   const debounceRef = useRef(null);
+  // Guards against two in-flight requests resolving out of order (the 250ms
+  // debounce only limits how often a fetch FIRES, not the order responses
+  // ARRIVE back in) and against setting state after unmount. Each fetch
+  // captures its own sequence number; a response is only applied if it's
+  // still the most recent one issued. Found in the final pre-deploy bug
+  // check (2026-07-17).
+  const requestSeqRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -51,15 +66,18 @@ export default function HeaderSearch() {
       return undefined;
     }
     setLoading(true);
+    const mySeq = ++requestSeqRef.current;
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
         const data = await res.json();
+        if (!mountedRef.current || requestSeqRef.current !== mySeq) return; // stale or unmounted
         setResults({ devices: data.devices || [], advisories: data.advisories || [] });
       } catch (_err) {
+        if (!mountedRef.current || requestSeqRef.current !== mySeq) return;
         setResults({ devices: [], advisories: [] });
       } finally {
-        setLoading(false);
+        if (mountedRef.current && requestSeqRef.current === mySeq) setLoading(false);
       }
     }, 250);
     return () => clearTimeout(debounceRef.current);

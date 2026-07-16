@@ -16,6 +16,7 @@ function formatWhen(iso) {
 const TYPE_DOT_COLOR = {
   patch_now: 'var(--red)',
   config_diff: 'var(--yellow)',
+  new_finding: 'var(--blue)',
 };
 
 // Header notification bell — real counts from GET /api/notifications/summary
