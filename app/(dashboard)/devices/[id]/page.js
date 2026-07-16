@@ -220,7 +220,14 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
         <div className="mt-4 border-t border-border pt-4">
           <h2 className="mb-2 text-sm font-medium text-text-primary">Rotate Credentials</h2>
-          <CredentialForm deviceId={device.id} vendor={device.vendor} />
+          {/* mgmt_method comes from the STORED row — the credential shape must follow
+              the access method this device was actually saved with, not the vendor's
+              default (an ssh fortinet must not be handed an API-token input). */}
+          <CredentialForm
+            deviceId={device.id}
+            vendor={device.vendor}
+            mgmtMethod={device.mgmt_method}
+          />
         </div>
       </div>
 

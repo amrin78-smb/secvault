@@ -2,7 +2,13 @@
 
 import { useState } from 'react';
 import Button from '../ui/Button';
-import { VENDOR_META, VENDOR_SLUGS, buildCredentialPlaintext } from './vendorMeta';
+import {
+  VENDOR_META,
+  VENDOR_SLUGS,
+  buildCredentialPlaintext,
+  resolveAccessMethod,
+  hasMultipleAccessMethods,
+} from './vendorMeta';
 
 const CRITICALITY_OPTIONS = [
   { value: 'low', label: 'Low' },
@@ -11,10 +17,24 @@ const CRITICALITY_OPTIONS = [
   { value: 'critical', label: 'Critical' },
 ];
 
+const AUTH_MODE_OPTIONS = [
+  { value: 'apikey', label: 'API Key / Token' },
+  { value: 'userpass', label: 'Username & Password' },
+];
+
 const inputClasses =
   'w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none';
 
-// Add/Edit device form, driven by VENDOR_META (frozen Tier 1 vendor table).
+// Add device form, driven by VENDOR_META (frozen Tier 1 vendor table).
+//
+// Two independent axes, both sourced from VENDOR_META — do not conflate them:
+//   meta.connection  → PER VENDOR. 'smc' uses smc_host/smc_port, 'mgmt' uses
+//                      mgmt_ip/mgmt_port. Never changes with the access method.
+//   accessMethod     → PER VENDOR+METHOD. Drives the port default, the
+//                      credential_type, the credential input shape, and whether
+//                      the self-signed SSL toggle is meaningful. Sent as
+//                      mgmt_method and validated server-side against
+//                      VENDOR_META[vendor].accessMethods.
 //
 // Forcepoint keeps the original behavior: Save is only enabled once a
 // "Test Connectivity" call against POST /api/devices/test-smc has succeeded in this
@@ -22,16 +42,15 @@ const inputClasses =
 // test result so a stale "Connected" state can never be carried into Save.
 // Other vendors have no pre-save test endpoint yet, so Save is gated only on the
 // required fields being present.
-//
-// mgmt_method is derived from the vendor (VENDOR_META) — never user-editable, and
-// the API re-derives it server-side anyway.
 export default function DeviceForm({ onSubmit }) {
   const [name, setName] = useState('');
   const [vendor, setVendor] = useState('forcepoint');
+  const [accessMethod, setAccessMethod] = useState(VENDOR_META.forcepoint.defaultAccessMethod);
   const [smcHost, setSmcHost] = useState('');
   const [smcPort, setSmcPort] = useState('');
   const [mgmtIp, setMgmtIp] = useState('');
   const [mgmtPort, setMgmtPort] = useState('');
+  const [authMode, setAuthMode] = useState('apikey');
   const [secret, setSecret] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -46,24 +65,74 @@ export default function DeviceForm({ onSubmit }) {
   const [submitError, setSubmitError] = useState('');
 
   const meta = VENDOR_META[vendor] || VENDOR_META.forcepoint;
+  // resolveAccessMethod falls back to the vendor's default when accessMethod is
+  // stale (e.g. mid-render right after a vendor switch), so `config` is never
+  // undefined and the port/credential UI can never key off garbage.
+  const { method, config } = resolveAccessMethod(vendor, accessMethod) ||
+    resolveAccessMethod('forcepoint', null);
+
   const isSmc = meta.connection === 'smc';
-  const isSecretShape = meta.credentialShape === 'secret';
-  const hasEnable = meta.credentialShape === 'userpass_enable';
+  const showMethodSelector = hasMultipleAccessMethods(vendor);
+  const shape = config.credentialShape;
+  const isSecretShape = shape === 'secret';
+  const isApiKeyOrUserPass = shape === 'apikey_or_userpass';
+  const hasEnable = shape === 'userpass_enable';
+  // A single secret input is shown for 'secret', and for 'apikey_or_userpass'
+  // while the operator has the API-key mode selected.
+  const showSecretInput = isSecretShape || (isApiKeyOrUserPass && authMode === 'apikey');
+  // "Allow Self-Signed SSL" only means anything for TLS transports. SSH does not
+  // present an X.509 cert, so the toggle is hidden (and left at its default) for
+  // ssh methods rather than implying it has an effect.
+  const showSslToggle = method !== 'ssh';
 
   function invalidateTest() {
     setTestResult(null);
   }
 
-  function handleVendorChange(nextVendor) {
-    setVendor(nextVendor);
-    // Ports and credentials are vendor-specific — reset them so the new vendor's
-    // default-port placeholder shows and no stale credential is carried across.
-    setSmcPort('');
-    setMgmtPort('');
+  // Clearing the credential inputs on any vendor/method switch is deliberate: the
+  // credential SHAPE changes with the method (an API token is not an SSH
+  // password), so carrying a value across would silently store the wrong thing.
+  function resetCredentialInputs() {
+    setAuthMode('apikey');
     setSecret('');
     setUsername('');
     setPassword('');
     setEnablePassword('');
+  }
+
+  // Both ports are cleared back to "" — an empty port field means "use this
+  // method's default", which is what the placeholder shows and what handleSubmit
+  // resolves it to. This is the reset the task calls for: fortinet api (443) →
+  // ssh (22) must not leave 443 behind.
+  //
+  // Judgement call: this DOES discard a port the operator typed by hand. That is
+  // the intended trade. The field is never silently wrong — it returns to a
+  // visible, labelled default (the placeholder updates to 22), and switching
+  // vendor or access method is a deliberate, rare act after which a previously
+  // typed port is almost certainly meaningless. Preserving a "deliberate" 443
+  // across an api→ssh switch is exactly the silent-connect-failure trap this
+  // reset exists to close; retyping a custom port costs seconds, debugging an
+  // SSH device that dials 443 costs an afternoon.
+  function resetPorts() {
+    setSmcPort('');
+    setMgmtPort('');
+  }
+
+  function handleVendorChange(nextVendor) {
+    setVendor(nextVendor);
+    // The previous method almost never exists on the new vendor; resolve to the
+    // new vendor's default rather than leaving a value its accessMethods lack.
+    const nextMeta = VENDOR_META[nextVendor];
+    setAccessMethod(nextMeta ? nextMeta.defaultAccessMethod : 'smc');
+    resetPorts();
+    resetCredentialInputs();
+    invalidateTest();
+  }
+
+  function handleAccessMethodChange(nextMethod) {
+    setAccessMethod(nextMethod);
+    resetPorts();
+    resetCredentialInputs();
     invalidateTest();
   }
 
@@ -76,7 +145,7 @@ export default function DeviceForm({ onSubmit }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           smc_host: smcHost,
-          smc_port: Number(smcPort) || VENDOR_META.forcepoint.defaultPort,
+          smc_port: Number(smcPort) || config.defaultPort,
           api_key: secret,
           allow_self_signed_ssl: allowSelfSignedSsl,
         }),
@@ -97,7 +166,7 @@ export default function DeviceForm({ onSubmit }) {
   // Forcepoint keeps the test-before-save gate; other vendors can save directly.
   const saveBlocked = isSmc ? !testResult?.ok : false;
 
-  const credentialProvided = isSecretShape ? Boolean(secret) : Boolean(username && password);
+  const credentialProvided = showSecretInput ? Boolean(secret) : Boolean(username && password);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -109,25 +178,30 @@ export default function DeviceForm({ onSubmit }) {
       const payload = {
         name,
         vendor,
+        mgmt_method: method,
         allow_self_signed_ssl: allowSelfSignedSsl,
         site,
         asset_criticality: assetCriticality,
       };
+      // Connection fields key off the VENDOR (meta.connection), never the method.
       if (isSmc) {
         payload.smc_host = smcHost;
-        payload.smc_port = Number(smcPort) || meta.defaultPort;
+        payload.smc_port = Number(smcPort) || config.defaultPort;
       } else {
         payload.mgmt_ip = mgmtIp;
-        payload.mgmt_port = Number(mgmtPort) || meta.defaultPort;
+        payload.mgmt_port = Number(mgmtPort) || config.defaultPort;
       }
       if (credentialProvided) {
-        payload.credential = buildCredentialPlaintext(vendor, {
+        payload.credential = buildCredentialPlaintext(vendor, method, {
+          authMode,
           secret,
           username,
           password,
           enablePassword,
         });
-        payload.credential_type = meta.credentialType;
+        // The server re-derives credential_type from (vendor, mgmt_method) and
+        // does not trust this value beyond its CREDENTIAL_TYPES check.
+        payload.credential_type = config.credentialType;
       }
       await onSubmit(payload);
     } catch (err) {
@@ -171,6 +245,26 @@ export default function DeviceForm({ onSubmit }) {
         </select>
       </div>
 
+      {showMethodSelector && (
+        <div>
+          <label htmlFor="device-access-method" className="mb-1 block text-sm text-text-secondary">
+            Access Method
+          </label>
+          <select
+            id="device-access-method"
+            value={method}
+            onChange={(e) => handleAccessMethodChange(e.target.value)}
+            className={inputClasses}
+          >
+            {Object.entries(meta.accessMethods).map(([key, cfg]) => (
+              <option key={key} value={key}>
+                {cfg.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {isSmc ? (
         <>
           <div>
@@ -197,7 +291,7 @@ export default function DeviceForm({ onSubmit }) {
             <input
               id="device-smc-port"
               type="number"
-              placeholder={String(meta.defaultPort)}
+              placeholder={String(config.defaultPort)}
               value={smcPort}
               onChange={(e) => {
                 setSmcPort(e.target.value);
@@ -230,7 +324,7 @@ export default function DeviceForm({ onSubmit }) {
             <input
               id="device-mgmt-port"
               type="number"
-              placeholder={String(meta.defaultPort)}
+              placeholder={String(config.defaultPort)}
               value={mgmtPort}
               onChange={(e) => setMgmtPort(e.target.value)}
               className={inputClasses}
@@ -239,10 +333,38 @@ export default function DeviceForm({ onSubmit }) {
         </>
       )}
 
-      {isSecretShape ? (
+      {isApiKeyOrUserPass && (
+        <div>
+          <label htmlFor="device-auth-mode" className="mb-1 block text-sm text-text-secondary">
+            Authentication
+          </label>
+          <select
+            id="device-auth-mode"
+            value={authMode}
+            onChange={(e) => {
+              setAuthMode(e.target.value);
+              // The two modes have disjoint inputs — don't carry a half-typed
+              // token into a username/password submission or vice versa.
+              setSecret('');
+              setUsername('');
+              setPassword('');
+              invalidateTest();
+            }}
+            className={inputClasses}
+          >
+            {AUTH_MODE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {showSecretInput ? (
         <div>
           <label htmlFor="device-secret" className="mb-1 block text-sm text-text-secondary">
-            {meta.secretLabel}
+            {config.secretLabel}
           </label>
           <input
             id="device-secret"
@@ -267,7 +389,10 @@ export default function DeviceForm({ onSubmit }) {
               type="text"
               autoComplete="off"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                invalidateTest();
+              }}
               className={inputClasses}
             />
           </div>
@@ -281,7 +406,10 @@ export default function DeviceForm({ onSubmit }) {
               type="password"
               autoComplete="new-password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                invalidateTest();
+              }}
               className={inputClasses}
             />
           </div>
@@ -304,17 +432,19 @@ export default function DeviceForm({ onSubmit }) {
         </>
       )}
 
-      <label className="flex items-center gap-2 text-sm text-text-secondary">
-        <input
-          type="checkbox"
-          checked={allowSelfSignedSsl}
-          onChange={(e) => {
-            setAllowSelfSignedSsl(e.target.checked);
-            invalidateTest();
-          }}
-        />
-        Allow Self-Signed SSL
-      </label>
+      {showSslToggle && (
+        <label className="flex items-center gap-2 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            checked={allowSelfSignedSsl}
+            onChange={(e) => {
+              setAllowSelfSignedSsl(e.target.checked);
+              invalidateTest();
+            }}
+          />
+          Allow Self-Signed SSL
+        </label>
+      )}
 
       <div>
         <label htmlFor="device-site" className="mb-1 block text-sm text-text-secondary">

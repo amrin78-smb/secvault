@@ -337,20 +337,66 @@ Six vendors are implemented. The slug is load-bearing: it must match across `dev
 `VENDOR_CPES` in `lib/feeds/nvd.js`, and `VENDOR_META` in `components/devices/vendorMeta.js`.
 Never invent a new spelling.
 
-| slug | Access | Connection fields | credential_type | Credential plaintext |
-|---|---|---|---|---|
-| `forcepoint` | SMC REST :8082 | `smc_host` + `smc_port` | `smc_api` | raw API key string |
-| `fortinet` | REST API | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | raw API token string |
-| `paloalto` | XML API | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | raw API key string |
-| `checkpoint` | Mgmt API (mgmt server IP, not gateway) | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | JSON `{"username","password"}` or `{"api_key"}` |
-| `cisco_asa` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password","enable_password"?}` |
-| `sangfor` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password"}` |
+**A vendor can support more than one access method.** `devices.mgmt_method` is *chosen by the
+operator* in the Add Device form (from that vendor's `accessMethods`) — it is NOT derived from
+the vendor slug. Adapter dispatch is `(vendor, mgmt_method) → adapter class`.
+
+| slug | mgmt_method | Access | Connection fields | credential_type | Credential plaintext |
+|---|---|---|---|---|---|
+| `forcepoint` | `smc` | SMC REST :8082 | `smc_host` + `smc_port` (8082) | `smc_api` | raw API key string (RAW, not JSON — legacy, works, don't "tidy") |
+| `fortinet` | `api` | REST API | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | JSON `{"api_key"}` or `{"username","password"}` |
+| `fortinet` | `ssh` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password"}` |
+| `paloalto` | `api` | XML API (user/pass → `?type=keygen` → key) | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | JSON `{"api_key"}` or `{"username","password"}` |
+| `paloalto` | `ssh` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password"}` |
+| `checkpoint` | `api` | Mgmt API (mgmt server IP, **not** gateway) | `mgmt_ip` + `mgmt_port` (443) | `rest_api` | JSON `{"api_key"}` or `{"username","password"}` |
+| `cisco_asa` | `ssh` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password","enable_password"?}` |
+| `sangfor` | `ssh` | SSH | `mgmt_ip` + `mgmt_port` (22) | `ssh` | JSON `{"username","password"}` |
+
+Forcepoint is SMC-only **by design** — CLAUDE.md's core rule is never to SSH to Forcepoint engines.
+
+Credential plaintext is written by `buildCredentialPlaintext(vendor, accessMethod, {...})`
+(vendorMeta.js) and read by `parseApiCredential()` (`lib/adapters/credentials.js`) for API
+vendors / `parseJsonCredential()` (`lib/adapters/sshClient.js`) for SSH vendors. `parseApiCredential`
+also accepts a **bare non-JSON string** as an api-key — that is deliberate backward compatibility
+for fortinet/paloalto devices added before access-method selection existed. Don't remove it.
+
+#### ⚠️ Two registries, deliberately duplicated — keep them in step
+
+`components/devices/vendorMeta.js` is an **ES module** (client components import it).
+`lib/adapters/index.js` is **CommonJS** (`services/engine-worker.js` `require()`s it under plain
+node, which cannot require ESM). So the dispatcher cannot import the vendor table, and these two
+must be updated together:
+
+| vendorMeta.js (ESM) | lib/adapters/index.js (CJS) |
+|---|---|
+| `VENDOR_META[slug].accessMethods` keys | `ADAPTERS[slug]` inner keys |
+| `VENDOR_META[slug].defaultAccessMethod` | `DEFAULT_METHOD[slug]` |
+
+Drift here is a silent runtime bug (the form offers a method dispatch can't honour, or a legacy
+row falls back to the wrong transport). Same class of cross-registry constraint as the slugs above.
 
 Rules that keep this working:
 - **Adapters implement ONLY the FirewallAdapter interface** (testConnectivity/getVersion/getRules/getConfig).
   The shared persistence pipeline — device_versions, firewall_rules, device_configs, Phase 5 rule analysis,
   Phase 6 diff/backup — lives ONCE in `lib/adapters/index.js` (`collectAndStore`). Never copy it into a vendor folder.
-- New vendor = adapter folder + `ADAPTERS` entry + `VENDOR_PARSERS` entry + `VENDOR_CPES` entry + `VENDOR_META` entry.
+- New vendor = adapter folder + `ADAPTERS` entry (+ `DEFAULT_METHOD` entry) + `VENDOR_PARSERS` entry
+  + `VENDOR_CPES` entry + `VENDOR_META` entry.
+- **`getRules()` must THROW on a retrieval failure — never return `[]`.** `collectAndStore` DELETEs a
+  device's `firewall_rules` before reinserting, so an empty array returned by a *failed* pull silently
+  wipes the real ruleset, cascades away its Phase 5 findings, and reports success. `[]` means "this
+  device genuinely has no rules", nothing else. (Fixed once in sangfor and fortinet; don't reintroduce.)
+- **Check Point: never pick a policy package positionally.** The Mgmt API talks to a management server
+  that can manage MANY gateways, each with a different package — `packages[0]` stored *another device's
+  rules* against this device. Resolution order is: the gateway's own installed policy → its
+  installation-targets → the only package on the server (if there is exactly one) → **throw, naming the
+  candidates**. Storing the wrong device's ruleset is far worse than storing none; a hard, actionable
+  failure is the correct outcome.
+- **Fortinet: collect every VDOM, or fail.** Requests without a `?vdom=` param silently return only the
+  token's default VDOM, and rule analysis then treats that partial set as complete. If VDOM enumeration
+  succeeds but one VDOM's rules fail, `getRules()` throws rather than returning the rest — see the
+  `getRules()` rule above for why partial success is the dangerous case.
+- **Any adapter returning a raw text config MUST redact it before returning from `getConfig()`** — see
+  "Stored configs are REDACTED" under Config Change Tracking.
 - SSH vendors share `lib/adapters/sshClient.js` (`runCommands`, `parseJsonCredential`) — ssh2 shell channel with
   legacy-algorithm compat for old ASA images. Don't open raw ssh2 connections in adapters.
 - `mgmt_port` is nullable — every adapter applies its own default (443 API / 22 SSH / 8082 SMC) when NULL.

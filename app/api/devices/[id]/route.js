@@ -1,18 +1,25 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
-import { VENDOR_META, VENDOR_SLUGS, CREDENTIAL_TYPES } from '../../../../components/devices/vendorMeta';
+import {
+  VENDOR_META,
+  VENDOR_SLUGS,
+  CREDENTIAL_TYPES,
+  resolveAccessMethod,
+} from '../../../../components/devices/vendorMeta';
 
 export const dynamic = 'force-dynamic';
 
 // Whitelist of devices-table columns that PUT is allowed to update — keeps the
 // dynamically-built SET clause safe even though column names are interpolated
 // (values themselves are always parameterized).
-// NOTE: mgmt_method is intentionally NOT in this list — it is always derived
-// server-side from the vendor slug, never trusted from the client.
+// mgmt_method is in this list, but it is NEVER copied straight from the request
+// body: it is destructured out of the body below and only ever re-assigned onto
+// `rest` after being validated against VENDOR_META[vendor].accessMethods.
 const UPDATABLE_FIELDS = [
   'name',
   'vendor',
+  'mgmt_method',
   'mgmt_ip',
   'mgmt_port',
   'smc_host',
@@ -50,27 +57,94 @@ export async function GET(request, { params }) {
 //
 // Credential inputs:
 //   { credential, credential_type }  — generic path (credential_type validated
-//                                      against CREDENTIAL_TYPES)
+//                                      against CREDENTIAL_TYPES, but the value
+//                                      STORED is derived from vendor + method)
 //   { smc_api_key }                  — legacy Forcepoint-only field, kept for
 //                                      backward compatibility (maps to 'smc_api')
+//
+// mgmt_method is accepted but validated against VENDOR_META[vendor].accessMethods
+// (400 if the vendor doesn't support it). The vendor used for that check is the
+// one in the body when it is being changed, otherwise the device's stored vendor.
 export async function PUT(request, { params }) {
   const body = await request.json().catch(() => ({}));
-  const { smc_api_key, credential, credential_type, mgmt_method: _ignored, ...rest } = body || {};
+  const { smc_api_key, credential, credential_type, mgmt_method, ...rest } = body || {};
 
-  // Validate vendor (if being updated) and derive mgmt_method from it server-side.
-  if (rest.vendor !== undefined) {
-    const meta = VENDOR_META[rest.vendor];
-    if (!meta) {
-      return NextResponse.json(
-        { error: `vendor must be one of: ${VENDOR_SLUGS.join(', ')}` },
-        { status: 400 }
-      );
+  let existing;
+  try {
+    // Load the row up front: the stored vendor/mgmt_method are needed to validate
+    // a partial update, and this also 404s BEFORE any credential is written
+    // (setCredential on a nonexistent device would otherwise write first and
+    // fail the FK afterwards).
+    const found = await pool.query('SELECT * FROM devices WHERE id = $1', [params.id]);
+    if (found.rows.length === 0) {
+      return NextResponse.json({ error: 'Device not found' }, { status: 404 });
     }
-    rest.mgmt_method = meta.mgmtMethod;
+    existing = found.rows[0];
+  } catch (err) {
+    return NextResponse.json({ error: err.message || 'Failed to load device' }, { status: 500 });
   }
+
+  // Validate vendor (if being updated); otherwise fall back to the stored vendor.
+  if (rest.vendor !== undefined && !VENDOR_META[rest.vendor]) {
+    return NextResponse.json(
+      { error: `vendor must be one of: ${VENDOR_SLUGS.join(', ')}` },
+      { status: 400 }
+    );
+  }
+  const effectiveVendor = rest.vendor !== undefined ? rest.vendor : existing.vendor;
+  const meta = VENDOR_META[effectiveVendor];
+  if (!meta) {
+    return NextResponse.json(
+      { error: `stored vendor '${existing.vendor}' is not a supported vendor` },
+      { status: 400 }
+    );
+  }
+
+  if (mgmt_method !== undefined && mgmt_method !== null && !meta.accessMethods[mgmt_method]) {
+    return NextResponse.json(
+      {
+        error: `mgmt_method '${mgmt_method}' is not supported by vendor '${effectiveVendor}' — supported: ${Object.keys(
+          meta.accessMethods
+        ).join(', ')}`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Which method this device will be on after the update:
+  //  - explicit mgmt_method wins (already validated above)
+  //  - a vendor change re-resolves the stored method against the NEW vendor
+  //    (keeps it if supported, else the new vendor's default) — the old method
+  //    may simply not exist on the new vendor
+  //  - otherwise it is untouched
+  let effectiveMethod;
+  if (mgmt_method !== undefined && mgmt_method !== null) {
+    effectiveMethod = mgmt_method;
+    rest.mgmt_method = mgmt_method;
+  } else if (rest.vendor !== undefined) {
+    effectiveMethod = resolveAccessMethod(effectiveVendor, existing.mgmt_method).method;
+    rest.mgmt_method = effectiveMethod;
+  } else {
+    effectiveMethod = resolveAccessMethod(effectiveVendor, existing.mgmt_method).method;
+  }
+  const { config } = resolveAccessMethod(effectiveVendor, effectiveMethod);
 
   if (rest.mgmt_port !== undefined) rest.mgmt_port = coercePort(rest.mgmt_port);
   if (rest.smc_port !== undefined) rest.smc_port = coercePort(rest.smc_port);
+
+  // If the access method actually changed and the caller did not state a port,
+  // move the port to the new method's default. Leaving the old one behind is the
+  // exact trap this feature exists to close (an api→ssh switch keeping 443).
+  // A port the caller DID supply is always respected.
+  const methodChanged = rest.mgmt_method !== undefined && rest.mgmt_method !== existing.mgmt_method;
+  if (methodChanged) {
+    if (meta.connection === 'mgmt' && rest.mgmt_port === undefined) {
+      rest.mgmt_port = config.defaultPort;
+    }
+    if (meta.connection === 'smc' && rest.smc_port === undefined) {
+      rest.smc_port = config.defaultPort;
+    }
+  }
 
   // Resolve credential to store — validated before any write happens.
   let credPlaintext = null;
@@ -83,8 +157,12 @@ export async function PUT(request, { params }) {
       );
     }
     credPlaintext = credential;
-    credType = credential_type;
+    // Derived server-side from (vendor, method) — the client's credential_type
+    // is checked but never stored, so a rotate can't desync the credStore row
+    // from the adapter that reads it.
+    credType = config.credentialType;
   } else if (smc_api_key) {
+    // Legacy Forcepoint-only field — unchanged behaviour for the live SMC device.
     credPlaintext = smc_api_key;
     credType = 'smc_api';
   }
@@ -94,9 +172,7 @@ export async function PUT(request, { params }) {
       await setCredential(params.id, credType, credPlaintext, pool);
     }
 
-    const updates = Object.keys(rest).filter(
-      (key) => UPDATABLE_FIELDS.includes(key) || key === 'mgmt_method'
-    );
+    const updates = Object.keys(rest).filter((key) => UPDATABLE_FIELDS.includes(key));
 
     if (updates.length > 0) {
       const setClauses = updates.map((key, i) => `${key} = $${i + 2}`);

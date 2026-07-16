@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { setCredential } from '../../../lib/credStore';
-import { VENDOR_META, VENDOR_SLUGS, CREDENTIAL_TYPES } from '../../../components/devices/vendorMeta';
+import {
+  VENDOR_META,
+  VENDOR_SLUGS,
+  CREDENTIAL_TYPES,
+  resolveAccessMethod,
+} from '../../../components/devices/vendorMeta';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,13 +43,17 @@ export async function GET() {
 // to the devices table — they are routed through credStore.setCredential into the
 // separately-encrypted device_credentials table, and never echoed back or logged.
 //
-// mgmt_method is derived server-side from the vendor slug (VENDOR_META) — any
-// client-supplied mgmt_method is ignored.
+// mgmt_method IS accepted from the client (fortinet/paloalto are user-selectable
+// between api and ssh) but is never trusted: it must be a key of
+// VENDOR_META[vendor].accessMethods or the request is rejected. An unsupported
+// value would break adapter dispatch in lib/adapters/index.js. Absent → the
+// vendor's defaultAccessMethod.
 export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const {
     name,
     vendor,
+    mgmt_method,
     smc_host,
     smc_port,
     mgmt_ip,
@@ -65,6 +74,22 @@ export async function POST(request) {
       { status: 400 }
     );
   }
+
+  // Validate the requested access method against THIS vendor's accessMethods.
+  // Reject rather than silently falling back: a client asking for ssh on a
+  // vendor that has no ssh adapter should learn that now, not by way of a
+  // connection attempt over the wrong transport later.
+  if (mgmt_method !== undefined && mgmt_method !== null && !meta.accessMethods[mgmt_method]) {
+    return NextResponse.json(
+      {
+        error: `mgmt_method '${mgmt_method}' is not supported by vendor '${vendorSlug}' — supported: ${Object.keys(
+          meta.accessMethods
+        ).join(', ')}`,
+      },
+      { status: 400 }
+    );
+  }
+  const { method, config } = resolveAccessMethod(vendorSlug, mgmt_method);
 
   if (!name) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 });
@@ -90,17 +115,25 @@ export async function POST(request) {
       );
     }
     credPlaintext = credential;
-    credType = credential_type;
+    // The client's credential_type passes the CREDENTIAL_TYPES check above, but
+    // the value actually STORED is derived server-side from (vendor, method).
+    // A client claiming credential_type 'ssh' on an api device cannot make the
+    // credStore row disagree with the adapter that will read it back.
+    credType = config.credentialType;
   } else if (smc_api_key) {
+    // Legacy Forcepoint-only field. Left hardcoded to 'smc_api' — identical to
+    // the derived value for forcepoint, and unchanged for the live SMC device.
     credPlaintext = smc_api_key;
     credType = 'smc_api';
   }
 
-  // Forcepoint keeps its historical default SMC port; other vendors store null
-  // unless the client supplied a port explicitly.
+  // The per-method defaultPort applies when the client omits the port. Only the
+  // port field matching the VENDOR's connection type gets a default; the other
+  // stays null (a forcepoint row has no mgmt_port, an mgmt row has no smc_port).
   const smcPortValue =
-    meta.connection === 'smc' ? coercePort(smc_port) ?? meta.defaultPort : coercePort(smc_port);
-  const mgmtPortValue = coercePort(mgmt_port);
+    meta.connection === 'smc' ? coercePort(smc_port) ?? config.defaultPort : coercePort(smc_port);
+  const mgmtPortValue =
+    meta.connection === 'mgmt' ? coercePort(mgmt_port) ?? config.defaultPort : coercePort(mgmt_port);
 
   try {
     const result = await pool.query(
@@ -112,7 +145,7 @@ export async function POST(request) {
       [
         name,
         vendorSlug,
-        meta.mgmtMethod,
+        method,
         smc_host || null,
         smcPortValue,
         mgmt_ip || null,

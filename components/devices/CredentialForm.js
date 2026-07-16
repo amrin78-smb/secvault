@@ -2,22 +2,41 @@
 
 import { useState } from 'react';
 import Button from '../ui/Button';
-import { VENDOR_META, buildCredentialPlaintext } from './vendorMeta';
+import { VENDOR_META, buildCredentialPlaintext, resolveAccessMethod } from './vendorMeta';
 
 const inputClasses =
   'rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none';
+
+const AUTH_MODE_OPTIONS = [
+  { value: 'apikey', label: 'API Key / Token' },
+  { value: 'userpass', label: 'Username & Password' },
+];
 
 // Reusable piece for rotating the stored credential on an existing device.
 // PUTs { credential, credential_type } to /api/devices/[id] — the route handler
 // routes those values through credStore instead of writing them to the devices table.
 //
-// `vendor` defaults to 'forcepoint' for backward compatibility — the existing call
-// site (device detail page) passes only deviceId today.
-export default function CredentialForm({ deviceId, vendor = 'forcepoint' }) {
-  const meta = VENDOR_META[vendor] || VENDOR_META.forcepoint;
-  const isSecretShape = meta.credentialShape === 'secret';
-  const hasEnable = meta.credentialShape === 'userpass_enable';
+// `mgmtMethod` MUST be the device's STORED devices.mgmt_method, not a value
+// re-derived from the vendor. A fortinet device saved as ssh and a fortinet
+// device saved as api need different credential shapes ('userpass' vs
+// 'apikey_or_userpass'); deriving from the vendor alone would always produce the
+// vendor's DEFAULT method's shape and would happily write an API-shaped
+// credential over an SSH device's — which fails only later, at connect time.
+// resolveAccessMethod tolerates null/unknown (legacy rows predating the
+// selector) by falling back to the vendor default, matching adapter dispatch.
+//
+// `vendor` defaults to 'forcepoint' for backward compatibility.
+export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMethod = null }) {
+  const resolved =
+    resolveAccessMethod(vendor, mgmtMethod) || resolveAccessMethod('forcepoint', null);
+  const { method, config } = resolved;
 
+  const shape = config.credentialShape;
+  const isSecretShape = shape === 'secret';
+  const isApiKeyOrUserPass = shape === 'apikey_or_userpass';
+  const hasEnable = shape === 'userpass_enable';
+
+  const [authMode, setAuthMode] = useState('apikey');
   const [secret, setSecret] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -25,14 +44,16 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint' }) {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null); // { ok, text }
 
-  const ready = isSecretShape ? Boolean(secret) : Boolean(username && password);
+  const showSecretInput = isSecretShape || (isApiKeyOrUserPass && authMode === 'apikey');
+  const ready = showSecretInput ? Boolean(secret) : Boolean(username && password);
 
   async function handleSave() {
     if (!ready || saving) return;
     setSaving(true);
     setResult(null);
     try {
-      const plaintext = buildCredentialPlaintext(vendor, {
+      const plaintext = buildCredentialPlaintext(vendor, method, {
+        authMode,
         secret,
         username,
         password,
@@ -41,13 +62,19 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint' }) {
       const res = await fetch(`/api/devices/${deviceId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: plaintext, credential_type: meta.credentialType }),
+        // No mgmt_method is sent — rotating a credential must never change the
+        // device's access method. The server re-derives credential_type from
+        // the vendor + the device's stored mgmt_method.
+        body: JSON.stringify({ credential: plaintext, credential_type: config.credentialType }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Failed to save credential');
       }
-      setResult({ ok: true, text: isSecretShape ? `${meta.secretLabel} updated.` : 'Credentials updated.' });
+      setResult({
+        ok: true,
+        text: showSecretInput ? `${config.secretLabel} updated.` : 'Credentials updated.',
+      });
       setSecret('');
       setUsername('');
       setPassword('');
@@ -61,13 +88,34 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint' }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {isSecretShape ? (
+      {isApiKeyOrUserPass && (
+        <select
+          aria-label="Authentication mode"
+          value={authMode}
+          onChange={(e) => {
+            setAuthMode(e.target.value);
+            setSecret('');
+            setUsername('');
+            setPassword('');
+            setResult(null);
+          }}
+          className={inputClasses}
+        >
+          {AUTH_MODE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {showSecretInput ? (
         <input
           type="password"
           autoComplete="new-password"
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
-          placeholder={`New ${meta.secretLabel}`}
+          placeholder={`New ${config.secretLabel}`}
           className={inputClasses}
         />
       ) : (
@@ -101,7 +149,7 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint' }) {
         </>
       )}
       <Button type="button" variant="secondary" onClick={handleSave} disabled={saving || !ready}>
-        {saving ? 'Saving…' : isSecretShape ? `Update ${meta.secretLabel}` : 'Update Credentials'}
+        {saving ? 'Saving…' : showSecretInput ? `Update ${config.secretLabel}` : 'Update Credentials'}
       </Button>
       {result && (
         <span className={`text-sm ${result.ok ? 'text-success' : 'text-danger'}`}>{result.text}</span>
