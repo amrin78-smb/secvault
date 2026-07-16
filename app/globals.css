@@ -3,18 +3,7 @@
    --accent-teal identity slot for the logo + active sidebar-nav chips, while
    --primary stays the shared suite red used for every interactive/focus/badge
    color across all five apps). See CLAUDE.md "Design System" for the full
-   rationale, including the no-Tailwind decision this file is the foundation of.
-
-   NOTE (transition period only — Phase 1 of the UI overhaul removes this):
-   the @tailwind directives below and the legacy alias block at the bottom
-   are kept ONLY so not-yet-migrated pages keep rendering sensibly while the
-   rest of the app is migrated off Tailwind page by page. Both are deleted in
-   Phase 2 once nothing references them anymore — do not add new code that
-   depends on the legacy aliases. */
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+   rationale, including the no-Tailwind decision this file is the foundation of. */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
@@ -607,24 +596,4 @@ body[data-readonly="true"] .btn-danger {
   opacity: 0.4;
   pointer-events: none;
   cursor: not-allowed;
-}
-
-/* ────────────────────────────────────────────────────────────
-   Legacy Tailwind alias layer — TRANSITION ONLY, removed in Phase 2.
-   Keeps every not-yet-migrated page's Tailwind utility classes
-   (bg-bg-surface, text-text-primary, border-border, bg-accent, ...)
-   resolving to real, coherent suite colors instead of undefined values,
-   without needing to touch tailwind.config.js during the migration.
-   ──────────────────────────────────────────────────────────── */
-:root {
-  --bg-base:        var(--bg-primary);
-  --bg-sidebar:     var(--navy);
-  --bg-surface:     var(--bg-card);
-  --bg-elevated:    var(--bg-card);
-  --accent:         var(--primary);
-  --accent-hover:   var(--primary-dark);
-  --success:        var(--green);
-  --warning:        var(--yellow);
-  --danger:         var(--red);
-  --info:           var(--blue);
 }
