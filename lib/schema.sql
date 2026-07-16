@@ -197,6 +197,43 @@ CREATE TABLE IF NOT EXISTS finding_acknowledgements (
 
 CREATE INDEX IF NOT EXISTS idx_fa_device_id ON finding_acknowledgements(device_id);
 
+-- Rule Analysis Dashboard Phase 4: risk-score trend + operator audit trail.
+
+-- One row per completed rule-analysis run (both scheduled collects and manual
+-- "Run Analysis" clicks -- both paths go through runAnalysisForDevice(), which
+-- is the single place this is snapshotted). score/band are stored together
+-- (computed once from lib/engines/riskScore.js's computeRiskScore()) rather
+-- than storing score alone and re-deriving band on read.
+CREATE TABLE IF NOT EXISTS device_risk_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL,
+  band TEXT NOT NULL, -- 'low' | 'medium' | 'high' | 'critical'
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_drh_device_id ON device_risk_history(device_id);
+CREATE INDEX IF NOT EXISTS idx_drh_recorded_at ON device_risk_history(recorded_at);
+
+-- Operator-action audit trail (NOT a general app log -- scheduled/background
+-- jobs already have C:\Apps\SecVault\logs\engine.log for that). Populated
+-- only at HTTP route call-sites representing a meaningful in-app action
+-- (run-analysis, acknowledge-finding, acknowledge-config-diff), via
+-- lib/activityLog.js. device_id is nullable: every call-site today is
+-- device-scoped, but a future non-device action (e.g. a settings change)
+-- should not be forced to fabricate one.
+CREATE TABLE IF NOT EXISTS activity_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor TEXT NOT NULL DEFAULT 'unknown',
+  action TEXT NOT NULL,
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+  detail TEXT,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_al_device_id ON activity_log(device_id);
+CREATE INDEX IF NOT EXISTS idx_al_occurred_at ON activity_log(occurred_at);
+
 -- ─────────────────────────────────────────
 -- CVE / ADVISORY
 -- ─────────────────────────────────────────

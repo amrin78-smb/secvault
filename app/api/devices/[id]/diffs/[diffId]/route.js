@@ -1,4 +1,7 @@
 import { pool } from '../../../../../../lib/db';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../auth/[...nextauth]/route';
+import { logActivity } from '../../../../../../lib/activityLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,18 +27,23 @@ export async function GET(request, { params }) {
 }
 
 // PUT /api/devices/[id]/diffs/[diffId]
-// Acknowledges a config change. Body is optional: { acknowledged_by } (default 'admin').
+// Acknowledges a config change. `acknowledged_by` is derived from the logged-in
+// session — never trust a client-supplied "who did this" value now that it
+// feeds the Phase 4 audit trail (activity_log).
 export async function PUT(request, { params }) {
   try {
     const { id, diffId } = params;
 
-    let body = {};
+    // Resolved defensively: acknowledgedBy feeds the PRIMARY update below, not
+    // just the audit trail, so a getServerSession hiccup must degrade to
+    // 'unknown' rather than abort the whole acknowledge action.
+    let acknowledgedBy = 'unknown';
     try {
-      body = await request.json();
-    } catch {
-      // No/invalid JSON body — acknowledge with defaults.
+      const session = await getServerSession(authOptions);
+      acknowledgedBy = (session && session.user && session.user.name) || 'unknown';
+    } catch (sessionErr) {
+      console.warn(`[diffs route] Failed to resolve session actor: ${sessionErr.message}`);
     }
-    const acknowledgedBy = (body && body.acknowledged_by) || 'admin';
 
     const { rows } = await pool.query(
       `UPDATE config_diffs
@@ -48,6 +56,13 @@ export async function PUT(request, { params }) {
     if (rows.length === 0) {
       return Response.json({ error: 'Diff not found' }, { status: 404 });
     }
+
+    await logActivity(pool, {
+      actor: acknowledgedBy,
+      action: 'acknowledge_config_diff',
+      deviceId: id,
+      detail: `Config diff ${diffId} acknowledged`,
+    });
 
     return Response.json(rows[0]);
   } catch (err) {

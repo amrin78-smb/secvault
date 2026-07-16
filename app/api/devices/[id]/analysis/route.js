@@ -1,6 +1,9 @@
 import { pool } from '../../../../../lib/db';
 import { runAnalysisForDevice } from '../../../../../lib/engines/ruleAnalysis';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { logActivity } from '../../../../../lib/activityLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +92,24 @@ export async function POST(request, { params }) {
   try {
     const { id } = params;
     const result = await runAnalysisForDevice(id, pool);
+
+    // Audit logging is best-effort and must never turn a successful analysis
+    // run into a reported failure to the client — a getServerSession/
+    // logActivity hiccup here is a secondary concern (who did this), not the
+    // primary action (the analysis already succeeded and committed above).
+    try {
+      const session = await getServerSession(authOptions);
+      const actor = (session && session.user && session.user.name) || 'unknown';
+      await logActivity(pool, {
+        actor,
+        action: 'run_analysis',
+        deviceId: id,
+        detail: `Analysis run — ${result.findings} finding(s)`,
+      });
+    } catch (auditErr) {
+      console.warn(`[analysis route] Failed to record activity log: ${auditErr.message}`);
+    }
+
     return Response.json(result);
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });

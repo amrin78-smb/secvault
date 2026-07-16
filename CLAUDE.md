@@ -229,6 +229,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `config_backups` | Labeled config snapshots (auto/manual/pre-change) for download | 6 ✅ |
 | `rule_analysis_results` | Rule hygiene findings (unused, shadow, risky, etc.) | 5 ✅ |
 | `finding_acknowledgements` | Operator status per finding (new/acknowledged/dismissed/actioned), keyed on `rule_id_vendor` not `firewall_rules.id` | Dashboard Phase 2 ✅ |
+| `device_risk_history` | Risk-score snapshot per completed analysis run (scheduled or manual) | Dashboard Phase 4 ✅ |
+| `activity_log` | Operator-action audit trail (run analysis, acknowledge finding/diff) — not a general app log | Dashboard Phase 4 ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
 | `audit_checks` / `audit_findings` | Compliance check library + results | 7 (not yet created) |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
@@ -808,6 +810,49 @@ No write-back to devices anywhere — same confirmed scope as the rest of this d
   snapshot of the device's full ruleset — that resolution is safe precisely because it's never
   persisted, only rendered once per request; the ids themselves are NOT stable across pulls,
   which is exactly why `finding_acknowledgements` doesn't key on them.
+
+#### Risk Trend + Audit/Tracking (Phase 4 — `device_risk_history` / `activity_log`)
+
+Two more tabs on `/devices/[id]/analysis` (`?tab=risk|tracking`). Phase 3 (Expiry Notification +
+Alerting) is explicitly KIV — no notification/alerting infrastructure was built or is planned for
+now; skip straight from Phase 2 to Phase 4 in this codebase's actual history.
+
+- **Risk trend**: `device_risk_history` (`device_id`, `score`, `band`, `recorded_at`) is
+  snapshotted from **inside `runAnalysisForDevice()`** (`lib/engines/ruleAnalysis.js`), not at
+  either of its callers. That one function is what both the scheduled 24h collect
+  (`collectAndStore`) and a manual "Run Analysis" click (`POST /api/devices/[id]/analysis`) go
+  through, so snapshotting there covers both triggers without duplicating the logic at each call
+  site. Best-effort: a snapshot failure is caught and warned, never allowed to fail the analysis
+  run itself (the findings are already committed by that point in the function).
+  `components/analysis/RiskTab.js` (server component, queries ascending by `recorded_at`) +
+  `components/analysis/RiskTrendChart.js` (`'use client'` recharts `LineChart`, same
+  CSS-custom-property color convention as `FindingsBarChart.js`).
+- **Audit/Tracking**: `activity_log` (`actor`, `action`, `device_id` nullable, `detail`,
+  `occurred_at`) is **NOT a general app log** — `services/engine-worker.js`'s scheduled jobs
+  already have `C:\Apps\SecVault\logs\engine.log` for that. This table only records
+  HTTP-route-triggered operator actions, via `lib/activityLog.js`'s `logActivity(pool, {actor,
+  action, deviceId, detail})` (CommonJS; never throws, catches its own errors — an audit-log
+  failure must never fail the primary action it's describing). Three call-sites today:
+  `POST /api/devices/[id]/analysis` (`run_analysis`), `POST /api/devices/[id]/acknowledgements`
+  (`acknowledge_finding`), `PUT /api/devices/[id]/diffs/[diffId]` (`acknowledge_config_diff`).
+  `components/analysis/TrackingTab.js` (server component, capped at 100 rows, generic
+  snake_case→Title Case label transform rather than a hardcoded action-name lookup).
+- **`actor` comes from `getServerSession(authOptions)`** (`next-auth/next`), added to this
+  codebase's API routes for the first time by this phase — `session.user.name` (the local admin's
+  or LDAP-bound username, per `app/api/auth/[...nextauth]/route.js`'s `authorize()`), falling back
+  to `'unknown'` only if the session lookup itself fails. **Every route wraps the session lookup
+  in its own try/catch, separate from the route's main try/catch** — a `getServerSession` hiccup
+  must never turn an already-successful primary action (analysis already ran, finding already
+  acknowledged) into a reported 500 to the client; that would be the audit trail's secondary
+  concern masking the primary action's real success. The diffs route is the one exception where
+  the resolved actor ALSO feeds the primary `UPDATE ... SET acknowledged_by` (not just the audit
+  log), so there it degrades to `'unknown'` rather than being skipped — the acknowledge still
+  needs to complete either way.
+  - Fixed in passing: `PUT /api/devices/[id]/diffs/[diffId]` used to trust a client-supplied
+    `acknowledged_by` body field (default `'admin'`) — the actual UI caller
+    (`components/config/AcknowledgeButton.js`) never sent one, so `config_diffs.acknowledged_by`
+    was always the literal string `'admin'` regardless of who was actually logged in. Now derived
+    from the real session for both the column and the audit trail.
 
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 

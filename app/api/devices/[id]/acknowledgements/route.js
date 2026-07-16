@@ -1,4 +1,7 @@
 import { pool } from '../../../../../lib/db';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { logActivity } from '../../../../../lib/activityLog';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +74,22 @@ export async function POST(request, { params }) {
        RETURNING id, device_id, rule_id_vendor, finding_type, status, note, updated_at`,
       [id, ruleIdVendor, findingType, status, note]
     );
+
+    // Audit logging is best-effort and must never turn a successful
+    // acknowledge into a reported failure to the client — see the identical
+    // reasoning in app/api/devices/[id]/analysis/route.js.
+    try {
+      const session = await getServerSession(authOptions);
+      const actor = (session && session.user && session.user.name) || 'unknown';
+      await logActivity(pool, {
+        actor,
+        action: 'acknowledge_finding',
+        deviceId: id,
+        detail: `${findingType} on rule "${ruleIdVendor}" → ${status}`,
+      });
+    } catch (auditErr) {
+      console.warn(`[acknowledgements route] Failed to record activity log: ${auditErr.message}`);
+    }
 
     return Response.json(rows[0]);
   } catch (err) {

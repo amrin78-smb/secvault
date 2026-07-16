@@ -10,6 +10,8 @@ import FindingsBarChart from '../../../../../components/analysis/FindingsBarChar
 import CleanupTab from '../../../../../components/analysis/CleanupTab';
 import OptimizationTab from '../../../../../components/analysis/OptimizationTab';
 import ReorderTab from '../../../../../components/analysis/ReorderTab';
+import RiskTab from '../../../../../components/analysis/RiskTab';
+import TrackingTab from '../../../../../components/analysis/TrackingTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
@@ -168,9 +170,16 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['summary', 'rules', 'findings', 'cleanup', 'optimization', 'reorder'].includes(
-    searchParams?.tab
-  )
+  const tab = [
+    'summary',
+    'rules',
+    'findings',
+    'cleanup',
+    'optimization',
+    'reorder',
+    'risk',
+    'tracking',
+  ].includes(searchParams?.tab)
     ? searchParams.tab
     : 'summary';
   const severityFilter = searchParams?.severity || '';
@@ -227,6 +236,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink('cleanup', 'Cleanup')}
         {tabLink('optimization', 'Optimization')}
         {tabLink('reorder', 'Reorder')}
+        {tabLink('risk', 'Risk')}
+        {tabLink('tracking', 'Tracking')}
       </div>
 
       {tab === 'summary' && (
@@ -286,6 +297,10 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'optimization' && <OptimizationTab deviceId={device.id} />}
 
       {tab === 'reorder' && <ReorderTab deviceId={device.id} />}
+
+      {tab === 'risk' && <RiskTab deviceId={device.id} />}
+
+      {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 
       {tab === 'findings' && (
         <div className="space-y-3">
