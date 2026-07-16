@@ -903,6 +903,63 @@ Implement exponential backoff on 403/429:
 // Never hammer NVD — will get IP banned
 ```
 
+### NVD Fallback — CIRCL Vulnerability-Lookup (added 2026-07-16)
+
+**Root cause this fixes:** a production SecVault server had its outbound firewall block
+`services.nvd.nist.gov` specifically (confirmed via `Test-NetConnection` — DNS resolved correctly,
+`github.com:443` connected fine from the same host, only NVD was blocked) while `node-fetch@2` had
+no request timeout at all, so a blocked NVD request hung indefinitely instead of failing — a sync
+that should take ~1-2 minutes looked hung for 7+ minutes. Two independent fixes, both in
+`lib/feeds/nvd.js`:
+
+1. **`FETCH_TIMEOUT_MS = 20000`** on every NVD `fetch()` call — a stalled request now fails fast
+   instead of hanging.
+2. **CIRCL fallback** (`vulnerability.circl.lu`, CIRCL's public "Vulnerability-Lookup" project) —
+   triggers ONLY when an NVD request fails with a true network-level error (`err.status == null`,
+   meaning `fetch()` itself threw — timeout, DNS failure, connection refused/reset). NVD remains
+   primary and is never skipped in favor of CIRCL; an NVD HTTP response of any kind (429/403/5xx)
+   is a *different* failure class and does NOT trigger the fallback, only a request that never got
+   a response does.
+
+**Live-verified before writing any code** (per this file's own "verify against live responses"
+rule — the user's assumed endpoint, `/api/query`, 404s and doesn't exist):
+- Real endpoint: `GET /api/vulnerability/search/{vendor}/{product}?page&per_page&since` (confirmed
+  against the live `swagger.json`). `{vendor}/{product}` are derived directly from each
+  `VENDOR_CPES` string's own `cpe:2.3:<part>:<vendor>:<product>:...` segments — no separate mapping
+  table needed.
+- **`/api/vulnerability/cpesearch/{cpe}` was tried and rejected** — passing our exact wildcard CPE
+  strings (e.g. `cpe:2.3:o:fortinet:fortios:*:*:*:*:*:*:*:*`) returned an unrelated product
+  (FortiPAM, under a FortiOS query) and has no pagination metadata. The vendor/product endpoint's
+  matching was precise and paginated across every vendor tested; `cpesearch` was not used.
+- `per_page` is a real, documented parameter, but the server silently clamps values above 100 (a
+  request for `per_page=200` came back as `page_size: 100`) — `CIRCL_PER_PAGE = 100` reflects the
+  verified ceiling, not a guess.
+- No API key is required for this endpoint (confirmed live: unauthenticated requests return real
+  200 OK data for all 6 vendor/product pairs). CIRCL's `Authorization` header is only for
+  account-specific write operations (comments, bundles, user management) — irrelevant here. **Do
+  not wire in a CIRCL API key** unless a real rate-limiting need shows up later; one is not needed
+  today.
+- Response shape is CVE Record Format 5.x (MITRE's own schema — `containers.cna`/`containers.adp`),
+  NOT NVD API 2.0's shape. CVSS data can be under `containers.cna.metrics[]` OR any
+  `containers.adp[].metrics[]` entry depending on which org authored the record — confirmed both
+  placements live, `pickCvssFromCveRecord` scans both. `total_count` counts raw entries across the
+  `nvd` + `cvelistv5` result buckets CIRCL merges, which commonly both carry the same CVE, so a
+  deduped record count well below `total_count` is normal and NOT a sign of truncation — only log
+  a "capped" warning when `CIRCL_MAX_PAGES` (10) was actually reached with more still outstanding.
+
+**Known simplification (accepted, documented in `lib/feeds/nvd.js`):** CVE Record Format's
+`affected[].versions[]` entries can carry a `changes[]` timeline of finer-grained affected/
+unaffected toggles inside one version range — e.g. patched at an intermediate version, regressed
+later. This is ignored; only the outer `{version, lessThan/lessThanOrEqual}` range is used, same as
+`versionMatcher.js` already expects from NVD data. This can only make a CIRCL-sourced range
+**wider** than the true affected set (a version patched mid-range still reads as affected), never
+narrower — same conservative direction as the "unknown treated as applicable" tri-state rule under
+CVE Engine Architecture above, never the dangerous direction.
+
+**Logging:** `[NVD] <cpeString>: N CVE(s)` on a normal successful fetch, `[CIRCL fallback] ...` on
+every fallback attempt/result/failure — grep `engine.log` for either prefix to see which source
+served a given sync.
+
 ---
 
 ## Engine Worker (`services/engine-worker.js`)
