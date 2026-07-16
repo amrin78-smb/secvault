@@ -434,30 +434,42 @@ field mappings, then **record the verified field names here** so the next person
 Adapters are written to fail loudly on an unexpected shape rather than return wrong data — a loud
 failure on first connect is the design working, not a regression.
 
-#### First live result — Palo Alto SSH (2026-07-16, PAN-OS 11.1.13-h5, PA-440, standalone)
+#### First live result — Palo Alto SSH (2026-07-16, PAN-OS 11.1.13-h5) — STILL UNRESOLVED
 
-Confirmed broken, then fixed: `show config running` in operational mode (`>`) **ignores**
-`set cli config-output-format set` and always returns the brace tree
-(`config { mgt-config { users { ... } } }`) — never flat `set` lines, regardless of the
-preference command. `RULE_LINE_REGEX` requires a line starting with `set `, so it matched
-zero lines (confirmed via the `skipped` counter also reading 0 — the regex was never even
-attempted against a candidate line, not "attempted and failed"). Same root cause silently
-broke `getConfig()`'s `parseConfigFromSet()`, since both share one `_getConfigText()` call.
+**`getRules()`/`getConfig()` over SSH do not work yet.** Do not trust rule counts from a
+Palo Alto SSH device until this is closed out.
 
-Fix: enter configuration mode first — `configure` → `set cli config-output-format set` →
-bare `show` (dumps the whole tree from root, fully-qualified paths, e.g. `set devices
-localhost.localdomain vsys vsys1 rulebase security rules "Allow Web" from trust`). The
-preference only takes effect on `show` run *inside* configuration mode. See
-`lib/adapters/paloalto/ssh.js`'s `CONFIGURE_MODE` comment. `configure` needs no elevated
-role — a built-in read-only "superreader" account can enter it and run `show`, just not
-commit/edit. **The diagnosis (brace format returned) is confirmed live; the fix (the
-3-step sequence) is not yet independently reconfirmed against this device** — check the
-next `[PaloAlto SSH Debug]` preview actually starts with `set ` before trusting rule counts.
+Round 1: `show config running` in operational mode (`>`) returned the curly-brace tree
+(`config { mgt-config { users { ... } } }`), never flat `set` lines — confirmed on a PA-440.
+Attempted fix: enter configuration mode first — `configure` → `set cli config-output-format
+set` → bare `show` — on the documented theory that the format preference only takes effect
+on `show` run *inside* configuration mode.
 
-Also confirmed live in the same session: `show system info` field names match this file's
-existing assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no changes
-needed there. PAN-OS API/username-password method against the same device already worked
-before this fix, confirming XML-API rule collection is sound independent of this bug.
+Round 2 (same day, a SECOND independent device — a PA-3220): the fix's command sequence
+runs correctly (confirmed: the debug log shows `show`, not `show config running`, and the
+dump grew from 93KB to 1.2MB — consistent with pulling the *whole* tree from root) — but the
+retrieved text **still starts with the brace tree** (`deviceconfig { system { panorama {
+... } } }`), not `set` lines. Two independent real devices now agree: this firmware does not
+produce `set`-format output the documented way, at least not via this exact command
+sequence. The theory behind Round 1's fix is not confirmed; do not extend or "correct" the
+command sequence again without new evidence — guessing a third CLI incantation blind is
+exactly the mistake that produced this bug.
+
+Next step (shipped, not yet run): `ssh.js` now ALSO searches the retrieved config for the
+literal substring `"rulebase"` and logs a ~8000-char window centered there, regardless of
+total file size — the plain head-of-file preview twice landed in `deviceconfig`/`mgt-config`
+and never reached it on a 93KB-1.2MB dump. The next real collect attempt should finally show
+the actual rule syntax on this firmware, whatever format it turns out to be (`set` lines
+after all, brace, or something else) — a parser will be written against that evidence, not
+guessed again. If it turns out to be genuinely brace-format, `sshParser.js` needs a proper
+recursive block-tree parser for it (PAN-OS's brace tree is structurally similar to what
+`fortinet/cliParser.js`'s `parseConfigTree()` already does for FortiOS's own default format —
+same general shape, different leaf/list syntax) rather than continuing to chase `set` format.
+
+Also confirmed live (both rounds): `show system info` field names match this file's existing
+assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no changes needed
+there. PAN-OS API/username-password method has separately worked on these same devices,
+confirming XML-API rule collection is sound independent of this SSH-specific bug.
 
 ### Known Limitations (by design — documented, not bugs)
 
@@ -700,6 +712,31 @@ The predicate engine code should not need to change for new CVEs.
 - Shadow/redundant/reorder analysis is O(n²) and **skipped entirely above 1000 rules** (warning logged)
 - Optional overrides via `settings` keys: `rule_unused_days`, `rule_expiry_window_days`, `risky_ports` (JSON array)
 - Coverage tests are string-equality provable-only (no CIDR math) — deliberately conservative to avoid false shadows
+
+### Rule Analysis Dashboard (`lib/engines/riskScore.js`)
+
+Pure, no-DB risk scoring layered on top of the Phase 5 findings — built to bring the Rule
+Analysis UI closer to feature parity with commercial firewall-analyzer dashboards (stat
+grid + bar chart + a single glanceable risk number), while staying **recommend-only**: no
+adapter gained a write-back/push-to-device capability, and none is planned — see the
+"Rule Analysis → Firewall-Analyzer-style Dashboard" plan for the full phased scope.
+
+- `computeRiskScoreFromCounts({critical,high,medium,info})` → weighted sum (10/5/2/0),
+  clamped to 0–100, banded into `low`/`medium`/`high`/`critical`. `computeRiskScore(findings)`
+  is a convenience wrapper that tallies severity counts from a raw findings array first.
+- Deliberately coarse (a triage signal, not a tuned risk model) — see the file's own comments
+  for why the band cut points land where they do (a single critical finding scores `medium`,
+  not `low`; three or more escalates to `high`).
+- Computed on read wherever it's needed (the `/api/devices/[id]/analysis` GET summary, the
+  per-device analysis page, the fleet analysis page) — no caching column, no scheduled job.
+  A future phase may snapshot it periodically for a trend view; not built yet.
+- `/devices/[id]/analysis` is now tabbed (`?tab=summary|rules|findings`, the same
+  server-rendered query-param pattern as `/devices/[id]/page.js`) instead of one flat page —
+  `summary` carries the risk badge, the stat grid (existing severity counts plus
+  Allowed/Denied/Inactive/Any-Any/Logging-Disabled pulled from `firewall_rules` directly),
+  and a hand-built Tailwind-only bar chart (no charting library in this repo — see the
+  `FindingTypeBarChart` component in that page for the convention: div height as a `%`,
+  colored via the same severity→Tailwind-class mapping `SeverityBadge` already uses).
 
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 

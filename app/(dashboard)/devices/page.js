@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { pool } from '../../../lib/db';
@@ -9,6 +8,7 @@ import Button from '../../../components/ui/Button';
 import StatusDot from '../../../components/ui/StatusDot';
 import EmptyState from '../../../components/ui/EmptyState';
 import Modal from '../../../components/ui/Modal';
+import DeviceRowActions from '../../../components/devices/DeviceRowActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,51 +22,20 @@ const SORT_OPTIONS = {
 
 // ────────────────────────────────────────────────────────────────────────
 // NOTE on per-row actions:
-// The spec called for small 'use client' components (module-top-level, in this same
-// file) for View CVEs / Collect Now / Test Connectivity / Edit / Delete. That's not
-// possible here — this file's default export is an async Server Component doing direct
-// pool.query data-fetching, and 'use client' is a file-scope directive; adding it would
-// turn the whole module (including the pg-backed fetch) into a client bundle, which
-// can't run in the browser. Since no extra file is available for a client island, the
-// same behavior is delivered with zero client JS:
-//   - View CVEs / Edit -> plain <Link> (no interactivity needed).
-//   - Collect Now / Test Connectivity -> Server Actions (<form action={...}>) that call
-//     the owning workstreams' HTTP endpoints (/api/devices/[id]/collect,
-//     /api/devices/[id]/test) via an internal fetch, forwarding the request's session
-//     cookie (middleware.js requires a valid session on every /api/* route), then
-//     revalidatePath('/devices') — the server-side equivalent of router.refresh().
-//   - Delete -> a plain <Link href="?confirmDelete=<id>"> flips a query param; when it
-//     matches a row, the shared Modal component (already 'use client' in its own file —
-//     perfectly fine to import into a Server Component tree) renders a confirmation with
-//     a Cancel link (clears the query param) and a Confirm <form> Server Action that
-//     deletes the device and redirects back to a clean /devices URL.
+// Collect Now / Test Connectivity used to be Server Actions (<form action={...}>)
+// calling /api/devices/[id]/collect and /test via an internalFetch() cookie-
+// forwarding helper -- no client JS in front of them, so clicking either one
+// did a genuine top-level form navigation with zero pending UI, and just sat
+// there (up to ~2 minutes on an unreachable device) until the response came
+// back. Replaced with DeviceRowActions.js, a client component using the same
+// fetch+pending+router.refresh() pattern as the device detail page's
+// DeviceActions.js, styled to match this table's compact inline text links.
+//   - View CVEs / Edit -> still a plain <Link> (no interactivity needed).
+//   - Delete -> still a plain <Link href="?confirmDelete=<id>"> query-param flip
+//     + the shared Modal component + a Confirm <form> Server Action -- a single
+//     fast DB delete, not a network call to a firewall, so the blocking-
+//     navigation cost that motivated the above change doesn't apply to it.
 // ────────────────────────────────────────────────────────────────────────
-
-function internalFetch(path, init) {
-  const h = headers();
-  const host = h.get('host');
-  const proto = h.get('x-forwarded-proto') || 'http';
-  const cookie = h.get('cookie') || '';
-  return fetch(`${proto}://${host}${path}`, {
-    ...init,
-    headers: { ...(init?.headers || {}), cookie },
-    cache: 'no-store',
-  });
-}
-
-async function collectNowAction(formData) {
-  'use server';
-  const id = formData.get('deviceId');
-  await internalFetch(`/api/devices/${id}/collect`, { method: 'POST' });
-  revalidatePath('/devices');
-}
-
-async function testConnectivityAction(formData) {
-  'use server';
-  const id = formData.get('deviceId');
-  await internalFetch(`/api/devices/${id}/test`, { method: 'POST' });
-  revalidatePath('/devices');
-}
 
 async function deleteDeviceAction(formData) {
   'use server';
@@ -209,18 +178,7 @@ export default async function DevicesPage({ searchParams }) {
                     <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
                       View
                     </Link>
-                    <form action={collectNowAction}>
-                      <input type="hidden" name="deviceId" value={d.id} />
-                      <button type="submit" className="text-accent hover:underline">
-                        Collect
-                      </button>
-                    </form>
-                    <form action={testConnectivityAction}>
-                      <input type="hidden" name="deviceId" value={d.id} />
-                      <button type="submit" className="text-accent hover:underline">
-                        Test
-                      </button>
-                    </form>
+                    <DeviceRowActions deviceId={d.id} />
                     <Link href={`/devices/${d.id}`} className="text-accent hover:underline">
                       Edit
                     </Link>
