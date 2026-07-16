@@ -377,14 +377,23 @@ Alternative: session auth via `POST /api/login` → `JSESSIONID` cookie. Use onl
 
 ### Self-Signed SSL
 
-Most enterprise SMC instances use self-signed certificates. Default to accepting:
+Most enterprise SMC instances use self-signed certificates. Default to accepting.
+
+**Source of truth is the per-device `devices.allow_self_signed_ssl` column** (NOT NULL,
+DEFAULT true) — not the `ALLOW_SELF_SIGNED_SSL` env var, which only seeds the Add Device
+form's default. The flag is per-device because one server can manage a mix of appliances.
+
 ```javascript
-const https = require('https');
-const agent = new https.Agent({
-  rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_SSL !== 'false'
-});
-// Default ALLOW_SELF_SIGNED_SSL=true in .env.local.example
+// The pattern every vendor adapter uses (forcepoint/smc.js, fortinet/api.js,
+// paloalto/api.js, checkpoint/api.js). Note the polarity carefully:
+const agent = new https.Agent({ rejectUnauthorized: allowSelfSignedSsl === false });
+// allowSelfSignedSsl true  -> rejectUnauthorized false -> self-signed ACCEPTED
+// allowSelfSignedSsl false -> rejectUnauthorized true  -> cert VALIDATED
 ```
+
+⚠️ Earlier revisions of this file documented `rejectUnauthorized: process.env.ALLOW_SELF_SIGNED_SSL !== 'false'`,
+which is **inverted** (it rejects self-signed certs when the flag says to allow them) and was
+never what the code did. Corrected here; do not reintroduce it.
 
 ### HATEOAS Pattern
 
@@ -528,6 +537,20 @@ When no `advisory_conditions` predicate exists for an advisory:
 - Unknown is treated **conservatively** (same as yes for prioritization)
 - NEVER default unknown to 'no' — would silently suppress CVEs with no predicates
 
+**"No usable config" includes an EMPTY object, not just null** (`lib/engines/applicability.js`
+→ `hasUsableConfig()`). `{}`, a non-object, and an array all mean *the config pull did not
+produce anything we can interrogate* — they must yield `'unknown'`, exactly like `null`.
+
+This is a real, reachable failure, not a theoretical one. An adapter parser meeting an
+unexpected live response shape can legitimately return `{}` (the five non-Forcepoint adapters'
+field names are still unverified against live hardware), and a Cisco ASA session that fails to
+reach enable mode parses to an empty skeleton. Without the guard, `{}` reaches `getByPath()`,
+every lookup returns `undefined`, and the key-based predicates answer `'no'` — so prioritization
+skips rules 1–4 (which require `config_applies !== 'no'` / `=== 'yes'`) and lands on rule 6 →
+`monitor`. **A KEV-listed, actively-exploited, version-affected CVE would be silently downgraded
+from `patch_now` to `monitor` by a failed config pull** — the exact "looks fine, isn't" failure
+this tri-state rule exists to prevent. Verified end-to-end before/after.
+
 ### Applicability Engine (Phase 6 — `lib/engines/applicability.js`)
 
 The predicate evaluator is now live. Semantics (do not change without documenting here first):
@@ -565,6 +588,29 @@ The predicate engine code should not need to change for new CVEs.
   written to `config_backups` **only when something changed** (avoids duplicating every unchanged daily pull)
 - A detected config change triggers an immediate CVE re-match in the engine worker (config_applies may have flipped)
 - UI: `/devices/[id]/changes` (timeline, diff viewer, acknowledge, backups + download)
+
+#### ⛔ Stored configs are REDACTED — do not "fix" this
+
+Adapters that retrieve a full text config (`cisco_asa`, `sangfor`) run it through a
+fail-closed redactor **before** it is persisted. Secrets never reach `device_configs.config_raw`,
+and therefore never reach `config_backups.config_raw` (which is copied from it verbatim) or the
+`/api/devices/[id]/backups/[backupId]` download.
+
+This is not optional hygiene — it closes a real disclosure path. A `show running-config` carries
+enable/user password hashes, IKE pre-shared keys, SNMP communities and RADIUS/TACACS+ secrets;
+**`lib/schema-grants.sql` grants `SELECT` on `device_configs` and `config_backups` to
+`claude_readonly` / `nocvault_readonly`.** Those are the exact roles CLAUDE.md bars from
+`device_credentials` — without redaction they would read device secrets straight out of the
+config tables, defeating that rule entirely.
+
+Consequences to know before changing anything here:
+- **Backups are for diff/audit/reference, NOT for restore-to-device.** A redacted config cannot be
+  replayed onto an appliance. Restore is not implemented, and adding it would require rethinking
+  this tradeoff (e.g. a separately-encrypted restore artifact via credStore) — not just removing
+  redaction.
+- Redaction is deterministic, so it **cannot** cause spurious change detection. It is also
+  irrelevant to diffing: `configDiff.js` diffs `config_parsed`, never `config_raw`.
+- Any NEW adapter that returns a raw text config MUST redact before returning it from `getConfig()`.
 
 ---
 
