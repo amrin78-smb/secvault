@@ -190,10 +190,15 @@ module.exports = { pool };
 
 - `lib/schema.sql` uses `CREATE TABLE IF NOT EXISTS` on every table — safe to re-run
 - `lib/migrate.js` runs `schema.sql` via the `pg` client, connected as `secvault_user`
-- `lib/schema-grants.sql` (readonly role creation + per-table grants) is a **separate file**, applied
-  separately by `Install-SecVault.ps1` under the `postgres` superuser — **not** run by `migrate.js` and
-  **not** part of the Update script. See "Readonly Access for Diagnostics" below for why.
-- Update script runs `migrate.js` (schema.sql only) BEFORE restarting services (see Update script section)
+- `lib/schema-grants.sql` (readonly role creation + per-table grants) is a **separate file**, run under
+  the `postgres` superuser — **not** run by `migrate.js`, which connects as `secvault_user`. See
+  "Readonly Access for Diagnostics" below for why. Both `Install-SecVault.ps1` **and**
+  `Update-SecVault.ps1` apply it (Update reads the superuser password back out of the deployed
+  `.env.local`'s `PG_ADMIN_PASSWORD` — see the Update Script section) — every statement in the file is
+  idempotent (`CREATE ROLE IF NOT EXISTS`, plain `GRANT`), so re-running it on every update is always
+  safe, not just when a table was actually added.
+- Update script runs `migrate.js` (schema.sql) THEN `schema-grants.sql`, both BEFORE restarting services
+  (see Update Script section)
 - Never use `DROP TABLE` in schema.sql — destructive and irreversible in production
 
 ### Primary Keys
@@ -243,7 +248,9 @@ GRANT SELECT ON TABLE new_table_name TO nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users
 ```
 
-**Why a separate file:** `lib/schema.sql` runs via `lib/migrate.js`, which connects as `secvault_user` — an account that only has `GRANT ALL PRIVILEGES ON DATABASE`, not `CREATEROLE`/superuser. `CREATE ROLE` inside `schema.sql` would throw a permission error, and because a multi-statement `pool.query()` call is one implicit transaction, that failure would roll back every `CREATE TABLE` in the same call — silently breaking every fresh install. `lib/schema-grants.sql` is applied separately by `Install-SecVault.ps1` under the `postgres` superuser (`psql -U postgres -d secvault -f lib/schema-grants.sql`), after the tables it grants on already exist, and its failure is logged as a warning, never fatal — these roles are diagnostic-only and not required for the app to function.
+**Why a separate file:** `lib/schema.sql` runs via `lib/migrate.js`, which connects as `secvault_user` — an account that only has `GRANT ALL PRIVILEGES ON DATABASE`, not `CREATEROLE`/superuser. `CREATE ROLE` inside `schema.sql` would throw a permission error, and because a multi-statement `pool.query()` call is one implicit transaction, that failure would roll back every `CREATE TABLE` in the same call — silently breaking every fresh install. `lib/schema-grants.sql` is applied separately, under the `postgres` superuser (`psql -U postgres -d secvault -f lib/schema-grants.sql`), after the tables it grants on already exist, and its failure is logged as a warning, never fatal — these roles are diagnostic-only and not required for the app to function.
+
+**Applied automatically by both installer scripts** — no manual step needed after adding a new table's `GRANT SELECT` line. `Install-SecVault.ps1` runs it with the just-generated superuser password (still in scope at that point in the script); `Update-SecVault.ps1` runs it too, reading the same password back out of the already-deployed `.env.local`'s `PG_ADMIN_PASSWORD` value (originally persisted there "for later reference" — this is that reference, used programmatically). Safe to re-run unconditionally on every update because every statement in the file is idempotent. If `.env.local` predates `PG_ADMIN_PASSWORD` (an install from before this was added) or the value is empty, the Update step logs a warning and skips — it never fails the update.
 
 ---
 
@@ -825,6 +832,7 @@ the pattern used by the NocVault suite uninstaller.
 3. git pull origin main
 4. npm ci
 5. node lib/migrate.js          ← schema migration BEFORE start
+5b. lib/schema-grants.sql       ← readonly grants, best-effort (never fails the update)
 6. npm run build
 7. sc.exe start SecVault-Engine
 8. sc.exe start SecVault-App
@@ -833,6 +841,14 @@ the pattern used by the NocVault suite uninstaller.
 Schema migration runs before services restart — ensures new tables exist before
 code that references them starts running. This is the same ordering used across
 all NocVault suite apps.
+
+Step 5b reads the postgres superuser password back out of the already-deployed
+`.env.local`'s `PG_ADMIN_PASSWORD` (see "Schema Migration" above) and re-runs
+`lib/schema-grants.sql` unconditionally — every statement in that file is
+idempotent, so this is safe on every update, not just when a table was added.
+Wrapped so it can only ever warn, never throw: missing `.env.local`, an empty
+`PG_ADMIN_PASSWORD`, or a `psql` failure all log a warning and the update
+continues — these roles are diagnostic-only, never required for the app itself.
 
 ### NSSM Service Registration
 
@@ -1034,7 +1050,7 @@ customer deployment.
 
 ### Schema Files
 - **Two schema files, two privilege levels** — see MVP bug #3 above. Never merge `schema-grants.sql` back into `schema.sql` — doing so will break fresh installs.
-- Every new table added to `schema.sql` needs a corresponding `GRANT SELECT` added to `schema-grants.sql`, then reapplied (`psql -U postgres -d secvault -f lib/schema-grants.sql`) — this does not happen automatically as part of `Update-SecVault.ps1`.
+- Every new table added to `schema.sql` needs a corresponding `GRANT SELECT` added to `schema-grants.sql` — both `Install-SecVault.ps1` and `Update-SecVault.ps1` apply it automatically on every run (see "Update Script" and "Schema Migration" above), so no manual `psql` step is needed for this specific case anymore. Manual reapplication is only needed if `.env.local` predates `PG_ADMIN_PASSWORD` or its value has gone stale (e.g. the postgres superuser password was changed outside these scripts).
 
 ### Rule Shadow Analysis
 - Shadow detection is O(n²) against rule count. For large rulesets (500+ rules), cap at 1000 rules or run off-hours. Log a warning when ruleset size exceeds threshold.

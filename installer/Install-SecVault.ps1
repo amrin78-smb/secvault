@@ -34,11 +34,12 @@
     PostgreSQL `postgres` superuser password is never hardcoded and never
     supplied by a human -- it's generated fresh by this script every run
     (same pattern as NEXTAUTH_SECRET/CREDENTIAL_KEY) and persisted to
-    .env.local as PG_ADMIN_PASSWORD purely for later reference; the app
-    itself never uses it (it only ever connects as secvault_user). If
-    PostgreSQL is already installed on this server, its password is reset
-    to the freshly generated value via a temporary trust-auth window --
-    see step 1d below.
+    .env.local as PG_ADMIN_PASSWORD; the SecVault APP itself never uses it
+    (it only ever connects as secvault_user) -- it's read back only by
+    Update-SecVault.ps1, to reapply lib\schema-grants.sql non-interactively
+    on every update (see CLAUDE.md "Schema Migration"). If PostgreSQL is
+    already installed on this server, its password is reset to the freshly
+    generated value via a temporary trust-auth window -- see step 1d below.
 
 .PARAMETER AppPort
     Port for the SecVault-App (Next.js) service.
@@ -246,8 +247,9 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue) -or -not (Get-Command 
 # human passes in -- generated fresh right here, every run (same reasoning
 # as NEXTAUTH_SECRET/CREDENTIAL_KEY in step 10 below), alphanumeric-only
 # (see the -DbPassword comment above for why). It's persisted to .env.local
-# as PG_ADMIN_PASSWORD purely for later manual reference -- the app itself
-# never uses it, only ever connecting as secvault_user.
+# as PG_ADMIN_PASSWORD -- the SecVault app itself never uses it (only ever
+# connecting as secvault_user), but Update-SecVault.ps1 reads it back to
+# reapply lib\schema-grants.sql non-interactively on every update.
 # .NET Framework's RNGCryptoServiceProvider.GetBytes only has the
 # GetBytes(byte[]) overload -- it fills a pre-allocated array in place and
 # returns void. Passing an int (as if calling a GetBytes(count) that

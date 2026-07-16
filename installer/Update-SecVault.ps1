@@ -10,6 +10,7 @@
       3. git pull origin main
       4. npm ci
       5. node lib\migrate.js       (schema migration BEFORE services restart)
+      5b. lib\schema-grants.sql    (readonly diagnostic grants -- best-effort)
       6. npm run build
       7. sc.exe start SecVault-Engine
       8. sc.exe start SecVault-App
@@ -198,6 +199,72 @@ Invoke-Step 'node lib\migrate.js' {
     Add-Content -Path $LogFile -Value ($out -join "`n")
     if ($LASTEXITCODE -ne 0) {
         throw "node lib\migrate.js exited with code $LASTEXITCODE"
+    }
+}
+
+# -----------------------------------------------------------------------
+# 5b. lib\schema-grants.sql  (readonly diagnostic grants -- best-effort)
+# -----------------------------------------------------------------------
+# CREATE ROLE requires postgres superuser, which secvault_user does not have
+# (see CLAUDE.md "Readonly Access for Diagnostics"), so this cannot be part of
+# lib\migrate.js above -- same reason Install-SecVault.ps1 applies it as a
+# separate step. This step was previously ONLY run by Install-SecVault.ps1,
+# which meant every new table added to schema.sql needed a manual
+# `psql -U postgres -d secvault -f lib\schema-grants.sql` after every update --
+# easy to forget, and CLAUDE.md had to carry a standing reminder about it.
+#
+# What makes running it here safe: Install-SecVault.ps1 already persists the
+# postgres superuser password into .env.local as PG_ADMIN_PASSWORD (see its
+# own comment: originally "purely for later manual reference" -- this is that
+# reference, used programmatically). schema-grants.sql's own CREATE ROLE
+# statements are already guarded with `IF NOT EXISTS` and every GRANT is
+# idempotent, so re-running the whole file on every update is always safe,
+# not just when a new table was actually added.
+#
+# Best-effort by design, same as Install-SecVault.ps1's tolerance: a failure
+# here (missing .env.local, empty PG_ADMIN_PASSWORD, wrong password after a
+# manual PostgreSQL password change, psql.exe not found) must NEVER fail the
+# overall update -- these roles are diagnostic-only and not required for the
+# app to function. Everything in this step is wrapped so it can only ever
+# warn, never throw, regardless of what goes wrong.
+Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
+    try {
+        $envLocalPath = Join-Path $repoRoot '.env.local'
+        if (-not (Test-Path $envLocalPath)) {
+            Write-Log '  [WARN] .env.local not found -- skipping readonly grants (not fatal).'
+            return
+        }
+
+        $envContent = Get-Content -Path $envLocalPath -Raw
+        $pgAdminPassword = $null
+        if ($envContent -match '(?m)^PG_ADMIN_PASSWORD=(.*)$') {
+            $pgAdminPassword = $matches[1].Trim()
+        }
+
+        if ([string]::IsNullOrEmpty($pgAdminPassword)) {
+            Write-Log '  [WARN] PG_ADMIN_PASSWORD not set in .env.local -- skipping readonly grants (not fatal). Run lib\schema-grants.sql manually with the postgres superuser password if needed.'
+            return
+        }
+
+        $PgBin = 'C:\Program Files\PostgreSQL\16\bin'
+        $grantsPath = Join-Path $repoRoot 'lib\schema-grants.sql'
+        if (-not (Test-Path $grantsPath)) {
+            Write-Log "  [WARN] $grantsPath not found -- skipping readonly grants (not fatal)."
+            return
+        }
+
+        $env:PGPASSWORD = $pgAdminPassword
+        $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -f $grantsPath 2>&1 }
+        Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+        $out | Write-Host
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
+            Write-Log "  [WARN] schema-grants.sql exited with code $LASTEXITCODE -- claude_readonly/nocvault_readonly may be out of date. This does not affect application function."
+        }
+    } catch {
+        Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+        Write-Log "  [WARN] Applying readonly grants threw an unexpected error -- $($_.Exception.Message). This does not affect application function."
     }
 }
 

@@ -1,8 +1,6 @@
-import { headers } from 'next/headers';
-import { revalidatePath } from 'next/cache';
 import { pool } from '../../../lib/db';
-import Button from '../../../components/ui/Button';
 import CVETable from '../../../components/cve/CVETable';
+import AssessNowButton from '../../../components/cve/AssessNowButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,44 +8,15 @@ const BAND_LABELS = ['patch_now', 'scheduled', 'monitor'];
 
 // ────────────────────────────────────────────────────────────────────────
 // NOTE on "Assess Now":
-// The spec asked for a 'use client' button that POSTs to /api/cve/assess then calls
-// router.refresh(). Same constraint as elsewhere in this task: this file's default
-// export does direct pool.query data-fetching, and 'use client' is file-scoped, so it
-// can't be mixed into this module. Following the precedent already set in
-// app/(dashboard)/advisories/page.js (SyncNowButton), a Server Action triggered by a
-// plain <form> is used instead — it calls the CVE Engine workstream's
-// POST /api/cve/assess endpoint via an internal fetch (forwarding the session cookie,
-// since middleware.js requires auth on every /api/* route), then revalidatePath('/cve')
-// — the server-side equivalent of router.refresh().
+// Used to be a Server Action (`assessNowAction`, 'use server') triggered by a
+// plain <form>, calling /api/cve/assess via an internalFetch() cookie-
+// forwarding helper with no client JS in front of it -- clicking it did a
+// genuine top-level form navigation with zero pending UI, and just sat there
+// until runMatchForAllDevices() finished across the whole fleet. Replaced with
+// AssessNowButton.js, a client component using the same fetch+spinner+
+// router.refresh() pattern as CredentialForm.js/RunAnalysisButton.js/
+// DeviceActions.js/SyncNowButton.js.
 // ────────────────────────────────────────────────────────────────────────
-
-function internalFetch(path, init) {
-  const h = headers();
-  const host = h.get('host');
-  const proto = h.get('x-forwarded-proto') || 'http';
-  const cookie = h.get('cookie') || '';
-  return fetch(`${proto}://${host}${path}`, {
-    ...init,
-    headers: { ...(init?.headers || {}), cookie },
-    cache: 'no-store',
-  });
-}
-
-async function assessNowAction() {
-  'use server';
-  await internalFetch('/api/cve/assess', { method: 'POST' });
-  revalidatePath('/cve');
-}
-
-function AssessNowButton() {
-  return (
-    <form action={assessNowAction}>
-      <Button type="submit" variant="primary">
-        Assess Now
-      </Button>
-    </form>
-  );
-}
 
 async function getSummary(dbPool) {
   const result = await dbPool.query(

@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { revalidatePath } from 'next/cache';
 import { pool } from '../../../lib/db';
-import { runFullSync } from '../../../lib/feeds';
+import SyncNowButton from '../../../components/advisories/SyncNowButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,42 +14,15 @@ const CVSS_BAND_OPTIONS = [
 
 // ────────────────────────────────────────────────────────────────────────
 // NOTE on the "Sync Now" control:
-// The spec for this page called for a small 'use client' island component defined in
-// this same file (not nested inside the server component) that POSTs to
-// /api/feeds/sync and then calls router.refresh(). That is not achievable in a single
-// file: Next.js's `'use client'` directive is file-scoped — placing it at the top of
-// this file would turn the ENTIRE module (including the async Server Component default
-// export below, which does direct `pool.query` data fetching) into a client bundle.
-// `pg` cannot be bundled for the browser, so that would either fail the build or leak
-// DB access into client code. Since only these seven files may be touched (no separate
-// SyncNowButton.js is allowed), the equivalent, correct pattern is used instead: a
-// Server Action (`syncNowAction`, marked with the `'use server'` directive inside the
-// function body — NOT at the top of the file) triggered by a plain <form>. It runs the
-// sync directly on the server (no self-fetch of our own API route, consistent with the
-// same principle behind "don't fetch your own API routes from a server component") and
-// calls `revalidatePath` — the server-side equivalent of `router.refresh()` — so the
-// page re-renders with fresh data after the sync completes. Functionally this delivers
-// the same UX (click "Sync Now" -> sync runs -> page shows fresh results) without
-// violating Next.js's module boundaries.
+// Used to be a Server Action (`syncNowAction`, 'use server') triggered by a
+// plain <form>, running runFullSync() directly on the server with no client JS
+// in front of it -- clicking it did a genuine top-level form navigation with
+// zero pending UI, and just sat there (NVD rate-limits to 1 req/6s without an
+// API key, across 6 vendor CPE strings, so a full sync is not fast) until it
+// finished. Replaced with SyncNowButton.js, a client component using the same
+// fetch+spinner+router.refresh() pattern as CredentialForm.js/
+// RunAnalysisButton.js/DeviceActions.js.
 // ────────────────────────────────────────────────────────────────────────
-async function syncNowAction() {
-  'use server';
-  await runFullSync(pool);
-  revalidatePath('/advisories');
-}
-
-function SyncNowButton() {
-  return (
-    <form action={syncNowAction}>
-      <button
-        type="submit"
-        className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"
-      >
-        Sync Now
-      </button>
-    </form>
-  );
-}
 
 function formatDateTime(value) {
   if (!value) return 'never';
