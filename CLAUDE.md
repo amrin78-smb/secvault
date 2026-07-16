@@ -97,7 +97,9 @@ npm run build                               # must pass with zero errors
 | Auth | next-auth 4.24.7, standalone (no suite SSO dependency) |
 | Database | PostgreSQL 16, `pg` module (pool pattern) |
 | Runtime | Node.js v20 |
-| CSS | Tailwind CSS 3.4.x |
+| CSS | Plain CSS custom properties + suite utility classes (`app/globals.css`) — NO framework. See "Design System" below. |
+| Icons | Hand-rolled inline SVG (`components/icons.js`) — no icon library |
+| Charts | `recharts` |
 | Credentials | `lib/credStore.js` (AES-256-GCM, per-record IV) |
 | Logging | `winston` → `C:\Apps\SecVault\logs\` |
 | Scheduling | `node-cron` in engine-worker.js |
@@ -110,26 +112,30 @@ secvault/
 ├── CLAUDE.md                        ← you are here
 ├── package.json                     ← version bumped on every push
 ├── next.config.js
-├── tailwind.config.js
 ├── .env.local.example               ← committed (no secrets)
 ├── .env.local                       ← gitignored (has secrets)
 ├── middleware.js                    ← route protection (auth gate)
 ├── app/
-│   ├── layout.js                    ← root layout
-│   ├── globals.css                  ← design tokens (CSS variables)
+│   ├── layout.js                    ← root layout + blocking theme-init <script>
+│   ├── globals.css                  ← NocVault suite design tokens + utility classes (no Tailwind)
 │   ├── (auth)/login/page.js
 │   ├── (dashboard)/
-│   │   ├── layout.js                ← sidebar + header wrapper
+│   │   ├── layout.js                ← sidebar + header wrapper (.sv-shell/.sv-body/.sv-content)
 │   │   ├── page.js                  ← main dashboard
 │   │   ├── devices/                 ← device inventory
 │   │   ├── cve/                     ← fleet CVE posture
-│   │   └── advisories/              ← advisory browser
+│   │   ├── advisories/              ← advisory browser
+│   │   ├── analysis/                ← rule analysis dashboard
+│   │   └── settings/
 │   └── api/
 │       ├── auth/[...nextauth]/route.js
-│       ├── devices/                 ← CRUD + test/collect actions
+│       ├── devices/                 ← CRUD + test/collect/analysis/acknowledgements/diffs/backups
 │       ├── advisories/
 │       ├── cve/
+│       ├── analysis/                ← fleet analysis + run-all
 │       ├── feeds/                   ← feed sync trigger + status
+│       ├── search/                  ← header search (devices + advisories)
+│       ├── notifications/summary/   ← header bell aggregate count
 │       └── settings/
 ├── lib/
 │   ├── db.js                        ← PostgreSQL pool singleton
@@ -137,6 +143,10 @@ secvault/
 │   ├── schema-grants.sql            ← readonly roles + per-table grants (runs as postgres superuser)
 │   ├── migrate.js                   ← runs schema.sql
 │   ├── credStore.js                 ← AES-256-GCM credential encryption
+│   ├── theme.js                     ← dual-theme mechanism (localStorage + data-theme + custom event)
+│   ├── feedStatus.js                ← shared feed_sync_log query (header pill + Advisories page)
+│   ├── activityLog.js               ← operator-action audit trail (never throws)
+│   ├── apiUtils.js                  ← isValidUuid() path-param guard
 │   ├── feeds/
 │   │   ├── nvd.js                   ← NVD API 2.0 client (dual-CPE for Forcepoint)
 │   │   ├── kev.js                   ← CISA KEV ingestion
@@ -157,10 +167,16 @@ secvault/
 ├── services/
 │   └── engine-worker.js             ← SecVault-Engine (scheduled jobs)
 ├── components/
-│   ├── ui/                          ← shared components
-│   ├── layout/                      ← Sidebar, Header
+│   ├── icons.js                     ← hand-rolled SVG icon set (no icon library)
+│   ├── ui/                          ← Badge/Button/Card/Table/Modal/StatusDot/EmptyState/
+│   │                                   LoadingSpinner/StatCard/PageHeader — plain suite CSS classes
+│   ├── layout/                      ← Header (server), Sidebar, HeaderSearch, NotificationBell,
+│   │                                   UserMenu, ThemeToggle
 │   ├── devices/
-│   └── cve/
+│   ├── cve/
+│   ├── advisories/
+│   ├── analysis/                    ← rule analysis dashboard tabs + charts
+│   └── config/                      ← config change/backup/predicate UI
 └── installer/
     ├── Install-SecVault.ps1
     ├── Update-SecVault.ps1
@@ -1128,34 +1144,131 @@ NETVAULT_URL=
 
 ---
 
-## Design System — Dark Theme
+## Design System — NocVault Suite Alignment (v2.0.0)
 
-CSS variables in `app/globals.css`. Match NocVault suite visual language.
+**Major architectural reversal from v1.x.** SecVault's UI was rebuilt to match the shared NocVault
+suite design system used identically by NetVault, LogVault, DDIVault, and SpanVault — verified by
+reading each sibling's own live `app/globals.css` directly, not assumed. All four are byte-for-byte
+identical on tokens; SecVault ports that same file with one addition (`--accent-teal`, see below).
+
+### No Tailwind
+
+Tailwind (`tailwindcss`/`postcss`/`autoprefixer`) has been **fully removed** — not re-themed, removed.
+Every sibling app styles with plain CSS custom properties (`app/globals.css`) plus inline
+`style={{}}` objects and a shared hand-written utility-class set (`.card`, `.kpi-card`, `.badge*`,
+`.btn*`, `.input`/`.select`, `.data-table`, `.skeleton`, `.modal-overlay`, `.page-header`, etc. — all
+defined in `app/globals.css`, read that file directly for the full class vocabulary before writing
+any new UI). Do not reintroduce Tailwind or any other CSS framework — match this exact pattern for
+all new UI work.
+
+### Dual theme — light default, dark toggle
+
+**Reverses the old "dark-only" decision.** Light is now the default; dark is an opt-in toggle,
+matching every sibling app. Mechanism (`lib/theme.js`, `components/layout/ThemeToggle.js`):
+- Theme stored in `localStorage['secvault-theme']`, applied as a `data-theme="dark"` attribute on
+  `<html>` (NOT a `.dark` class, NOT `prefers-color-scheme` alone).
+- A blocking inline `<script>` in `app/layout.js`'s `<head>` (`THEME_INIT_SCRIPT` from `lib/theme.js`)
+  applies the saved theme before first paint — avoids a flash of the wrong theme.
+- A `window` custom event (`secvault:theme`) keeps every mounted `ThemeToggle` instance in sync.
+- Light tokens live under `:root` in `app/globals.css`; dark overrides live under
+  `[data-theme="dark"]`. **Brand colors (`--primary`, `--navy*`, `--accent-teal`) and status colors
+  (`--green`/`--yellow`/`--red`/`--blue`/`--orange`/`--purple`/`--teal`) intentionally stay the same
+  in both themes** — only neutral surfaces/text/borders/shadows and the adaptive `--tint-*`/
+  `--tint-*-fg` pairs flip. Any new UI that needs a tinted surface behind text (a status banner, a
+  badge) MUST use a `--tint-*`/`--tint-*-fg` pair, never a hardcoded hex, or it won't adapt in dark
+  mode (a real gap — `.badge-orange` was hardcoded, found and fixed during the migration).
+
+### Tokens (`app/globals.css` — full file is authoritative, this is a summary)
 
 ```css
 :root {
-  --bg-base:         #0f1117;   /* page background */
-  --bg-sidebar:      #1a1d27;   /* sidebar */
-  --bg-surface:      #1e2130;   /* cards, panels */
-  --bg-elevated:     #252840;   /* modals, dropdowns */
-  --border:          #2a2d3e;   /* all borders */
-  --text-primary:    #e2e8f0;
-  --text-secondary:  #94a3b8;
-  --text-muted:      #64748b;
-  --accent:          #6366f1;   /* indigo — primary action */
-  --accent-hover:    #4f46e5;
-  --success:         #10b981;   /* emerald */
-  --warning:         #f59e0b;   /* amber */
-  --danger:          #ef4444;   /* red */
-  --info:            #3b82f6;   /* blue */
+  color-scheme: light;
+  --primary:        #C8102E;   /* shared suite red — buttons, focus rings, badges, links */
+  --primary-dark:   #a00d24;
+  --navy:           #1a2744;   /* header + sidebar background */
+  --bg-primary:     #f4f6f9;   /* page background */
+  --bg-card:        #ffffff;   /* cards, panels, modals */
+  --border:         #e2e8f0;
+  --text-primary:   #0f172a;
+  --text-secondary: #334155;
+  --text-muted:     #64748b;
+  --radius:         8px;
+  --radius-sm:      6px;
+
+  --green: #16a34a; --yellow: #d97706; --red: #dc2626; --blue: #2563eb;
+  --orange: #ea580c; --purple: #7c3aed; --teal: #0891b2;
+
+  /* SecVault's own identity — unclaimed by any sibling (NetVault=red,
+     LogVault=blue, DDIVault=amber, SpanVault=green). Logo wordmark +
+     active sidebar-nav-chip color ONLY — every interactive control
+     (buttons, focus rings, links, badges) still uses the shared --primary
+     red above, exactly like every sibling app does for its own accent. */
+  --accent-teal:    #0891b2;
+
+  --text-xs: 11px; --text-sm: 12px; --text-base: 13px; --text-md: 14px;
+  --text-lg: 16px; --text-xl: 20px; --text-2xl: 28px;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+
+  /* Adaptive tint pairs — use these for any tinted surface behind text */
+  --tint-info: #eff6ff;    --tint-info-fg: #1d4ed8;
+  --tint-success: #f0fdf4; --tint-success-fg: #15803d;
+  --tint-warn: #fffbeb;    --tint-warn-fg: #b45309;
+  --tint-danger: #fef2f2;  --tint-danger-fg: #b91c1c;
+}
+[data-theme="dark"] {
+  --bg-primary: #0d1220; --bg-card: #1a2235; --border: #2d3a52;
+  --text-primary: #f1f5f9; --text-secondary: #cbd5e1; --text-muted: #94a3b8;
+  /* --primary/--navy/--accent-teal/status colors unchanged; --tint-* pairs
+     get dark-appropriate rgba() + light-foreground overrides — see the file. */
 }
 ```
 
-Priority band visual encoding:
-- `patch_now` → `--danger` (#ef4444), label "Patch Now"
-- `scheduled`  → `--warning` (#f59e0b), label "Scheduled"
-- `monitor`    → `--text-muted` (#64748b), label "Monitor"
-- KEV badge → solid `--danger` background, white text, "KEV" label
+Font: Google Fonts Inter (loaded via `@import` in `app/globals.css`, matching every sibling — not
+`next/font`). Monospace: JetBrains Mono stack, applied via the `.mono` class.
+
+### Icons — hand-rolled, no dependency
+
+`components/icons.js` — every icon (nav, bell, search, sun/moon, chevrons, etc.) is a small inline
+SVG using the suite-wide Feather-compatible convention: `viewBox="0 0 24 24" fill="none"
+stroke="currentColor" strokeWidth={2}` round caps/joins. Never add an icon library — hand-roll new
+icons matching this exact convention (see the `base()` helper in `components/icons.js`).
+
+### Header / Sidebar structure
+
+- `components/layout/Header.js` — a **server component** (queries `feed_sync_log` directly via
+  `lib/feedStatus.js`'s `getSyncPillStatus()` for the sync-status pill — no client round-trip for
+  that value). 72px navy bar: hand-drawn logo SVG + "Sec"(white)/"Vault"(teal) wordmark, a divider,
+  an uppercase subtitle ("FIREWALL SECURITY PLATFORM"), a centered `HeaderSearch` (client, debounced,
+  "/" shortcut, hits `GET /api/search`), then a sync-status pill, `NotificationBell` (client, polls
+  `GET /api/notifications/summary` every 60s — a REAL three-way aggregate: `finding_acknowledgements`
+  status='new' + `device_cve_assessments` priority_band='patch_now' + unacknowledged `config_diffs`,
+  not cosmetic), `ThemeToggle`, and `UserMenu` (avatar + name/role + dropdown, reuses the `session`
+  already resolved server-side by `app/(dashboard)/layout.js` — never re-fetches session client-side).
+- `components/layout/Sidebar.js` — 240px navy (64px collapsed), a "NAVIGATION" eyebrow label,
+  per-route colored icon chips (neutral gray when inactive, a distinct accent color only when
+  active — see the `NAV` array for the exact per-route hue), a 3px rounded accent bar (`--primary`)
+  on the active item, a bottom collapse toggle persisted to
+  `localStorage['secvault-sidebar-collapsed']`, and a version footer reading `package.json`'s
+  version (passed down server-side from `app/(dashboard)/layout.js` — `import pkg from
+  '../../package.json'` — no API call needed for this one value).
+
+### Shared UI components (`components/ui/`)
+
+`Badge`/`Button`/`Card` (+`CardHeader`/`CardTitle`/`CardBody`)/`Table`/`Modal`/`StatusDot`/
+`EmptyState`/`LoadingSpinner` all rebuilt on the plain suite CSS classes — same props/call sites as
+before the migration, no page changes needed if you're just using them normally. Two components
+added specifically for this migration: `StatCard` (the `.kpi-card` colored-left-border tile — the
+standard stat-grid unit on every dashboard/summary page) and `PageHeader` (`.page-header`/
+`.page-title`/`.page-subtitle` + an optional `actions` slot — replaces ad hoc `<h1>`/`<p>` pairs).
+`Table` still enforces `tableLayout:'fixed'` internally — the CLAUDE.md rule below is unchanged,
+just now satisfied inside a component instead of a raw Tailwind class.
+
+Priority band visual encoding (unchanged mapping, new token names):
+- `patch_now` → `var(--red)` / `<Badge color="danger">`, label "Patch Now"
+- `scheduled`  → `var(--yellow)` / `<Badge color="warning">`, label "Scheduled"
+- `monitor`    → `var(--text-muted)` / `<Badge color="muted">`, label "Monitor"
+- KEV badge → solid `var(--red)` background, white text, "KEV" label — deliberately NOT a tinted
+  `<Badge>`, a hand-rolled solid-fill span, to stay visually distinct from the softer tinted badges.
 
 ---
 
