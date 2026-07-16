@@ -1,17 +1,16 @@
-const VARIANT_CLASSES = {
-  primary: 'bg-accent text-white hover:bg-accent-hover',
-  secondary: 'border border-border bg-bg-surface text-text-primary hover:bg-bg-elevated',
-  danger: 'bg-danger text-white hover:opacity-90',
+// Suite `.btn`/`.btn-primary`/`.btn-secondary`/`.btn-danger` classes
+// (app/globals.css). `variant` keeps the same prop values callers already use.
+const VARIANT_CLASS = {
+  primary: 'btn-primary',
+  secondary: 'btn-secondary',
+  danger: 'btn-danger',
+  navy: 'btn-navy',
 };
 
 export default function Button({ variant = 'primary', className = '', children, ...props }) {
-  const variantClasses = VARIANT_CLASSES[variant] || VARIANT_CLASSES.primary;
-
+  const variantClass = VARIANT_CLASS[variant] || VARIANT_CLASS.primary;
   return (
-    <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${variantClasses} ${className}`}
-      {...props}
-    >
+    <button className={`btn ${variantClass} ${className}`} {...props}>
       {children}
     </button>
   );

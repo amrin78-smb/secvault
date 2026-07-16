@@ -3,8 +3,17 @@ export default function LoadingSpinner({ size = 20, className = '' }) {
     <span
       role="status"
       aria-label="Loading"
-      className={`inline-block animate-spin rounded-full border-2 border-border border-t-accent align-middle ${className}`}
-      style={{ width: size, height: size }}
+      className={className}
+      style={{
+        display: 'inline-block',
+        verticalAlign: 'middle',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        border: '2px solid var(--border)',
+        borderTopColor: 'var(--primary)',
+        animation: 'spin 0.7s linear infinite',
+      }}
     />
   );
 }

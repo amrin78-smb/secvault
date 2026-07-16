@@ -2,52 +2,86 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import {
+  IconDashboard,
+  IconDevices,
+  IconShield,
+  IconChart,
+  IconDocument,
+  IconSettings,
+  IconChevronLeft,
+} from '../icons';
 
-const NAV_ITEMS = [
-  { label: 'Dashboard', href: '/' },
-  { label: 'Devices', href: '/devices' },
-  { label: 'CVE Posture', href: '/cve' },
-  { label: 'Rule Analysis', href: '/analysis' },
-  { label: 'Advisories', href: '/advisories' },
-  { label: 'Settings', href: '/settings' },
+const NAV = [
+  { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true, color: '#0891b2', bg: 'rgba(8,145,178,0.20)' },
+  { href: '/devices', label: 'Devices', Icon: IconDevices, color: '#60a5fa', bg: 'rgba(96,165,250,0.20)' },
+  { href: '/cve', label: 'CVE Posture', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
+  { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },
+  { href: '/advisories', label: 'Advisories', Icon: IconDocument, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
+  { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
 ];
 
-function isActive(pathname, href) {
-  if (href === '/') {
-    return pathname === '/';
-  }
+const COLLAPSE_KEY = 'secvault-sidebar-collapsed';
+
+function isActive(pathname, href, exact) {
+  if (exact) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function Sidebar() {
+export default function Sidebar({ version }) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === 'true');
+    } catch (_err) {
+      // ignore — collapse just won't persist
+    }
+  }, []);
+
+  function toggle() {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, String(next));
+      } catch (_err) {
+        // ignore
+      }
+      return next;
+    });
+  }
 
   return (
-    <nav className="flex h-full flex-col">
-      <div className="px-5 py-5 border-b border-border">
-        <span className="text-lg font-semibold tracking-tight text-text-primary">
-          Sec<span className="text-accent">Vault</span>
-        </span>
-      </div>
-      <ul className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const active = isActive(pathname, item.href);
+    <aside className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}>
+      <div className="sv-nav-label">Navigation</div>
+      <nav className="sv-nav">
+        {NAV.map(({ href, label, Icon, exact, color, bg }) => {
+          const active = isActive(pathname, href, exact);
           return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                className={
-                  active
-                    ? 'block rounded-md px-3 py-2 text-sm font-medium bg-accent/10 text-accent border-l-2 border-accent'
-                    : 'block rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-bg-surface hover:text-text-primary border-l-2 border-transparent'
-                }
-              >
-                {item.label}
-              </Link>
-            </li>
+            <Link key={href} href={href} className={active ? 'active' : ''} title={collapsed ? label : undefined}>
+              <span className="sv-nav-chip" style={{ '--chip-color': color, '--chip-bg': bg }}>
+                <Icon width={16} height={16} />
+              </span>
+              <span>{label}</span>
+            </Link>
           );
         })}
-      </ul>
-    </nav>
+      </nav>
+
+      <button
+        type="button"
+        className="sv-collapse-btn"
+        onClick={toggle}
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <IconChevronLeft width={18} height={18} />
+        <span>Collapse</span>
+      </button>
+
+      <div className="sv-version">SecVault{version ? ` v${version}` : ''}</div>
+    </aside>
   );
 }

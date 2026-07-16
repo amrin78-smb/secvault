@@ -1,18 +1,25 @@
-const STATUS_CLASSES = {
-  green: 'bg-success',
-  amber: 'bg-warning',
-  red: 'bg-danger',
-  grey: 'bg-text-muted',
+const STATUS_COLOR = {
+  green: 'var(--green)',
+  amber: 'var(--yellow)',
+  red: 'var(--red)',
+  grey: 'var(--text-muted)',
 };
 
 export default function StatusDot({ status = 'grey', className = '' }) {
-  const statusClasses = STATUS_CLASSES[status] || STATUS_CLASSES.grey;
-
+  const color = STATUS_COLOR[status] || STATUS_COLOR.grey;
   return (
     <span
-      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${statusClasses} ${className}`}
+      className={className}
       title={status}
       aria-label={`status: ${status}`}
+      style={{
+        display: 'inline-block',
+        width: 10,
+        height: 10,
+        flexShrink: 0,
+        borderRadius: '50%',
+        background: color,
+      }}
     />
   );
 }

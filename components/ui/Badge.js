@@ -1,19 +1,19 @@
-const COLOR_CLASSES = {
-  danger: 'bg-danger/15 text-danger',
-  warning: 'bg-warning/15 text-warning',
-  success: 'bg-success/15 text-success',
-  info: 'bg-info/15 text-info',
-  muted: 'bg-bg-elevated text-text-muted',
+// Suite `.badge` + color-variant classes (app/globals.css). `color` keeps the
+// same prop values callers already use across the app (danger/warning/
+// success/info/muted/purple/teal) — mapped here to the suite's badge-<hue>
+// naming so call sites don't need to change.
+const COLOR_CLASS = {
+  danger: 'badge-red',
+  warning: 'badge-yellow',
+  success: 'badge-green',
+  info: 'badge-blue',
+  muted: 'badge-gray',
+  purple: 'badge-purple',
+  teal: 'badge-teal',
+  orange: 'badge-orange',
 };
 
 export default function Badge({ color = 'muted', children, className = '' }) {
-  const colorClasses = COLOR_CLASSES[color] || COLOR_CLASSES.muted;
-
-  return (
-    <span
-      className={`inline-flex items-center whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${colorClasses} ${className}`}
-    >
-      {children}
-    </span>
-  );
+  const colorClass = COLOR_CLASS[color] || COLOR_CLASS.muted;
+  return <span className={`badge ${colorClass} ${className}`}>{children}</span>;
 }
