@@ -434,42 +434,59 @@ field mappings, then **record the verified field names here** so the next person
 Adapters are written to fail loudly on an unexpected shape rather than return wrong data — a loud
 failure on first connect is the design working, not a regression.
 
-#### First live result — Palo Alto SSH (2026-07-16, PAN-OS 11.1.13-h5) — STILL UNRESOLVED
+#### Palo Alto SSH — RESOLVED (2026-07-16, PAN-OS 11.1.13-h5, two independent devices)
 
-**`getRules()`/`getConfig()` over SSH do not work yet.** Do not trust rule counts from a
-Palo Alto SSH device until this is closed out.
+`getRules()`/`getConfig()` over SSH parse the PAN-OS **brace tree**, not `set` format. Three
+rounds to get here, kept in full below because the dead ends are exactly what stops a future
+change from re-treading them:
 
-Round 1: `show config running` in operational mode (`>`) returned the curly-brace tree
-(`config { mgt-config { users { ... } } }`), never flat `set` lines — confirmed on a PA-440.
-Attempted fix: enter configuration mode first — `configure` → `set cli config-output-format
-set` → bare `show` — on the documented theory that the format preference only takes effect
-on `show` run *inside* configuration mode.
+- **Round 1** (a PA-440): `show config running` in operational mode (`>`) returned the brace
+  tree (`config { mgt-config { users { ... } } }`), never flat `set` lines. Attempted fix:
+  `configure` → `set cli config-output-format set` → bare `show`, on the documented theory
+  that the format preference only takes effect inside configuration mode.
+- **Round 2** (a SECOND device, a PA-3220): Round 1's command sequence runs correctly
+  (confirmed: the debug log shows `show`, not `show config running`; the dump grew from 93KB
+  to 1.2MB, consistent with pulling the whole tree from root) — but the text **still** starts
+  with the brace tree (`deviceconfig { system { panorama { ... } } }`). Two independent real
+  devices agreeing ruled out Round 1's theory; a third guessed command sequence was
+  deliberately NOT attempted.
+- **Round 3** (resolution): rather than guess again, `ssh.js` was given a targeted debug
+  search for the literal substring `"rulebase"`, logging an 8000-char window centered there
+  regardless of total file size (the plain head-of-file preview twice landed in
+  `deviceconfig`/`mgt-config` and never reached it on a 93KB–1.2MB dump). That surfaced the
+  real rulebase text: `rulebase { security { rules { RuleName { from ...; to ...; action
+  drop; } } } } }` — genuine brace format, confirmed directly, not inferred.
 
-Round 2 (same day, a SECOND independent device — a PA-3220): the fix's command sequence
-runs correctly (confirmed: the debug log shows `show`, not `show config running`, and the
-dump grew from 93KB to 1.2MB — consistent with pulling the *whole* tree from root) — but the
-retrieved text **still starts with the brace tree** (`deviceconfig { system { panorama {
-... } } }`), not `set` lines. Two independent real devices now agree: this firmware does not
-produce `set`-format output the documented way, at least not via this exact command
-sequence. The theory behind Round 1's fix is not confirmed; do not extend or "correct" the
-command sequence again without new evidence — guessing a third CLI incantation blind is
-exactly the mistake that produced this bug.
+**The fix:** `sshParser.js` now has a real tokenizer + recursive-descent parser for this
+grammar (`tokenizeBraceConfig`/`parseBraceBlock`/`parseBraceConfig`), replacing the dead
+`set`-format code entirely (renamed `parseRulesFromSetConfig`→`parseSecurityRules`,
+`parseConfigFromSet`→`parseConfig` — update any reference to the old names).
+`findSecurityRulesContainers()` searches the parsed tree depth-first for any
+`rulebase.security.rules` container, wherever it sits (bare single-vsys root — this is what
+both real test devices are — `vsys { entry { ... } }`, `shared { ... }`, or a Panorama
+`pre-rulebase`/`post-rulebase` shape), the same "search deep, don't assume the absolute path"
+approach `fortinet/cliParser.js`'s `findBlockDeep()` already uses in this codebase. The `ssh.js`
+command sequence (`configure` → `set cli config-output-format set` → bare `show`) is UNCHANGED
+— it reliably retrieves the full config tree containing the rulebase; only the parser needed
+to change, from expecting `set` lines to parsing what the firmware actually returns.
 
-Next step (shipped, not yet run): `ssh.js` now ALSO searches the retrieved config for the
-literal substring `"rulebase"` and logs a ~8000-char window centered there, regardless of
-total file size — the plain head-of-file preview twice landed in `deviceconfig`/`mgt-config`
-and never reached it on a 93KB-1.2MB dump. The next real collect attempt should finally show
-the actual rule syntax on this firmware, whatever format it turns out to be (`set` lines
-after all, brace, or something else) — a parser will be written against that evidence, not
-guessed again. If it turns out to be genuinely brace-format, `sshParser.js` needs a proper
-recursive block-tree parser for it (PAN-OS's brace tree is structurally similar to what
-`fortinet/cliParser.js`'s `parseConfigTree()` already does for FortiOS's own default format —
-same general shape, different leaf/list syntax) rather than continuing to chase `set` format.
+**Verified against real data, not just live-shaped samples**: the parser was run against the
+actual captured rulebase text from the PA-3220 log before this shipped — 15/15 rules extracted
+correctly, names/actions/enabled-states/zones all matching the source text exactly, including
+the unspaced-list-bracket edge case (`[ DMZ1 DMZ2 DMZ3]` — no space before `]`) and a rule with
+a nested `profile-setting` sub-block.
 
-Also confirmed live (both rounds): `show system info` field names match this file's existing
+**Security note for `parseConfig()`**: `getConfig()` now redacts the raw text FIRST, then
+builds `parsed.tree` from the REDACTED text (previously the `set`-format summary was narrow
+enough to never touch secret-bearing fields; the new `parsed.tree` is a full parsed structure,
+and `device_configs.config_parsed` is GRANT SELECT'd to `claude_readonly`/`nocvault_readonly`
+— the same roles `device_credentials` is barred from). Rule parsing still uses the unredacted
+text, which is fine — rules never carry secrets.
+
+Also confirmed live (all rounds): `show system info` field names match this file's existing
 assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no changes needed
 there. PAN-OS API/username-password method has separately worked on these same devices,
-confirming XML-API rule collection is sound independent of this SSH-specific bug.
+confirming XML-API rule collection was never affected by this SSH-specific bug.
 
 ### Known Limitations (by design — documented, not bugs)
 
