@@ -295,6 +295,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             >
               Rule analysis →
             </Link>
+            <Link
+              href={`/devices/${device.id}/vpn`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
+              VPN →
+            </Link>
           </div>
         </div>
       )}

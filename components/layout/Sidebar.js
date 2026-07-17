@@ -13,6 +13,7 @@ import {
   IconSearch,
   IconSettings,
   IconChevronLeft,
+  IconUser,
 } from '../icons';
 
 // Icon reuse note (Phase 7, Compliance): IconShield is already taken by "CVE
@@ -29,6 +30,11 @@ const NAV = [
   { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },
   { href: '/advisories', label: 'Advisories', Icon: IconDocument, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
   { href: '/compliance', label: 'Compliance', Icon: IconSearch, color: '#34d399', bg: 'rgba(52,211,153,0.20)' },
+  // No dedicated VPN/tunnel icon exists in components/icons.js — reusing
+  // IconUser (VPN is fundamentally remote-USER access) rather than inventing
+  // a new SVG file, same "reuse what's there even if not a perfect semantic
+  // match" call this file already made for Compliance -> IconSearch.
+  { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
   { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
 ];
 
