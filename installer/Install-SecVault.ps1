@@ -440,6 +440,42 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "    [OK] Permissions locked down on $deployKeyDest (read-only, $env:USERNAME only)."
 }
 
+# ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: the deploy key
+# used to be copied ONLY to $env:USERPROFILE\.ssh\ -- the profile of
+# whichever admin runs this installer interactively. That's fine for a
+# manual "& Update-SecVault.ps1" run by that same admin, but the in-app
+# updater (Settings -> Updates -> "Update Now") schedules Update-SecVault.ps1
+# as a Windows Scheduled Task running as SYSTEM, and SYSTEM's own
+# $env:USERPROFILE resolves to a completely different, unrelated profile
+# with no copy of this key at all -- confirmed live (see the long comment
+# chain in Update-SecVault.ps1 around $deployKeyRepoRelative/
+# $deployKeyUserProfile). Also copy the key to a machine-wide location under
+# C:\ProgramData -- readable by any account on the box, including SYSTEM,
+# by default -- so the "Update Now" path has a location it can actually
+# reach regardless of which admin originally ran this installer.
+# Update-SecVault.ps1 checks this path FIRST, ahead of the repo-relative and
+# user-profile fallbacks that predate this fix.
+$machineKeyDir = 'C:\ProgramData\SecVault\ssh'
+if (-not (Test-Path $machineKeyDir)) {
+    New-Item -ItemType Directory -Force -Path $machineKeyDir | Out-Null
+}
+$machineKeyDest = Join-Path $machineKeyDir 'secvault_deploy'
+if (Test-Path $machineKeyDest) {
+    $out = Invoke-Native { icacls $machineKeyDest /reset 2>&1 }
+}
+Copy-Item -Path $DeployKeySource -Destination $machineKeyDest -Force
+# Lock down to SYSTEM + local Administrators, read-only, inheritance removed
+# -- same posture as the user-profile copy above, just for the two accounts
+# that actually need to read it (the scheduled task runs as SYSTEM; an
+# interactive admin re-running this script or troubleshooting needs it too).
+$out = Invoke-Native { icacls $machineKeyDest /inheritance:r /grant:r 'SYSTEM:R' /grant:r 'BUILTIN\Administrators:R' 2>&1 }
+$out | Write-Host
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[WARN] icacls exited with code $LASTEXITCODE while locking down $machineKeyDest -- the SYSTEM-scheduled update path may fail to authenticate as a result." -ForegroundColor Yellow
+} else {
+    Write-Host "    [OK] Deploy key also placed at $machineKeyDest (SYSTEM-readable, for the in-app updater's scheduled-task path)."
+}
+
 # SSH config: pin github.com to this key. IdentityFile must be an absolute
 # path -- ssh does not resolve relative paths in config. accept-new (not
 # `no`) accepts the host key on first connection and verifies the

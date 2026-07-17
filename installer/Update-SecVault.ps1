@@ -51,7 +51,21 @@ $InstallRoot = 'C:\Apps\SecVault'
 $LogDir = 'C:\Apps\SecVault\logs'
 $LogFile = Join-Path $LogDir 'update.log'
 
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+# ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: this ran before
+# Write-Log exists (it's defined below) with $ErrorActionPreference already
+# 'Stop' -- a failure here (e.g. C:\Apps\SecVault not yet created, a
+# permissions issue under the SYSTEM-scheduled-task path) was an uncaught
+# terminating error with no Write-Log line and no guaranteed console/stderr
+# visibility when launched non-interactively via schtasks. Wrapped so the
+# failure is at least reported via Write-Warning (visible in Get-ScheduledTaskInfo/
+# Event Viewer's PowerShell log even with no transcript yet) before exiting,
+# instead of silently vanishing.
+try {
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+} catch {
+    Write-Warning "Could not create log directory $LogDir -- $($_.Exception.Message)"
+    exit 1
+}
 
 # The in-app updater (Settings -> Updates, POST /api/system/update) is
 # fire-and-forget: it schedules this script as a SYSTEM scheduled task and
@@ -194,28 +208,42 @@ try {
 # genuinely does not exist at that path on this install (possibly cleaned up
 # post-install, or never placed there in the first place on this server).
 #
-# Check BOTH locations, preferring the repo-relative one (needed for the
-# in-app updater's SYSTEM-scheduled-task path, if it exists) but falling
-# back to the original $env:USERPROFILE\.ssh\secvault_deploy path -- the one
-# every confirmed-successful manual update this session actually used, since
-# Install-SecVault.ps1 unconditionally copies the key there for whichever
-# admin account runs it. Only fail if NEITHER exists. This restores the
-# manual/interactive path immediately; the SYSTEM/"Update Now" path remains
-# only as reliable as whichever of these two locations SYSTEM's own account
-# can actually read (its own profile copy, if any, or this repo-relative
-# copy, if one gets placed there) -- unresolved until confirmed against a
-# real "Update Now" click, not assumed further.
+# ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: neither location
+# checked below is reliably readable by SYSTEM (the account the in-app
+# updater's scheduled task actually runs as -- see the long comment chain
+# above). Install-SecVault.ps1 now ALSO places a copy at
+# C:\ProgramData\SecVault\ssh\secvault_deploy, locked down to SYSTEM +
+# BUILTIN\Administrators, specifically so this path has a location that
+# works regardless of which account is running. Checked FIRST -- it's the
+# only one of the three that is guaranteed correct for both the manual and
+# SYSTEM-scheduled invocation paths on any install that's re-run
+# Install-SecVault.ps1 since this fix landed. The other two remain as
+# fallbacks for an install that hasn't been re-run yet.
+$deployKeyMachineWide = 'C:\ProgramData\SecVault\ssh\secvault_deploy'
 $deployKeyRepoRelative = Join-Path $repoRoot 'installer\dependencies\secvault_deploy'
 $deployKeyUserProfile = "$env:USERPROFILE\.ssh\secvault_deploy"
-if (Test-Path $deployKeyRepoRelative) {
+if (Test-Path $deployKeyMachineWide) {
+    $deployKey = $deployKeyMachineWide
+} elseif (Test-Path $deployKeyRepoRelative) {
     $deployKey = $deployKeyRepoRelative
 } elseif (Test-Path $deployKeyUserProfile) {
     $deployKey = $deployKeyUserProfile
 } else {
-    Write-Host "  [FAIL] SSH deploy key not found at either location:"
+    Write-Host "  [FAIL] SSH deploy key not found at any of:"
+    Write-Host "         $deployKeyMachineWide"
     Write-Host "         $deployKeyRepoRelative"
     Write-Host "         $deployKeyUserProfile"
     Write-Host "         Re-run Install-SecVault.ps1 to configure SSH credentials"
+    # ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: this was the
+    # only exit point in the whole script that skipped Stop-Transcript --
+    # every other path falls through to the try/Stop-Transcript/catch at the
+    # bottom. Under the SYSTEM-scheduled-task path (see the long comment
+    # above), this is also the single most likely real-world failure -- and
+    # it left the transcript file open/unflushed indefinitely (until the next
+    # script run's Start-Transcript implicitly closes it, if PowerShell even
+    # allows that), the exact run that most needed a durable record per this
+    # script's own transcript comment at the top.
+    try { Stop-Transcript | Out-Null } catch {}
     exit 1
 }
 
@@ -381,7 +409,22 @@ Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
 # -----------------------------------------------------------------------
 # 6. npm run build
 # -----------------------------------------------------------------------
-Invoke-Step 'npm run build' {
+# ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: Invoke-Step's
+# return value (true/false) was never captured anywhere -- every step,
+# including this one, ran as a fire-and-forget "best effort recovery"
+# regardless of outcome, per the script's own top-of-file doc comment. That's
+# a defensible default for most steps (stopping/starting services, the
+# best-effort readonly-grants step) but NOT for this one: SecVault-App
+# (step 8) runs `next start` directly against .next\ on disk. A failed
+# `npm run build` can leave .next\ from a stale PREVIOUS successful build, a
+# half-written/corrupted one from the failed run, or (on a fresh install with
+# no prior build) missing entirely -- in every case, starting SecVault-App
+# afterward either serves stale code silently (looks like a successful
+# deploy; isn't) or crash-loops. Capturing the result here so step 8 below
+# can gate on it specifically -- SecVault-Engine (step 7) is intentionally
+# NOT gated the same way, since engine-worker.js runs directly under `node`
+# and has no dependency on the Next.js build output.
+$buildSucceeded = Invoke-Step 'npm run build' {
     Push-Location $repoRoot
     $out = Invoke-Native { npm run build 2>&1 }
     Pop-Location
@@ -405,15 +448,22 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
 }
 
 # -----------------------------------------------------------------------
-# 8. Start SecVault-App
+# 8. Start SecVault-App -- gated on step 6 (npm run build) actually
+# succeeding. See the $buildSucceeded comment above step 6 for why starting
+# this service against a failed build is worse than leaving it stopped.
 # -----------------------------------------------------------------------
-Invoke-Step 'sc.exe start SecVault-App' {
-    $out = sc.exe start SecVault-App
-    $out | Write-Host
-    Add-Content -Path $LogFile -Value ($out -join "`n")
-    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15)) {
-        Write-Log '  [WARN] SecVault-App did not reach Running state within 15s -- check logs\app-error.log.'
+if ($buildSucceeded) {
+    Invoke-Step 'sc.exe start SecVault-App' {
+        $out = sc.exe start SecVault-App
+        $out | Write-Host
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+        if (-not (Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15)) {
+            Write-Log '  [WARN] SecVault-App did not reach Running state within 15s -- check logs\app-error.log.'
+        }
     }
+} else {
+    $script:hadFailure = $true
+    Write-Log '  [SKIP] sc.exe start SecVault-App -- npm run build failed above. Refusing to (re)start the app against a broken/stale build. Fix the build error, then either re-run this script or start the service manually: sc.exe start SecVault-App'
 }
 
 Write-Log '=================================================='
