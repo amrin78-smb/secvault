@@ -210,16 +210,19 @@ export default async function DeviceRulesPage({ params, searchParams }) {
       ) : (
         <Table>
           <colgroup>
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '12%' }} />
             <col style={{ width: '5%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '9%' }} />
             <col style={{ width: '10%' }} />
             <col style={{ width: '10%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '3%' }} />
+            <col style={{ width: '5%' }} />
             <col style={{ width: '2%' }} />
           </colgroup>
           <thead>
@@ -233,6 +236,9 @@ export default async function DeviceRulesPage({ params, searchParams }) {
               <th>Src Address</th>
               <th>Dst Address</th>
               <th>Services</th>
+              <th>Comment</th>
+              <th>Applications</th>
+              <th>Schedule</th>
               <th>Log</th>
               <th>Hits</th>
             </tr>
@@ -249,6 +255,9 @@ export default async function DeviceRulesPage({ params, searchParams }) {
                 <td title={joinArray(r.src_addresses)}>{joinArray(r.src_addresses)}</td>
                 <td title={joinArray(r.dst_addresses)}>{joinArray(r.dst_addresses)}</td>
                 <td title={joinArray(r.services)}>{joinArray(r.services)}</td>
+                <td title={r.comment || ''}>{r.comment || '—'}</td>
+                <td title={joinArray(r.applications)}>{joinArray(r.applications)}</td>
+                <td title={r.schedule || ''}>{r.schedule || '—'}</td>
                 <td>{r.log_enabled ? 'Yes' : 'No'}</td>
                 <td>{r.hit_count ?? 0}</td>
               </tr>

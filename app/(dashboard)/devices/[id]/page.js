@@ -11,6 +11,7 @@ import Table from '../../../../components/ui/Table';
 import CVETable from '../../../../components/cve/CVETable';
 import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
+import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,24 @@ function joinArray(value) {
   return value.join(', ');
 }
 
+// Plain functions returning JSX, called imperatively ({twoFactorBadge(...)}),
+// same "not a nested component" pattern as tabLink() above -- 3-state
+// rendering (true/false/null → Enabled/Disabled/Unknown), never collapsing
+// an unmodeled fact (null) into a confident "Disabled", matching this app's
+// tri-state discipline used throughout (see CLAUDE.md's applicability.js
+// notes).
+function twoFactorBadge(value) {
+  if (value === true) return <Badge color="success">Enabled</Badge>;
+  if (value === false) return <Badge color="muted">Disabled</Badge>;
+  return <Badge color="muted">Unknown</Badge>;
+}
+
+function sourceRestrictedBadge(value) {
+  if (value === true) return <Badge color="success">Restricted</Badge>;
+  if (value === false) return <Badge color="muted">Any Source</Badge>;
+  return <Badge color="muted">Unknown</Badge>;
+}
+
 function actionBorderColor(action) {
   if (action === 'allow') return 'var(--green)';
   if (action === 'deny' || action === 'drop' || action === 'reject') return 'var(--red)';
@@ -65,7 +84,7 @@ async function getDevice(dbPool, id) {
 
 async function getLatestVersion(dbPool, id) {
   const result = await dbPool.query(
-    `SELECT version_string, model, build, collected_at
+    `SELECT version_string, model, build, serial, collected_at
      FROM device_versions
      WHERE device_id = $1
      ORDER BY collected_at DESC
@@ -95,6 +114,18 @@ async function getTopRules(dbPool, id) {
     [id]
   );
   return result.rows;
+}
+
+// Latest config_parsed snapshot for this device, or null if none collected
+// yet -- same query shape as devices/[id]/vpn/page.js's getLatestConfigParsed
+// (mirrored rather than imported/shared, same convention that file's own
+// comment documents relative to lib/engines/applicability.js's version).
+async function getLatestConfigParsed(dbPool, id) {
+  const result = await dbPool.query(
+    `SELECT config_parsed FROM device_configs WHERE device_id = $1 ORDER BY collected_at DESC LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] || null;
 }
 
 // Module-top-level so a future refactor toward client-side interactive tabs
@@ -137,14 +168,18 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['cve', 'rules', 'config'].includes(searchParams?.tab) ? searchParams.tab : 'cve';
+  const tab = ['cve', 'rules', 'config', 'admins'].includes(searchParams?.tab) ? searchParams.tab : 'cve';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
-  const [version, cveRows, rules] = await Promise.all([
+  const [version, cveRows, rules, configRow] = await Promise.all([
     getLatestVersion(pool, device.id),
     tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
     tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
+    tab === 'admins' ? getLatestConfigParsed(pool, device.id) : Promise.resolve(null),
   ]);
+
+  const adminSummary =
+    tab === 'admins' ? summarizeAdminAccounts(device.vendor, configRow ? configRow.config_parsed : null) : null;
 
   const status =
     device.last_connectivity_ok === true ? 'green' : device.last_connectivity_ok === false ? 'red' : 'grey';
@@ -176,7 +211,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           style={{
             marginTop: 12,
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: 16,
             fontSize: 'var(--text-base)',
           }}
@@ -200,6 +235,28 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               Model
             </div>
             <div style={{ color: 'var(--text-primary)' }}>{version?.model || '—'}</div>
+          </div>
+          {/* Build and Serial: fixed 2026-07-19 -- Build was already queried by
+              getLatestVersion() above and never rendered here (pure UI gap);
+              Serial was parsed by the Fortinet/Palo Alto SSH adapters and
+              silently dropped before it ever reached this table (adapter +
+              schema fix, see lib/schema.sql's device_versions.serial comment
+              and lib/adapters/fortinet/ssh.js's getVersion()). Both render as
+              '—' for any device/transport that doesn't supply one, same as
+              every other tile here. */}
+          <div>
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Build
+            </div>
+            <div style={{ color: 'var(--text-primary)' }}>{version?.build || '—'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Serial
+            </div>
+            <div style={{ color: 'var(--text-primary)' }} className="mono">
+              {version?.serial || '—'}
+            </div>
           </div>
           <div>
             <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
@@ -228,6 +285,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'cve', 'CVE Posture')}
         {tabLink(device.id, tab, 'rules', 'Rules')}
         {tabLink(device.id, tab, 'config', 'Config Changes')}
+        {tabLink(device.id, tab, 'admins', 'Admins')}
       </div>
 
       {tab === 'cve' && <CVETable rows={cveRows} showDeviceColumn={false} />}
@@ -322,6 +380,50 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           >
             View config changes &amp; backups →
           </Link>
+        </div>
+      )}
+
+      {tab === 'admins' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {!adminSummary.supported ? (
+            <EmptyState message="Admin account data is not yet collected for this vendor." />
+          ) : adminSummary.accounts.length === 0 ? (
+            <EmptyState message="No admin accounts found in this device's latest collected config (or none collected yet)." />
+          ) : (
+            <>
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+                {adminSummary.totalCount} account{adminSummary.totalCount === 1 ? '' : 's'},{' '}
+                {adminSummary.superuserCount} with superuser/full-admin privilege
+                {adminSummary.error && ' — config was collected but could not be fully parsed'}
+              </p>
+              <Table>
+                <colgroup>
+                  <col style={{ width: '34%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '22%' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Privilege</th>
+                    <th>2FA</th>
+                    <th>Source Restricted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminSummary.accounts.map((a, i) => (
+                    <tr key={`${a.username || 'unknown'}-${i}`}>
+                      <td className="mono">{a.username || '—'}</td>
+                      <td>{a.privilege || '—'}</td>
+                      <td>{twoFactorBadge(a.twoFactorEnabled)}</td>
+                      <td>{sourceRestrictedBadge(a.sourceRestricted)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </>
+          )}
         </div>
       )}
 

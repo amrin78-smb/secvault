@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +77,9 @@ function buildCsv(rows) {
     'Src Addresses',
     'Dst Addresses',
     'Services',
+    'Comment',
+    'Applications',
+    'Schedule',
     'Log Enabled',
     'Hit Count',
   ];
@@ -92,6 +96,9 @@ function buildCsv(rows) {
         csvEscape(r.src_addresses),
         csvEscape(r.dst_addresses),
         csvEscape(r.services),
+        csvEscape(r.comment),
+        csvEscape(r.applications),
+        csvEscape(r.schedule),
         csvEscape(r.log_enabled),
         csvEscape(r.hit_count),
       ].join(',')
@@ -104,6 +111,11 @@ function buildCsv(rows) {
 // full (unpaginated) CSV export honoring the same filters.
 export async function GET(request, { params }) {
   const deviceId = params.id;
+
+  if (!isValidUuid(deviceId)) {
+    return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+  }
+
   const { searchParams } = new URL(request.url);
   const format = searchParams.get('format');
   const { where, params: sqlParams } = buildFilters(deviceId, searchParams);
@@ -112,7 +124,8 @@ export async function GET(request, { params }) {
     if (format === 'csv') {
       const result = await pool.query(
         `SELECT sequence_number, rule_name, enabled, action, src_zones, dst_zones,
-                src_addresses, dst_addresses, services, log_enabled, hit_count
+                src_addresses, dst_addresses, services, comment, applications, schedule,
+                log_enabled, hit_count
          FROM firewall_rules
          ${where}
          ORDER BY sequence_number ASC NULLS LAST`,
