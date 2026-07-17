@@ -162,15 +162,65 @@ try {
     Write-Log "  [WARN] Could not register safe.directory for $repoRoot -- $($_.Exception.Message)"
 }
 
-# secvault is a private repo -- git pull (step 3 below) needs the SSH deploy
-# key that Install-SecVault.ps1 configures at $env:USERPROFILE\.ssh\secvault_deploy.
-# Fail fast, before touching any service, if it's missing.
-$deployKey = "$env:USERPROFILE\.ssh\secvault_deploy"
+# ⛔ Account-mismatch bug fixed 2026-07-17 -- same family as the
+# safe.directory fix above, and the SAME bug already found and fixed in
+# lib\updateCheck.js (the in-app updater's read-only status check), just
+# never ported here to the script that actually performs the update.
+#
+# secvault is a private repo -- git pull (step 3 below) needs an SSH deploy
+# key. This USED to point at $env:USERPROFILE\.ssh\secvault_deploy -- the
+# profile of whichever admin ran Install-SecVault.ps1 interactively. That
+# works fine when THIS script is also run interactively by that same admin
+# ("& Update-SecVault.ps1" per CLAUDE.md's "Deploy After Commit"), which is
+# almost certainly why manual updates have been working throughout this
+# session's debugging. But the in-app updater (Settings -> Updates ->
+# "Update Now", POST /api/system/update) schedules this script as a Windows
+# Scheduled Task running as SYSTEM -- and $env:USERPROFILE for SYSTEM
+# resolves to a completely different, unrelated profile path with no copy of
+# the key at all. That path was never actually exercised/confirmed working
+# in this session (all confirmed successful deploys were manual, interactive
+# runs) -- it would fail this exact check and exit 1 here, before touching
+# any service (safe, but silently never actually updates).
+#
+# Fixed the same way as lib\updateCheck.js: point at the key's fixed,
+# repo-relative location instead of any one account's profile --
+# installer\dependencies\secvault_deploy, the original bundled file (present
+# on every real deploy; Install-SecVault.ps1 itself already requires it to
+# exist before install can complete) -- works identically regardless of
+# which account (an interactive admin, or SYSTEM) is running this script.
+$deployKey = Join-Path $repoRoot 'installer\dependencies\secvault_deploy'
 if (-not (Test-Path $deployKey)) {
     Write-Host "  [FAIL] SSH deploy key not found: $deployKey"
     Write-Host "         Re-run Install-SecVault.ps1 to configure SSH credentials"
     exit 1
 }
+
+# Route git's SSH transport straight at this key file via a per-invocation
+# core.sshCommand override (step 3 below), instead of relying on whichever
+# account's ~/.ssh/config happens to reference it -- same fix, same
+# reasoning as lib\updateCheck.js's sshCommandOverride(). UserKnownHostsFile
+# points at $env:TEMP rather than anywhere under the running account's
+# profile or the repo tree -- $env:TEMP is set and writable for every
+# Windows account, including SYSTEM, unconditionally; ssh's default
+# known_hosts location (under the account's own profile) is exactly the
+# class of account-specific path already responsible for two of this
+# session's three updater failures. Not pre-seeded with a hardcoded host
+# key -- StrictHostKeyChecking=accept-new still performs its own
+# first-connect trust-and-persist, just now with somewhere it can actually
+# write the result. BatchMode=yes: never hang on an interactive prompt.
+# No quoting around the paths themselves -- git parses core.sshCommand's
+# value with its own space-splitting, same as a plain shell command line,
+# and (matching this codebase's existing assumption elsewhere for this exact
+# class of path, e.g. lib\updateCheck.js's identical override) neither
+# $repoRoot nor $env:TEMP contains a space on the current install layout.
+# Deliberately avoids nesting quotes inside the already-quoted `-c` argument
+# below, which is fragile to reason about correctly across PowerShell's own
+# string interpolation, git's config-value parsing, AND git's re-invocation
+# of ssh with this string as ITS command line -- three layers, and this
+# script cannot be executed/tested outside a real Windows host to verify a
+# nested-quoting scheme actually survives all three intact.
+$knownHostsPath = Join-Path $env:TEMP 'secvault-update-known_hosts'
+$sshCommand = "ssh -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
 
 # -----------------------------------------------------------------------
 # 1. Stop SecVault-App
@@ -201,7 +251,7 @@ Invoke-Step 'sc.exe stop SecVault-Engine' {
 # -----------------------------------------------------------------------
 Invoke-Step 'git pull origin main' {
     Push-Location $repoRoot
-    $out = Invoke-Native { git pull origin main 2>&1 }
+    $out = Invoke-Native { git -c "core.sshCommand=$sshCommand" pull origin main 2>&1 }
     Pop-Location
     $out | Write-Host
     Add-Content -Path $LogFile -Value ($out -join "`n")
