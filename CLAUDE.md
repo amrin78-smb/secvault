@@ -887,6 +887,35 @@ now; skip straight from Phase 2 to Phase 4 in this codebase's actual history.
     was always the literal string `'admin'` regardless of who was actually logged in. Now derived
     from the real session for both the column and the audit trail.
 
+#### Rule Composition Chart, Clickable Drill-Down, CSV Export (2026-07-19)
+
+The Summary tab's flat StatCard row gained a `RuleStatsBarChart` (`components/analysis/
+RuleStatsBarChart.js`, `'use client'`, same recharts/CSS-var-color-reading template as
+`FindingsBarChart.js`) sitting alongside the existing `FindingsBarChart` in a responsive 2-column
+grid — `RuleStatsBarChart` charts rule-COMPOSITION (Allowed/Denied/Inactive/NAT Enabled/Any-to-Any/
+Logging Disabled), distinct from `FindingsBarChart`'s finding-TYPE breakdown. Includes a new **NAT
+Enabled** stat — `firewall_rules.nat_enabled` already existed in the schema but had never been
+surfaced in any UI until now (`getRuleStats()` extended with `COUNT(*) FILTER (WHERE nat_enabled =
+true)`).
+
+Every StatCard on the Summary tab that has a real filtered destination is now a `Link`: Total →
+unfiltered `/devices/[id]/rules`, Allowed → `?action=allow`, Inactive → `?enabled=false`, NAT →
+`?nat=true`, Any-to-Any / Logging Disabled → the Findings tab pre-filtered by `finding_type`
+(`?tab=findings&finding_type=...`, already-existing support). **Denied needed a small filter
+extension first**: the StatCard counts `action IN ('deny','drop','reject','block')`, but
+`/devices/[id]/rules`'s `action=` filter only ever matched a single exact value — linking it to
+`?action=deny` alone would have undercounted relative to what the tile actually showed. `action=` now
+accepts a comma-separated list (`?action=deny,drop,reject,block`), matched via `= ANY($N::text[])`
+instead of plain `=` (a bare single value still works identically — `ANY()` over a 1-element array
+equals `=`) — added identically to both `app/(dashboard)/devices/[id]/rules/page.js`'s own
+`buildFilters()` and the sibling `app/api/devices/[id]/rules/route.js`'s copy (this file's established
+per-file-duplication convention, not a shared module), plus a matching `nat=true|false` filter in
+both. The rules page's filter form gained matching `<select>` options for both.
+
+Export CSV (`?format=csv` on `GET /api/devices/[id]/analysis`, see the Compliance Engine section
+above for the shared CSV pattern this mirrors) — an "Export CSV" action button was added next to the
+existing risk badge and "Run Analysis" button.
+
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 
 - After every config pull, `collectAndStore` diffs the two latest snapshots → `config_diffs`; an `'auto'` backup is
@@ -1085,16 +1114,64 @@ warning))`, **excluding `na` from the denominator** (an inapplicable check shoul
 the score), `null` — not `0`/`NaN` — when nothing is measurable (never audited, or every mapped
 check is `na`) — rendered as "—", since null and 0% mean very different things.
 
-`/compliance` (fleet matrix: devices × standards, colored green >80% / amber 60–80% / red <60% /
-muted null) and `/compliance/[deviceId]` (per-device: 4 score tiles + client-side standard tabs —
-a deliberate, documented exception to this app's usual `?tab=` server-navigation convention,
-since here all 4 standards' findings are already in one fetched payload and a full page reload per
-tab would just re-fetch identical data). Both pages query the DB directly rather than fetching their
-own paired API route, same "server components query the DB directly" convention as the Alerts page
-— the API routes exist for `RunAuditButton`'s POST and any future client-side consumer, not for
-these pages' own initial render; the aggregation SQL is therefore intentionally duplicated in 4
-places (both API routes + both pages) and must be kept in step by inspection if the scoring formula
-ever changes, same caveat as the Alerts/events split above.
+`/compliance` (fleet-wide) and `/compliance/[deviceId]` (per-device) both query the DB directly
+rather than fetching their own paired API route, same "server components query the DB directly"
+convention as the Alerts page — the API routes exist for `RunAuditButton`'s POST and any future
+client-side consumer, not for these pages' own initial render; the aggregation SQL is therefore
+intentionally duplicated in 4 places (both API routes + both pages) and must be kept in step by
+inspection if the scoring formula ever changes, same caveat as the Alerts/events split above.
+
+#### Standard donut cards, print report, CSV export (2026-07-19)
+
+Both compliance pages' original "flat StatCard tiles + table" layout was replaced with a
+`StandardCard` (`components/compliance/StandardCard.js`) grid, one card per standard: a
+`StandardDonut` (`components/compliance/StandardDonut.js`, `'use client'`, recharts `Pie`, one
+2-segment ring so the colored arc + gray track always sum to a full circle — color pulled from
+`ComplianceMatrix.js`'s existing `scoreColor`/`SCORE_COLOR_VAR`, reused rather than re-derived), a
+short factual description + external reference link per standard (`STANDARD_META`, exported from
+`ComplianceMatrix.js` alongside `STANDARDS` — generic "this assessment is based on..." wording,
+never a claim about SecVault's own certification status, since it has none), and a "Failed" quick-list
+(up to 5 items + "+N more"). **The two pages' cards mean something different in that quick-list**:
+per-device (`compliance/[deviceId]/page.js`) shows the actual failing CHECK NAMES (derived from the
+already-fetched `findings` array — no new query); fleet-wide (`compliance/page.js`) shows which
+DEVICES have at least one failure for that standard (a new, separate `getFleetFailedDevicesByStandard`
+query — a check-name list wouldn't say *where* at fleet scale, since the same check can fail
+identically across many devices). At `scorePct === 100` the card shows a `Badge color="success"`
+"Fully Compliant" in place of the failed-list (no emoji anywhere in this codebase, confirmed by grep
+before choosing this — see `StandardCard.js`'s own comment).
+
+The fleet page (`compliance/page.js`) gained a `?view=cards|table` toggle (`cards` is now the
+default) — `cards` shows the new fleet-wide `StandardCard` grid (per-standard totals summed in JS
+from the same per-device data `getFleetCompliance` already fetches, no new query for the numbers
+themselves), `table` is the original device×standard `ComplianceMatrix` comparison table, unchanged
+and still reachable, since a wide fleet is easier to scan as a table than as N cards.
+
+`StandardTabs.js`'s hash-based deep-link (`/compliance/[deviceId]#CIS_V8` preselects that tab) used
+to only read `window.location.hash` once, on mount — the new `StandardCard` failed-check links point
+at `#STANDARD_KEY` anchors on the *same* page, and a same-page `next/link` hash change doesn't
+remount the component under App Router, so the original mount-only read never saw it. Fixed by
+adding a `hashchange` listener alongside the existing mount-time read (`StandardTabs.js`) — both the
+original cross-page case and the new same-page case now work identically.
+
+**CSV export** — `?format=csv` was added to all three `GET` routes above (`/api/compliance/[deviceId]`,
+`/api/compliance/fleet`, and `/api/devices/[id]/analysis` for the Rule Analysis sibling below),
+mirroring the pre-existing `GET /api/devices/[id]/rules?format=csv` pattern exactly (per-route
+`csvEscape`/`buildCsv` duplicates, `Content-Disposition: attachment` — this codebase's established
+per-file-duplication convention for small helpers, not a shared utility module). Every compliance/
+analysis page now has an "Export CSV" action button pointing at its sibling route with `?format=csv`.
+
+**Print report** — a new route, `/compliance/[deviceId]/print`, a server-rendered, chrome-free report
+page (duplicates `getDevice`/`getFindings`/`aggregateStandards` from the sibling live page, same
+"duplication is deliberate" convention) showing **all 4 standards' full findings in one scroll**
+(unlike the live page's client-side `StandardTabs`, which shows one standard at a time) — that's the
+whole point of an exportable report. A `PrintReportButton` (`'use client'`, the only client boundary
+needed — `window.print()` requires `onClick`, which a Server Component can't hold) triggers the
+browser's native print/Save-as-PDF dialog. `app/globals.css` gained an additive-only `@media print`
+block (nothing existing was touched) that hides the `.sv-topbar`/`.sv-sidebar` app chrome and any
+`.no-print`-marked element, forces light-theme colors regardless of the operator's saved dark-mode
+preference (paper should never render dark colors), and gives `.print-report` sensible page-break/
+margin behavior. This print stylesheet applies to any page printed while inside the dashboard shell,
+not just the report route, since hiding app chrome on paper is a reasonable default everywhere.
 
 ---
 
