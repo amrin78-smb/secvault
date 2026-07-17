@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import SyncNowButton from '../../../components/advisories/SyncNowButton';
 
-const { getLastSyncs } = require('../../../lib/feedStatus');
+const { getFeedStatusBySource } = require('../../../lib/feeds');
 import Badge from '../../../components/ui/Badge';
 import Card, { CardBody } from '../../../components/ui/Card';
 import Table from '../../../components/ui/Table';
@@ -115,14 +115,39 @@ async function getAdvisories(dbPool, searchParams) {
   return result.rows;
 }
 
-export default async function AdvisoriesPage({ searchParams }) {
-  const [advisories, lastSyncs] = await Promise.all([
-    getAdvisories(pool, searchParams),
-    getLastSyncs(pool),
-  ]);
+// One line per real feed_sync_log-backed source, in run order (see
+// lib/feeds/index.js's runFullSync). 'circl' is NOT a source with its own
+// feed_sync_log row -- it's an in-band fallback inside the 'nvd' sync -- so
+// it's rendered separately below, derived from the nvd entry's own .circl
+// field (see getFeedStatusBySource's summarizeCirclUsage), not looked up here.
+const FEED_SOURCE_LABELS = [
+  { key: 'nvd', label: 'NVD' },
+  { key: 'paloalto_psirt', label: 'Palo Alto PSIRT' },
+  { key: 'fortinet_psirt', label: 'Fortinet FortiGuard' },
+  { key: 'kev', label: 'CISA KEV' },
+];
 
-  const lastNvd = lastSyncs.find((s) => s.feed_name === 'nvd');
-  const lastKev = lastSyncs.find((s) => s.feed_name === 'kev');
+function FeedSourcePill({ label, entry }) {
+  if (!entry) {
+    return (
+      <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>
+        {label}: not yet run
+      </span>
+    );
+  }
+  const color = entry.status === 'success' ? 'var(--green)' : entry.status === 'partial' ? 'var(--yellow)' : 'var(--red)';
+  return (
+    <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+      {label}: {formatDateTime(entry.finished_at)} <span style={{ color }}>({entry.status})</span>
+    </span>
+  );
+}
+
+export default async function AdvisoriesPage({ searchParams }) {
+  const [advisories, bySource] = await Promise.all([
+    getAdvisories(pool, searchParams),
+    getFeedStatusBySource(pool),
+  ]);
 
   const vendorValue = searchParams?.vendor || '';
   const cvssBandValue = searchParams?.cvssBand || '';
@@ -137,15 +162,19 @@ export default async function AdvisoriesPage({ searchParams }) {
         <CardBody
           style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
         >
-          <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
-            <span>
-              Last NVD sync: {formatDateTime(lastNvd?.finished_at)}{' '}
-              {lastNvd ? `(${lastNvd.status})` : ''}
-            </span>
-            <span style={{ marginLeft: 16 }}>
-              Last KEV sync: {formatDateTime(lastKev?.finished_at)}{' '}
-              {lastKev ? `(${lastKev.status})` : ''}
-            </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            {FEED_SOURCE_LABELS.map(({ key, label }) => (
+              <FeedSourcePill key={key} label={label} entry={bySource[key]} />
+            ))}
+            {/* CIRCL has no feed_sync_log row of its own -- it's an in-band fallback
+                inside the nvd sync -- so it's only shown when the most recent nvd
+                run actually fell back to it, per bySource.nvd.circl (see
+                lib/feeds/index.js's summarizeCirclUsage). */}
+            {bySource.nvd?.circl?.used && (
+              <span style={{ fontSize: 'var(--text-base)', color: 'var(--yellow)' }}>
+                CIRCL: used as NVD fallback ({bySource.nvd.circl.eventCount}x last run)
+              </span>
+            )}
           </div>
           <SyncNowButton />
         </CardBody>

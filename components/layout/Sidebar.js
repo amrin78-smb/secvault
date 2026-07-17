@@ -10,10 +10,17 @@ import {
   IconShield,
   IconChart,
   IconDocument,
+  IconSearch,
   IconSettings,
   IconChevronLeft,
 } from '../icons';
 
+// Icon reuse note (Phase 7, Compliance): IconShield is already taken by "CVE
+// Posture" and IconDocument by "Advisories", so Compliance reuses IconSearch
+// (a magnifying glass reads reasonably as "audit/inspect") rather than
+// inventing a new SVG icon file -- the same "reuse what's there even if not
+// a perfect semantic match" call this file already made when Alerts reused
+// IconBell.
 const NAV = [
   { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true, color: '#0891b2', bg: 'rgba(8,145,178,0.20)' },
   { href: '/alerts', label: 'Alerts', Icon: IconBell, color: '#fb923c', bg: 'rgba(251,146,60,0.20)' },
@@ -21,6 +28,7 @@ const NAV = [
   { href: '/cve', label: 'CVE Posture', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
   { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },
   { href: '/advisories', label: 'Advisories', Icon: IconDocument, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
+  { href: '/compliance', label: 'Compliance', Icon: IconSearch, color: '#34d399', bg: 'rgba(52,211,153,0.20)' },
   { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
 ];
 

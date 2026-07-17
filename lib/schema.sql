@@ -216,6 +216,64 @@ CREATE TABLE IF NOT EXISTS cve_assessment_acknowledgements (
 
 CREATE INDEX IF NOT EXISTS idx_caa_device_id ON cve_assessment_acknowledgements(device_id);
 
+-- Phase 7: Compliance engine. Curated check library (audit_checks) + per-device
+-- results (audit_findings), reusing lib/engines/applicability.js's predicate
+-- evaluator (predicate_config is the SAME shape as advisory_conditions.predicate_config
+-- -- config_key_exists/config_value_equals/config_value_matches/feature_enabled/
+-- port_exposed/admin_access_from_zone -- evaluated against device_configs.config_parsed).
+--
+-- `standards` is a TEXT[], not a single TEXT column, even though the compliance
+-- spec otherwise describes one check having one "standard" -- because the same
+-- spec's own mapping table ("logging checks -> PCI_DSS, ISO_27001", "access
+-- control checks -> PCI_DSS, CIS_V8, ISO_27001, NIST") requires ONE check to
+-- score against MULTIPLE standards simultaneously (a single "admin access not
+-- from WAN" check must count toward CIS_V8 AND ISO_27001 AND PCI_DSS AND NIST's
+-- separate pass/fail percentages). A single-value column cannot represent that
+-- many-to-many relationship; a plain array avoids a join table for what is
+-- small, rarely-changing curated data (same tradeoff this schema already makes
+-- for affected_version_ranges/fixed_in_versions as JSONB rather than child
+-- tables).
+CREATE TABLE IF NOT EXISTS audit_checks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  check_id TEXT NOT NULL UNIQUE, -- stable slug, e.g. 'fortinet-ssl-vpn-not-internet-exposed'
+  name TEXT NOT NULL,
+  description TEXT,
+  standards TEXT[] NOT NULL, -- subset of 'PCI_DSS' | 'ISO_27001' | 'CIS_V8' | 'NIST' | 'CUSTOM'
+  vendor TEXT, -- NULL = applies to all vendors; else a specific devices.vendor slug
+  severity TEXT NOT NULL DEFAULT 'medium', -- 'critical' | 'high' | 'medium' | 'low' | 'info'
+  predicate_config JSONB NOT NULL, -- {predicate_type, ...} -- same evaluator as advisory_conditions
+  remediation_guidance TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_checks_vendor ON audit_checks(vendor);
+CREATE INDEX IF NOT EXISTS idx_audit_checks_standards ON audit_checks USING GIN(standards);
+
+-- Unlike rule_analysis_results/firewall_rules, audit_checks is curated library
+-- data seeded once (lib/auditChecksSeed.js) and only changes when a human adds
+-- a check -- it is NOT rewritten per device per pull. A stable UUID FK is
+-- therefore safe here (contrast finding_acknowledgements' deliberate natural-key
+-- design, which exists specifically because ITS parent rows churn every pull).
+--
+-- audit_findings itself DOES follow the rule_analysis_results lifecycle: DELETE
+-- + reinsert per device on every compliance run (scheduled, after every config
+-- pull; or on-demand). No ack/dismiss table for findings -- out of scope here,
+-- unlike Phase 5's findings; add one later the same way finding_acknowledgements
+-- was added if operators need it.
+CREATE TABLE IF NOT EXISTS audit_findings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  check_id UUID NOT NULL REFERENCES audit_checks(id) ON DELETE CASCADE,
+  status TEXT NOT NULL, -- 'pass' | 'fail' | 'warning' | 'na'
+  detail TEXT,
+  detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_findings_device_id ON audit_findings(device_id);
+CREATE INDEX IF NOT EXISTS idx_audit_findings_check_id ON audit_findings(check_id);
+CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status);
+
 -- Rule Analysis Dashboard Phase 4: risk-score trend + operator audit trail.
 
 -- One row per completed rule-analysis run (both scheduled collects and manual

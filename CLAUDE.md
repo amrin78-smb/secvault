@@ -249,7 +249,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `activity_log` | Operator-action audit trail (run analysis, acknowledge finding/diff) — not a general app log | Dashboard Phase 4 ✅ |
 | `cve_assessment_acknowledgements` | Operator status per patch-now CVE assessment (new/acknowledged/dismissed/actioned), keyed on `(device_id, advisory_id)` — mirrors `finding_acknowledgements`, since `device_cve_assessments` has no ack column of its own | Fleet Alerts Page ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
-| `audit_checks` / `audit_findings` | Compliance check library + results | 7 (not yet created) |
+| `audit_checks` | Compliance check library (curated, seeded via `lib/auditChecksSeed.js`) — `standards` is `TEXT[]`, not singular, since one check can score against multiple standards at once | 7 ✅ |
+| `audit_findings` | Per-device compliance results (pass/fail/warning/na), DELETE+reinsert per device per run like `rule_analysis_results` | 7 ✅ |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
 Tables marked "not yet created" are part of the full architecture (see repo root architecture doc in project history) and will be added via new `CREATE TABLE IF NOT EXISTS` statements in their respective phases — do not pre-create empty tables for features that are not yet implemented.
@@ -952,12 +953,111 @@ there was nowhere the bell itself could lead to actually acknowledge/resolve any
 
 ---
 
+## Compliance Engine (Phase 7 — `/compliance`, added 2026-07-17)
+
+Reuses `lib/engines/applicability.js`'s predicate evaluator (`evaluatePredicate`, `hasUsableConfig`)
+rather than a second implementation — compliance checks and CVE-applicability conditions are both
+"evaluate a predicate against `device_configs.config_parsed`," just for different purposes.
+`applicability.js` itself was touched only to export `hasUsableConfig` (it wasn't previously
+exported) — its actual tri-state logic is unchanged.
+
+### The tri-state → four-state polarity problem
+
+`evaluatePredicate()` returns `'yes'|'no'|'unknown'` with no concept of which outcome is "good" —
+a compliance check needs four states (`pass`/`fail`/`warning`/`na`), and different checks need
+**opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `'yes'` to mean PASS;
+an `admin_access_from_zone` check on the WAN zone wants `'yes'` — access WAS found — to mean FAIL).
+Resolved via a `pass_when: 'yes'|'no'` field inside each check's `predicate_config`, read by
+`lib/engines/configAuditor.js`'s `evaluateCheck()`:
+- No usable config at all (`hasUsableConfig()` false) → **every** check for that device → `'na'`,
+  one early return, no per-check evaluation attempted ("nothing to check," not "checked and
+  unsure").
+- `evaluatePredicate()` result `'unknown'` → `'warning'` (config WAS collected, this specific value
+  couldn't be resolved).
+- result `=== pass_when` → `'pass'`; otherwise → `'fail'`.
+- **`pass_when` missing or not exactly `'yes'`/`'no'`** (a malformed or hand-edited `audit_checks`
+  row) → `'warning'`, never a silent default to either polarity — a bug here is a curated-data
+  problem, not a device problem, and inverting pass/fail with no error would be exactly the kind of
+  "looks fine, isn't" failure this whole tri-state discipline exists to prevent (same instinct as
+  the "unknown never collapses to no" rule above). Found and fixed during this phase's own review
+  before it shipped — an earlier version silently defaulted an invalid `pass_when` to `'yes'`.
+
+### `audit_checks.standards` is `TEXT[]`, not a single value
+
+The compliance spec's own standard-mapping ("logging checks → PCI_DSS + ISO_27001," "access-control
+checks → PCI_DSS + CIS_V8 + ISO_27001 + NIST") requires ONE check to score against MULTIPLE
+standards simultaneously — a single-value column can't represent that many-to-many relationship. A
+plain Postgres array avoids a join table for what is small, rarely-changing curated data (same
+tradeoff `affected_version_ranges`/`fixed_in_versions` already make as JSONB instead of child
+tables). `node-postgres` returns this as a real JS array automatically — no parsing needed on read.
+
+### Seed library — `lib/auditChecksSeed.js`, called from `lib/migrate.js`
+
+28 checks (8 shared concepts × 2 vendors, since Fortinet's and Palo Alto's `config_parsed` trees
+have completely different shapes per their different parsers — a single vendor-NULL row with one
+`path` can't realistically match both — plus 6 Fortinet-specific + 6 Palo Alto-specific), following
+`lib/migrate.js`'s existing `seedDefaultAdmin()` pattern: an idempotent JS function
+(`ON CONFLICT (check_id) DO UPDATE`), not a raw `.sql` seed file — called **unguarded** from
+`main()` (unlike `schema-grants.sql`'s best-effort tolerance: a seed failure here means the
+compliance feature silently has zero checks, which should fail the whole `migrate.js` run loudly,
+not be swallowed).
+
+Predicate paths are grounded in this codebase's own parser output where verifiable — Palo Alto's
+`lib/adapters/paloalto/sshParser.js` is live-verified (see "Live Validation Status" above:
+`mgt-config.users`, `deviceconfig.system.panorama`, `rulebase.security.rules` are real, confirmed
+paths) — but **8 of the 28 checks (all Fortinet, spanning NTP/DNS/logging/password-policy/
+FortiGuard-updates/IPS-on-rules) use a deliberate `predicate_type: 'not_evaluable_from_config'`**,
+a string that doesn't match any of `applicability.js`'s six real predicate cases and therefore
+correctly falls through to its `default: return 'unknown'` branch — i.e. these checks always render
+as `'warning'`, honestly, rather than guessing a path into a config section
+`lib/adapters/fortinet/index.js`'s `getConfig()` doesn't currently collect (only `global`/
+`interfaces`/`ssl_vpn`/`snmp`/`admins` today). **This is a real, known gap, not a bug** — extending
+the Fortinet adapter's collected config sections is the natural follow-up, at which point those 8
+checks' `predicate_config` can be upgraded from `not_evaluable_from_config` to a real predicate
+without touching `configAuditor.js` at all.
+
+### Engine — `lib/engines/configAuditor.js`
+
+`runComplianceAuditForDevice(deviceId, pool)` mirrors `runAnalysisForDevice()`'s shape (Phase 5):
+load device + latest `config_parsed` (via `applicability.js`'s `getLatestConfigParsed`) + applicable
+checks (`vendor IS NULL OR vendor = $1`), evaluate, then DELETE+reinsert that device's
+`audit_findings` inside one transaction — same "a partial rewrite must never leave findings in a
+mixed old/new state" reasoning as `rule_analysis_results` and `firewall_rules`. Runs automatically
+in `lib/adapters/index.js`'s `collectAndStore`, right after the Phase 6 config-diff block, gated on
+`result.configCollected`; also runnable on-demand via `POST /api/compliance/[deviceId]/run`.
+
+### API + UI
+
+`GET /api/compliance/[deviceId]` (per-device findings + per-standard pass/fail/warning/na counts +
+`scorePct`), `GET /api/compliance/fleet` (same shape, one row per active device), `POST
+/api/compliance/[deviceId]/run` (on-demand trigger). `scorePct = round(100 * pass / (pass + fail +
+warning))`, **excluding `na` from the denominator** (an inapplicable check shouldn't count against
+the score), `null` — not `0`/`NaN` — when nothing is measurable (never audited, or every mapped
+check is `na`) — rendered as "—", since null and 0% mean very different things.
+
+`/compliance` (fleet matrix: devices × standards, colored green >80% / amber 60–80% / red <60% /
+muted null) and `/compliance/[deviceId]` (per-device: 4 score tiles + client-side standard tabs —
+a deliberate, documented exception to this app's usual `?tab=` server-navigation convention,
+since here all 4 standards' findings are already in one fetched payload and a full page reload per
+tab would just re-fetch identical data). Both pages query the DB directly rather than fetching their
+own paired API route, same "server components query the DB directly" convention as the Alerts page
+— the API routes exist for `RunAuditButton`'s POST and any future client-side consumer, not for
+these pages' own initial render; the aggregation SQL is therefore intentionally duplicated in 4
+places (both API routes + both pages) and must be kept in step by inspection if the scoring formula
+ever changes, same caveat as the Alerts/events split above.
+
+---
+
 ## Feed Sources
 
 | Feed | URL | Schedule | Notes |
 |---|---|---|---|
 | NVD API 2.0 | `https://services.nvd.nist.gov/rest/json/cves/2.0` | Every 6h | Rate: 1 req/6s without key, 5 req/30s with `NVD_API_KEY`. Multi-vendor: `VENDOR_CPES` in `lib/feeds/nvd.js` maps every vendor slug to live-verified CPE strings (cisco_asa needs BOTH `o:` and `a:` part variants — NVD is split). Always `virtualMatchString`, never `cpeName`. |
+| Palo Alto PSIRT | `https://security.paloaltonetworks.com/api/v1/products/PAN-OS/advisories` | Every 6h, sequential after NVD | `lib/feeds/paloalto.js`. Bulk beta API, one call, ~346 advisories, CVE Record Format 5.x (same shape NVD's CIRCL fallback already parses). See "Vendor PSIRT Feeds" below. |
+| Fortinet FortiGuard | `https://www.fortiguard.com/rss/ir.xml` (→ redirects to `filestore.fortinet.com`) | Every 6h, sequential after Palo Alto | `lib/feeds/fortinet.js`. RSS for discovery + per-advisory CSAF 2.0 JSON for structured data, 1s rate limit between advisories. See "Vendor PSIRT Feeds" below. |
 | CISA KEV | `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` | Every 6h | Full download, cross-reference by cve_id |
+
+Sync order (`lib/feeds/index.js`'s `runFullSync`) is deliberately **sequential, not parallel**: NVD → Palo Alto PSIRT → Fortinet FortiGuard → KEV. One feed's failure is fully isolated (its own try/catch) and never blocks the next. Each of the four gets its own `feed_sync_log` row (`feed_name`: `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`) — `getFeedStatusBySource(pool)` returns the latest row per source (`null` for a feed that hasn't run yet, not an error). CIRCL is **not** a fifth `feed_sync_log` row — it has no independent scheduled run of its own, it's an in-band fallback inside the NVD sync; its usage is derived from the `nvd` row's own `errors` jsonb via `summarizeCirclUsage()` (every CIRCL code path, success or failure, pushes a `[CIRCL fallback] ...`-prefixed entry there — the success path didn't originally do this and under-reported CIRCL usage on the Advisories page banner until fixed alongside this phase; see `lib/feeds/nvd.js`'s `tryCirclFallback`).
 
 ### NVD Rate Limiting
 
@@ -1025,6 +1125,92 @@ CVE Engine Architecture above, never the dangerous direction.
 **Logging:** `[NVD] <cpeString>: N CVE(s)` on a normal successful fetch, `[CIRCL fallback] ...` on
 every fallback attempt/result/failure — grep `engine.log` for either prefix to see which source
 served a given sync.
+
+---
+
+## Vendor PSIRT Feeds — Palo Alto + Fortinet (added 2026-07-17)
+
+Both live-verified with curl before writing any parser, per this file's own "documentation lies,
+test against live systems" rule — the endpoints/shapes below are confirmed, not assumed from
+vendor docs. `[PaloAlto PSIRT Debug]` / `[Fortinet PSIRT Debug]` are logged on the first advisory
+processed each run, same convention as every other feed/adapter in this codebase.
+
+### Palo Alto — `lib/feeds/paloalto.js`
+
+**Use the beta bulk endpoint, `GET /api/v1/products/PAN-OS/advisories`, as the ONLY source.**
+Do **not** use `GET /json` / `GET /json?product=PAN-OS` / `GET /json/{id}` — live-verified to only
+return the 25 most recent bulletins (not full history), with a fragile parallel-array version-range
+format (`"< 12.1.4-h8, < 12.1.7-h2, < 12.1.8"`, comma-separated hotfix-train upper bounds with no
+explicit lower bound) and no valid CVSS vector (only separate AV/AC/PR/UI/C/I/A letters, missing
+Scope). The beta endpoint, by contrast, returns **346 advisories in one call** (~4.3MB, no
+pagination), and every entry is a **full CVE Record Format 5.x object** — the exact same shape
+`lib/feeds/nvd.js`'s CIRCL fallback already parses (`extractAffectedRangesFromCveRecord` etc.) —
+`paloalto.js` mirrors that logic rather than importing it (kept independent so this feed's parsing
+can't regress the already-verified NVD file; some duplication accepted, same tradeoff as the
+alerts/events split documented elsewhere in this file).
+
+Confirmed live:
+- `cveMetadata.cveId` is `CVE-YYYY-NNNNN` for most entries, `PAN-SA-YYYY-NNNN` for informational
+  bulletins with no assigned CVE (59 of 346 at verification time) — stored as-is in `advisories.cve_id`
+  (just a unique text key, not format-validated).
+- `containers.cna.affected[]` entries carry a `product` field (`"PAN-OS"`, `"Cloud NGFW"`,
+  `"Prisma Access"`, ...) — filter to `product === 'PAN-OS'` **exact string match**; an advisory
+  with zero matching entries (PAN-OS-unaffected) is skipped, not inserted as an empty row.
+  `versions[]` per matching entry: `{status, version, lessThan, changes}` — 0 of 346 entries had
+  unusable version data at verification time.
+- `containers.cna.metrics[]` mixes `cvssV4_0`/`cvssV3_1`/`cvssV3_0` across different advisories
+  (Palo Alto is mid-migration to v4.0), and **can hold multiple entries for the SAME CVE**
+  representing different deployment "scenarios" (e.g. management-interface-exposed vs. restricted).
+  Preference cascade `cvssV4_0 → cvssV3_1 → cvssV3_0`, **first match wins, not highest score** — a
+  scenario-specific narrative isn't the general-case recommendation.
+- `containers.cna.references[0].url`, `.title`, `.descriptions[0].value` are all clean, real,
+  vendor-authored — used directly, no synthesis needed (unlike NVD, which has no title field).
+- No rate limiting needed (one bulk call, not N-per-advisory) — still gets the standard
+  `FETCH_TIMEOUT_MS = 20000`.
+
+### Fortinet — `lib/feeds/fortinet.js`
+
+**RSS is discovery-only. CSAF 2.0 JSON is the real data source, NOT HTML table scraping**, despite
+an earlier plan assuming HTML scraping (with a `Accept: application/json` content-negotiation
+attempt) would be the primary path — live-verified that the advisory HTML page ignores that header
+entirely and has no embedded client-hydration JSON, but **does** link to a genuine OASIS CSAF 2.0
+JSON file per advisory. HTML table scraping is kept only as a fallback for the rare advisory where
+CSAF is missing/broken (verified the fallback logic itself against real HTML, but could not find a
+live pre-CSAF advisory to exercise the fallback's *trigger* end-to-end — every guessed old FG-IR-ID
+either had CSAF or 404'd).
+
+Confirmed live, exact mechanics:
+1. `GET https://www.fortiguard.com/rss/ir.xml` returns **HTTP 500 with no User-Agent header**, and a
+   302 redirect to `https://filestore.fortinet.com/fortiguard/rss/ir.xml` (HTTP 200, real RSS 2.0)
+   **with one** — always send a browser-like `User-Agent`. Each `<item>`'s `link` is
+   `https://fortiguard.fortinet.com/psirt/FG-IR-YY-NNN` (note: `fortiguard.fortinet.com`, **not**
+   `www.fortiguard.com`) — use the RSS `<link>` value directly, don't reconstruct it. RSS items have
+   no CVE ID field.
+2. Fetch that advisory page → regex out the `csaf_url=` query-param value from an `<a href="/psirt/csaf/{ID}?csaf_url=https://filestore.fortinet.com/fortiguard/psirt/csaf_<slug>_<id>.json">`
+   link, then fetch **that** filestore URL directly (confirmed live: hitting
+   `fortiguard.fortinet.com/psirt/csaf/{ID}` directly, without the query param, 422s — "Invalid
+   Parameters").
+3. CSAF shape: `vulnerabilities[]`, one entry **per CVE per affected product** — the same CVE can
+   appear twice (once scoped to FortiOS, once to FortiProxy) with different `product_status`/`scores`
+   each time (confirmed live on CVE-2026-59840). Filter to FortiOS-scoped entries at BOTH the
+   `vulnerabilities[]`-entry level and the per-string level inside `known_affected`/
+   `known_not_affected` (an advisory can legitimately bundle a FortiOS-relevant CVE and a
+   FortiProxy-only one under the same FG-IR-ID) — this is more precise than a whole-advisory
+   FortiOS/FortiProxy filter and is what the code does.
+4. `known_affected`/`known_not_affected` string formats, confirmed live, tolerate all three
+   (separators are genuinely inconsistent — space, `/`, and `-` all appear):
+   - `"FortiOS >=7.6.0|<=7.6.3"` → `{min:"7.6.0", max:"7.6.3"}` (both bounds inclusive)
+   - `"FortiOS 7.2 all versions"` / `"FortiOS/ 8.0 all versions"` → `{min:"X.Y.0", max:"X.Y.999"}`
+   - `"FortiOS-7.6.4"` (bare version, no range operator, seen in `known_not_affected`) → a single
+     fixed version, not a range.
+5. **1-second delay required between advisory fetches** (FortiGuard is rate-sensitive per this
+   file's own requirement) — a real sequential `for` loop with `await sleep(1000)`, covering the
+   HTML-page-fetch + CSAF-fetch pair as one unit, never `Promise.all`/parallel.
+6. **`cheerio` was added as a new dependency** (`npm install cheerio`, real command — package.json
+   AND package-lock.json both updated) specifically for the HTML-table-scrape fallback path — a
+   hand-rolled regex-over-stripped-text scraper was deliberately rejected as too fragile against
+   real-world HTML's inconsistent nesting. `fast-xml-parser` (already a dependency) is reused as-is
+   for the RSS XML, no new package needed there.
 
 ---
 
