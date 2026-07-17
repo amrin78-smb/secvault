@@ -1005,14 +1005,18 @@ not be swallowed).
 Predicate paths are grounded in this codebase's own parser output where verifiable — Palo Alto's
 `lib/adapters/paloalto/sshParser.js` is live-verified (see "Live Validation Status" above:
 `mgt-config.users`, `deviceconfig.system.panorama`, `rulebase.security.rules` are real, confirmed
-paths) — but **8 of the 28 checks (all Fortinet, spanning NTP/DNS/logging/password-policy/
-FortiGuard-updates/IPS-on-rules) use a deliberate `predicate_type: 'not_evaluable_from_config'`**,
-a string that doesn't match any of `applicability.js`'s six real predicate cases and therefore
-correctly falls through to its `default: return 'unknown'` branch — i.e. these checks always render
-as `'warning'`, honestly, rather than guessing a path into a config section
-`lib/adapters/fortinet/index.js`'s `getConfig()` doesn't currently collect (only `global`/
-`interfaces`/`ssl_vpn`/`snmp`/`admins` today). **This is a real, known gap, not a bug** — extending
-the Fortinet adapter's collected config sections is the natural follow-up, at which point those 8
+paths) — but **11 of the 28 checks (8 Fortinet — NTP/DNS/logging/password-policy/FortiGuard-updates/
+IPS-on-rules — plus 3 Palo Alto) use a deliberate `predicate_type: 'not_evaluable_from_config'`**
+(⛔ corrected 2026-07-19, found in a follow-up bug sweep — this section previously said "8 of the 28
+checks, all Fortinet," undercounting by 3 and mischaracterizing which vendors are affected; verified
+directly against `lib/auditChecksSeed.js`, not re-assumed from the prior text), a string that doesn't
+match any of `applicability.js`'s six real predicate cases and therefore correctly falls through to
+its `default: return 'unknown'` branch — i.e. these checks always render as `'warning'`, honestly,
+rather than guessing a path into a config section the relevant adapter's `getConfig()` doesn't
+currently collect (`lib/adapters/fortinet/index.js` collects only `global`/`interfaces`/`ssl_vpn`/
+`snmp`/`admins` today; the 3 Palo Alto checks have the same shape of gap against
+`lib/adapters/paloalto/sshParser.js`'s collected tree). **This is a real, known gap, not a bug** —
+extending each adapter's collected config sections is the natural follow-up, at which point those 11
 checks' `predicate_config` can be upgraded from `not_evaluable_from_config` to a real predicate
 without touching `configAuditor.js` at all.
 
@@ -1113,14 +1117,23 @@ rule — the user's assumed endpoint, `/api/query`, 404s and doesn't exist):
   deduped record count well below `total_count` is normal and NOT a sign of truncation — only log
   a "capped" warning when `CIRCL_MAX_PAGES` (10) was actually reached with more still outstanding.
 
-**Known simplification (accepted, documented in `lib/feeds/nvd.js`):** CVE Record Format's
-`affected[].versions[]` entries can carry a `changes[]` timeline of finer-grained affected/
-unaffected toggles inside one version range — e.g. patched at an intermediate version, regressed
-later. This is ignored; only the outer `{version, lessThan/lessThanOrEqual}` range is used, same as
-`versionMatcher.js` already expects from NVD data. This can only make a CIRCL-sourced range
-**wider** than the true affected set (a version patched mid-range still reads as affected), never
-narrower — same conservative direction as the "unknown treated as applicable" tri-state rule under
-CVE Engine Architecture above, never the dangerous direction.
+**⛔ Stale note corrected 2026-07-19, found in a follow-up bug sweep:** this paragraph previously said
+`changes[]` is "ignored" outright — that stopped being true as of the 2026-07-17/2026-07-18 fixes to
+`highestVersionFromChanges`/`allCheckpointsFromChanges` (see those functions' own comments in
+`lib/feeds/nvd.js` and `lib/feeds/paloalto.js`, and the identical logic ported into
+`lib/feeds/fortinet.js`'s CSAF parsing), and a further 2026-07-19 fix now collects `changes[]`
+checkpoints **unconditionally** rather than only when no top-level `lessThan`/`lessThanOrEqual` bound
+is present. `changes[]` IS used, on all three CVE-Record-Format-consuming feeds: the highest
+`'unaffected'` change point sets `max`/`excludeFixed` when no top-level bound exists, and every
+`'unaffected'` change point (regardless of whether a top-level bound exists) is collected into
+`safe_exact_versions` so `versionComparator.js`'s `isSafeOnMatchingTrain` can check a device against
+its own hotfix train, not just the coarse `{min,max}` range. What genuinely remains a known,
+accepted simplification: a `changes[]` entry's own *sub*-timeline (a point patched, then regressed
+in a later change within the same entry) isn't modeled — only the flat set of `'unaffected'` points is
+extracted, with no ordering/dependency between them. This can only make the recognized-safe set
+**wider** than strictly correct in a regression-after-patch edge case, never narrower — same
+conservative direction as the "unknown treated as applicable" tri-state rule under CVE Engine
+Architecture above, never the dangerous direction.
 
 **Logging:** `[NVD] <cpeString>: N CVE(s)` on a normal successful fetch, `[CIRCL fallback] ...` on
 every fallback attempt/result/failure — grep `engine.log` for either prefix to see which source
@@ -1819,6 +1832,134 @@ re-investigated.
   it protects) — not the "any error → silent partial ruleset" bug an initial pass described. The
   explicit multi-VDOM loop (once VDOMs ARE known) has no try/catch on purpose and correctly throws
   whole on any single VDOM's failure.
+
+### ⚠️ Bug-sweep fixes (2026-07-19) — third-pass audit, all confirmed and fixed
+
+A third full-app bug sweep (independent finders per subsystem, then the highest-severity findings
+personally re-verified against the actual code before any fix was written) found and fixed the
+following. Primary-agent fixes plus 6 fanned single-file agent fixes, each verified against the
+real diff before integrating (per this file's own "Verify agent diffs before integrating" rule).
+
+**CVE engine correctness (`lib/feeds/nvd.js`, mirrored in `paloalto.js`/`fortinet.js`):**
+- `extractAffectedRanges()` (NVD API 2.0 path): an NVD `cpeMatch` entry can be `vulnerable: true`
+  with NONE of `versionStartIncluding`/`versionEndIncluding`/`versionEndExcluding` set — NVD's shape
+  for "this one exact CPE version is affected," no range needed. The old code fell through to
+  `{min: null, max: null}`, and `isInRange()` treats a null bound as "no constraint on that side" (by
+  design, for genuinely unbounded ranges) — so an exact-version CVE silently matched EVERY version of
+  that vendor's product, forever, flipping every device to `patch_now`/`scheduled` for a CVE that may
+  only affect one specific old build. Fixed: falls back to `extractVersionFromCriteria(match.criteria)`
+  (the same helper `extractFixedVersions` already used correctly) to pull the pinned version and use
+  it as both `min` and `max`; if neither a range field nor a usable pinned version exists, the entry
+  is skipped rather than emitting an unbounded range from nothing.
+- `extractAffectedRangesFromCveRecord()` (CVE Record Format 5.x path — CIRCL fallback in nvd.js,
+  native in paloalto.js/fortinet.js): checkpoint collection (`allCheckpointsFromChanges(v.changes)`,
+  feeding `safe_exact_versions` for `versionComparator.js`'s `isSafeOnMatchingTrain`) was only reached
+  inside the branch where NEITHER `v.lessThan` NOR `v.lessThanOrEqual` was present. A real entry can
+  have a top-level bound AND a `changes[]` timeline of per-hotfix-train fix points at the same time —
+  every checkpoint was silently dropped in that shape. Fixed: checkpoints are now collected
+  unconditionally whenever `changes[]` is present, independent of which branch sets `max`/
+  `excludeFixed`. Same fix applied identically in `paloalto.js` and `fortinet.js` (verified present
+  and fixed in both, not assumed).
+- `upsertAdvisory()` in all three feed files: every column except `title`/`affected_version_ranges`/
+  `fixed_in_versions` (already vendor-ownership-guarded) was unconditionally overwritten with
+  `EXCLUDED.*` on a `cve_id` conflict — `description`/`cvss_score`/`cvss_vector`/`published_at`/
+  `advisory_url`/`raw_data`. A genuine cross-vendor `cve_id` collision (a shared-library CVE, or a
+  different feed's own take on the "same" CVE) could silently overwrite the owning vendor's CVSS
+  score and description with an unrelated source's data purely due to sync order, while leaving that
+  row's title/ranges untouched — a corrupted hybrid record with mismatched severity and version data.
+  **This reverses previously-intentional behavior**, not just a bugfix: the original design explicitly
+  treated CVSS/description as "vendor-neutral, any sync can refresh" data. Every column is now guarded
+  by the same `CASE WHEN advisories.vendor = EXCLUDED.vendor THEN EXCLUDED.x ELSE advisories.x END`
+  pattern, in all three files.
+- `lib/feeds/fortinet.js`'s CSAF parser had a separate, distinct bug: a bare version string like
+  `"FortiOS-7.4.2"` (no range operator) was filed into `fixedVersions` unconditionally, regardless of
+  whether it came from `known_affected` (means: THIS exact version is vulnerable) or
+  `known_not_affected` (means: this version is fixed) — the inverse of its true meaning for the
+  `known_affected` case, which would make `versionMatcher.js` treat a device on the exact vulnerable
+  version as already patched. Fixed: `parseAffectedEntry()` now takes the originating status
+  explicitly; a bare version under `'affected'` now yields a pinned `{min: v, max: v}` range instead
+  of a fixed-version entry.
+
+**In-app updater / deploy pipeline (`installer/*.ps1`, `lib/updateCheck.js`):**
+- `installer/Update-SecVault.ps1`: `Invoke-Step`'s boolean return value was captured nowhere — every
+  step, including `npm run build`, ran as fire-and-forget "best-effort recovery" per the script's own
+  design (both services still start at the end regardless of any step's outcome). That's defensible
+  for most steps, but NOT for `npm run build`: `SecVault-App` runs `next start` directly against
+  `.next\` on disk, and a failed build can leave that directory stale (serves old code silently — looks
+  like a successful deploy, isn't), half-written, or missing entirely (fresh install). Fixed: the
+  build step's result is now captured (`$buildSucceeded`), and step 8 (`sc.exe start SecVault-App`)
+  is skipped with a loud `[SKIP]` log line when it's `$false`, rather than starting the app against a
+  broken build. `SecVault-Engine` (step 7) is intentionally NOT gated the same way — it runs directly
+  under `node`, no dependency on the Next.js build output.
+- Same script: the SSH-deploy-key-not-found `exit 1` path (used when neither known key location
+  exists) was the ONLY exit point in the whole script that skipped `Stop-Transcript` — every other
+  path falls through to the try/`Stop-Transcript`/catch at the bottom. This is also the single most
+  likely real-world failure path (see the deploy-key relocation fix below), so it's exactly the run
+  most likely to need the durable per-run transcript this script otherwise always captures. Fixed:
+  `Stop-Transcript` now runs before this `exit 1` too.
+- Same script: `New-Item -ItemType Directory -Force -Path $LogDir` ran before `Write-Log` is defined,
+  with `$ErrorActionPreference = 'Stop'` already active — a failure here (e.g. `C:\Apps\SecVault` not
+  yet created, a permissions issue under the SYSTEM-scheduled-task path) was an uncaught terminating
+  error with no logged trace and no guaranteed console visibility when launched non-interactively via
+  `schtasks`. Wrapped in try/catch with `Write-Warning` + a clear `exit 1` so the failure is at least
+  reported.
+- **Deploy key placement (`installer/Install-SecVault.ps1`, `installer/Update-SecVault.ps1`,
+  `lib/updateCheck.js`)**: the SSH deploy key used to be copied ONLY to
+  `$env:USERPROFILE\.ssh\secvault_deploy` — the profile of whichever admin ran `Install-SecVault.ps1`
+  interactively. That works for a manual `& Update-SecVault.ps1` run by that same admin (every
+  confirmed-successful update this project's history has seen), but the in-app updater ("Update Now")
+  schedules `Update-SecVault.ps1` as a Windows Scheduled Task running as SYSTEM, and SYSTEM's own
+  `$env:USERPROFILE` resolves to an unrelated profile with no copy of the key — and
+  `lib/updateCheck.js` (the SecVault-App service's own live update-status check, a DIFFERENT service
+  account again) only ever checked the repo-relative `installer/dependencies/secvault_deploy` path,
+  which this project's own prior debugging already confirmed missing on a real deployed server. Three
+  independent accounts, three different reliable-key-location needs, no single existing path covered
+  all of them. Fixed: `Install-SecVault.ps1` now ALSO places a copy at
+  `C:\ProgramData\SecVault\ssh\secvault_deploy`, locked down via `icacls` to `SYSTEM:R` +
+  `BUILTIN\Administrators:R` — a machine-wide location readable by any account on the box.
+  `Update-SecVault.ps1` and `lib/updateCheck.js` both now check this path FIRST, ahead of their
+  existing fallbacks (which remain, for an install that hasn't been re-run since this fix landed).
+  **Not yet confirmed against a real "Update Now" click** — same caveat this file's Live Validation
+  Status section applies to vendor adapters: doc-derived reasoning, first live exercise is the real
+  verification step.
+
+**Alerts / dashboard data correctness:**
+- `app/api/notifications/summary/route.js`'s patch_now count and `recentPatchNow` list queries had no
+  `LEFT JOIN cve_assessment_acknowledgements` at all — unlike `app/api/events/route.js` and
+  `app/(dashboard)/alerts/page.js`, which both correctly join and exclude `dismissed`/`actioned`
+  statuses (see "Fleet Alerts Page" above for why this triplication exists and why it's a known,
+  accepted "must be kept in step by inspection" risk). The header bell's badge count and dropdown
+  could show/list a patch_now CVE an operator had already dismissed. Fixed: both queries now carry
+  the identical join/filter the other two files already use.
+- `components/advisories/SyncNowButton.js`: the post-sync `allDone` check only verified every feed
+  source's `finished_at` was set — never its `status` field — so a partial feed failure (e.g. NVD
+  errored, KEV succeeded) still rendered a green "Sync complete" message. Fixed: now checks each
+  source's `status` against `'error'` (same convention as `lib/feedStatus.js`'s `getSyncPillStatus()`,
+  reusing its same known-feed-name list) and reports which source(s) failed when any did.
+- `components/cve/AssessNowButton.js`: `POST /api/cve/assess` (`runMatchForAllDevices()` in
+  `lib/engines/versionMatcher.js`) can return HTTP 200 with a non-empty per-device `errors` array
+  (skipped/failed devices) with no top-level `error` field — the button only checked the top-level
+  field, so it showed "Assessment complete." even when some devices' assessment genuinely failed.
+  Fixed: now surfaces a partial-failure message naming the error count and affected device id(s) when
+  `data.errors` is non-empty.
+- `components/settings/UpdatePanel.js`: `POST /api/system/update` deletes+recreates+runs the
+  `SecVaultUpdate` scheduled task on every call with no idempotency check server-side, and the "Start
+  Update" button had no in-flight guard — a rapid double-click (or a second click before the confirm
+  Modal had fully unmounted) could fire the POST twice, and a second call while the first
+  `Update-SecVault.ps1` run is still executing could disrupt it mid-run. Fixed: a `starting` state now
+  disables both the "Start Update" and "Cancel" buttons for the window between the click and the POST
+  resolving/throwing; only reset on the error path (success transitions to the full-screen updating
+  overlay, which unmounts the button entirely).
+
+**Investigated, found already correctly handled or intentionally out of scope (do not re-investigate
+without new evidence):**
+- `lib/engines/configDiff.js`'s `MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR` allowlist (Palo Alto
+  `system_info` noise filtering — see that file's own extensive comments) was flagged as possibly too
+  narrow. Deferred, not code-changed: correctly extending it requires comparing against a live PAN-OS
+  `show system info` response to find any further noisy-but-unlisted field, the same "verify against
+  live responses before writing any parser" constraint this file's own header comment already states
+  for itself. No live PAN-OS access was available to do that verification in this pass — flagged here
+  as an open, needs-live-verification item rather than guessed at.
 
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
