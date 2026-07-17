@@ -2,11 +2,11 @@ import Link from 'next/link';
 import { pool } from '../../../../lib/db';
 import PageHeader from '../../../../components/ui/PageHeader';
 import Badge from '../../../../components/ui/Badge';
-import StatCard from '../../../../components/ui/StatCard';
 import EmptyState from '../../../../components/ui/EmptyState';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
 import StandardTabs from '../../../../components/compliance/StandardTabs';
-import { STANDARDS, scoreColor, SCORE_COLOR_VAR } from '../../../../components/compliance/ComplianceMatrix';
+import StandardCard from '../../../../components/compliance/StandardCard';
+import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
@@ -126,6 +126,24 @@ export default async function DeviceCompliancePage({ params }) {
     return !latest || new Date(f.detectedAt) > new Date(latest) ? f.detectedAt : latest;
   }, null);
 
+  // Derived from the already-fetched `findings` array -- no new query needed.
+  // Feeds each StandardCard's "Failed Checks" quick-list; hrefs jump to the
+  // matching StandardTabs tab via the #STANDARD_KEY hash (StandardTabs.js's
+  // hashchange listener picks this up even for a same-page link click).
+  const failedChecksByStandard = {};
+  for (const s of STANDARDS) failedChecksByStandard[s.key] = [];
+  for (const f of findings) {
+    if (f.status !== 'fail') continue;
+    for (const key of f.standards) {
+      if (!failedChecksByStandard[key]) continue;
+      failedChecksByStandard[key].push({
+        id: f.id,
+        name: f.name,
+        href: `/compliance/${device.id}#${key}`,
+      });
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
@@ -142,20 +160,34 @@ export default async function DeviceCompliancePage({ params }) {
             <span>Last run: {formatDateTime(lastRunAt)}</span>
           </span>
         }
-        actions={<RunAuditButton deviceId={device.id} />}
+        actions={
+          <>
+            <a href={`/api/compliance/${device.id}?format=csv`} className="btn btn-secondary">
+              Export CSV
+            </a>
+            <Link href={`/compliance/${device.id}/print`} className="btn btn-secondary">
+              Print Report
+            </Link>
+            <RunAuditButton deviceId={device.id} />
+          </>
+        }
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 }}>
         {STANDARDS.map((s) => {
-          const stat = standards[s.key];
-          const color = SCORE_COLOR_VAR[scoreColor(stat.scorePct)];
+          const meta = STANDARD_META[s.key] || {};
+          const failed = failedChecksByStandard[s.key] || [];
           return (
-            <StatCard
+            <StandardCard
               key={s.key}
-              label={s.label}
-              value={stat.scorePct == null ? '—' : `${stat.scorePct}%`}
-              sub={`${stat.pass} pass · ${stat.fail} fail · ${stat.warning} warning · ${stat.na} n/a`}
-              color={color}
+              standard={s}
+              description={meta.description}
+              referenceUrl={meta.referenceUrl}
+              stats={standards[s.key]}
+              failedChecks={failed.slice(0, 5)}
+              failedChecksTotal={failed.length}
+              viewMoreHref={`/compliance/${device.id}#${s.key}`}
+              lastRunAt={lastRunAt}
             />
           );
         })}

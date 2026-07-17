@@ -40,12 +40,30 @@ export default function StandardTabs({ standards, findings }) {
   // that tab, so the fleet matrix's per-standard chip links
   // (ComplianceMatrix.js) land directly on the right tab instead of always
   // opening to the first standard.
+  //
+  // ⛔ Extended 2026-07-19: this used to only read the hash once, on mount.
+  // The new StandardCard "failed check" / "view more" links
+  // (compliance/[deviceId]/page.js) point at `#STANDARD_KEY` anchors on this
+  // SAME page — a same-page hash change via next/link's <Link> does not
+  // remount this component (App Router treats it as a client-side hash
+  // navigation on the same route), so the mount-only effect never re-ran and
+  // clicking a failed-check link did nothing to the active tab. A
+  // `hashchange` listener makes both the original cross-page case (fleet
+  // matrix → per-device page, still works via the initial-read branch below)
+  // and this same-page case work identically.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const hash = window.location.hash.replace('#', '');
-    if (hash && standards.some((s) => s.key === hash)) {
-      setActive(hash);
-    }
+    if (typeof window === 'undefined') return undefined;
+
+    const applyHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash && standards.some((s) => s.key === hash)) {
+        setActive(hash);
+      }
+    };
+
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

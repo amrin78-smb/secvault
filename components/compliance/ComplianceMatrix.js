@@ -18,6 +18,37 @@ export const STANDARDS = [
   { key: 'NIST', label: 'NIST' },
 ];
 
+// Descriptive blurb + external reference link per standard, for the
+// StandardCard donut cards (compliance/[deviceId]/page.js and
+// compliance/page.js's cards view) — factual, generic text describing what
+// each standard covers, matching the tone of "This assessment is based on
+// the NIST Standard of compliance. For more information, please visit..."
+// rather than any claim about SecVault's own certification status (it has
+// none — this is a self-assessment tool against curated checks, not an
+// auditor).
+export const STANDARD_META = {
+  PCI_DSS: {
+    description:
+      'Payment Card Industry Data Security Standard — network security requirements for systems that store, process, or transmit cardholder data.',
+    referenceUrl: 'https://www.pcisecuritystandards.org/',
+  },
+  ISO_27001: {
+    description:
+      'ISO/IEC 27001 — international standard for information security management, including access control, logging, and network security controls.',
+    referenceUrl: 'https://www.iso.org/standard/27001',
+  },
+  CIS_V8: {
+    description:
+      'CIS Critical Security Controls v8 — prioritized safeguards for network devices covering secure configuration, access control, and audit logging.',
+    referenceUrl: 'https://www.cisecurity.org/controls',
+  },
+  NIST: {
+    description:
+      'NIST SP 800-53 — security and privacy controls for federal information systems, widely used as a general-purpose security control baseline.',
+    referenceUrl: 'https://csrc.nist.gov/projects/risk-management/sp800-53-controls',
+  },
+};
+
 // Score -> visual severity banding, per the compliance spec: green >80%,
 // amber 60-80%, red <60%, muted/gray for null (never audited, or every
 // finding mapped to that standard is 'na') -- rendered as "-", not "0%",

@@ -5,6 +5,40 @@ export const dynamic = 'force-dynamic';
 
 const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST'];
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/[",\n\r]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function buildCsv(rows) {
+  const headers = ['Check Name', 'Severity', 'Standards', 'Status', 'Detail', 'Remediation'];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        csvEscape(r.name),
+        csvEscape(r.severity),
+        csvEscape(Array.isArray(r.standards) ? r.standards.join('; ') : r.standards),
+        csvEscape(r.status),
+        csvEscape(r.detail),
+        csvEscape(r.remediation_guidance),
+      ].join(',')
+    );
+  }
+  return lines.join('\r\n');
+}
+
+// Sanitizes user-entered device data (device.name) before it lands in an HTTP
+// header (Content-Disposition filename) — strips anything that isn't
+// alphanumeric/dash/underscore/space.
+function sanitizeForFilename(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9\- _]/g, '');
+}
+
 // scorePct = round(100 * pass / (pass + fail + warning)), EXCLUDING 'na' from
 // the denominator (an inapplicable check shouldn't count against the score).
 // Divide-by-zero guarded: all-na or zero-checks -> scorePct: null.
@@ -43,6 +77,8 @@ function buildStandardStats(rows) {
 export async function GET(request, { params }) {
   try {
     const { deviceId } = params;
+    const { searchParams } = new URL(request.url);
+    const format = searchParams.get('format');
 
     if (!isValidUuid(deviceId)) {
       return Response.json({ error: 'Invalid device id' }, { status: 400 });
@@ -75,6 +111,18 @@ export async function GET(request, { params }) {
          ac.name`,
       [deviceId]
     );
+
+    if (format === 'csv') {
+      const csv = buildCsv(findingRows);
+      const filenameBase = sanitizeForFilename(device.name) || deviceId;
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="compliance-${filenameBase}.csv"`,
+        },
+      });
+    }
 
     const { rows: lastRunRows } = await pool.query(
       'SELECT MAX(detected_at) AS last_run_at FROM audit_findings WHERE device_id = $1',

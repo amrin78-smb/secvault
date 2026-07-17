@@ -20,12 +20,50 @@ function finalizeScorePct(stats) {
   }
 }
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/[",\n\r]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+// Matches the formatLastRun/formatDateTime convention already used in
+// components/compliance/ComplianceMatrix.js.
+function formatLastRun(lastRunAt) {
+  if (!lastRunAt) return '';
+  return new Date(lastRunAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+function buildCsv(rows) {
+  const headers = ['Device', 'Vendor', 'Last Run', 'PCI DSS %', 'ISO 27001 %', 'CIS v8 %', 'NIST %'];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        csvEscape(r.deviceName),
+        csvEscape(r.vendor),
+        csvEscape(formatLastRun(r.lastRunAt)),
+        csvEscape(r.standards.PCI_DSS.scorePct),
+        csvEscape(r.standards.ISO_27001.scorePct),
+        csvEscape(r.standards.CIS_V8.scorePct),
+        csvEscape(r.standards.NIST.scorePct),
+      ].join(',')
+    );
+  }
+  return lines.join('\r\n');
+}
+
 // GET /api/compliance/fleet
 // One row per active device (WHERE active = true — same convention as
 // app/(dashboard)/alerts/page.js's getDevices), each with the same
 // per-standard scorePct breakdown as GET /api/compliance/[deviceId].
-export async function GET() {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const format = searchParams.get('format');
+
     const { rows: devices } = await pool.query(
       'SELECT id, name, vendor FROM devices WHERE active = true ORDER BY name ASC'
     );
@@ -77,6 +115,17 @@ export async function GET() {
         standards: stats,
       };
     });
+
+    if (format === 'csv') {
+      const csv = buildCsv(result);
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': 'attachment; filename="compliance-fleet.csv"',
+        },
+      });
+    }
 
     return Response.json({ devices: result });
   } catch (err) {
