@@ -182,15 +182,39 @@ try {
 # runs) -- it would fail this exact check and exit 1 here, before touching
 # any service (safe, but silently never actually updates).
 #
-# Fixed the same way as lib\updateCheck.js: point at the key's fixed,
-# repo-relative location instead of any one account's profile --
-# installer\dependencies\secvault_deploy, the original bundled file (present
-# on every real deploy; Install-SecVault.ps1 itself already requires it to
-# exist before install can complete) -- works identically regardless of
-# which account (an interactive admin, or SYSTEM) is running this script.
-$deployKey = Join-Path $repoRoot 'installer\dependencies\secvault_deploy'
-if (-not (Test-Path $deployKey)) {
-    Write-Host "  [FAIL] SSH deploy key not found: $deployKey"
+# ⛔ Correction (2026-07-17, same day): the fix above assumed
+# installer\dependencies\secvault_deploy persists on disk after install --
+# CLAUDE.md's own installer documentation describes it as the source file
+# Install-SecVault.ps1 copies FROM, gitignored so a `git pull`/`reset --hard`
+# can't delete it, and this repo's own earlier research (this session) never
+# found anything that explicitly removes it. But that assumption was never
+# actually verified against a real deployed server, and it was wrong: a live
+# run failed immediately with "SSH deploy key not found:
+# ...\installer\dependencies\secvault_deploy" -- confirming that file
+# genuinely does not exist at that path on this install (possibly cleaned up
+# post-install, or never placed there in the first place on this server).
+#
+# Check BOTH locations, preferring the repo-relative one (needed for the
+# in-app updater's SYSTEM-scheduled-task path, if it exists) but falling
+# back to the original $env:USERPROFILE\.ssh\secvault_deploy path -- the one
+# every confirmed-successful manual update this session actually used, since
+# Install-SecVault.ps1 unconditionally copies the key there for whichever
+# admin account runs it. Only fail if NEITHER exists. This restores the
+# manual/interactive path immediately; the SYSTEM/"Update Now" path remains
+# only as reliable as whichever of these two locations SYSTEM's own account
+# can actually read (its own profile copy, if any, or this repo-relative
+# copy, if one gets placed there) -- unresolved until confirmed against a
+# real "Update Now" click, not assumed further.
+$deployKeyRepoRelative = Join-Path $repoRoot 'installer\dependencies\secvault_deploy'
+$deployKeyUserProfile = "$env:USERPROFILE\.ssh\secvault_deploy"
+if (Test-Path $deployKeyRepoRelative) {
+    $deployKey = $deployKeyRepoRelative
+} elseif (Test-Path $deployKeyUserProfile) {
+    $deployKey = $deployKeyUserProfile
+} else {
+    Write-Host "  [FAIL] SSH deploy key not found at either location:"
+    Write-Host "         $deployKeyRepoRelative"
+    Write-Host "         $deployKeyUserProfile"
     Write-Host "         Re-run Install-SecVault.ps1 to configure SSH credentials"
     exit 1
 }
