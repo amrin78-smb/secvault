@@ -142,13 +142,13 @@ export default function NotificationBell() {
             type="button"
             onClick={() => {
               setOpen(false);
-              router.push('/analysis');
+              router.push('/alerts');
             }}
             style={{ width: '100%', padding: '11px 16px', background: 'var(--bg-card)', border: 'none', borderTop: '1px solid var(--border-light)', cursor: 'pointer', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--primary)', textAlign: 'center' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--tint-danger)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card)')}
           >
-            View Rule Analysis &rarr;
+            View All Alerts &rarr;
           </button>
         </div>
       )}

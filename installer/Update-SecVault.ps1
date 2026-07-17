@@ -53,6 +53,22 @@ $LogFile = Join-Path $LogDir 'update.log'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+# The in-app updater (Settings -> Updates, POST /api/system/update) is
+# fire-and-forget: it schedules this script as a SYSTEM scheduled task and
+# immediately returns { started: true } to the browser, with no live output
+# stream. Without a transcript, a run triggered that way leaves NO durable
+# record of what happened beyond the plain-text $LogFile below (which only
+# captures what Write-Log is explicitly given, not raw native-command output
+# that some steps below write straight to Write-Host). Start it as early as
+# possible so even an early failure is captured. This is a SEPARATE file from
+# $LogFile ('update.log') -- keep both. Mirrors the 2026-07-14 hardening pass
+# already applied to the sibling NocVault apps' equivalent scripts (e.g.
+# netvault's Update-NetVault.ps1). Best-effort: a transcript that fails to
+# start must never block the actual update, and Write-Log isn't defined yet
+# at this point in the script, so a start failure is reported via Write-Warning.
+$transcriptPath = Join-Path $LogDir "update-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+try { Start-Transcript -Path $transcriptPath -Append | Out-Null } catch { Write-Warning "Could not start transcript: $($_.Exception.Message)" }
+
 $script:hadFailure = $false
 
 function Write-Log {
@@ -128,6 +144,23 @@ Write-Log 'SecVault update starting.'
 Write-Log '=================================================='
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# The in-app updater (POST /api/system/update) now sometimes launches this
+# script via a Windows Scheduled Task running as SYSTEM, and SYSTEM has never
+# run git in this repo's working copy before (only whichever interactive
+# account originally cloned it has). Git >= 2.35.2 (CVE-2022-24765) refuses to
+# operate in a repo it doesn't consider "owned" by the current account:
+# "fatal: detected dubious ownership in repository at '...'". Register this
+# repo as safe for whichever account is running right now (idempotent -- safe
+# to add the same path twice) so step 3's git pull can't hit this. Best-effort:
+# a failure here must never abort the update -- mirrors the 2026-07-14
+# hardening pass already applied to the sibling NocVault apps' equivalent
+# scripts (e.g. netvault's Update-NetVault.ps1).
+try {
+    $null = & git config --global --add safe.directory $repoRoot 2>&1
+} catch {
+    Write-Log "  [WARN] Could not register safe.directory for $repoRoot -- $($_.Exception.Message)"
+}
 
 # secvault is a private repo -- git pull (step 3 below) needs the SSH deploy
 # key that Install-SecVault.ps1 configures at $env:USERPROFILE\.ssh\secvault_deploy.
@@ -316,3 +349,7 @@ if ($script:hadFailure) {
     Write-Log 'SecVault update completed successfully.'
 }
 Write-Log '=================================================='
+
+# Best-effort -- if Start-Transcript never succeeded (see top of script), this
+# throws harmlessly; never let it mask the update's own success/failure above.
+try { Stop-Transcript | Out-Null } catch {}

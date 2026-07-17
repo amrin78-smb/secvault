@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   IconDashboard,
+  IconBell,
   IconDevices,
   IconShield,
   IconChart,
@@ -15,6 +16,7 @@ import {
 
 const NAV = [
   { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true, color: '#0891b2', bg: 'rgba(8,145,178,0.20)' },
+  { href: '/alerts', label: 'Alerts', Icon: IconBell, color: '#fb923c', bg: 'rgba(251,146,60,0.20)' },
   { href: '/devices', label: 'Devices', Icon: IconDevices, color: '#60a5fa', bg: 'rgba(96,165,250,0.20)' },
   { href: '/cve', label: 'CVE Posture', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
   { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },

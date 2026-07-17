@@ -197,6 +197,25 @@ CREATE TABLE IF NOT EXISTS finding_acknowledgements (
 
 CREATE INDEX IF NOT EXISTS idx_fa_device_id ON finding_acknowledgements(device_id);
 
+-- Fleet Alerts/Events page: same ack pattern as finding_acknowledgements above,
+-- but for device_cve_assessments rows (which have no ack column of their own).
+-- Keyed on (device_id, advisory_id) -- NOT device_cve_assessments.id -- because
+-- although that table is upserted (ON CONFLICT DO UPDATE, not delete+reinsert,
+-- see versionMatcher.js), the natural key is what versionMatcher already
+-- upserts on, so keying the ack the same way keeps both tables joinable on
+-- the same pair reliably regardless of internal id churn.
+CREATE TABLE IF NOT EXISTS cve_assessment_acknowledgements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  advisory_id UUID NOT NULL REFERENCES advisories(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'acknowledged' | 'dismissed' | 'actioned'
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (device_id, advisory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caa_device_id ON cve_assessment_acknowledgements(device_id);
+
 -- Rule Analysis Dashboard Phase 4: risk-score trend + operator audit trail.
 
 -- One row per completed rule-analysis run (both scheduled collects and manual

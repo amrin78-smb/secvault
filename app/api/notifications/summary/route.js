@@ -54,19 +54,19 @@ export async function GET() {
       ...recentPatchNow.rows.map((r) => ({
         type: 'patch_now',
         label: `${r.cve_id} — ${r.device_name}`,
-        href: `/devices/${r.device_id}?tab=cve`,
+        href: `/alerts?type=patch_now&device_id=${r.device_id}`,
         occurredAt: r.assessed_at,
       })),
       ...recentDiffs.rows.map((r) => ({
         type: 'config_diff',
         label: `${r.device_name}: ${r.change_summary || 'Config changed'}`,
-        href: `/devices/${r.device_id}/changes`,
+        href: `/alerts?type=config_diff&device_id=${r.device_id}`,
         occurredAt: r.detected_at,
       })),
       ...recentNewFindings.rows.map((r) => ({
         type: 'new_finding',
         label: `${r.device_name}: ${r.finding_type} (${r.rule_id_vendor})`,
-        href: `/devices/${r.device_id}/analysis?tab=findings`,
+        href: `/alerts?type=new_finding&device_id=${r.device_id}`,
         occurredAt: r.updated_at,
       })),
     ]

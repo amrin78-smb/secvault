@@ -247,6 +247,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `finding_acknowledgements` | Operator status per finding (new/acknowledged/dismissed/actioned), keyed on `rule_id_vendor` not `firewall_rules.id` | Dashboard Phase 2 ✅ |
 | `device_risk_history` | Risk-score snapshot per completed analysis run (scheduled or manual) | Dashboard Phase 4 ✅ |
 | `activity_log` | Operator-action audit trail (run analysis, acknowledge finding/diff) — not a general app log | Dashboard Phase 4 ✅ |
+| `cve_assessment_acknowledgements` | Operator status per patch-now CVE assessment (new/acknowledged/dismissed/actioned), keyed on `(device_id, advisory_id)` — mirrors `finding_acknowledgements`, since `device_cve_assessments` has no ack column of its own | Fleet Alerts Page ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
 | `audit_checks` / `audit_findings` | Compliance check library + results | 7 (not yet created) |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
@@ -902,6 +903,55 @@ Consequences to know before changing anything here:
 
 ---
 
+## Fleet Alerts Page (v2.1.0 — `/alerts`)
+
+Fixes a real UX gap: the header notification bell (`components/layout/NotificationBell.js`)
+surfaces fleet-wide "needs attention" items (new rule findings, patch-now CVEs, unacknowledged
+config diffs), but until this phase every click either dropped the operator onto an unrelated
+device page or, for the dropdown's static footer link, onto the fleet Rule Analysis summary —
+there was nowhere the bell itself could lead to actually acknowledge/resolve anything.
+
+- **New table**: `cve_assessment_acknowledgements` (see Key Tables above) — `device_cve_assessments`
+  has no ack column of its own, unlike `finding_acknowledgements` and `config_diffs.acknowledged_at`
+  which already had one each. New ack route: `POST /api/devices/[id]/cve-acknowledgements`, body
+  `{advisory_id, status, note?}`, upserts on `(device_id, advisory_id)` — copy of the existing
+  `POST /api/devices/[id]/acknowledgements` pattern, adapted to the CVE key shape.
+- **`GET /api/events`** — the fleet-wide, filterable, paginated version of what
+  `app/api/notifications/summary/route.js` already does at a top-5-preview scale. Query params
+  `type` (`new_finding`/`patch_now`/`config_diff`, omit = all three), `status` (`open` default /
+  `all`), `device_id`, `page`. Three separate bounded queries (`LIMIT 500` each) merged/sorted/
+  paginated **in JS**, not a DB-side UNION — same "bounded, not built for unlimited scale"
+  tradeoff this codebase already accepts elsewhere (Phase 5 rule analysis caps at 1000 rules).
+- **`app/(dashboard)/alerts/page.js`** — the actual page. Per this app's established convention
+  ("server components query the DB directly, API routes exist for client-triggered writes" — see
+  Rule Analysis Dashboard Phase 2 above), this page does **not** fetch its own `/api/events` route
+  — it duplicates the same three-source query/merge/paginate logic directly via `pool.query`.
+  `/api/events` exists for `AlertAckControl`'s post-save `router.refresh()` path and any future
+  client-side consumer, not for this page's initial render. **This duplication is deliberate, not
+  an oversight — the same pattern already exists once between `notifications/summary/route.js`
+  (bell preview) and `/api/events` (full feed).** If you change the query/shape logic in one of
+  the three places (`notifications/summary/route.js`, `api/events/route.js`,
+  `alerts/page.js`), check the other two — nothing enforces them staying in sync automatically.
+  A device_id filter that isn't a valid UUID is silently dropped (not a raw Postgres error) — a
+  server-rendered page has no response-status channel to reject it the way the API route's
+  `isValidUuid` 400 does.
+- **`components/alerts/AlertAckControl.js`** — one control, branches on `item.ack.kind`:
+  `finding`/`cve` render the shared 4-state `new/acknowledged/dismissed/actioned` select (POSTing
+  to the respective ack route); `diff` is binary — `config_diffs` has no status enum, only
+  `acknowledged_at`/`acknowledged_by` set once via the existing `PUT
+  /api/devices/[id]/diffs/[diffId]` — so it renders a one-shot "Acknowledge" button, or a static
+  "Acknowledged by X · date" label once set.
+- **Notification bell rewiring**: `app/api/notifications/summary/route.js`'s three item queries
+  now emit `href: /alerts?type=<type>&device_id=<id>` instead of per-type device-page links; the
+  dropdown's footer button now reads "View All Alerts →" and routes to `/alerts` instead of the
+  fleet Rule Analysis summary. Fleet Rule Analysis (`/analysis`) is unchanged and still exists —
+  it's the aggregate severity-counts-per-device view, a different thing from this page's
+  chronological cross-device event feed.
+- **Sidebar nav**: new `Alerts` entry (`IconBell`, reused from the notification bell), positioned
+  right after Dashboard.
+
+---
+
 ## Feed Sources
 
 | Feed | URL | Schedule | Notes |
@@ -1101,6 +1151,115 @@ continues — these roles are diagnostic-only, never required for the app itself
 
 ---
 
+## In-App Updater (v2.1.0)
+
+Copied from the NocVault suite's proven pattern (netvault is the closest architectural match —
+one Next.js App Router process, one port — so its implementation was the literal template;
+logvault/ddivault/spanvault run a split frontend+Express-API shape SecVault does not have). This
+**supersedes** the old aspirational "compare git hash to GitHub API" line that used to live under
+Versioning Policy below — that was never implemented, and the suite's own history (see the
+sibling repos' `releaseNotes`) shows the GitHub REST API approach was tried and abandoned
+suite-wide after `raw.githubusercontent.com`/`api.github.com` rate-limited and timed out under a
+shared corporate egress IP. The real mechanism uses git's own transport instead.
+
+### Detection — live, no DB caching
+
+`lib/updateCheck.js` (CommonJS, shared by both routes below):
+- `findGitRoot(startDir)` walks up from `process.cwd()` looking for `.git` (repo root).
+- `localCommitHash(repoRoot)` — `git rev-parse HEAD`, 7-char short SHA, `null` on failure.
+- `remoteCommitHash(repoRoot)` — `git ls-remote origin main` (NOT the GitHub REST API), 7-char
+  short SHA, `null` on failure.
+- `remoteVersion(repoRoot)` — `git fetch --quiet origin main` then `git show
+  FETCH_HEAD:package.json`, parsed for `.version`; only called once a commit diff is already
+  known (avoids paying a network fetch on the common up-to-date path).
+- `update_available` = local and remote hashes both resolved AND differ — **independent of
+  `package.json` version**, so a patch pushed without a semver bump still surfaces as available.
+
+Two routes consume this:
+- `GET /api/system/update-status` — full live check on every call, auth-gated (via
+  `middleware.js`'s blanket `/api/*` gate — no extra role check, since SecVault has no
+  admin/viewer role split anywhere in this app; see Authentication above). Returns
+  `{current_version, latest_version, current_commit, latest_commit, up_to_date,
+  update_available, release_notes, release_date, error?}`. Any git/network failure degrades to
+  `{up_to_date:true, update_available:false, error:'Could not check for updates'}` — **never**
+  a 500, never a false "available". `release_notes` is a hand-maintained object in the route
+  file keyed by version string (3-5 bullets), `'default'` fallback
+  `['Bug fixes and performance improvements']` — **update it alongside every version bump**,
+  same convention as the NocVault suite (no separate CHANGELOG.md).
+- `GET /api/system/update-available` — lightweight, polled by the banner every 6h. Backed by a
+  module-level cache refreshed on process start + every 24h (`setInterval`) — safe because
+  `next start` is one long-lived Node process, not serverless. Same auth gate as above.
+
+`GET /api/health` — trivial `{status:'ok'}`, no DB dependency, used only by the post-update
+liveness poll (see below). Same auth gate as everything else — no exemption added.
+
+### Trigger — one-time SYSTEM scheduled task, not a spawned child process
+
+`POST /api/system/update`: `getServerSession` → 401 if none (the only gate — matches every other
+write route in this app, since there's no role concept to check further); 400 if `SERVER_IP` is
+unset. Then, same as the suite:
+```powershell
+schtasks /delete /tn "SecVaultUpdate" /f          # best-effort, swallow "not found"
+schtasks /create /tn "SecVaultUpdate" /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File \"<repoRoot>\installer\Update-SecVault.ps1\"" /sc once /st 00:00 /f /ru SYSTEM
+schtasks /run /tn "SecVaultUpdate"
+```
+Returns `{started:true}` immediately (fire-and-forget — the HTTP response can't stay open while
+the very service serving it restarts). **Why a scheduled task and not `child_process.spawn`**:
+the API runs as a limited service account; a spawned child dies when the parent service stops,
+and the service account may lack rights to start/stop Windows services anyway. A Task Scheduler
+job running as `SYSTEM` is fully detached from this process tree and has the permissions +
+lifetime to finish. Unlike netvault's version, SecVault's trigger does **not** pass `-ServerIp` —
+`Update-SecVault.ps1` already reads everything it needs from the deployed `.env.local` and its
+own hardcoded `$InstallRoot`.
+
+`installer/Update-SecVault.ps1`'s existing 8-step order (see "Update Script — Exact Order" above)
+is unchanged. Two additions, both non-fatal, made specifically because this script can now be
+launched by SYSTEM (which has never run git in this checkout before):
+- `git config --global --add safe.directory $repoRoot` — Git ≥2.35.2 refuses to operate in a repo
+  it doesn't consider "owned" by the current account otherwise.
+- `Start-Transcript`/`Stop-Transcript` to a separate timestamped file per run
+  (`update-yyyyMMdd-HHmmss.log` under `C:\Apps\SecVault\logs\`) — a fire-and-forget SYSTEM task
+  leaves no other durable record, so this is in addition to (not instead of) the existing
+  `Write-Log`/`update.log` mechanism.
+
+### UI — banner + Settings panel, no separate tab system
+
+- `components/layout/UpdateNotifier.js` — dismissible top banner, mounted in
+  `app/(dashboard)/layout.js` only (never on `/login`). Polls `/api/system/update-available`
+  every 6h; dismissal is `sessionStorage`-keyed on the specific `latest` version so a newer patch
+  re-shows the banner even if an older one was dismissed this session.
+- Settings page (`app/(dashboard)/settings/page.js`) has no tab system (unlike the suite apps'
+  `?tab=updates`) — it's a flat list of `Card`s, so the update UI is just a third Card,
+  "Software Update", rendering `components/settings/UpdatePanel.js`. Fetches
+  `/api/system/update-status` on open + a manual "Check for Updates" button; shows current
+  version/commit when up to date, or version/commit/release-notes + an "Update Now" button that
+  opens a confirm dialog (reuses `components/ui/Modal.js` — do not hand-roll a second modal
+  primitive) when an update exists.
+- Confirming opens a full-screen, non-dismissible progress overlay that polls `GET /api/health`
+  every 2s. State machine (`starting → down → back_up`, or `timeout` after 10 minutes): a probe
+  **must** be observed failing at least once before any later success counts as "recovered" (else
+  the overlay could declare victory against the still-running pre-restart process), then **3
+  consecutive** healthy probes are required before flipping to `back_up`. On `back_up`, it
+  re-fetches `/api/system/update-status` and compares `current_commit` against the value captured
+  before the update was triggered — if unchanged, shows `verify_failed` instead of a false
+  success. Only then: a 15s visible countdown (lets the freshly-restarted Next.js process settle),
+  then `window.location.href = '/?updated=true'` — a full navigation, which also naturally
+  re-validates the session.
+
+### What was deliberately NOT copied from the suite
+
+- **No license-gating** on the trigger route — SecVault has no license system at all (unlike
+  every suite app, which blocks the trigger on `disabled`/`grace`/`expired` license states).
+- **No separate unauthenticated allowlist path** — the suite apps exempt `update-available` from
+  their license gate so the banner still works when the app itself is disabled. SecVault has
+  nothing to exempt it from, so it stays behind the same blanket `/api/*` auth as every other
+  route; no change to `middleware.js` was needed or made.
+- **SpanVault's missing role-check on the trigger route was a real gap found during suite
+  research and is explicitly not replicated** — every write path in SecVault (including this one)
+  requires a valid session at minimum.
+
+---
+
 ## Environment Variables
 
 Complete list of all `.env.local` variables. Every variable referenced in code must be here.
@@ -1278,12 +1437,14 @@ Priority band visual encoding (unchanged mapping, new token names):
 - **Bump patch** on any push that touches UI or logic
 - **Bump minor** on new feature or phase completion
 - **Bump major** on breaking schema changes or major architectural shifts
-- Update detection: git commit hash comparison (same as NocVault suite pattern)
-  ```javascript
-  // Check for updates: compare current git hash to latest GitHub API response
-  GET https://api.github.com/repos/amrin78-smb/secvault/commits/main
-  // → compare sha to locally stored hash
-  ```
+- Update detection + in-app updater: see "In-App Updater" section above — implemented (v2.1.0)
+  using git's own transport (`git ls-remote`/`git fetch`), **not** the GitHub REST API (an earlier
+  version of this line described the REST-API approach; it was never built, and the NocVault
+  suite's own history shows that approach was tried and abandoned suite-wide after
+  `raw.githubusercontent.com`/`api.github.com` rate-limited under a shared corporate egress IP —
+  see the In-App Updater section for the real mechanism). When bumping the version, also add 3-5
+  bullets for it to the `releaseNotes` object in `app/api/system/update-status/route.js` — no
+  separate CHANGELOG.md, same convention as the rest of the suite.
 
 ---
 

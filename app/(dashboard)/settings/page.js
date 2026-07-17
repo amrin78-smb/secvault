@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
+import UpdatePanel from '../../../components/settings/UpdatePanel';
 
 export default function SettingsPage() {
   const [feedPollIntervalHours, setFeedPollIntervalHours] = useState('');
@@ -152,6 +153,15 @@ export default function SettingsPage() {
               Update Password
             </Button>
           </form>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Software Update</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <UpdatePanel />
         </CardBody>
       </Card>
     </div>
