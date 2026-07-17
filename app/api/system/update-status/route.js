@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.5.0': [
+    'Added a VPN Summary page (fleet-wide and per-device) showing SSL-VPN/remote-access configuration for Fortinet, Palo Alto, Cisco ASA, and Sangfor devices, plus 2 new Fortinet SSL-VPN compliance checks (idle timeout, minimum TLS version).',
+    'Added active VPN session polling for Fortinet devices — a new scheduled job samples active SSL-VPN session counts every 30 minutes and charts the trend, without requiring syslog ingestion.',
+    'Fixed a latent shutdown-timing bug in the background engine service where an in-flight job could be cut off early if a second job finished around the same time — became reachable now that VPN polling runs on its own, more frequent schedule.',
+  ],
   '2.4.0': [
     'Compliance pages redesigned around a donut-chart card per standard, with a factual description, a "Failed Checks" quick-list, and a fleet-wide cards/table toggle — replacing the old flat percentage tiles.',
     'Added a printable, chrome-free Compliance Report page (Print / Save as PDF) and CSV export on Compliance and Rule Analysis, for handing a snapshot to an auditor without screenshotting the app.',

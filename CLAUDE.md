@@ -250,6 +250,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `cve_assessment_acknowledgements` | Operator status per patch-now CVE assessment (new/acknowledged/dismissed/actioned), keyed on `(device_id, advisory_id)` — mirrors `finding_acknowledgements`, since `device_cve_assessments` has no ack column of its own | Fleet Alerts Page ✅ |
 | `firewall_logs` | Ingested syslog events (with retention expiry) | 8 (not yet created) |
 | `audit_checks` | Compliance check library (curated, seeded via `lib/auditChecksSeed.js`) — `standards` is `TEXT[]`, not singular, since one check can score against multiple standards at once | 7 ✅ |
+| `vpn_session_snapshots` | Polled active-VPN-session-count timestamps (Fortinet only — `getVpnSessionSummary()`), a coarse substitute for real syslog-derived VPN usage telemetry | VPN Summary ✅ |
 | `audit_findings` | Per-device compliance results (pass/fail/warning/na), DELETE+reinsert per device per run like `rule_analysis_results` | 7 ✅ |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
@@ -1175,6 +1176,123 @@ not just the report route, since hiding app chrome on paper is a reasonable defa
 
 ---
 
+## VPN Summary + Session Polling (added 2026-07-19)
+
+Two distinct capabilities, deliberately kept separate — mirrors the split ManageEngine Firewall
+Analyzer itself has between "VPN Summary" (config-derived) and "VPN Reports" (log-derived), a
+useful model since SecVault genuinely can only build the first one without syslog ingestion:
+
+1. **VPN config summary** — read-only interpretation of each vendor's already-collected
+   `device_configs.config_parsed`, showing whatever VPN/remote-access config exists. No new
+   collection was needed for 2 of 4 covered vendors (see below) — this closes a real "collected but
+   never surfaced" gap, same pattern as `nat_enabled` and the Fortinet compliance-section work.
+2. **VPN active-session polling** — a NEW, Fortinet-only capability: periodically ask the device how
+   many SSL-VPN sessions are active right now and store a timestamped snapshot. A coarse,
+   polling-based APPROXIMATION of real VPN usage telemetry — genuine per-user login history,
+   session duration, and bytes transferred all require syslog ingestion (Phase 8, not built) and
+   cannot be produced by polling. This is explicitly the bounded, no-log-ingestion-required
+   substitute discussed when this was scoped, not a replacement for Phase 8.
+
+### `lib/engines/vpnSummary.js` — per-vendor config interpretation
+
+Pure module, `summarizeVpnConfig(vendor, configParsed) -> {supported, hasConfig, enabled?,
+sourceInterface?, foundAt?, fields, lowConfidence?, error?}`. One interpreter function per vendor,
+each grounded in that vendor's ACTUAL `config_parsed` shape (verified by reading the real adapter
+code before writing this, not assumed):
+
+- **Fortinet**: `ssl_vpn` is already a flat `{key: value}` object (both transports collect it — see
+  Compliance Engine section above). `source-interface` presence is used as the signal, the same
+  field `fortinet-sslvpn-not-wan-exposed` (Compliance Engine) already treats as grounded/real.
+- **Cisco ASA**: `parsed.webvpn.{enabled, enabled_interface}`, a real boolean added to
+  `lib/adapters/cisco_asa/parser.js`'s `parseRunningConfig()` this same day — minimal, low-risk
+  presence detection only (a `webvpn` block + `enable <interface>` line, mirroring the existing
+  `currentInterface` block-tracking pattern already in that file). Deliberately does NOT parse
+  `tunnel-group`/`group-policy`/`anyconnect image` — out of scope, would need much deeper ASA config
+  modeling than this file currently supports.
+- **Sangfor**: `parsed.sections.ssl_vpn.enabled`, a **tri-state** (`true`/`false`/`null`) added to
+  `lib/adapters/sangfor/parser.js`. Sangfor is this codebase's least-verified adapter (see Live
+  Validation Status below) — `null` (undetected) is documented as the EXPECTED common case, not a
+  failure, and the UI renders a "Low confidence — doc-derived, unverified for this vendor" badge
+  whenever this vendor's summary is shown, so the uncertainty is visible, not hidden.
+- **Palo Alto (both SSH and XML/API transports)**: **no adapter change was needed at all** — the
+  full config tree is already present in `config_parsed` (SSH under `.tree`, a brace-tree Node; XML/
+  API spread directly at the top level — see `lib/adapters/paloalto/{sshParser,parser}.js`'s own
+  `parseConfig()`). `vpnSummary.js` does a bounded (depth 8) deep search for a key/block whose name
+  contains `global-protect`/`globalprotect`, rather than assuming one exact path — PAN-OS config
+  nesting varies (single-vsys root, `vsys.entry`, `shared`, Panorama pre/post-rulebase), the exact
+  same structural variability `findSecurityRulesContainers()` already has to search deep for
+  security rules, for the identical reason (see Live Validation Status below). This is a UI-layer
+  concern, free to search deeply — the compliance predicate engine (`evaluatePredicate()`, exactly
+  one fixed dot-path per check) could NOT do this safely, which is why **no Palo Alto GlobalProtect
+  compliance check was added** — a deliberate scope decision, not an oversight.
+- **Check Point**: not in the dispatch table at all — `summarizeVpnConfig` returns
+  `{supported: false, ...}`, which the UI renders distinctly from `{supported: true, hasConfig:
+  false}` ("collected, and it's genuinely empty" is a different fact from "not implemented yet").
+
+⚠️ All four vendors' VPN fields are doc-derived and NOT yet live-verified (Fortinet's `ssl_vpn`
+fields specifically — `source-interface`/`port`/`idle-timeout`/`ssl-min-proto-ver` — same standing
+caveat as the rest of this file's Fortinet work; Cisco ASA/Sangfor's detection logic likewise). A
+live Fortinet SSH device exists in this deployment — check its VPN Summary page against the real
+device's actual SSL-VPN config on the next collect.
+
+### `vpn_session_snapshots` — active-session polling (Fortinet only)
+
+New table (`lib/schema.sql`): `device_id`, `active_session_count` (NOT NULL — a row is only ever
+inserted on a SUCCESSFUL poll, never a guessed/zero value on failure), `raw` (jsonb, the adapter's
+raw response for future debugging), `sampled_at`. No retention/cleanup job exists yet (accepted
+simplification — ~17.5k rows/device/year at the default 30-minute interval, not a near-term scaling
+concern).
+
+**Fortinet adapter** (both transports) gained an OPTIONAL capability, `getVpnSessionSummary()` — NOT
+part of the `FirewallAdapter` base interface (`testConnectivity`/`getVersion`/`getRules`/
+`getConfig`), checked via `typeof adapter.getVpnSessionSummary === 'function'` before use, since
+most vendors don't implement it:
+- **SSH**: `get vpn ssl monitor` (a real, documented FortiOS operational command), parsed by
+  `cliParser.countActiveVpnSessions()` — counts numbered session rows under a "SSL VPN Login Users:"
+  header rather than parsing every field (only the COUNT is needed). Returns `null` (not `0`) when
+  the header itself isn't found at all — the caller MUST treat that as "unrecognized output, don't
+  trust a count," never as "confirmed zero active sessions" (finding the header IS the signal this
+  is the right output shape; zero rows after a found header is a legitimate real zero). `getRules()`
+  /`getConfig()`'s existing fail-loud philosophy applies here too — `getVpnSessionSummary()` throws
+  rather than guessing.
+- **REST**: `GET /api/v2/monitor/vpn/ssl` (a monitor endpoint, not cmdb — live/operational state).
+  Counts `results.length` rather than parsing individual session fields, sidestepping uncertainty
+  about the exact per-session field shape (not yet live-verified).
+
+**`services/engine-worker.js`** gained a third scheduled job, `vpn-session-poll`, on its OWN interval
+(`VPN_POLL_INTERVAL_MINUTES`, default 30, clamped 5-59 — deliberately minutes-scale, unlike the
+other two jobs' hours-scale intervals, since a meaningful "sessions over time" trend needs much
+finer sampling). Iterates active devices, skips any whose adapter lacks `getVpnSessionSummary`,
+inserts one `vpn_session_snapshots` row per successful poll, logs and continues past any per-device
+failure — same per-device isolation as `runRuleVersionPullJob`.
+
+⛔ **Bug fixed in passing, found while adding this job**: `isJobRunning` (the flag `shutdown()` polls
+to let an in-flight job finish before the process exits) was a **boolean**, correct for exactly one
+job in flight at a time. The two pre-existing jobs' hours-scale cron cadences were unlikely to ever
+overlap in practice, so this was a latent bug, not yet a reachable one. The new minutes-scale VPN
+poll job will routinely overlap with the still-running `rule-version-pull` job (which sequentially
+collects every device over SSH/REST — credibly minutes to complete on a real fleet): with a boolean,
+job A finishing while job B is still running flips the flag to `false`, and `shutdown()` would
+proceed to stop the process while job B was still mid-collect — the exact "finish current job then
+exit" contract violation this codebase already fixed once before (the 150000ms hard-ceiling bump),
+reintroduced through a different mechanism. Changed to `runningJobCount`, a counter.
+
+### UI
+
+`/vpn` (fleet-wide table: device, vendor, VPN status badge, config timestamp, latest active-session
+count if polled) and `/devices/[id]/vpn` (per-device: config summary card +
+`VpnSessionTrendChart` — a `recharts` `LineChart`, same CSS-custom-property color convention as
+`RiskTrendChart.js`/`FindingsBarChart.js` — showing session-count history when any exists). Both are
+server components querying the DB directly (this app's established convention); `GET /api/vpn/fleet`
+and `GET /api/devices/[id]/vpn` exist for `?format=csv` export and any future client-side consumer,
+same "duplicated query, not shared" tradeoff as the rest of this app. A "VPN" sidebar entry was
+added (reusing `IconUser` — no dedicated VPN/tunnel icon exists in `components/icons.js`, same
+"reuse what's there even if not a perfect semantic match" call already made for Compliance ->
+`IconSearch`), and a "VPN →" link was added next to the existing "Rule analysis →" link on the
+per-device overview page.
+
+---
+
 ## Feed Sources
 
 | Feed | URL | Schedule | Notes |
@@ -1614,6 +1732,7 @@ ALLOW_SELF_SIGNED_SSL=true                 # Accept self-signed certs from SMC
 FEED_POLL_INTERVAL_HOURS=6
 CONFIG_PULL_INTERVAL_HOURS=24
 NVD_API_KEY=                               # Optional — increases NVD rate limit
+VPN_POLL_INTERVAL_MINUTES=30               # 5-59 — see "VPN Summary + Session Polling" below
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
