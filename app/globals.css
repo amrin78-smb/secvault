@@ -597,3 +597,127 @@ body[data-readonly="true"] .btn-danger {
   pointer-events: none;
   cursor: not-allowed;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   Print report layout (additive only — nothing above this comment was
+   touched). Used by app/(dashboard)/compliance/[deviceId]/print/page.js
+   as its report root wrapper, but the class + .no-print helper are
+   generic enough to reuse from any future print-style page.
+   ══════════════════════════════════════════════════════════════════ */
+.print-report {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.print-report section + section {
+  margin-top: 28px;
+}
+.print-report table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.print-report th,
+.print-report td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.print-report th {
+  background: var(--surface-subtle);
+  font-weight: 600;
+}
+
+/* ── Print stylesheet ─────────────────────────────────────────────
+   Hides app chrome (sidebar/header) on any page when printed via
+   window.print() or Ctrl+P — most relevant for the dedicated
+   /compliance/[deviceId]/print report page, but written against the
+   shared .sv-shell/.sv-topbar/.sv-sidebar/.sv-content-col/.sv-content
+   structure (app/(dashboard)/layout.js, components/layout/Header.js,
+   components/layout/Sidebar.js — confirmed by reading both files and
+   this file's own rules around line ~466/511 before writing this),
+   so it applies to any page rendered inside the dashboard shell, not
+   just the print report route. ────────────────────────────────────── */
+@media print {
+  /* A printed page should never render dark-theme colors (expensive/
+     illegible on paper), regardless of the operator's saved
+     localStorage['secvault-theme'] preference (lib/theme.js sets
+     [data-theme="dark"] on <html> before first paint). Simplest robust
+     fix: reset the exact same custom properties the real
+     [data-theme="dark"] block above (line ~80) overrides, back to
+     their :root/light values (line ~16), scoped inside this @media
+     print block only — the real dark-mode block is untouched. */
+  [data-theme="dark"] {
+    color-scheme: light;
+    --bg-primary:     #f4f6f9;
+    --bg-card:        #ffffff;
+    --border:         #e2e8f0;
+    --border-light:   #f1f5f9;
+    --text-primary:   #0f172a;
+    --text-secondary: #334155;
+    --text-muted:     #64748b;
+    --surface-subtle: #f8fafc;
+    --tint-info:    #eff6ff;  --tint-info-fg:    #1d4ed8;
+    --tint-success: #f0fdf4;  --tint-success-fg: #15803d;
+    --tint-warn:    #fffbeb;  --tint-warn-fg:    #b45309;
+    --tint-danger:  #fef2f2;  --tint-danger-fg:  #b91c1c;
+    --tint-purple:  #f5f3ff;  --tint-purple-fg:  #6d28d9;
+    --tint-teal:    #ecfeff;  --tint-teal-fg:    #0e7490;
+    --tint-orange:  #ffedd5;  --tint-orange-fg:  #c2410c;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* App chrome never belongs on paper, and anything explicitly marked
+     .no-print (e.g. the "Print / Save as PDF" button itself) shouldn't
+     appear in the printed output either. */
+  .sv-topbar,
+  .sv-sidebar,
+  .no-print {
+    display: none !important;
+  }
+
+  /* .sv-shell/.sv-body/.sv-content-col are flex-based (see the real
+     rules above, ~line 466) rather than margin/padding-offset around a
+     fixed sidebar width, so removing the sidebar element already frees
+     up the width on its own — this just makes sure the flex/overflow
+     rules meant for an interactive viewport (100vh height, hidden
+     overflow, internal scroll regions) don't clip or truncate a
+     printed/paginated document. */
+  .sv-shell,
+  .sv-body,
+  .sv-content-col {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .sv-content {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  .print-report {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    font-size: 11px;
+  }
+  .print-report section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .print-report tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 14mm 12mm;
+  }
+}
