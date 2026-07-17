@@ -759,7 +759,22 @@ The predicate engine code should not need to change for new CVEs.
   analysis always reruns immediately after the rewrite
 - Shadow/redundant/reorder analysis is O(n²) and **skipped entirely above 1000 rules** (warning logged)
 - Optional overrides via `settings` keys: `rule_unused_days`, `rule_expiry_window_days`, `risky_ports` (JSON array)
-- Coverage tests are string-equality provable-only (no CIDR math) — deliberately conservative to avoid false shadows
+- Coverage tests (`fieldCovers`, used by `shadow`/`reorder_candidate`) are string-equality PLUS
+  CIDR-aware containment as of 2026-07-19 (`lib/engines/cidrUtils.js`) — an S-side address-list item
+  that's a literal IPv4/CIDR (e.g. Palo Alto rules typed directly with `"10.0.0.0/16"` instead of an
+  address-object reference) now correctly covers a narrower R-side literal (`"10.0.5.0/24"`) even
+  though the strings differ. `cidrContains()` returns `null` (never `false`) whenever either side
+  isn't a parseable IPv4 literal — which is the common case, since most address-list items across
+  every Tier 1 vendor are unresolved OBJECT NAMES (`"LAN-subnet"`), not literal CIDRs — so this only
+  ever ADDS matches on top of the pre-existing string-equality test, never removes any; it's a pure
+  false-negative reduction, not a change to the "deliberately conservative, no false shadows"
+  philosophy. Deliberately scoped narrow: IPv4 only (IPv6 returns `null`, untouched), no
+  address-OBJECT-to-CIDR resolution (would need a new per-vendor fetch layer — `config firewall
+  address` on Fortinet, `address`/`address-group` xpaths on Palo Alto — that doesn't exist), and only
+  applied to `fieldCovers` — `fieldEquals` (used by `redundant`) deliberately was NOT given the same
+  treatment, since CIDR-aware SET equality is a harder bipartite-matching problem once either side has
+  more than one item, and a wrong `redundant` finding (suggesting a rule be deleted) is worse than a
+  wrong `shadow` finding — flagged as an accepted, un-done follow-up rather than guessed at.
 
 ### Rule Analysis Dashboard (`lib/engines/riskScore.js`)
 
@@ -1005,20 +1020,51 @@ not be swallowed).
 Predicate paths are grounded in this codebase's own parser output where verifiable — Palo Alto's
 `lib/adapters/paloalto/sshParser.js` is live-verified (see "Live Validation Status" above:
 `mgt-config.users`, `deviceconfig.system.panorama`, `rulebase.security.rules` are real, confirmed
-paths) — but **11 of the 28 checks (8 Fortinet — NTP/DNS/logging/password-policy/FortiGuard-updates/
-IPS-on-rules — plus 3 Palo Alto) use a deliberate `predicate_type: 'not_evaluable_from_config'`**
-(⛔ corrected 2026-07-19, found in a follow-up bug sweep — this section previously said "8 of the 28
-checks, all Fortinet," undercounting by 3 and mischaracterizing which vendors are affected; verified
-directly against `lib/auditChecksSeed.js`, not re-assumed from the prior text), a string that doesn't
-match any of `applicability.js`'s six real predicate cases and therefore correctly falls through to
-its `default: return 'unknown'` branch — i.e. these checks always render as `'warning'`, honestly,
-rather than guessing a path into a config section the relevant adapter's `getConfig()` doesn't
-currently collect (`lib/adapters/fortinet/index.js` collects only `global`/`interfaces`/`ssl_vpn`/
-`snmp`/`admins` today; the 3 Palo Alto checks have the same shape of gap against
-`lib/adapters/paloalto/sshParser.js`'s collected tree). **This is a real, known gap, not a bug** —
-extending each adapter's collected config sections is the natural follow-up, at which point those 11
-checks' `predicate_config` can be upgraded from `not_evaluable_from_config` to a real predicate
-without touching `configAuditor.js` at all.
+paths) — and, as of 2026-07-19, so is 5 of 7 Fortinet gaps (see below). **3 Palo Alto checks still
+use `predicate_type: 'not_evaluable_from_config'`** (⛔ count corrected again 2026-07-19 — this
+section previously said "11 of 28, 8 Fortinet + 3 Palo Alto"; the real number, counted directly
+against `checkId`/`predicate_type` pairs in `lib/auditChecksSeed.js` — not re-derived from this
+file's own prior text, which is exactly how the miscount happened the first time — was 7 Fortinet +
+3 Palo Alto = 10. The 2026-07-19 Fortinet adapter extension below closed 5 of those 7, leaving 2
+Fortinet + 3 Palo Alto = 5 still `not_evaluable_from_config` today), a string that doesn't match any
+of `applicability.js`'s six real predicate cases and therefore correctly falls through to its
+`default: return 'unknown'` branch — i.e. these checks always render as `'warning'`, honestly, rather
+than guessing a path into a config section the relevant adapter's `getConfig()` doesn't currently
+collect. The 3 Palo Alto checks have this gap against `lib/adapters/paloalto/sshParser.js`'s
+collected tree — extending that adapter's collected sections is the natural follow-up, same pattern
+as the Fortinet fix below, not yet done.
+
+**Fortinet gap closed 2026-07-19 (5 of 7 checks) — `lib/adapters/fortinet/index.js`/`api.js`
+(REST) and `ssh.js`/`cliParser.js` (SSH) now collect 6 more `config_parsed` sections**, on top of
+the original 5 (`global`/`interfaces`/`ssl_vpn`/`snmp`/`admins`): `ntp`, `dns`, `log_syslogd`,
+`password_policy`, `fortiguard`, `autoupdate_schedule` — each a flat `{key: value}` object of that
+FortiOS section's direct settings (CLI: `settingsOfFirst(path) = flattenSettings(findBlockDeep(tree,
+path))`, the same pattern the original 5 already used; REST: one new `api.js` fetch function +
+`sections` array row each, same data-driven pattern as the original 5). Deliberately flat-only — e.g.
+`system ntp`'s nested `ntpserver` table is NOT collected, since the checks below only need the flat
+`ntpsync` toggle. This let 5 of the 7 Fortinet `not_evaluable_from_config` checks be upgraded to real
+predicates: `fortinet-ntp-configured` (`feature_enabled`, `ntp.ntpsync`), `fortinet-dns-configured`
+(`config_key_exists`, `dns.primary`), `fortinet-logging-enabled` (`feature_enabled`,
+`log_syslogd.status`), `fortinet-password-min-length` (`config_key_exists`,
+`password_policy.minimum-length` — presence-only, same "doesn't prove a non-default value" caveat as
+the sibling `fortinet-session-timeout` check), `fortinet-fortiguard-updates-enabled`
+(`feature_enabled`, `autoupdate_schedule.status`). The remaining 2 Fortinet checks —
+`fortinet-ips-internet-facing-policies` (per-rule data, lives in `firewall_rules.raw_rule` not
+`device_configs.config_parsed` — the predicate engine only supports one fixed dot-path per check, not
+"for every rule") and `fortinet-unused-interfaces-shutdown` (needs traffic/hit-count telemetry a
+static config snapshot structurally cannot contain) — are **not** fixable by collecting more config
+sections and remain `not_evaluable_from_config` for those structural reasons; see
+`lib/auditChecksSeed.js`'s own header comment for the reason-(a)-vs-(b) taxonomy.
+
+⚠️ **All 6 new sections' field paths (`ntp.ntpsync`, `dns.primary`, `log_syslogd.status`,
+`password_policy.minimum-length`, `autoupdate_schedule.status`) are doc-derived from standard
+FortiOS CLI/REST conventions, matching the same "written without a live FortiGate" posture as every
+other Fortinet field mapping in this file — NOT yet confirmed against a live device.** A live
+Fortinet SSH device exists in this deployment (added 2026-07-19); its next collect should be checked
+against `[Fortinet Debug]` log output to confirm/correct these paths, same verification step every
+other unresolved vendor mapping in this file is waiting on. If any turn out wrong, only
+`lib/auditChecksSeed.js` and the two adapter files need updating — the predicate engine itself
+(`applicability.js`) needs no change either way.
 
 ### Engine — `lib/engines/configAuditor.js`
 
