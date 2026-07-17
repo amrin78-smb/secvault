@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.6.0': [
+    'Added an Admins tab on each device page showing local/admin accounts and privilege levels for Fortinet, Palo Alto, and Cisco ASA devices, plus 5 new compliance checks (Fortinet admin 2FA and password policy; Cisco ASA telnet, HTTP admin, and local accounts — its first-ever compliance coverage).',
+    'Rule comments, applications, and schedules are now shown in the Rules table and CSV export.',
+    'Fixed two critical Forcepoint bugs: devices could silently collect another engine\'s version/rules/config on any SMC managing more than one engine, and a missing policy reference could silently import an unrelated engine\'s ruleset. Also closed a Check Point gap in the same class, added missing config redaction to both vendors, and fixed a device serial number that was read but never saved.',
+    'Fixed a stale-credential bug where changing a device\'s vendor or connection method without also rotating its credentials could leave it silently using the previous vendor\'s saved password or key.',
+  ],
   '2.5.0': [
     'Added a VPN Summary page (fleet-wide and per-device) showing SSL-VPN/remote-access configuration for Fortinet, Palo Alto, Cisco ASA, and Sangfor devices, plus 2 new Fortinet SSL-VPN compliance checks (idle timeout, minimum TLS version).',
     'Added active VPN session polling for Fortinet devices — a new scheduled job samples active SSL-VPN session counts every 30 minutes and charts the trend, without requiring syslog ingestion.',

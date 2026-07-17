@@ -533,9 +533,18 @@ confirming XML-API rule collection was never affected by this SSH-specific bug.
   rests on `devices.name` matching the gateway object's name. Where it doesn't, a multi-package server
   now **hard-fails** rather than importing another gateway's rules — that's the intended bar. The error
   names the candidate gateways; fix by aligning the device name.
-- **Check Point `getVersion()`/`getConfig()` still use `findGateway()`'s "first gateway" fallback**, so
-  on a name mismatch they can report another gateway's version/config. Less destructive than the
-  `packages[0]` rules bug (which is fixed), but the same class. Open.
+- **✅ RESOLVED 2026-07-19** (was: "Check Point `getVersion()`/`getConfig()` still use `findGateway()`'s
+  'first gateway' fallback, so on a name mismatch they can report another gateway's version/config").
+  `_findGateway()` (index.js) now calls `findGatewayByIdentity()` — the same strict, no-fallback matcher
+  policy-package resolution already used — for every purpose (version, config, AND policy). Both call
+  sites now throw, naming candidate gateways, on no identity match, matching the already-fixed
+  `packages[0]` rules bug's error style exactly. The old fallback-permitting `findGateway()` function
+  had no remaining callers once this landed and was removed from `lib/adapters/checkpoint/parser.js`
+  rather than left as unused dead code. Also fixed the same day: `getConfig()` never redacted the stored
+  gateway/api_versions object at all — the only one of six adapters with no redaction pass — now runs a
+  generic keyword-based `redactSecrets()` (mirrors `fortinet/parser.js`'s `redactSecretFields()`) before
+  storing, fail-closed (a redaction-pass error drops that subtree to a placeholder rather than risk
+  returning it unredacted).
 - **PAN-OS XML `getRules()` returns `[]` (does not throw) when a reachable device reports an empty
   rulebase** — it can't distinguish "genuinely empty" from "wrong xpath" without live verification.
   The any-vsys fallback narrows it; the ambiguity remains until first live connect.
@@ -760,6 +769,13 @@ The predicate engine code should not need to change for new CVEs.
   analysis always reruns immediately after the rewrite
 - Shadow/redundant/reorder analysis is O(n²) and **skipped entirely above 1000 rules** (warning logged)
 - Optional overrides via `settings` keys: `rule_unused_days`, `rule_expiry_window_days`, `risky_ports` (JSON array)
+- `firewall_rules.comment`/`.applications`/`.schedule` were always collected by most vendor parsers
+  (`comment` by all 6; `applications` by 4 of 6 — Fortinet, Forcepoint, Palo Alto both transports;
+  `schedule` by 4 of 6) but never surfaced anywhere until 2026-07-19 — added as columns to
+  `/devices/[id]/rules`'s table and its `GET .../rules?format=csv` export (`comment` in particular
+  had zero consumers anywhere despite every adapter populating it — the clearest "dead data" case
+  found in that pass). Purely a UI/export addition — `ruleAnalysis.js` itself does not read any of
+  the three, and still doesn't; no finding type currently depends on them.
 - Coverage tests (`fieldCovers`, used by `shadow`/`reorder_candidate`) are string-equality PLUS
   CIDR-aware containment as of 2026-07-19 (`lib/engines/cidrUtils.js`) — an S-side address-list item
   that's a literal IPv4/CIDR (e.g. Palo Alto rules typed directly with `"10.0.0.0/16"` instead of an
@@ -1096,6 +1112,39 @@ other unresolved vendor mapping in this file is waiting on. If any turn out wron
 `lib/auditChecksSeed.js` and the two adapter files need updating — the predicate engine itself
 (`applicability.js`) needs no change either way.
 
+**Second round, same day: 2 more real Fortinet checks + Cisco ASA's first-ever compliance
+coverage.** `fortinet-admin-2fa-required` (`feature_enabled`, `admins.0.two-factor`) and
+`fortinet-password-policy-enabled` (`feature_enabled`, `password_policy.status`) needed **no
+adapter work at all** — `admins`/`password_policy` were already-collected sections from the first
+round above. `fortinet-admin-2fa-required` is notable: unlike almost every other Fortinet path in
+this file, `admins[0]['two-factor']` is **live-confirmed**, not doc-derived — a direct production DB
+query the same day read a real device's `admins[0]` and found `"two-factor": "disable"` (see the VPN
+Summary section below for how that DB access came about). Same index-0-only limitation as
+`fortinet-default-admin-active` (no "for every admin" capability in this predicate engine — see
+`lib/engines/adminAccountSummary.js` below for the UI-layer alternative that CAN iterate the whole
+array). `fortinet-password-policy-enabled` is a stronger check than the existing
+`fortinet-password-min-length` — it proves the policy block is actually enforced (`status enable`),
+not just that a field is present in the dump.
+
+`lib/auditChecksSeed.js` also gained its first `vendor: 'cisco_asa'` rows (3 checks) — Cisco ASA had
+ZERO compliance coverage before this, despite `lib/adapters/cisco_asa/parser.js`'s `parseRunningConfig()`
+already collecting real, checkable data. `cisco-asa-telnet-disabled` (`critical` — a configured
+`telnet_sources` entry is a genuine cleartext-management finding, not a hardening suggestion) and
+`cisco-asa-http-server-disabled` (`high`) are both real predicates. Both needed a small correctness
+question answered first: `parsed.telnet_sources`/`parsed.usernames` are ARRAYS, and an empty array
+still resolves `config_key_exists` to `'yes'` on the bare path (an empty array is defined, not
+undefined) — the fix is targeting `path: 'telnet_sources.0'` specifically. `getByPath()`'s tokenizer
+(`([^[\].]+)|\[(\d+)\]`) never reaches its `[digit]` branch for a bare dot-segment like `.0` — it
+captures `'0'` via the **string** alternative — but `array['0']` resolves identically to `array[0]`
+in JS (array indices are just string-keyed properties), so `config_key_exists` on `telnet_sources.0`
+correctly means "index 0 exists" = "the array is non-empty", exactly the signal needed, confirmed by
+reading `getByPath()`'s actual implementation rather than assumed. A third candidate check,
+`cisco-asa-local-admin-accounts-present`, was deliberately left `not_evaluable_from_config` — ASA's
+`usernames` field captures names only (no role/privilege/password data, by the parser's own explicit
+design), and "at least one local account exists" isn't a real pass/fail concept (local accounts are
+often necessary) — forcing a polarity on it would have been exactly the kind of misleading
+confident-answer this file's own `not_evaluable_from_config` convention exists to prevent.
+
 ### Engine — `lib/engines/configAuditor.js`
 
 `runComplianceAuditForDevice(deviceId, pool)` mirrors `runAnalysisForDevice()`'s shape (Phase 5):
@@ -1215,16 +1264,29 @@ code before writing this, not assumed):
   failure, and the UI renders a "Low confidence — doc-derived, unverified for this vendor" badge
   whenever this vendor's summary is shown, so the uncertainty is visible, not hidden.
 - **Palo Alto (both SSH and XML/API transports)**: **no adapter change was needed at all** — the
-  full config tree is already present in `config_parsed` (SSH under `.tree`, a brace-tree Node; XML/
-  API spread directly at the top level — see `lib/adapters/paloalto/{sshParser,parser}.js`'s own
-  `parseConfig()`). `vpnSummary.js` does a bounded (depth 8) deep search for a key/block whose name
-  contains `global-protect`/`globalprotect`, rather than assuming one exact path — PAN-OS config
-  nesting varies (single-vsys root, `vsys.entry`, `shared`, Panorama pre/post-rulebase), the exact
-  same structural variability `findSecurityRulesContainers()` already has to search deep for
-  security rules, for the identical reason (see Live Validation Status below). This is a UI-layer
-  concern, free to search deeply — the compliance predicate engine (`evaluatePredicate()`, exactly
-  one fixed dot-path per check) could NOT do this safely, which is why **no Palo Alto GlobalProtect
-  compliance check was added** — a deliberate scope decision, not an oversight.
+  full config tree is already present in `config_parsed` (SSH under `.tree`; XML/API spread directly
+  at the top level — see `lib/adapters/paloalto/{sshParser,parser}.js`'s own `parseConfig()`).
+  `vpnSummary.js` does a bounded (depth 8) deep search for a key whose name contains
+  `global-protect`/`globalprotect`, rather than assuming one exact path — PAN-OS config nesting
+  varies (single-vsys root, `vsys.entry`, `shared`, Panorama pre/post-rulebase), the exact same
+  structural variability `findSecurityRulesContainers()` already has to search deep for security
+  rules, for the identical reason (see Live Validation Status below). This is a UI-layer concern,
+  free to search deeply — the compliance predicate engine (`evaluatePredicate()`, exactly one fixed
+  dot-path per check) could NOT do this safely, which is why **no Palo Alto GlobalProtect compliance
+  check was added** — a deliberate scope decision, not an oversight.
+  - ⛔ **Bug fixed 2026-07-19, found the same day this shipped**: the SSH-transport branch originally
+    searched `configParsed.tree` assuming a `{settings, blocks: {name: Node}, entries: [Node]}` Node
+    shape (mirroring Fortinet's `cliParser.js` tree). That assumption was wrong — verified directly
+    against `lib/adapters/paloalto/sshParser.js`'s real, current `parseBraceBlock()`, which builds a
+    **plain nested object** instead (`node[key] = child`, no `.blocks`/`.entries` wrapper — the same
+    shape the XML/API transport already has). The dedicated tree-walking helpers
+    (`deepFindBlockInTree`/`flattenNodeSettings`) were therefore searching for a `.blocks` property
+    that never exists on a real parsed tree, meaning GlobalProtect was **never found for any
+    SSH-collected Palo Alto device**, including this deployment's live `IDC FW` device — silently
+    rendering "no VPN config found" regardless of the device's actual configuration. Fixed by
+    deleting both Node-shaped helpers and using the same plain-object `deepFindKeyByPattern()` the
+    XML/API branch already used correctly, rooted at `.tree` instead of `configParsed` itself — both
+    transports turn out to need the identical generic walker.
 - **Check Point**: not in the dispatch table at all — `summarizeVpnConfig` returns
   `{supported: false, ...}`, which the UI renders distinctly from `{supported: true, hasConfig:
   false}` ("collected, and it's genuinely empty" is a different fact from "not implemented yet").
@@ -1259,6 +1321,34 @@ most vendors don't implement it:
   Counts `results.length` rather than parsing individual session fields, sidestepping uncertainty
   about the exact per-session field shape (not yet live-verified).
 
+⛔ **VDOM-awareness bug fixed 2026-07-19, found the same day this shipped**: both transports
+originally ran their session-count command exactly once, in the admin session's own default-VDOM
+context — the identical "silent under-count on a multi-VDOM box" class of bug this file's own VDOM
+rule already documents for `getRules()` (a request without `?vdom=`/VDOM enumeration only reflects
+one VDOM, and looks like a complete, correct total). Fixed to mirror `getRules()`'s existing
+`_discoverVdoms()`/per-VDOM pattern on both transports (REST: `getSslVpnMonitor(conn, vdom)` now
+takes an optional vdom param, summed across all VDOMs; SSH: a new `getVpnSessionSummaryMultiVdom()`
+batches `config vdom`/`edit <vdom>`/`get vpn ssl monitor`/`end` for every VDOM in one round-trip, the
+same command-batching shape as `_getRulesMultiVdom()`). Deliberately **more lenient** than
+`getRules()` in one respect, on purpose: `getRules()` has no per-VDOM try/catch (one VDOM's failure
+must fail the whole authoritative ruleset collection), but the VPN poll degrades gracefully per VDOM
+(`raw.partial: true` when some VDOMs failed) since a partial count is still a meaningful coarse trend
+signal — only throws overall when the VDOM list itself can't be enumerated at all (mirroring
+`getRules()`'s reasoning there exactly: a KNOWN multi-VDOM box silently falling back to a
+single-VDOM count would look like a real, complete total, which is worse than an error).
+
+⛔ **Job-overlap race fixed 2026-07-19, found the same day this shipped**: `node-cron` 3.x has no
+overlap protection of its own — a scheduled tick fires unconditionally even if the previous
+invocation of the SAME job is still running. Unlikely to matter for the two pre-existing jobs' hours-
+scale cadences, but the new minutes-scale `vpn-session-poll` job made two failure modes routinely
+reachable: (a) the job overlapping its own next tick if a poll cycle runs long, and (b)
+`vpn-session-poll` and `rule-version-pull` running concurrently against the SAME device, opening two
+separate SSH/REST sessions to one firewall at once (`lib/adapters/fortinet/api.js` notes a concurrent
+admin-session cap that a second session can hit). Two boolean flags (`ruleVersionPullInFlight`,
+`vpnPollInFlight`) close both cases: a job never re-enters itself, and `vpn-session-poll` (a coarse,
+can-wait-a-cycle signal) defers a whole tick rather than run alongside the higher-priority,
+authoritative `rule-version-pull` job. Not a full per-device lock — that's a bigger change, not done.
+
 **`services/engine-worker.js`** gained a third scheduled job, `vpn-session-poll`, on its OWN interval
 (`VPN_POLL_INTERVAL_MINUTES`, default 30, clamped 5-59 — deliberately minutes-scale, unlike the
 other two jobs' hours-scale intervals, since a meaningful "sessions over time" trend needs much
@@ -1290,6 +1380,69 @@ added (reusing `IconUser` — no dedicated VPN/tunnel icon exists in `components
 "reuse what's there even if not a perfect semantic match" call already made for Compliance ->
 `IconSearch`), and a "VPN →" link was added next to the existing "Rule analysis →" link on the
 per-device overview page.
+
+---
+
+## Admin Account Summary (added 2026-07-19)
+
+Direct architectural sibling of VPN Summary above — same "read-only interpretation of
+`device_configs.config_parsed`, kept out of the adapters themselves" pattern, this time answering
+"who can log into this firewall, and with what privilege" from data several adapters already collect
+but never surfaced anywhere.
+
+### `lib/engines/adminAccountSummary.js`
+
+`summarizeAdminAccounts(vendor, configParsed) -> {supported, accounts: [{username, privilege,
+twoFactorEnabled, sourceRestricted}], totalCount, superuserCount, error?}`. Unlike the compliance
+predicate engine (one fixed dot-path per check, so `fortinet-default-admin-active`/
+`fortinet-admin-2fa-required` can only ever look at `admins[0]`), this module iterates the WHOLE
+account array — a UI-layer concern, same "free to search/iterate deeply" latitude `vpnSummary.js`
+already has.
+
+- **Fortinet**: `admins[]` — same section both compliance checks above already use. Real shape
+  confirmed live (2026-07-19, production `TUS`): `{name, accprofile, "two-factor", trusthost1..10,
+  ...}`. `sourceRestricted` is true only when at least one present `trusthostN`'s address token isn't
+  `"0.0.0.0"` — a MISSING trusthost slot is treated the same as "not restricted" as an explicitly
+  wide-open one (FortiOS omits unset slots entirely rather than filling them with the wide-open
+  value; "absence of evidence isn't provable absence" doesn't apply here the way it does elsewhere in
+  this app, since a missing slot genuinely means no restriction was configured on it).
+- **Palo Alto (both transports)**: `mgt-config.users` — XML/API has it directly at the top level
+  (`{users: {entry: [...] | {...}}}`, handling fast-xml-parser's single-element-collapses-to-bare-
+  object convention); SSH has it nested in `.tree` (a plain object, per the vpnSummary.js bug-fix
+  note above — this module was written fresh against the REAL shape, not the stale Node-shape
+  assumption, so its own small bounded deep search never had that bug). `privilege` is derived from
+  `Object.keys(entry.permissions['role-based'])[0]` — whichever role key is actually present
+  (`superuser`/`superreader`/`deviceadmin`/...) — identical logic on both transports, since
+  `permissions.role-based` has the same shape either way. `twoFactorEnabled`/`sourceRestricted` are
+  always `null` ("not modeled here", never coerced to `false`) — PAN-OS `mgt-config` doesn't carry an
+  equivalent concept the way Fortinet's `trusthostN`/`two-factor` do.
+- **Cisco ASA**: `usernames[]` — plain strings only (no role/2FA/source data, by the parser's own
+  explicit design — see the Compliance Engine section's Cisco ASA paragraph above). `privilege`/
+  `twoFactorEnabled`/`sourceRestricted` always `null`.
+- **Sangfor, Check Point, Forcepoint**: `supported: false` — none of the three collect admin/user
+  account data today (confirmed by reading all three parsers directly, not assumed).
+
+`superuserCount` uses a best-effort, case-insensitive cross-vendor heuristic
+(`/^super(_?admin|user)$/i`) — anchored on purpose, not a bare `/super/i` substring test, so Palo
+Alto's `superreader` (read-only, despite the "super" prefix) does NOT count as a superuser. An
+initial unanchored version of this pattern was tried and miscounted `superreader`, caught by this
+module's own pre-ship test — not a live incident, but worth keeping the anchoring intentional in any
+future edit here. This is a UI summary signal, not a security boundary, and won't catch every
+vendor's own naming for "full admin."
+
+### UI
+
+A new **"Admins"** tab on the existing per-device page (`app/(dashboard)/devices/[id]/page.js`,
+`?tab=admins` — NOT a new top-level route, unlike VPN Summary; this app already has a growing sidebar
+and this data is scoped to one device at a time with no obvious fleet-wide rollup worth a dedicated
+page yet). Shows a summary line, then a table (username/privilege/2FA badge/source-restricted
+badge, both 3-state — `Enabled`/`Disabled`/`Unknown`, never collapsing an unmodeled fact to a
+confident answer, same discipline as everywhere else in this app) or an `EmptyState` for
+`!supported`/zero accounts.
+
+⚠️ Same standing caveat as VPN Summary: every field path here (except Fortinet's `two-factor`, which
+is live-confirmed — see the Compliance Engine section's `fortinet-admin-2fa-required` paragraph) is
+doc-derived and not yet independently live-verified.
 
 ---
 
@@ -2202,6 +2355,112 @@ without new evidence):**
   live responses before writing any parser" constraint this file's own header comment already states
   for itself. No live PAN-OS access was available to do that verification in this pass — flagged here
   as an open, needs-live-verification item rather than guessed at.
+
+### ⚠️ Bug-sweep fixes (2026-07-19, fourth pass) — full-app sweep alongside a feature round
+
+Requested as "do the full compliance/rule-analysis/admin-account feature round PLUS a full feature
+check and bug fix" — six parallel fan-out agents (three building features, three doing read-only
+audits of subsystems not yet swept this session: Forcepoint, device CRUD/credentials/settings,
+auth/middleware + a fresh self-review of this same day's own VPN round), followed by a seventh
+agent fixing everything the Forcepoint audit found. All findings personally verified against the
+actual diffs before being reported as done, same standard as every prior pass.
+
+**Forcepoint (`lib/adapters/forcepoint/*.js`) — this codebase's ORIGINAL MVP vendor, never
+re-audited until now, had 5 real bugs, 2 critical:**
+- **CRITICAL — no device-to-engine identity matching at all.** `getVersion()`/`getRules()`/
+  `getConfig()` each did `const primaryEngine = engines[0]` — `smc.getEngines()` returns EVERY
+  engine on the whole SMC server, unfiltered, with no use of `this.device.name` anywhere. On any SMC
+  managing more than one engine (CLAUDE.md's own Forcepoint section already says 50+ is a normal
+  case), every SecVault device pointed at that `smc_host` silently collapsed onto whichever engine
+  happened to be first in the server's listing. Fixed with a new `findEngineByIdentity()`/
+  `describeEngineCandidates()` pair in `parser.js`, mirroring Check Point's already-established
+  strict-match-or-throw-naming-candidates pattern exactly — a new `_resolveEngine(conn)` in
+  `index.js` replaces all three `engines[0]` picks.
+- **CRITICAL — `getRules()` fell back to a positionally-picked policy** (`policies[0]` from the
+  ENTIRE SMC server's `fw_policy` list) whenever the resolved engine element didn't expose a
+  `fw_policy`/`policy` href — a real possibility since these are doc-derived, unverified field
+  names. Now throws instead, naming what WAS found on the engine element (or that nothing was) — no
+  ruleset is safer than the wrong one, same principle as the already-fixed Check Point
+  `packages[0]` bug.
+- **HIGH — `getConfig()` stored the full engine element with zero secret redaction** — the only one
+  of six adapters with no redaction pass at all (every other adapter, including the API/JSON-based
+  ones, redacts defensively even when it's unverified whether the vendor API itself already blanks
+  secrets). Fixed with a new `redactEngineElement()`/`isSecretKey()` pair in `parser.js`, mirroring
+  `fortinet/parser.js`'s `redactSecretFields()` bounded-recursion style.
+- **MEDIUM-HIGH — unresolved SMC "any" refs landed as raw objects, defeating `any_any`.** SMC's
+  convention for an unrestricted source/destination/service is `{any: true}`, which `resolveRef()`'s
+  existing `.ref`/`.href`/`.name` fallback chain didn't recognize — it fell through to returning the
+  raw `{any: true}` object itself into `src_addresses`/`dst_addresses`/`services`.
+  `String({any:true})` is `"[object Object]"`, which `ruleAnalysis.js`'s `isAny()` never matches — so
+  a genuine Forcepoint allow-any rule silently never triggered the `critical`-severity `any_any`
+  finding (or `overly_permissive`/`shadow`/`redundant`/`reorder_candidate`, all of which key off the
+  same `isAny()`). Fixed: `ref.any === true` now returns the literal string `'any'`, which
+  `ANY_ALIASES` already recognizes — zero `ruleAnalysis.js` changes needed.
+- **MEDIUM, conservative fix (no live SMC to fully confirm)** — the version-string candidate list
+  checked `dynamic_package` (the installed Dynatic Update signature-package version — a DIFFERENT
+  concept) before `engine_version` (the actual firmware version concept). Reordered so
+  `engine_version` is preferred; `dynamic_package` demoted to last-resort. Flagged doc-derived in
+  the code, pending live SMC verification — no Forcepoint devices exist in this deployment's
+  production database to check against right now.
+
+**Device CRUD / credentials / settings — 2 real findings, fixed:**
+- **Stale `device_credentials` row silently reused after a vendor/`mgmt_method` change with no fresh
+  credential supplied.** `credStore.setCredential()` only ever cleans up the row for the
+  `credential_type` it's actively writing — never a device's OTHER credential-type rows. `PUT
+  /api/devices/[id]` accepts a vendor/method change with no credential in the same request (a
+  legitimate call shape the credential-rotation UI never triggers, but nothing stops a direct API
+  call). Concrete failure: `fortinet`+`ssh` → `paloalto`+`ssh` (both resolve to `credential_type:
+  'ssh'`) with no new credential — the adapter dispatch changes to `PaloaltoSshAdapter`, but
+  `getCredential(deviceId, 'ssh', pool)` silently returns the STALE Fortinet SSH username/password.
+  Fixed: whenever the vendor or method actually changes, `PUT /api/devices/[id]` now deletes every
+  `device_credentials` row for that device OTHER than the type the device will need going forward —
+  a device can only ever need exactly one credential_type at a time, so anything else is stale by
+  definition. A credential supplied in the SAME request for the new type is unaffected, written
+  afterward by the existing `setCredential()` call.
+- **`isValidUuid` guard missing on 7 of the `devices/[id]/*` routes** — `collect`, `test`, `cve`,
+  `rules`, `backups`, `backups/[backupId]` (both `id` AND `backupId`), `diffs`. A malformed id hit a
+  raw Postgres "invalid input syntax for type uuid" error, surfaced as an unhelpful 500 instead of a
+  clean 400 — the exact failure mode a 2026-07-17 fix already closed for 4 sibling routes, just never
+  extended to these. Fixed identically across all 7.
+- **Lower severity, fixed opportunistically while already touching `device_credentials`**: no
+  DB-level `UNIQUE(device_id, credential_type)` constraint existed — `setCredential()`'s DELETE+INSERT
+  transaction is atomic for one request but doesn't prevent two CONCURRENT calls (e.g. a
+  double-submitted credential rotation) from each leaving a row behind, with `getCredential()`'s
+  `ORDER BY created_at DESC LIMIT 1` picking one with no DB-enforced guarantee. Added the constraint
+  (with a dedupe pass immediately before it in `schema.sql`, safe to run against a production
+  database that might already have accumulated a duplicate — `claude_readonly`/`nocvault_readonly`
+  correctly cannot read this table to check ahead of time) and rewrote `setCredential()` as a single
+  `INSERT ... ON CONFLICT (device_id, credential_type) DO UPDATE` — genuinely atomic under real
+  concurrency via Postgres row-level locking, not application-level DELETE-then-INSERT timing.
+
+**Auth/middleware self-review — clean**, plus one informational gap noted but not fixed:
+`LDAP_URL`/`LDAP_BASE_DN` are fully wired in `authorize()` (correctly falls back to local-admin
+when unset, correctly fails closed on a connection error) — but `app/(auth)/login/page.js` only
+ever calls `signIn('local', ...)`; there is no LDAP option anywhere in the UI. Not a security bug
+(fails safe, just unreachable), but the documented "optional LDAP/AD" feature doesn't actually work
+end-to-end today. Flagged as a real, known gap — building LDAP login UI is a feature addition, out
+of scope for a bug-fix pass.
+
+**Device inventory — serial numbers parsed then dropped, `build` queried then never rendered:**
+Both Fortinet SSH and Palo Alto SSH successfully parse a device serial number
+(`parseSystemStatus().serial` / `parseSystemInfo().serial` respectively) — `getVersion()`'s own
+return object simply never included it, and `device_versions` had no column for it anyway. Fixed:
+`ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS serial TEXT` (safe to re-run on an
+already-deployed table), all four transports' `getVersion()` updated (`serial: info.serial || null`
+for the two SSH cases; Fortinet REST's `parser.js` already read `statusBody.serial` but only as a
+last-resort MODEL fallback, never as its own field, now extracted separately too; Palo Alto XML/API
+never parsed `serial` at all before this — added, doc-derived, not yet live-verified for that one
+specific transport). `collectAndStore()`'s INSERT extended to include it. Separately, `build` was
+already queried by `getLatestVersion()` on the device detail page and simply never rendered in the
+JSX — pure UI gap, no data/adapter issue. Both now render as new tiles on the device summary card.
+
+**`lib/engines/ruleAnalysis.js` — dead condition in the `unused` finding, simplified:** the
+condition read `Number(rule.hit_count) === 0 && !rule.last_hit_at`. No adapter, for any vendor, has
+ever populated `firewall_rules.last_hit_at` — it isn't even in `collectAndStore()`'s INSERT column
+list — so `!rule.last_hit_at` was always `true`, permanently vacuous. Simplified to
+`Number(rule.hit_count) === 0` alone (that was always the real, entire decision) and updated the
+finding's `detail` text, which previously referenced "no last-hit timestamp" as if it were a real,
+sometimes-false signal.
 
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
