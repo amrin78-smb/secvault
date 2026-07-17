@@ -1,5 +1,6 @@
 import { pool } from '../../../../../lib/db';
 import { getAdapter } from '../../../../../lib/adapters';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,10 @@ export const dynamic = 'force-dynamic';
 // any supported vendor.
 export async function POST(request, { params }) {
   const { id } = params;
+
+  if (!isValidUuid(id)) {
+    return Response.json({ error: 'Invalid device id' }, { status: 400 });
+  }
 
   const deviceResult = await pool.query('SELECT * FROM devices WHERE id = $1', [id]);
   if (deviceResult.rows.length === 0) {

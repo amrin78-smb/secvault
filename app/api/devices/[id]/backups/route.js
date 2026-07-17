@@ -1,5 +1,6 @@
 import { pool } from '../../../../../lib/db';
 import { createBackup } from '../../../../../lib/engines/configDiff';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,10 @@ const ALLOWED_LABELS = ['manual', 'pre-change'];
 export async function GET(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
     const { rows } = await pool.query(
       `SELECT id, label, backed_up_at, octet_length(config_raw) AS size_bytes
@@ -33,6 +38,10 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
     let body = {};
     try {

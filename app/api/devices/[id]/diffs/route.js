@@ -1,4 +1,5 @@
 import { pool } from '../../../../../lib/db';
+import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request, { params }) {
   try {
     const { id } = params;
+
+    if (!isValidUuid(id)) {
+      return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
     const { rows } = await pool.query(
       `SELECT id, change_summary, detected_at, acknowledged_at, acknowledged_by

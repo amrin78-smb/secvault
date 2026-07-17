@@ -1,4 +1,5 @@
 import { pool } from '../../../../../../lib/db';
+import { isValidUuid } from '../../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +8,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request, { params }) {
   try {
     const { id, backupId } = params;
+
+    if (!isValidUuid(id) || !isValidUuid(backupId)) {
+      return Response.json({ error: 'Invalid device or backup id' }, { status: 400 });
+    }
 
     const { rows } = await pool.query(
       `SELECT config_raw FROM config_backups WHERE id = $1 AND device_id = $2`,
@@ -33,6 +38,10 @@ export async function GET(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     const { id, backupId } = params;
+
+    if (!isValidUuid(id) || !isValidUuid(backupId)) {
+      return Response.json({ error: 'Invalid device or backup id' }, { status: 400 });
+    }
 
     const { rows } = await pool.query(
       `DELETE FROM config_backups WHERE id = $1 AND device_id = $2 RETURNING id`,
