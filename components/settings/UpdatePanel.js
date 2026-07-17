@@ -206,6 +206,18 @@ export default function UpdatePanel() {
   const [checking, setChecking] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // Guards the window between the "Start Update" click and the POST
+  // resolving/throwing -- without this, a rapid double-click (or a second
+  // click before the confirm Modal has actually unmounted) can fire
+  // POST /api/system/update twice. The route deletes+recreates+runs the
+  // "SecVaultUpdate" scheduled task on every call with no idempotency check,
+  // so a second concurrent call while the first Update-SecVault.ps1 run is
+  // still executing (stop services -> git pull -> npm ci -> migrate -> build
+  // -> start services, per CLAUDE.md) can disrupt it mid-run. Only reset on
+  // the error path -- on success handleStartUpdate flips to the updating
+  // overlay, which unmounts this button entirely, so there's nothing to
+  // re-enable.
+  const [starting, setStarting] = useState(false);
   const [updateError, setUpdateError] = useState(null);
   // Commit captured when status is first loaded (and refreshed on every
   // manual check) — compared against the post-restart commit to confirm the
@@ -234,6 +246,8 @@ export default function UpdatePanel() {
   }, []);
 
   async function handleStartUpdate() {
+    if (starting) return; // already in flight -- physically can't double-fire
+    setStarting(true);
     setConfirmOpen(false);
     setUpdateError(null);
     try {
@@ -244,6 +258,7 @@ export default function UpdatePanel() {
         // (caught below), so show an error instead of the progress overlay.
         const data = await res.json().catch(() => ({}));
         setUpdateError(data.error || 'Update request failed.');
+        setStarting(false);
         return;
       }
     } catch (_err) {
@@ -379,11 +394,12 @@ export default function UpdatePanel() {
           update completes.
         </p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)}>
+          <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)} disabled={starting}>
             Cancel
           </Button>
-          <Button type="button" variant="primary" onClick={handleStartUpdate}>
-            Start Update
+          <Button type="button" variant="primary" onClick={handleStartUpdate} disabled={starting}>
+            {starting && <LoadingSpinner size={14} />}
+            {starting ? 'Starting…' : 'Start Update'}
           </Button>
         </div>
       </Modal>

@@ -30,7 +30,21 @@ export default function AssessNowButton() {
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Assessment failed');
       }
-      setResult({ ok: true, text: 'Assessment complete.' });
+      // /api/cve/assess can return 200 OK with a per-device `errors` array
+      // (runMatchForAllDevices in lib/engines/versionMatcher.js) when some
+      // devices' assessment succeeded and others failed -- that's distinct
+      // from the top-level `error` field checked above, which only appears
+      // when the whole call threw (500). Surface partial failures instead of
+      // reporting a blanket success.
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        const deviceIds = data.errors.map((e) => e.device_id).filter(Boolean).join(', ');
+        setResult({
+          ok: false,
+          text: `Assessment completed with ${data.errors.length} error(s)${deviceIds ? ` (device: ${deviceIds})` : ''}.`,
+        });
+      } else {
+        setResult({ ok: true, text: 'Assessment complete.' });
+      }
       router.refresh();
     } catch (err) {
       setResult({ ok: false, text: err.message || 'Assessment failed' });

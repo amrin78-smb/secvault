@@ -9,7 +9,14 @@ export async function GET() {
   try {
     const [newFindings, patchNow, unackedDiffs] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS count FROM finding_acknowledgements WHERE status = 'new'`),
-      pool.query(`SELECT COUNT(*)::int AS count FROM device_cve_assessments WHERE priority_band = 'patch_now'`),
+      pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM device_cve_assessments dca
+         LEFT JOIN cve_assessment_acknowledgements caa
+           ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
+         WHERE dca.priority_band = 'patch_now'
+           AND (caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))`
+      ),
       pool.query(`SELECT COUNT(*)::int AS count FROM config_diffs WHERE acknowledged_at IS NULL`),
     ]);
 
@@ -22,7 +29,10 @@ export async function GET() {
          FROM device_cve_assessments dca
          JOIN advisories a ON a.id = dca.advisory_id
          JOIN devices d ON d.id = dca.device_id
+         LEFT JOIN cve_assessment_acknowledgements caa
+           ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
          WHERE dca.priority_band = 'patch_now'
+           AND (caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))
          ORDER BY dca.assessed_at DESC
          LIMIT 3`
       ),

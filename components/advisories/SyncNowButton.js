@@ -89,7 +89,17 @@ export default function SyncNowButton() {
         if (allDone) {
           stopPolling();
           setRunning(false);
-          setResult({ ok: true, text: `Sync complete. ${summarizeBySource(bySource)}` });
+          // A completed run is not necessarily a successful one — mirror lib/feedStatus.js's
+          // getSyncPillStatus() convention (status === 'error' is the failure signal, same
+          // known feed-name list) rather than treating "finished_at is set" as "succeeded".
+          // Without this, a source that errored out (e.g. NVD failed while KEV succeeded)
+          // still reported ok: true here, hiding a real partial failure from the operator.
+          const failed = FEED_SOURCES.filter(({ key }) => bySource[key] && bySource[key].status === 'error');
+          const ok = failed.length === 0;
+          const text = ok
+            ? `Sync complete. ${summarizeBySource(bySource)}`
+            : `Sync completed with errors (${failed.map((f) => f.label).join(', ')}). ${summarizeBySource(bySource)}`;
+          setResult({ ok, text });
           router.refresh();
         }
       } catch (_err) {
