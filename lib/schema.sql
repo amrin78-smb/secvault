@@ -292,6 +292,36 @@ CREATE TABLE IF NOT EXISTS device_risk_history (
 CREATE INDEX IF NOT EXISTS idx_drh_device_id ON device_risk_history(device_id);
 CREATE INDEX IF NOT EXISTS idx_drh_recorded_at ON device_risk_history(recorded_at);
 
+-- VPN active-session count snapshots (added 2026-07-19). A coarse,
+-- polling-based substitute for real VPN usage telemetry (the "how many
+-- concurrent VPN users over time" question genuinely needs syslog ingestion
+-- -- see CLAUDE.md's Phase 8 notes -- this is a bounded, no-log-ingestion-
+-- required approximation: periodically ask the device how many VPN sessions
+-- are active RIGHT NOW, timestamp it, done). Only vendors whose adapter
+-- implements getVpnSessionSummary() are ever polled -- see
+-- services/engine-worker.js's runVpnSessionPoll(). A row is only ever
+-- inserted on a SUCCESSFUL poll (a failed/unsupported poll writes nothing,
+-- same "don't record a confident-looking zero for a failure" discipline as
+-- everywhere else in this app) so active_session_count is NOT NULL.
+-- `raw` keeps the adapter's raw parsed response for future debugging /
+-- extending which fields get surfaced, without a schema change.
+--
+-- No retention/cleanup job exists for this table yet (accepted simplification
+-- -- at a realistic 30-minute poll interval this is ~17.5k rows/device/year,
+-- not a near-term scaling concern; a real retention policy is a documented
+-- follow-up, not built now, same spirit as LOG_RETENTION_HOT_DAYS/WARM_DAYS
+-- existing today for the not-yet-built Phase 8 firewall_logs table).
+CREATE TABLE IF NOT EXISTS vpn_session_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  active_session_count INTEGER NOT NULL,
+  raw JSONB,
+  sampled_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_vss_device_id ON vpn_session_snapshots(device_id);
+CREATE INDEX IF NOT EXISTS idx_vss_sampled_at ON vpn_session_snapshots(sampled_at);
+
 -- Operator-action audit trail (NOT a general app log -- scheduled/background
 -- jobs already have C:\Apps\SecVault\logs\engine.log for that). Populated
 -- only at HTTP route call-sites representing a meaningful in-app action

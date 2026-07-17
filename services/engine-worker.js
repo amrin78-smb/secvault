@@ -56,7 +56,7 @@ const winston = require('winston');
 const { pool } = require('../lib/db');
 const { runFullSync } = require('../lib/feeds');
 const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
-const { collectAndStore, SUPPORTED_VENDORS } = require('../lib/adapters');
+const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapters');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -173,6 +173,34 @@ function buildHourlyCron(intervalHours) {
   return `0 */${n} * * *`;
 }
 
+// VPN session polling (added 2026-07-19) runs far more often than the other
+// two jobs (a coarse "how many active sessions right now" trend needs
+// minutes-scale sampling, not hours) — a separate minutes-based interval,
+// clamped to 5-59 so `*/n * * * *` never needs to cross an hour boundary
+// (a value >= 60 would silently produce a nonsensical cron expression).
+function getVpnPollIntervalMinutes() {
+  const fallback = 30;
+  const raw = parseInt(process.env.VPN_POLL_INTERVAL_MINUTES, 10);
+  if (Number.isInteger(raw) && raw >= 5 && raw <= 59) {
+    return raw;
+  }
+  if (process.env.VPN_POLL_INTERVAL_MINUTES) {
+    logger.warn(
+      `VPN_POLL_INTERVAL_MINUTES value "${process.env.VPN_POLL_INTERVAL_MINUTES}" is not a valid integer between 5 and 59 — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
+function buildMinutelyCron(intervalMinutes) {
+  let n = parseInt(intervalMinutes, 10);
+  if (!Number.isInteger(n) || n < 5 || n > 59) {
+    logger.warn(`Invalid cron interval minutes "${intervalMinutes}" — falling back to 30.`);
+    n = 30;
+  }
+  return `*/${n} * * * *`;
+}
+
 // ---------------------------------------------------------------------------
 // Job bodies — each independently try/catch'd. A single job failure must
 // never crash the process or stop future scheduled runs.
@@ -252,14 +280,90 @@ async function runRuleVersionPullJob() {
   }
 }
 
+// VPN active-session snapshot poll — a coarse, no-syslog-ingestion-required
+// substitute for real VPN usage telemetry (see lib/schema.sql's
+// vpn_session_snapshots comment for the full rationale). Only devices whose
+// adapter implements the OPTIONAL getVpnSessionSummary() capability are
+// polled — most vendors don't (checked via `typeof ... === 'function'`,
+// never assumed present). A row is only ever inserted on a successful poll;
+// a failure for one device is logged and skipped, never fatal to the job or
+// to other devices in the same run — same per-device isolation as
+// runRuleVersionPullJob above.
+async function runVpnSessionPollJob() {
+  const start = Date.now();
+  logger.info('Job [vpn-session-poll] starting.');
+  try {
+    const { rows: devices } = await pool.query('SELECT * FROM devices WHERE active = true');
+
+    let polled = 0;
+    let skipped = 0;
+
+    for (const device of devices) {
+      if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
+
+      let adapter;
+      try {
+        adapter = getAdapter(device, pool);
+      } catch (err) {
+        logger.warn(`Job [vpn-session-poll] could not build adapter for device ${device.id}: ${err.message}`);
+        continue;
+      }
+
+      if (typeof adapter.getVpnSessionSummary !== 'function') {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const summary = await adapter.getVpnSessionSummary();
+        await pool.query(
+          `INSERT INTO vpn_session_snapshots (device_id, active_session_count, raw)
+           VALUES ($1, $2, $3::jsonb)`,
+          [device.id, summary.active_session_count, JSON.stringify(summary.raw || null)]
+        );
+        polled += 1;
+      } catch (err) {
+        logger.warn(
+          `Job [vpn-session-poll] failed for device ${device.id} (${device.name || 'unnamed'}): ${err.message}`
+        );
+      }
+    }
+
+    const durationMs = Date.now() - start;
+    logger.info(
+      `Job [vpn-session-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no VPN capability) ${skipped}, ${devices.length} active device(s) total.`
+    );
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [vpn-session-poll] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
 
-let isJobRunning = false;
+// ⛔ Bug fixed 2026-07-19, found while adding the VPN poll job above: this
+// was a boolean, not a counter. runTrackedJob() set it true on entry and
+// false on exit (in `finally`) — correct for exactly one job in flight at a
+// time, but the two PRE-EXISTING jobs' cron cadences (every N hours, every
+// M hours) were unlikely to ever overlap in practice, so this was a latent
+// bug, not yet a reachable one. The new VPN poll job runs every 5-59
+// MINUTES specifically so it produces a meaningful trend — meaning it will
+// routinely overlap with the still-long-running rule-version-pull job
+// (which sequentially collects every device over SSH/REST, credibly
+// minutes to complete on a real fleet). With a boolean, job A finishing
+// while job B is still running would flip the flag to false, and shutdown()
+// would proceed to stop the process while job B was still mid-collect —
+// exactly the "finish current job then exit" contract violation this
+// codebase has already fixed once before (see the hardCeilingMs history
+// below) reintroduced through a different mechanism. A counter tracks how
+// many jobs are actually in flight, not just whether any one job's own
+// finally block has run.
+let runningJobCount = 0;
 
 async function runTrackedJob(jobFn, jobName) {
-  isJobRunning = true;
+  runningJobCount += 1;
   try {
     await jobFn();
   } catch (err) {
@@ -267,7 +371,7 @@ async function runTrackedJob(jobFn, jobName) {
     // anyway so a scheduled job can never crash the process.
     logger.error(`Job [${jobName}] threw unexpectedly: ${err.stack || err.message}`);
   } finally {
-    isJobRunning = false;
+    runningJobCount -= 1;
   }
 }
 
@@ -307,7 +411,15 @@ async function scheduleJobs() {
     runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
   });
 
-  scheduledTasks = [feedTask, configTask];
+  const vpnPollIntervalMinutes = getVpnPollIntervalMinutes();
+  const vpnCronExpr = buildMinutelyCron(vpnPollIntervalMinutes);
+  logger.info(`Scheduling [vpn-session-poll] with cron "${vpnCronExpr}" (every ${vpnPollIntervalMinutes}m).`);
+  const vpnTask = cron.schedule(vpnCronExpr, () => {
+    if (shuttingDown) return;
+    runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
+  });
+
+  scheduledTasks = [feedTask, configTask, vpnTask];
 }
 
 async function main() {
@@ -321,6 +433,7 @@ async function main() {
   // Immediate on-startup passes so data is fresh before any scheduled cycle fires.
   await runTrackedJob(runFeedSyncAndMatchJob, 'feed-sync-and-match');
   await runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
+  await runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
 
   await scheduleJobs();
 
@@ -357,14 +470,16 @@ async function shutdown(signal) {
   // largest single-adapter timeout so a mid-pull stop can actually finish.
   const hardCeilingMs = 150000;
   let waited = 0;
-  while (isJobRunning && waited < hardCeilingMs) {
+  while (runningJobCount > 0 && waited < hardCeilingMs) {
     // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     waited += pollIntervalMs;
   }
 
-  if (isJobRunning) {
-    logger.warn(`Shutdown hard ceiling (${hardCeilingMs}ms) reached with a job still in flight. Exiting anyway.`);
+  if (runningJobCount > 0) {
+    logger.warn(
+      `Shutdown hard ceiling (${hardCeilingMs}ms) reached with ${runningJobCount} job(s) still in flight. Exiting anyway.`
+    );
   } else {
     logger.info('No job in flight. Shutting down cleanly.');
   }
