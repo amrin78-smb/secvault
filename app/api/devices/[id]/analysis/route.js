@@ -8,6 +8,34 @@ import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (/[",\n\r]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+function buildCsv(rows) {
+  const headers = ['Severity', 'Finding Type', 'Rule Sequence', 'Rule Name', 'Action', 'Detail', 'Remediation'];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        csvEscape(r.severity),
+        csvEscape(r.finding_type),
+        csvEscape(r.sequence_number),
+        csvEscape(r.rule_name),
+        csvEscape(r.action),
+        csvEscape(r.detail),
+        csvEscape(r.remediation),
+      ].join(',')
+    );
+  }
+  return lines.join('\r\n');
+}
+
 // GET /api/devices/[id]/analysis
 // Returns rule hygiene findings for one device, joined with the affected rule,
 // ordered by severity (critical -> high -> medium -> info) then finding_type,
@@ -22,6 +50,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request, { params }) {
   try {
     const { id } = params;
+    const { searchParams } = new URL(request.url);
+    const format = searchParams.get('format');
 
     if (!isValidUuid(id)) {
       return Response.json({ error: 'Invalid device id' }, { status: 400 });
@@ -54,6 +84,17 @@ export async function GET(request, { params }) {
         [id]
       ),
     ]);
+
+    if (format === 'csv') {
+      const csv = buildCsv(rows);
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="rule-analysis-${id}.csv"`,
+        },
+      });
+    }
 
     const byType = {};
     const bySeverity = {};

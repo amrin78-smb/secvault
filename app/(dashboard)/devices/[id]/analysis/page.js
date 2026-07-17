@@ -10,6 +10,7 @@ import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
 import FindingTypeBadge from '../../../../../components/analysis/FindingTypeBadge';
 import RunAnalysisButton from '../../../../../components/analysis/RunAnalysisButton';
 import FindingsBarChart from '../../../../../components/analysis/FindingsBarChart';
+import RuleStatsBarChart from '../../../../../components/analysis/RuleStatsBarChart';
 import CleanupTab from '../../../../../components/analysis/CleanupTab';
 import OptimizationTab from '../../../../../components/analysis/OptimizationTab';
 import ReorderTab from '../../../../../components/analysis/ReorderTab';
@@ -94,19 +95,30 @@ async function getFindingTypeCounts(dbPool, deviceId) {
 // Rule-level stats direct from firewall_rules -- ManageEngine-style
 // Allowed/Denied/Inactive/Total, computed independently of the findings
 // engine (a device can have rules with zero findings).
+//
+// nat_count added 2026-07-19 for RuleStatsBarChart / the NAT StatCard tile --
+// firewall_rules.nat_enabled already existed in the schema (used by no UI
+// until now).
 async function getRuleStats(dbPool, deviceId) {
   const result = await dbPool.query(
     `SELECT
        COUNT(*)::int AS total_rules,
        COUNT(*) FILTER (WHERE action IN ('allow', 'permit', 'accept'))::int AS allowed_count,
        COUNT(*) FILTER (WHERE action IN ('deny', 'drop', 'reject', 'block'))::int AS denied_count,
-       COUNT(*) FILTER (WHERE enabled = false)::int AS inactive_count
+       COUNT(*) FILTER (WHERE enabled = false)::int AS inactive_count,
+       COUNT(*) FILTER (WHERE nat_enabled = true)::int AS nat_count
      FROM firewall_rules
      WHERE device_id = $1`,
     [deviceId]
   );
   return (
-    result.rows[0] || { total_rules: 0, allowed_count: 0, denied_count: 0, inactive_count: 0 }
+    result.rows[0] || {
+      total_rules: 0,
+      allowed_count: 0,
+      denied_count: 0,
+      inactive_count: 0,
+      nat_count: 0,
+    }
   );
 }
 
@@ -231,6 +243,9 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             <Badge color={RISK_BAND_COLOR[riskScore.band]}>
               Risk: {RISK_BAND_LABEL[riskScore.band]} ({riskScore.score})
             </Badge>
+            <a href={`/api/devices/${device.id}/analysis?format=csv`} className="btn btn-secondary">
+              Export CSV
+            </a>
             <RunAnalysisButton deviceId={device.id} />
           </>
         }
@@ -249,13 +264,49 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
       {tab === 'summary' && (
         <>
+          {/* ⛔ 2026-07-19: every tile below that has a real filtered
+              destination is now a link -- "Denied Rules" links to
+              action=deny,drop,reject,block (buildFilters() in both
+              devices/[id]/rules/page.js and the sibling API route now accept
+              a comma-separated action list via `= ANY(...)`, added
+              specifically for this so the link's result set actually matches
+              what this tile counted), "Any-to-Any"/"Logging Disabled" link
+              into the Findings tab pre-filtered by finding_type (already
+              supported), "NAT Enabled" is a new tile (ruleStats.nat_count,
+              from firewall_rules.nat_enabled -- collected but never surfaced
+              in any UI until now). "Total Rules" links to the unfiltered
+              rule list. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-            <StatCard label="Total Rules" value={ruleStats.total_rules} />
-            <StatCard label="Allowed Rules" value={ruleStats.allowed_count} color="var(--green)" />
-            <StatCard label="Denied Rules" value={ruleStats.denied_count} color="var(--red)" />
-            <StatCard label="Inactive Rules" value={ruleStats.inactive_count} />
-            <StatCard label="Allowed Any-to-Any" value={findingTypeCounts.any_any} color="var(--red)" />
-            <StatCard label="Logging Disabled" value={findingTypeCounts.log_disabled} color="var(--text-muted)" />
+            <Link href={`/devices/${device.id}/rules`} style={{ textDecoration: 'none' }}>
+              <StatCard label="Total Rules" value={ruleStats.total_rules} />
+            </Link>
+            <Link href={`/devices/${device.id}/rules?action=allow`} style={{ textDecoration: 'none' }}>
+              <StatCard label="Allowed Rules" value={ruleStats.allowed_count} color="var(--green)" />
+            </Link>
+            <Link
+              href={`/devices/${device.id}/rules?action=deny,drop,reject,block`}
+              style={{ textDecoration: 'none' }}
+            >
+              <StatCard label="Denied Rules" value={ruleStats.denied_count} color="var(--red)" />
+            </Link>
+            <Link href={`/devices/${device.id}/rules?enabled=false`} style={{ textDecoration: 'none' }}>
+              <StatCard label="Inactive Rules" value={ruleStats.inactive_count} />
+            </Link>
+            <Link href={`/devices/${device.id}/rules?nat=true`} style={{ textDecoration: 'none' }}>
+              <StatCard label="NAT Enabled" value={ruleStats.nat_count || 0} color="var(--blue)" />
+            </Link>
+            <Link
+              href={`/devices/${device.id}/analysis?tab=findings&finding_type=any_any`}
+              style={{ textDecoration: 'none' }}
+            >
+              <StatCard label="Allowed Any-to-Any" value={findingTypeCounts.any_any} color="var(--red)" />
+            </Link>
+            <Link
+              href={`/devices/${device.id}/analysis?tab=findings&finding_type=log_disabled`}
+              style={{ textDecoration: 'none' }}
+            >
+              <StatCard label="Logging Disabled" value={findingTypeCounts.log_disabled} color="var(--text-muted)" />
+            </Link>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
@@ -277,7 +328,10 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             </div>
           </div>
 
-          <FindingsBarChart counts={findingTypeCounts} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16 }}>
+            <RuleStatsBarChart ruleStats={ruleStats} findingTypeCounts={findingTypeCounts} />
+            <FindingsBarChart counts={findingTypeCounts} />
+          </div>
         </>
       )}
 

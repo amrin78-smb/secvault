@@ -6,20 +6,35 @@ export const dynamic = 'force-dynamic';
 // Builds a parameterized WHERE clause + params array for the shared filter set used by
 // both the JSON listing and the CSV export. Never interpolates raw query-param values
 // into SQL — every filter value goes in as a bound parameter.
+// ⛔ Extended 2026-07-19: `action` now accepts a comma-separated list (e.g.
+// `action=deny,drop,reject`), matched via `= ANY($N::text[])` — see the
+// identical comment in the sibling page's own buildFilters() (this file's
+// established convention is duplicating this helper across page + API route
+// rather than sharing it, since Next.js page/route files aren't importable
+// modules for each other). Also added `nat=true`/`nat=false`.
 function buildFilters(deviceId, searchParams) {
   const conditions = ['device_id = $1'];
   const params = [deviceId];
 
   const action = searchParams.get('action');
   if (action) {
-    params.push(action);
-    conditions.push(`action = $${params.length}`);
+    const actions = action.split(',').map((a) => a.trim()).filter(Boolean);
+    if (actions.length > 0) {
+      params.push(actions);
+      conditions.push(`action = ANY($${params.length}::text[])`);
+    }
   }
 
   const enabled = searchParams.get('enabled');
   if (enabled === 'true' || enabled === 'false') {
     params.push(enabled === 'true');
     conditions.push(`enabled = $${params.length}`);
+  }
+
+  const nat = searchParams.get('nat');
+  if (nat === 'true' || nat === 'false') {
+    params.push(nat === 'true');
+    conditions.push(`nat_enabled = $${params.length}`);
   }
 
   const zone = searchParams.get('zone');

@@ -26,20 +26,39 @@ function joinArray(value) {
 
 // Builds a parameterized WHERE clause + params array — never interpolates raw query
 // param values into SQL, only bound parameters.
+//
+// ⛔ Extended 2026-07-19: `action` now accepts a comma-separated list (e.g.
+// `action=deny,drop,reject`), matched via `= ANY($N::text[])` instead of
+// plain `=` — added so the Rule Analysis Summary tab's "Denied Rules"
+// StatCard (which counts action IN ('deny','drop','reject','block'), see
+// getRuleStats() in devices/[id]/analysis/page.js) can link to a filtered
+// view that actually matches what it counted, rather than only the single
+// literal 'deny' action. A bare single value (no comma) still works exactly
+// as before — ANY() over a 1-element array is equivalent to `=`. Also added
+// `nat=true`, for the new "NAT Enabled" stat/chart bar.
 function buildFilters(deviceId, searchParams) {
   const conditions = ['device_id = $1'];
   const params = [deviceId];
 
   const action = searchParams?.action;
   if (action) {
-    params.push(action);
-    conditions.push(`action = $${params.length}`);
+    const actions = action.split(',').map((a) => a.trim()).filter(Boolean);
+    if (actions.length > 0) {
+      params.push(actions);
+      conditions.push(`action = ANY($${params.length}::text[])`);
+    }
   }
 
   const enabled = searchParams?.enabled;
   if (enabled === 'true' || enabled === 'false') {
     params.push(enabled === 'true');
     conditions.push(`enabled = $${params.length}`);
+  }
+
+  const nat = searchParams?.nat;
+  if (nat === 'true' || nat === 'false') {
+    params.push(nat === 'true');
+    conditions.push(`nat_enabled = $${params.length}`);
   }
 
   const zone = searchParams?.zone;
@@ -148,9 +167,10 @@ export default async function DeviceRulesPage({ params, searchParams }) {
           <select id="action" name="action" defaultValue={searchParams?.action || ''} className="input">
             <option value="">All actions</option>
             <option value="allow">Allow</option>
-            <option value="deny">Deny</option>
-            <option value="drop">Drop</option>
-            <option value="reject">Reject</option>
+            <option value="deny,drop,reject,block">Denied (deny/drop/reject/block)</option>
+            <option value="deny">Deny only</option>
+            <option value="drop">Drop only</option>
+            <option value="reject">Reject only</option>
           </select>
         </div>
         <div className="form-field">
@@ -159,6 +179,14 @@ export default async function DeviceRulesPage({ params, searchParams }) {
             <option value="">All</option>
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
+          </select>
+        </div>
+        <div className="form-field">
+          <label htmlFor="nat">NAT</label>
+          <select id="nat" name="nat" defaultValue={searchParams?.nat || ''} className="input">
+            <option value="">All</option>
+            <option value="true">NAT enabled</option>
+            <option value="false">NAT disabled</option>
           </select>
         </div>
         <div className="form-field">
