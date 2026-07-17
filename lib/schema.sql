@@ -47,6 +47,16 @@ CREATE TABLE IF NOT EXISTS device_versions (
   collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ⛔ Added 2026-07-19, found in a follow-up bug sweep: Fortinet SSH and Palo
+-- Alto SSH both successfully parse a serial number out of the device
+-- (parseSystemStatus()'s `serial` field / sshParser's system-info `serial`
+-- field respectively) and then getVersion()'s own return object dropped it
+-- before it ever reached collectAndStore()'s INSERT — there was no column
+-- to put it in anyway. `ADD COLUMN IF NOT EXISTS` (not part of the CREATE
+-- TABLE above, which only applies on first creation) so this lands on an
+-- already-deployed table too.
+ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS serial TEXT;
+
 -- Tier 1 multi-vendor support: generic management port (API vendors default to
 -- 443, SSH vendors to 22, applied in the adapter when NULL). smc_port remains
 -- Forcepoint-specific. ADD COLUMN IF NOT EXISTS is idempotent — safe to re-run.
@@ -65,6 +75,35 @@ CREATE TABLE IF NOT EXISTS device_credentials (
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_credentials_device_id ON device_credentials(device_id);
+
+-- ⛔ Added 2026-07-19, found in a follow-up bug sweep: setCredential()'s
+-- DELETE+INSERT transaction is atomic for a SINGLE request, but nothing
+-- ever prevented two CONCURRENT setCredential() calls for the same
+-- (device_id, credential_type) — e.g. a double-submit of the credential
+-- rotation form — from each independently deleting-then-inserting and
+-- leaving two rows behind, with getCredential()'s `ORDER BY created_at DESC
+-- LIMIT 1` silently picking one by timestamp with no DB-enforced guarantee.
+-- Dedupe (keep only the newest row per pair, matching what getCredential()
+-- would already have picked) BEFORE adding the constraint, so this is safe
+-- to run on a production database that may have accumulated a duplicate —
+-- claude_readonly/nocvault_readonly cannot read this table (correctly) so
+-- this could not be verified clean ahead of time; both statements are
+-- idempotent, safe to re-run on every update.
+DELETE FROM device_credentials a USING device_credentials b
+WHERE a.device_id = b.device_id
+  AND a.credential_type = b.credential_type
+  AND a.created_at < b.created_at;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'device_credentials_device_id_credential_type_key'
+  ) THEN
+    ALTER TABLE device_credentials
+      ADD CONSTRAINT device_credentials_device_id_credential_type_key
+      UNIQUE (device_id, credential_type);
+  END IF;
+END $$;
 
 -- ─────────────────────────────────────────
 -- CONFIG

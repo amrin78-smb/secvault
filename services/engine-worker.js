@@ -235,7 +235,32 @@ async function collectForDevice(device) {
   return null;
 }
 
+// ⛔ Overlap guards added 2026-07-19, found in a follow-up bug sweep:
+// node-cron 3.x has NO overlap protection of its own — each scheduled tick
+// fires unconditionally, even if the previous invocation of the SAME job is
+// still running. This was a latent risk even before the VPN job existed
+// (rule-version-pull can run for minutes on a real fleet, in principle
+// overlapping its own next hourly-multiple tick), but became a routinely
+// REACHABLE one once vpn-session-poll started running every 5-59 MINUTES:
+// (a) vpn-session-poll can overlap itself if a poll cycle runs long, and
+// (b) vpn-session-poll and rule-version-pull can run concurrently against
+// the SAME device, opening two separate SSH/REST sessions to one firewall
+// at once — lib/adapters/fortinet/api.js's own comment notes a concurrent
+// admin-session cap that a second overlapping session can hit. Two simple
+// boolean flags (not a full per-device lock — that's a bigger change,
+// deferred) close the two most reachable cases: a job never re-enters
+// itself, and vpn-session-poll (a coarse, can-wait-a-cycle trend signal)
+// defers a whole tick rather than run concurrently with the
+// higher-priority, authoritative rule-version-pull job.
+let ruleVersionPullInFlight = false;
+let vpnPollInFlight = false;
+
 async function runRuleVersionPullJob() {
+  if (ruleVersionPullInFlight) {
+    logger.warn('Job [rule-version-pull] previous run still in progress — skipping this tick.');
+    return;
+  }
+  ruleVersionPullInFlight = true;
   const start = Date.now();
   logger.info('Job [rule-version-pull] starting.');
   try {
@@ -277,6 +302,8 @@ async function runRuleVersionPullJob() {
   } catch (err) {
     const durationMs = Date.now() - start;
     logger.error(`Job [rule-version-pull] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  } finally {
+    ruleVersionPullInFlight = false;
   }
 }
 
@@ -290,6 +317,18 @@ async function runRuleVersionPullJob() {
 // to other devices in the same run — same per-device isolation as
 // runRuleVersionPullJob above.
 async function runVpnSessionPollJob() {
+  if (vpnPollInFlight) {
+    logger.warn('Job [vpn-session-poll] previous run still in progress — skipping this tick.');
+    return;
+  }
+  if (ruleVersionPullInFlight) {
+    // A coarse trend signal can wait one cycle; rule-version-pull is the
+    // higher-priority, authoritative collection and shouldn't share SSH/REST
+    // sessions to the same devices with a concurrent VPN poll.
+    logger.info('Job [vpn-session-poll] rule-version-pull is in progress — deferring this tick.');
+    return;
+  }
+  vpnPollInFlight = true;
   const start = Date.now();
   logger.info('Job [vpn-session-poll] starting.');
   try {
@@ -336,6 +375,8 @@ async function runVpnSessionPollJob() {
   } catch (err) {
     const durationMs = Date.now() - start;
     logger.error(`Job [vpn-session-poll] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  } finally {
+    vpnPollInFlight = false;
   }
 }
 
