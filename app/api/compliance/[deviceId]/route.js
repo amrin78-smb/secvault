@@ -3,7 +3,10 @@ import { isValidUuid } from '../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
-const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST'];
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: see the identical fix
+// + comment in app/api/compliance/fleet/route.js — this list had the same
+// drift (missing 'SANS'), same silent-drop consequence.
+const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST', 'SANS'];
 
 function csvEscape(value) {
   if (value === null || value === undefined) return '';

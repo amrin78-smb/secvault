@@ -36,13 +36,20 @@ const STAT_TILE_COLOR = {
   attention: 'var(--text-muted)',
 };
 
-// Display/sort order requested for this tab specifically: worst band first,
-// but with 'attention' placed between 'medium' and 'low' -- distinct from
-// RULE_BAND_RANK inside riskScore.js (which ranks 'attention' as the LOWEST
-// concern, for "is this worse than that" comparisons elsewhere). Both are
-// correct for their own purpose; this is purely a display-order concern.
+// Display/sort order for this tab: worst band first, with 'attention'
+// placed between 'medium' and 'low' (an uninspected rule deserves more
+// attention than a confirmed-low-risk one) -- distinct from RULE_BAND_RANK
+// inside riskScore.js (which ranks 'attention' as the LOWEST concern, for
+// "is this worse than that" comparisons elsewhere). Both are correct for
+// their own purpose.
+//
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: BAND_ORDER (drives the
+// stat-tile render order) used to list 'low' BEFORE 'attention', while
+// SORT_RANK (drives the table's actual row order) ranks 'attention' BEFORE
+// 'low' -- the tiles and the table below them visually contradicted each
+// other on this one pair. BAND_ORDER now matches SORT_RANK's ordering.
 const SORT_RANK = { critical: 0, high: 1, medium: 2, attention: 3, low: 4 };
-const BAND_ORDER = ['critical', 'high', 'medium', 'low', 'attention'];
+const BAND_ORDER = ['critical', 'high', 'medium', 'attention', 'low'];
 
 // Same array-to-readable-string cell convention as
 // devices/[id]/rules/page.js's joinArray() -- mirrored here rather than

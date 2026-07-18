@@ -2,7 +2,17 @@ import { pool } from '../../../../lib/db';
 
 export const dynamic = 'force-dynamic';
 
-const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST'];
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: this list had drifted
+// out of step with components/compliance/ComplianceMatrix.js's real STANDARDS
+// export (which gained 'SANS') — both page.js server components import from
+// ComplianceMatrix.js correctly and were never affected, but this route's
+// own buildStandardStats() silently dropped every SANS-tagged finding via
+// its `if (!stats[standard]) continue` guard, so the JSON this route returns
+// had no SANS key at all. Kept as a literal array, not an import, per this
+// file's own established "duplicated query/shape, not shared" convention —
+// just now back in sync. Watch for this drifting again if a standard is
+// ever added/removed.
+const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST', 'SANS'];
 
 function emptyStandardStats() {
   const stats = {};

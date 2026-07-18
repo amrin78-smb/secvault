@@ -196,9 +196,18 @@ export default async function DeviceCompliancePage({ params }) {
   }, null);
 
   // Derived from the already-fetched `findings` array -- no new query needed.
-  // Feeds each StandardCard's "Failed Checks" quick-list; hrefs jump to the
-  // matching StandardTabs tab via the #STANDARD_KEY hash (StandardTabs.js's
-  // hashchange listener picks this up even for a same-page link click).
+  // Feeds each StandardCard's "Failed Checks" quick-list.
+  //
+  // ⛔ Changed 2026-07-18: a user explicitly reported that clicking one of
+  // these named checks only scrolled to the shared per-standard table
+  // further down this SAME page instead of opening something dedicated to
+  // that one check -- these now link to the new per-check detail page
+  // (app/(dashboard)/compliance/[deviceId]/checks/[findingId]/page.js), a
+  // REAL page navigation, not a same-page anchor. `viewMoreHref` below
+  // ("+N more") intentionally still points at the `#STANDARD_KEY` anchor --
+  // there's no single check to deep-link to for "see the rest", so the
+  // same-page tab view (with StandardTabs.js's scroll-into-view fix) remains
+  // the right destination for that one link.
   const failedChecksByStandard = {};
   for (const s of STANDARDS) failedChecksByStandard[s.key] = [];
   for (const f of findings) {
@@ -208,7 +217,7 @@ export default async function DeviceCompliancePage({ params }) {
       failedChecksByStandard[key].push({
         id: f.id,
         name: f.name,
-        href: `/compliance/${device.id}#${key}`,
+        href: `/compliance/${device.id}/checks/${f.id}`,
       });
     }
   }
@@ -286,7 +295,7 @@ export default async function DeviceCompliancePage({ params }) {
       {findings.length === 0 ? (
         <EmptyState message="No compliance findings yet — run an audit to see results." />
       ) : (
-        <StandardTabs standards={STANDARDS} findings={findings} />
+        <StandardTabs standards={STANDARDS} findings={findings} deviceId={device.id} />
       )}
     </div>
   );

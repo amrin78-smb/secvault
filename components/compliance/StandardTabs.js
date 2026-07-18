@@ -1,10 +1,10 @@
 'use client';
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
-import RuleEvidenceTable from './RuleEvidenceTable';
 
 // Deliberate deviation from this app's usual `?tab=` server-navigation
 // convention (see app/(dashboard)/devices/[id]/analysis/page.js) -- see
@@ -43,15 +43,10 @@ const STATUS_FILTERS = [
   { key: 'pass', label: 'Pass' },
 ];
 
-export default function StandardTabs({ standards, findings }) {
+export default function StandardTabs({ standards, findings, deviceId }) {
   const [active, setActive] = useState(standards?.[0]?.key || '');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [expanded, setExpanded] = useState({});
   const containerRef = useRef(null);
-
-  function toggleExpanded(id) {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
 
   // Nice-to-have deep-link support: /compliance/[deviceId]#CIS_V8 preselects
   // that tab, so the fleet matrix's per-standard chip links
@@ -180,61 +175,35 @@ export default function StandardTabs({ standards, findings }) {
               const sev = SEVERITY_BADGE[f.severity] || SEVERITY_BADGE.info;
               const st = STATUS_BADGE[f.status] || STATUS_BADGE.na;
               const hasEvidence = f.status === 'fail' && Array.isArray(f.ruleEvidence) && f.ruleEvidence.length > 0;
-              const isExpanded = !!expanded[f.id];
               return (
-                <Fragment key={f.id}>
-                  <tr>
-                    <td title={f.name}>{f.name}</td>
-                    <td>
-                      <Badge color={sev.color}>{sev.label}</Badge>
-                    </td>
-                    <td>
-                      <Badge color={st.color}>{st.label}</Badge>
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
-                      {f.detail || '—'}
-                      {hasEvidence && (
-                        <div style={{ marginTop: 4 }}>
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(f.id)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              color: 'var(--primary)',
-                              fontSize: 'var(--text-sm)',
-                              textDecoration: 'underline',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {isExpanded
-                              ? 'Hide'
-                              : `Show ${f.ruleEvidence.length} offending rule${f.ruleEvidence.length === 1 ? '' : 's'}`}
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ color: 'var(--text-secondary)' }} title={f.remediationGuidance || ''}>
-                      {f.remediationGuidance || '—'}
-                    </td>
-                  </tr>
-                  {hasEvidence && isExpanded && (
-                    <tr key={`${f.id}-evidence`}>
-                      <td colSpan={5} style={{ background: 'var(--bg-primary)', padding: 12 }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <RuleEvidenceTable rules={f.ruleEvidence} />
-                          {f.remediationGuidance && (
-                            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-                              <strong style={{ color: 'var(--text-primary)' }}>Recommendation: </strong>
-                              {f.remediationGuidance}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                <tr key={f.id}>
+                  <td title={f.name}>
+                    {deviceId ? (
+                      <Link href={`/compliance/${deviceId}/checks/${f.id}`} style={{ color: 'var(--primary)' }}>
+                        {f.name}
+                      </Link>
+                    ) : (
+                      f.name
+                    )}
+                  </td>
+                  <td>
+                    <Badge color={sev.color}>{sev.label}</Badge>
+                  </td>
+                  <td>
+                    <Badge color={st.color}>{st.label}</Badge>
+                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
+                    {f.detail || '—'}
+                    {hasEvidence && (
+                      <div style={{ marginTop: 4, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                        {f.ruleEvidence.length} offending rule{f.ruleEvidence.length === 1 ? '' : 's'} — click the check name for details
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }} title={f.remediationGuidance || ''}>
+                    {f.remediationGuidance || '—'}
+                  </td>
+                </tr>
               );
             })}
           </tbody>
