@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.10.0': [
+    'Rebuilt the main Dashboard with 10 new fleet-wide widgets: CVE severity (with day-over-day trend), risk by vulnerability category, top risky devices, vendor distribution, ruleset health, compliance score, recent critical alerts, recent activity, and recent config changes — all built from real, already-collected data, none simulated.',
+    'New "Risk by Category" grouping classifies CVEs by CWE (Remote Code Execution, Privilege Escalation, Information Disclosure, Denial of Service) instead of just severity.',
+    'Fixed Palo Alto rule hit counts always showing 0 — both the SSH and API transports now query the device for real hit counts (single-vsys devices only; multi-vsys is skipped rather than risk attributing one vsys\'s count to another).',
+    'Added two compliance checks that were missing compared to other firewall analyzers: explicit deny-all rule present, and unwanted ICMP blocked.',
+  ],
   '2.9.1': [
     'Fixed a real bug behind many wrong compliance failures on Palo Alto devices: the checker was reading configuration from the wrong location internally, so settings that were genuinely correct (logging enabled, HTTP management off, DNS configured) showed as failed. Also fixed the same class of bug for several Fortinet checks that use "enable"/"disable" wording. Verified directly against real device data before shipping.',
   ],

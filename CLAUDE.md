@@ -250,7 +250,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `device_credentials` | AES-256-GCM encrypted creds (credStore) | 2 |
 | `device_configs` | Config snapshots (jsonb) | 2 |
 | `firewall_rules` | Normalized rule extraction across all vendors | 2 |
-| `advisories` | Normalized CVE advisory store (all feed sources) | 1 |
+| `advisories` | Normalized CVE advisory store (all feed sources). `cwe_ids TEXT[]` + `vulnerability_category TEXT` (added Dashboard Rebuild — see `lib/engines/vulnerabilityCategory.js`) extracted from each feed's own raw CWE shape at ingest, vendor-ownership-guarded on conflict same as every other non-neutral column | 1 |
 | `advisory_conditions` | Applicability predicate rules (curated data, evaluated by Phase 6 engine) | 1 |
 | `device_cve_assessments` | Per-device CVE match results + priority bands | 3 (built in this Phase 1+2 pass ahead of schedule for the matcher/prioritization engines) |
 | `vendor_recommended_releases` | Manually-maintained mature/preferred release table | 2/3 |
@@ -266,6 +266,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `audit_checks` | Compliance check library (curated, seeded via `lib/auditChecksSeed.js`) — `standards` is `TEXT[]`, not singular, since one check can score against multiple standards at once | 7 ✅ |
 | `vpn_session_snapshots` | Polled active-VPN-session-count timestamps (Fortinet only — `getVpnSessionSummary()`), a coarse substitute for real syslog-derived VPN usage telemetry | VPN Summary ✅ |
 | `audit_findings` | Per-device compliance results (pass/fail/warning/na), DELETE+reinsert per device per run like `rule_analysis_results` | 7 ✅ |
+| `fleet_dashboard_snapshots` | One row per calendar day (`snapshot_date` UNIQUE), fleet-wide CVE severity counts + compliance scores — feeds the main Dashboard's day-over-day deltas, populated by a daily `engine-worker.js` job | Dashboard Rebuild ✅ |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
 Tables marked "not yet created" are part of the full architecture (see repo root architecture doc in project history) and will be added via new `CREATE TABLE IF NOT EXISTS` statements in their respective phases — do not pre-create empty tables for features that are not yet implemented.
@@ -763,6 +764,14 @@ The predicate evaluator is now live. Semantics (do not change without documentin
 - Predicate types: `config_key_exists` / `config_value_equals` / `config_value_matches` (path missing → `'no'`),
   `feature_enabled`, and `port_exposed` / `admin_access_from_zone` (deep-scan; **not found → `'unknown'`**, because
   absence of evidence in a parsed config is not provable absence)
+- **Every lookup goes through `getLatestConfigParsed()`, which normalizes the config root via
+  `normalizeConfigParsedRoot()` before any predicate ever sees it** — see "Compliance predicate engine
+  was reading the wrong root for Palo Alto" below for why this exists. Both this engine and
+  `configAuditor.js`'s compliance checks call the same `getLatestConfigParsed()`, so the fix applies to
+  CVE applicability and compliance simultaneously.
+- A THIRD predicate type, `ruleset_property`, exists only in `configAuditor.js` (not this file) — see
+  the Compliance Engine section below for why it's separate (it reads `firewall_rules`, not
+  `config_parsed`, so `evaluatePredicate()`'s config-path model doesn't apply to it).
 - `versionMatcher.runMatchForAllDevices()` loads conditions once per vendor and the latest `config_parsed` per
   device, and passes them into `matchDeviceToAdvisories(..., applicability)` — the 5th param is optional; legacy
   callers omitting it get `'unknown'` everywhere
@@ -1097,6 +1106,37 @@ Resolved via a `pass_when: 'yes'|'no'` field inside each check's `predicate_conf
   the "unknown never collapses to no" rule above). Found and fixed during this phase's own review
   before it shipped — an earlier version silently defaulted an invalid `pass_when` to `'yes'`.
 
+### A third predicate type — `ruleset_property` (Dashboard Rebuild round, 2026-07-18)
+
+Found via direct comparison against a competing firewall analyzer's compliance report on the same
+real devices (see "Bug-sweep fixes... third-party comparison" below): two checks it has that
+SecVault lacked — "explicit deny-all rule present" and "unwanted ICMP blocked" — are POSITIVE
+existence questions ("does a required pattern exist SOMEWHERE in the ruleset?"), not the single-path
+config lookups `evaluatePredicate()` (`applicability.js`) is built for, and not the "a bad pattern
+should NOT exist" shape `rule_scan` checks already cover via Phase 5's `rule_analysis_results`. A
+third predicate type, evaluated entirely inside `lib/engines/configAuditor.js` (NOT
+`applicability.js` — it reads `firewall_rules` directly, not `config_parsed`, so the config-path
+predicate model doesn't apply):
+- `predicate_config: { predicate_type: 'ruleset_property', property: 'has_explicit_deny_all' |
+  'blocks_icmp' }`
+- `runComplianceAuditForDevice()` bulk-loads `SELECT action, src_addresses, dst_addresses, services,
+  enabled FROM firewall_rules WHERE device_id = $1` once per device (only when the device has rules
+  at all — `ruleCount === 0` short-circuits to `'na'`, matching every other check's "nothing to
+  measure" convention) and reuses it for both checks, rather than re-querying per check.
+- `hasExplicitDenyAll(rules)`: true when an enabled rule's action is a deny-family action
+  (`deny`/`drop`/`reject`/`block`) AND every one of its src/dst/service fields resolves to an "any"
+  alias (`ANY_ALIASES` — reuses the same any-detection vocabulary `ruleAnalysis.js`'s `isAny()`
+  already established, so a rule this check calls "deny-all" is the same thing the Phase 5 `any_any`
+  finding would call "any-any" if it were an allow rule).
+- `blocksIcmp(rules)`: true when an enabled deny-family rule's `services` array contains an entry
+  matching `/\bicmp\b/i` — a plain substring/word-boundary test, not full protocol-object resolution
+  (an ICMP block expressed only via an unresolved custom service-object name won't be detected; same
+  "resolved literals only" limitation the CIDR-aware `fieldCovers()` work already accepts elsewhere
+  in this codebase).
+- Both checks are `severity: 'medium'`/`'low'` respectively, `vendor: null` (apply to every vendor —
+  rule fields are already normalized to `NormalizedRule` shape by every adapter, so no vendor-specific
+  path is needed, unlike almost every other check in this file).
+
 ### `audit_checks.standards` is `TEXT[]`, not a single value
 
 The compliance spec's own standard-mapping ("logging checks → PCI_DSS + ISO_27001," "access-control
@@ -1108,7 +1148,9 @@ tables). `node-postgres` returns this as a real JS array automatically — no pa
 
 ### Seed library — `lib/auditChecksSeed.js`, called from `lib/migrate.js`
 
-28 checks (8 shared concepts × 2 vendors, since Fortinet's and Palo Alto's `config_parsed` trees
+44 checks as of the Dashboard Rebuild round (42 vendor-specific/shared config-path checks + the 2
+new `ruleset_property` checks above, which are `vendor: null` and apply fleet-wide — see that
+section for what they check). The original count was 28 checks (8 shared concepts × 2 vendors, since Fortinet's and Palo Alto's `config_parsed` trees
 have completely different shapes per their different parsers — a single vendor-NULL row with one
 `path` can't realistically match both — plus 6 Fortinet-specific + 6 Palo Alto-specific), following
 `lib/migrate.js`'s existing `seedDefaultAdmin()` pattern: an idempotent JS function
@@ -2880,6 +2922,175 @@ specifically, until the SSH adapter is confirmed to (or extended to) actually co
 not attempted here without live SSH access to verify what command would surface it. Cisco ASA's
 compliance checks remain entirely unverified against real data — no Cisco ASA device exists in this
 deployment to check against.
+
+## Main Dashboard Rebuild (v2.10.0, 2026-07-18)
+
+The main `/` Dashboard was data-thin (device cards + one summary row + a feed-sync footer). Rebuilt
+around a ChatGPT-generated mockup the user shared as inspiration, but scoped to ONLY what's honestly
+buildable from data this app actually collects — no simulated/placeholder numbers anywhere. Built as
+10 new standalone widget components (`components/dashboard/*.js`), each an independent async server
+component doing its own `pool.query` (this app's established "server components query the DB
+directly" convention), assembled into `app/(dashboard)/page.js` alongside the pre-existing device-card
+grid and feed-sync footer (both kept, still real/useful data).
+
+Built via 5 parallel fan-out agents once the shared foundation (schema + CWE engine + snapshot job)
+was done by the primary agent first — per this file's own "high-risk/core work done by primary agent,
+sub-agents fan out only after foundation work is committed" convention. Every agent owned a disjoint
+file list (frozen contracts, zero file collisions), and every agent's diff was personally read and
+verified against real column names/exports before being trusted, same standard as every prior
+sub-agent round in this codebase.
+
+### New: CWE-derived vulnerability categorization (`lib/engines/vulnerabilityCategory.js`)
+
+CVE severity alone (Critical/High/Medium/Low) doesn't answer "what KIND of risk is this" — the
+Dashboard's "Risk by Category" widget needed a real categorization, not a guessed one. Built on CWE
+(Common Weakness Enumeration), which all three feed sources already carry in their raw responses but
+this app never extracted before now:
+- `CATEGORIES`: `RCE` ("Remote Code Execution"), `PRIV_ESC` ("Privilege Escalation"),
+  `INFO_DISCLOSURE` ("Information Disclosure"), `DOS` ("Denial of Service"), `OTHER` ("Other" — the
+  honest fallback for an unmapped/ambiguous CWE or a CVE with no CWE data at all, never guessed into
+  one of the first four).
+- `CWE_CATEGORY_MAP`: a curated, deliberately non-exhaustive map of ~35 real, well-known CWE IDs
+  (e.g. CWE-78 OS Command Injection → RCE, CWE-269 Improper Privilege Management → PRIV_ESC, CWE-200
+  Information Exposure → INFO_DISCLOSURE, CWE-400 Uncontrolled Resource Consumption → DOS). An
+  unmapped CWE correctly falls to `'Other'` rather than being force-fit into the nearest bucket.
+- `categorizeCwes(cweIds)`: when a CVE carries multiple CWEs mapping to different categories, picks
+  by fixed priority RCE > PRIV_ESC > INFO_DISCLOSURE > DOS > OTHER — the worst-case category wins,
+  consistent with this app's general "conservative/worse-case" bias (same instinct as the tri-state
+  applicability rules).
+- **Three independent raw-CWE-extraction functions, one per feed shape** (this app's established
+  per-file-duplication convention, not a shared parser): `lib/feeds/nvd.js`'s `extractCweIds()` (NVD
+  API 2.0's `weaknesses[].description[].value`) and `extractCweIdsFromCveRecord()` (CVE Record Format
+  5.x's `containers.cna/adp[].problemTypes[].descriptions[].cweId`, used by both the CIRCL fallback
+  in `nvd.js` AND natively by `lib/feeds/paloalto.js`, an independent duplicate copy per the same
+  convention); `lib/feeds/fortinet.js`'s CSAF 2.0 extraction, shape-different again — `cwe` is a
+  SINGLE object per `vulnerabilities[]` entry, not an array (`vulnerabilities[].cwe.id`), collected
+  into a per-CVE `Set` across every FortiOS-scoped entry merged for that CVE.
+- `upsertAdvisory()` in all three feed files stores `cwe_ids`/`vulnerability_category` using the same
+  vendor-ownership-guarded `CASE WHEN advisories.vendor = EXCLUDED.vendor THEN EXCLUDED.x ELSE
+  advisories.x END` pattern every other non-neutral advisories column already uses (the 2026-07-19
+  cross-vendor-collision fix — see the CVE engine correctness bullet in the third bug-sweep pass).
+- `backfillVulnerabilityCategories(pool)`: a one-time-but-safely-rerunnable migrate-time backfill
+  (`lib/migrate.js`, best-effort/non-fatal unlike `seedAuditChecks()`) that derives `cwe_ids`/
+  `vulnerability_category` for every EXISTING `advisories` row from its own already-stored `raw_data`
+  — no re-fetch from any feed needed, only rows where `vulnerability_category IS NULL` are touched
+  (cheap on every re-run after the first).
+- `advisories.cwe_ids TEXT[]` / `advisories.vulnerability_category TEXT`: added via BOTH the
+  `CREATE TABLE IF NOT EXISTS` body AND a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — per
+  this file's own documented "CREATE TABLE IF NOT EXISTS is a no-op on an existing table" incident,
+  every new column on an existing table needs both forms or an already-deployed server never gets it.
+
+### New: daily fleet snapshot job (`lib/engines/dashboardSnapshot.js`, `fleet_dashboard_snapshots`)
+
+The Dashboard's CVE-severity "vs yesterday" delta and the Compliance Score widget's trend both need a
+point-in-time fleet-wide snapshot, not just a live query — `fleet_dashboard_snapshots` (one row per
+calendar day, `snapshot_date DATE UNIQUE`) is populated by a new `services/engine-worker.js` job,
+`runDashboardSnapshotJob()`, scheduled via `cron.schedule('10 0 * * *', ...)` (a fixed daily time, NOT
+a configurable `*_INTERVAL_*` env var like the other 3 jobs — a once-a-day snapshot doesn't need
+operator tuning), plus run once on startup alongside the existing 3 jobs. No in-flight guard needed
+(pure read-then-upsert, no adapter/device I/O, can't meaningfully overlap itself in any harmful way).
+`computeAndStoreDashboardSnapshot(pool)` computes:
+- `computeFleetCveSeverity(pool)`: fleet-wide (active devices only) CVE counts bucketed by
+  `advisories.cvss_score` — **NULL/unparseable scores are excluded from every bucket, never guessed
+  into `'low'`**, same tri-state-honesty discipline as the Applicability Tri-State Default.
+- `computeFleetComplianceScores(pool)`: fleet-wide overall + per-standard `scorePct`, the EXACT same
+  formula as `app/(dashboard)/compliance/page.js`'s `scorePctFromCounts` (pass / (pass+fail+warning),
+  `na` excluded from the denominator, `null` — never `0` — when nothing is measurable).
+- `ON CONFLICT (snapshot_date) DO UPDATE` — idempotent within the same calendar day, so a manual
+  re-run or a retry after a transient failure always reflects the latest computation, never a
+  duplicate row.
+- Both `CveSeveritySummary.js` and `ComplianceScoreWidget.js` fall back to a LIVE on-the-fly
+  computation (mirroring this file's exact query/formula, so the two numbers never structurally
+  disagree) when the snapshot table is empty — a normal "day one, job hasn't run yet" state, not an
+  error, so the widget is never blank just because the daily job hasn't fired yet.
+
+### The 10 new widgets (`components/dashboard/*.js`) — none wired into any OTHER page
+
+All standalone, all real data, all following this app's tri-state-honesty conventions:
+- `CveSeveritySummary` — live fleet CVE severity counts + "vs yesterday" delta (only shown when a
+  fresh-enough snapshot exists — stale/missing snapshot silently omits the delta rather than showing
+  a misleading one).
+- `TopRiskyDevices` — top-N active devices by latest `device_risk_history` score, `INNER JOIN LATERAL`
+  (deliberately not LEFT — a device with no risk history yet has nothing to rank and simply doesn't
+  appear, rather than showing a fake zero).
+- `VendorDistribution` — active-device count by vendor, plain CSS bars (no chart library — a simple
+  proportion view doesn't need one).
+- `RulesetOverview` — fleet-wide rule totals + 4 finding-type counts as flat StatCard tiles, NOT a
+  donut/pie, with an explicit on-page disclaimer that the 4 finding counts are NOT a partition of
+  Total (a rule can carry more than one finding type at once) — a donut would visually misrepresent
+  that as a breakdown.
+- `ComplianceScoreWidget` — big `StandardDonut` gauge for the pooled overall score + a compact
+  per-standard list, reading the latest snapshot with the live-fallback described above.
+- `RiskByCategory` — CVE counts by the new CWE-derived category, fixed display order imported from
+  `vulnerabilityCategory.js`'s own `CATEGORIES` (never hardcoded a second time), zero-count categories
+  still render as a visible zero-width row rather than being hidden.
+- `DeviceStatusSummary` — titled "Device Connectivity", NOT "Devices Online" — SecVault has no
+  real-time health-check polling, only `devices.last_connectivity_ok` (the last test result), so the
+  widget carries an explicit "not real-time monitoring" caption rather than overclaiming live status.
+- `RecentCriticalAlerts` — most recent fleet-wide `patch_now` CVE assessments, query copied verbatim
+  (not reinvented) from `app/api/events/route.js`'s `fetchPatchNow()` — same JOINs, same
+  `d.active = true` filter, same "open" definition (bare `'new'`/unset only).
+- `RecentActivityFeed` — fleet-wide top-N `activity_log` rows, rendering conventions (date format,
+  `actionLabel()` snake_case→Title Case transform) copied verbatim from
+  `components/analysis/TrackingTab.js` so this widget and the per-device Tracking tab read identically
+  for the same underlying rows.
+- `ConfigChangesWidget` — fleet-wide config-change summary over a trailing N-day window (default 7).
+  `config_diffs.diff` is genuinely a structured jsonb column (`{added, removed, modified}` —
+  `lib/engines/configDiff.js`'s `diffConfigs()`), so the Added/Removed/Modified breakdown is real data
+  read via `jsonb_array_length()`, not a fabricated split — confirmed by reading `configDiff.js`
+  first rather than assuming only free-text `change_summary` existed.
+
+Layout in `app/(dashboard)/page.js`: the original top-row StatCards (Devices/Patch Now/Scheduled/
+Monitor) and the device-card grid + feed-sync footer are UNCHANGED — the 10 new widgets are inserted
+between them as a full-width CVE-severity card, then 4 two-column responsive rows pairing
+RulesetOverview+ComplianceScoreWidget, RiskByCategory+VendorDistribution, TopRiskyDevices+
+DeviceStatusSummary, RecentCriticalAlerts+ConfigChangesWidget, then a full-width RecentActivityFeed.
+Some widgets self-wrap in `<Card>` (their own internal heading), others (`CveSeveritySummary`,
+`TopRiskyDevices`, `VendorDistribution`) return bare content and are wrapped in `<Card><CardHeader>
+<CardTitle>...` by the assembling page — a deliberate per-widget choice made by whichever agent built
+it, reconciled at assembly time rather than forced into one convention retroactively.
+
+### Palo Alto `hit_count` was hardcoded to 0 on both transports (found via third-party comparison)
+
+Found by comparing SecVault's rule analysis against a competing firewall analyzer's own report for
+the same real devices (IDC FW, TUS) — confirmed live: 752/752 and 64/64 rules showing zero hits on
+Palo Alto specifically (every other Tier-1 vendor's adapter does populate `hit_count`, or explicitly
+documents why it can't — see "Known Limitations" above for Fortinet-over-SSH/Sangfor). Root cause:
+`hit_count` was never even attempted — `parser.js`'s `parseRuleEntry()` set it to a literal `0` with a
+comment noting the config-get API doesn't carry hit counts, and no code anywhere called the real
+operational command that does.
+
+**Fix, both transports, ADDITIVE enrichment only — never affects `getRules()`'s core contract:**
+- **XML/API** (`api.js`/`parser.js`/`index.js`): new `api.getRuleHitCount(conn, vsysName)` issues the
+  op command `show rule-hit-count vsys <vsys> rule-base security rules all`. `parser.parseRuleHitCount()`
+  does a bounded depth-first walk for any node carrying a rule-identifying `@_name` plus a sibling key
+  matching `/hit.?count/i` — deliberately shape-agnostic (doc-derived, unverified response shape;
+  guessing one fixed nesting path risked silently returning nothing if the guess is wrong, the same
+  "search deep, don't assume the absolute path" approach `findSecurityRulesContainers()` already uses).
+- **SSH** (`ssh.js`/`sshParser.js`): `show rule-hit-count vsys <vsys-name> rule-base security rules
+  all` over the CLI. `sshParser.resolveVsysNames()` looks for a `vsys { <name>: {...} }` wrapper in
+  the parsed brace tree, falling back to the PAN-OS default `vsys1` name when none is found (the
+  confirmed-live shape for this deployment's single-vsys device). `parseRuleHitCountOutput()` is a
+  line-based table parser: accepts a row only when it has ≥2 whitespace-delimited columns AND at
+  least one column after the first is purely numeric — anything else (headers, separators,
+  unrecognized shapes) is skipped, never guessed at.
+- **Both transports run enrichment ONLY on the unambiguous single-vsys path, and skip it entirely
+  (not "best-effort attempt it anyway") on the multi-vsys path** — rule names are unique per vsys, not
+  globally (`parseRulesDeep()`'s own existing comment), so merging a per-vsys hit-count map back onto
+  a flattened multi-vsys rule list by name alone risks attributing one vsys's count to a DIFFERENT
+  vsys's identically-named rule. A wrong hit count is worse than a missing one — same "no ruleset is
+  safer than the wrong one" principle CLAUDE.md's `getRules()` rule already applies, extended here to
+  enrichment data.
+- **The whole enrichment step is wrapped in try/catch that only warns, never throws** — a hit-count
+  fetch failure leaves every rule at its prior default (`hit_count: 0`) and never blocks or alters the
+  already-built, already-returned rule list. This is a deliberately DIFFERENT failure contract from
+  `getRules()` itself (which must throw on a real retrieval failure) — a missing hit-count is a
+  degraded-but-safe state, not a data-loss risk.
+- ⚠️ **Doc-derived, NOT yet live-verified** — no live PAN-OS device has confirmed either transport's
+  exact `show rule-hit-count` response/output shape for this codebase. Both transports log the full
+  raw response/output the first time this runs (`[PaloAlto Debug] rule-hit-count raw response:` /
+  `[PaloAlto SSH Debug] rule-hit-count raw output:`) — same "first live connect is the real
+  verification step" posture as every other unverified Palo Alto field in this file.
 
 ### ⚠️ Bug-sweep fixes (2026-07-19, fourth pass) — full-app sweep alongside a feature round
 

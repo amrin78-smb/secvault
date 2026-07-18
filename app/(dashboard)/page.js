@@ -4,9 +4,26 @@ import DeviceCard from '../../components/devices/DeviceCard';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import StatCard from '../../components/ui/StatCard';
+import Card, { CardHeader, CardTitle, CardBody } from '../../components/ui/Card';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
+import CveSeveritySummary from '../../components/dashboard/CveSeveritySummary';
+import TopRiskyDevices from '../../components/dashboard/TopRiskyDevices';
+import VendorDistribution from '../../components/dashboard/VendorDistribution';
+import RulesetOverview from '../../components/dashboard/RulesetOverview';
+import ComplianceScoreWidget from '../../components/dashboard/ComplianceScoreWidget';
+import RiskByCategory from '../../components/dashboard/RiskByCategory';
+import DeviceStatusSummary from '../../components/dashboard/DeviceStatusSummary';
+import RecentCriticalAlerts from '../../components/dashboard/RecentCriticalAlerts';
+import RecentActivityFeed from '../../components/dashboard/RecentActivityFeed';
+import ConfigChangesWidget from '../../components/dashboard/ConfigChangesWidget';
 
 export const dynamic = 'force-dynamic';
+
+// Two-column responsive row used to pair widgets that are naturally
+// half-width on a wide screen and stack to one column on a narrow one —
+// matches the grid convention every individual widget already uses
+// internally (see e.g. RulesetOverview.js's tile grid).
+const twoColGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 };
 
 async function getFleetSummary(dbPool) {
   const result = await dbPool.query(
@@ -95,6 +112,51 @@ export default async function DashboardPage() {
         <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" />
         <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>CVE Severity (Fleet)</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <CveSeveritySummary />
+        </CardBody>
+      </Card>
+
+      <div style={twoColGrid}>
+        <RulesetOverview />
+        <ComplianceScoreWidget />
+      </div>
+
+      <div style={twoColGrid}>
+        <RiskByCategory />
+        <Card>
+          <CardHeader>
+            <CardTitle>Vendor Distribution</CardTitle>
+          </CardHeader>
+          <CardBody>
+            <VendorDistribution />
+          </CardBody>
+        </Card>
+      </div>
+
+      <div style={twoColGrid}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Top Risky Devices</CardTitle>
+          </CardHeader>
+          <CardBody>
+            <TopRiskyDevices />
+          </CardBody>
+        </Card>
+        <DeviceStatusSummary />
+      </div>
+
+      <div style={twoColGrid}>
+        <RecentCriticalAlerts />
+        <ConfigChangesWidget />
+      </div>
+
+      <RecentActivityFeed />
 
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
