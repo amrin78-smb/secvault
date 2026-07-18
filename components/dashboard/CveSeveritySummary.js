@@ -29,6 +29,7 @@ export default async function CveSeveritySummary() {
   }
 
   const comparison = pickComparisonSnapshot(snapshots);
+  const comparisonGapDays = comparison ? daysAgo(comparison.snapshot_date) : null;
   const snapshotKey = { critical: 'cve_critical', high: 'cve_high', medium: 'cve_medium', low: 'cve_low' };
 
   return (
@@ -36,7 +37,7 @@ export default async function CveSeveritySummary() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
         {SEVERITY.map(({ key, label, color }) => {
           const sub = comparison
-            ? deltaLabel(live[key] - Number(comparison[snapshotKey[key]] ?? 0))
+            ? deltaLabel(live[key] - Number(comparison[snapshotKey[key]] ?? 0), comparisonGapDays)
             : undefined;
           return <StatCard key={key} label={label} value={live[key]} color={color} sub={sub} />;
         })}
@@ -108,8 +109,16 @@ function pickComparisonSnapshot(snapshots) {
   return daysAgo(mostRecent.snapshot_date) === 0 ? secondMostRecent : mostRecent;
 }
 
-function deltaLabel(delta) {
-  if (delta > 0) return `+${delta} since yesterday`;
-  if (delta < 0) return `${delta} since yesterday`;
-  return 'No change since yesterday';
+// gapDays is how old the COMPARISON snapshot actually is (daysAgo() of the
+// row pickComparisonSnapshot() chose), not assumed to be 1. Found
+// 2026-07-18: if the daily snapshot job is ever down for a stretch (e.g.
+// 10 days) and then resumes, pickComparisonSnapshot() can legitimately pick
+// a comparison row that's several days old -- the label must say so rather
+// than always claiming "since yesterday", which would misrepresent a
+// multi-day delta as a single day's change.
+function deltaLabel(delta, gapDays) {
+  const suffix = gapDays === 1 ? 'since yesterday' : `vs ${gapDays}d ago`;
+  if (delta > 0) return `+${delta} ${suffix}`;
+  if (delta < 0) return `${delta} ${suffix}`;
+  return `No change ${suffix}`;
 }

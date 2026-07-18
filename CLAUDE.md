@@ -3092,6 +3092,106 @@ operational command that does.
   `[PaloAlto SSH Debug] rule-hit-count raw output:`) — same "first live connect is the real
   verification step" posture as every other unverified Palo Alto field in this file.
 
+### ⚠️ Bug-sweep fixes (2026-07-18, fifth pass) — sweep of the Dashboard Rebuild round itself
+
+Requested immediately after the Dashboard Rebuild round shipped ("do a complete bug sweep after to
+make sure all ok") — 4 parallel read-only finder agents, one per subsystem of that round (dashboard
+widgets + snapshot job; CWE categorization + feed extraction; an adversarial second-opinion re-review
+of the Palo Alto hit-count fix; the new `ruleset_property` compliance checks), followed by personal
+verification of every finding against the actual code before fixing anything, same standard as every
+prior bug-sweep pass in this file.
+
+**CRITICAL — `lib/feeds/paloalto.js`'s `upsertAdvisory()` never persisted `cwe_ids`/
+`vulnerability_category` at all.** `normalizePaloAltoRecord()` correctly computed both values, but
+the INSERT column list, VALUES placeholders, `ON CONFLICT DO UPDATE SET` clause, and parameter array
+all omitted them entirely (unlike `nvd.js`/`fortinet.js`, whose `upsertAdvisory()` copies were
+correctly extended) — every one of the ~346 Palo Alto PSIRT advisories synced with `vulnerability_category`
+silently left `NULL` forever on every direct feed sync, only self-correcting via the next
+`migrate.js` run's backfill. Fixed to match `nvd.js`'s pattern exactly (12th/13th params, matching
+`CASE WHEN` guard).
+
+**LOW — `lib/feeds/fortinet.js`'s HTML-table-scrape fallback path** (used only when CSAF is
+missing/broken for an advisory) omitted `cwe_ids`/`vulnerability_category` from its returned record
+entirely, degrading to `NULL` on upsert rather than the codebase's own established explicit-`'Other'`
+convention for "genuinely nothing to categorize." Fixed: explicit `cwe_ids: []`,
+`vulnerability_category: categorizeCwes([])` — self-corrects if the same advisory is later ingested
+via CSAF, since the vendor-match `CASE WHEN` guard lets that later sync overwrite it.
+
+**MEDIUM — `CveSeveritySummary.js`'s "vs yesterday" delta label was hardcoded regardless of how
+stale the comparison snapshot actually was.** `pickComparisonSnapshot()` only validates the freshness
+of the MOST RECENT snapshot before picking a comparison row — if the daily snapshot job were ever
+down for a stretch (say 10 days) and then resumed, the function correctly picks the second-most-recent
+row as the comparison baseline, but the label still unconditionally said "since yesterday," silently
+misrepresenting a multi-day delta as a one-day one. Fixed: `deltaLabel()` now takes the actual
+`daysAgo()` of the chosen comparison row and renders `"vs Nd ago"` for anything other than a genuine
+1-day gap.
+
+**HIGH — `configAuditor.js`'s new `rule-has-explicit-deny-all` check false-failed on Cisco ASA.**
+ASA ACEs encode "all IP protocols" as the literal token `ip` in the services field (`access-list
+OUTSIDE_IN extended deny ip any any` → `services: ['ip']`, never normalized to `"any"`) — the single
+most common real-world ASA explicit-deny-all pattern. `isAnyField(['ip'])` returned `false` because
+`'ip'` isn't in the shared `ANY_ALIASES` vocabulary, so a genuinely compliant device reported FAIL.
+Fixed with a service-field-only `SERVICE_ANY_ALIASES` extension (`ANY_ALIASES` + `ip`/`ip4`/`ip6`),
+passed to `isAnyField()` only for the services check — deliberately NOT folded into the shared
+`ANY_ALIASES` used for address fields, since `ip` as a protocol-wildcard token is a different concept
+from an address wildcard and merging them would risk misclassifying an address object literally
+named "ip." `ruleAnalysis.js`'s own `any_any` finding has the identical blind spot for `permit ip any
+any` on ASA — deliberately NOT fixed there in this pass, since that has a much wider blast radius
+(every existing ASA shadow/redundant/any_any finding) and needs its own independently-verified
+change, not a side effect of this one.
+
+**MEDIUM — the same round's `rule-blocks-icmp` check missed FortiOS's own default `ALL_ICMP`/
+`ALL_ICMP6` builtin service objects.** The original `\bicmp\b` pattern's word-boundary does not fire
+between `_` and `I` (underscore is a `\w` character), so a FortiGate rule using FortiOS's
+out-of-the-box "block all ICMP" object reported FAIL despite being correctly configured. Fixed to
+`/(^|[^a-z])icmp/i` — only requires the character immediately before "icmp" to not be a letter
+(start-of-string, underscore, digit, hyphen all qualify), matching `ALL_ICMP`/`ALL_ICMP6`/`icmpv6`
+while still excluding an unrelated name that merely contains "icmp" as a non-leading letter run.
+
+**LOW — `isAnyField()` didn't filter empty/whitespace-only entries before checking array length**,
+unlike `ruleAnalysis.js`'s own `normList()`, which the header comment claims this duplicates — an
+array like `['', ' ']` was treated as NOT-any (length 1) instead of any (all entries empty). Fixed to
+filter empty strings first, matching the vocabulary it's meant to mirror.
+
+**HIGH (structural, unverified — no live multi-vsys Palo Alto device exists in this deployment) —
+the SSH-transport Palo Alto hit-count enrichment's vsys-ambiguity detection was less shape-tolerant
+than the rule-finder it was meant to protect.** `sshParser.js`'s `resolveVsysNames()`/
+`walkForVsysNames()` only recognizes one exact `vsys { <name>: {...} }` wrapper shape, unlike
+`findSecurityRulesContainers()`'s deliberately deep, shape-agnostic search (which already has to
+tolerate a bare single-vsys root, a `vsys.entry` wrapper, `shared`, or a Panorama pre/post-rulebase
+shape). On a genuinely multi-vsys device whose real vsys-wrapper didn't match the one shape
+`walkForVsysNames()` recognizes, it would silently fall back to `['vsys1']` as if that were
+CONFIRMED single-vsys — `_enrichHitCounts()` would then treat this as the safe case and merge
+vsys1's hit counts onto same-named rules that were actually collected from a DIFFERENT vsys
+container, exactly the cross-vsys corruption this whole enrichment step was built to prevent. Fixed:
+`parseSecurityRules()` now also returns the parsed `tree` it already builds internally (avoiding a
+redundant second full re-parse of the config text as a side benefit), and `ssh.js`'s
+`_enrichHitCounts()` now gates FIRST on `containersFound !== 1` (the same signal `getRules()` itself
+already trusts to decide whether the ruleset is unambiguous) before even attempting vsys-name
+resolution — "exactly one container" is at least as trustworthy as anything the narrower vsys-name
+walk could independently conclude, and any value other than 1 skips enrichment entirely rather than
+guessing. Also corrected an overstated comment on the XML/API transport's sibling code path, which
+had claimed the queried vsys was "unambiguous" when what's actually true is narrower: that path is
+only reached when the hardcoded `api.DEFAULT_VSYS` xpath alone already yielded rules, which is safe
+to enrich against that same vsys regardless of whether the device is otherwise multi-vsys — not
+because topology was confirmed.
+
+**Investigated, flagged but NOT changed — already-honest, inherent doc-derived-guess limitations,
+not something a code change can safely resolve without a live device**: `parseRuleHitCountOutput()`'s
+"first purely-numeric column after the name wins" heuristic (SSH) has no way to distinguish a real
+hit-count column from an earlier unrelated numeric column (e.g. a rule position/ID) if PAN-OS's real
+table layout happens to have one — the exact response shape remains unverified. `collectHitCounts()`
+(XML/API) does an unscoped name+regex walk that could in principle misattribute a value from an
+unrelated summary node, or let a nested duplicate silently overwrite a correct one. Both are
+consequences of the deliberately shape-agnostic "search deep, don't assume the path" design this
+codebase already uses elsewhere for doc-derived Palo Alto parsing, both are already flagged in-code
+as unverified, and both need a live device's actual raw output (already logged on first connect) to
+resolve correctly rather than trading one guess for another. The extra SSH session per collect that
+hit-count enrichment now costs (a second `_run()` call beyond the cached config-pull session) was
+also flagged as a real but low-severity performance tradeoff, not a correctness issue — not changed,
+since consolidating it into the existing cached session would mean restructuring already-verified
+session-caching code for a best-effort enrichment step.
+
 ### ⚠️ Bug-sweep fixes (2026-07-19, fourth pass) — full-app sweep alongside a feature round
 
 Requested as "do the full compliance/rule-analysis/admin-account feature round PLUS a full feature

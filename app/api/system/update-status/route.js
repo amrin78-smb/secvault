@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.10.1': [
+    'Bug sweep on the Dashboard Rebuild round: fixed Palo Alto PSIRT-sourced CVEs never getting their risk category saved (Risk by Category widget was missing that vendor\'s data), a false "fail" on the new deny-all-rule check for Cisco ASA devices, a false "fail" on the new ICMP-blocked check for FortiGate devices using the default block-ICMP object, and a Palo Alto rule hit-count edge case that could attribute one virtual firewall\'s hit counts to another\'s identically-named rule.',
+  ],
   '2.10.0': [
     'Rebuilt the main Dashboard with 10 new fleet-wide widgets: CVE severity (with day-over-day trend), risk by vulnerability category, top risky devices, vendor distribution, ruleset health, compliance score, recent critical alerts, recent activity, and recent config changes — all built from real, already-collected data, none simulated.',
     'New "Risk by Category" grouping classifies CVEs by CWE (Remote Code Execution, Privilege Escalation, Information Disclosure, Denial of Service) instead of just severity.',
