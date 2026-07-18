@@ -57,6 +57,7 @@ const { pool } = require('../lib/db');
 const { runFullSync } = require('../lib/feeds');
 const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
 const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapters');
+const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSnapshot');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -380,6 +381,29 @@ async function runVpnSessionPollJob() {
   }
 }
 
+// Fleet Dashboard trend snapshot — one row/day (see lib/schema.sql's
+// fleet_dashboard_snapshots comment). Pure query-only work (no per-device
+// SSH/REST sessions), so unlike rule-version-pull/vpn-session-poll it needs
+// no in-flight guard against those jobs — it can't contend for a device
+// connection with either. Runs once daily at a fixed time (not a
+// configurable interval like the other jobs — "once a day" is the actual
+// requirement here, a settings-driven N-hour interval would just add drift
+// risk for no benefit).
+async function runDashboardSnapshotJob() {
+  const start = Date.now();
+  logger.info('Job [dashboard-snapshot] starting.');
+  try {
+    const { cve, compliance } = await computeAndStoreDashboardSnapshot(pool);
+    const durationMs = Date.now() - start;
+    logger.info(
+      `Job [dashboard-snapshot] finished in ${durationMs}ms — CVE critical=${cve.critical} high=${cve.high} medium=${cve.medium} low=${cve.low}, compliance overall=${compliance.overall}.`
+    );
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [dashboard-snapshot] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
@@ -460,7 +484,15 @@ async function scheduleJobs() {
     runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
   });
 
-  scheduledTasks = [feedTask, configTask, vpnTask];
+  // Fixed daily time (00:10 UTC) rather than a configurable interval — see
+  // runDashboardSnapshotJob()'s own comment for why.
+  logger.info('Scheduling [dashboard-snapshot] with cron "10 0 * * *" (daily).');
+  const dashboardSnapshotTask = cron.schedule('10 0 * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
+  });
+
+  scheduledTasks = [feedTask, configTask, vpnTask, dashboardSnapshotTask];
 }
 
 async function main() {
@@ -475,6 +507,7 @@ async function main() {
   await runTrackedJob(runFeedSyncAndMatchJob, 'feed-sync-and-match');
   await runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
   await runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
+  await runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
 
   await scheduleJobs();
 
