@@ -2556,9 +2556,27 @@ real diff before integrating (per this file's own "Verify agent diffs before int
   `BUILTIN\Administrators:R` — a machine-wide location readable by any account on the box.
   `Update-SecVault.ps1` and `lib/updateCheck.js` both now check this path FIRST, ahead of their
   existing fallbacks (which remain, for an install that hasn't been re-run since this fix landed).
-  **Not yet confirmed against a real "Update Now" click** — same caveat this file's Live Validation
-  Status section applies to vendor adapters: doc-derived reasoning, first live exercise is the real
-  verification step.
+  **✅ Exercised for real 2026-07-18, and it failed as anticipated**: a production server (installed
+  before this fix existed) had "Update Now" run, report success, and silently leave the app on the
+  old version — `C:\ProgramData\SecVault\ssh\secvault_deploy` genuinely did not exist there
+  (`Test-Path` confirmed `False` directly on the box), because that path is only ever POPULATED by
+  `Install-SecVault.ps1` at install time, and nothing re-runs that step on update. A manual
+  `& Update-SecVault.ps1` run by the interactive admin worked fine throughout (their own profile had
+  a working fallback copy), which is exactly what masked the gap until the in-app button was actually
+  tried. Fixed on that server by hand (copied the repo-relative `installer\dependencies\secvault_deploy`
+  up to the machine-wide path with the same `icacls` lockdown `Install-SecVault.ps1` uses). See
+  `Update-SecVault.ps1`'s own self-heal fix immediately below for why no OTHER already-deployed
+  server should need the same manual fix.
+- **`Update-SecVault.ps1` self-heal, added the same day**: right after the deploy-key resolution
+  block (the one that picks machine-wide → repo-relative → user-profile, in that order), a new check
+  fires whenever the RESOLVED key wasn't the machine-wide one — it copies whichever fallback key was
+  actually used up to `C:\ProgramData\SecVault\ssh\secvault_deploy` and re-applies the same
+  `SYSTEM:R` + `BUILTIN\Administrators:R` lockdown `Install-SecVault.ps1` uses, right then, before
+  continuing. Best-effort (a failure here is logged but never blocks the update — the run already has
+  a working key via the fallback it found). This means the NEXT scheduled "Update Now" click after
+  any manual/interactive update run will already have a working machine-wide key, with no manual
+  intervention — the exact gap that caused this incident closes itself on the very next successful
+  run, on this server or any other already-deployed one carrying the same gap.
 
 **Alerts / dashboard data correctness:**
 - `app/api/notifications/summary/route.js`'s patch_now count and `recentPatchNow` list queries had no

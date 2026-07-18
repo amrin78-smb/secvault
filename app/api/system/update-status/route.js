@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.8.3': [
+    'Fixed the in-app updater silently failing on servers installed before an earlier fix — the "Update Now" button now self-heals its own deploy-key setup on the next run instead of requiring a manual server-side fix.',
+  ],
   '2.8.2': [
     'The per-device Compliance page no longer requires scrolling past the summary cards to reach the full check list — that table now lives on its own page ("View All Checks"), one click away instead of stacked below.',
   ],

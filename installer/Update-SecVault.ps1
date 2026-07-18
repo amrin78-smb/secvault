@@ -247,6 +247,41 @@ if (Test-Path $deployKeyMachineWide) {
     exit 1
 }
 
+# ⛔ Self-heal added 2026-07-18, found live on a real server (thaiunion
+# deployment): a server installed/last-Install-SecVault.ps1'd before the
+# machine-wide-copy fix above landed never gets it retroactively --
+# Install-SecVault.ps1 only places $deployKeyMachineWide at INSTALL time,
+# and nothing re-runs that step on update. This server hit exactly that
+# gap: `& Update-SecVault.ps1` run manually/interactively worked fine (the
+# admin's own profile had a working fallback copy), while the in-app
+# "Update Now" button's SYSTEM-scheduled run failed silently on the exact
+# check above (SYSTEM has no access to either fallback) -- confirmed via
+# Test-Path directly on the server. Fixed by hand once on that server; this
+# self-heal exists so no OTHER already-deployed server (or this one again,
+# if the file is ever lost) needs the same manual one-off fix. Whenever a
+# fallback key resolved instead of the machine-wide one, copy it up now,
+# locked down the exact same way Install-SecVault.ps1 does. Best-effort --
+# a failure here must not block THIS run (it already has a working key via
+# the fallback), only logged so it stays visible.
+if ($deployKey -ne $deployKeyMachineWide) {
+    Write-Log "  [INFO] Machine-wide deploy key missing -- self-healing from $deployKey"
+    try {
+        $machineKeyDir = Split-Path $deployKeyMachineWide -Parent
+        if (-not (Test-Path $machineKeyDir)) {
+            New-Item -ItemType Directory -Force -Path $machineKeyDir | Out-Null
+        }
+        if (Test-Path $deployKeyMachineWide) {
+            icacls $deployKeyMachineWide /reset | Out-Null
+        }
+        Copy-Item -Path $deployKey -Destination $deployKeyMachineWide -Force
+        $out = icacls $deployKeyMachineWide /inheritance:r /grant:r 'SYSTEM:R' /grant:r 'BUILTIN\Administrators:R' 2>&1
+        $out | Write-Host
+        Write-Log "  [OK] Deploy key self-healed to $deployKeyMachineWide -- future SYSTEM-scheduled updates will find it directly."
+    } catch {
+        Write-Log "  [WARN] Could not self-heal machine-wide deploy key: $($_.Exception.Message) -- this run continues fine using $deployKey, but the in-app SYSTEM-scheduled update path may still fail until this is resolved."
+    }
+}
+
 # Route git's SSH transport straight at this key file via a per-invocation
 # core.sshCommand override (step 3 below), instead of relying on whichever
 # account's ~/.ssh/config happens to reference it -- same fix, same
