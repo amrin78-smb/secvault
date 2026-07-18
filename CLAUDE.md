@@ -2715,6 +2715,20 @@ this standard's checks" — that one link's same-page-scroll behavior is correct
 `findingId` from an older audit run legitimately 404s here (findings are DELETE+reinserted every
 run) — handled as a clear "this result is from an earlier run, go back" message, not a raw 404.
 
+**Follow-up, same day (2026-07-18):** the per-check page above closed HALF the "everything crammed
+onto one scrolling page" complaint — the other half was that `compliance/[deviceId]/page.js` still
+stacked the full multi-standard browsable table (`StandardTabs`) below the 5 `StandardCard`s, so
+reaching it meant scrolling past all of them regardless. Split into two pages:
+`compliance/[deviceId]/page.js` is now JUST the `StandardCard` grid + Network Details (its
+`getFindings()` query is correspondingly slimmer — it never needed `matched_rule_ids`/rule evidence,
+only `status`/`standards`/`name` for the cards' stats and failed-check quick-list); the table moved
+to a new `compliance/[deviceId]/standards/page.js`, reached via each card's "+N more" link or a new
+"View All Checks" header action. `viewMoreHref` now points there (with the `#STANDARD_KEY` hash
+still preselecting a tab, same `StandardTabs.js` mechanism as before) instead of a same-page anchor.
+The print report (`compliance/[deviceId]/print/page.js`) was deliberately left untouched — showing
+every standard in one continuous scroll is the correct, intentional design for a printable document,
+not the same "too much on one screen" problem the interactive page had.
+
 **Alerts subsystem (fresh-eyes pass — first re-audit since Phase 4, not touched by any of this
 session's other passes):**
 - None of `fetchNewFindings`/`fetchPatchNow`/`fetchConfigDiffs` (duplicated identically in

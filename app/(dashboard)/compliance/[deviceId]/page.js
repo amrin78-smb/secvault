@@ -3,32 +3,33 @@ import { pool } from '../../../../lib/db';
 import PageHeader from '../../../../components/ui/PageHeader';
 import Badge from '../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../components/ui/Card';
-import EmptyState from '../../../../components/ui/EmptyState';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
-import StandardTabs from '../../../../components/compliance/StandardTabs';
 import StandardCard from '../../../../components/compliance/StandardCard';
 import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
-// Per-device Compliance view. Same "server component queries the DB
-// directly for its own render" convention as the fleet page
-// (app/(dashboard)/compliance/page.js) and app/(dashboard)/alerts/page.js --
-// deliberately duplicates the same scorePct/aggregation formula the sibling
-// GET /api/compliance/[deviceId] route computes, rather than internally
-// fetching that route for this page's initial render (no page in this app
-// self-fetches its own paired API GET route -- checked across app/(dashboard)
-// before writing this). RunAuditButton still POSTs to the sibling
-// /run route -- that write path is exactly what API routes are for.
+// Per-device Compliance SUMMARY view — the StandardCard grid + Network
+// Details only. Same "server component queries the DB directly for its own
+// render" convention as the fleet page (app/(dashboard)/compliance/page.js)
+// and app/(dashboard)/alerts/page.js -- deliberately duplicates the same
+// scorePct/aggregation formula the sibling GET /api/compliance/[deviceId]
+// route computes, rather than internally fetching that route for this
+// page's initial render (no page in this app self-fetches its own paired
+// API GET route -- checked across app/(dashboard) before writing this).
+// RunAuditButton still POSTs to the sibling /run route -- that write path is
+// exactly what API routes are for.
 //
-// Standards tabs are client-side (StandardTabs.js, 'use client') rather than
-// this app's usual `?tab=` server-navigation convention (see
-// devices/[id]/analysis/page.js) -- deliberate deviation: switching
-// standards here only re-filters an ALREADY-FETCHED findings array (the API
-// contract returns every standard's findings in one response), there is no
-// new per-tab query the way analysis's cleanup/optimization/reorder/risk/
-// tracking tabs each run their own.
+// ⛔ Split 2026-07-18: this page used to ALSO render the full multi-standard
+// browsable table (StandardTabs) stacked below the cards -- a user reported
+// that made the page require scrolling past 5 summary cards just to reach
+// it. The table now lives on its own page
+// (compliance/[deviceId]/standards/page.js), one click away via each card's
+// "+N more" link or the "View All Checks" header action below. This page no
+// longer needs matched_rule_ids/rule-evidence resolution at all (that only
+// ever fed the table), so getFindings()/its query here is intentionally
+// slimmer than the standards page's own copy.
 
 function formatDateTime(value) {
   if (!value) return 'Never run';
@@ -50,52 +51,24 @@ async function getDevice(dbPool, id) {
   return result.rows[0] || null;
 }
 
+// Slimmer than the standards page's own copy of this query — this page only
+// ever needs status/standards/name for the cards' aggregate stats and
+// failed-check quick-list, never matched_rule_ids/rule evidence.
 async function getFindings(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT af.id, ac.id AS check_uuid, ac.check_id AS check_slug, ac.name, ac.severity,
-            ac.standards, af.status, af.detail, ac.remediation_guidance, af.detected_at,
-            af.matched_rule_ids
+    `SELECT af.id, ac.name, ac.standards, af.status, af.detected_at
      FROM audit_findings af
      JOIN audit_checks ac ON ac.id = af.check_id
-     WHERE af.device_id = $1
-     ORDER BY
-       CASE af.status WHEN 'fail' THEN 0 WHEN 'warning' THEN 1 WHEN 'pass' THEN 2 ELSE 3 END,
-       CASE ac.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
-       ac.name ASC`,
+     WHERE af.device_id = $1`,
     [deviceId]
   );
   return result.rows.map((r) => ({
     id: r.id,
-    checkId: r.check_uuid,
-    checkSlug: r.check_slug,
     name: r.name,
-    severity: r.severity,
     standards: Array.isArray(r.standards) ? r.standards : [],
     status: r.status,
-    detail: r.detail,
-    remediationGuidance: r.remediation_guidance,
     detectedAt: r.detected_at,
-    matchedRuleIds: Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [],
   }));
-}
-
-// Bulk-resolves every distinct firewall_rules row referenced across all
-// findings' matched_rule_ids into a Map(id -> row) -- one query shared by
-// every finding rather than a per-finding lookup, mirroring
-// lib/engines/configAuditor.js's own "one query, not per-check" convention
-// for loadRuleFindingsByType(). Returns an empty Map (never throws) when
-// there's nothing to resolve.
-async function getRuleEvidenceMap(dbPool, ruleIds) {
-  if (!ruleIds || ruleIds.length === 0) return new Map();
-  const result = await dbPool.query(
-    `SELECT id, rule_name, action, src_addresses, dst_addresses, services, src_zones, dst_zones
-     FROM firewall_rules
-     WHERE id = ANY($1::uuid[])`,
-    [ruleIds]
-  );
-  const map = new Map();
-  for (const row of result.rows) map.set(row.id, row);
-  return map;
 }
 
 // Distinct zone names seen across this device's collected rules (src_zones +
@@ -172,21 +145,7 @@ export default async function DeviceCompliancePage({ params }) {
     return notFound();
   }
 
-  const findingsRaw = await getFindings(pool, device.id);
-
-  // Flatten + dedupe every rule id referenced across all findings, then
-  // resolve them in ONE bulk query (see getRuleEvidenceMap above) rather than
-  // per-finding -- same "one shared query, not N" convention as
-  // configAuditor.js's loadRuleFindingsByType().
-  const allRuleIds = Array.from(
-    new Set(findingsRaw.flatMap((f) => f.matchedRuleIds || []))
-  );
-  const ruleMap = await getRuleEvidenceMap(pool, allRuleIds);
-  const findings = findingsRaw.map((f) => ({
-    ...f,
-    ruleEvidence: (f.matchedRuleIds || []).map((id) => ruleMap.get(id)).filter(Boolean),
-  }));
-
+  const findings = await getFindings(pool, device.id);
   const zones = await getDeviceZones(pool, device.id);
 
   const standards = aggregateStandards(findings);
@@ -196,18 +155,12 @@ export default async function DeviceCompliancePage({ params }) {
   }, null);
 
   // Derived from the already-fetched `findings` array -- no new query needed.
-  // Feeds each StandardCard's "Failed Checks" quick-list.
-  //
-  // ⛔ Changed 2026-07-18: a user explicitly reported that clicking one of
-  // these named checks only scrolled to the shared per-standard table
-  // further down this SAME page instead of opening something dedicated to
-  // that one check -- these now link to the new per-check detail page
-  // (app/(dashboard)/compliance/[deviceId]/checks/[findingId]/page.js), a
-  // REAL page navigation, not a same-page anchor. `viewMoreHref` below
-  // ("+N more") intentionally still points at the `#STANDARD_KEY` anchor --
-  // there's no single check to deep-link to for "see the rest", so the
-  // same-page tab view (with StandardTabs.js's scroll-into-view fix) remains
-  // the right destination for that one link.
+  // Feeds each StandardCard's "Failed Checks" quick-list, linking straight
+  // to the per-check detail page (a REAL page navigation) -- see that
+  // page's own header comment for why. `viewMoreHref` below ("+N more") now
+  // points at the new dedicated /standards page (see that file's header
+  // comment) instead of a same-page anchor -- this page no longer has an
+  // in-page table to scroll to at all.
   const failedChecksByStandard = {};
   for (const s of STANDARDS) failedChecksByStandard[s.key] = [];
   for (const f of findings) {
@@ -240,6 +193,9 @@ export default async function DeviceCompliancePage({ params }) {
         }
         actions={
           <>
+            <Link href={`/compliance/${device.id}/standards`} className="btn btn-secondary">
+              View All Checks
+            </Link>
             <a href={`/api/compliance/${device.id}?format=csv`} className="btn btn-secondary">
               Export CSV
             </a>
@@ -285,18 +241,12 @@ export default async function DeviceCompliancePage({ params }) {
               stats={standards[s.key]}
               failedChecks={failed.slice(0, 5)}
               failedChecksTotal={failed.length}
-              viewMoreHref={`/compliance/${device.id}#${s.key}`}
+              viewMoreHref={`/compliance/${device.id}/standards#${s.key}`}
               lastRunAt={lastRunAt}
             />
           );
         })}
       </div>
-
-      {findings.length === 0 ? (
-        <EmptyState message="No compliance findings yet — run an audit to see results." />
-      ) : (
-        <StandardTabs standards={STANDARDS} findings={findings} deviceId={device.id} />
-      )}
     </div>
   );
 }

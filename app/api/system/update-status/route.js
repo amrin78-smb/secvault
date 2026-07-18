@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.8.2': [
+    'The per-device Compliance page no longer requires scrolling past the summary cards to reach the full check list — that table now lives on its own page ("View All Checks"), one click away instead of stacked below.',
+  ],
   '2.8.1': [
     'Compliance: clicking a failed check now opens a dedicated page instead of scrolling to a shared table on the same page.',
     'Fixed the Alerts page and notification bell counting alerts for decommissioned devices forever, and a rule-analysis engine bug that could leave findings in a corrupted partial state if a database error happened mid-save.',
