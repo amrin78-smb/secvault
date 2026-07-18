@@ -414,6 +414,35 @@ CREATE TABLE IF NOT EXISTS device_risk_history (
 CREATE INDEX IF NOT EXISTS idx_drh_device_id ON device_risk_history(device_id);
 CREATE INDEX IF NOT EXISTS idx_drh_recorded_at ON device_risk_history(recorded_at);
 
+-- Fleet-wide dashboard trend snapshots (added 2026-07-18) -- one row per day,
+-- feeding the main Dashboard's day-over-day CVE-severity deltas/sparklines
+-- and month-over-month compliance-score trend. Deliberately ONE wide table
+-- rather than two (a CVE-severity table + a compliance-score table): both
+-- are fleet-wide, both are taken once a day by the SAME new engine-worker
+-- job (lib/engines/dashboardSnapshot.js), and there is no case where a
+-- caller wants one without the other -- splitting them would just mean two
+-- queries joined on the same snapshot_date instead of one.
+--
+-- snapshot_date is a DATE (not TIMESTAMPTZ) with a UNIQUE constraint so the
+-- daily job is naturally idempotent: ON CONFLICT (snapshot_date) DO UPDATE
+-- means re-running the job the same day (e.g. after a manual trigger, or a
+-- retry) overwrites that day's row with fresher counts instead of creating
+-- a duplicate -- a "snapshot" should reflect the LATEST state as of that
+-- calendar day, not the first time the job happened to run.
+CREATE TABLE IF NOT EXISTS fleet_dashboard_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  snapshot_date DATE NOT NULL UNIQUE,
+  cve_critical INTEGER NOT NULL DEFAULT 0,
+  cve_high INTEGER NOT NULL DEFAULT 0,
+  cve_medium INTEGER NOT NULL DEFAULT 0,
+  cve_low INTEGER NOT NULL DEFAULT 0,
+  compliance_overall_score INTEGER, -- nullable -- null when nothing is measurable yet, never 0 (see scorePctFromCounts's own null-vs-0 distinction elsewhere in this app)
+  compliance_by_standard JSONB NOT NULL DEFAULT '{}'::jsonb, -- {STANDARD_KEY: scorePct|null, ...} -- JSONB rather than one column per standard so adding/removing a standard (e.g. the SANS addition) never needs a schema change here
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fds_snapshot_date ON fleet_dashboard_snapshots(snapshot_date);
+
 -- VPN active-session count snapshots (added 2026-07-19). A coarse,
 -- polling-based substitute for real VPN usage telemetry (the "how many
 -- concurrent VPN users over time" question genuinely needs syslog ingestion
@@ -482,14 +511,32 @@ CREATE TABLE IF NOT EXISTS advisories (
   fixed_in_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
   advisory_url TEXT,
   raw_data JSONB,
+  -- CWE weakness ids (e.g. 'CWE-78') and a derived coarse category, added
+  -- for the Dashboard's "Risk by Category" widget — see
+  -- lib/engines/vulnerabilityCategory.js. Nullable: populated at ingestion
+  -- going forward, backfilled once from each row's own already-stored
+  -- raw_data for advisories ingested before this existed (see
+  -- lib/migrate.js's backfillVulnerabilityCategories()) — no new feed
+  -- fetch required, the source data was already being stored, just not
+  -- parsed for this.
+  cwe_ids TEXT[],
+  vulnerability_category TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ⛔ Per CLAUDE.md's own documented trap (see the audit_findings.matched_rule_ids
+-- incident): CREATE TABLE IF NOT EXISTS above is a no-op on a server that
+-- already has this table, so these two columns need their own explicit
+-- ALTER TABLE to actually reach an already-deployed database.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cwe_ids TEXT[];
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS vulnerability_category TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_advisories_vendor ON advisories(vendor);
 CREATE INDEX IF NOT EXISTS idx_advisories_kev_listed ON advisories(kev_listed);
 CREATE INDEX IF NOT EXISTS idx_advisories_cvss_score ON advisories(cvss_score);
 CREATE INDEX IF NOT EXISTS idx_advisories_published_at ON advisories(published_at);
+CREATE INDEX IF NOT EXISTS idx_advisories_vulnerability_category ON advisories(vulnerability_category);
 
 -- Applicability predicates — curated data, not code. Empty until Phase 6 builds the
 -- predicate evaluator; device_cve_assessments.config_applies defaults to 'unknown'
