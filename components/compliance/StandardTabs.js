@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import RuleEvidenceTable from './RuleEvidenceTable';
 
 // Deliberate deviation from this app's usual `?tab=` server-navigation
 // convention (see app/(dashboard)/devices/[id]/analysis/page.js) -- see
@@ -33,8 +34,23 @@ const SEVERITY_BADGE = {
   info: { label: 'Info', color: 'muted' },
 };
 
+// Pass/Fail/All sub-filter, layered on top of the existing standard-tab
+// filter. Default 'all' preserves the pre-existing behavior for anyone not
+// touching the new control.
+const STATUS_FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'fail', label: 'Fail' },
+  { key: 'pass', label: 'Pass' },
+];
+
 export default function StandardTabs({ standards, findings }) {
   const [active, setActive] = useState(standards?.[0]?.key || '');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [expanded, setExpanded] = useState({});
+
+  function toggleExpanded(id) {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
 
   // Nice-to-have deep-link support: /compliance/[deviceId]#CIS_V8 preselects
   // that tab, so the fleet matrix's per-standard chip links
@@ -67,7 +83,12 @@ export default function StandardTabs({ standards, findings }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = findings.filter((f) => Array.isArray(f.standards) && f.standards.includes(active));
+  const filtered = findings.filter(
+    (f) =>
+      Array.isArray(f.standards) &&
+      f.standards.includes(active) &&
+      (statusFilter === 'all' || f.status === statusFilter)
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -90,6 +111,30 @@ export default function StandardTabs({ standards, findings }) {
               }}
             >
               {s.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {STATUS_FILTERS.map((sf) => {
+          const isActive = statusFilter === sf.key;
+          return (
+            <button
+              key={sf.key}
+              type="button"
+              onClick={() => setStatusFilter(sf.key)}
+              style={{
+                padding: '4px 10px',
+                fontSize: 'var(--text-sm)',
+                borderRadius: 'var(--radius-sm)',
+                border: `1px solid ${isActive ? 'var(--primary)' : 'var(--border)'}`,
+                background: isActive ? 'var(--primary)' : 'transparent',
+                color: isActive ? '#fff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              {sf.label}
             </button>
           );
         })}
@@ -119,22 +164,62 @@ export default function StandardTabs({ standards, findings }) {
             {filtered.map((f) => {
               const sev = SEVERITY_BADGE[f.severity] || SEVERITY_BADGE.info;
               const st = STATUS_BADGE[f.status] || STATUS_BADGE.na;
+              const hasEvidence = f.status === 'fail' && Array.isArray(f.ruleEvidence) && f.ruleEvidence.length > 0;
+              const isExpanded = !!expanded[f.id];
               return (
-                <tr key={f.id}>
-                  <td title={f.name}>{f.name}</td>
-                  <td>
-                    <Badge color={sev.color}>{sev.label}</Badge>
-                  </td>
-                  <td>
-                    <Badge color={st.color}>{st.label}</Badge>
-                  </td>
-                  <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
-                    {f.detail || '—'}
-                  </td>
-                  <td style={{ color: 'var(--text-secondary)' }} title={f.remediationGuidance || ''}>
-                    {f.remediationGuidance || '—'}
-                  </td>
-                </tr>
+                <Fragment key={f.id}>
+                  <tr>
+                    <td title={f.name}>{f.name}</td>
+                    <td>
+                      <Badge color={sev.color}>{sev.label}</Badge>
+                    </td>
+                    <td>
+                      <Badge color={st.color}>{st.label}</Badge>
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
+                      {f.detail || '—'}
+                      {hasEvidence && (
+                        <div style={{ marginTop: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(f.id)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: 'var(--primary)',
+                              fontSize: 'var(--text-sm)',
+                              textDecoration: 'underline',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {isExpanded
+                              ? 'Hide'
+                              : `Show ${f.ruleEvidence.length} offending rule${f.ruleEvidence.length === 1 ? '' : 's'}`}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ color: 'var(--text-secondary)' }} title={f.remediationGuidance || ''}>
+                      {f.remediationGuidance || '—'}
+                    </td>
+                  </tr>
+                  {hasEvidence && isExpanded && (
+                    <tr key={`${f.id}-evidence`}>
+                      <td colSpan={5} style={{ background: 'var(--bg-primary)', padding: 12 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <RuleEvidenceTable rules={f.ruleEvidence} />
+                          {f.remediationGuidance && (
+                            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                              <strong style={{ color: 'var(--text-primary)' }}>Recommendation: </strong>
+                              {f.remediationGuidance}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

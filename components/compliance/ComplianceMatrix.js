@@ -16,6 +16,7 @@ export const STANDARDS = [
   { key: 'ISO_27001', label: 'ISO 27001' },
   { key: 'CIS_V8', label: 'CIS v8' },
   { key: 'NIST', label: 'NIST' },
+  { key: 'SANS', label: 'SANS' },
 ];
 
 // Descriptive blurb + external reference link per standard, for the
@@ -44,8 +45,13 @@ export const STANDARD_META = {
   },
   NIST: {
     description:
-      'NIST SP 800-53 — security and privacy controls for federal information systems, widely used as a general-purpose security control baseline.',
+      'NIST SP 800-53 — security and privacy controls for federal information systems, widely used as a general-purpose security control baseline. Several checks below also draw on NIST SP 800-41 Rev. 1 ("Guidelines on Firewalls and Firewall Policy") for firewall-specific ruleset review and logging/monitoring guidance.',
     referenceUrl: 'https://csrc.nist.gov/projects/risk-management/sp800-53-controls',
+  },
+  SANS: {
+    description:
+      'Thematic coverage of the SANS Institute\'s published Firewall Checklist (SANS SCORE, a widely-used industry audit checklist) — rule-order discipline, explicit blocking of high-risk cleartext services, logging, and ruleset review. This maps to the checklist\'s recurring themes, not literal section-numbered citations of a single formal standard, since SANS SCORE checklists are practitioner guidance rather than a certifiable regulatory framework.',
+    referenceUrl: 'https://www.sans.org/media/score/checklists/FirewallChecklist.pdf',
   },
 };
 

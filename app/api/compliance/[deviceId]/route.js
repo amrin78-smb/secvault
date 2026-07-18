@@ -14,10 +14,19 @@ function csvEscape(value) {
   return str;
 }
 
-function buildCsv(rows) {
-  const headers = ['Check Name', 'Severity', 'Standards', 'Status', 'Detail', 'Remediation'];
+// `ruleNamesById` is a Map(id -> rule_name), resolved by the caller via one
+// bulk query (see the "Matched Rules" bulk lookup below) -- semicolon-joined
+// per row, empty string when null/empty, matching this file's own
+// csvEscape() convention for the other columns.
+function buildCsv(rows, ruleNamesById) {
+  const headers = ['Check Name', 'Severity', 'Standards', 'Status', 'Detail', 'Remediation', 'Matched Rules'];
   const lines = [headers.join(',')];
   for (const r of rows) {
+    const matchedRuleIds = Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [];
+    const matchedRuleNames = matchedRuleIds
+      .map((id) => (ruleNamesById ? ruleNamesById.get(id) : null))
+      .filter(Boolean)
+      .join('; ');
     lines.push(
       [
         csvEscape(r.name),
@@ -26,6 +35,7 @@ function buildCsv(rows) {
         csvEscape(r.status),
         csvEscape(r.detail),
         csvEscape(r.remediation_guidance),
+        csvEscape(matchedRuleNames),
       ].join(',')
     );
   }
@@ -95,7 +105,8 @@ export async function GET(request, { params }) {
 
     const { rows: findingRows } = await pool.query(
       `SELECT af.id, af.check_id, ac.check_id AS check_slug, ac.name, ac.standards,
-              ac.severity, af.status, af.detail, ac.remediation_guidance, af.detected_at
+              ac.severity, af.status, af.detail, ac.remediation_guidance, af.detected_at,
+              af.matched_rule_ids
        FROM audit_findings af
        JOIN audit_checks ac ON ac.id = af.check_id
        WHERE af.device_id = $1
@@ -113,7 +124,22 @@ export async function GET(request, { params }) {
     );
 
     if (format === 'csv') {
-      const csv = buildCsv(findingRows);
+      // Bulk-resolve every distinct matched rule id -> rule_name in ONE
+      // extra query, rather than per-row -- same "one shared query" pattern
+      // used elsewhere in this app's compliance/analysis pages.
+      const allRuleIds = Array.from(
+        new Set(findingRows.flatMap((r) => (Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [])))
+      );
+      let ruleNamesById = new Map();
+      if (allRuleIds.length > 0) {
+        const { rows: ruleRows } = await pool.query(
+          'SELECT id, rule_name FROM firewall_rules WHERE id = ANY($1::uuid[])',
+          [allRuleIds]
+        );
+        ruleNamesById = new Map(ruleRows.map((r) => [r.id, r.rule_name]));
+      }
+
+      const csv = buildCsv(findingRows, ruleNamesById);
       const filenameBase = sanitizeForFilename(device.name) || deviceId;
       return new Response(csv, {
         status: 200,
@@ -151,6 +177,7 @@ export async function GET(request, { params }) {
         detail: r.detail,
         remediationGuidance: r.remediation_guidance,
         detectedAt: r.detected_at,
+        matchedRuleIds: Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [],
       })),
     });
   } catch (err) {
