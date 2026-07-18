@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.9.0': [
+    'The Compliance page\'s Cards view now shows one firewall at a time, chosen from a dropdown, instead of a fleet-wide summary — matching how Firewall Analyzer\'s compliance report works. Fleet-wide comparison is still available under "Compare Devices".',
+  ],
   '2.8.3': [
     'Fixed the in-app updater silently failing on servers installed before an earlier fix — the "Update Now" button now self-heals its own deploy-key setup on the next run instead of requiring a manual server-side fix.',
   ],

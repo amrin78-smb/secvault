@@ -1235,14 +1235,53 @@ Both compliance pages' original "flat StatCard tiles + table" layout was replace
 short factual description + external reference link per standard (`STANDARD_META`, exported from
 `ComplianceMatrix.js` alongside `STANDARDS` — generic "this assessment is based on..." wording,
 never a claim about SecVault's own certification status, since it has none), and a "Failed" quick-list
-(up to 5 items + "+N more"). **The two pages' cards mean something different in that quick-list**:
-per-device (`compliance/[deviceId]/page.js`) shows the actual failing CHECK NAMES (derived from the
-already-fetched `findings` array — no new query); fleet-wide (`compliance/page.js`) shows which
-DEVICES have at least one failure for that standard (a new, separate `getFleetFailedDevicesByStandard`
-query — a check-name list wouldn't say *where* at fleet scale, since the same check can fail
-identically across many devices). At `scorePct === 100` the card shows a `Badge color="success"`
+(up to 5 items + "+N more"). At `scorePct === 100` the card shows a `Badge color="success"`
 "Fully Compliant" in place of the failed-list (no emoji anywhere in this codebase, confirmed by grep
 before choosing this — see `StandardCard.js`'s own comment).
+
+**⛔ Superseded 2026-07-18** (see the dated subsection below): this paragraph originally described
+`compliance/page.js`'s Cards view as fleet-wide, with its quick-list showing DEVICE names instead of
+check names. That fleet-aggregate Cards view no longer exists — Cards is now per-device, exactly
+like `compliance/[deviceId]/page.js`, chosen via a dropdown. Both pages' quick-lists now show the
+same thing: failing CHECK NAMES for whichever one device is on screen.
+
+#### Fleet Cards view becomes per-device, via a dropdown (changed 2026-07-18)
+
+Direct user feedback, comparing against ManageEngine Firewall Analyzer: "the main compliance page
+shows the donuts and percentage for the current chosen firewall. It does not show summary for all."
+`compliance/page.js`'s "Cards" view used to sum every active device's findings into ONE set of
+fleet-wide donuts per standard — genuinely not what an operator auditing a SPECIFIC firewall wants,
+and there was no way to drill into one device's posture from that view at all (only via
+`compliance/[deviceId]` reached some other way, e.g. the fleet dashboard or Devices list).
+
+Cards now shows exactly ONE device's compliance posture at a time, chosen via
+`components/compliance/DeviceSelect.js` (new, `'use client'`, a plain `<select>` — same
+"navigate via `router.push` on every `onChange`" convention `components/alerts/AlertsFilters.js`
+already uses for its own filter selects, a real Next.js client-side navigation rather than a full
+page reload, satisfying "interactively update" without any client-side fetch/state management) —
+driven by `?device=<deviceId>` on the SAME `/compliance` URL. **Never falls back to a fleet-wide
+aggregate**: no `?device=` (or a malformed/stale one — validated with `isValidUuid()` AND checked
+against the active-devices list, same defensive posture as everywhere else in this app) defaults to
+the first active device alphabetically; zero active devices renders `EmptyState` before any
+per-device query is attempted.
+
+The per-device query/aggregation/JSX in `compliance/page.js`'s Cards branch DELIBERATELY duplicates
+`compliance/[deviceId]/page.js`'s own (down to the query shapes and comments) rather than importing
+from it — same "duplicate small per-page queries, don't extract a shared module" convention this
+codebase already uses for the Alerts/Compliance query triplication. `compliance/[deviceId]/page.js`
+itself is UNCHANGED and still a valid, separate, deep-linkable "this device's compliance" page
+(reached from the Devices list, Alerts, etc.) — Cards and that page now render near-identically,
+just reached differently.
+
+**"Compare Devices" (`?view=table`) is UNCHANGED** — still the fleet-wide device×standard
+`ComplianceMatrix` table, still the place to see every device's score side by side; `getFleetCompliance()`
+(the query feeding it) was kept. `getFleetFailedDevicesByStandard()` and `getFleetStandardTotals()`
+(both used ONLY by the old fleet-aggregate Cards rendering) were removed as dead code rather than
+left unused.
+
+`Export CSV` is now conditional on which view is active: Cards points at the SELECTED device's own
+`GET /api/compliance/[deviceId]?format=csv` (since that's what's actually on screen), table keeps
+pointing at the fleet-wide `GET /api/compliance/fleet?format=csv` exactly as before.
 
 #### Rule-evidence drill-down + `rule_scan` checks + SANS standard (added 2026-07-18)
 
