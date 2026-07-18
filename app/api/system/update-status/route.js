@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.8.0': [
+    'Added an Objects tab on each device\'s Rule Analysis page: unused and duplicate address/service objects, collected from Fortinet, Palo Alto, Check Point, Cisco ASA, and Forcepoint (Sangfor intentionally not included — no reliable basis to parse its object syntax yet).',
+    'Fixed the Compliance page: clicking a failed check now scrolls to show the details instead of silently updating off-screen, and the Network Details zone list now explains what it\'s for.',
+  ],
   '2.7.1': [
     'Fixed the per-device Compliance page throwing a server error on every click — a column added to an already-existing production table via CREATE TABLE IF NOT EXISTS (a no-op on a table that already exists) instead of ALTER TABLE. Also lays groundwork for an upcoming Objects tab (unused/duplicate address and service objects) — inactive until per-vendor collection is added.',
   ],

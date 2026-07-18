@@ -245,8 +245,12 @@ export default async function DeviceCompliancePage({ params }) {
       {zones.length > 0 && (
         <Card>
           <CardBody>
-            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
               Network Details
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 8 }}>
+              Zones seen across this device&apos;s collected firewall rules — referenced by the zone-based checks
+              below (e.g. admin access restrictions).
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {zones.map((zone) => (

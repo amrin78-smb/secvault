@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
@@ -47,6 +47,7 @@ export default function StandardTabs({ standards, findings }) {
   const [active, setActive] = useState(standards?.[0]?.key || '');
   const [statusFilter, setStatusFilter] = useState('all');
   const [expanded, setExpanded] = useState({});
+  const containerRef = useRef(null);
 
   function toggleExpanded(id) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -67,6 +68,19 @@ export default function StandardTabs({ standards, findings }) {
   // `hashchange` listener makes both the original cross-page case (fleet
   // matrix → per-device page, still works via the initial-read branch below)
   // and this same-page case work identically.
+  //
+  // ⛔ Extended again 2026-07-19 (scroll fix): matching a hash also updated
+  // `active`, but nothing ever scrolled the tab/table into view -- on a
+  // same-page click (the hashchange branch) the content changes far below
+  // the fold with zero visible motion, so it looked like the link did
+  // nothing. Now scrolls containerRef into view whenever a real standard
+  // hash is matched, on BOTH the initial mount-time read (cross-page
+  // arrival, e.g. fleet matrix -> per-device page -- explicit scroll is
+  // harmless/consistent even though browser-native anchor scroll may
+  // already help there) and the hashchange listener (same-page click, the
+  // actual bug -- this path previously had no scroll at all). Deliberately
+  // NOT called on a bare initial load with no hash -- scrolling the page on
+  // every normal visit would itself be unwanted motion.
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
 
@@ -74,6 +88,7 @@ export default function StandardTabs({ standards, findings }) {
       const hash = window.location.hash.replace('#', '');
       if (hash && standards.some((s) => s.key === hash)) {
         setActive(hash);
+        containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     };
 
@@ -91,7 +106,7 @@ export default function StandardTabs({ standards, findings }) {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {standards.map((s) => {
           const isActive = active === s.key;

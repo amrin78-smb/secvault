@@ -1512,6 +1512,117 @@ per-device overview page.
 
 ---
 
+## Network Object Catalog (added 2026-07-18)
+
+Answers "Unused Objects" / "Duplicate Objects" (the ManageEngine Firewall Analyzer "Rule Management
+> Cleanup/Optimization > Objects" concept) — a genuinely NEW collection dimension, unlike VPN
+Summary/Admin Account Summary above (both of which are read-only interpreters over data adapters
+already collected for other reasons). `firewall_rules.src_addresses`/`dst_addresses`/`services`
+store whatever a RULE references — usually an object's NAME, sometimes a literal inline value with
+no backing object at all — never the object CATALOG itself (what named objects exist on the device,
+and what they resolve to/contain). Closing that gap needs each adapter to collect the object
+definitions too.
+
+### `FirewallAdapter.getObjects()` — optional, unlike every other interface method
+
+`lib/adapters/interface.js` documents the contract in a comment (not a throwing default — the base
+class simply omits the method; `lib/adapters/index.js`'s `collectAndStore()` checks
+`typeof adapter.getObjects === 'function'` before calling it, same optional-method pattern as the
+existing `getVpnSessionSummary()`):
+```js
+async getObjects() {
+  return {
+    addresses: [ { name, type?, value } ],      // leaf address objects
+    addressGroups: [ { name, members: [...] } ], // members = names of other addresses/groups
+    services: [ { name, value } ],                // e.g. value: "tcp/443"
+    serviceGroups: [ { name, members: [...] } ],
+  };
+}
+```
+**Must degrade gracefully per sub-category** (try/catch each of the 4 fetches internally, `[]` on
+failure) rather than throwing whole on one sub-fetch's failure — deliberately the OPPOSITE of
+`getRules()`'s fail-loud rule. There is no destructive "DELETE then store nothing" risk here the way
+an empty `getRules()` result silently wipes `firewall_rules` — a partial object catalog is still
+useful data, not a dangerous one.
+
+### Schema — `network_objects` / `object_analysis_results`
+
+Same DELETE+reinsert-per-device-per-pull lifecycle as `firewall_rules`/`rule_analysis_results`.
+`network_objects` (`device_id, object_type, name, value, members jsonb`) stores the raw catalog;
+`object_analysis_results` (`device_id, object_id, finding_type: 'unused'|'duplicate', detail,
+related_object_ids jsonb`) stores `lib/engines/objectUsage.js`'s findings, mirroring
+`rule_analysis_results`' own shape. Both are brand-new tables (safe as plain `CREATE TABLE IF NOT
+EXISTS` — see the schema-migration bug two sections below for why that distinction matters).
+
+### `lib/engines/objectUsage.js` — pure analysis, mirrors `ruleAnalysis.js`'s shape
+
+`analyzeObjectUsage(objects, rules)`: **unused** = an object's name never appears directly in any
+rule's address/service fields, AND is never a MEMBER of a group that's itself in use — a transitive
+closure (bounded by object count, since each pass that changes anything must add ≥1 name), not just
+a direct-reference check, otherwise every address inside a used GROUP would be wrongly flagged just
+because the rule names the group, not the member. **duplicate** = two LEAF objects (address/service
+only, never groups) of the same type sharing the exact same value under different names —
+deliberately NOT extended to groups, same "member-SET equality is a harder bipartite-matching
+problem, and a wrong `duplicate` finding suggesting an object be merged/deleted is worse than a
+missed one" reasoning `ruleAnalysis.js`'s `fieldEquals`/`fieldCovers` comment already documents for
+this codebase. Verified via a synthetic test before shipping: a group-member address correctly
+survived as "used" via transitive closure, an unreferenced address was correctly flagged unused, and
+two same-value address objects were correctly cross-referenced as duplicates of each other.
+
+`runObjectUsageAnalysisForDevice()` runs in `collectAndStore()` right after the compliance-audit
+block, gated on `typeof adapter.getObjects === 'function'` — a device with zero `network_objects`
+(vendor doesn't implement `getObjects()` yet, or the last collect failed before storing any) is a
+legitimate, common state, not an error: it clears any stale findings from a previous pull and
+returns cleanly.
+
+### Per-vendor status (2026-07-18)
+
+| Vendor | Status | Source |
+|---|---|---|
+| Palo Alto (both transports) | Implemented, **no new device call** | Reuses the ALREADY-collected full config tree via `getLatestConfigParsed()` (called after `collectAndStore()`'s config block, so this pull's own row is already committed) — bounded deep search for `address`/`address-group`/`service`/`service-group` keys, same "search deep, don't assume the path" convention as `findSecurityRulesContainers()`/`vpnSummary.js`/`adminAccountSummary.js`. Field SHAPE is grounded (fast-xml-parser `@_name` convention, SSH plain-nested-object convention — both already live-confirmed elsewhere in this codebase); the specific PAN-OS object leaf field names (`ip-netmask`/`ip-range`/`fqdn`, `protocol.tcp.port`, etc.) are doc-derived, not yet live-verified — no prior code in this repo touched address/service objects. |
+| Fortinet (both transports) | Implemented, VDOM-aware | REST: `cmdb/firewall/address`, `/addrgrp`, `firewall.service/custom`, `/group`, per discovered VDOM. SSH: `show firewall address`/`addrgrp`/`service custom`/`service group` per VDOM, same `config vdom`/`edit <vdom>`/`end` batching as `_getRulesMultiVdom()` — but unlike that fail-loud method, a single VDOM's failure is skipped, not fatal (a coarse catalog partially covering the fleet is still useful, unlike an authoritative ruleset). Doc-derived field names, not live-verified. `network_objects` has no VDOM column — an identically-named object across two VDOMs collapses to whichever was collected last; accepted, documented simplification, not a bug. |
+| Check Point | Implemented | Reuses the adapter's EXISTING Mgmt API session (`api.withSession`) — no second login. `show-hosts`/`show-networks`/`show-address-ranges` → addresses, `show-groups` → address groups, `show-services-tcp`/`show-services-udp` → services, `show-service-groups` → service groups, each paginated via a new shared `_fetchAllPages()` helper (extracted from the gateway-listing code that already paginated this way — DRY, not new pagination logic). The `details-level: 'full'` assumption (group members return inline names, not just uids) is unverified; degrades to uid-named members rather than dropped ones if wrong. |
+| Cisco ASA | Implemented | Parses `object network`/`object-group network`/`object service`/`object-group service` blocks from the SAME `show running-config` text already fetched for `getRules()`/`getConfig()`, using this adapter's existing line-by-line block-tracking style (mirrors `currentInterface` tracking) — not a generic brace-tree parser, deliberately consistent with this vendor's established simple-parser convention. A bare inline literal inside a group (`network-object host 1.2.3.4` with no backing named object) correctly contributes no member name, rather than inventing one. |
+| Forcepoint | Implemented | `GET /api/elements/network_elements` / `/service_elements`, reusing the adapter's existing HATEOAS pagination helper and `resolveRef()` (including its `{any: true}` handling) for group members — no new pagination or ref-resolution logic. Object catalog is SERVER-wide, not per-engine, so — unlike `getRules()`/`getConfig()`/`getVersion()` — this method deliberately does NOT call `_resolveEngine()`. Whether the list endpoints return full inline fields or summary-only entries requiring a per-object href-follow is unverified (chose not to follow per-object hrefs, to avoid an N+1 explosion on a large catalog) — a `[SMC Debug]` sample log was added for the first live connection to confirm. |
+| Sangfor | **Deliberately not implemented** — returns `{addresses: [], addressGroups: [], services: [], serviceGroups: []}` unconditionally | A real engineering decision, not a gap: this codebase's least-verified adapter has no live device, no documentation trail, and no already-captured config text plausibly containing object definitions to parse against (unlike the existing `ssl_vpn.enabled` tri-state detection, which is grounded in one already-known CLI line). Writing regex against invented block syntax would fabricate unused/duplicate findings as confidently as real ones — exactly what this file's own "documentation lies, verify against live systems" rule warns against. "Not yet built" is the correct, honest choice here, matching this codebase's own established acceptance of the same posture elsewhere (e.g. several Palo Alto/Fortinet compliance checks intentionally left `not_evaluable_from_config`). |
+
+### UI
+
+New **Objects** tab on `devices/[id]/analysis` (`?tab=objects`, positioned after the existing Risky
+Rules tab), `components/analysis/ObjectsTab.js` — a server component LEFT JOINing `network_objects`
+with `object_analysis_results`, three stat tiles (Total/Unused/Duplicate), and two tables (Unused
+Objects, Duplicate Objects). Zero `network_objects` rows for a device renders an `EmptyState`
+explaining the vendor may not support object collection yet — not an error, a normal state for
+Sangfor and for any device not yet re-collected since this feature shipped.
+
+### ⛔ Bug fixed 2026-07-18, found live in production the same day the rule-evidence drill-down
+shipped — see the Schema Migration section's own entry on `CREATE TABLE IF NOT EXISTS` not adding
+columns to an already-existing table. Unrelated to the object catalog itself, but fixed in the same
+pass since it was found while this round's schema changes were already in flight — see that entry
+for the full story, not repeated here.
+
+### Compliance page UX fixes (found live the same day, 2026-07-18)
+
+Two real usability bugs, reported directly by a user testing the rule-evidence drill-down feature
+right after it shipped:
+- **Clicking a failed-check link did nothing visible.** `StandardCard.js`'s failed-check links point
+  at `/compliance/[deviceId]#STANDARD_KEY` — while already ON that exact page, this is a same-URL,
+  hash-only change. Next.js App Router's `<Link>` does not natively scroll to a same-page hash target
+  the way a plain browser `<a href="#foo">` anchor would; `StandardTabs.js`'s `hashchange` listener
+  correctly updated which tab was active, but nothing ever scrolled the content into view, so a user
+  below the fold saw literally no reaction to their click. Fixed: `StandardTabs.js`'s outer container
+  now has a ref, and `applyHash()` calls `scrollIntoView({behavior:'smooth', block:'start'})` after a
+  successful match — covers both the cross-page arrival case and the same-page click case identically.
+- **"What are the network details for?"** — the Network Details card (distinct zone names aggregated
+  from a device's collected rules) rendered as a bare, unlabeled wall of 40+ zone-name badges with no
+  explanation. Fixed with a one-line caption ("Zones seen across this device's collected firewall
+  rules — referenced by the zone-based checks below"). Deliberately did NOT attempt to categorize
+  zones into DMZ/WAN/LAN-style buckets (the way ManageEngine's own Network Details groups them) —
+  real zone names in this deployment (`TFM-HQ`, `YCC`, `VRZ`, ...) aren't reliably classifiable by
+  name pattern, and a confidently-wrong categorization is worse than an honest flat list.
+
+---
+
 ## Admin Account Summary (added 2026-07-19)
 
 Direct architectural sibling of VPN Summary above — same "read-only interpretation of
