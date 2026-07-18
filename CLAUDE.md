@@ -1290,9 +1290,11 @@ Source/Destination/Service/Src Zone/Dst Zone), mirroring `devices/[id]/rules/pag
 formatting convention (comma-joined, `—` fallback) rather than inventing a new one — that file
 doesn't export its `joinArray()` helper, so it's duplicated, matching this app's established
 per-file-duplication convention for small render helpers. `StandardTabs.js` gained a Pass/Fail/All
-sub-filter and, for each `fail` finding with non-empty rule evidence, a "Show N offending rule(s)"
-toggle revealing `RuleEvidenceTable` plus the existing `remediationGuidance` text underneath — same
-"table of offending rules, then a written recommendation" layout Firewall Analyzer uses.
+sub-filter. **Superseded 2026-07-18** (see the fifth bug-sweep pass below): the inline "Show N
+offending rule(s)" expand/collapse described here originally was REMOVED after a user reported it
+looked like clicking a failed check did nothing — evidence is now shown on a dedicated per-check
+page (`compliance/[deviceId]/checks/[findingId]/page.js`), a real navigation, not a same-page
+toggle; `RuleEvidenceTable` is still used, just from that page instead of inline in this table.
 `compliance/[deviceId]/page.js` resolves `matched_rule_ids` to full rule rows in ONE bulk
 `WHERE id = ANY($1::uuid[])` query (deduped across every finding, not per-row) and also gained a
 **Network Details** card — distinct zone names aggregated from this device's `firewall_rules.src_
@@ -2595,6 +2597,144 @@ without new evidence):**
   live responses before writing any parser" constraint this file's own header comment already states
   for itself. No live PAN-OS access was available to do that verification in this pass — flagged here
   as an open, needs-live-verification item rather than guessed at.
+
+### ⚠️ Bug-sweep fixes (2026-07-18, fifth pass) — 7 parallel finders over the rule-evidence/object-catalog rounds + a fresh Alerts audit
+
+Requested as "do a complete bug sweep of all changes you just made or maybe just do whole app" —
+7 parallel READ-ONLY finder agents (no edits), each scoped to one subsystem from the two most
+recent rounds (rule-evidence compliance engine; correlation + per-rule risk; the object-usage
+engine + schema; Fortinet/Palo Alto `getObjects()`; Check Point/Cisco ASA/Forcepoint/Sangfor
+`getObjects()`; the Objects tab UI + `collectAndStore` wiring) plus one fresh-eyes pass on a
+subsystem this session hadn't recently re-audited (chose the Alerts page, per CLAUDE.md's own
+"must be kept in step by inspection" flag on its 3-way query duplication). All 13 findings below
+were personally re-verified against the actual code before being fixed — several were confirmed
+by directly reading the file and tracing the concrete failure scenario, not just trusted from the
+finder's report.
+
+**Correctness (compliance/rule-analysis engines):**
+- `lib/engines/ruleAnalysis.js`'s `runAnalysisForDevice()` rewrote `rule_analysis_results` via
+  DELETE then a per-row `pool.query()` INSERT loop with **no transaction** — despite
+  `configAuditor.js`'s own header comment claiming to follow "the same reasoning as
+  rule_analysis_results and firewall_rules" for this exact rewrite shape, this file itself was
+  never actually wrapped in one. A failure partway through the INSERT loop left the DELETE
+  committed and only some findings inserted — a corrupted partial state that Phase 7's `rule_scan`
+  checks then read from, meaning a critical check like `rule-no-any-any-allow` could silently
+  under-report. Fixed to match `configAuditor.js`'s real transaction pattern (one client,
+  BEGIN/COMMIT, ROLLBACK + release on error).
+- `correlation`'s pairwise loop could mischaracterize a rule pair as "consider merging" (medium)
+  when it was actually fully `shadow`ed (high, unreachable) by that same earlier rule — `shadow`'s
+  own loop only records the FIRST covering match it finds (`break` after one), so its
+  `shadowPairs` guard didn't catch every earlier rule that also happens to fully cover `r`.
+  Fixed: `correlation`'s loop now skips ANY `s` where `ruleCovers(s, r)` is true, not just the
+  specific pair `shadowPairs` recorded.
+- `app/api/compliance/[deviceId]/route.js` and `app/api/compliance/fleet/route.js` both hardcode
+  their own `STANDARDS` list (a deliberate duplication of `ComplianceMatrix.js`'s export, per this
+  app's established per-file-duplication convention) — both had drifted out of sync, missing the
+  new `SANS` standard, so their JSON responses silently had no SANS key at all. Not reachable via
+  the live UI (both sibling page.js components import the correct list directly), but exactly the
+  drift this file's own comment on that duplication warns about. Fixed in both.
+- `components/analysis/RiskyRulesTab.js`'s `BAND_ORDER` (drives the stat-tile render order) used to
+  list `low` before `attention`, while `SORT_RANK` (drives the actual table row order) ranks
+  `attention` before `low` — the tiles and the table below them visually contradicted each other on
+  this one pair. `BAND_ORDER` now matches `SORT_RANK`.
+
+**Network Object Catalog:**
+- `lib/engines/objectUsage.js`'s `analyzeObjectUsage()` used ONE flat name→object map spanning every
+  `object_type`, seeded from a rule's address AND service fields mixed together — an address object
+  and a service object CAN legitimately share a name on a real device (e.g. both named "DNS",
+  separate namespaces on every Tier-1 vendor), and the flat map meant a rule referencing service
+  "DNS" would ALSO mark an unrelated, genuinely-unreferenced address object named "DNS" as used,
+  silently suppressing a real `unused` finding. Fixed: names, the lookup map, and the
+  transitive-closure walk are now fully namespace-partitioned (address vs. service), verified with a
+  synthetic test reproducing the exact collision.
+- `components/analysis/ObjectsTab.js` selected `finding_type`/`detail` as two INDEPENDENT
+  `array_agg()` calls with no guaranteed correlated order, then matched them with a blind
+  `.find(d => d)` — grabbing whichever detail string came first, not the one belonging to the
+  finding_type being rendered. An object CAN carry both an `unused` AND a `duplicate` finding at
+  once (nothing makes them mutually exclusive), so the "Duplicate Of" column could show the
+  `unused` explanation text instead. Fixed by aggregating `(finding_type, detail)` as one paired
+  JSON object per finding (`json_agg(json_build_object(...))`) — no separate-arrays alignment
+  problem to have.
+- `lib/adapters/index.js`'s object-usage analysis used to run unconditionally whenever
+  `getObjects()` was attempted, even when it threw and `storeObjects()` never ran — recomputing
+  `object_analysis_results` from a STALE `network_objects` catalog against this pull's FRESH
+  `firewall_rules`. Mismatched-freshness inputs can produce actively wrong verdicts, not just stale
+  ones (e.g. a renamed object: the stale catalog still has the old name, current rules reference the
+  new one, so the old name gets a fresh "unused" verdict that misrepresents a rename as an
+  abandonment). Fixed to mirror the exact `rulesCollected` gate already used for Phase 5 above —
+  usage analysis only runs when object collection actually succeeded THIS pull.
+- `PUT /api/devices/[id]` cleans up stale `device_credentials` on a vendor/method change (see the
+  2026-07-19 bug-sweep entry below) but had no equivalent for `network_objects`/
+  `object_analysis_results` — a vendor change left the PREVIOUS vendor's object catalog behind
+  indefinitely, displayed under the device's new identity with no indication it was orphaned. Fixed:
+  gated on vendor change specifically (not `methodChanged` alone — a same-vendor transport switch,
+  e.g. fortinet api→ssh, doesn't invalidate what an object catalog fundamentally IS), best-effort
+  (a cleanup failure here must not block the device update itself).
+- Forcepoint's `classifyNetworkElement()`/`classifyServiceElement()` own header comment claims to
+  "prefer an explicit type field, falling back to shape-based inference when absent" — the code
+  didn't implement that priority: the shape-based `Array.isArray(el.element)` group check ran
+  BEFORE the explicit `type === 'host'`/`'network'` branches, so an element with an explicit
+  non-group type that also happened to carry an `element` array field would be misclassified as a
+  group, silently dropping its real address/service value. Fixed: an explicit, recognized `type`
+  now fully decides classification and returns before ever reaching shape-based inference.
+- Check Point's new `_fetchAllPages()` (shared pagination helper extracted from the existing
+  gateway-listing code) had no warning when the `MAX_PAGES` cap was hit, unlike its sibling
+  `_fetchAccessRulebasePages()` — a catalog exceeding the cap silently returned truncated with zero
+  log signal. Added the same warning convention.
+- Fortinet REST's `restGroupToNamedGroup()` only ever read `entry.member` as an array — a FortiOS
+  response returning a single-item table field as a bare object instead of a 1-element array (the
+  same single-item-collapse class of issue already documented for Palo Alto's XML parser) silently
+  discarded the group's one real member with no warning. The SSH-transport sibling already handled
+  this shape; the REST version didn't. Fixed to accept either shape, matching it — covers both
+  address groups and service groups, since both reuse this one function.
+- **Known, accepted, NOT fixed this pass**: Palo Alto's `getObjects()` reads back
+  `device_configs.config_parsed` via `getLatestConfigParsed()`, which has no way to distinguish
+  "this pull's own fresh row" from "an older successful pull's row" — if `getConfig()` fails THIS
+  cycle, `getObjects()` still runs and silently persists a stale object catalog with no flag
+  indicating it wasn't refreshed. Not gated on `result.configCollected` because that block is
+  vendor-generic and 5 of 6 vendors' `getObjects()` don't depend on config at all. Partially
+  mitigated: `ObjectsTab.js` shows a "last collected" timestamp, so staleness isn't fully invisible
+  to the operator. Flagged rather than over-engineered — low-medium severity, no crash, no wrong
+  vendor's data.
+
+**Compliance page navigation — changed per direct user feedback, not a bug fix:**
+A user explicitly reported that clicking a failed check from a `StandardCard`'s "Failed: N" list
+only scrolled to a shared table further down the SAME page (the original rule-evidence
+drill-down's same-page anchor + scroll-into-view design from the round before this one) — they
+expected a REAL new page. Built `app/(dashboard)/compliance/[deviceId]/checks/[findingId]/page.js`,
+a dedicated per-check detail page (check name, standard/severity/status badges, description,
+result detail, remediation, and the rule-evidence table if the check is `rule_scan`-backed).
+`StandardCard`'s failed-check links and `StandardTabs.js`'s check-name cells now both navigate here
+via real `next/link` `<Link>` navigation. `StandardTabs.js`'s inline expand/collapse
+`RuleEvidenceTable` rendering was REMOVED (redundant now that the dedicated page shows the same
+evidence, and having two different "see more" affordances live side by side was itself a source of
+confusion) — the table's Detail cell now just names the offending-rule count with a "click the
+check name for details" hint. `viewMoreHref` ("+N more" on a `StandardCard`) still points at the
+`#STANDARD_KEY` same-page anchor, since there's no single check to deep-link to for "see the rest of
+this standard's checks" — that one link's same-page-scroll behavior is correct and unchanged. A
+`findingId` from an older audit run legitimately 404s here (findings are DELETE+reinserted every
+run) — handled as a clear "this result is from an earlier run, go back" message, not a raw 404.
+
+**Alerts subsystem (fresh-eyes pass — first re-audit since Phase 4, not touched by any of this
+session's other passes):**
+- None of `fetchNewFindings`/`fetchPatchNow`/`fetchConfigDiffs` (duplicated identically in
+  `app/api/events/route.js` and `app/(dashboard)/alerts/page.js`), nor the three queries in
+  `app/api/notifications/summary/route.js`, filtered on `devices.active` — every OTHER fleet-wide
+  view in this app (dashboard, fleet CVE/analysis/compliance/VPN pages, `versionMatcher.js`,
+  `ruleAnalysis.js`, `engine-worker.js`) consistently excludes deactivated devices; this subsystem
+  never did. A decommissioned device's existing `patch_now` CVE or unacknowledged finding/diff kept
+  inflating the header bell badge and the Alerts feed forever, with no way to even filter directly
+  to it (the device filter dropdown DID correctly exclude inactive devices — only the actual event
+  queries didn't). Fixed by adding `d.active = true` unconditionally (not just under the `open`
+  filter — an inactive device's history shouldn't appear even under "All") to all 6 queries across
+  the 3 files.
+- `fetchPatchNow`'s "open" definition (`caa.status IS NULL OR caa.status NOT IN ('dismissed',
+  'actioned')` — i.e. `acknowledged` still counted as open) was inconsistent with
+  `fetchNewFindings`' stricter definition (only bare `'new'` counts as open), despite
+  `AlertAckControl.js` rendering the IDENTICAL 4-state `new`/`acknowledged`/`dismissed`/`actioned`
+  select for both row kinds — selecting "Acknowledged" made a finding row vanish from the default
+  Open view but left a CVE row visible, the same control behaving differently depending on which
+  row it happened to be attached to. Aligned to the stricter, findings-side definition everywhere.
 
 ### ⚠️ Bug-sweep fixes (2026-07-19, fourth pass) — full-app sweep alongside a feature round
 
