@@ -47,8 +47,16 @@ function formatWhen(value) {
   return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass (mirrored identically
+// in app/api/events/route.js — see that file's comment for the full
+// reasoning): d.active = true added unconditionally to all three fetch
+// functions below, so a decommissioned device's stale alerts stop
+// inflating the bell/feed forever; fetchPatchNow's "open" definition
+// aligned to match fetchNewFindings' (only 'new' counts as open, not
+// 'acknowledged') since AlertAckControl.js renders the identical select for
+// both row kinds.
 async function fetchNewFindings(dbPool, deviceId, open) {
-  const conditions = [];
+  const conditions = ['d.active = true'];
   const values = [];
   if (open) conditions.push(`fa.status = 'new'`);
   if (deviceId) {
@@ -95,9 +103,9 @@ async function fetchNewFindings(dbPool, deviceId, open) {
 }
 
 async function fetchPatchNow(dbPool, deviceId, open) {
-  const conditions = [`dca.priority_band = 'patch_now'`];
+  const conditions = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
   const values = [];
-  if (open) conditions.push(`(caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))`);
+  if (open) conditions.push(`(caa.status IS NULL OR caa.status = 'new')`);
   if (deviceId) {
     values.push(deviceId);
     conditions.push(`dca.device_id = $${values.length}`);
@@ -132,7 +140,7 @@ async function fetchPatchNow(dbPool, deviceId, open) {
 }
 
 async function fetchConfigDiffs(dbPool, deviceId, open) {
-  const conditions = [];
+  const conditions = ['d.active = true'];
   const values = [];
   if (open) conditions.push(`cd.acknowledged_at IS NULL`);
   if (deviceId) {

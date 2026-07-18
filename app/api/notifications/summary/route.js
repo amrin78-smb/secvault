@@ -7,17 +7,37 @@ export const dynamic = 'force-dynamic';
 // diffs) plus a handful of the most recent actionable items for the dropdown.
 export async function GET() {
   try {
+    // ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: none of these
+    // three count queries (nor the three "recent items" queries below) ever
+    // joined devices/filtered on d.active — see the identical fix + full
+    // reasoning in app/api/events/route.js's fetchNewFindings comment. A
+    // decommissioned device's alerts kept inflating this exact badge count
+    // forever. The patch_now "open" definition is also aligned here to
+    // match findings' (only 'new' counts as open) for the same
+    // AlertAckControl.js-shares-one-control reason.
     const [newFindings, patchNow, unackedDiffs] = await Promise.all([
-      pool.query(`SELECT COUNT(*)::int AS count FROM finding_acknowledgements WHERE status = 'new'`),
+      pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM finding_acknowledgements fa
+         JOIN devices d ON d.id = fa.device_id
+         WHERE fa.status = 'new' AND d.active = true`
+      ),
       pool.query(
         `SELECT COUNT(*)::int AS count
          FROM device_cve_assessments dca
+         JOIN devices d ON d.id = dca.device_id
          LEFT JOIN cve_assessment_acknowledgements caa
            ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
          WHERE dca.priority_band = 'patch_now'
-           AND (caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))`
+           AND d.active = true
+           AND (caa.status IS NULL OR caa.status = 'new')`
       ),
-      pool.query(`SELECT COUNT(*)::int AS count FROM config_diffs WHERE acknowledged_at IS NULL`),
+      pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM config_diffs cd
+         JOIN devices d ON d.id = cd.device_id
+         WHERE cd.acknowledged_at IS NULL AND d.active = true`
+      ),
     ]);
 
     const total =
@@ -32,7 +52,8 @@ export async function GET() {
          LEFT JOIN cve_assessment_acknowledgements caa
            ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
          WHERE dca.priority_band = 'patch_now'
-           AND (caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))
+           AND d.active = true
+           AND (caa.status IS NULL OR caa.status = 'new')
          ORDER BY dca.assessed_at DESC
          LIMIT 3`
       ),
@@ -40,7 +61,7 @@ export async function GET() {
         `SELECT cd.id, cd.change_summary, cd.detected_at, d.id AS device_id, d.name AS device_name
          FROM config_diffs cd
          JOIN devices d ON d.id = cd.device_id
-         WHERE cd.acknowledged_at IS NULL
+         WHERE cd.acknowledged_at IS NULL AND d.active = true
          ORDER BY cd.detected_at DESC
          LIMIT 3`
       ),
@@ -54,7 +75,7 @@ export async function GET() {
         `SELECT fa.device_id, d.name AS device_name, fa.finding_type, fa.rule_id_vendor, fa.updated_at
          FROM finding_acknowledgements fa
          JOIN devices d ON d.id = fa.device_id
-         WHERE fa.status = 'new'
+         WHERE fa.status = 'new' AND d.active = true
          ORDER BY fa.updated_at DESC
          LIMIT 3`
       ),

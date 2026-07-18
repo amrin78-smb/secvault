@@ -27,8 +27,21 @@ const TYPES = new Set(['new_finding', 'patch_now', 'config_diff']);
 const STATUS_FILTERS = new Set(['open', 'all']);
 const PAGE_SIZE = 25;
 
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: none of the three
+// fetch functions below filtered on d.active — every other fleet-wide view
+// in this app (dashboard, fleet CVE/analysis/compliance/VPN pages,
+// versionMatcher.js, ruleAnalysis.js, engine-worker.js) consistently
+// excludes deactivated devices, but this one didn't. A decommissioned
+// device's existing patch_now CVE / unacknowledged finding / unacknowledged
+// config diff kept inflating the header bell badge and the Alerts feed
+// forever, with no way to even filter directly to it (the device dropdown,
+// alerts/page.js's getDevices(), already correctly excludes inactive
+// devices — only the actual event queries didn't). Fixed by adding
+// `d.active = true` unconditionally (not just under the `open` filter —
+// an inactive device's history shouldn't appear even under "All") to all
+// three queries here.
 async function fetchNewFindings(deviceId, open) {
-  const conditions = [];
+  const conditions = ['d.active = true'];
   const values = [];
 
   if (open) {
@@ -83,11 +96,22 @@ async function fetchNewFindings(deviceId, open) {
 }
 
 async function fetchPatchNow(deviceId, open) {
-  const conditions = [`dca.priority_band = 'patch_now'`];
+  const conditions = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
   const values = [];
 
   if (open) {
-    conditions.push(`(caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned'))`);
+    // ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: this used to be
+    // `caa.status IS NULL OR caa.status NOT IN ('dismissed', 'actioned')` —
+    // i.e. 'acknowledged' still counted as "open" for CVEs, while
+    // fetchNewFindings above only ever treats bare 'new' as open.
+    // AlertAckControl.js renders the IDENTICAL 4-state new/acknowledged/
+    // dismissed/actioned <select> for both row kinds, so clicking
+    // "Acknowledged" on a finding row (silently vanishes from the default
+    // Open view) behaved differently from clicking the exact same option on
+    // a CVE row (stayed visible) — confusing given it's the same control.
+    // Aligned to the stricter, findings-side definition: only 'new' (or an
+    // unset/NULL ack row, which is implicitly new) counts as open.
+    conditions.push(`(caa.status IS NULL OR caa.status = 'new')`);
   }
   if (deviceId) {
     values.push(deviceId);
@@ -123,7 +147,7 @@ async function fetchPatchNow(deviceId, open) {
 }
 
 async function fetchConfigDiffs(deviceId, open) {
-  const conditions = [];
+  const conditions = ['d.active = true'];
   const values = [];
 
   if (open) {
