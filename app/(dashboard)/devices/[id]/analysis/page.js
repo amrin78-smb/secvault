@@ -15,21 +15,26 @@ import CleanupTab from '../../../../../components/analysis/CleanupTab';
 import OptimizationTab from '../../../../../components/analysis/OptimizationTab';
 import ReorderTab from '../../../../../components/analysis/ReorderTab';
 import RiskTab from '../../../../../components/analysis/RiskTab';
+import RiskyRulesTab from '../../../../../components/analysis/RiskyRulesTab';
 import TrackingTab from '../../../../../components/analysis/TrackingTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
 
-// The 9 finding types in the fixed severity order CLAUDE.md documents for the
-// rule analysis engine, used both for the findings-tab filter dropdown and
-// for the summary-tab bar chart (so the bar order never depends on whatever
-// happens to be present in a given device's results).
+// The 10 finding types in the fixed severity order CLAUDE.md documents for
+// the rule analysis engine, used both for the findings-tab filter dropdown
+// and for the summary-tab bar chart (so the bar order never depends on
+// whatever happens to be present in a given device's results). 'correlation'
+// (medium — mergeable rules, added alongside the Risky Rules view) sits
+// next to 'redundant'/'overly_permissive', the other two ruleset-simplification
+// (not security-exposure) finding types.
 const FINDING_TYPES = [
   'any_any',
   'risky_service',
   'shadow',
   'reorder_candidate',
   'redundant',
+  'correlation',
   'overly_permissive',
   'unused',
   'expiring_soon',
@@ -210,6 +215,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     'optimization',
     'reorder',
     'risk',
+    'risky-rules',
     'tracking',
   ].includes(searchParams?.tab)
     ? searchParams.tab
@@ -259,6 +265,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'optimization', 'Optimization')}
         {tabLink(device.id, tab, 'reorder', 'Reorder')}
         {tabLink(device.id, tab, 'risk', 'Risk')}
+        {tabLink(device.id, tab, 'risky-rules', 'Risky Rules')}
         {tabLink(device.id, tab, 'tracking', 'Tracking')}
       </div>
 
@@ -360,6 +367,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'reorder' && <ReorderTab deviceId={device.id} />}
 
       {tab === 'risk' && <RiskTab deviceId={device.id} />}
+
+      {tab === 'risky-rules' && <RiskyRulesTab deviceId={device.id} />}
 
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 

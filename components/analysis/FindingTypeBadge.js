@@ -12,6 +12,7 @@ const TYPE_LABELS = {
   expiring_soon: 'Expiring',
   log_disabled: 'Logging Off',
   overly_permissive: 'Overly Permissive',
+  correlation: 'Correlation',
 };
 
 export default function FindingTypeBadge({ type }) {
