@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.7.0': [
+    'Compliance checks now show their actual evidence: a failed check tied to a rule pattern (any-any rules, risky services, missing logging, shadowed/redundant/overly-permissive rules, stale unused rules) expands to show the specific offending rules, plus a written recommendation — not just a pass/fail line.',
+    'Added a SANS-standard compliance tab, citing the real SANS Institute Firewall Checklist by item number for each mapped check.',
+    'Added a "Risky Rules" tab on each device\'s Rule Analysis page — every rule individually banded Critical/High/Medium/Low/Attention, with fleet-style stat tiles, alongside the existing device-level risk trend.',
+    'Rule analysis can now detect rules that could be merged (same action/zones/service, differing only in source or destination address) as a new "Correlation" finding, and the Compliance page shows a Network Details card summarizing each device\'s collected zones.',
+  ],
   '2.6.0': [
     'Added an Admins tab on each device page showing local/admin accounts and privilege levels for Fortinet, Palo Alto, and Cisco ASA devices, plus 5 new compliance checks (Fortinet admin 2FA and password policy; Cisco ASA telnet, HTTP admin, and local accounts — its first-ever compliance coverage).',
     'Rule comments, applications, and schedules are now shown in the Rules table and CSV export.',

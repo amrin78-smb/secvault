@@ -762,8 +762,19 @@ The predicate engine code should not need to change for new CVEs.
 
 ### Rule Analysis Engine (Phase 5 — `lib/engines/ruleAnalysis.js`)
 
-9 finding types with fixed severities: `any_any` (critical); `risky_service`, `shadow`, `reorder_candidate` (high);
-`redundant`, `overly_permissive`, `unused`, `expiring_soon` (medium); `log_disabled` (info).
+10 finding types with fixed severities: `any_any` (critical); `risky_service`, `shadow`, `reorder_candidate` (high);
+`redundant`, `correlation`, `overly_permissive`, `unused`, `expiring_soon` (medium); `log_disabled` (info).
+- **`correlation` (added 2026-07-18)**: ManageEngine Firewall Analyzer's "Policy Anomalies >
+  Correlation" concept — two enabled rules with the same action category, same zones, and same
+  service(s), differing in ONLY source OR ONLY destination addresses (not both — that's `redundant` —
+  and not neither), where the differing side isn't already `any` on either rule (nothing meaningful
+  left to merge). A ruleset-simplification suggestion, not a security exposure, hence `medium`
+  alongside `redundant`/`overly_permissive` rather than `high`/`critical`. Lives in the same
+  `maxRulesForShadow`-gated O(n²) block as `shadow`/`redundant`/`reorder_candidate`, with its own
+  `correlationPairs` de-dupe Set (checked against `shadowPairs` too, though the two shouldn't overlap
+  by construction: `redundant` requires src AND dst equal, `correlation` requires exactly one to
+  differ). Surfaced in the Cleanup tab (`components/analysis/CleanupTab.js`) alongside
+  `unused`/`redundant`/`overly_permissive` — all four are "simplify the ruleset" suggestions.
 - Runs automatically after every rule pull (inside `collectAndStore`) — findings are DELETE+reinserted per device
 - `rule_analysis_results.rule_id` cascades from `firewall_rules`, which is itself rewritten each pull — safe because
   analysis always reruns immediately after the rewrite
@@ -932,6 +943,35 @@ both. The rules page's filter form gained matching `<select>` options for both.
 Export CSV (`?format=csv` on `GET /api/devices/[id]/analysis`, see the Compliance Engine section
 above for the shared CSV pattern this mirrors) — an "Export CSV" action button was added next to the
 existing risk badge and "Run Analysis" button.
+
+#### Per-rule risk banding — "Risky Rules" tab (added 2026-07-18)
+
+`computeRiskScoreFromCounts`/`computeRiskScore` (above) weigh a whole DEVICE's finding counts into
+one number. `computeRuleRiskBand(ruleFindings, enabled)` (also in `lib/engines/riskScore.js`) is a
+different, simpler granularity: bands a single RULE from its own `rule_analysis_results` rows only
+(never `affected_rule_ids`, which names OTHER rules in a shadow/redundant/correlation relationship —
+a different concept). No weighted sum, no clamping — a rule's band is just the worst severity among
+its own findings (`critical`→critical, `high`→high, `medium`→medium, `info`→low), because a single
+rule can only be as risky as its worst individual finding, unlike a whole device where many findings
+genuinely compound.
+
+A 5th band, **`attention`**, exists alongside the 4 severity-derived ones — mirroring ManageEngine
+Firewall Analyzer's own Risk tab, which has 5 stat tiles (Critical/High/Medium/Low/Attention), not
+just 4. An ENABLED rule with zero findings of its own is `attention`, not `low` — "nothing flagged"
+isn't the same claim as "confirmed fine," and collapsing the two would overstate confidence. A
+DISABLED rule with zero findings is `low` — Phase 5 findings only ever key off enabled rules' live
+behavior, so "no findings + disabled" really is the unambiguous low-risk case.
+
+`components/analysis/RiskyRulesTab.js` (new tab, `?tab=risky-rules` on
+`devices/[id]/analysis/page.js`, positioned right after the existing device-level `risk` tab —
+sibling, not a replacement: `RiskTab.js` still trends one score for the whole device over time, this
+tab is the per-rule breakdown) — async server component, `LEFT JOIN rule_analysis_results` grouped
+by `rule_id` with `array_agg(severity) FILTER (WHERE severity IS NOT NULL)` so a zero-finding rule
+still appears (an inner join would silently drop it, breaking the `attention` band). Renders 5
+`StatCard` tiles (Critical/High/Medium/Low/Attention counts of RULES, not findings), a "N Risky
+Rules of Total: M" summary line (N = every band except `low`, matching Firewall Analyzer's own
+apparent inclusion of its `Attention` bucket in the risky total), then a full rule table sorted
+worst-band-first with a colored `Badge` per rule's band.
 
 ### Config Change Tracking (Phase 6 — `lib/engines/configDiff.js`)
 
@@ -1189,6 +1229,81 @@ query — a check-name list wouldn't say *where* at fleet scale, since the same 
 identically across many devices). At `scorePct === 100` the card shows a `Badge color="success"`
 "Fully Compliant" in place of the failed-list (no emoji anywhere in this codebase, confirmed by grep
 before choosing this — see `StandardCard.js`'s own comment).
+
+#### Rule-evidence drill-down + `rule_scan` checks + SANS standard (added 2026-07-18)
+
+**The gap this closes**: every check up to this point (`predicate_type`: `config_key_exists` /
+`config_value_equals` / `config_value_matches` / `feature_enabled` / `port_exposed` /
+`admin_access_from_zone` / `not_evaluable_from_config`) is evaluated by `applicability.js`'s
+`evaluatePredicate()` against ONE fixed dot-path in `device_configs.config_parsed` — a failed check
+produced only a generic sentence, never a list of which actual RULES caused the failure. A
+competing product (ManageEngine Firewall Analyzer) shows exactly that: click a failed section, see
+the offending rules in a table, plus written remediation. SecVault already had the rule-scanning
+half of this — `lib/engines/ruleAnalysis.js`'s Phase 5 findings — just not surfaced as compliance
+evidence.
+
+**`predicate_type: 'rule_scan'`** — a SECOND, distinct kind of `audit_checks` row, evaluated by
+`configAuditor.js` directly (`evaluateRuleScanCheck()`/`loadRuleFindingsByType()`), NOT by
+`applicability.js`. `predicate_config` shape: `{predicate_type: 'rule_scan', finding_types: [...]}`
+— no `pass_when`, since every rule_scan check today is fixed-polarity ("this bad pattern should
+never exist" — zero matching rules is always PASS, any match is always FAIL; there's no meaningful
+inverse reading the way `feature_enabled`/`admin_access_from_zone` need one). Reuses
+`rule_analysis_results` findings that `ruleAnalysis.js` already computed rather than a second
+detection pass — `rule_scan` checks don't need `device_configs.config_parsed` (`hasUsableConfig()`)
+at all, only `firewall_rules` to exist; a device with rules collected but no successful config pull
+yet still gets real `rule_scan` results instead of a blanket `na`.
+
+**`audit_findings.matched_rule_ids UUID[]`** (nullable) carries the evidence: the `firewall_rules.id`
+values that caused a `rule_scan` fail. NULL for every config-predicate check (nothing single-rule to
+point at) and for a passing/na `rule_scan` check. Not a DB-enforced FK-on-array-element (Postgres has
+none) — safe regardless, since both `firewall_rules` and `audit_findings` are fully DELETE+reinserted
+on every pull/run, so a stale id here just resolves to zero rows on the next JOIN, never a broken
+reference living past the next collect.
+
+**7 new rule_scan checks** (`vendor: null` — `firewall_rules`/`rule_analysis_results` are already
+vendor-normalized, no per-vendor duplication needed): `rule-no-any-any-allow` (`any_any`, critical),
+`rule-no-risky-services` (`risky_service`, high), `rule-logging-enabled-on-rules` (`log_disabled`,
+medium), `rule-no-shadowed-rules` (`shadow`, high), `rule-no-redundant-rules` (`redundant`, medium),
+`rule-no-overly-permissive-rules` (`overly_permissive`, medium), `rule-stale-unused-rules-reviewed`
+(`unused`, low). `correlation` (see Rule Analysis Dashboard section above) was deliberately NOT given
+a compliance check — it's a ruleset-simplification suggestion, not something any of the mapped
+standards actually mandate as a checklist item; forcing a pass/fail polarity onto it would be the
+same kind of misleading confident-answer this codebase's `not_evaluable_from_config` convention
+already exists to avoid.
+
+**UI**: `components/compliance/RuleEvidenceTable.js` (new) — a compact table (Rule Name/Action/
+Source/Destination/Service/Src Zone/Dst Zone), mirroring `devices/[id]/rules/page.js`'s cell-
+formatting convention (comma-joined, `—` fallback) rather than inventing a new one — that file
+doesn't export its `joinArray()` helper, so it's duplicated, matching this app's established
+per-file-duplication convention for small render helpers. `StandardTabs.js` gained a Pass/Fail/All
+sub-filter and, for each `fail` finding with non-empty rule evidence, a "Show N offending rule(s)"
+toggle revealing `RuleEvidenceTable` plus the existing `remediationGuidance` text underneath — same
+"table of offending rules, then a written recommendation" layout Firewall Analyzer uses.
+`compliance/[deviceId]/page.js` resolves `matched_rule_ids` to full rule rows in ONE bulk
+`WHERE id = ANY($1::uuid[])` query (deduped across every finding, not per-row) and also gained a
+**Network Details** card — distinct zone names aggregated from this device's `firewall_rules.src_
+zones`/`dst_zones`. Those columns' shape varies by vendor and is not guaranteed to always be a flat
+JSON array (some parser could store something else), so the aggregation query guards with
+`jsonb_typeof(...) = 'array'` and the whole thing is wrapped in try/catch — any error just omits the
+card silently rather than risk crashing the page render, since this is an enrichment, not a required
+element. `GET /api/compliance/[deviceId]` (JSON + CSV) also carries `matchedRuleIds`/a "Matched
+Rules" column now, for the RunAuditButton refresh path and CSV export.
+
+**New standard: SANS.** Real, cited source — SANS Institute's own published "Firewall Checklist"
+(Krishni Naidu), `https://www.sans.org/media/score/checklists/FirewallChecklist.pdf`, a 91-item
+numbered SCORE checklist, fetched and read directly (not paraphrased from memory) before writing any
+check. `STANDARD_META.SANS` is explicit that this maps to the checklist's recurring THEMES, not
+literal section-numbered citations of a formal regulatory framework, since SANS SCORE checklists are
+practitioner guidance, not a certifiable standard — the same honesty `STANDARD_META`'s existing
+entries already apply to SecVault's own non-certification status. 11 checks carry the `SANS` tag,
+each with the specific checklist item numbers cited in its `description` (e.g. `rule-no-risky-
+services` cites items 34/37/44-45/53-55/57-58/70 for Telnet/FTP/TFTP/rlogin-rsh/NetBIOS-SMB/SNMP).
+**Deliberately did NOT add every standard ManageEngine ships** (NERC-CIP, SOX, GDPR, CJIS, GSMA,
+HIPAA, ...) — those require interpreting legal/regulatory text, not enumerating a published
+checklist, and getting that wrong is a compliance-liability risk, not a feature. NIST SP 800-41 Rev.
+1 ("Guidelines on Firewalls and Firewall Policy," `https://csrc.nist.gov/pubs/sp/800/41/r1/final`)
+was folded into the EXISTING `NIST` standard's description (formal change-control ruleset review,
+continuous log/alert monitoring) rather than added as a confusing second NIST-labeled standard key.
 
 The fleet page (`compliance/page.js`) gained a `?view=cards|table` toggle (`cards` is now the
 default) — `cards` shows the new fleet-wide `StandardCard` grid (per-standard totals summed in JS
