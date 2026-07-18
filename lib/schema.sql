@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   rule_id UUID NOT NULL REFERENCES firewall_rules(id) ON DELETE CASCADE,
-  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
+  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'correlation' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
   severity TEXT NOT NULL DEFAULT 'info', -- 'critical' | 'high' | 'medium' | 'info'
   detail TEXT,
   affected_rule_ids JSONB NOT NULL DEFAULT '[]'::jsonb, -- e.g. for shadow: the rule(s) doing the shadowing
@@ -204,6 +204,51 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
 CREATE INDEX IF NOT EXISTS idx_rar_device_id ON rule_analysis_results(device_id);
 CREATE INDEX IF NOT EXISTS idx_rar_finding_type ON rule_analysis_results(finding_type);
 CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
+
+-- Object catalog collection (address/service objects + groups), added
+-- alongside the "Unused Objects"/"Duplicate Objects" analysis feature --
+-- see CLAUDE.md's "Network Object Catalog" section. Distinct from
+-- firewall_rules.src_addresses/dst_addresses/services, which store whatever
+-- VALUE a rule references (usually the object's NAME, sometimes a literal
+-- inline value with no backing object at all) -- this table stores the
+-- object DEFINITIONS themselves: what named objects exist on the device,
+-- and what they resolve to / contain. Optional per-adapter collection (see
+-- FirewallAdapter's optional getObjects() -- lib/adapters/index.js) --
+-- unlike firewall_rules, a vendor with no getObjects() implementation simply
+-- has zero rows here, not an error.
+--
+-- Same DELETE+reinsert-per-device-per-pull lifecycle as firewall_rules --
+-- object_id in object_analysis_results is therefore only ever valid
+-- alongside the SAME pull's firewall_rules/rule_analysis_results, exactly
+-- like rule_analysis_results.rule_id already is.
+CREATE TABLE IF NOT EXISTS network_objects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  object_type TEXT NOT NULL, -- 'address' | 'address_group' | 'service' | 'service_group'
+  name TEXT NOT NULL,
+  value TEXT, -- leaf address/service objects only: literal value (CIDR/range/fqdn, or protocol/port string) -- NULL for groups
+  members JSONB, -- address_group/service_group only: JSON array of member name strings -- NULL for leaf objects
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_network_objects_device_id ON network_objects(device_id);
+CREATE INDEX IF NOT EXISTS idx_network_objects_type ON network_objects(object_type);
+
+-- Findings from lib/engines/objectUsage.js's analyzeObjectUsage() -- mirrors
+-- rule_analysis_results' own shape/lifecycle exactly (DELETE+reinsert per
+-- device after every successful object collection).
+CREATE TABLE IF NOT EXISTS object_analysis_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  object_id UUID NOT NULL REFERENCES network_objects(id) ON DELETE CASCADE,
+  finding_type TEXT NOT NULL, -- 'unused' | 'duplicate'
+  detail TEXT,
+  related_object_ids JSONB NOT NULL DEFAULT '[]'::jsonb, -- 'duplicate': the other object id(s) sharing the same value
+  analyzed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_oar_device_id ON object_analysis_results(device_id);
+CREATE INDEX IF NOT EXISTS idx_oar_finding_type ON object_analysis_results(finding_type);
 
 -- Operator acknowledge/dismiss tracking for Phase 5 rule-hygiene findings
 -- (Rule Analysis Dashboard Phase 2 -- Cleanup/Optimization/Reorder tabs).
@@ -329,6 +374,23 @@ CREATE TABLE IF NOT EXISTS audit_findings (
   matched_rule_ids UUID[],
   detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ⛔ BUG FIXED 2026-07-18, found live in production the same day it shipped:
+-- audit_findings already existed on any server that had previously run the
+-- Phase 7 compliance rollout, so the matched_rule_ids column added to the
+-- CREATE TABLE IF NOT EXISTS body above was a NO-OP there — CREATE TABLE IF
+-- NOT EXISTS does not add columns to an existing table, it only guards table
+-- CREATION. The compliance fleet page (which never selects this column)
+-- kept working, masking the gap; the per-device compliance page crashed with
+-- a raw "column af.matched_rule_ids does not exist" Postgres error on every
+-- click, on every already-deployed server, until this ran. Same class of
+-- bug the device_versions.serial fix already documents (see that ALTER
+-- TABLE below) — any column added to an ALREADY-SHIPPED table needs its own
+-- explicit ALTER TABLE ADD COLUMN IF NOT EXISTS, never just a CREATE TABLE
+-- IF NOT EXISTS edit, no matter how new the column looks in a diff. Safe to
+-- re-run unconditionally: a no-op on a fresh install (the column already
+-- exists from the CREATE TABLE above) and a real fix on every existing one.
+ALTER TABLE audit_findings ADD COLUMN IF NOT EXISTS matched_rule_ids UUID[];
 
 CREATE INDEX IF NOT EXISTS idx_audit_findings_device_id ON audit_findings(device_id);
 CREATE INDEX IF NOT EXISTS idx_audit_findings_check_id ON audit_findings(check_id);

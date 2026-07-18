@@ -216,6 +216,20 @@ module.exports = { pool };
 - Update script runs `migrate.js` (schema.sql) THEN `schema-grants.sql`, both BEFORE restarting services
   (see Update Script section)
 - Never use `DROP TABLE` in schema.sql — destructive and irreversible in production
+- **⛔ Adding a column to an EXISTING table? `CREATE TABLE IF NOT EXISTS` will NOT add it on a
+  server that already has that table — the whole statement is a no-op there, guarding only table
+  *creation*, never column changes. Found live in production 2026-07-18: `audit_findings.matched_rule_ids`
+  was added inside the `CREATE TABLE IF NOT EXISTS audit_findings (...)` body; every server that had
+  already run the Phase 7 compliance rollout silently kept the old table shape, and the per-device
+  Compliance page (the only query selecting that column) crashed with a raw "column ... does not
+  exist" Postgres error on every click — the fleet page, which doesn't select it, kept working,
+  masking the gap until a user reported the crash directly. Fixed the same day with a companion
+  `ALTER TABLE audit_findings ADD COLUMN IF NOT EXISTS matched_rule_ids UUID[];`** — always add BOTH:
+  the column in the `CREATE TABLE IF NOT EXISTS` body (for a truly fresh install) AND a matching
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` right after it (for every already-deployed server) —
+  never just one. This is the exact same class of bug the `device_versions.serial` fix already fixed
+  once before (search this file for it) — a genuinely easy mistake to repeat because the CREATE
+  TABLE body still LOOKS correct in a diff.
 
 ### Primary Keys
 

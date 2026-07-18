@@ -43,6 +43,8 @@ GRANT SELECT ON TABLE devices TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_versions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_configs TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE firewall_rules TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE network_objects TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE object_analysis_results TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE advisories TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE advisory_conditions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_cve_assessments TO claude_readonly, nocvault_readonly;

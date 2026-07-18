@@ -16,6 +16,7 @@ import OptimizationTab from '../../../../../components/analysis/OptimizationTab'
 import ReorderTab from '../../../../../components/analysis/ReorderTab';
 import RiskTab from '../../../../../components/analysis/RiskTab';
 import RiskyRulesTab from '../../../../../components/analysis/RiskyRulesTab';
+import ObjectsTab from '../../../../../components/analysis/ObjectsTab';
 import TrackingTab from '../../../../../components/analysis/TrackingTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
@@ -216,6 +217,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     'reorder',
     'risk',
     'risky-rules',
+    'objects',
     'tracking',
   ].includes(searchParams?.tab)
     ? searchParams.tab
@@ -266,6 +268,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'reorder', 'Reorder')}
         {tabLink(device.id, tab, 'risk', 'Risk')}
         {tabLink(device.id, tab, 'risky-rules', 'Risky Rules')}
+        {tabLink(device.id, tab, 'objects', 'Objects')}
         {tabLink(device.id, tab, 'tracking', 'Tracking')}
       </div>
 
@@ -369,6 +372,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'risk' && <RiskTab deviceId={device.id} />}
 
       {tab === 'risky-rules' && <RiskyRulesTab deviceId={device.id} />}
+      {tab === 'objects' && <ObjectsTab deviceId={device.id} />}
 
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 

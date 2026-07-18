@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.7.1': [
+    'Fixed the per-device Compliance page throwing a server error on every click — a column added to an already-existing production table via CREATE TABLE IF NOT EXISTS (a no-op on a table that already exists) instead of ALTER TABLE. Also lays groundwork for an upcoming Objects tab (unused/duplicate address and service objects) — inactive until per-vendor collection is added.',
+  ],
   '2.7.0': [
     'Compliance checks now show their actual evidence: a failed check tied to a rule pattern (any-any rules, risky services, missing logging, shadowed/redundant/overly-permissive rules, stale unused rules) expands to show the specific offending rules, plus a written recommendation — not just a pass/fail line.',
     'Added a SANS-standard compliance tab, citing the real SANS Institute Firewall Checklist by item number for each mapped check.',
