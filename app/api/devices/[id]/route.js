@@ -188,6 +188,29 @@ export async function PUT(request, { params }) {
     }
   }
 
+  // ⛔ Bug fixed 2026-07-18, found in a bug-sweep pass: a VENDOR change (not
+  // just a method change within the same vendor) left the previous vendor's
+  // network_objects/object_analysis_results rows behind indefinitely — the
+  // same staleness class as the device_credentials gap fixed above, just
+  // never given the same treatment for this newer feature. Gated on vendor
+  // specifically, not methodChanged: switching transport within the SAME
+  // vendor (e.g. fortinet api -> fortinet ssh) doesn't invalidate what an
+  // object catalog fundamentally IS, only a genuine vendor change does
+  // (Fortinet's addrgrp concept has no meaningful relationship to Palo
+  // Alto's address-group). object_analysis_results cascades automatically
+  // via its ON DELETE CASCADE FK on network_objects.id — no separate
+  // DELETE needed for that table. Best-effort: unlike the credential
+  // cleanup above, a failure here must not block the update (a device
+  // record change is not itself invalid just because a lower-stakes,
+  // non-secret, next-pull-self-correcting table failed to clear).
+  if (rest.vendor !== undefined && rest.vendor !== existing.vendor) {
+    try {
+      await pool.query('DELETE FROM network_objects WHERE device_id = $1', [params.id]);
+    } catch (err) {
+      console.warn(`[devices/${params.id}] failed to clear stale network_objects after vendor change: ${err.message}`);
+    }
+  }
+
   // Resolve credential to store — validated before any write happens.
   let credPlaintext = null;
   let credType = null;

@@ -30,18 +30,30 @@ function valueOrMembers(row) {
   return '—';
 }
 
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: this used to select
+// finding_type and detail as two INDEPENDENT array_agg() calls. An object
+// CAN carry both an 'unused' and a 'duplicate' finding at once (nothing in
+// analyzeObjectUsage() makes them mutually exclusive), and the component
+// below matched them up with a blind `finding_details.find(d => d)` —
+// grabbing whichever detail string happened to be first, with no actual
+// pairing to the finding_type it was rendering next to. For a dual-finding
+// object this could show the 'unused' explanation text in the "Duplicate
+// Of" column, or vice versa. Postgres also doesn't guarantee two
+// independent array_agg() calls in one GROUP BY produce arrays in
+// correlated order without an explicit ORDER BY inside each. Fixed by
+// aggregating (finding_type, detail) as a single paired JSON object per
+// finding, so there is no separate-arrays alignment problem at all — the
+// component below now finds the right detail by finding_type, directly.
 async function getObjectsWithFindings(dbPool, deviceId) {
   const result = await dbPool.query(
     `SELECT
        no.id, no.object_type, no.name, no.value, no.members, no.collected_at,
        COALESCE(
-         array_agg(oar.finding_type) FILTER (WHERE oar.finding_type IS NOT NULL),
-         '{}'
-       ) AS finding_types,
-       COALESCE(
-         array_agg(oar.detail) FILTER (WHERE oar.detail IS NOT NULL),
-         '{}'
-       ) AS finding_details
+         json_agg(
+           json_build_object('finding_type', oar.finding_type, 'detail', oar.detail)
+         ) FILTER (WHERE oar.finding_type IS NOT NULL),
+         '[]'
+       ) AS findings
      FROM network_objects no
      LEFT JOIN object_analysis_results oar ON oar.object_id = no.id
      WHERE no.device_id = $1
@@ -49,7 +61,15 @@ async function getObjectsWithFindings(dbPool, deviceId) {
      ORDER BY no.object_type ASC, no.name ASC`,
     [deviceId]
   );
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    findings: Array.isArray(row.findings) ? row.findings : [],
+  }));
+}
+
+function detailFor(row, findingType) {
+  const match = row.findings.find((f) => f && f.finding_type === findingType);
+  return (match && match.detail) || '—';
 }
 
 export default async function ObjectsTab({ deviceId }) {
@@ -61,8 +81,8 @@ export default async function ObjectsTab({ deviceId }) {
     );
   }
 
-  const unused = objects.filter((o) => o.finding_types.includes('unused'));
-  const duplicates = objects.filter((o) => o.finding_types.includes('duplicate'));
+  const unused = objects.filter((o) => o.findings.some((f) => f.finding_type === 'unused'));
+  const duplicates = objects.filter((o) => o.findings.some((f) => f.finding_type === 'duplicate'));
   const lastCollectedAt = objects.reduce((latest, o) => {
     if (!o.collected_at) return latest;
     return !latest || new Date(o.collected_at) > new Date(latest) ? o.collected_at : latest;
@@ -108,9 +128,7 @@ export default async function ObjectsTab({ deviceId }) {
                   <td title={o.name}>{o.name}</td>
                   <td>{typeBadge(o.object_type)}</td>
                   <td title={valueOrMembers(o)}>{valueOrMembers(o)}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>
-                    {o.finding_details.find((d) => d) || '—'}
-                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{detailFor(o, 'unused')}</td>
                 </tr>
               ))}
             </tbody>
@@ -144,9 +162,7 @@ export default async function ObjectsTab({ deviceId }) {
                   <td title={o.name}>{o.name}</td>
                   <td>{typeBadge(o.object_type)}</td>
                   <td title={o.value || ''}>{o.value || '—'}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>
-                    {o.finding_details.find((d) => d) || '—'}
-                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{detailFor(o, 'duplicate')}</td>
                 </tr>
               ))}
             </tbody>
