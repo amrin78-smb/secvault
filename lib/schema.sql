@@ -277,10 +277,19 @@ CREATE TABLE IF NOT EXISTS audit_checks (
   check_id TEXT NOT NULL UNIQUE, -- stable slug, e.g. 'fortinet-ssl-vpn-not-internet-exposed'
   name TEXT NOT NULL,
   description TEXT,
-  standards TEXT[] NOT NULL, -- subset of 'PCI_DSS' | 'ISO_27001' | 'CIS_V8' | 'NIST' | 'CUSTOM'
+  standards TEXT[] NOT NULL, -- subset of 'PCI_DSS' | 'ISO_27001' | 'CIS_V8' | 'NIST' | 'SANS' | 'CUSTOM'
   vendor TEXT, -- NULL = applies to all vendors; else a specific devices.vendor slug
   severity TEXT NOT NULL DEFAULT 'medium', -- 'critical' | 'high' | 'medium' | 'low' | 'info'
   predicate_config JSONB NOT NULL, -- {predicate_type, ...} -- same evaluator as advisory_conditions
+  -- predicate_type: 'rule_scan' is a SECOND, distinct kind of check (added
+  -- alongside the rule-evidence drill-down UI), evaluated by
+  -- lib/engines/configAuditor.js directly against rule_analysis_results
+  -- (NOT applicability.js's evaluatePredicate(), which only ever sees
+  -- device_configs.config_parsed and has no concept of "for every rule").
+  -- Its predicate_config shape is {predicate_type: 'rule_scan', finding_types:
+  -- [...]} -- no pass_when, since every rule_scan check's polarity is fixed
+  -- ("zero matching rules" always means pass): vendor:null, since
+  -- firewall_rules/rule_analysis_results are already vendor-normalized.
   remediation_guidance TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -306,6 +315,18 @@ CREATE TABLE IF NOT EXISTS audit_findings (
   check_id UUID NOT NULL REFERENCES audit_checks(id) ON DELETE CASCADE,
   status TEXT NOT NULL, -- 'pass' | 'fail' | 'warning' | 'na'
   detail TEXT,
+  -- Rule-level evidence for predicate_type: 'rule_scan' checks (added
+  -- alongside the rule-evidence drill-down UI) -- the firewall_rules.id
+  -- values that caused a 'fail'. NULL for every config-predicate check (the
+  -- original kind, evaluated against device_configs.config_parsed, which has
+  -- no single-rule evidence to point at) and for a rule_scan check that
+  -- passed (nothing to show). Deliberately NOT a FK array (Postgres has no
+  -- native FK-on-array-element) -- firewall_rules is fully DELETE+reinserted
+  -- on every pull, so a stale id here simply resolves to zero rows on the
+  -- next JOIN rather than violating a constraint; audit_findings itself is
+  -- also fully DELETE+reinserted on every compliance run, so staleness here
+  -- never outlives the next run either way.
+  matched_rule_ids UUID[],
   detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
