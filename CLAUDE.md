@@ -2807,6 +2807,80 @@ session's other passes):**
   Open view but left a CVE row visible, the same control behaving differently depending on which
   row it happened to be attached to. Aligned to the stricter, findings-side definition everywhere.
 
+### ⛔ CRITICAL — Compliance predicate engine was reading the wrong root for Palo Alto (2026-07-18)
+
+Reported directly by a user: "a lot of the fails are actually ok — logging is already enabled, HTTP
+management is not enabled, DNS is configured for some already." This was NOT per-check bad data —
+it was a shared, architectural bug in `lib/engines/applicability.js`'s `getLatestConfigParsed()`,
+affecting **every** `deviceconfig.*`/`shared.*`/`mgt-config.*`-path predicate on **every** Palo Alto
+device, on both transports, since this engine was built. Root-caused directly against real
+`device_configs` rows (readonly prod DB access), not guessed — see the exact investigation queries
+in this session's history if the reasoning below needs re-deriving.
+
+**Root cause 1 — wrong root, per transport:**
+- **SSH** (`lib/adapters/paloalto/sshParser.js`): the ENTIRE real config tree (`shared`,
+  `deviceconfig`, `network`, `rulebase`, everything) lives under a `.tree` wrapper key, with
+  `model`/`hostname`/`sw_version` as siblings at the true top level. Every predicate path in
+  `lib/auditChecksSeed.js` for this vendor assumes those keys are at the top level.
+  `getByPath(configParsed, 'deviceconfig.system.service.disable-http')` was resolving against
+  `configParsed.deviceconfig`, which is always `undefined` — `feature_enabled`/`config_key_exists`
+  both treat `undefined` as an unconditional 'no', **regardless of the device's real
+  configuration**. Confirmed live on IDC FW: `disable-http` is genuinely `"yes"` (HTTP correctly
+  off), `shared.log-settings.syslog` is genuinely populated (2 real syslog servers configured), yet
+  every check reading those paths showed FAIL.
+- **XML/API** (`lib/adapters/paloalto/parser.js`): `shared` and `mgt-config` genuinely ARE at the
+  top level (confirmed live on ITC-SLY) — but `deviceconfig` specifically is nested three levels
+  down at `devices.entry.deviceconfig`, not at the top level every `deviceconfig.*` path assumes.
+
+**Fix**: a new `normalizeConfigParsedRoot()` in `applicability.js`, applied inside
+`getLatestConfigParsed()` — the SINGLE function both the compliance engine
+(`configAuditor.js`) and the CVE-applicability engine (`getConfigAppliesForDevice()`, feeding
+`versionMatcher.js`'s CVE prioritization) both call. Fixing it there fixes both consumers at once,
+and is a no-op for every other vendor (confirmed: no other adapter's `getConfig()` ever produces a
+top-level `.tree` key or a `devices.entry.deviceconfig` key). SSH: swap the effective root to
+`.tree` wholesale. XML/API: keep the root, hoist `deviceconfig` up from `devices.entry.deviceconfig`
+non-destructively (only when not already present at the top level, so it can never shadow a real
+key on some future adapter shape).
+
+**Root cause 2 — FortiOS's bare enable/disable vocabulary:**
+`applicability.js`'s `TRUTHY_FEATURE_VALUES`/`FALSY_FEATURE_VALUES` only recognized
+`'enabled'`/`'disabled'` — but FortiOS genuinely uses the BARE strings `"enable"`/`"disable"`
+(confirmed live on TUS: `log_syslogd.status`, `password_policy.status`, `autoupdate_schedule.status`,
+`ntp.ntpsync`, `admins[].two-factor` — every single one). Every `feature_enabled` check against a
+Fortinet device was silently resolving `'unknown'` (neither list matched) instead of the correct
+`'yes'`/`'no'` — a real PASS showed as `'warning'`, and worse, a real FAIL (2FA genuinely disabled on
+TUS's admin account) was ALSO downgraded to a vague warning instead of a proper fail. Fixed by adding
+the bare forms alongside the existing `-d` forms.
+
+**Root cause 3 — one genuinely wrong path**: `paloalto-logging-enabled` pointed at
+`shared.server-profile.syslog`, which doesn't exist on either real device. The real syslog
+server-profile location, confirmed on BOTH transports, is `shared.log-settings.syslog` — fixed.
+
+**Verified end-to-end against real production data** (not just unit-tested in isolation) before
+shipping: re-ran `evaluatePredicate()` directly against real `device_configs` rows for both real
+Palo Alto devices and the real Fortinet device, for every check the user's screenshot showed as
+wrongly failing plus several more. All now resolve correctly — including confirming that
+`fortinet-admin-2fa-required` correctly flips to a genuine FAIL post-fix (2FA really is off on that
+account — the fix didn't just make failures disappear, it also correctly surfaces a real gap that
+was previously being masked as a harmless warning).
+
+**Also swept, both fully verified against real data, found correct, NOT changed**: every other
+Fortinet check (the SSL-VPN WAN-exposure and weak-TLS findings are genuine, confirmed real
+misconfigurations on TUS, not bugs — same for the default-named `"admin"` account and default HTTPS
+port 443, both real). Most other Palo Alto checks also verified correct post-fix.
+
+**Known, NOT fixed this pass — a separate, deeper gap, flagged rather than guessed at**:
+`mgt-config` (used by `paloalto-password-min-length`/`paloalto-session-timeout`) does not exist
+ANYWHERE in IDC FW's real SSH-collected config tree (confirmed via a bounded deep search, not just
+the top level) — this isn't a path bug, the SSH adapter genuinely never captures that section for
+this device, the same "reason (a): section never collected" class of gap this file's own
+`not_evaluable_from_config` convention already documents elsewhere. Those two checks will keep
+showing FAIL rather than an honest `unknown`/`warning` for SSH-collected Palo Alto devices
+specifically, until the SSH adapter is confirmed to (or extended to) actually collect that section —
+not attempted here without live SSH access to verify what command would surface it. Cisco ASA's
+compliance checks remain entirely unverified against real data — no Cisco ASA device exists in this
+deployment to check against.
+
 ### ⚠️ Bug-sweep fixes (2026-07-19, fourth pass) — full-app sweep alongside a feature round
 
 Requested as "do the full compliance/rule-analysis/admin-account feature round PLUS a full feature

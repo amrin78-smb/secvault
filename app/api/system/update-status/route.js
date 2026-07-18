@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.9.1': [
+    'Fixed a real bug behind many wrong compliance failures on Palo Alto devices: the checker was reading configuration from the wrong location internally, so settings that were genuinely correct (logging enabled, HTTP management off, DNS configured) showed as failed. Also fixed the same class of bug for several Fortinet checks that use "enable"/"disable" wording. Verified directly against real device data before shipping.',
+  ],
   '2.9.0': [
     'The Compliance page\'s Cards view now shows one firewall at a time, chosen from a dropdown, instead of a fleet-wide summary — matching how Firewall Analyzer\'s compliance report works. Fleet-wide comparison is still available under "Compare Devices".',
   ],
