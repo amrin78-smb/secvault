@@ -1,8 +1,5 @@
-import Link from 'next/link';
 import { pool } from '../../lib/db';
-import DeviceCard from '../../components/devices/DeviceCard';
 import Badge from '../../components/ui/Badge';
-import EmptyState from '../../components/ui/EmptyState';
 import StatCard from '../../components/ui/StatCard';
 import Card from '../../components/ui/Card';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
@@ -39,35 +36,6 @@ async function getDeviceCount(dbPool) {
   return result.rows[0]?.total ?? 0;
 }
 
-async function getDevices(dbPool) {
-  const result = await dbPool.query(
-    `SELECT d.id, d.name, d.vendor, d.last_connectivity_ok, d.last_collected_at,
-            dv.version_string,
-            COALESCE(band.patch_now_count, 0) AS patch_now_count,
-            COALESCE(band.scheduled_count, 0) AS scheduled_count,
-            COALESCE(band.monitor_count, 0) AS monitor_count
-     FROM devices d
-     LEFT JOIN LATERAL (
-       SELECT version_string
-       FROM device_versions
-       WHERE device_versions.device_id = d.id
-       ORDER BY collected_at DESC
-       LIMIT 1
-     ) dv ON true
-     LEFT JOIN LATERAL (
-       SELECT
-         COUNT(*) FILTER (WHERE priority_band = 'patch_now') AS patch_now_count,
-         COUNT(*) FILTER (WHERE priority_band = 'scheduled') AS scheduled_count,
-         COUNT(*) FILTER (WHERE priority_band = 'monitor') AS monitor_count
-       FROM device_cve_assessments
-       WHERE device_cve_assessments.device_id = d.id
-     ) band ON true
-     WHERE d.active = true
-     ORDER BY d.name ASC`
-  );
-  return result.rows;
-}
-
 async function getLastFeedSync(dbPool) {
   const result = await dbPool.query('SELECT * FROM feed_sync_log ORDER BY started_at DESC LIMIT 1');
   return result.rows[0] || null;
@@ -87,10 +55,9 @@ function syncBadgeColor(status) {
 }
 
 export default async function DashboardPage() {
-  const [summary, deviceCount, devices, lastSync] = await Promise.all([
+  const [summary, deviceCount, lastSync] = await Promise.all([
     getFleetSummary(pool),
     getDeviceCount(pool),
-    getDevices(pool),
     getLastFeedSync(pool),
   ]);
 
@@ -142,24 +109,6 @@ export default async function DashboardPage() {
       </div>
 
       <RecentActivityFeed />
-
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <h1 style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>Devices</h1>
-          <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-            View all →
-          </Link>
-        </div>
-        {devices.length === 0 ? (
-          <EmptyState message="No devices yet. Add one from the Devices page." />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-            {devices.map((device) => (
-              <DeviceCard key={device.id} device={device} />
-            ))}
-          </div>
-        )}
-      </div>
 
       <div
         className="card"

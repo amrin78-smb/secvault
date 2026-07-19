@@ -4,7 +4,7 @@ import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
 
 // Dashboard widget: active-device counts by last_connectivity_ok, the same
-// tri-state signal DeviceCard.js/devices/page.js already render (true =
+// tri-state signal devices/page.js already renders (true =
 // reachable/green, false = unreachable/red, null = never tested/grey). Async
 // server component -- does its own pool.query, same convention as every
 // other dashboard/analysis widget in this app. Do not add 'use client'.
