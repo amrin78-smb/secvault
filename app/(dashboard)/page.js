@@ -19,15 +19,6 @@ import ConfigChangesWidget from '../../components/dashboard/ConfigChangesWidget'
 
 export const dynamic = 'force-dynamic';
 
-// One shared auto-fill grid for every card-style widget below the headline
-// stats — lets the browser pack 2/3/4 widgets per row depending on actual
-// viewport width, rather than a hardcoded pairing that always wastes space
-// on a wide screen. Paired with the `-compact` StatCard/Card variants
-// (app/globals.css) each widget below opts into, this is what cuts the
-// Dashboard's vertical scroll length down versus the original one-widget-
-// per-full-width-row layout.
-const widgetGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 };
-
 async function getFleetSummary(dbPool) {
   const result = await dbPool.query(
     `SELECT
@@ -125,7 +116,7 @@ export default async function DashboardPage() {
         </div>
       </Card>
 
-      <div style={widgetGrid}>
+      <div className="dashboard-widget-grid">
         <RulesetOverview />
         <ComplianceScoreWidget />
         <RiskByCategory />

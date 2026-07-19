@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.10.3': [
+    'Fixed the main Dashboard\'s widget grid: it was auto-packing a variable number of widgets per row (e.g. 5 on one row, 3 leftover on the next) depending on screen width, leaving ragged rows and cramping some widgets\' internal tables enough to clip text (e.g. "fortinet"/"paloalto" in Top Risky Devices). Now a fixed 3-per-row layout on desktop that steps down to 2, then 1, on narrower screens, plus badges everywhere now ellipsize instead of hard-clipping when they run out of room.',
+  ],
   '2.10.2': [
     'Made the main Dashboard noticeably more compact — smaller stat tiles and card padding throughout, and widgets now pack 2-4 per row (based on screen width) instead of a fixed 2-up layout, cutting down on scrolling.',
   ],

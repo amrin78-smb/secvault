@@ -51,9 +51,9 @@ export default async function TopRiskyDevices({ limit = 5 }) {
   return (
     <Table className="dashboard-compact-table">
       <colgroup>
-        <col style={{ width: '50%' }} />
-        <col style={{ width: '20%' }} />
-        <col style={{ width: '30%' }} />
+        <col style={{ width: '42%' }} />
+        <col style={{ width: '26%' }} />
+        <col style={{ width: '32%' }} />
       </colgroup>
       <thead>
         <tr>

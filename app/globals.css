@@ -159,6 +159,9 @@ tbody tr:hover td { background: var(--bg-primary); }
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .badge-green   { background: var(--tint-success); color: var(--tint-success-fg); }
 .badge-yellow  { background: var(--tint-warn);    color: var(--tint-warn-fg); }
@@ -299,6 +302,20 @@ tbody tr:hover td { background: var(--bg-primary); }
    scrolling. */
 .dashboard-compact-table th { padding: 6px 10px; font-size: 10px; }
 .dashboard-compact-table td { padding: 6px 10px; font-size: var(--text-xs); }
+
+/* Main Dashboard's widget grid -- fixed 3-per-row on desktop, not
+   auto-fill/auto-fit (which packs a variable, viewport-width-dependent
+   column count, e.g. 5 then 3 leftover on a wide screen -- ragged rows
+   and, since each widget ends up narrower than intended, cramped internal
+   tables whose cell content clips). Steps down to 2, then 1, on narrower
+   viewports so widgets never get so narrow their own content clips. */
+.dashboard-widget-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 1400px) {
+  .dashboard-widget-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 820px) {
+  .dashboard-widget-grid { grid-template-columns: 1fr; }
+}
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn, .btn-primary, .btn-secondary, .btn-navy, .btn-danger {
