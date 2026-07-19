@@ -263,6 +263,43 @@ tbody tr:hover td { background: var(--bg-primary); }
 .card-title { font-size: var(--text-md); font-weight: 600; color: var(--text-primary); }
 .card-body { padding: 20px; }
 
+/* ── Compact density variants ─────────────────────────────────
+   Additive only — every rule above is untouched, so every existing page
+   (Rule Analysis, Compliance, Risky Rules, etc.) keeps its current look.
+   Used exclusively by the main Dashboard's widget grid, which needs a much
+   higher information density (many small widgets, minimal scrolling) than
+   a single-focus page does. */
+.kpi-card-compact {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.kpi-card-compact:hover { box-shadow: var(--shadow-md); }
+.stat-value-compact { font-size: var(--text-lg); font-weight: 800; line-height: 1; letter-spacing: -0.5px; }
+.stat-label-compact { font-size: var(--text-xs); font-weight: 500; color: var(--text-secondary); margin-top: 2px; }
+.stat-sub-compact   { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+
+.card-header-compact {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.card-title-compact { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+.card-body-compact { padding: 12px; }
+
+/* Scoped table-density override (does NOT touch the global th/td rule above,
+   so every other table in the app is unaffected) -- used only by the main
+   Dashboard's Recent Activity widget, which needs to show more rows without
+   scrolling. */
+.dashboard-compact-table th { padding: 6px 10px; font-size: 10px; }
+.dashboard-compact-table td { padding: 6px 10px; font-size: var(--text-xs); }
+
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn, .btn-primary, .btn-secondary, .btn-navy, .btn-danger {
   display: inline-flex;

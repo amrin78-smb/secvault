@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.10.2': [
+    'Made the main Dashboard noticeably more compact — smaller stat tiles and card padding throughout, and widgets now pack 2-4 per row (based on screen width) instead of a fixed 2-up layout, cutting down on scrolling.',
+  ],
   '2.10.1': [
     'Bug sweep on the Dashboard Rebuild round: fixed Palo Alto PSIRT-sourced CVEs never getting their risk category saved (Risk by Category widget was missing that vendor\'s data), a false "fail" on the new deny-all-rule check for Cisco ASA devices, a false "fail" on the new ICMP-blocked check for FortiGate devices using the default block-ICMP object, and a Palo Alto rule hit-count edge case that could attribute one virtual firewall\'s hit counts to another\'s identically-named rule.',
   ],

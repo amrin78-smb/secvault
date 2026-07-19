@@ -4,7 +4,7 @@ import DeviceCard from '../../components/devices/DeviceCard';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import StatCard from '../../components/ui/StatCard';
-import Card, { CardHeader, CardTitle, CardBody } from '../../components/ui/Card';
+import Card from '../../components/ui/Card';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
 import CveSeveritySummary from '../../components/dashboard/CveSeveritySummary';
 import TopRiskyDevices from '../../components/dashboard/TopRiskyDevices';
@@ -19,11 +19,14 @@ import ConfigChangesWidget from '../../components/dashboard/ConfigChangesWidget'
 
 export const dynamic = 'force-dynamic';
 
-// Two-column responsive row used to pair widgets that are naturally
-// half-width on a wide screen and stack to one column on a narrow one —
-// matches the grid convention every individual widget already uses
-// internally (see e.g. RulesetOverview.js's tile grid).
-const twoColGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 16 };
+// One shared auto-fill grid for every card-style widget below the headline
+// stats — lets the browser pack 2/3/4 widgets per row depending on actual
+// viewport width, rather than a hardcoded pairing that always wastes space
+// on a wide screen. Paired with the `-compact` StatCard/Card variants
+// (app/globals.css) each widget below opts into, this is what cuts the
+// Dashboard's vertical scroll length down versus the original one-widget-
+// per-full-width-row layout.
+const widgetGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 };
 
 async function getFleetSummary(dbPool) {
   const result = await dbPool.query(
@@ -103,55 +106,46 @@ export default async function DashboardPage() {
   const lastSyncTime = lastSync ? formatDateTime(lastSync.finished_at || lastSync.started_at) : null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <AutoRefresh intervalMs={60000} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        <StatCard label="Devices" value={deviceCount} />
-        <StatCard label="Patch Now" value={summary.patch_now_count} color="var(--red)" />
-        <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" />
-        <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
+        <StatCard label="Devices" value={deviceCount} compact />
+        <StatCard label="Patch Now" value={summary.patch_now_count} color="var(--red)" compact />
+        <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" compact />
+        <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" compact />
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>CVE Severity (Fleet)</CardTitle>
-        </CardHeader>
-        <CardBody>
+        <div className="card-header-compact">
+          <div className="card-title-compact">CVE Severity (Fleet)</div>
+        </div>
+        <div className="card-body-compact">
           <CveSeveritySummary />
-        </CardBody>
+        </div>
       </Card>
 
-      <div style={twoColGrid}>
+      <div style={widgetGrid}>
         <RulesetOverview />
         <ComplianceScoreWidget />
-      </div>
-
-      <div style={twoColGrid}>
         <RiskByCategory />
         <Card>
-          <CardHeader>
-            <CardTitle>Vendor Distribution</CardTitle>
-          </CardHeader>
-          <CardBody>
+          <div className="card-header-compact">
+            <div className="card-title-compact">Vendor Distribution</div>
+          </div>
+          <div className="card-body-compact">
             <VendorDistribution />
-          </CardBody>
+          </div>
         </Card>
-      </div>
-
-      <div style={twoColGrid}>
         <Card>
-          <CardHeader>
-            <CardTitle>Top Risky Devices</CardTitle>
-          </CardHeader>
-          <CardBody>
+          <div className="card-header-compact">
+            <div className="card-title-compact">Top Risky Devices</div>
+          </div>
+          <div className="card-body-compact">
             <TopRiskyDevices />
-          </CardBody>
+          </div>
         </Card>
         <DeviceStatusSummary />
-      </div>
-
-      <div style={twoColGrid}>
         <RecentCriticalAlerts />
         <ConfigChangesWidget />
       </div>

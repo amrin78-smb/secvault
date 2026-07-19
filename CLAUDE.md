@@ -2339,6 +2339,24 @@ standard stat-grid unit on every dashboard/summary page) and `PageHeader` (`.pag
 `Table` still enforces `tableLayout:'fixed'` internally — the CLAUDE.md rule below is unchanged,
 just now satisfied inside a component instead of a raw Tailwind class.
 
+**Compact density variants (added 2026-07-19, for the main Dashboard only).** Direct user feedback
+on the Dashboard Rebuild: the widget grid was too tall, needing too much scrolling, with only 2
+widgets fitting per row regardless of screen width. `StatCard` takes an opt-in `compact` prop
+(default `false` — every existing page's `StatCard` usage is pixel-identical, unaffected) that swaps
+in `.kpi-card-compact`/`.stat-value-compact`/`.stat-label-compact`/`.stat-sub-compact`
+(`app/globals.css`, additive-only, no existing class touched). For `Card`'s header/body, there is no
+component-level `compact` prop — callers needing compact chrome use the raw `.card-header-compact`/
+`.card-title-compact`/`.card-body-compact` classes directly instead of the `CardHeader`/`CardTitle`/
+`CardBody` sub-components (those sub-components hardcode the base `card-header`/`card-body` classes
+internally, and layering a second class on top would depend on fragile CSS-cascade ordering between
+the two rules rather than a clean override). A third scoped class, `.dashboard-compact-table`
+(applied via `Table`'s existing `className` prop), tightens `th`/`td` padding for the Dashboard's
+`RecentActivityFeed`/`TopRiskyDevices` tables without touching the global `table th`/`table td` rule
+every other table in the app relies on. `app/(dashboard)/page.js`'s widget layout also changed from
+several hardcoded two-column row pairs to one shared `repeat(auto-fill, minmax(300px, 1fr))` grid —
+the browser now packs 2/3/4 widgets per row depending on actual viewport width instead of a fixed
+2-up pairing that wasted space on a wide screen.
+
 Priority band visual encoding (unchanged mapping, new token names):
 - `patch_now` → `var(--red)` / `<Badge color="danger">`, label "Patch Now"
 - `scheduled`  → `var(--yellow)` / `<Badge color="warning">`, label "Scheduled"

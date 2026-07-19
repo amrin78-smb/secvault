@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card, { CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
 
@@ -46,9 +46,10 @@ const headingStyle = {
 };
 
 const subtextStyle = {
-  fontSize: 'var(--text-xs)',
+  fontSize: 10,
   color: 'var(--text-muted)',
-  marginBottom: 16,
+  marginBottom: 8,
+  lineHeight: 1.35,
 };
 
 // Fleet-wide "Ruleset Overview" widget (ManageEngine-style concept), rebuilt
@@ -65,10 +66,10 @@ export default async function RulesetOverview() {
   if (!totals || totals.total === 0) {
     return (
       <Card>
-        <CardBody>
+        <div className="card-body-compact">
           <div style={headingStyle}>Ruleset Overview</div>
           <EmptyState message="No rules collected yet — add a device and run a collect to see fleet-wide rule health." />
-        </CardBody>
+        </div>
       </Card>
     );
   }
@@ -86,21 +87,20 @@ export default async function RulesetOverview() {
 
   return (
     <Card>
-      <CardBody>
+      <div className="card-body-compact">
         <div style={headingStyle}>Ruleset Overview</div>
         <div style={subtextStyle}>
-          Fleet-wide rule counts across all active devices. A rule can carry more than one finding type at
-          once (e.g. both unused and shadowed), so Unused/Shadow/Redundant/Any-Any are independent counts,
-          not a breakdown of Total — they will not sum to it.
+          Fleet-wide rule counts. A rule can carry more than one finding type at once, so
+          Unused/Shadow/Redundant/Any-Any won&apos;t sum to Total.
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8 }}>
           {tiles.map((t) => (
             <Link key={t.label} href="/analysis" style={{ textDecoration: 'none' }}>
-              <StatCard label={t.label} value={t.value} color={t.color} />
+              <StatCard label={t.label} value={t.value} color={t.color} compact />
             </Link>
           ))}
         </div>
-      </CardBody>
+      </div>
     </Card>
   );
 }

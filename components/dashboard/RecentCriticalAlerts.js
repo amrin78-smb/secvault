@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import CVEBadge from '../cve/CVEBadge';
@@ -51,14 +51,14 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Recent Critical Alerts</CardTitle>
-      </CardHeader>
-      <CardBody>
+      <div className="card-header-compact">
+        <div className="card-title-compact">Recent Critical Alerts</div>
+      </div>
+      <div className="card-body-compact">
         {items.length === 0 ? (
           <EmptyState message="No urgent CVEs right now." />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {items.map((item) => (
               <Link
                 key={item.id}
@@ -67,19 +67,21 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '10px 12px',
+                  gap: 8,
+                  padding: '6px 8px',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--border)',
                   color: 'inherit',
                   textDecoration: 'none',
                 }}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                  <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{item.cve_id}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500, fontSize: 'var(--text-xs)', color: 'var(--text-primary)' }}>
+                    {item.cve_id}
+                  </span>
                   <span
                     style={{
-                      fontSize: 'var(--text-sm)',
+                      fontSize: 10,
                       color: 'var(--text-muted)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -90,7 +92,7 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
                     {item.device_name}
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                   <CVEBadge kevListed={item.kev_listed} />
                   <Badge color={cvssBadgeColor(item.cvss_score)}>
                     {item.cvss_score != null ? `CVSS ${item.cvss_score}` : 'CVSS —'}
@@ -100,7 +102,7 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
             ))}
           </div>
         )}
-      </CardBody>
+      </div>
     </Card>
   );
 }

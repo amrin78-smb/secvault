@@ -1,5 +1,5 @@
 import { pool } from '../../lib/db';
-import Card, { CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
 
@@ -55,7 +55,7 @@ export default async function DeviceStatusSummary() {
 
   return (
     <Card>
-      <CardBody>
+      <div className="card-body-compact">
         <div
           style={{
             fontSize: 'var(--text-xs)',
@@ -66,27 +66,27 @@ export default async function DeviceStatusSummary() {
         >
           Device Connectivity
         </div>
-        <div style={{ marginTop: 4, marginBottom: 16, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Based on each device&apos;s last connectivity test, not real-time monitoring.
+        <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>
+          Last connectivity test, not real-time monitoring.
         </div>
 
         {total === 0 ? (
           <EmptyState message="No active devices yet." />
         ) : (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              <StatCard label="Reachable" value={summary.reachable} color="var(--green)" />
-              <StatCard label="Unreachable" value={summary.unreachable} color="var(--red)" />
-              <StatCard label="Never Tested" value={summary.never_tested} color="var(--text-muted)" />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <StatCard label="Reachable" value={summary.reachable} color="var(--green)" compact />
+              <StatCard label="Unreachable" value={summary.unreachable} color="var(--red)" compact />
+              <StatCard label="Never Tested" value={summary.never_tested} color="var(--text-muted)" compact />
             </div>
             {summary.oldest_collected_at && (
-              <div style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                Longest since last successful collect: {timeAgo(summary.oldest_collected_at)}
+              <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-muted)' }}>
+                Longest since last collect: {timeAgo(summary.oldest_collected_at)}
               </div>
             )}
           </>
         )}
-      </CardBody>
+      </div>
     </Card>
   );
 }

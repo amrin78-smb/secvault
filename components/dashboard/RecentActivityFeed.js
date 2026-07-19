@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import Table from '../ui/Table';
 import EmptyState from '../ui/EmptyState';
 
@@ -48,14 +48,14 @@ export default async function RecentActivityFeed({ limit = 8 }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Recent Activity</CardTitle>
-      </CardHeader>
-      <CardBody>
+      <div className="card-header-compact">
+        <div className="card-title-compact">Recent Activity</div>
+      </div>
+      <div className="card-body-compact">
         {entries.length === 0 ? (
           <EmptyState message="No activity recorded yet." />
         ) : (
-          <Table>
+          <Table className="dashboard-compact-table">
             <colgroup>
               <col style={{ width: '20%' }} />
               <col style={{ width: '22%' }} />
@@ -90,7 +90,7 @@ export default async function RecentActivityFeed({ limit = 8 }) {
             </tbody>
           </Table>
         )}
-      </CardBody>
+      </div>
     </Card>
   );
 }

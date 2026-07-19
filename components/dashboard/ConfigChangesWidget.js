@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 
 // Dashboard widget: fleet-wide config-change summary over the trailing
@@ -59,40 +59,31 @@ export default async function ConfigChangesWidget({ days = 7 }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Config Changes ({days}d)</CardTitle>
-      </CardHeader>
-      <CardBody>
+      <div className="card-header-compact">
+        <div className="card-title-compact">Config Changes ({days}d)</div>
+      </div>
+      <div className="card-body-compact">
         {totalCount === 0 ? (
           <EmptyState message={`No configuration changes in the last ${days} days.`} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
-                <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {totalCount}
                 </div>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-                  Change{totalCount === 1 ? '' : 's'} detected
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  Change{totalCount === 1 ? '' : 's'}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-                <div>
-                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added}</span>{' '}
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>added</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed}</span>{' '}
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>removed</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified}</span>{' '}
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>modified</span>
-                </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', fontSize: 'var(--text-xs)' }}>
+                <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added} added</span>
+                <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed} removed</span>
+                <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified} modified</span>
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {recent.map((r) => (
                 <Link
                   key={r.id}
@@ -100,18 +91,20 @@ export default async function ConfigChangesWidget({ days = 7 }) {
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 2,
-                    padding: '8px 10px',
+                    gap: 1,
+                    padding: '6px 8px',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--border)',
                     color: 'inherit',
                     textDecoration: 'none',
                   }}
                 >
-                  <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{r.device_name}</span>
+                  <span style={{ fontWeight: 500, fontSize: 'var(--text-xs)', color: 'var(--text-primary)' }}>
+                    {r.device_name}
+                  </span>
                   <span
                     style={{
-                      fontSize: 'var(--text-sm)',
+                      fontSize: 10,
                       color: 'var(--text-secondary)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -126,7 +119,7 @@ export default async function ConfigChangesWidget({ days = 7 }) {
             </div>
           </div>
         )}
-      </CardBody>
+      </div>
     </Card>
   );
 }

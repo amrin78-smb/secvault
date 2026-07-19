@@ -1,5 +1,5 @@
 import { pool } from '../../lib/db';
-import Card, { CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 import { CATEGORIES } from '../../lib/engines/vulnerabilityCategory';
 
@@ -59,7 +59,7 @@ export default async function RiskByCategory() {
 
   return (
     <Card>
-      <CardBody>
+      <div className="card-body-compact">
         <div
           style={{
             fontSize: 'var(--text-xs)',
@@ -70,15 +70,14 @@ export default async function RiskByCategory() {
         >
           Risk by Category
         </div>
-        <div style={{ marginTop: 4, marginBottom: 16, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Category is derived from each CVE&apos;s CWE classification where available; uncategorized CVEs are
-          grouped under &quot;Other&quot;.
+        <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>
+          Derived from each CVE&apos;s CWE classification; uncategorized CVEs land under &quot;Other&quot;.
         </div>
 
         {total === 0 ? (
           <EmptyState message="No assessed CVEs for active devices yet." />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {CATEGORY_ORDER.map((category) => {
               const count = countByCategory[category] || 0;
               const widthPct = count === 0 ? 0 : Math.max(2, Math.round((count / maxCount) * 100));
@@ -88,9 +87,9 @@ export default async function RiskByCategory() {
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
-                      fontSize: 'var(--text-sm)',
+                      fontSize: 'var(--text-xs)',
                       color: 'var(--text-secondary)',
-                      marginBottom: 4,
+                      marginBottom: 2,
                     }}
                   >
                     <span>{category}</span>
@@ -98,8 +97,8 @@ export default async function RiskByCategory() {
                   </div>
                   <div
                     style={{
-                      height: 8,
-                      borderRadius: 4,
+                      height: 6,
+                      borderRadius: 3,
                       background: 'var(--bg-primary)',
                       border: '1px solid var(--border)',
                       overflow: 'hidden',
@@ -110,7 +109,7 @@ export default async function RiskByCategory() {
                         height: '100%',
                         width: `${widthPct}%`,
                         background: CATEGORY_COLOR[category] || 'var(--text-muted)',
-                        borderRadius: 4,
+                        borderRadius: 3,
                       }}
                     />
                   </div>
@@ -119,7 +118,7 @@ export default async function RiskByCategory() {
             })}
           </div>
         )}
-      </CardBody>
+      </div>
     </Card>
   );
 }

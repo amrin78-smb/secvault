@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card, { CardBody } from '../ui/Card';
+import Card from '../ui/Card';
 import Badge from '../ui/Badge';
 import StandardDonut from '../compliance/StandardDonut';
 import { STANDARDS, scoreColor } from '../compliance/ComplianceMatrix';
@@ -79,9 +79,9 @@ const headingStyle = {
 };
 
 const subtextStyle = {
-  fontSize: 'var(--text-xs)',
+  fontSize: 10,
   color: 'var(--text-muted)',
-  marginBottom: 16,
+  marginBottom: 8,
 };
 
 function formatSnapshotDate(value) {
@@ -117,12 +117,12 @@ export default async function ComplianceScoreWidget() {
 
   return (
     <Card>
-      <CardBody>
+      <div className="card-body-compact">
         <div style={headingStyle}>Compliance Score</div>
         <div style={subtextStyle}>{asOfLabel}</div>
-        <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap' }}>
-          <StandardDonut pct={overall} size={120} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 180 }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <StandardDonut pct={overall} size={84} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 140 }}>
             {STANDARDS.map((s) => {
               const pct = byStandard ? byStandard[s.key] : null;
               return (
@@ -134,7 +134,7 @@ export default async function ComplianceScoreWidget() {
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     textDecoration: 'none',
-                    fontSize: 'var(--text-sm)',
+                    fontSize: 'var(--text-xs)',
                     color: 'var(--text-secondary)',
                   }}
                 >
@@ -145,7 +145,7 @@ export default async function ComplianceScoreWidget() {
             })}
           </div>
         </div>
-      </CardBody>
+      </div>
     </Card>
   );
 }
