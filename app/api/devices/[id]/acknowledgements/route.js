@@ -6,7 +6,7 @@ import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
-// Same 9 finding types lib/engines/ruleAnalysis.js emits — kept in step
+// Same 10 finding types lib/engines/ruleAnalysis.js emits — kept in step
 // manually (no shared module exports this list as a constant today).
 const FINDING_TYPES = new Set([
   'any_any',
@@ -14,6 +14,7 @@ const FINDING_TYPES = new Set([
   'shadow',
   'reorder_candidate',
   'redundant',
+  'correlation',
   'overly_permissive',
   'unused',
   'expiring_soon',

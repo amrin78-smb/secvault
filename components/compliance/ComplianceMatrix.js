@@ -146,7 +146,7 @@ export default function ComplianceMatrix({ devices }) {
               const pct = stat ? stat.scorePct : null;
               return (
                 <td key={s.key}>
-                  <Link href={`/compliance/${d.deviceId}#${s.key}`} style={{ textDecoration: 'none' }}>
+                  <Link href={`/compliance/${d.deviceId}/standards#${s.key}`} style={{ textDecoration: 'none' }}>
                     {scoreChip(pct)}
                   </Link>
                 </td>

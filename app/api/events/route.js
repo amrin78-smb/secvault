@@ -40,44 +40,44 @@ const PAGE_SIZE = 25;
 // `d.active = true` unconditionally (not just under the `open` filter —
 // an inactive device's history shouldn't appear even under "All") to all
 // three queries here.
+// ⛔ BUG FIXED 2026-07-19, found in an adversarially-verified bug-sweep pass:
+// this used to be rooted FROM finding_acknowledgements, which only ever gets
+// a row via a human-triggered POST from AcknowledgeControl.js
+// (components/analysis/{Cleanup,Optimization,Reorder}Tab.js) -- so a
+// genuinely new finding from the latest rule-analysis run (runAnalysisForDevice()
+// in lib/engines/ruleAnalysis.js never touches finding_acknowledgements) had
+// zero finding_acknowledgements rows and was invisible to the bell badge and
+// this feed, the opposite of what the 'new_finding' alert type is supposed to
+// surface. Rooted FROM rule_analysis_results instead, LEFT JOIN
+// finding_acknowledgements, mirroring CleanupTab.js's getCleanupFindings() --
+// the same COALESCE(fa.status, 'new') pattern already used there -- so a
+// finding with no ack row yet still surfaces as status 'new'.
 async function fetchNewFindings(deviceId, open) {
   const conditions = ['d.active = true'];
   const values = [];
 
   if (open) {
-    conditions.push(`fa.status = 'new'`);
+    conditions.push(`(fa.status IS NULL OR fa.status = 'new')`);
   }
   if (deviceId) {
     values.push(deviceId);
-    conditions.push(`fa.device_id = $${values.length}`);
+    conditions.push(`rar.device_id = $${values.length}`);
   }
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // rule_analysis_results has no rule_id_vendor column of its own (only a
-  // rule_id FK into firewall_rules, which -- like rule_analysis_results
-  // itself -- is fully DELETE+reinserted on every pull/analysis run). To
-  // resolve severity for a finding_acknowledgements row we therefore go
-  // through firewall_rules on (device_id, rule_id_vendor) first, matched
-  // via a LATERAL subquery with LIMIT 1 so a device that happens to have
-  // more than one live rule sharing a vendor rule id can never fan out the
-  // finding_acknowledgements row into duplicates. A miss (stale ack whose
-  // source finding no longer exists) yields severity = NULL, tolerated per
-  // this route's contract -- rendered as unknown, never a query failure.
   const { rows } = await pool.query(
-    `SELECT fa.id, fa.device_id, d.name AS device_name, fa.rule_id_vendor,
-            fa.finding_type, fa.status, fa.updated_at, rar.severity
-     FROM finding_acknowledgements fa
-     JOIN devices d ON d.id = fa.device_id
-     LEFT JOIN LATERAL (
-       SELECT rar_inner.severity
-       FROM firewall_rules fr
-       JOIN rule_analysis_results rar_inner
-         ON rar_inner.rule_id = fr.id AND rar_inner.finding_type = fa.finding_type
-       WHERE fr.device_id = fa.device_id AND fr.rule_id_vendor = fa.rule_id_vendor
-       LIMIT 1
-     ) rar ON true
+    `SELECT rar.id, rar.device_id, d.name AS device_name, fr.rule_id_vendor,
+            rar.finding_type, rar.severity, rar.analyzed_at,
+            COALESCE(fa.status, 'new') AS status
+     FROM rule_analysis_results rar
+     JOIN devices d ON d.id = rar.device_id
+     JOIN firewall_rules fr ON fr.id = rar.rule_id
+     LEFT JOIN finding_acknowledgements fa
+       ON fa.device_id = rar.device_id
+       AND fa.rule_id_vendor = fr.rule_id_vendor
+       AND fa.finding_type = rar.finding_type
      ${whereClause}
-     ORDER BY fa.updated_at DESC
+     ORDER BY rar.analyzed_at DESC
      LIMIT 500`,
     values
   );
@@ -90,7 +90,7 @@ async function fetchNewFindings(deviceId, open) {
     label: `${r.finding_type} on ${r.rule_id_vendor}`,
     severity: r.severity || null,
     status: r.status,
-    occurredAt: r.updated_at,
+    occurredAt: r.analyzed_at,
     ack: { kind: 'finding', rule_id_vendor: r.rule_id_vendor, finding_type: r.finding_type },
   }));
 }

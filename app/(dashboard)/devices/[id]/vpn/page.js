@@ -140,7 +140,13 @@ export default async function DeviceVpnPage({ params }) {
               </span>
               {summary.enabled === true && <Badge color="success">Enabled</Badge>}
               {summary.enabled === false && <Badge color="muted">Disabled</Badge>}
-              {summary.enabled === null && <Badge color="muted">Unknown</Badge>}
+              {/* enabled === null/undefined (Sangfor's tri-state, or a vendor like
+                  Fortinet/Palo Alto whose config was found but this module doesn't
+                  infer a confident on/off state for — see vpnSummary.js's own
+                  comments, and the identical fallback in the fleet vpn/page.js). */}
+              {(summary.enabled === null || summary.enabled === undefined) && (
+                <Badge color="warning">Configured (state unknown)</Badge>
+              )}
               {summary.lowConfidence && (
                 <Badge color="warning">Low confidence — doc-derived, unverified for this vendor</Badge>
               )}

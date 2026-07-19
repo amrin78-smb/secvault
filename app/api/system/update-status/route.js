@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.11.2': [
+    'Full-app bug sweep: closed two more gaps in yesterday\'s config-change secret redaction (a secret nested inside a whole newly-added/removed section wasn\'t being caught before), a real secret-redaction gap in the Forcepoint adapter, and a Check Point identity-matching gap that could misattribute a management server\'s data to the wrong device on distributed deployments.',
+    'Fixed the notification bell, Alerts page, and the events API all under-reporting brand-new rule findings from scheduled analysis runs until an operator had separately opened that finding in another tab first.',
+    'Fixed several other real bugs found in the sweep: an Update Script gap that could restart the app after a failed database migration, a Forcepoint SSH ruleset-wipe risk on an unrecognized field name, a Palo Alto Panorama rule-collection gap, an NVD CVE-severity gap for CVEs scored only with CVSS v4.0, and an accessibility fix (keyboard focus trap) for every confirm dialog in the app.',
+  ],
   '2.11.1': [
     'Fixed the "Config Changes" widget showing device clock/uptime/auto-updating signature versions as if an admin had changed something — confirmed the underlying noise filter was already working correctly, the widget was just still showing historical entries recorded before that filter existed. This update cleans up those old entries automatically on install.',
     'Security fix: found and closed a gap where a device secret (captured at the exact moment a redaction fix took effect) could end up stored in the config-change history. Added a second redaction pass specifically for this history, and this update scrubs the one affected historical entry automatically.',

@@ -55,36 +55,38 @@ function formatWhen(value) {
 // aligned to match fetchNewFindings' (only 'new' counts as open, not
 // 'acknowledged') since AlertAckControl.js renders the identical select for
 // both row kinds.
+// ⛔ BUG FIXED 2026-07-19, found in an adversarially-verified bug-sweep pass
+// (mirrored identically from app/api/events/route.js — see that file's
+// comment for the full reasoning): this used to be rooted FROM
+// finding_acknowledgements, which only ever gets a row via a human-triggered
+// POST from AcknowledgeControl.js — so a genuinely new finding from the
+// latest rule-analysis run (which never touches finding_acknowledgements)
+// had zero rows here and was invisible on this page. Rooted FROM
+// rule_analysis_results instead, LEFT JOIN finding_acknowledgements,
+// mirroring CleanupTab.js's COALESCE(fa.status, 'new') pattern.
 async function fetchNewFindings(dbPool, deviceId, open) {
   const conditions = ['d.active = true'];
   const values = [];
-  if (open) conditions.push(`fa.status = 'new'`);
+  if (open) conditions.push(`(fa.status IS NULL OR fa.status = 'new')`);
   if (deviceId) {
     values.push(deviceId);
-    conditions.push(`fa.device_id = $${values.length}`);
+    conditions.push(`rar.device_id = $${values.length}`);
   }
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // See app/api/events/route.js's fetchNewFindings for why severity is
-  // resolved via a LATERAL join against firewall_rules/rule_analysis_results
-  // rather than a plain column on finding_acknowledgements, and why a miss
-  // (stale ack whose source finding no longer exists) yields severity = NULL
-  // rather than failing the query.
   const { rows } = await dbPool.query(
-    `SELECT fa.id, fa.device_id, d.name AS device_name, fa.rule_id_vendor,
-            fa.finding_type, fa.status, fa.updated_at, rar.severity
-     FROM finding_acknowledgements fa
-     JOIN devices d ON d.id = fa.device_id
-     LEFT JOIN LATERAL (
-       SELECT rar_inner.severity
-       FROM firewall_rules fr
-       JOIN rule_analysis_results rar_inner
-         ON rar_inner.rule_id = fr.id AND rar_inner.finding_type = fa.finding_type
-       WHERE fr.device_id = fa.device_id AND fr.rule_id_vendor = fa.rule_id_vendor
-       LIMIT 1
-     ) rar ON true
+    `SELECT rar.id, rar.device_id, d.name AS device_name, fr.rule_id_vendor,
+            rar.finding_type, rar.severity, rar.analyzed_at,
+            COALESCE(fa.status, 'new') AS status
+     FROM rule_analysis_results rar
+     JOIN devices d ON d.id = rar.device_id
+     JOIN firewall_rules fr ON fr.id = rar.rule_id
+     LEFT JOIN finding_acknowledgements fa
+       ON fa.device_id = rar.device_id
+       AND fa.rule_id_vendor = fr.rule_id_vendor
+       AND fa.finding_type = rar.finding_type
      ${whereClause}
-     ORDER BY fa.updated_at DESC
+     ORDER BY rar.analyzed_at DESC
      LIMIT 500`,
     values
   );
@@ -97,7 +99,7 @@ async function fetchNewFindings(dbPool, deviceId, open) {
     label: `${r.finding_type} on ${r.rule_id_vendor}`,
     severity: r.severity || null,
     status: r.status,
-    occurredAt: r.updated_at,
+    occurredAt: r.analyzed_at,
     ack: { kind: 'finding', rule_id_vendor: r.rule_id_vendor, finding_type: r.finding_type },
   }));
 }

@@ -29,6 +29,19 @@ async function getLatestSnapshot(dbPool) {
   return rows[0] || null;
 }
 
+// Mirrors CveSeveritySummary.js's own daysAgo()/staleness convention exactly
+// (>2 days is stale) -- see this file's own header comment on why the
+// snapshot can go stale indefinitely (the daily engine-worker job only
+// logs-and-skips on failure, with no retry until the next day's cron tick).
+function daysAgo(dateValue) {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return Infinity;
+  const today = new Date();
+  const utcDate = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const utcToday = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.round((utcToday - utcDate) / 86400000);
+}
+
 // Live fallback for when the daily snapshot job hasn't run yet (a normal
 // state on a fresh install / day one, not an error) -- computed directly
 // from audit_findings/audit_checks/devices, fleet-wide, active devices only.
@@ -94,18 +107,24 @@ function formatSnapshotDate(value) {
 
 // Fleet-wide compliance score widget: a big StandardDonut gauge for the
 // overall pooled score, plus a compact per-standard list. Reads the most
-// recent fleet_dashboard_snapshots row when one exists (the normal case once
-// the daily engine-worker job has run at least once); falls back to a live
-// on-the-fly computation otherwise, so this widget is never empty just
-// because the snapshot table is new/unpopulated.
+// recent fleet_dashboard_snapshots row when one exists AND is fresh enough
+// (the normal case once the daily engine-worker job has run at least once);
+// falls back to a live on-the-fly computation otherwise, so this widget is
+// never empty just because the snapshot table is new/unpopulated, and never
+// silently serves a stuck/stale score if the daily job stops running (it
+// only logs-and-skips on failure, with no retry before the next day's cron
+// tick -- see services/engine-worker.js's runDashboardSnapshotJob()).
+// >2 days stale mirrors CveSeveritySummary.js's own pickComparisonSnapshot()
+// threshold exactly.
 export default async function ComplianceScoreWidget() {
   const snapshot = await getLatestSnapshot(pool);
+  const snapshotFresh = snapshot && daysAgo(snapshot.snapshot_date) <= 2;
 
   let overall;
   let byStandard;
   let asOfLabel;
 
-  if (snapshot) {
+  if (snapshotFresh) {
     overall = snapshot.compliance_overall_score;
     byStandard = snapshot.compliance_by_standard || {};
     const dateLabel = formatSnapshotDate(snapshot.snapshot_date);
@@ -114,7 +133,9 @@ export default async function ComplianceScoreWidget() {
     const live = await computeLiveFleetCompliance(pool);
     overall = live.overall;
     byStandard = live.byStandard;
-    asOfLabel = 'Live — no daily snapshot recorded yet';
+    asOfLabel = snapshot
+      ? 'Live — daily snapshot is stale, recomputed live'
+      : 'Live — no daily snapshot recorded yet';
   }
 
   return (

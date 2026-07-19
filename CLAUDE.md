@@ -3394,6 +3394,185 @@ list — so `!rule.last_hit_at` was always `true`, permanently vacuous. Simplifi
 finding's `detail` text, which previously referenced "no last-hit timestamp" as if it were a real,
 sometimes-false signal.
 
+### ⚠️ Bugs Found and Fixed — full-app orchestrated sweep (2026-07-19, sixth pass)
+
+Requested directly as "do a full bug sweep of the entire app... fan agents across the app, check all
+nooks and crannies" before a dev session the next day — the first sweep in this codebase's history run
+as an actual multi-agent Workflow rather than a handful of parallel Task agents: **16 parallel
+read-only finders**, one per subsystem (every vendor adapter individually — Forcepoint, Fortinet, Palo
+Alto, and Check Point/Cisco ASA/Sangfor grouped — the CVE feed engine, applicability/compliance, rule
+analysis/object usage, the Dashboard, Alerts, the brand-new Vulnerability page merge, device CRUD,
+auth/shell, VPN/admin summary, config-diff/engine-worker, the updater/installer, and shared UI
+components), **56 agents total**, every one of the 22 findings put through an adversarial skeptical
+verifier (told to default to REFUTED unless it could personally trace the exact failure through the
+real, current code) before any fix was attempted — all 22 survived verification. Fixes were then
+applied grouped by file so no two agents touched the same file, followed by a personal review of every
+diff (not just a build check) before integrating, per this file's own "verify agent diffs before
+integrating" rule. The three files changed earlier that same day (Dashboard icons, the Vulnerability
+merge, the config-diff secret-redaction fix) were explicitly called out to their respective finders for
+extra scrutiny rather than assumed clean just because they were new.
+
+**Security:**
+- `lib/adapters/forcepoint/parser.js`'s `SECRET_KEY_PATTERN` was still the OLD narrow pattern
+  (`secret|password|passwd|psk|private[-_]?key|community|credential|token|api[-_]?key`) — the exact
+  keyword gap that caused the real production secret leak documented in the Config Change Tracking
+  section above (a `phash` field). The widened pattern (adding `phash`/`pre[-_]?shared`/`keytab`) had
+  only ever landed in `lib/engines/configDiff.js`'s downstream `SECRET_PATH_PATTERN`, never
+  back-ported to this file — the FIRST and only adapter-level redaction pass before `device_configs`
+  (granted to `claude_readonly`/`nocvault_readonly`) is populated for Forcepoint. Fixed to match.
+- **Two more gaps found in the SAME `configDiff.js` secret-redaction work from earlier that day**,
+  confirmed by giving that file's own finder explicit "genuinely skeptical, not a rubber stamp"
+  instructions rather than trusting it was already correct: (1) `redactSecretEntries()`/`isSecretPath()`
+  only ever inspected a diff entry's own top-level PATH, never the object it carries — `diffValue()`
+  never recurses into a key that exists on only one side of a diff (a whole new/removed subtree is
+  captured as one opaque `value`), so a secret nested inside e.g. a newly-created Palo Alto admin user
+  object (`mgt-config.users.newadmin: {phash: '...', ...}`) was never inspected at all, because the
+  entry's own path (`...newadmin`) isn't itself secret-shaped. (2) `isVolatilePath()` only matches a
+  nested leaf path with a trailing-dot prefix (`system_info.time`) — if the WHOLE `system_info` subtree
+  appears/disappears as one add/remove entry rather than field-by-field, the bare path `system_info`
+  never matches its own `${root}.` prefix test, so the noise-suppression allowlist is bypassed entirely
+  for that one diff. Fixed with `deepRedactSecrets()` (recursively redacts any secret-shaped KEY found
+  at any depth inside a carried value, applied to every entry regardless of its own path) and
+  `isRegisteredSubtreeRoot()` (decomposes a whole-subtree add/remove of a registered volatile root via
+  a recursive `diffValue(subtree, {}, ...)` / `diffValue({}, subtree, ...)` call instead of capturing it
+  as one opaque entry, so per-leaf `isVolatilePath` filtering applies correctly). Re-verified against
+  live production data (read-only) after the fix, including a synthetic whole-subtree-add test
+  confirming both a nested `phash` and nested volatile `system_info.time`/`.uptime` are now correctly
+  handled in the one-sided-diff shape that was missed before.
+- `lib/adapters/checkpoint/parser.js`'s `findGatewayByIdentity()` had no object-type filter — on a
+  distributed deployment (`device.mgmt_ip` = the Security Management Server's own IP, the exact
+  scenario this function's own header comment already calls out as needing name-based disambiguation),
+  the SMC's own `checkpoint-host`/server object can share that IP and get matched as "the gateway"
+  before the real gateway's name-based match is ever reached (list order from the API isn't
+  guaranteed). Fixed with `isGatewayLikeType(type)` (`/gateway|cluster/i`, matching this file's existing
+  `_showGatewayElement()` type-check convention), required alongside the IP/name match.
+
+**Correctness / data-loss risk:**
+- `lib/adapters/forcepoint/parser.js`'s `parsePolicy()` returned `[]` identically whether a policy
+  genuinely has zero rules OR its rules live under a field name other than the two doc-derived,
+  unverified guesses (`rules`/`fw_ipv4_access_rules`) — `getRules()` returned that `[]` straight
+  through with no way to tell the two apart, and `collectAndStore()` would DELETE the device's real
+  `firewall_rules` before inserting the empty result, silently wiping the ruleset on a field-name
+  mismatch while reporting success. The exact "getRules() must throw, never return []" violation this
+  file documents as already fixed once in Sangfor/Fortinet. Fixed: throws when NEITHER known field is
+  present on the element at all; still returns `[]` (correctly) when a known field IS present but
+  resolves empty — a genuine zero-rule policy.
+- `lib/adapters/paloalto/sshParser.js`'s `findSecurityRulesContainers()` only ever matched a literal
+  `rulebase` key, never Panorama's `pre-rulebase`/`post-rulebase` — contradicting its own header
+  comment and this file's own claim (both asserted the Panorama shape was already tolerated). A
+  Panorama-managed device with rules only under `pre-rulebase`/`post-rulebase` would fail SSH
+  collection outright (`containersFound === 0` → throw) despite having a real, enforced ruleset. Fixed
+  to check all three keys at every recursion level.
+- `lib/feeds/nvd.js`'s CIRCL-fallback path (`matchingAffectedEntriesFromCveRecord`) required
+  `entry.cpes[]` to be present — an optional, NVD-specific enrichment that raw CVE List v5 records
+  commonly omit (e.g. a CVE not yet processed by NVD's own CPE-matching pipeline, the exact class of
+  CVE the CIRCL fallback exists to surface during an NVD outage). An entry with no `cpes[]` was
+  silently dropped, `normalizeCirclRecord()` had no guard analogous to `paloalto.js`'s zero-match skip,
+  and the resulting advisory row was upserted anyway with empty `affected_version_ranges`/
+  `fixed_in_versions` — permanently unmatchable to any device, the opposite of what CIRCL is for. Fixed
+  with a fallback match on the entry's plain `vendor`/`product` strings (normalized, required on every
+  CVE Record affected[] entry) when `cpes[]` is absent.
+- `lib/feeds/nvd.js`'s `pickCvss()`/`pickCvssFromCveRecord()` never checked `cvssMetricV40`/`cvssV4_0`
+  — only `paloalto.js`'s equivalent cascade had been extended for this, despite both consuming the
+  identical CVE Record Format 5.x shape. A CVE carrying only a v4.0 metric resolved to `cvss_score =
+  null`, which `prioritization.js` coerces to `0`, permanently blocking priority-tree steps 3/4
+  (cvss>=9.0/7.0) regardless of real severity. Fixed to match `paloalto.js`'s cascade exactly.
+- `app/api/devices/[id]/acknowledgements/route.js`'s `FINDING_TYPES` allow-list was missing
+  `'correlation'` (the 10th finding type, added 2026-07-18) — acknowledging a correlation finding from
+  the Cleanup tab always 400'd, permanently stuck at "New" unlike its three sibling finding types in
+  the same tab. Fixed by adding it.
+- **`app/api/events/route.js`'s `fetchNewFindings()` was rooted FROM `finding_acknowledgements`**,
+  which only ever gets a row via a human-triggered ack POST — a genuinely new finding from the latest
+  scheduled rule-analysis run (which never touches that table) had zero rows and was invisible to the
+  bell badge, `GET /api/events?type=new_finding`, and the Alerts page, the exact opposite of what
+  `new_finding` is supposed to surface. Fixed by rooting FROM `rule_analysis_results` instead, `LEFT
+  JOIN finding_acknowledgements`, `COALESCE(fa.status, 'new')` — mirroring the pattern
+  `CleanupTab.js`'s `getCleanupFindings()` already used correctly. **Found only in one of the three
+  places this exact query is deliberately duplicated** (per this file's own "must be kept in step by
+  inspection" warning on that duplication) — the sweep's fix-grouped-by-file strategy only touched the
+  one file its finder flagged, so `app/(dashboard)/alerts/page.js`'s own copy and
+  `app/api/notifications/summary/route.js`'s bell-count/recent-items queries were independently
+  checked and found to have the identical bug, then fixed identically by hand immediately after
+  integrating the sweep's other fixes — a gap in the sweep's own file-grouping strategy for findings
+  that are supposed to apply to more than one file, worth remembering for the next orchestrated sweep.
+- `components/dashboard/RecentActivityFeed.js`'s fleet-wide activity query had no `d.active = true`
+  filter (or any device-status condition) — the one Dashboard widget in its own grid that didn't,
+  unlike the identical 2026-07-19 fix already applied to the Alerts subsystem the day before. A
+  deactivated device's old logged actions could occupy multiple of the widget's only 8 slots
+  indefinitely. Fixed with `WHERE al.device_id IS NULL OR d.active = true` — the `IS NULL` half
+  specifically preserves fleet-wide entries (`Trigger Update` etc., which have no `device_id`) that a
+  bare `d.active = true` would have wrongly dropped via the `LEFT JOIN`'s NULL.
+- `app/(dashboard)/devices/page.js`'s "Edit" action linked to the exact same URL as "View", and that
+  destination page has no field-editing form at all (only credential rotation, Collect/Test, Delete) —
+  `PUT /api/devices/[id]` fully supports updating name/vendor/mgmt_ip/site/asset_criticality, but
+  nothing in the UI ever calls it with anything but a credential. The only UI recovery from a typo'd
+  field was Delete + re-add, cascading away the device's entire historical trail. Fixed by removing the
+  dead/misleading Edit link (the smallest correct fix for a bug-sweep; building an actual edit form is
+  a real, separate feature gap worth its own follow-up, not attempted here).
+
+**UI / navigation:**
+- `components/compliance/ComplianceMatrix.js`'s fleet "Compare Devices" score-chip links, and
+  `app/(dashboard)/compliance/[deviceId]/checks/[findingId]/page.js`'s "Back to Compliance" link, both
+  still pointed at `/compliance/{deviceId}#{standardKey}` — a same-page hash anchor that stopped doing
+  anything the moment the 2026-07-18 split moved `StandardTabs`' hashchange/scrollIntoView handling off
+  that summary page onto the separate `/compliance/{deviceId}/standards` route. Every OTHER link in the
+  same feature (`StandardCard`'s own `viewMoreHref` in both compliance pages) was updated at the time;
+  these two were missed. Fixed by adding `/standards` to both.
+- `components/dashboard/ComplianceScoreWidget.js` had no staleness bound on the
+  `fleet_dashboard_snapshots` row it reads as the Dashboard's PRIMARY compliance score — unlike its
+  sibling `CveSeveritySummary.js`, which explicitly refuses a comparison snapshot more than 2 days old.
+  The daily snapshot cron job only logs-and-skips on failure with no retry before the next day's tick,
+  so a persistent failure could leave the Dashboard silently showing a frozen, arbitrarily-old score
+  indefinitely with only a small 10px date caption as the sole hint. Fixed with the identical >2-day
+  `daysAgo()` staleness gate `CveSeveritySummary.js` already uses, falling back to the live computation
+  (already used for "no snapshot yet") when the snapshot is present but stale too.
+- `app/(dashboard)/devices/[id]/vpn/page.js` checked `summary.enabled === null` but not `undefined` for
+  the "state unknown" badge — Fortinet/Palo Alto devices whose VPN module returns `undefined` (not
+  `null`) for an unmodeled confidence state never rendered ANY Enabled/Disabled/Unknown badge at all.
+  Fixed to match the fleet-wide `/vpn` page's own equivalent fallback exactly (`Configured (state
+  unknown)`, warning color) — closing both the missing-badge bug and a wording/color inconsistency
+  between the two pages in one fix.
+- `components/ui/Modal.js` had no focus trap, no initial-focus management, and no `role`/`aria-modal` —
+  interactive elements behind an open confirm dialog (Delete Device, Start Update?) remained reachable
+  and activatable via Tab while the modal was open. Fixed: focus moves into the dialog on open and
+  restores to the triggering element on close, Tab/Shift+Tab now cycles only within the dialog's own
+  focusable elements, and `role="dialog"`/`aria-modal="true"`/`tabIndex={-1}` were added to the panel.
+  Purely additive to the existing `open`/`onClose` `useEffect` — no existing call site's rendering
+  changes.
+
+**Observability (silent-verification gaps, not user-facing bugs):**
+- `lib/adapters/forcepoint/smc.js`'s mandatory `[SMC Debug] Engine element:` first-connect log (the
+  raw-response evidence this file's own Live Validation Status protocol requires before trusting any
+  field mapping) only fired on the branch that follows an engine's href for full data — a live SMC
+  whose `/api/elements/engines` list response already returns complete elements inline (arguably the
+  more common REST shape) never logged anything, for any collect cycle, silently defeating the
+  verification protocol while the adapter ran with no visible error. Fixed by moving the log outside
+  the conditional href-follow branch so it fires unconditionally per engine.
+- `lib/adapters/fortinet/cliParser.js`'s `parseSystemStatus()` warned on a failed version-line match
+  but not a failed `Virtual domain configuration:` match — the sole gate for whether multi-VDOM
+  enumeration is even attempted (`isMultiVdom()` silently treats an unparsed line as single-VDOM by
+  design). A real multi-VDOM device with slightly different firmware wording on that one line would
+  silently collect only the default VDOM's rules with zero `engine.log` signal pointing at the cause.
+  Fixed to warn, matching the sibling versionLine pattern.
+
+**Installer:**
+- `installer/Update-SecVault.ps1` step 8 (`sc.exe start SecVault-App`) was gated only on `npm run
+  build` succeeding, not on step 5 (`node lib\migrate.js`) — a failed schema migration still let the
+  app restart running new code against the old/incomplete schema (the exact class of failure the
+  `audit_findings.matched_rule_ids` incident above documents). Fixed by capturing `$migrateSucceeded`
+  (mirroring the existing `$buildSucceeded` pattern exactly) and gating step 8 on both. The final
+  summary log line also unconditionally claimed "Both services were still (re)started" even when step
+  8 was deliberately skipped — fixed to report accurately which service(s) actually started.
+- `app/api/system/update-available/route.js`'s polled-banner cache started at the hardcoded
+  `{available:false}` default and only refreshed at process start + every 24h — if the very first
+  resolution failed (e.g. network not fully up right after a reboot), the cache silently stayed at a
+  confident-looking "no update" for up to 24 hours with no retry. Fixed with a `resolvedOnce` flag and
+  a 5-minute retry loop that stops once a check actually resolves either hash.
+
+**Result:** all 20 touched files (18 from the sweep + the 2 hand-fixed duplicates) `node --check`ed
+(PowerShell files syntax-validated via `PSParser`), every diff personally reviewed against the actual
+finding before integrating, `npm run build` clean.
+
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
 Real production traps discovered during the Phase 1+2 build — documented here so they are never

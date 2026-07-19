@@ -31,7 +31,11 @@ const SORT_OPTIONS = {
 // back. Replaced with DeviceRowActions.js, a client component using the same
 // fetch+pending+router.refresh() pattern as the device detail page's
 // DeviceActions.js, styled to match this table's compact inline text links.
-//   - View CVEs / Edit -> still a plain <Link> (no interactivity needed).
+//   - View -> still a plain <Link> (no interactivity needed). The separate "Edit"
+//     link that used to sit here was removed: it pointed at this same URL, and the
+//     device detail page it led to has no field-editing form (identity/inventory
+//     fields can only be changed via the PUT API directly, not from this UI) --
+//     the link was dead/misleading, not a real affordance.
 //   - Delete -> still a plain <Link href="?confirmDelete=<id>"> query-param flip
 //     + the shared Modal component + a Confirm <form> Server Action -- a single
 //     fast DB delete, not a network call to a firewall, so the blocking-
@@ -192,9 +196,6 @@ export default async function DevicesPage({ searchParams }) {
                       View
                     </Link>
                     <DeviceRowActions deviceId={d.id} />
-                    <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
-                      Edit
-                    </Link>
                     <Link
                       href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}
                       style={{ color: 'var(--red)', textDecoration: 'underline' }}

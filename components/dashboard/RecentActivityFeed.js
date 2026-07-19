@@ -38,6 +38,7 @@ async function getRecentActivity(dbPool, limit) {
     `SELECT al.actor, al.action, al.device_id, d.name AS device_name, al.detail, al.occurred_at
      FROM activity_log al
      LEFT JOIN devices d ON d.id = al.device_id
+     WHERE al.device_id IS NULL OR d.active = true
      ORDER BY al.occurred_at DESC
      LIMIT $1`,
     [limit]

@@ -15,12 +15,26 @@ export async function GET() {
     // forever. The patch_now "open" definition is also aligned here to
     // match findings' (only 'new' counts as open) for the same
     // AlertAckControl.js-shares-one-control reason.
+    // ⛔ BUG FIXED 2026-07-19, found in an adversarially-verified bug-sweep
+    // pass (mirrored identically from app/api/events/route.js — see that
+    // file's comment for the full reasoning): rooted FROM
+    // finding_acknowledgements, which only ever gets a row via a
+    // human-triggered ack POST — a genuinely new finding from the latest
+    // rule-analysis run had zero rows here, so the bell badge undercounted
+    // and never listed it. Rooted FROM rule_analysis_results instead, LEFT
+    // JOIN finding_acknowledgements, same COALESCE-equivalent
+    // (fa.status IS NULL OR fa.status = 'new') pattern as the sibling fix.
     const [newFindings, patchNow, unackedDiffs] = await Promise.all([
       pool.query(
         `SELECT COUNT(*)::int AS count
-         FROM finding_acknowledgements fa
-         JOIN devices d ON d.id = fa.device_id
-         WHERE fa.status = 'new' AND d.active = true`
+         FROM rule_analysis_results rar
+         JOIN devices d ON d.id = rar.device_id
+         JOIN firewall_rules fr ON fr.id = rar.rule_id
+         LEFT JOIN finding_acknowledgements fa
+           ON fa.device_id = rar.device_id
+           AND fa.rule_id_vendor = fr.rule_id_vendor
+           AND fa.finding_type = rar.finding_type
+         WHERE (fa.status IS NULL OR fa.status = 'new') AND d.active = true`
       ),
       pool.query(
         `SELECT COUNT(*)::int AS count
@@ -72,11 +86,16 @@ export async function GET() {
       // whenever new-finding rows were the only open item. Found in the
       // final pre-deploy bug check (2026-07-17).
       pool.query(
-        `SELECT fa.device_id, d.name AS device_name, fa.finding_type, fa.rule_id_vendor, fa.updated_at
-         FROM finding_acknowledgements fa
-         JOIN devices d ON d.id = fa.device_id
-         WHERE fa.status = 'new' AND d.active = true
-         ORDER BY fa.updated_at DESC
+        `SELECT rar.device_id, d.name AS device_name, rar.finding_type, fr.rule_id_vendor, rar.analyzed_at
+         FROM rule_analysis_results rar
+         JOIN devices d ON d.id = rar.device_id
+         JOIN firewall_rules fr ON fr.id = rar.rule_id
+         LEFT JOIN finding_acknowledgements fa
+           ON fa.device_id = rar.device_id
+           AND fa.rule_id_vendor = fr.rule_id_vendor
+           AND fa.finding_type = rar.finding_type
+         WHERE (fa.status IS NULL OR fa.status = 'new') AND d.active = true
+         ORDER BY rar.analyzed_at DESC
          LIMIT 3`
       ),
     ]);
@@ -98,7 +117,7 @@ export async function GET() {
         type: 'new_finding',
         label: `${r.device_name}: ${r.finding_type} (${r.rule_id_vendor})`,
         href: `/alerts?type=new_finding&device_id=${r.device_id}`,
-        occurredAt: r.updated_at,
+        occurredAt: r.analyzed_at,
       })),
     ]
       .sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt))

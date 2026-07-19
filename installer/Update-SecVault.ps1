@@ -364,7 +364,17 @@ Invoke-Step 'npm ci' {
 # -----------------------------------------------------------------------
 # 5. node lib\migrate.js  (schema migration BEFORE services restart)
 # -----------------------------------------------------------------------
-Invoke-Step 'node lib\migrate.js' {
+# ⛔ Bug fixed 2026-07-19: this step's result was previously discarded (only
+# $script:hadFailure was set on failure, which has no gating effect until the
+# final summary log line, printed AFTER services are already restarted -- see
+# CLAUDE.md's own audit_findings.matched_rule_ids incident for the exact class
+# of "column ... does not exist" runtime failure this allowed). npm run build
+# does NOT require the DB schema to be current (every DB-hitting route is
+# force-dynamic specifically to avoid build-time DB access), so a failed
+# migration could still be followed by a successful build and, without this
+# capture, an app restart (step 8) against the old/incomplete schema. Captured
+# so step 8 can gate on it alongside $buildSucceeded.
+$migrateSucceeded = Invoke-Step 'node lib\migrate.js' {
     Push-Location $repoRoot
     $out = Invoke-Native { node lib\migrate.js 2>&1 }
     Pop-Location
@@ -483,11 +493,14 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
 }
 
 # -----------------------------------------------------------------------
-# 8. Start SecVault-App -- gated on step 6 (npm run build) actually
-# succeeding. See the $buildSucceeded comment above step 6 for why starting
-# this service against a failed build is worse than leaving it stopped.
+# 8. Start SecVault-App -- gated on step 5 (node lib\migrate.js) AND step 6
+# (npm run build) actually succeeding. See the $migrateSucceeded comment above
+# step 5 and the $buildSucceeded comment above step 6 for why starting this
+# service against a failed migration or a failed build is worse than leaving
+# it stopped.
 # -----------------------------------------------------------------------
-if ($buildSucceeded) {
+$appStartSkipped = $false
+if ($buildSucceeded -and $migrateSucceeded) {
     Invoke-Step 'sc.exe start SecVault-App' {
         $out = sc.exe start SecVault-App
         $out | Write-Host
@@ -498,12 +511,23 @@ if ($buildSucceeded) {
     }
 } else {
     $script:hadFailure = $true
-    Write-Log '  [SKIP] sc.exe start SecVault-App -- npm run build failed above. Refusing to (re)start the app against a broken/stale build. Fix the build error, then either re-run this script or start the service manually: sc.exe start SecVault-App'
+    $appStartSkipped = $true
+    $skipReason = if (-not $migrateSucceeded) { 'node lib\migrate.js failed above' } else { 'npm run build failed above' }
+    Write-Log "  [SKIP] sc.exe start SecVault-App -- $skipReason. Refusing to (re)start the app against a broken/stale build or an incomplete schema. Fix the error, then either re-run this script or start the service manually: sc.exe start SecVault-App"
 }
 
 Write-Log '=================================================='
 if ($script:hadFailure) {
-    Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. Both services were still (re)started as a best-effort recovery.'
+    # ⛔ Bug fixed 2026-07-19: this line used to unconditionally claim "Both
+    # services were still (re)started" even when step 8 above was deliberately
+    # SKIPPED (build or migration failure) -- directly contradicting the SKIP
+    # line just logged and telling an operator tailing update.log that
+    # SecVault-App was restarted when it was deliberately left stopped.
+    if ($appStartSkipped) {
+        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. SecVault-App was NOT (re)started (see SKIP above); SecVault-Engine was still started as a best-effort recovery.'
+    } else {
+        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. Both services were still (re)started as a best-effort recovery.'
+    }
 } else {
     Write-Log 'SecVault update completed successfully.'
 }

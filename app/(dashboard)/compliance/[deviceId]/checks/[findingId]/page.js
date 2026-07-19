@@ -87,7 +87,11 @@ async function getRuleEvidence(dbPool, ruleIds) {
 
 function backLink(deviceId, standardKey) {
   const base = `/compliance/${deviceId}`;
-  return standardKey ? `${base}#${standardKey}` : base;
+  // Point at the standards sub-page, not the summary page's own URL — the
+  // 2026-07-18 split moved StandardTabs' hashchange/scrollIntoView handling
+  // off compliance/[deviceId]/page.js onto compliance/[deviceId]/standards/
+  // page.js, so a #standardKey anchor on the summary page's own URL is inert.
+  return standardKey ? `${base}/standards#${standardKey}` : base;
 }
 
 export default async function ComplianceCheckDetailPage({ params }) {
