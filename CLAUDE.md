@@ -1026,6 +1026,77 @@ Consequences to know before changing anything here:
   irrelevant to diffing: `configDiff.js` diffs `config_parsed`, never `config_raw`.
 - Any NEW adapter that returns a raw text config MUST redact before returning it from `getConfig()`.
 
+#### ⛔ Retroactive `config_diffs` cleanup + a real secret-disclosure bug (found and fixed 2026-07-19)
+
+User report: the Dashboard's "Config Changes" widget was showing entries like "5 modified — e.g.
+system_info.time, system_info.uptime, system_info.wildfire-version" and asked, correctly, "these
+aren't real changes — an admin didn't do this." Investigated directly against live production data
+(read-only DB access — see "SecVault readonly DB access" section) rather than guessing:
+
+- **The noise-filtering allowlist (`MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR`, above) was already correct
+  and already working** — confirmed live: zero NEW noisy `config_diffs` rows recorded across ~15
+  collects spanning 2 days, despite `system_info.time`/`.uptime` being mathematically guaranteed to
+  differ every single collect. What the widget was showing was **28 historical rows recorded before
+  this allowlist existed**, still inside the widget's 7-day trailing window — not a live bug.
+
+- **While auditing those 28 rows to confirm they were safe to bulk-delete, found a real secret-disclosure
+  bug**: one row (`ITC-SLY`, a Palo Alto API-transport device, 2026-07-16) had its `old` value containing
+  a **raw, unredacted certificate private key and 16 local-admin/user password hashes**, captured
+  verbatim at the exact moment that device's own redaction was fixed (old snapshot = raw secret, new
+  snapshot = the vendor adapter's own `'<redacted>'` placeholder). `diffConfigs()` has no concept of
+  "this leaf might be a secret" — it faithfully copies whatever `old`/`new` value it's given into the
+  diff it persists. `config_diffs` is `GRANT SELECT`'d to `claude_readonly`/`nocvault_readonly` (see
+  "Readonly Access for Diagnostics" above) — the exact roles this file bars from `device_credentials` —
+  so this raw private key and these password hashes were readable by both roles in production. A
+  **separate SSH-transport (`IDC FW`) row from the same day**, which wholesale-added an entire parsed
+  config tree (`tree`/`vsys`/`services` — the exact moment the sshParser tokenizer rewrite landed, see
+  "Palo Alto SSH — RESOLVED" above), was checked the same way and found already safely redacted at
+  every private-key/phash occurrence — confirming this was a real but narrow, single-transport,
+  single-day gap, not a broad ongoing leak.
+
+**Fix, in `lib/engines/configDiff.js`:**
+- **`SECRET_PATH_PATTERN`** — a value-level redaction pass, applied to every diff entry's
+  `old`/`new`/`value` whenever the entry's leaf field name looks secret-shaped. Mirrors the
+  `SECRET_KEY_PATTERN` convention already identical in `lib/adapters/checkpoint/parser.js` and
+  `lib/adapters/forcepoint/parser.js`, widened to also catch `phash` (the exact field that leaked) and
+  `pre[-_]?shared` (a bare `private[-_]?key` check does NOT match `"pre-shared-key"` — different word
+  entirely, confirmed by testing the narrower pattern against the real leaked path and finding it
+  silently missed it). A small **exception set** (`SECRET_PATH_EXCEPTIONS`, currently just
+  `password_policy`/`password-policy`) exists because the broad `password` substring match would
+  otherwise wholesale-redact Fortinet's real, legitimate `password_policy` config section (see
+  "Fortinet gap closed 2026-07-19" above) just for containing that substring in its section NAME, not
+  a credential value — found and fixed by testing the pattern against every real path in production
+  history before shipping, not assumed safe. Same asymmetric-risk reasoning as
+  `MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR`'s allowlist but inverted: a short, growable denylist-of-
+  exceptions is fine here because missing one just over-redacts a section (safe direction), unlike
+  under-listing the volatile-fields allowlist (which would be unsafe).
+- Applied in **two places**: inside `diffConfigs()` itself (protects every diff computed from now on —
+  defense in depth, on top of the adapter-level redaction that's supposed to make this layer
+  unnecessary in the first place, same "redact defensively even when the upstream layer should already
+  have done it" posture this codebase already applies to Check Point's/Forcepoint's `getConfig()`), and
+  inside a new **`filterDiffForCurrentRules(diff, vendor)`** — re-applies both the volatile-path filter
+  AND the new secret redaction to an ALREADY-STORED diff object, which is what actually scrubs the
+  already-leaked secret out of the database, not just prevents new ones.
+- **`cleanupVolatileConfigDiffs(pool)`** — a new, idempotent, best-effort migration (same pattern as
+  `backfillVulnerabilityCategories()` in `lib/engines/vulnerabilityCategory.js`), wired into
+  `lib/migrate.js`'s `main()` so it runs automatically on every `Update-SecVault.ps1` deploy. Re-filters
+  every existing `config_diffs` row through the current rules: a row that becomes fully empty is
+  **deleted** (pure noise); a row that still has real content after filtering is **updated in place**
+  (noise dropped, any secret value redacted, `change_summary` re-derived) — never silently discarding a
+  real change just because noise or a secret happened to be sitting next to it in the same row.
+  Verified directly against live production data before shipping (not just unit-tested in isolation):
+  of 31 total historical rows, 28 are pure noise (deleted), 2 have real content that survives filtering
+  (updated — including the `ITC-SLY` secret, now redacted), 1 is untouched (the legitimate Fortinet
+  `dns`/`ntp`/`fortiguard`/... section additions — see "Fortinet gap closed 2026-07-19" above; these
+  are a genuine one-time collector-capability change, not noise, and correctly survive unfiltered).
+  Compares the FULL re-filtered object against the original (not just entry counts), since secret
+  redaction changes a row's CONTENT without changing its entry COUNT — a count-only comparison would
+  have silently missed the exact case this migration exists to fix.
+- **Not yet run against production** — this fix ships in code; the actual DB cleanup (deleting the 28
+  noise rows, redacting the 2 real ones) happens the next time `Update-SecVault.ps1` (or the in-app
+  "Update Now") runs `node lib/migrate.js` on the server. Until then, the already-exposed secret
+  remains in the live database — deploy promptly after this lands.
+
 ---
 
 ## Fleet Alerts Page (v2.1.0 — `/alerts`)
@@ -2714,6 +2785,13 @@ without new evidence):**
   live responses before writing any parser" constraint this file's own header comment already states
   for itself. No live PAN-OS access was available to do that verification in this pass — flagged here
   as an open, needs-live-verification item rather than guessed at.
+  **✅ RESOLVED 2026-07-19** — live production DB access (see "SecVault readonly DB access" — direct
+  `claude_readonly` Postgres access, not SSH to a firewall) made this verifiable directly against real
+  `config_diffs` rows instead of needing a live PAN-OS connection: the allowlist itself was confirmed
+  CORRECT and already fully suppressing new noise (zero new noisy diffs recorded across ~15 collects
+  over 2 days) — the user's actual complaint was 28 historical rows recorded BEFORE the allowlist
+  existed, still visible in the Dashboard's 7-day "Config Changes" widget. See the new "Retroactive
+  config_diffs cleanup" section below for the fix and the secret-disclosure bug found alongside it.
 
 ### ⚠️ Bug-sweep fixes (2026-07-18, fifth pass) — 7 parallel finders over the rule-evidence/object-catalog rounds + a fresh Alerts audit
 

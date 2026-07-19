@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.11.1': [
+    'Fixed the "Config Changes" widget showing device clock/uptime/auto-updating signature versions as if an admin had changed something — confirmed the underlying noise filter was already working correctly, the widget was just still showing historical entries recorded before that filter existed. This update cleans up those old entries automatically on install.',
+    'Security fix: found and closed a gap where a device secret (captured at the exact moment a redaction fix took effect) could end up stored in the config-change history. Added a second redaction pass specifically for this history, and this update scrubs the one affected historical entry automatically.',
+  ],
   '2.11.0': [
     'Merged "CVE Posture" and "Advisories" into a single "Vulnerability" page with two tabs — they were two views of the same underlying data (the CVE catalog vs. your fleet\'s exposure to it), and now share one nav entry. Existing bookmarks/links to the old /cve and /advisories pages have been updated everywhere in the app (search, sidebar, alerts, CVE tables); the API endpoints they use are unchanged.',
     'Added small colored icon chips to every main Dashboard widget header and the top 4 stat tiles, reusing the same icon/color language as the sidebar nav for a more polished, visually consistent look.',
