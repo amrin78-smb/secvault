@@ -190,7 +190,7 @@ export default function HeaderSearch() {
                     <button
                       key={a.cve_id}
                       type="button"
-                      onClick={() => go(`/advisories/${encodeURIComponent(a.cve_id)}`)}
+                      onClick={() => go(`/vulnerability/advisories/${encodeURIComponent(a.cve_id)}`)}
                       style={resultRowStyle}
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}

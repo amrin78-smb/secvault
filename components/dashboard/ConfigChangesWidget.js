@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
+import IconChip from '../ui/IconChip';
+import { IconRefresh } from '../icons';
 
 // Dashboard widget: fleet-wide config-change summary over the trailing
 // `days` window. Standalone, read-only, server component -- not wired into
@@ -60,7 +62,10 @@ export default async function ConfigChangesWidget({ days = 7 }) {
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact">Config Changes ({days}d)</div>
+        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconChip icon={IconRefresh} color="#a78bfa" bg="rgba(167,139,250,0.20)" />
+          Config Changes ({days}d)
+        </div>
       </div>
       <div className="card-body-compact">
         {totalCount === 0 ? (

@@ -3,8 +3,10 @@
 import { useRouter } from 'next/navigation';
 
 // Filter bar for /alerts. Same enumerable-field-uses-<select> convention as
-// the vendor/cvssBand filters on app/(dashboard)/cve/page.js and
-// app/(dashboard)/advisories/page.js, but those pages use a plain
+// the vendor/cvssBand filters on components/vulnerability/CvePostureTab.js
+// and components/vulnerability/AdvisoriesTab.js (formerly separate
+// app/(dashboard)/cve/page.js and app/(dashboard)/advisories/page.js, merged
+// into /vulnerability's two tabs), but those tabs use a plain
 // <form method="GET"> full-page-navigation submit -- this one is 'use client'
 // (per this feature's file contract) and navigates on every onChange instead
 // of waiting for a submit click, via router.push (still a full navigation,

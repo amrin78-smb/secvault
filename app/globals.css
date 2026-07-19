@@ -317,6 +317,17 @@ tbody tr:hover td { background: var(--bg-primary); }
   .dashboard-widget-grid { grid-template-columns: 1fr; }
 }
 
+/* Small colored icon badge for Dashboard widget headers -- same visual
+   language as the sidebar's per-route nav chips (Sidebar.js's
+   .sv-nav-chip), just always-colored (not hover/active-gated) since it
+   sits on a light card background instead of the dark sidebar. */
+.widget-icon-chip {
+  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--chip-bg); color: var(--chip-color);
+}
+.widget-icon-chip svg { width: 14px; height: 14px; }
+
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn, .btn-primary, .btn-secondary, .btn-navy, .btn-danger {
   display: inline-flex;

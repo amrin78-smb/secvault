@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic';
 
 // GET /api/search?q=... — powers the header search dropdown. Small ILIKE
 // lookups against devices + advisories, same shape as the existing list
-// pages' own filters (app/(dashboard)/devices/page.js, .../advisories/page.js).
+// pages' own filters (app/(dashboard)/devices/page.js,
+// components/vulnerability/AdvisoriesTab.js).
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);

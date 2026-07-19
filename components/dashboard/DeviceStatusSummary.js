@@ -2,6 +2,8 @@ import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
+import IconChip from '../ui/IconChip';
+import { IconActivity } from '../icons';
 
 // Dashboard widget: active-device counts by last_connectivity_ok, the same
 // tri-state signal devices/page.js already renders (true =
@@ -58,12 +60,16 @@ export default async function DeviceStatusSummary() {
       <div className="card-body-compact">
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             fontSize: 'var(--text-xs)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             color: 'var(--text-muted)',
           }}
         >
+          <IconChip icon={IconActivity} color="#60a5fa" bg="rgba(96,165,250,0.20)" />
           Device Connectivity
         </div>
         <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>

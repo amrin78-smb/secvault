@@ -69,7 +69,7 @@ export default function CVETable({ rows = [], showDeviceColumn = false, deviceCo
             }
           }
 
-          const href = `/cve/${encodeURIComponent(row.cve_id)}`;
+          const href = `/vulnerability/cve/${encodeURIComponent(row.cve_id)}`;
           const rowKey = `${row.cve_id}-${row.device_name || ''}-${i}`;
 
           return (

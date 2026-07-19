@@ -9,26 +9,25 @@ import {
   IconDevices,
   IconShield,
   IconChart,
-  IconDocument,
   IconSearch,
   IconSettings,
   IconChevronLeft,
   IconUser,
 } from '../icons';
 
-// Icon reuse note (Phase 7, Compliance): IconShield is already taken by "CVE
-// Posture" and IconDocument by "Advisories", so Compliance reuses IconSearch
-// (a magnifying glass reads reasonably as "audit/inspect") rather than
-// inventing a new SVG icon file -- the same "reuse what's there even if not
-// a perfect semantic match" call this file already made when Alerts reused
-// IconBell.
+// Icon reuse note (Phase 7, Compliance): IconShield is already taken by
+// "Vulnerability" (formerly "CVE Posture" -- merged with the separate
+// "Advisories" entry, which used to take IconDocument, into one /vulnerability
+// page in the Vulnerability merge), so Compliance reuses IconSearch (a
+// magnifying glass reads reasonably as "audit/inspect") rather than inventing
+// a new SVG icon file -- the same "reuse what's there even if not a perfect
+// semantic match" call this file already made when Alerts reused IconBell.
 const NAV = [
   { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true, color: '#0891b2', bg: 'rgba(8,145,178,0.20)' },
   { href: '/alerts', label: 'Alerts', Icon: IconBell, color: '#fb923c', bg: 'rgba(251,146,60,0.20)' },
   { href: '/devices', label: 'Devices', Icon: IconDevices, color: '#60a5fa', bg: 'rgba(96,165,250,0.20)' },
-  { href: '/cve', label: 'CVE Posture', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
+  { href: '/vulnerability', label: 'Vulnerability', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
   { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },
-  { href: '/advisories', label: 'Advisories', Icon: IconDocument, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
   { href: '/compliance', label: 'Compliance', Icon: IconSearch, color: '#34d399', bg: 'rgba(52,211,153,0.20)' },
   // No dedicated VPN/tunnel icon exists in components/icons.js — reusing
   // IconUser (VPN is fundamentally remote-USER access) rather than inventing

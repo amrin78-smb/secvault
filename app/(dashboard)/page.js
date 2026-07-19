@@ -2,6 +2,8 @@ import { pool } from '../../lib/db';
 import Badge from '../../components/ui/Badge';
 import StatCard from '../../components/ui/StatCard';
 import Card from '../../components/ui/Card';
+import IconChip from '../../components/ui/IconChip';
+import { IconDevices, IconAlertTriangle, IconClock, IconActivity, IconShield, IconTrendingUp } from '../../components/icons';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
 import CveSeveritySummary from '../../components/dashboard/CveSeveritySummary';
 import TopRiskyDevices from '../../components/dashboard/TopRiskyDevices';
@@ -68,15 +70,49 @@ export default async function DashboardPage() {
       <AutoRefresh intervalMs={60000} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
-        <StatCard label="Devices" value={deviceCount} compact />
-        <StatCard label="Patch Now" value={summary.patch_now_count} color="var(--red)" compact />
-        <StatCard label="Scheduled" value={summary.scheduled_count} color="var(--yellow)" compact />
-        <StatCard label="Monitor" value={summary.monitor_count} color="var(--text-muted)" compact />
+        <StatCard
+          label="Devices"
+          value={deviceCount}
+          compact
+          icon={IconDevices}
+          iconColor="#60a5fa"
+          iconBg="rgba(96,165,250,0.20)"
+        />
+        <StatCard
+          label="Patch Now"
+          value={summary.patch_now_count}
+          color="var(--red)"
+          compact
+          icon={IconAlertTriangle}
+          iconColor="#f87171"
+          iconBg="rgba(248,113,113,0.22)"
+        />
+        <StatCard
+          label="Scheduled"
+          value={summary.scheduled_count}
+          color="var(--yellow)"
+          compact
+          icon={IconClock}
+          iconColor="#fbbf24"
+          iconBg="rgba(251,191,36,0.20)"
+        />
+        <StatCard
+          label="Monitor"
+          value={summary.monitor_count}
+          color="var(--text-muted)"
+          compact
+          icon={IconActivity}
+          iconColor="#9ca3af"
+          iconBg="rgba(156,163,175,0.20)"
+        />
       </div>
 
       <Card>
         <div className="card-header-compact">
-          <div className="card-title-compact">CVE Severity (Fleet)</div>
+          <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <IconChip icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.22)" />
+            CVE Severity (Fleet)
+          </div>
         </div>
         <div className="card-body-compact">
           <CveSeveritySummary />
@@ -89,7 +125,10 @@ export default async function DashboardPage() {
         <RiskByCategory />
         <Card>
           <div className="card-header-compact">
-            <div className="card-title-compact">Vendor Distribution</div>
+            <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <IconChip icon={IconDevices} color="#60a5fa" bg="rgba(96,165,250,0.20)" />
+              Vendor Distribution
+            </div>
           </div>
           <div className="card-body-compact">
             <VendorDistribution />
@@ -97,7 +136,10 @@ export default async function DashboardPage() {
         </Card>
         <Card>
           <div className="card-header-compact">
-            <div className="card-title-compact">Top Risky Devices</div>
+            <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <IconChip icon={IconTrendingUp} color="#f87171" bg="rgba(248,113,113,0.22)" />
+              Top Risky Devices
+            </div>
           </div>
           <div className="card-body-compact">
             <TopRiskyDevices />

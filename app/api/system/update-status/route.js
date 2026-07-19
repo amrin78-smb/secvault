@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.11.0': [
+    'Merged "CVE Posture" and "Advisories" into a single "Vulnerability" page with two tabs — they were two views of the same underlying data (the CVE catalog vs. your fleet\'s exposure to it), and now share one nav entry. Existing bookmarks/links to the old /cve and /advisories pages have been updated everywhere in the app (search, sidebar, alerts, CVE tables); the API endpoints they use are unchanged.',
+    'Added small colored icon chips to every main Dashboard widget header and the top 4 stat tiles, reusing the same icon/color language as the sidebar nav for a more polished, visually consistent look.',
+  ],
   '2.10.4': [
     'Removed the main Dashboard\'s bottom "Devices" card grid — it was a strict subset of the dedicated Devices page (same name/vendor/version/patch-now/scheduled/monitor/last-collected fields, just fewer of them and no sort/edit/delete actions), and the Dashboard Rebuild\'s newer widgets (Vendor Distribution, Top Risky Devices, Device Connectivity, the top stat tiles) already surface the fleet-level version of the same information. Cuts more scroll length; full per-device browsing is still one click away via the sidebar.',
   ],

@@ -3,6 +3,8 @@ import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
+import IconChip from '../ui/IconChip';
+import { IconChart } from '../icons';
 
 // Fleet-wide rule totals (active devices only) -- mirrors the same
 // `JOIN devices d ON d.id = fr.device_id WHERE d.active = true` filter used
@@ -67,7 +69,10 @@ export default async function RulesetOverview() {
     return (
       <Card>
         <div className="card-body-compact">
-          <div style={headingStyle}>Ruleset Overview</div>
+          <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <IconChip icon={IconChart} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+            Ruleset Overview
+          </div>
           <EmptyState message="No rules collected yet — add a device and run a collect to see fleet-wide rule health." />
         </div>
       </Card>
@@ -88,7 +93,10 @@ export default async function RulesetOverview() {
   return (
     <Card>
       <div className="card-body-compact">
-        <div style={headingStyle}>Ruleset Overview</div>
+        <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconChip icon={IconChart} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+          Ruleset Overview
+        </div>
         <div style={subtextStyle}>
           Fleet-wide rule counts. A rule can carry more than one finding type at once, so
           Unused/Shadow/Redundant/Any-Any won&apos;t sum to Total.

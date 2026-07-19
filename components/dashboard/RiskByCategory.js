@@ -1,6 +1,8 @@
 import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
+import IconChip from '../ui/IconChip';
+import { IconGrid } from '../icons';
 import { CATEGORIES } from '../../lib/engines/vulnerabilityCategory';
 
 // Dashboard widget: fleet-wide count of assessed CVEs (active devices only)
@@ -62,12 +64,16 @@ export default async function RiskByCategory() {
       <div className="card-body-compact">
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
             fontSize: 'var(--text-xs)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             color: 'var(--text-muted)',
           }}
         >
+          <IconChip icon={IconGrid} color="#f87171" bg="rgba(248,113,113,0.22)" />
           Risk by Category
         </div>
         <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>

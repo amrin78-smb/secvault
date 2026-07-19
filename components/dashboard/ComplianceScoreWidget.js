@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import Badge from '../ui/Badge';
+import IconChip from '../ui/IconChip';
+import { IconSearch } from '../icons';
 import StandardDonut from '../compliance/StandardDonut';
 import { STANDARDS, scoreColor } from '../compliance/ComplianceMatrix';
 
@@ -118,7 +120,10 @@ export default async function ComplianceScoreWidget() {
   return (
     <Card>
       <div className="card-body-compact">
-        <div style={headingStyle}>Compliance Score</div>
+        <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconChip icon={IconSearch} color="#34d399" bg="rgba(52,211,153,0.20)" />
+          Compliance Score
+        </div>
         <div style={subtextStyle}>{asOfLabel}</div>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
           <StandardDonut pct={overall} size={84} />
