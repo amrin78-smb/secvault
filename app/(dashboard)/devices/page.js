@@ -230,7 +230,7 @@ export default async function DevicesPage({ searchParams }) {
                     <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
                       View
                     </Link>
-                    <DeviceRowActions deviceId={d.id} />
+                    {canWrite && <DeviceRowActions deviceId={d.id} />}
                     {canWrite && (
                       <Link
                         href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}

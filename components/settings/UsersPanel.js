@@ -22,21 +22,33 @@ const ROLE_BADGE = { admin: 'danger', viewer: 'muted' };
 export default function UsersPanel() {
   const [users, setUsers] = useState(null); // null = loading/forbidden, [] = loaded
   const [visible, setVisible] = useState(false);
+  const [loadError, setLoadError] = useState(false); // true = fetch() itself failed (network), distinct from a 403 hide
   const [status, setStatus] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('viewer');
 
   async function loadUsers() {
-    const res = await fetch('/api/users');
-    if (res.status === 403) {
-      setVisible(false);
-      setUsers(null);
-      return;
+    try {
+      const res = await fetch('/api/users');
+      if (res.status === 403) {
+        setVisible(false);
+        setUsers(null);
+        setLoadError(false);
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      setUsers(data.users || []);
+      setVisible(true);
+      setLoadError(false);
+    } catch (err) {
+      // Network-level failure (fetch() rejected) -- distinct from a 403.
+      // Keep the panel visible and show a retry-able error instead of
+      // silently rendering nothing, which would be indistinguishable from
+      // the deliberate viewer-role hide above.
+      setVisible(true);
+      setLoadError(true);
     }
-    const data = await res.json().catch(() => ({}));
-    setUsers(data.users || []);
-    setVisible(true);
   }
 
   useEffect(() => {
@@ -106,6 +118,26 @@ export default function UsersPanel() {
   }
 
   if (!visible) return null;
+
+  if (loadError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Users</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
+              Failed to load users.
+            </p>
+            <Button variant="secondary" onClick={loadUsers}>
+              Retry
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
 
   return (
     <Card>

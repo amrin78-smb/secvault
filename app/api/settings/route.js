@@ -36,6 +36,17 @@ export async function PUT(request) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
+  // Authorize every requested change BEFORE performing any DB write, so a
+  // request combining a self-service password change with an admin-only
+  // field can never partially commit (password changed) while still
+  // reporting 403 for the whole call. Feed poll interval is a global app
+  // setting, admin-only.
+  if (feedPollIntervalHours !== undefined && feedPollIntervalHours !== null) {
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+  }
+
   // Handle password change first, if requested. Changing YOUR OWN password
   // is allowed for any authenticated user (admin or viewer), not gated on
   // isAdmin() — this is self-service account management, not an
@@ -84,12 +95,9 @@ export async function PUT(request) {
     );
   }
 
-  // Handle feed poll interval update, if provided — a global app setting,
-  // admin-only.
+  // Handle feed poll interval update, if provided. Admin check already
+  // performed above, before any write occurred.
   if (feedPollIntervalHours !== undefined && feedPollIntervalHours !== null) {
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
-    }
     await pool.query(
       `INSERT INTO settings (key, value, updated_at)
        VALUES ('feed_poll_interval_hours', $1, now())

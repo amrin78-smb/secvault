@@ -3,6 +3,7 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
+import { VIEWER_ROLE } from '../../../../lib/rbac';
 
 // Binds against LDAP_URL / LDAP_BASE_DN. Resolves to the bound username on
 // success, rejects on any failure. Never throws out of authorize() — caller
@@ -109,15 +110,40 @@ export const authOptions = {
     signIn: '/login',
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
-        token.role = user.role || 'admin';
+        token.id = user.id;
+        token.provider = account?.provider;
+        token.role = user.role || VIEWER_ROLE;
       }
+
+      // Re-validate role against the live `users` table on every request
+      // (not just at initial sign-in) — a role change or account deletion
+      // (PUT/DELETE app/api/users/[id]/route.js) must take effect
+      // immediately rather than waiting out the JWT's ~30-day default
+      // lifetime, during which a demoted/deleted user would otherwise keep
+      // passing every isAdmin() check with their stale cached role. LDAP
+      // users have no `users` table row (role is always the hardcoded
+      // 'admin' set above — see the 'ldap' provider's authorize()), so
+      // they're exempt from this DB re-check.
+      if (token.provider === 'local' && token.id) {
+        try {
+          const result = await pool.query('SELECT role FROM users WHERE id = $1', [token.id]);
+          const storedUser = result.rows[0];
+          // null => the user row is gone (deleted); session() below fails
+          // this closed to VIEWER_ROLE rather than re-granting admin.
+          token.role = storedUser ? storedUser.role : null;
+        } catch (err) {
+          // DB unreachable — fail closed rather than trust a stale role.
+          token.role = null;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.role = token.role || 'admin';
+        session.user.role = token.role || VIEWER_ROLE;
       }
       return session;
     },

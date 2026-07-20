@@ -35,6 +35,17 @@ function isExpandableValue(value) {
 // collapsed by default with a "Show details" toggle instead of inline.
 const LARGE_VALUE_THRESHOLD = 400;
 
+// Same idea, applied to plain string values. Unlike paths (bounded by
+// truncatePathForDisplay in configDiff.js) and objects/arrays (bounded by
+// CollapsibleValue above), a primitive string value had no size bound at
+// all — a large free-text field, or a corrupted blob landing as a VALUE
+// instead of a KEY, would dump inline unbounded. Mirrors LARGE_VALUE_THRESHOLD.
+const LARGE_STRING_THRESHOLD = 400;
+
+function isLargeString(value) {
+  return typeof value === 'string' && value.length > LARGE_STRING_THRESHOLD;
+}
+
 function summarizeValue(value) {
   if (Array.isArray(value)) {
     const n = value.length;
@@ -101,39 +112,71 @@ function CollapsibleValue({ value }) {
   );
 }
 
+// Same collapse treatment as CollapsibleValue, for a large plain-string
+// value — kept as a separate component rather than folding into
+// CollapsibleValue because a raw string should never be routed through
+// JSON.stringify/summarizeValue (which assumes an object/array shape).
+function CollapsibleString({ value }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = value.slice(0, 200);
+
+  return (
+    <span style={{ display: 'block', marginTop: 4 }}>
+      <span style={{ color: 'var(--text-muted)' }}>{preview}… ({value.length} chars)</span>
+      <button type="button" onClick={() => setExpanded((e) => !e)} style={TOGGLE_BUTTON_STYLE}>
+        {expanded ? '▾ Hide details' : '▸ Show details'}
+      </button>
+      {expanded && <pre style={PRE_STYLE}>{value}</pre>}
+    </span>
+  );
+}
+
+// True when a value needs its own block-level rendering (CollapsibleValue for
+// objects/arrays, CollapsibleString for large strings) rather than inline
+// formatValue() text.
+function needsBlockRender(value) {
+  return isExpandableValue(value) || isLargeString(value);
+}
+
+// Renders whichever block-level treatment applies. Caller must already know
+// needsBlockRender(value) is true.
+function renderBlockValue(value) {
+  return isExpandableValue(value) ? <CollapsibleValue value={value} /> : <CollapsibleString value={value} />;
+}
+
 // One "path: value" row for an Added/Removed entry. Value is inline for
-// primitives, pretty-printed (and possibly collapsible) below the path for
-// objects/arrays.
+// small primitives, block-rendered (and possibly collapsible) below the path
+// for objects/arrays and large strings.
 function DiffValueRow({ path, value }) {
-  const expandable = isExpandableValue(value);
+  const block = needsBlockRender(value);
   return (
     <span style={{ display: 'block' }}>
-      <span style={PATH_LABEL_STYLE}>{path}{expandable ? ':' : ''}</span>
-      {expandable ? <CollapsibleValue value={value} /> : <span>: {formatValue(value)}</span>}
+      <span style={PATH_LABEL_STYLE}>{path}{block ? ':' : ''}</span>
+      {block ? renderBlockValue(value) : <span>: {formatValue(value)}</span>}
     </span>
   );
 }
 
 // One "− old" / "+ new" line within a Modified row.
 function LabeledValue({ label, labelColor, value }) {
-  const expandable = isExpandableValue(value);
+  const block = needsBlockRender(value);
   return (
     <span style={{ display: 'block' }}>
-      <span style={{ color: labelColor, fontWeight: 600 }}>{label}{expandable ? ':' : ''}</span>
-      {expandable ? <CollapsibleValue value={value} /> : <span> {formatValue(value)}</span>}
+      <span style={{ color: labelColor, fontWeight: 600 }}>{label}{block ? ':' : ''}</span>
+      {block ? renderBlockValue(value) : <span> {formatValue(value)}</span>}
     </span>
   );
 }
 
-// A full Modified row: simple "old → new" inline when both sides are
+// A full Modified row: simple "old → new" inline when both sides are small
 // primitives, or a stacked "− old" / "+ new" comparison when either side is
-// an object/array — stacked (not side-by-side) so both are fully readable
-// without a cramped two-column squeeze, which matters for a tool operators
-// use to actually compare configs, not just glance at them.
+// an object/array or a large string — stacked (not side-by-side) so both are
+// fully readable without a cramped two-column squeeze, which matters for a
+// tool operators use to actually compare configs, not just glance at them.
 function DiffModifiedRow({ path, oldValue, newValue }) {
-  const anyExpandable = isExpandableValue(oldValue) || isExpandableValue(newValue);
+  const anyBlock = needsBlockRender(oldValue) || needsBlockRender(newValue);
 
-  if (!anyExpandable) {
+  if (!anyBlock) {
     return (
       <span style={{ display: 'block' }}>
         <span style={PATH_LABEL_STYLE}>{path}</span>
@@ -219,14 +262,14 @@ function RuleChangeBadge({ changeType }) {
 }
 
 // Value cell for one rule-level change — adapts DiffModifiedRow's own
-// old/new logic (inline "old → new" for primitives, stacked "− old"/"+ new"
-// for objects/arrays) to a table cell instead of a <li> block, and reuses
-// CollapsibleValue/formatValue directly for the added/removed case so an
-// object-valued field doesn't dump raw JSON inline.
+// old/new logic (inline "old → new" for small primitives, stacked "− old"/
+// "+ new" for objects/arrays or large strings) to a table cell instead of a
+// <li> block, and reuses the same block-render helpers so an object-valued
+// or very long string field doesn't dump raw text inline.
 function RuleChangeValueCell({ change }) {
   if (change.changeType === 'modified') {
-    const anyExpandable = isExpandableValue(change.old) || isExpandableValue(change.new);
-    if (!anyExpandable) {
+    const anyBlock = needsBlockRender(change.old) || needsBlockRender(change.new);
+    if (!anyBlock) {
       return <span>{formatValue(change.old)} → {formatValue(change.new)}</span>;
     }
     return (
@@ -237,11 +280,7 @@ function RuleChangeValueCell({ change }) {
     );
   }
   // added / removed
-  return isExpandableValue(change.value) ? (
-    <CollapsibleValue value={change.value} />
-  ) : (
-    <span>{formatValue(change.value)}</span>
-  );
+  return needsBlockRender(change.value) ? renderBlockValue(change.value) : <span>{formatValue(change.value)}</span>;
 }
 
 // Rule name is repeated on every field-level change row rather than

@@ -1,5 +1,8 @@
 import { pool } from '../../../../lib/db';
 import { runAnalysisForAllDevices } from '../../../../lib/engines/ruleAnalysis';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +12,11 @@ export const dynamic = 'force-dynamic';
 // what would eventually force this to a background job).
 export async function POST(request) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const result = await runAnalysisForAllDevices(pool);
     return Response.json(result);
   } catch (err) {

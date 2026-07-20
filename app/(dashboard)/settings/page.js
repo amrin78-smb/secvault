@@ -33,6 +33,35 @@ export default function SettingsPage() {
   const [generalStatus, setGeneralStatus] = useState('');
   const [passwordStatus, setPasswordStatus] = useState('');
 
+  // Admin-only gate for the Feed Sync Save button and the Updates tab.
+  // This page is (and stays) a plain 'use client' component with no
+  // server-passed session prop, so — unlike the sibling pages that resolve
+  // canWrite via getServerSession() server-side — role is read from
+  // NextAuth's own built-in GET /api/auth/session endpoint. Defaults to
+  // false (fail closed) until resolved, same "hidden until proven admin"
+  // posture as UsersPanel's own self-gating `visible` state below.
+  const [isAdminUser, setIsAdminUser] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSession() {
+      try {
+        const res = await fetch('/api/auth/session');
+        const data = await res.json();
+        if (!cancelled) setIsAdminUser(data?.user?.role === 'admin');
+      } catch {
+        // Fail closed -- stay non-admin if the session check itself errors.
+      }
+    }
+
+    loadSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Deep-link convenience only, read once on mount — after this, tab
   // switching is purely client-side state (matches the suite's own
   // Settings tab pattern; see SETTINGS-STANDARDIZATION.md).
@@ -159,7 +188,7 @@ export default function SettingsPage() {
                     id="feed_poll_interval_hours"
                     type="number"
                     min="1"
-                    disabled={loading}
+                    disabled={loading || !isAdminUser}
                     value={feedPollIntervalHours}
                     onChange={(e) => setFeedPollIntervalHours(e.target.value)}
                     className="input"
@@ -170,9 +199,11 @@ export default function SettingsPage() {
                   <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{generalStatus}</p>
                 )}
 
-                <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
-                  Save
-                </Button>
+                {isAdminUser && (
+                  <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
+                    Save
+                  </Button>
+                )}
               </form>
             </CardBody>
           </Card>
@@ -225,7 +256,7 @@ export default function SettingsPage() {
 
       {activeTab === 'users' && <UsersPanel />}
 
-      {activeTab === 'updates' && (
+      {activeTab === 'updates' && isAdminUser && (
         <div style={{ maxWidth: 576 }}>
           <Card>
             <CardHeader>

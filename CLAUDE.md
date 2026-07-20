@@ -3935,6 +3935,146 @@ extra scrutiny rather than assumed clean just because they were new.
 (PowerShell files syntax-validated via `PSParser`), every diff personally reviewed against the actual
 finding before integrating, `npm run build` clean.
 
+### ⚠️ Bugs Found and Fixed — full-session orchestrated sweep (2026-07-20, seventh pass)
+
+Run as a single Workflow (6 parallel dimension finders → adversarial verify-per-finding, told to
+default to REFUTED unless it could trace the exact failure through the real code → fix grouped by
+file → personally re-reviewed every diff before integrating), scoped to everything built in one
+continuous session that day: RBAC (`lib/rbac.js`, the `users` table, every route guard), the rule
+reorder recommendation export, config-diff acknowledgement notes, the `classifyDiff()`/`DiffViewer.js`
+presentation rewrite (and its two same-day follow-up corruption fixes), and the Settings tabs
+rewrite. 16 findings, all independently adversarially confirmed, all fixed same-pass.
+
+**⛔ CRITICAL — `POST /api/analysis/run` (the fleet-wide "re-run rule analysis for every active
+device" trigger) had no RBAC guard at all.** Not found in the original RBAC rollout's own route
+inventory because it's a sibling of `POST /api/devices/[id]/analysis` (per-device, correctly
+gated) sitting under a different path (`app/api/analysis/run/`, not `app/api/devices/[id]/analysis/`)
+— an easy one to miss when sweeping by directory structure rather than by grepping every
+POST/PUT/DELETE export in `app/api/**`. A `viewer`-role session (which passes `middleware.js`'s
+blanket "any authenticated token" check — middleware only checks token *presence*, never role) could
+`POST` here directly and trigger a real, DB-mutating, fleet-wide rewrite of
+`rule_analysis_results`/`device_risk_history` — exactly the class of action RBAC exists to block.
+Fixed with the identical three-line guard every sibling route already uses. **Lesson**: when
+auditing RBAC route coverage, grep every `export async function (POST|PUT|DELETE|PATCH)` in
+`app/api/**` directly and cross-reference against `isAdmin` usage, rather than trusting a
+feature-by-feature route inventory to be complete.
+
+**⛔ HIGH — RBAC role was baked into the JWT only at sign-in and never re-validated.** Demoting an
+admin to viewer, or deleting their account entirely (both via the new Users panel,
+`PUT`/`DELETE /api/users/[id]`), never touched that user's already-issued session — `jwt()` only set
+`token.role` `if (user)` (i.e. only at the initial `authorize()` call), and `session()` just copied
+whatever the JWT already had, no DB lookup. With no `session.maxAge` override anywhere in the app,
+next-auth's default 30-day JWT lifetime applied — a revoked/deleted admin kept full admin capability
+for up to 30 days or until they happened to log out themselves, completely defeating the point of the
+role-change/delete-user controls. **Fixed**: `jwt()` now re-queries `SELECT role FROM users WHERE id
+= $1` on **every** invocation (not just sign-in) for `local`-provider tokens, so a role change or
+deletion takes effect on the very next request. `token.id`/`token.provider` are now stashed at
+sign-in specifically to make this re-check possible. LDAP-authenticated tokens are deliberately
+exempt (LDAP users have no `users` table row at all — role is always the hardcoded `admin` set in the
+`ldap` provider's own `authorize()`, a pre-existing, documented limitation — querying `users WHERE id
+= $1` with a non-UUID LDAP username would throw on every request and silently demote every LDAP admin
+to viewer). A DB-unreachable error during the re-check fails **closed** (`token.role = null`), not
+open. **A second, smaller fail-open bug found in the same file was load-bearing for this fix**: both
+`jwt()`/`session()` used to default a falsy role to `'admin'` (`user.role || 'admin'`, `token.role ||
+'admin'`) — without flipping this to `VIEWER_ROLE`, a deleted user's freshly-set `token.role = null`
+from the fix above would have been silently turned back into `'admin'` by that same fallback,
+completely undoing the revocation fix. Both changes shipped together, not independently — fixing the
+JWT staleness without fixing the fail-open default would not have actually closed the gap.
+
+**⛔ MEDIUM — `PUT /api/settings` could partially commit a mutation before returning 403.** The
+self-service password-change block (allowed for any role) ran and committed unconditionally *before*
+the `feed_poll_interval_hours` admin check — so a single request combining both fields from a
+non-admin session would silently rotate the password, THEN hit the admin gate and return 403 for the
+whole call, with no signal to the caller that the password half actually succeeded. A naive retry
+(a normal reaction to a 403) would then fail a second time too, since `current_password` no longer
+matched the just-rotated hash. Fixed by moving the `isAdmin()` check for `feed_poll_interval_hours` to
+run first, before any DB write — authorize everything the request asks for before mutating anything.
+
+**Config-diff engine — a fourth round of fixes in the same area that already burned through three
+rounds of user-driven "looks fixed, wasn't" earlier the same day** (see the `classifyDiff()` /
+`truncatePathForDisplay()` entries above): (1) `classifyDiff()`'s Rule Changes table grouped rows by
+the ALREADY-TRUNCATED display `ruleName`, so two entirely unrelated corrupted rule names that both
+collapse to the identical `"(unreadable path...)"` placeholder (or share the same first 200 display
+characters) silently merged into one fake group — an operator would see what looked like one rule's
+change history but was actually two different rules' changes interleaved with no way to tell them
+apart. Fixed by carrying a raw, pre-truncation `ruleGroupKey` through internally and grouping on
+that instead, stripped back out before the public shape is returned. (2) `sectionLabelFor()` had
+`'shared'` registered as its own `SECTION_LABELS` entry (`'Shared Config'`) — but PAN-OS nests real,
+type-specific objects directly under it (`shared.address.*`/`shared.service.*`/`shared.nat.*`, a
+shape this codebase's own `paloalto/parser.js` comments already document), and the root-to-leaf scan
+returns on the *first* matching segment — so `shared` won before the scan ever reached `address`/
+`service`/`nat` underneath it, collapsing every shared-scope object change into the generic bucket and
+losing the type-specific breakdown this whole classifier exists to provide. Fixed by moving `'shared'`
+into `WRAPPER_SEGMENTS` (skipped, not matched) instead of `SECTION_LABELS`. (3) Panorama's
+`pre-rulebase`/`post-rulebase` segments (vs. a bare `rulebase`) weren't recognized by
+`sectionLabelFor()`'s strict per-segment equality check (unlike `RULE_PATH_MARKER`'s substring match,
+which already tolerated the prefix) — an unresolvable-index rule change under either fell through to
+the uninformative generic fallback (`"Other (Pre Rulebase)"`) instead of the intended `"Rules (detail
+unavailable for this device)"` label. Fixed with explicit `SECTION_LABELS` entries for both. (4)
+`DiffViewer.js`'s `formatValue()` had no length bound on plain STRING values — unlike paths (bounded
+by `truncatePathForDisplay`) and objects/arrays (bounded by `CollapsibleValue`'s
+`LARGE_VALUE_THRESHOLD`), a very large or corrupted string VALUE (the same brace-corruption bug class,
+this time landing as a value instead of a key) would dump inline unbounded — a milder recurrence of
+the exact "wall of text" complaint this whole feature was built across three rounds to fix, just for
+values instead of paths. Fixed with a mirrored `LARGE_STRING_THRESHOLD`/`CollapsibleString`, and every
+render call site (`DiffValueRow`, `LabeledValue`, `DiffModifiedRow`, `RuleChangeValueCell`) updated to
+route through a shared `needsBlockRender()`/`renderBlockValue()` pair instead of the old
+object/array-only `isExpandableValue()` check.
+
+**`lib/engines/ruleReorder.js` — resolved/unresolved finding counts could undercount.** The dedup
+`edgeKeys` Set (correctly used to avoid inflating in-degree counts when two findings name the same
+deny/allow pair) was ALSO being used, unmodified, as the loop driving the final
+`resolvedFindingCount`/`unresolvedFindingCount` tally — so two distinct findings that collapsed to the
+same edge only contributed one increment total, not one each, undercounting relative to the function's
+own documented contract ("two findings can independently name the same deny/allow pair"). Not
+currently reachable via the app's real data flow (`ruleAnalysis.js`'s `reorder_candidate` generator
+breaks after the first covering allow per deny rule, so a given `denyId` can only ever produce one
+finding per device today) — a latent defect in the pure function's own accounting, not a live bug, but
+fixed anyway (a `Map<edgeKey, count>` tracked separately from the dedup Set, added into the tally
+instead of a flat `+= 1` per unique edge) since the two counts are already returned verbatim in `GET
+/api/devices/[id]/reorder-recommendation`'s JSON body for any future consumer.
+
+**UI-consistency gaps, both real but not security holes (server-side enforcement already held in
+both cases)**: (1) `app/(dashboard)/devices/page.js` gated "Add Device"/"Delete" behind `canWrite` but
+left `DeviceRowActions` (the inline Collect/Test buttons) unconditionally visible — a viewer saw
+clickable buttons that would 403 and show a small `⚠` icon, instead of the control simply not being
+there, unlike the device DETAIL page's equivalent `DeviceActions` (already correctly gated). Fixed by
+wrapping it in the same `{canWrite && ...}` pattern used two lines below for Delete. (2) The Settings
+page rewrite (same day, same session, immediately after RBAC shipped) never fetched session/role at
+all — the Feed Sync "Save" button and the entire Updates tab (`UpdatePanel`, "Update Now") rendered
+fully visible and clickable for a viewer, unlike every OTHER page touched in the RBAC pass, which all
+resolve `canWrite` server-side via `getServerSession`. Settings stays a plain `'use client'` component
+with no server-passed session prop (a deliberate earlier design choice — see "Settings Page — Tabbed
+Layout" above), so there's no `getServerSession` available inside it; fixed instead via NextAuth's own
+built-in `GET /api/auth/session` endpoint, fetched client-side into a new `isAdminUser` state
+(defaults to `false`, fail-closed, same "hidden until proven admin" posture `UsersPanel`'s own
+`visible` state already uses) — the Save button and the whole Updates tab now only render once that
+resolves `true`.
+
+**`components/settings/UsersPanel.js` — a genuine network failure was indistinguishable from a
+viewer-role 403 hide.** `loadUsers()`'s `fetch('/api/users')` call had no try/catch — if `fetch()`
+itself rejected (a true network-level failure: dropped connection, blocked request, DNS hiccup — as
+opposed to resolving with a non-2xx status, which the existing `.catch(() => ({}))` on `res.json()`
+already handled fine), the unhandled rejection meant `visible` never left its initial `false`, so the
+whole Users card silently vanished with zero error message — an ADMIN hitting a transient network
+blip would see exactly what a viewer sees on purpose, with no way to tell the two apart, potentially
+concluding they'd lost admin rights entirely. Fixed with a new `loadError` state: a genuine
+fetch-level exception now keeps the panel visible and shows a "Failed to load users" message with a
+Retry button, while the deliberate 403 hide path is completely unchanged.
+
+**`lib/schema.sql`** — one straightforward doc-drift fix: the `users` table's header comment
+referenced a function named `seedUsersFromLegacyAdmin()`, which doesn't exist anywhere in the
+codebase (the real function, doing exactly what the comment describes, is `seedUsers()` in
+`lib/migrate.js`) — corrected to the real name.
+
+**Result:** 10 files touched (`app/api/analysis/run/route.js`,
+`app/api/auth/[...nextauth]/route.js`, `app/api/settings/route.js`, `lib/schema.sql`,
+`components/settings/UsersPanel.js`, `lib/engines/ruleReorder.js`, `lib/engines/configDiff.js`,
+`components/config/DiffViewer.js`, `app/(dashboard)/devices/page.js`,
+`app/(dashboard)/settings/page.js`), every fix's `node --check` passing individually during the fix
+phase, every diff personally re-reviewed against its finding before integrating, `npm run build`
+clean end to end.
+
 ### ⚠️ Bugs Found and Fixed During MVP Build (v1.0.0)
 
 Real production traps discovered during the Phase 1+2 build — documented here so they are never

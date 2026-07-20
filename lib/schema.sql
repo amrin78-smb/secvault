@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS settings (
 -- than one person can have their own login, and so a login can be
 -- read-only. `lib/migrate.js` migrates any existing settings-based admin
 -- identity into a row here on first run after upgrade — see
--- seedUsersFromLegacyAdmin() there. No CHECK constraint on `role`, same
+-- seedUsers() there. No CHECK constraint on `role`, same
 -- convention as every other enum-like column in this file — validated in
 -- application code only (see lib/rbac.js).
 CREATE TABLE IF NOT EXISTS users (

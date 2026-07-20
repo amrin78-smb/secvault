@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.13.2': [
+    'Security fix: closed a gap where the fleet-wide "re-run analysis" endpoint was missing the read-only role restriction that every similar action already had.',
+    'Security fix: a user demoted from admin to read-only (or removed entirely) now loses access on their very next action, instead of keeping admin access for up to 30 days on their existing login.',
+    'Fixed a data-integrity issue on the Settings page: changing your password in the same request as an admin-only setting could silently succeed even when the request was rejected.',
+    'A handful of smaller fixes from a full review of today\'s changes: two more Config Changes display edge cases, a Rule Reorder counting edge case, and some read-only role indicators that weren\'t showing up everywhere they should.',
+  ],
   '2.13.1': [
     'Fixed a third spot with the same config-diff corruption issue: expanding an "Address Objects" (or similar) section on a diff affected by the earlier parsing issue still showed the raw corrupted text as the row label. It now shows a clean placeholder there too, consistent with the other two fixes from the last update.',
   ],
