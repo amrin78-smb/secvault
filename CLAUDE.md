@@ -1059,6 +1059,29 @@ worst-band-first with a colored `Badge` per rule's band.
   to already only read `jsonb_array_length(cd.diff->'added'|'removed'|'modified')` counts or the
   free-text `change_summary` column — never individual raw entries — so this classifier is genuinely
   scoped to the one place (`DiffViewer.js`) that had the problem, not silently under-applied elsewhere.
+- **⛔ Follow-up bug found the SAME DAY, by the user directly testing the `classifyDiff()` fix above**:
+  the fix only covers the EXPANDED "View diff" content — `change_summary`, the short one-line preview
+  that renders unconditionally on the Changes page BEFORE a user ever clicks "View diff", is a
+  SEPARATE, cached string (`summarizeDiff()`, computed once at diff-detection time and stored in
+  `config_diffs.change_summary`) that `classifyDiff()` never touches. Confirmed live in production: one
+  row's `change_summary` was **13,647 characters** — `summarizeDiff()` picks up to 3 example PATHS with
+  no length cap, and two of that diff's four paths were themselves ~6,800-character corrupted blobs
+  from the SAME brace-corruption incident documented above, this time corrupting a PATH (an object key)
+  rather than a value. `sanitizeExamplePath()` (new, in `lib/engines/configDiff.js`) now guards both
+  failure shapes: any example path containing whitespace or a brace character (a real dot/bracket path
+  never legitimately contains either) is swapped for an honest `(unreadable path — see full diff for
+  details)` placeholder instead of a truncated garbage fragment; anything else is truncated to 80
+  characters. `regenerateOversizedChangeSummaries(pool)` (new, same
+  one-time-but-safely-rerunnable/best-effort shape as `cleanupVolatileConfigDiffs()`, wired into
+  `lib/migrate.js`'s `main()` right after it) re-derives `change_summary` for any EXISTING row over 500
+  characters using the fixed `summarizeDiff()` — a code fix alone doesn't retroactively repair a value
+  already persisted in the DB, same reasoning as every other retroactive-cleanup migration in this
+  codebase. Verified directly against the real affected row before shipping: 13,647 chars → 181 chars,
+  with both corrupted paths correctly replaced by the placeholder text instead of truncated garbage.
+  **Lesson for future config-diff work**: `config_diffs` has TWO independent rendering surfaces fed by
+  the same underlying `diff` — the cached `change_summary` (always visible) and the live-fetched full
+  `diff`/`classified` (behind "View diff") — a fix to one is not a fix to the other; check both before
+  calling a diff-rendering bug closed.
 
 #### ⛔ Stored configs are REDACTED — do not "fix" this
 
@@ -2057,6 +2080,72 @@ route's own server-side `isAdmin()` guard above. `components/settings/UsersPanel
 relies entirely on this: it calls `GET /api/users` on mount, and that route's own `isAdmin()` check
 (403 for a viewer) is what makes the whole Users card render as nothing for a non-admin — there is no
 separate client-side role check to keep in sync.
+
+---
+
+## Settings Page — Tabbed Layout (added 2026-07-20)
+
+`app/(dashboard)/settings/page.js` was rewritten from a flat single-column page into a 4-tab layout
+(General / Users / Updates / About) at direct user request, to match the standardized tabbed
+Settings pattern documented in `C:\Users\amrin\Documents\NocVault\SETTINGS-STANDARDIZATION.md` — a
+cross-app spec doc that lives one level up from all the sibling NocVault suite app repos, **not**
+part of this repo. Netvault's own live `app/(app)/settings/page.tsx` was actually opened and read as
+the reference implementation before building this, rather than working from the spec doc alone.
+
+**SecVault is explicitly NOT part of that suite** — see "What SecVault Is" at the top of this file
+("SEPARATE PRODUCT from the NocVault suite — own auth, own DB, own services, own server. Not a
+module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependency on any of them."). The
+tab *structure and styling* were adopted purely because it's a good, proven pattern and SecVault
+already shares the same design tokens by independent choice (see "Design System" below) — not
+because SecVault is answering to or reporting into that suite. The new About tab is careful to say
+so: it states only `SecVault v{pkg.version}` and `"Standalone firewall security and management
+platform."` (the exact phrase this file's own opening section uses) — it makes no mention of the
+NocVault suite, no claim of membership, and no cross-app version/status reporting of any kind.
+
+### The 4 tabs
+
+- **General** — the pre-existing Feed Sync interval form and Change Your Password form, unchanged in
+  behavior, now living under one tab instead of stacked on the flat page.
+- **Users** — renders the existing `components/settings/UsersPanel.js` unmodified. Self-gates via its
+  own `GET /api/users` 403 check for a `viewer`-role session (see "Role-Based Access Control" above,
+  directly preceding this section) — the tab itself has no separate visibility check, it just always
+  renders the panel, which then renders as nothing for a non-admin.
+- **Updates** — renders the existing `components/settings/UpdatePanel.js` unmodified, inside the same
+  `Card` wrapper ("Software Update") it always had.
+- **About** — new. A plain HTML `<table>` (not the shared `Table` component — a static 5-row detail
+  list has no need for `Table`'s sorting/pagination machinery), `tableLayout: 'fixed'` set per this
+  file's own Critical Rules (percentage-width columns collapse unpredictably on overflow without it).
+  Rows: Product (`SecVault — Firewall Security Platform`), Version (`v{pkg.version}`), Port (`3010`),
+  Runtime (`Node.js v20 · Next.js 14.2.35 · React 18.3`), Database (`PostgreSQL 16`) — all static
+  strings except the version, which reads `package.json` the same way `Sidebar.js`'s version footer
+  already does (`import pkg from '../../../package.json'`, no API call).
+
+### Tab mechanism — a deliberate, scoped exception to this app's usual `?tab=` convention
+
+Every other multi-tab page in this app (`/devices/[id]/analysis`, `/compliance/[deviceId]`, etc.)
+uses the `?tab=` query param as the actual state — a server component reads it and re-renders
+server-side on every tab switch. Settings does NOT follow that pattern: `activeTab` is plain
+client-side `useState` (`'use client'`, the whole page already was one), and `?tab=` is read exactly
+ONCE inside a mount-only `useEffect` purely as a deep-link convenience (e.g. a future
+`/settings?tab=users` link) — after initial mount, switching tabs never touches the URL or triggers
+a server round-trip. This matches netvault's own Settings tab implementation specifically (their
+other tabbed pages may still use a different pattern) — copied deliberately, not a drift from this
+app's convention. Worth calling out explicitly so a future reader doesn't "fix" this page to match
+`/devices/[id]/analysis`'s server-driven `?tab=` pattern — that would be reverting an intentional,
+scoped choice, not correcting an inconsistency.
+
+### Dark-mode verification (done 2026-07-20, before this section was written)
+
+The whole file was read end-to-end and checked for hardcoded hex/`rgb()`/`rgba()` colors in every
+inline `style={{}}` — none found; every color is a `var(--...)` token (`--primary`, `--border`,
+`--text-primary`, `--text-secondary`, `--text-muted`, `--bg-primary`, `--bg-card`), including the new
+About-tab table. The sticky tab bar's `background: 'var(--bg-primary)'` was specifically checked
+against `app/globals.css`: `--bg-primary` is defined with distinct real values under both `:root`
+(`#f4f6f9`) and `[data-theme="dark"]` (`#0d1220`), and `.sv-content` (the actual scrolling ancestor
+this sticky bar sticks within, per `app/(dashboard)/layout.js`) uses that same `--bg-primary` as its
+own background — so the sticky bar is opaque and color-matched against the page background it sticks
+over in both themes, and the `Card` content that scrolls underneath it uses the distinct `--bg-card`
+token as intended (no mismatch). Confirmed clean, not assumed.
 
 ---
 
