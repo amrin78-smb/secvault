@@ -1,5 +1,8 @@
 import { pool } from '../../../../../../lib/db';
 import { isValidUuid } from '../../../../../../lib/apiUtils';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +39,11 @@ export async function GET(request, { params }) {
 // DELETE /api/devices/[id]/backups/[backupId]
 // Removes one backup row.
 export async function DELETE(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   try {
     const { id, backupId } = params;
 

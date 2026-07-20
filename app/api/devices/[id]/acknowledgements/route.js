@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,11 @@ export async function POST(request, { params }) {
 
     if (!isValidUuid(id)) {
       return Response.json({ error: 'Invalid device id' }, { status: 400 });
+    }
+
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
     }
 
     const deviceResult = await pool.query('SELECT id FROM devices WHERE id = $1', [id]);
@@ -85,7 +91,6 @@ export async function POST(request, { params }) {
     // acknowledge into a reported failure to the client — see the identical
     // reasoning in app/api/devices/[id]/analysis/route.js.
     try {
-      const session = await getServerSession(authOptions);
       const actor = (session && session.user && session.user.name) || 'unknown';
       await logActivity(pool, {
         actor,

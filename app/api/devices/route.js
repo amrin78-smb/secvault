@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { setCredential } from '../../../lib/credStore';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
 import {
   VENDOR_META,
   VENDOR_SLUGS,
@@ -49,6 +52,11 @@ export async function GET() {
 // value would break adapter dispatch in lib/adapters/index.js. Absent → the
 // vendor's defaultAccessMethod.
 export async function POST(request) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   const body = await request.json().catch(() => ({}));
   const {
     name,

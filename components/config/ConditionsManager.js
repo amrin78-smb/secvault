@@ -69,7 +69,7 @@ function ApplicabilityBadge({ result }) {
   return <Badge color={color}>{label}</Badge>;
 }
 
-export default function ConditionsManager({ cveId, initialConditions, devices }) {
+export default function ConditionsManager({ cveId, initialConditions, devices, canWrite = false }) {
   const [conditions, setConditions] = useState(initialConditions || []);
 
   // Add/Edit form state
@@ -217,9 +217,11 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
         <CardBody>
           <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <h2 style={SECTION_HEADING_STYLE}>Conditions ({conditions.length})</h2>
-            <Button type="button" onClick={openAddForm}>
-              Add condition
-            </Button>
+            {canWrite && (
+              <Button type="button" onClick={openAddForm}>
+                Add condition
+              </Button>
+            )}
           </div>
 
           {listError && <p style={{ marginBottom: 12, fontSize: 'var(--text-base)', color: 'var(--red)' }}>{listError}</p>}
@@ -239,19 +241,21 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
                         {c.condition_description || 'No description'}
                       </p>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Button type="button" variant="secondary" onClick={() => openEditForm(c)}>
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        onClick={() => handleDelete(c)}
-                        disabled={deletingId === c.id}
-                      >
-                        {deletingId === c.id ? 'Deleting…' : 'Delete'}
-                      </Button>
-                    </div>
+                    {canWrite && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Button type="button" variant="secondary" onClick={() => openEditForm(c)}>
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="danger"
+                          onClick={() => handleDelete(c)}
+                          disabled={deletingId === c.id}
+                        >
+                          {deletingId === c.id ? 'Deleting…' : 'Delete'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <pre
                     className="mono"
@@ -272,7 +276,7 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
           )}
 
           {/* Add/Edit form */}
-          {formOpen && (
+          {canWrite && formOpen && (
             <form
               onSubmit={handleSubmit}
               style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12, ...LIST_ITEM_STYLE }}
@@ -333,7 +337,10 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
         </CardBody>
       </Card>
 
-      {/* Test panel */}
+      {/* Test panel -- POST .../conditions/test is also admin-gated server-side
+          (see app/api/advisories/[cveId]/conditions/test/route.js), so this
+          whole card is hidden for a viewer rather than just its buttons. */}
+      {canWrite && (
       <Card>
         <CardBody>
           <h2 style={{ ...SECTION_HEADING_STYLE, marginBottom: 12 }}>Test against device</h2>
@@ -402,6 +409,7 @@ export default function ConditionsManager({ cveId, initialConditions, devices })
           )}
         </CardBody>
       </Card>
+      )}
     </div>
   );
 }

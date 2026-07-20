@@ -1,6 +1,9 @@
 import { pool } from '../../../../../lib/db';
 import { collectAndStore } from '../../../../../lib/adapters';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +11,11 @@ export const dynamic = 'force-dynamic';
 // single device, any supported vendor. The same collectAndStore(device, pool)
 // function is also invoked by services/engine-worker.js on the scheduled pull job.
 export async function POST(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   const { id } = params;
 
   // ⛔ Added 2026-07-19, found in a follow-up bug sweep: a malformed id must

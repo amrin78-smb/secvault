@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.12.0': [
+    'Added role-based access control: a new Users management panel on Settings (admin-only) lets you create logins with either full-admin or read-only-viewer access, instead of everyone sharing one admin login. Existing installs keep working with their current username/password, now upgraded to an admin account automatically.',
+    'Added "Export Recommended Order" on the Rule Analysis Reorder tab — computes one full recommended rule order that resolves as many shadowed-rule findings as possible in one go, downloadable as a CSV, instead of fixing each shadowed rule one at a time.',
+    'Config change acknowledgements (on the device Changes page and the Alerts page) can now include an optional note/reason, matching the CVE acknowledgement flow.',
+  ],
   '2.11.4': [
     'Fixed the Dashboard widget grid rendering with wildly uneven widths and two widgets seemingly missing — an unusually long piece of text in one widget could push the whole layout off-screen. Widgets are now protected from this regardless of content length.',
     'Fixed a real data-corruption bug on Palo Alto SSH devices: redacting a sensitive-looking word inside a free-text field (like an address description) could corrupt the rest of that device\'s collected configuration, which is what caused the unreadable "Config Changes" text seen on some devices. Redaction now hides the sensitive text without breaking anything around it.',

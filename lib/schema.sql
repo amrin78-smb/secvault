@@ -15,6 +15,27 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- ─────────────────────────────────────────
+-- USERS (RBAC — admin vs viewer)
+-- ─────────────────────────────────────────
+-- Local-admin identity used to live entirely in `settings`
+-- (admin_username/admin_password_hash, a single global identity with no
+-- role concept). This table replaces that with real per-user rows so more
+-- than one person can have their own login, and so a login can be
+-- read-only. `lib/migrate.js` migrates any existing settings-based admin
+-- identity into a row here on first run after upgrade — see
+-- seedUsersFromLegacyAdmin() there. No CHECK constraint on `role`, same
+-- convention as every other enum-like column in this file — validated in
+-- application code only (see lib/rbac.js).
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'viewer', -- 'admin' | 'viewer'
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT
 -- ─────────────────────────────────────────
 
@@ -162,8 +183,14 @@ CREATE TABLE IF NOT EXISTS config_diffs (
   change_summary TEXT,
   detected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   acknowledged_at TIMESTAMPTZ,
-  acknowledged_by TEXT
+  acknowledged_by TEXT,
+  acknowledged_note TEXT
 );
+
+-- CREATE TABLE IF NOT EXISTS is a no-op on an already-existing table, so a
+-- column added to the body above never reaches a server that already has
+-- this table — see the schema-migration note near audit_findings below.
+ALTER TABLE config_diffs ADD COLUMN IF NOT EXISTS acknowledged_note TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_config_diffs_device_id ON config_diffs(device_id);
 CREATE INDEX IF NOT EXISTS idx_config_diffs_detected_at ON config_diffs(detected_at);

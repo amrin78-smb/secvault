@@ -5,6 +5,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,6 +143,11 @@ export async function POST(request, { params }) {
       return Response.json({ error: 'Invalid device id' }, { status: 400 });
     }
 
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const result = await runAnalysisForDevice(id, pool);
 
     // Audit logging is best-effort and must never turn a successful analysis
@@ -149,7 +155,6 @@ export async function POST(request, { params }) {
     // logActivity hiccup here is a secondary concern (who did this), not the
     // primary action (the analysis already succeeded and committed above).
     try {
-      const session = await getServerSession(authOptions);
       const actor = (session && session.user && session.user.name) || 'unknown';
       await logActivity(pool, {
         actor,

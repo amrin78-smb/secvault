@@ -5,6 +5,7 @@ import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
+import UsersPanel from '../../../components/settings/UsersPanel';
 
 export default function SettingsPage() {
   const [feedPollIntervalHours, setFeedPollIntervalHours] = useState('');
@@ -114,7 +115,7 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Change Admin Password</CardTitle>
+          <CardTitle>Change Your Password</CardTitle>
         </CardHeader>
         <CardBody>
           <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -164,6 +165,8 @@ export default function SettingsPage() {
           <UpdatePanel />
         </CardBody>
       </Card>
+
+      <UsersPanel />
     </div>
   );
 }

@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
 import Badge from '../../../../../components/ui/Badge';
 import EmptyState from '../../../../../components/ui/EmptyState';
@@ -46,7 +49,7 @@ async function getDevice(dbPool, id) {
 
 async function getDiffs(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT id, change_summary, detected_at, acknowledged_at, acknowledged_by
+    `SELECT id, change_summary, detected_at, acknowledged_at, acknowledged_by, acknowledged_note
      FROM config_diffs
      WHERE device_id = $1
      ORDER BY detected_at DESC
@@ -68,6 +71,13 @@ async function getBackups(dbPool, deviceId) {
 }
 
 export default async function DeviceChangesPage({ params }) {
+  // Defense in depth only -- PUT devices/[id]/diffs/[diffId] (Acknowledge)
+  // and POST devices/[id]/backups (Create backup) are already server-side
+  // admin-only (lib/rbac.js). Hiding the controls here just avoids a viewer
+  // clicking one and getting a 403.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const device = await getDevice(pool, params.id);
 
   if (!device) {
@@ -114,13 +124,22 @@ export default async function DeviceChangesPage({ params }) {
                       {d.change_summary || 'Configuration change detected'}
                     </p>
                   </div>
-                  <div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                     {d.acknowledged_at ? (
-                      <Badge color="success">
-                        Acknowledged by {d.acknowledged_by || 'unknown'} · {formatDateTime(d.acknowledged_at)}
-                      </Badge>
-                    ) : (
+                      <>
+                        <Badge color="success">
+                          Acknowledged by {d.acknowledged_by || 'unknown'} · {formatDateTime(d.acknowledged_at)}
+                        </Badge>
+                        {d.acknowledged_note && (
+                          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textAlign: 'right' }}>
+                            &ldquo;{d.acknowledged_note}&rdquo;
+                          </span>
+                        )}
+                      </>
+                    ) : canWrite ? (
                       <AcknowledgeButton deviceId={device.id} diffId={d.id} />
+                    ) : (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>—</span>
                     )}
                   </div>
                 </div>
@@ -136,7 +155,7 @@ export default async function DeviceChangesPage({ params }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2 style={SECTION_HEADING_STYLE}>Config Backups</h2>
 
-        <BackupActions deviceId={device.id} />
+        {canWrite && <BackupActions deviceId={device.id} />}
 
         {backups.length === 0 ? (
           <EmptyState message="No config backups yet" />

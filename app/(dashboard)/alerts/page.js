@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../lib/rbac';
 import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
@@ -111,7 +114,7 @@ async function fetchConfigDiffs(dbPool, deviceId, open) {
 
   const { rows } = await dbPool.query(
     `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary,
-            cd.detected_at, cd.acknowledged_at, cd.acknowledged_by
+            cd.detected_at, cd.acknowledged_at, cd.acknowledged_by, cd.acknowledged_note
      FROM config_diffs cd
      JOIN devices d ON d.id = cd.device_id
      ${whereClause}
@@ -131,6 +134,7 @@ async function fetchConfigDiffs(dbPool, deviceId, open) {
     occurredAt: r.detected_at,
     acknowledgedBy: r.acknowledged_by,
     acknowledgedAt: r.acknowledged_at,
+    acknowledgedNote: r.acknowledged_note,
     ack: { kind: 'diff', diff_id: r.id },
   }));
 }
@@ -141,6 +145,13 @@ async function getDevices(dbPool) {
 }
 
 export default async function AlertsPage({ searchParams }) {
+  // Defense in depth only -- PUT devices/[id]/diffs/[diffId] and POST
+  // devices/[id]/cve-acknowledgements (both of which AlertAckControl calls)
+  // are already server-side admin-only (lib/rbac.js). Hiding the control
+  // here just avoids a viewer clicking it and getting a 403.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const typeParam = TYPES.has(searchParams?.type) ? searchParams.type : '';
   const statusParam = searchParams?.status === 'all' ? 'all' : 'open';
   const open = statusParam !== 'all';
@@ -241,7 +252,11 @@ export default async function AlertsPage({ searchParams }) {
                     </td>
                     <td style={{ color: 'var(--text-secondary)' }}>{formatWhen(item.occurredAt)}</td>
                     <td>
-                      <AlertAckControl item={item} />
+                      {canWrite ? (
+                        <AlertAckControl item={item} />
+                      ) : (
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{item.status}</span>
+                      )}
                     </td>
                   </tr>
                 );

@@ -47,7 +47,7 @@ function ruleLabel(row) {
   return `${seq} ${row.rule_name || '(unnamed rule)'}`;
 }
 
-export default async function OptimizationTab({ deviceId }) {
+export default async function OptimizationTab({ deviceId, canWrite = false }) {
   const findings = await getOptimizationFindings(pool, deviceId);
 
   if (findings.length === 0) {
@@ -88,15 +88,17 @@ export default async function OptimizationTab({ deviceId }) {
               {row.detail || '—'}
             </td>
             <td>
-              {row.rule_id_vendor ? (
+              {canWrite && row.rule_id_vendor ? (
                 <AcknowledgeControl
                   deviceId={deviceId}
                   ruleIdVendor={row.rule_id_vendor}
                   findingType={row.finding_type}
                   currentStatus={row.ack_status}
                 />
-              ) : (
+              ) : canWrite ? (
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>—</span>
+              ) : (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{row.ack_status}</span>
               )}
             </td>
           </tr>

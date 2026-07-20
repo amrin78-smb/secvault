@@ -38,6 +38,8 @@ export default function AlertAckControl({ item }) {
   const [status, setStatus] = useState(item.status);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [diffNote, setDiffNote] = useState('');
+  const [showDiffNote, setShowDiffNote] = useState(false);
 
   // Resync local status when the server-authoritative item.status changes for
   // a reason other than this control's own in-flight save -- same reasoning
@@ -89,7 +91,7 @@ export default function AlertAckControl({ item }) {
       const res = await fetch(`/api/devices/${item.deviceId}/diffs/${item.ack.diff_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ note: diffNote.trim() || undefined }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -108,27 +110,64 @@ export default function AlertAckControl({ item }) {
       const who = item.acknowledgedBy ? ` by ${item.acknowledgedBy}` : '';
       const when = formatWhen(item.acknowledgedAt);
       return (
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Acknowledged{who}
-          {when ? ` · ${when}` : ''}
+        <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+            Acknowledged{who}
+            {when ? ` · ${when}` : ''}
+          </span>
+          {item.acknowledgedNote && (
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+              &ldquo;{item.acknowledgedNote}&rdquo;
+            </span>
+          )}
         </span>
       );
     }
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={acknowledgeDiff}
-          disabled={saving}
-          style={{ fontSize: 'var(--text-xs)', padding: '4px 10px' }}
-        >
-          {saving ? 'Acknowledging…' : 'Acknowledge'}
-        </button>
-        {error && (
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
-            ⚠
-          </span>
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={acknowledgeDiff}
+            disabled={saving}
+            style={{ fontSize: 'var(--text-xs)', padding: '4px 10px' }}
+          >
+            {saving ? 'Acknowledging…' : 'Acknowledge'}
+          </button>
+          {!showDiffNote && (
+            <button
+              type="button"
+              onClick={() => setShowDiffNote(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                fontSize: 'var(--text-xs)',
+                color: 'var(--text-muted)',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+              }}
+            >
+              + note
+            </button>
+          )}
+          {error && (
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
+              ⚠
+            </span>
+          )}
+        </span>
+        {showDiffNote && (
+          <input
+            type="text"
+            className="input"
+            placeholder="Optional reason"
+            value={diffNote}
+            onChange={(e) => setDiffNote(e.target.value)}
+            disabled={saving}
+            style={{ fontSize: 'var(--text-xs)', padding: '4px 8px', minWidth: 200 }}
+          />
         )}
       </span>
     );

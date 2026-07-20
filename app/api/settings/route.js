@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
+import { authOptions } from '../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +31,17 @@ export async function PUT(request) {
     new_password: newPassword,
   } = body || {};
 
-  // Handle password change first, if requested.
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  // Handle password change first, if requested. Changing YOUR OWN password
+  // is allowed for any authenticated user (admin or viewer), not gated on
+  // isAdmin() — this is self-service account management, not an
+  // administrative action. RBAC: identity now lives in the `users` table,
+  // not the old global settings.admin_password_hash single-identity row —
+  // see lib/schema.sql / lib/migrate.js's seedUsers().
   if (newPassword) {
     if (!currentPassword) {
       return NextResponse.json(
@@ -44,20 +57,21 @@ export async function PUT(request) {
       );
     }
 
-    const hashResult = await pool.query(
-      "SELECT value FROM settings WHERE key = 'admin_password_hash'",
-      []
+    const userResult = await pool.query(
+      'SELECT id, password_hash FROM users WHERE username = $1',
+      [session.user.name]
     );
-
-    const storedHash = hashResult.rows.length > 0 ? hashResult.rows[0].value : null;
-    if (!storedHash) {
+    const storedUser = userResult.rows[0];
+    if (!storedUser) {
+      // LDAP-bound sessions have no row in `users` — their password lives
+      // in LDAP/AD, not here, so there is nothing local to change.
       return NextResponse.json(
-        { error: 'No admin password is currently configured' },
+        { error: 'Password changes are only available for local accounts' },
         { status: 400 }
       );
     }
 
-    const valid = await bcrypt.compare(currentPassword, storedHash);
+    const valid = await bcrypt.compare(currentPassword, storedUser.password_hash);
     if (!valid) {
       return NextResponse.json({ error: 'Current password is incorrect' }, { status: 400 });
     }
@@ -65,15 +79,17 @@ export async function PUT(request) {
     const newHash = await bcrypt.hash(newPassword, 10);
 
     await pool.query(
-      `INSERT INTO settings (key, value, updated_at)
-       VALUES ('admin_password_hash', $1, now())
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-      [newHash]
+      'UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2',
+      [newHash, storedUser.id]
     );
   }
 
-  // Handle feed poll interval update, if provided.
+  // Handle feed poll interval update, if provided — a global app setting,
+  // admin-only.
   if (feedPollIntervalHours !== undefined && feedPollIntervalHours !== null) {
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
     await pool.query(
       `INSERT INTO settings (key, value, updated_at)
        VALUES ('feed_poll_interval_hours', $1, now())

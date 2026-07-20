@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import Badge from '../../../../components/ui/Badge';
 import Button from '../../../../components/ui/Button';
@@ -35,7 +38,11 @@ export const dynamic = 'force-dynamic';
 
 async function deleteDeviceAction(formData) {
   'use server';
+  const session = await getServerSession(authOptions);
   const id = formData.get('deviceId');
+  if (!isAdmin(session)) {
+    redirect(`/devices/${id}?error=forbidden`);
+  }
   await pool.query('DELETE FROM devices WHERE id = $1', [id]);
   revalidatePath('/devices');
   redirect('/devices');
@@ -155,6 +162,14 @@ function tabLink(deviceId, activeTab, key, label) {
 }
 
 export default async function DeviceDetailPage({ params, searchParams }) {
+  // Defense in depth only -- every route these controls call (PUT/DELETE
+  // devices/[id], POST devices/[id]/test, POST devices/[id]/collect) already
+  // server-side enforces admin-only via lib/rbac.js's isAdmin(). Hiding the
+  // controls here just avoids a viewer clicking one and getting a confusing
+  // 403 -- same convention as app/(dashboard)/devices/page.js's canWrite.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const device = await getDevice(pool, params.id);
 
   if (!device) {
@@ -200,10 +215,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             <Badge color="info">{device.vendor}</Badge>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <DeviceActions deviceId={device.id} />
-            <Link href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`} className="btn btn-danger">
-              Delete
-            </Link>
+            {canWrite && <DeviceActions deviceId={device.id} />}
+            {canWrite && (
+              <Link href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`} className="btn btn-danger">
+                Delete
+              </Link>
+            )}
           </div>
         </div>
 
@@ -266,19 +283,21 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-          <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
-            Rotate Credentials
-          </h2>
-          {/* mgmt_method comes from the STORED row — the credential shape must follow
-              the access method this device was actually saved with, not the vendor's
-              default (an ssh fortinet must not be handed an API-token input). */}
-          <CredentialForm
-            deviceId={device.id}
-            vendor={device.vendor}
-            mgmtMethod={device.mgmt_method}
-          />
-        </div>
+        {canWrite && (
+          <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+            <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
+              Rotate Credentials
+            </h2>
+            {/* mgmt_method comes from the STORED row — the credential shape must follow
+                the access method this device was actually saved with, not the vendor's
+                default (an ssh fortinet must not be handed an API-token input). */}
+            <CredentialForm
+              deviceId={device.id}
+              vendor={device.vendor}
+              mgmtMethod={device.mgmt_method}
+            />
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>

@@ -1,12 +1,20 @@
 import { pool } from '../../../../../lib/db';
 import { getAdapter } from '../../../../../lib/adapters';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
 // POST /api/devices/[id]/test — test connectivity to an already-saved device,
 // any supported vendor.
 export async function POST(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   const { id } = params;
 
   if (!isValidUuid(id)) {

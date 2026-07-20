@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import PageHeader from '../../../../components/ui/PageHeader';
 import Badge from '../../../../components/ui/Badge';
@@ -145,6 +148,12 @@ export default async function DeviceCompliancePage({ params }) {
     return notFound();
   }
 
+  // Defense in depth only -- POST /api/compliance/[deviceId]/run is already
+  // server-side admin-only (lib/rbac.js). Hiding the button here just avoids
+  // a viewer clicking it and getting a 403.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const findings = await getFindings(pool, device.id);
   const zones = await getDeviceZones(pool, device.id);
 
@@ -202,7 +211,7 @@ export default async function DeviceCompliancePage({ params }) {
             <Link href={`/compliance/${device.id}/print`} className="btn btn-secondary">
               Print Report
             </Link>
-            <RunAuditButton deviceId={device.id} />
+            {canWrite && <RunAuditButton deviceId={device.id} />}
           </>
         }
       />

@@ -1002,6 +1002,17 @@ worst-band-first with a colored `Badge` per rule's band.
   written to `config_backups` **only when something changed** (avoids duplicating every unchanged daily pull)
 - A detected config change triggers an immediate CVE re-match in the engine worker (config_applies may have flipped)
 - UI: `/devices/[id]/changes` (timeline, diff viewer, acknowledge, backups + download)
+- `config_diffs.acknowledged_note TEXT` (added 2026-07-20, both in the `CREATE TABLE IF NOT EXISTS`
+  body and a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` per this file's own schema-migration
+  rule) — an optional free-text reason on acknowledgement, mirroring
+  `cve_assessment_acknowledgements`'s existing optional `note` field, which config-diff
+  acknowledgement never had. `PUT /api/devices/[id]/diffs/[diffId]` accepts an optional `note` in the
+  body and folds it into the `logActivity` detail string when present.
+  `components/config/AcknowledgeButton.js` (the Changes-page control) and
+  `components/alerts/AlertAckControl.js`'s `'diff'` branch (the fleet Alerts-page control) both gained
+  an optional "+ note" toggle that reveals a small text input before acknowledging; the note renders
+  alongside the "Acknowledged by X · date" badge once set. This route is RBAC-gated (admin-only, see
+  Role-Based Access Control above) — it wasn't gated at all before RBAC existed.
 
 #### ⛔ Stored configs are REDACTED — do not "fix" this
 
@@ -1916,6 +1927,124 @@ confident answer, same discipline as everywhere else in this app) or an `EmptySt
 ⚠️ Same standing caveat as VPN Summary: every field path here (except Fortinet's `two-factor`, which
 is live-confirmed — see the Compliance Engine section's `fortinet-admin-2fa-required` paragraph) is
 doc-derived and not yet independently live-verified.
+
+---
+
+## Role-Based Access Control (added 2026-07-20)
+
+Scoped from the ManageEngine Firewall Analyzer gap-analysis research — "at minimum: read-only vs.
+full admin." Two roles only, `admin` and `viewer`, no granular permission system (deliberately
+rejected a middle ground like "viewer can acknowledge but not delete" — a coarse, unambiguous
+boundary is safer than a fine-grained one that's easy to get subtly wrong across dozens of routes).
+`viewer` is strictly read-only: cannot acknowledge/dismiss findings, run analyses, trigger syncs,
+rotate credentials, add/delete devices, manage users, or change any global setting. Changing your
+OWN password is the one exception — that's self-service account management, not an administrative
+action, and is available to both roles.
+
+### `users` table replaces the old single global admin identity
+
+Local-admin identity used to be one global row pair in `settings`
+(`admin_username`/`admin_password_hash` — a single shared login, no concept of "who"). RBAC needed
+real per-person identity, so a new `users` table (`lib/schema.sql`) holds `username`, `password_hash`,
+`role` ('admin' | 'viewer', no CHECK constraint — validated in application code only, same convention
+as every other enum-like column in this file). `lib/migrate.js`'s `seedUsers()` is guarded on `users`
+being empty (so it only ever does something once per database) and handles both cases: an
+already-deployed install has its identity sitting in the legacy `settings` rows — migrated forward
+into `users` (role `admin`) so the existing username/password keep working; a genuinely fresh install
+gets the same well-known default identity (`admin`/`changeme`) the old `seedDefaultAdmin()` used to
+seed, just directly into `users` now. The legacy `settings` rows are left in place (not deleted) —
+harmless, and nothing reads them as the source of truth anymore.
+
+`users.password_hash` gets the same secret-bearing-column treatment as `settings.admin_password_hash`
+before it: `REVOKE SELECT ON TABLE users` + a `users_readonly` view (excluding the hash) granted to
+`claude_readonly`/`nocvault_readonly` instead of the base table (`lib/schema-grants.sql`).
+
+### `lib/rbac.js` — the shared guard
+
+A pure, dependency-free CommonJS module: `ADMIN_ROLE`/`VIEWER_ROLE` constants, `isAdmin(session)`,
+`forbiddenResponse()` (a 403 JSON Response). Deliberately does NOT import `authOptions` or do session
+resolution itself — every route continues to resolve its own session via the already-established
+per-route `getServerSession(authOptions)` pattern, then calls `isAdmin(session)` from here. This
+sidesteps any ESM/CJS interop risk between a CJS lib file and the ESM Next.js route files that import
+it (`lib/activityLog.js` already established the "CommonJS for every lib/*.js file, even ones only
+consumed by App Router routes" convention this follows).
+
+Standard guard shape for a write-method route handler:
+```javascript
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '<relative>/api/auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '<relative>/lib/rbac';
+
+export async function POST(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) return forbiddenResponse();
+  // ... existing logic
+}
+```
+Applied to every mutating (POST/PUT/DELETE/PATCH) API route in the app — device CRUD/credentials/
+collect/test, analysis/compliance/CVE run-now triggers, feed sync, advisory-conditions CRUD, the
+system self-update trigger, and every acknowledgement route (findings/CVE/config-diff). GET routes
+are never gated — read access is the same for both roles. Several routes already resolved a
+`getServerSession` result for an unrelated purpose (deriving an `actor` name for `logActivity`,
+inside its own best-effort try/catch, positioned AFTER the mutating work) — those were hoisted so the
+admin check runs BEFORE any write, with the later actor-name resolution reusing the same session
+object rather than calling `getServerSession` twice.
+
+Server Actions (only two exist in the whole app — both `deleteDeviceAction`, in `devices/page.js` and
+`devices/[id]/page.js`) can't return an HTTP status code the way an API route can, so they guard with
+`redirect('/devices?error=forbidden')` instead of a 403 Response; the page renders a small banner off
+that query param.
+
+### LDAP provider — known limitation, not fixed
+
+`app/api/auth/[...nextauth]/route.js`'s LDAP provider still hardcodes `role: 'admin'` for any
+successful bind — there is no LDAP-group-to-role mapping. A successful bind against
+`LDAP_URL`/`LDAP_BASE_DN` was already an explicit trust boundary this app relied on before RBAC
+existed; building real group-to-role mapping is a feature addition, out of scope for "read-only vs.
+full admin, at minimum." Revisit if a viewer-role LDAP user is ever needed.
+
+### UI-level hiding — defense in depth only
+
+Write-action buttons/links (Add Device, Delete, the Users management card, etc.) are hidden for a
+viewer session in several places, but this is cosmetic UX only — the real enforcement is every write
+route's own server-side `isAdmin()` guard above. `components/settings/UsersPanel.js` in particular
+relies entirely on this: it calls `GET /api/users` on mount, and that route's own `isAdmin()` check
+(403 for a viewer) is what makes the whole Users card render as nothing for a non-admin — there is no
+separate client-side role check to keep in sync.
+
+---
+
+## Rule Reorder Recommendation (added 2026-07-20)
+
+Closes a real gap the ManageEngine Firewall Analyzer research identified: `ruleAnalysis.js`'s
+`reorder_candidate` finding (see Rule Analysis Engine above) only ever flags INDIVIDUAL problem rules
+("this deny is shadowed by that allow") — there was no synthesis step producing one recommended full
+rule order, the equivalent of ManageEngine's "Rule Reorder & Recommendation" tool.
+
+`lib/engines/ruleReorder.js` — pure, no-DB (same "pure engine" pattern as `riskScore.js`). Each
+`reorder_candidate` finding means rule `rule_id` (a deny) is unreachable because an earlier rule
+`affected_rule_ids[0]` (an allow) fully covers its traffic — read as a precedence CONSTRAINT: the
+deny must end up before its shadowing allow. `computeRecommendedOrder(rules, findings)` solves this
+via **Kahn's algorithm (topological sort)**, not naive pairwise swapping, specifically because Kahn's
+algorithm has a clean, correct answer for the case naive swapping doesn't: a genuine CYCLE (rule A
+must precede rule B per one finding, rule B must precede rule A per another — two constraints no
+single order can satisfy). A cycle's rules are detected and reported as `unresolvedRuleIds`, left at
+their original position, rather than guessed at — the same "no ruleset is safer than the wrong one"
+posture this codebase already applies to `getRules()`'s fail-loud contract. Rules not referenced by
+any finding are never touched; the algorithm does a stable merge that only reorders the minimal
+subset of involved rules into the slots they already occupied, so the recommendation is the smallest
+possible diff from the current order, not a full re-sort. A finding referencing a rule id no longer
+in the current `firewall_rules` snapshot (stale relative to the last collect) is silently skipped,
+same defensive posture `ReorderTab.js` already has for `affected_rule_ids` resolution.
+
+`GET /api/devices/[id]/reorder-recommendation` — JSON by default, `?format=csv` for a downloadable
+export, matching the established `?format=csv` convention (`/api/devices/[id]/rules`,
+`/api/compliance/[deviceId]`, etc.). Read-only — no RBAC guard needed (GET routes are never gated),
+and critically **no write-back to the device or to `firewall_rules`** — this is a recommendation for
+a human to apply manually, the same recommend-only scope as every other finding in this dashboard
+(see the Rule Analysis Dashboard section above — no adapter has ever gained a write-back capability).
+`components/analysis/ReorderTab.js` gained an "Export Recommended Order" link pointing at the CSV
+variant.
 
 ---
 

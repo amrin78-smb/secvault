@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
 import Table from '../../../../../components/ui/Table';
 import Badge from '../../../../../components/ui/Badge';
@@ -195,6 +198,12 @@ function tabLink(deviceId, activeTab, key, label) {
 }
 
 export default async function DeviceAnalysisPage({ params, searchParams }) {
+  // Defense in depth only -- POST devices/[id]/analysis (Run Analysis) is
+  // already server-side admin-only (lib/rbac.js). Hiding the button here
+  // just avoids a viewer clicking it and getting a 403.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const device = await getDevice(pool, params.id);
 
   if (!device) {
@@ -254,7 +263,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             <a href={`/api/devices/${device.id}/analysis?format=csv`} className="btn btn-secondary">
               Export CSV
             </a>
-            <RunAnalysisButton deviceId={device.id} />
+            {canWrite && <RunAnalysisButton deviceId={device.id} />}
           </>
         }
       />
@@ -363,11 +372,11 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         </Card>
       )}
 
-      {tab === 'cleanup' && <CleanupTab deviceId={device.id} />}
+      {tab === 'cleanup' && <CleanupTab deviceId={device.id} canWrite={canWrite} />}
 
-      {tab === 'optimization' && <OptimizationTab deviceId={device.id} />}
+      {tab === 'optimization' && <OptimizationTab deviceId={device.id} canWrite={canWrite} />}
 
-      {tab === 'reorder' && <ReorderTab deviceId={device.id} />}
+      {tab === 'reorder' && <ReorderTab deviceId={device.id} canWrite={canWrite} />}
 
       {tab === 'risk' && <RiskTab deviceId={device.id} />}
 

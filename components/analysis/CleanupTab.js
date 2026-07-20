@@ -47,7 +47,7 @@ async function getCleanupFindings(dbPool, deviceId) {
   return result.rows;
 }
 
-export default async function CleanupTab({ deviceId }) {
+export default async function CleanupTab({ deviceId, canWrite = false }) {
   const findings = await getCleanupFindings(pool, deviceId);
 
   if (findings.length === 0) {
@@ -88,17 +88,19 @@ export default async function CleanupTab({ deviceId }) {
               {row.detail || '—'}
             </td>
             <td>
-              {row.rule_id_vendor ? (
+              {canWrite && row.rule_id_vendor ? (
                 <AcknowledgeControl
                   deviceId={deviceId}
                   ruleIdVendor={row.rule_id_vendor}
                   findingType={row.finding_type}
                   currentStatus={row.ack_status}
                 />
-              ) : (
+              ) : canWrite ? (
                 <span style={{ color: 'var(--text-muted)' }} title="No stable rule identifier — cannot acknowledge">
                   —
                 </span>
+              ) : (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{row.ack_status}</span>
               )}
             </td>
           </tr>

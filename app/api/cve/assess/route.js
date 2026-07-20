@@ -1,5 +1,8 @@
 import { pool } from '../../../../lib/db';
 import { runMatchForAllDevices } from '../../../../lib/engines/versionMatcher';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +12,11 @@ export const dynamic = 'force-dynamic';
 // vendors generically, request completes well within a normal request lifetime today).
 export async function POST(request) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const result = await runMatchForAllDevices(pool);
     return Response.json(result);
   } catch (err) {

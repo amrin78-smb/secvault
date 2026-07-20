@@ -1,3 +1,6 @@
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../../lib/rbac';
 import { pool } from '../../../../../../lib/db';
 import {
   getLatestConfigParsed,
@@ -11,6 +14,11 @@ export const dynamic = 'force-dynamic';
 // Body: { device_id }
 export async function POST(request, { params }) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const { cveId } = params;
 
     let body = {};

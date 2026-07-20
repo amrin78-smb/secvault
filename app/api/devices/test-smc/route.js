@@ -1,4 +1,7 @@
 import { getApiInfo, getEngines } from '../../../../lib/adapters/forcepoint/smc';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +10,11 @@ export const dynamic = 'force-dynamic';
 // is passed raw in the request body since there's no device row or credStore entry to
 // look it up from. This route must NOT write anything to the database.
 export async function POST(request) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   const body = await request.json().catch(() => ({}));
   const { smc_host, smc_port, api_key, allow_self_signed_ssl } = body || {};
 

@@ -4,13 +4,6 @@ import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
 
-// Fetches a single settings row by key. Always pass `pool` explicitly.
-async function getSetting(key, pool) {
-  const result = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
-  if (result.rows.length === 0) return null;
-  return result.rows[0].value;
-}
-
 // Binds against LDAP_URL / LDAP_BASE_DN. Resolves to the bound username on
 // success, rejects on any failure. Never throws out of authorize() — caller
 // wraps this in a try/catch and returns null on error.
@@ -55,23 +48,26 @@ export const authOptions = {
           return null;
         }
 
-        const storedUsername = await getSetting('admin_username', pool);
-        const storedHash = await getSetting('admin_password_hash', pool);
-
-        if (!storedUsername || !storedHash) {
+        // RBAC: real per-user identity/role, from the `users` table — see
+        // lib/schema.sql. Used to be a single global identity read out of
+        // `settings` (admin_username/admin_password_hash); lib/migrate.js's
+        // seedUsers() migrates any such legacy identity into `users` on
+        // first run after upgrade, so existing installs keep working.
+        const result = await pool.query(
+          'SELECT id, username, password_hash, role FROM users WHERE username = $1',
+          [credentials.username]
+        );
+        const storedUser = result.rows[0];
+        if (!storedUser) {
           return null;
         }
 
-        if (credentials.username !== storedUsername) {
-          return null;
-        }
-
-        const valid = await bcrypt.compare(credentials.password, storedHash);
+        const valid = await bcrypt.compare(credentials.password, storedUser.password_hash);
         if (!valid) {
           return null;
         }
 
-        return { id: storedUsername, name: storedUsername, role: 'admin' };
+        return { id: storedUser.id, name: storedUser.username, role: storedUser.role };
       },
     }),
     CredentialsProvider({
@@ -92,6 +88,13 @@ export const authOptions = {
 
         try {
           const username = await ldapAuthenticate(credentials.username, credentials.password);
+          // Known limitation: LDAP/AD users always get 'admin' — there is
+          // no LDAP-group-to-role mapping. A successful bind against
+          // LDAP_URL/LDAP_BASE_DN was already an explicit trust boundary
+          // this app relies on before RBAC existed; building real group
+          // mapping is a feature addition, not part of "read-only vs full
+          // admin, at minimum" RBAC. Revisit if viewer-role LDAP users are
+          // ever needed.
           return { id: username, name: username, role: 'admin' };
         } catch (err) {
           return null;

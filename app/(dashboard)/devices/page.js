@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../lib/rbac';
 import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
@@ -44,6 +47,15 @@ const SORT_OPTIONS = {
 
 async function deleteDeviceAction(formData) {
   'use server';
+  // Server Actions can't return an HTTP status code the way an API route
+  // can (see lib/rbac.js's own header comment) — the guard here redirects
+  // back with ?error=forbidden instead, which the page renders as a
+  // banner, rather than throwing an uncaught error into the framework's
+  // generic error boundary.
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    redirect('/devices?error=forbidden');
+  }
   const id = formData.get('deviceId');
   await pool.query('DELETE FROM devices WHERE id = $1', [id]);
   revalidatePath('/devices');
@@ -118,16 +130,39 @@ export default async function DevicesPage({ searchParams }) {
   const confirmDeleteId = searchParams?.confirmDelete || null;
   const confirmDevice = confirmDeleteId ? devices.find((d) => d.id === confirmDeleteId) : null;
 
+  // Defense in depth only — deleteDeviceAction's own isAdmin() guard above
+  // is the real enforcement. Hiding the Delete link/button for a viewer
+  // just avoids a confusing "click Delete, land back with a forbidden
+  // banner" round trip.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
         title="Devices"
         actions={
-          <Link href="/devices/new" className="btn btn-primary">
-            Add Device
-          </Link>
+          canWrite && (
+            <Link href="/devices/new" className="btn btn-primary">
+              Add Device
+            </Link>
+          )
         }
       />
+
+      {searchParams?.error === 'forbidden' && (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--tint-danger)',
+            color: 'var(--tint-danger-fg)',
+            fontSize: 'var(--text-base)',
+          }}
+        >
+          You don&apos;t have permission to do that — admin role required.
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-base)' }}>
         <span style={{ color: 'var(--text-muted)' }}>Sort by:</span>
@@ -196,12 +231,14 @@ export default async function DevicesPage({ searchParams }) {
                       View
                     </Link>
                     <DeviceRowActions deviceId={d.id} />
-                    <Link
-                      href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}
-                      style={{ color: 'var(--red)', textDecoration: 'underline' }}
-                    >
-                      Delete
-                    </Link>
+                    {canWrite && (
+                      <Link
+                        href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}
+                        style={{ color: 'var(--red)', textDecoration: 'underline' }}
+                      >
+                        Delete
+                      </Link>
+                    )}
                   </div>
                 </td>
               </tr>

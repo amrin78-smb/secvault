@@ -121,7 +121,7 @@ async function fetchConfigDiffs(deviceId, open) {
 
   const { rows } = await pool.query(
     `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary,
-            cd.detected_at, cd.acknowledged_at, cd.acknowledged_by
+            cd.detected_at, cd.acknowledged_at, cd.acknowledged_by, cd.acknowledged_note
      FROM config_diffs cd
      JOIN devices d ON d.id = cd.device_id
      ${whereClause}
@@ -141,6 +141,7 @@ async function fetchConfigDiffs(deviceId, open) {
     occurredAt: r.detected_at,
     acknowledgedBy: r.acknowledged_by,
     acknowledgedAt: r.acknowledged_at,
+    acknowledgedNote: r.acknowledged_note,
     ack: { kind: 'diff', diff_id: r.id },
   }));
 }

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
 import { isValidUuid } from '../../../../lib/apiUtils';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 import {
   VENDOR_META,
   VENDOR_SLUGS,
@@ -70,6 +73,11 @@ export async function GET(request, { params }) {
 // (400 if the vendor doesn't support it). The vendor used for that check is the
 // one in the body when it is being changed, otherwise the device's stored vendor.
 export async function PUT(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }
@@ -263,6 +271,11 @@ export async function PUT(request, { params }) {
 // DELETE /api/devices/[id] — related rows (device_versions, device_credentials,
 // firewall_rules, device_cve_assessments, ...) cascade via ON DELETE CASCADE in schema.sql.
 export async function DELETE(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }

@@ -1,3 +1,6 @@
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import { runFullSync } from '../../../../lib/feeds';
 
@@ -18,6 +21,11 @@ export const dynamic = 'force-dynamic';
 // therefore doesn't need to do anything with runFullSync's return value — only make sure an
 // unhandled rejection can't warn/crash the process.
 export async function POST(request) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   runFullSync(pool).catch((err) => {
     console.error('[feeds/sync] background sync failed:', err);
   });

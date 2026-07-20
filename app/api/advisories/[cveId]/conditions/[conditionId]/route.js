@@ -1,3 +1,6 @@
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../../lib/rbac';
 import { pool } from '../../../../../../lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +28,11 @@ async function getAdvisoryByCveId(cveId) {
 // Only fields present in the body are updated.
 export async function PUT(request, { params }) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const { cveId, conditionId } = params;
 
     const advisory = await getAdvisoryByCveId(cveId);
@@ -95,6 +103,11 @@ export async function PUT(request, { params }) {
 // DELETE /api/advisories/[cveId]/conditions/[conditionId]
 export async function DELETE(request, { params }) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const { cveId, conditionId } = params;
 
     const advisory = await getAdvisoryByCveId(cveId);

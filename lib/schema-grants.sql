@@ -61,4 +61,15 @@ GRANT SELECT ON TABLE device_risk_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE fleet_dashboard_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE activity_log TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_session_snapshots TO claude_readonly, nocvault_readonly;
+
+-- users carries password_hash — same secret-bearing-column treatment as
+-- settings.admin_password_hash above (a view excluding it, never a bare
+-- table grant). REVOKE first for the same "this file re-runs on every
+-- update" reason as settings above.
+REVOKE SELECT ON TABLE users FROM claude_readonly, nocvault_readonly;
+
+CREATE OR REPLACE VIEW users_readonly AS
+  SELECT id, username, role, created_at, updated_at FROM users;
+
+GRANT SELECT ON users_readonly TO claude_readonly, nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users

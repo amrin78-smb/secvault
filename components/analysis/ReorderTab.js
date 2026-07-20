@@ -18,6 +18,14 @@ import AcknowledgeControl from './AcknowledgeControl';
 // collect, so those ids are not stable across pulls, but within one render
 // they refer to the same snapshot rule_analysis_results.rule_id was joined
 // against, so resolving them here is safe.
+//
+// "Export Recommended Order" (added alongside ManageEngine Firewall
+// Analyzer parity work) synthesizes this tab's individual findings into
+// ONE recommended full rule order via GET
+// /api/devices/[id]/reorder-recommendation?format=csv -- see
+// lib/engines/ruleReorder.js for the topological-sort algorithm. Read-only:
+// exports a CSV for a human to apply manually, never writes back to the
+// device.
 
 async function getReorderFindings(dbPool, deviceId) {
   const result = await dbPool.query(
@@ -82,7 +90,7 @@ function shadowingRuleLabel(affectedRuleIds, ruleMap) {
     .join(', ');
 }
 
-export default async function ReorderTab({ deviceId }) {
+export default async function ReorderTab({ deviceId, canWrite = false }) {
   const [findings, deviceRules, acks] = await Promise.all([
     getReorderFindings(pool, deviceId),
     getDeviceRules(pool, deviceId),
@@ -99,7 +107,17 @@ export default async function ReorderTab({ deviceId }) {
   const ackMap = new Map(acks.map((a) => [a.rule_id_vendor, a.status]));
 
   return (
-    <Table>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <a
+          href={`/api/devices/${deviceId}/reorder-recommendation?format=csv`}
+          className="btn btn-secondary"
+          style={{ fontSize: 'var(--text-xs)' }}
+        >
+          Export Recommended Order
+        </a>
+      </div>
+      <Table>
       <colgroup>
         <col style={{ width: '9%' }} />
         <col style={{ width: '20%' }} />
@@ -130,20 +148,25 @@ export default async function ReorderTab({ deviceId }) {
               {row.detail || '—'}
             </td>
             <td>
-              {row.rule_id_vendor ? (
+              {canWrite && row.rule_id_vendor ? (
                 <AcknowledgeControl
                   deviceId={deviceId}
                   ruleIdVendor={row.rule_id_vendor}
                   findingType="reorder_candidate"
                   currentStatus={ackMap.get(row.rule_id_vendor) || 'new'}
                 />
-              ) : (
+              ) : canWrite ? (
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>—</span>
+              ) : (
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  {ackMap.get(row.rule_id_vendor) || 'new'}
+                </span>
               )}
             </td>
           </tr>
         ))}
       </tbody>
     </Table>
+    </div>
   );
 }

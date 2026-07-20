@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
 import { execSync } from 'child_process';
 import path from 'path';
 import { pool } from '../../../../lib/db';
@@ -14,20 +15,19 @@ export const dynamic = 'force-dynamic';
 // waiting for the update to finish (the script stops this app's own service
 // partway through). Pattern copied from netvault's app/api/system/update/route.ts.
 //
-// Auth: SecVault has no role/RBAC split anywhere in this app -- confirmed by
-// grep across app/api for session.user.role/user.role/isAdmin: the only hits
-// are in app/api/auth/[...nextauth]/route.js's jwt()/session() callbacks,
-// which always set role to 'admin' (both the local-admin and LDAP authorize()
-// functions hardcode role: 'admin'; there is no admin-vs-viewer distinction
-// anywhere, unlike netvault's admin/super_admin gate on this same route). An
-// authenticated session is therefore the same bar every other write route in
-// this codebase already uses (e.g. app/api/devices/[id]/acknowledgements) --
-// that's the bar here too, deliberately not a role check that doesn't exist
-// elsewhere in this app.
+// Auth: gated on the `admin` role via lib/rbac.js's isAdmin(session) -- a
+// `viewer`-role session (or no session at all) is rejected with a 403. This
+// route used to only require ANY authenticated session (no role/RBAC split
+// existed anywhere in this app at the time). That has since changed: a
+// `users` table + `admin`|`viewer` role now exists, and triggering a
+// full application update/restart is exactly the kind of write-adjacent
+// action a viewer must not be able to do -- so this route was upgraded from
+// a session-only check to a real admin-role check, matching the RBAC model's
+// "viewer = strictly read-only, no actions" rule used everywhere else.
 export async function POST() {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
   }
 
   const serverIp = process.env.SERVER_IP || '';

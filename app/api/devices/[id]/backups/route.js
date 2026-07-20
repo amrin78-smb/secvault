@@ -1,6 +1,9 @@
 import { pool } from '../../../../../lib/db';
 import { createBackup } from '../../../../../lib/engines/configDiff';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +39,11 @@ export async function GET(request, { params }) {
 // Creates a labeled backup from the device's latest collected config.
 // Body is optional: { label } — 'manual' (default) or 'pre-change'.
 export async function POST(request, { params }) {
+  const session = await getServerSession(authOptions);
+  if (!isAdmin(session)) {
+    return forbiddenResponse();
+  }
+
   try {
     const { id } = params;
 

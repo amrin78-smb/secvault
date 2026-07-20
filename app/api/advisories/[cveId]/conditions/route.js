@@ -1,3 +1,6 @@
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../auth/[...nextauth]/route';
+import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -50,6 +53,11 @@ export async function GET(request, { params }) {
 // Body: { condition_description, predicate_type, predicate_config }
 export async function POST(request, { params }) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!isAdmin(session)) {
+      return forbiddenResponse();
+    }
+
     const { cveId } = params;
 
     const advisory = await getAdvisoryByCveId(cveId);
