@@ -316,6 +316,21 @@ tbody tr:hover td { background: var(--bg-primary); }
 @media (max-width: 820px) {
   .dashboard-widget-grid { grid-template-columns: 1fr; }
 }
+/* ⛔ Bug fixed 2026-07-20, found live on production: a grid item's default
+   min-width is `auto`, which resolves to its content's min-content size --
+   for a `white-space: nowrap` text node (e.g. a truncated-looking
+   change_summary preview with overflow:hidden/text-overflow:ellipsis one
+   level down), min-content is the FULL untruncated text width, since nowrap
+   text has no line-break points to shrink at. One corrupted config_diffs row
+   (a 13,000+ character unbroken string, itself a separate parser bug -- see
+   lib/adapters/paloalto/ssh.js) drove one widget's grid column to ~57,700px,
+   shoving the third column (and everything in it) off-screen -- looking
+   exactly like two widgets had vanished, when they were actually just
+   pushed far outside the viewport. overflow:hidden/ellipsis on a descendant
+   span does NOT protect the ancestor grid item from this -- min-width must
+   be constrained explicitly. Scoped to direct children of this grid only
+   (not a global `.card` change) so no other page's card layout is affected. */
+.dashboard-widget-grid > * { min-width: 0; }
 
 /* Small colored icon badge for Dashboard widget headers -- same visual
    language as the sidebar's per-route nav chips (Sidebar.js's

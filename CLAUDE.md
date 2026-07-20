@@ -1097,15 +1097,94 @@ aren't real changes — an admin didn't do this." Investigated directly against 
   "Update Now") runs `node lib/migrate.js` on the server. Until then, the already-exposed secret
   remains in the live database — deploy promptly after this lands.
 
+#### ⛔ Palo Alto SSH redaction corrupted the config brace structure (found and fixed 2026-07-20)
+
+Follow-up to the section above: a user reported the Dashboard's "Config Changes" widget rendering as
+an unreadable wall of text — not the noise/secret issue already fixed, a new, distinct bug.
+Root-caused directly against the live device's stored `config_raw` (read-only DB access): a real,
+legitimate PAN-OS address object had a free-text `description` field written by an admin —
+`description "Manage Change Password <text>";` — that happened to contain the word "Password".
+`lib/adapters/paloalto/sshParser.js`'s `redactLine()` correctly matched it as secret-shaped
+(fail-closed is the right call here — a description merely *mentioning* a password is exactly the
+kind of ambiguous case that should redact), but its replacement discarded everything from the matched
+word to the end of the line — **including the value's closing `"` and the trailing `;`**.
+`tokenizeBraceConfig()` tracks quote state character-by-character and does not stop at a newline while
+inside an open `"..."`, so the now-unterminated quote caused it to keep consuming every following
+character — other objects' real `{`/`}`/`;` included — until the next `"` anywhere later in the file
+happened to close it. That merged dozens of unrelated, subsequent address objects into one ~13,000-
+character garbage key, which is exactly what `config_diffs.change_summary` and the per-device Changes
+page were rendering.
+
+**Fix**: `redactLine()` now locates every quoted span on the line first (`findQuotedSpans()`, mirroring
+`tokenizeBraceConfig()`'s own backslash-escape handling exactly, so the two never disagree about what
+counts as "inside a quote"), then branches on where the matched secret-shaped token sits — inside a
+quoted free-text value, redact only the quoted CONTENT and keep the opening/closing `"` and trailing
+`;` intact (`description "<redacted>";`); outside any quote (the token IS the real leaf key), redact
+only the VALUE via a new `redactValuePreservingStructure()` helper, which likewise preserves a quoted
+value's closing quote or a bare value's trailing `;`. Both properties — secret hidden, brace structure
+never corrupted — hold simultaneously; this does not weaken redaction, it only stops the replacement
+from eating structural characters it never should have touched. `redactConfig()`/`redactLine()` is the
+one shared redaction pass for the whole SSH transport, so this single fix covers every quoted field
+(descriptions, comments, etc.), not just the one that happened to surface.
+
+**Known limitation**: this only prevents corruption on the *next* collect. It does not retroactively
+repair the device's already-corrupted `config_diffs`/`device_configs` rows in production — unlike the
+secret-disclosure case above, this doesn't need an active scrubbing migration, because the corrupted
+snapshot is superseded by a correctly-parsed one on the device's next scheduled collect (the stale
+snapshot simply ages out of the two-most-recent-snapshots diff window); expect one more noisy
+"everything looks modified" diff on that next collect as the corrupted blob gets compared against the
+real, correctly-parsed catalog, then it self-resolves.
+
+#### ⛔ Dashboard widget grid: a corrupted `change_summary` string could blow the whole grid off-screen (found and fixed 2026-07-20)
+
+Same underlying corrupted data as above, but a second, independent bug in how the Dashboard rendered
+it — worth fixing on its own merits since ANY future long unbroken string in any widget could trigger
+this identically, not just this one incident. The symptom looked like "two widgets vanished and the
+remaining ones have wildly uneven widths" — live DOM inspection (`getComputedStyle`, not a screenshot
+guess) showed `.dashboard-widget-grid`'s computed `grid-template-columns` as `194px 57696px 268px`: all
+8 widgets were genuinely present in the DOM (`RiskByCategory`/`DeviceStatusSummary` were never
+missing), just shoved to x≈58,183px — off-screen — because the middle column was ~58,000px wide.
+
+Root cause: a CSS Grid item's default `min-width` is `auto`, which resolves to its content's
+min-content size. `ConfigChangesWidget.js` renders each `change_summary` in a
+`white-space: nowrap; overflow: hidden; text-overflow: ellipsis` span — correct for normal-length text,
+but a `nowrap` span's min-content width is its FULL, untruncated text width (nowrap means no
+line-break opportunities to shrink at), and `overflow:hidden`/ellipsis on the span itself does nothing
+to stop that intrinsic size from propagating up to the ancestor GRID ITEM, which also defaults to
+`min-width: auto`. The corrupted ~13,000-character string (see the redaction bug above) drove that
+one grid item's min-content — and therefore its entire COLUMN's width, since CSS Grid sizes a column
+track across all rows sharing it — to ~57,700px, dragging column 3 far outside the viewport with it.
+
+**Fix**: `.dashboard-widget-grid > * { min-width: 0; }` in `app/globals.css`, scoped to direct children
+of this one grid (not a global `.card` change, so no other page is affected). Verified live via
+`getComputedStyle` before and after: before, `194.7px 57696.6px 268.9px`; after, all three tracks
+exactly `533.33px`, all 8 widgets back in the visible viewport. This is a durable, generic fix — it
+protects every current and future dashboard widget from this exact class of bug regardless of what
+pathological content a future data source produces, not just this one corrupted row.
+
 ---
 
 ## Fleet Alerts Page (v2.1.0 — `/alerts`)
 
 Fixes a real UX gap: the header notification bell (`components/layout/NotificationBell.js`)
-surfaces fleet-wide "needs attention" items (new rule findings, patch-now CVEs, unacknowledged
-config diffs), but until this phase every click either dropped the operator onto an unrelated
-device page or, for the dropdown's static footer link, onto the fleet Rule Analysis summary —
-there was nowhere the bell itself could lead to actually acknowledge/resolve anything.
+surfaces fleet-wide "needs attention" items (originally new rule findings, patch-now CVEs,
+unacknowledged config diffs — see the 2026-07-20 scope change below), but until this phase every
+click either dropped the operator onto an unrelated device page or, for the dropdown's static
+footer link, onto the fleet Rule Analysis summary — there was nowhere the bell itself could lead to
+actually acknowledge/resolve anything.
+
+**⛔ Scope change 2026-07-20 — `new_finding` REMOVED, direct user feedback.** A 2026-07-19 bug-sweep
+fix correctly made rule-level findings visible here for the first time (they'd been invisible due to
+a query bug — see the bug-sweep history below) — but a single device can carry hundreds of
+`unused`/`shadow` findings, and surfacing every one blew the bell badge past its 99+ cap and buried
+the two genuinely low-cardinality, curated types underneath a flood of findings that already have a
+correct, dedicated triage home: the Cleanup/Optimization/Reorder tabs on `devices/[id]/analysis`
+(`CleanupTab.js`'s `getCleanupFindings()`, which was never affected by the visibility bug in the
+first place). Every mention of "new rule findings" / `new_finding` / three-way / `fetchNewFindings`
+below this point describes the ORIGINAL, now-superseded design — kept for history, not current
+behavior. Current state: `app/api/events/route.js`, `app/(dashboard)/alerts/page.js`, and
+`app/api/notifications/summary/route.js` all support exactly two types, `patch_now` and
+`config_diff`; `fetchNewFindings()` was deleted from all three (not merely disabled).
 
 - **New table**: `cve_assessment_acknowledgements` (see Key Tables above) — `device_cve_assessments`
   has no ack column of its own, unlike `finding_acknowledgements` and `config_diffs.acknowledged_at`

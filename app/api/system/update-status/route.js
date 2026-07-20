@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.11.4': [
+    'Fixed the Dashboard widget grid rendering with wildly uneven widths and two widgets seemingly missing — an unusually long piece of text in one widget could push the whole layout off-screen. Widgets are now protected from this regardless of content length.',
+    'Fixed a real data-corruption bug on Palo Alto SSH devices: redacting a sensitive-looking word inside a free-text field (like an address description) could corrupt the rest of that device\'s collected configuration, which is what caused the unreadable "Config Changes" text seen on some devices. Redaction now hides the sensitive text without breaking anything around it.',
+  ],
   '2.11.3': [
     'Removed individual rule findings (unused/shadow/any-any, etc.) from the Alerts page and notification bell — direct feedback that a single device can have hundreds of these, which was flooding the "needs attention" feed and blowing past the bell\'s 99+ badge cap. That detail already has a proper home in Rule Analysis\'s Cleanup/Optimization/Reorder tabs; Alerts is back to just patch-now CVEs and unacknowledged config changes.',
   ],
