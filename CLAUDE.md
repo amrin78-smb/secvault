@@ -1013,6 +1013,52 @@ worst-band-first with a colored `Badge` per rule's band.
   an optional "+ note" toggle that reveals a small text input before acknowledging; the note renders
   alongside the "Acknowledged by X · date" badge once set. This route is RBAC-gated (admin-only, see
   Role-Based Access Control above) — it wasn't gated at all before RBAC existed.
+- **`classifyDiff()` — raw-diff classification for display (added 2026-07-20).** Direct user report:
+  a real 501-entry `config_diffs` row (all Palo Alto address-object additions) was rendering in the
+  Changes-page diff viewer as 501 stacked raw JSON rows, with no way to tell "did a rule change" from
+  "an object catalog got re-parsed." Root cause traced to the SAME event already documented above under
+  "Palo Alto SSH redaction corrupted the config brace structure" — a one-time, self-resolving side
+  effect of that brace-corruption bug (confirmed via direct live production DB investigation, not
+  assumed): the corrupted snapshot's massive garbage key got compared against the next, correctly-parsed
+  snapshot once the redaction fix landed, producing one abnormally large diff. `diffConfigs()` itself was
+  never the problem (it correctly diffs the full parsed tree into flat `{added, removed, modified}`
+  dot-path entries — the right shape to PERSIST, vendor-agnostic, no tree-shape knowledge needed to
+  compute or store) — the problem was purely presentational: a raw path like
+  `tree.rulebase.security.rules.RuleName.action` or `tree.address.TUMN-2` means nothing to an operator
+  scanning a long list for "what actually changed."
+  `classifyDiff(diff)` (pure, no DB, called at READ time by `GET /api/devices/[id]/diffs/[diffId]` —
+  never at write time, so a future improvement to section labeling or rule-path detection applies
+  retroactively to every historical row for free, with no migration needed) groups an already-computed
+  diff into (a) a "Rule Changes" table (rule name / field / old→new, matching ManageEngine Firewall
+  Analyzer's own change-tracking table shape — the thing operators actually care about most) and (b)
+  everything else collapsed into per-section summaries with just a count (e.g. "Address Objects: 500
+  added") instead of a raw dump, via `classifyPath()`/`sectionLabelFor()`. **Scoping limitation, by
+  design, not an oversight**: only Palo Alto SSH-transport rule paths resolve into the rule table today
+  — on that transport the rule NAME is a literal path segment
+  (`tree.rulebase.security.rules.<RuleName>.<field>`), directly extractable. Palo Alto XML/API-transport
+  rules are array-indexed (`rulebase.security.rules.entry[N].<field>` — the name is a SIBLING `@_name`
+  field inside `entry[N]`, not recoverable from the diff entry's path alone without a live full-tree
+  lookup, a bigger, separate change) and fall through to the generic section bucket rather than being
+  guessed at or mislabeled — same "no ruleset is safer than the wrong one" honesty this file's
+  `getRules()` fail-loud rule already applies elsewhere. No other vendor's `config_parsed` contains a
+  rulebase at all (Fortinet's is flat settings sections only — see the Compliance Engine section above),
+  so this only ever applies to Palo Alto devices, on either transport, for the object/section grouping;
+  only the SSH transport additionally gets the rule table. **Still-open, explicitly out-of-scope gap**:
+  there is still no "who made this change on the device" column — `acknowledged_by` only ever records
+  who acknowledged the change *inside SecVault* afterward, never who made it on the firewall itself; a
+  real answer to that requires syslog/audit-log ingestion from the device (Phase 8, not built), a
+  structurally different and much larger feature than a diff-rendering improvement, not attempted here.
+  Code: `lib/engines/configDiff.js`'s `classifyDiff()`/`classifyPath()`/`sectionLabelFor()`, consumed by
+  `GET /api/devices/[id]/diffs/[diffId]` (`classified` field on the response) and rendered by
+  `components/config/DiffViewer.js`. Verified against real production data (live read-only DB access)
+  before shipping: the actual 501-entry diff now groups into `{label: 'Address Objects', addedCount:
+  500}` instead of 501 raw rows, and a real Palo Alto SSH rule addition elsewhere in the same device's
+  history correctly appears in the rule-changes table. Every OTHER `config_diffs.diff` consumer in the
+  app (`components/dashboard/ConfigChangesWidget.js`, `app/api/events/route.js`,
+  `app/(dashboard)/alerts/page.js`, `app/api/notifications/summary/route.js`) was checked and confirmed
+  to already only read `jsonb_array_length(cd.diff->'added'|'removed'|'modified')` counts or the
+  free-text `change_summary` column — never individual raw entries — so this classifier is genuinely
+  scoped to the one place (`DiffViewer.js`) that had the problem, not silently under-applied elsewhere.
 
 #### ⛔ Stored configs are REDACTED — do not "fix" this
 

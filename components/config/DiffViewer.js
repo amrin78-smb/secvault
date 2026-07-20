@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import LoadingSpinner from '../ui/LoadingSpinner';
+import Table from '../ui/Table';
+import Badge from '../ui/Badge';
 
 // Renders one grouped section of a config diff (Added / Removed / Modified).
 // Defined at module top level (never nested inside DiffViewer — CLAUDE.md rule).
@@ -202,10 +204,165 @@ function renderModifiedRow(row) {
   return <DiffModifiedRow path={row.path} oldValue={row.old} newValue={row.new} />;
 }
 
+// ---------------------------------------------------------------------------
+// Rule Changes table (classifyDiff()'s `ruleChanges`) — the headline view,
+// matching ManageEngine Firewall Analyzer's own rule-change table (rule name /
+// field / old → new) instead of a raw path:value dump. Defined at module top
+// level per CLAUDE.md.
+// ---------------------------------------------------------------------------
+
+const CHANGE_BADGE_COLOR = { added: 'success', removed: 'danger', modified: 'warning' };
+const CHANGE_BADGE_LABEL = { added: 'Added', removed: 'Removed', modified: 'Modified' };
+
+function RuleChangeBadge({ changeType }) {
+  return <Badge color={CHANGE_BADGE_COLOR[changeType] || 'muted'}>{CHANGE_BADGE_LABEL[changeType] || changeType}</Badge>;
+}
+
+// Value cell for one rule-level change — adapts DiffModifiedRow's own
+// old/new logic (inline "old → new" for primitives, stacked "− old"/"+ new"
+// for objects/arrays) to a table cell instead of a <li> block, and reuses
+// CollapsibleValue/formatValue directly for the added/removed case so an
+// object-valued field doesn't dump raw JSON inline.
+function RuleChangeValueCell({ change }) {
+  if (change.changeType === 'modified') {
+    const anyExpandable = isExpandableValue(change.old) || isExpandableValue(change.new);
+    if (!anyExpandable) {
+      return <span>{formatValue(change.old)} → {formatValue(change.new)}</span>;
+    }
+    return (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <LabeledValue label="− old" labelColor="var(--red)" value={change.old} />
+        <LabeledValue label="+ new" labelColor="var(--green)" value={change.new} />
+      </span>
+    );
+  }
+  // added / removed
+  return isExpandableValue(change.value) ? (
+    <CollapsibleValue value={change.value} />
+  ) : (
+    <span>{formatValue(change.value)}</span>
+  );
+}
+
+// Rule name is repeated on every field-level change row rather than
+// rowSpan'd across a group — this app doesn't use rowSpan anywhere else
+// (checked before deciding), and repeating a short rule name per row is
+// simpler and avoids the layout/border edge cases rowSpan introduces inside
+// this app's <Table> wrapper.
+function RuleChangesTable({ ruleChanges }) {
+  if (!Array.isArray(ruleChanges) || ruleChanges.length === 0) return null;
+
+  return (
+    <div>
+      <div
+        style={{
+          marginBottom: 4,
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--text-muted)',
+        }}
+      >
+        Rule Changes
+      </div>
+      <Table>
+        <colgroup>
+          <col style={{ width: '22%' }} />
+          <col style={{ width: '12%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '46%' }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Rule Name</th>
+            <th>Change</th>
+            <th>Field</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ruleChanges.flatMap((rc) =>
+            rc.changes.map((change, i) => (
+              <tr key={`${rc.ruleName}-${i}`}>
+                <td className="mono" title={rc.ruleName} style={{ wordBreak: 'break-word' }}>
+                  {rc.ruleName}
+                </td>
+                <td>
+                  <RuleChangeBadge changeType={change.changeType} />
+                </td>
+                <td className="mono" title={change.field || '(entire rule)'} style={{ wordBreak: 'break-word' }}>
+                  {change.field || '(entire rule)'}
+                </td>
+                <td className="mono" style={{ wordBreak: 'break-word' }}>
+                  <RuleChangeValueCell change={change} />
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Collapsed section groups (classifyDiff()'s `sections`) — fixes the original
+// bug report (a 500-entry address-object diff rendering as 500 stacked raw
+// rows): one summary line per section, collapsed by default, reusing the
+// exact same DiffSection/DiffValueRow/DiffModifiedRow row renderers the old
+// flat Added/Removed/Modified list already used, just now scoped per section
+// instead of spanning the whole diff.
+// ---------------------------------------------------------------------------
+
+function sectionSummaryLine(section) {
+  const parts = [];
+  if (section.addedCount > 0) parts.push(`${section.addedCount} added`);
+  if (section.removedCount > 0) parts.push(`${section.removedCount} removed`);
+  if (section.modifiedCount > 0) parts.push(`${section.modifiedCount} modified`);
+  return parts.join(', ');
+}
+
+function SectionGroup({ section }) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = Array.isArray(section.entries) ? section.entries : [];
+  const addedEntries = entries.filter((e) => e.changeType === 'added');
+  const removedEntries = entries.filter((e) => e.changeType === 'removed');
+  const modifiedEntries = entries.filter((e) => e.changeType === 'modified');
+
+  return (
+    <div
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '8px 12px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+        <span>
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{section.label}</span>
+          <span style={{ color: 'var(--text-muted)' }}> — {sectionSummaryLine(section)}</span>
+        </span>
+        <button type="button" onClick={() => setExpanded((e) => !e)} style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0 }}>
+          {expanded ? '▾ Hide details' : '▸ Show details'}
+        </button>
+      </div>
+      {expanded && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <DiffSection title="Added" tone="success" rows={addedEntries} renderRow={renderAddedRow} />
+          <DiffSection title="Removed" tone="danger" rows={removedEntries} renderRow={renderRemovedRow} />
+          <DiffSection title="Modified" tone="warning" rows={modifiedEntries} renderRow={renderModifiedRow} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DiffViewer({ deviceId, diffId }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [diff, setDiff] = useState(null); // { added, removed, modified }
+  const [diff, setDiff] = useState(null); // { added, removed, modified } — raw, kept for backward compat
+  const [classified, setClassified] = useState(null); // { ruleChanges, sections } — see lib/engines/configDiff.js classifyDiff()
   const [error, setError] = useState(null);
 
   async function handleToggle() {
@@ -223,6 +380,7 @@ export default function DiffViewer({ deviceId, diffId }) {
       }
       const row = await res.json();
       setDiff(row.diff || {});
+      setClassified(row.classified || { ruleChanges: [], sections: [] });
     } catch (err) {
       setError(err.message || 'Failed to load diff');
     } finally {
@@ -230,10 +388,9 @@ export default function DiffViewer({ deviceId, diffId }) {
     }
   }
 
-  const added = diff?.added || [];
-  const removed = diff?.removed || [];
-  const modified = diff?.modified || [];
-  const isEmpty = diff && added.length === 0 && removed.length === 0 && modified.length === 0;
+  const ruleChanges = classified?.ruleChanges || [];
+  const sections = classified?.sections || [];
+  const isEmpty = classified && ruleChanges.length === 0 && sections.length === 0;
 
   return (
     <div>
@@ -258,11 +415,12 @@ export default function DiffViewer({ deviceId, diffId }) {
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {loading && <LoadingSpinner size={18} />}
           {error && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</p>}
-          {diff && !loading && !error && (
+          {diff && classified && !loading && !error && (
             <>
-              <DiffSection title="Added" tone="success" rows={added} renderRow={renderAddedRow} />
-              <DiffSection title="Removed" tone="danger" rows={removed} renderRow={renderRemovedRow} />
-              <DiffSection title="Modified" tone="warning" rows={modified} renderRow={renderModifiedRow} />
+              <RuleChangesTable ruleChanges={ruleChanges} />
+              {sections.map((section, i) => (
+                <SectionGroup key={`${section.label}-${i}`} section={section} />
+              ))}
               {isEmpty && <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>This diff contains no entries.</p>}
             </>
           )}

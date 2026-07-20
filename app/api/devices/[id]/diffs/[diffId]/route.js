@@ -4,6 +4,7 @@ import { authOptions } from '../../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../../lib/apiUtils';
 import { isAdmin, forbiddenResponse } from '../../../../../../lib/rbac';
+import { classifyDiff } from '../../../../../../lib/engines/configDiff';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +30,13 @@ export async function GET(request, { params }) {
       return Response.json({ error: 'Diff not found' }, { status: 404 });
     }
 
-    return Response.json(rows[0]);
+    // classified is a presentation-layer grouping of the same raw `diff` --
+    // see lib/engines/configDiff.js's classifyDiff() block comment. Additive
+    // only: `diff` stays in the response unchanged, for any existing/future
+    // consumer that wants the raw shape.
+    const classified = classifyDiff(rows[0].diff);
+
+    return Response.json({ ...rows[0], classified });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }

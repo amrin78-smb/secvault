@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.12.1': [
+    'Fixed the Configuration Changes diff viewer showing a wall of raw JSON on a device with a large config change — it now shows a real "Rule Changes" table (rule name, field, old → new value, matching what a competing product shows) plus collapsed summaries for everything else (e.g. "Address Objects: 500 added") instead of hundreds of stacked raw rows. Also confirmed the one report that triggered this — a 501-entry change — was a one-time, already-fixed parsing side effect, not a real config change.',
+  ],
   '2.12.0': [
     'Added role-based access control: a new Users management panel on Settings (admin-only) lets you create logins with either full-admin or read-only-viewer access, instead of everyone sharing one admin login. Existing installs keep working with their current username/password, now upgraded to an admin account automatically.',
     'Added "Export Recommended Order" on the Rule Analysis Reorder tab — computes one full recommended rule order that resolves as many shadowed-rule findings as possible in one go, downloadable as a CSV, instead of fixing each shadowed rule one at a time.',
