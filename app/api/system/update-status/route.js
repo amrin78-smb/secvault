@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.11.3': [
+    'Removed individual rule findings (unused/shadow/any-any, etc.) from the Alerts page and notification bell — direct feedback that a single device can have hundreds of these, which was flooding the "needs attention" feed and blowing past the bell\'s 99+ badge cap. That detail already has a proper home in Rule Analysis\'s Cleanup/Optimization/Reorder tabs; Alerts is back to just patch-now CVEs and unacknowledged config changes.',
+  ],
   '2.11.2': [
     'Full-app bug sweep: closed two more gaps in yesterday\'s config-change secret redaction (a secret nested inside a whole newly-added/removed section wasn\'t being caught before), a real secret-redaction gap in the Forcepoint adapter, and a Check Point identity-matching gap that could misattribute a management server\'s data to the wrong device on distributed deployments.',
     'Fixed the notification bell, Alerts page, and the events API all under-reporting brand-new rule findings from scheduled analysis runs until an operator had separately opened that finding in another tab first.',

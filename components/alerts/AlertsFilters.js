@@ -16,7 +16,6 @@ import { useRouter } from 'next/navigation';
 // different, larger result set would otherwise silently land past the end.
 const TYPE_OPTIONS = [
   { value: '', label: 'All Types' },
-  { value: 'new_finding', label: 'Finding' },
   { value: 'patch_now', label: 'Patch-Now CVE' },
   { value: 'config_diff', label: 'Config Diff' },
 ];

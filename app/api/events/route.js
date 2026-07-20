@@ -5,95 +5,55 @@ export const dynamic = 'force-dynamic';
 
 // GET /api/events -- fleet-wide Alerts/Events feed.
 //
-// Same three "needs attention" sources app/api/notifications/summary/route.js
-// already aggregates for the header-bell dropdown (new findings, patch_now
-// CVEs, unacknowledged config diffs), but as a filterable, paginated feed
-// rather than a top-5 snapshot. Deliberately three separate bounded queries
-// merged/sorted/paginated in JS, not one DB-side UNION -- the three sources
-// have incompatible native shapes (finding_acknowledgements, device_cve_
-// assessments+advisories, config_diffs) and this app's other list views
-// (e.g. rule analysis) already accept a bounded-then-in-memory-merge
-// approach rather than building true cross-source DB pagination. Each
-// source query is capped at 500 rows before the merge -- a firewall
-// fleet's realistic open-event volume fits comfortably inside that.
+// Same two "needs attention" sources app/api/notifications/summary/route.js
+// already aggregates for the header-bell dropdown (patch_now CVEs,
+// unacknowledged config diffs), but as a filterable, paginated feed rather
+// than a top-5 snapshot. Deliberately two separate bounded queries
+// merged/sorted/paginated in JS, not one DB-side UNION -- the two sources
+// have incompatible native shapes (device_cve_assessments+advisories,
+// config_diffs) and this app's other list views (e.g. rule analysis)
+// already accept a bounded-then-in-memory-merge approach rather than
+// building true cross-source DB pagination. Each source query is capped at
+// 500 rows before the merge -- a firewall fleet's realistic open-event
+// volume fits comfortably inside that.
 //
 // Query params:
-//   type      - 'new_finding' | 'patch_now' | 'config_diff' (omit = all three)
+//   type      - 'patch_now' | 'config_diff' (omit = both)
 //   status    - 'open' (default) | 'all'
 //   device_id - optional UUID filter
+//
+// ⛔ 'new_finding' REMOVED 2026-07-20, direct user feedback -- see
+// fetchNewFindings' own removal comment below for the full reasoning.
 //   page      - optional, default 1, 1-indexed
 
-const TYPES = new Set(['new_finding', 'patch_now', 'config_diff']);
+const TYPES = new Set(['patch_now', 'config_diff']);
 const STATUS_FILTERS = new Set(['open', 'all']);
 const PAGE_SIZE = 25;
 
-// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: none of the three
-// fetch functions below filtered on d.active — every other fleet-wide view
-// in this app (dashboard, fleet CVE/analysis/compliance/VPN pages,
-// versionMatcher.js, ruleAnalysis.js, engine-worker.js) consistently
-// excludes deactivated devices, but this one didn't. A decommissioned
-// device's existing patch_now CVE / unacknowledged finding / unacknowledged
-// config diff kept inflating the header bell badge and the Alerts feed
-// forever, with no way to even filter directly to it (the device dropdown,
-// alerts/page.js's getDevices(), already correctly excludes inactive
-// devices — only the actual event queries didn't). Fixed by adding
-// `d.active = true` unconditionally (not just under the `open` filter —
-// an inactive device's history shouldn't appear even under "All") to all
-// three queries here.
-// ⛔ BUG FIXED 2026-07-19, found in an adversarially-verified bug-sweep pass:
-// this used to be rooted FROM finding_acknowledgements, which only ever gets
-// a row via a human-triggered POST from AcknowledgeControl.js
-// (components/analysis/{Cleanup,Optimization,Reorder}Tab.js) -- so a
-// genuinely new finding from the latest rule-analysis run (runAnalysisForDevice()
-// in lib/engines/ruleAnalysis.js never touches finding_acknowledgements) had
-// zero finding_acknowledgements rows and was invisible to the bell badge and
-// this feed, the opposite of what the 'new_finding' alert type is supposed to
-// surface. Rooted FROM rule_analysis_results instead, LEFT JOIN
-// finding_acknowledgements, mirroring CleanupTab.js's getCleanupFindings() --
-// the same COALESCE(fa.status, 'new') pattern already used there -- so a
-// finding with no ack row yet still surfaces as status 'new'.
-async function fetchNewFindings(deviceId, open) {
-  const conditions = ['d.active = true'];
-  const values = [];
-
-  if (open) {
-    conditions.push(`(fa.status IS NULL OR fa.status = 'new')`);
-  }
-  if (deviceId) {
-    values.push(deviceId);
-    conditions.push(`rar.device_id = $${values.length}`);
-  }
-  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const { rows } = await pool.query(
-    `SELECT rar.id, rar.device_id, d.name AS device_name, fr.rule_id_vendor,
-            rar.finding_type, rar.severity, rar.analyzed_at,
-            COALESCE(fa.status, 'new') AS status
-     FROM rule_analysis_results rar
-     JOIN devices d ON d.id = rar.device_id
-     JOIN firewall_rules fr ON fr.id = rar.rule_id
-     LEFT JOIN finding_acknowledgements fa
-       ON fa.device_id = rar.device_id
-       AND fa.rule_id_vendor = fr.rule_id_vendor
-       AND fa.finding_type = rar.finding_type
-     ${whereClause}
-     ORDER BY rar.analyzed_at DESC
-     LIMIT 500`,
-    values
-  );
-
-  return rows.map((r) => ({
-    id: r.id,
-    type: 'new_finding',
-    deviceId: r.device_id,
-    deviceName: r.device_name,
-    label: `${r.finding_type} on ${r.rule_id_vendor}`,
-    severity: r.severity || null,
-    status: r.status,
-    occurredAt: r.analyzed_at,
-    ack: { kind: 'finding', rule_id_vendor: r.rule_id_vendor, finding_type: r.finding_type },
-  }));
-}
+// ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass: neither fetch function
+// below filtered on d.active — every other fleet-wide view in this app
+// (dashboard, fleet CVE/analysis/compliance/VPN pages, versionMatcher.js,
+// ruleAnalysis.js, engine-worker.js) consistently excludes deactivated
+// devices, but this one didn't. A decommissioned device's existing
+// patch_now CVE / unacknowledged config diff kept inflating the header
+// bell badge and the Alerts feed forever, with no way to even filter
+// directly to it (the device dropdown, alerts/page.js's getDevices(),
+// already correctly excludes inactive devices — only the actual event
+// queries didn't). Fixed by adding `d.active = true` unconditionally (not
+// just under the `open` filter — an inactive device's history shouldn't
+// appear even under "All") to both queries here.
+//
+// ⛔ fetchNewFindings() REMOVED 2026-07-20, direct user feedback: a
+// 'new_finding' type briefly existed here (rule-level findings surfaced as
+// individual alert rows), correctly fixing a real bug where a fresh finding
+// from a scheduled rule-analysis run was invisible everywhere -- but a
+// single device can carry hundreds of 'unused'/'shadow' findings, and
+// dumping every one into the curated "needs attention" Alerts feed defeated
+// its purpose (the bell badge hit the 99+ cap, the feed became noise).
+// Rule-level findings already have a correct, dedicated home with full
+// triage tooling: the Cleanup/Optimization/Reorder tabs on
+// devices/[id]/analysis (CleanupTab.js's getCleanupFindings(), never
+// affected by the bug this removed function existed to fix).
 
 async function fetchPatchNow(deviceId, open) {
   const conditions = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
@@ -215,9 +175,6 @@ export async function GET(request) {
     const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
 
     const fetchers = [];
-    if (!typeParam || typeParam === 'new_finding') {
-      fetchers.push(fetchNewFindings(deviceIdParam, open));
-    }
     if (!typeParam || typeParam === 'patch_now') {
       fetchers.push(fetchPatchNow(deviceIdParam, open));
     }

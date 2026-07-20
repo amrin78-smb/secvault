@@ -11,8 +11,8 @@ import { isValidUuid } from '../../../lib/apiUtils';
 export const dynamic = 'force-dynamic';
 
 // Fleet-wide Alerts page -- the bell's destination, and the one place every
-// "needs attention" item (new rule findings, patch_now CVEs, unacknowledged
-// config diffs) can actually be acknowledged/dismissed/resolved in place.
+// "needs attention" item (patch_now CVEs, unacknowledged config diffs) can
+// actually be acknowledged/dismissed/resolved in place.
 //
 // This is a server component, so per this app's established convention
 // ("server components query the DB directly in their own query, API routes
@@ -23,19 +23,23 @@ export const dynamic = 'force-dynamic';
 // AlertAckControl's post-save router.refresh() path and any future
 // client-side use, not for this page's read path.
 //
-// The three fetch*/merge/sort/paginate functions below are therefore a
-// deliberate duplicate of app/api/events/route.js's fetchNewFindings/
-// fetchPatchNow/fetchConfigDiffs/GET -- the same duplication already exists
-// once between app/api/notifications/summary/route.js (top-5 bell preview)
-// and this route (full paginated feed), for the same reason: different call
-// sites, shared logic that's cheap enough to keep in step by inspection.
-// If the query logic in one changes, check the other.
+// The two fetch*/merge/sort/paginate functions below are therefore a
+// deliberate duplicate of app/api/events/route.js's fetchPatchNow/
+// fetchConfigDiffs/GET -- the same duplication already exists once between
+// app/api/notifications/summary/route.js (top-5 bell preview) and this
+// route (full paginated feed), for the same reason: different call sites,
+// shared logic that's cheap enough to keep in step by inspection. If the
+// query logic in one changes, check the other.
+//
+// ⛔ 'new_finding' REMOVED 2026-07-20, direct user feedback -- see
+// app/api/events/route.js's identical removal comment for the full
+// reasoning (rule-level findings belong in Rule Analysis's Cleanup/
+// Optimization/Reorder tabs, not the curated Alerts feed).
 
-const TYPES = new Set(['new_finding', 'patch_now', 'config_diff']);
+const TYPES = new Set(['patch_now', 'config_diff']);
 const PAGE_SIZE = 25;
 
 const TYPE_BADGE = {
-  new_finding: { color: 'info', label: 'Finding' },
   patch_now: { color: 'danger', label: 'Patch Now' },
   config_diff: { color: 'warning', label: 'Config Diff' },
 };
@@ -49,61 +53,15 @@ function formatWhen(value) {
 
 // ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass (mirrored identically
 // in app/api/events/route.js — see that file's comment for the full
-// reasoning): d.active = true added unconditionally to all three fetch
+// reasoning): d.active = true added unconditionally to both fetch
 // functions below, so a decommissioned device's stale alerts stop
 // inflating the bell/feed forever; fetchPatchNow's "open" definition
-// aligned to match fetchNewFindings' (only 'new' counts as open, not
-// 'acknowledged') since AlertAckControl.js renders the identical select for
-// both row kinds.
-// ⛔ BUG FIXED 2026-07-19, found in an adversarially-verified bug-sweep pass
-// (mirrored identically from app/api/events/route.js — see that file's
-// comment for the full reasoning): this used to be rooted FROM
-// finding_acknowledgements, which only ever gets a row via a human-triggered
-// POST from AcknowledgeControl.js — so a genuinely new finding from the
-// latest rule-analysis run (which never touches finding_acknowledgements)
-// had zero rows here and was invisible on this page. Rooted FROM
-// rule_analysis_results instead, LEFT JOIN finding_acknowledgements,
-// mirroring CleanupTab.js's COALESCE(fa.status, 'new') pattern.
-async function fetchNewFindings(dbPool, deviceId, open) {
-  const conditions = ['d.active = true'];
-  const values = [];
-  if (open) conditions.push(`(fa.status IS NULL OR fa.status = 'new')`);
-  if (deviceId) {
-    values.push(deviceId);
-    conditions.push(`rar.device_id = $${values.length}`);
-  }
-  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const { rows } = await dbPool.query(
-    `SELECT rar.id, rar.device_id, d.name AS device_name, fr.rule_id_vendor,
-            rar.finding_type, rar.severity, rar.analyzed_at,
-            COALESCE(fa.status, 'new') AS status
-     FROM rule_analysis_results rar
-     JOIN devices d ON d.id = rar.device_id
-     JOIN firewall_rules fr ON fr.id = rar.rule_id
-     LEFT JOIN finding_acknowledgements fa
-       ON fa.device_id = rar.device_id
-       AND fa.rule_id_vendor = fr.rule_id_vendor
-       AND fa.finding_type = rar.finding_type
-     ${whereClause}
-     ORDER BY rar.analyzed_at DESC
-     LIMIT 500`,
-    values
-  );
-
-  return rows.map((r) => ({
-    id: r.id,
-    type: 'new_finding',
-    deviceId: r.device_id,
-    deviceName: r.device_name,
-    label: `${r.finding_type} on ${r.rule_id_vendor}`,
-    severity: r.severity || null,
-    status: r.status,
-    occurredAt: r.analyzed_at,
-    ack: { kind: 'finding', rule_id_vendor: r.rule_id_vendor, finding_type: r.finding_type },
-  }));
-}
-
+// aligned to only count bare 'new' as open, not 'acknowledged', since
+// AlertAckControl.js renders the identical select for both row kinds.
+//
+// ⛔ fetchNewFindings() REMOVED 2026-07-20, direct user feedback -- see
+// app/api/events/route.js's identical removal comment for the full
+// reasoning.
 async function fetchPatchNow(dbPool, deviceId, open) {
   const conditions = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
   const values = [];
@@ -200,7 +158,6 @@ export default async function AlertsPage({ searchParams }) {
   const page = Number.isInteger(pageNum) && pageNum >= 1 ? pageNum : 1;
 
   const fetchers = [];
-  if (!typeParam || typeParam === 'new_finding') fetchers.push(fetchNewFindings(pool, deviceIdParam, open));
   if (!typeParam || typeParam === 'patch_now') fetchers.push(fetchPatchNow(pool, deviceIdParam, open));
   if (!typeParam || typeParam === 'config_diff') fetchers.push(fetchConfigDiffs(pool, deviceIdParam, open));
 
@@ -226,7 +183,7 @@ export default async function AlertsPage({ searchParams }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         title="Alerts"
-        subtitle="Fleet-wide items needing attention — new rule findings, patch-now CVEs, and unacknowledged config changes."
+        subtitle="Fleet-wide items needing attention — patch-now CVEs and unacknowledged config changes. Rule findings live in Rule Analysis."
       />
 
       <AlertsFilters

@@ -16,12 +16,12 @@ function formatWhen(iso) {
 const TYPE_DOT_COLOR = {
   patch_now: 'var(--red)',
   config_diff: 'var(--yellow)',
-  new_finding: 'var(--blue)',
 };
 
 // Header notification bell — real counts from GET /api/notifications/summary
-// (finding_acknowledgements status='new' + device_cve_assessments
-// priority_band='patch_now' + unacknowledged config_diffs), polled every 60s.
+// (device_cve_assessments priority_band='patch_now' + unacknowledged
+// config_diffs), polled every 60s. Rule-level findings are deliberately not
+// counted here — see app/api/events/route.js's removal comment.
 export default function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
