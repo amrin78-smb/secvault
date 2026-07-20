@@ -1078,10 +1078,29 @@ worst-band-first with a colored `Badge` per rule's band.
   already persisted in the DB, same reasoning as every other retroactive-cleanup migration in this
   codebase. Verified directly against the real affected row before shipping: 13,647 chars → 181 chars,
   with both corrupted paths correctly replaced by the placeholder text instead of truncated garbage.
-  **Lesson for future config-diff work**: `config_diffs` has TWO independent rendering surfaces fed by
-  the same underlying `diff` — the cached `change_summary` (always visible) and the live-fetched full
-  `diff`/`classified` (behind "View diff") — a fix to one is not a fix to the other; check both before
-  calling a diff-rendering bug closed.
+- **⛔ THIRD occurrence, found by the user directly testing the fix above, same day**: even after both
+  fixes, expanding a corrupted diff's "Address Objects" (or any other) section still showed the raw
+  ~6,800-character corrupted path as the row label — `classifyDiff()`'s `sections[].entries[]` correctly
+  BUCKETED the entry (classification runs against the real, untruncated path — correct), but handed the
+  entry's raw, unsanitized `path` straight through to the UI, so `DiffViewer.js`'s per-row label
+  rendered the same blob one level deeper (inside "Show details", not the top-level summary). Fixed by
+  extracting `sanitizeExamplePath()`'s logic into a shared `truncatePathForDisplay(path, maxLength)`
+  (same shape-check + truncate-or-placeholder behavior, parameterized by length — 80 for the one-liner,
+  a more generous 200 for a full table/list row), applied to `sections[].entries[].path` AND
+  `ruleChanges[].ruleName`/`.field` (the latter defensively, since rule-path segments are far less
+  likely to be corrupted, but not assumed safe) — applied strictly AFTER `classifyPath()` has already
+  used the real path to decide bucket/rule-name, never before, so classification accuracy is unaffected
+  by the display-only truncation. Verified against the real affected row: the section-entry path now
+  renders as the same 45-character placeholder instead of the raw blob, with the real rule-table row
+  (`FW_Analyzer-NIST_NVD`, correctly extracted, unaffected) still showing correctly alongside it.
+  **Lesson for future config-diff work, revised**: `config_diffs` has (at least) THREE independent
+  places a path can render, all fed by the same underlying `diff` but each requiring its OWN
+  sanitization: (1) `change_summary`'s cached one-liner (always visible), (2) `classifyDiff()`'s
+  `sections[].entries[].path` (behind "View diff" → a section's "Show details"), (3) `classifyDiff()`'s
+  `ruleChanges[].ruleName`/`.field` (the Rule Changes table). A fix to one is not a fix to the others —
+  do not declare a diff-rendering corruption bug closed without checking all three, and consider
+  whether any FUTURE new rendering surface for `diff` data needs the same `truncatePathForDisplay()`
+  treatment before shipping it.
 
 #### ⛔ Stored configs are REDACTED — do not "fix" this
 

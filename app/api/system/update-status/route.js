@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.13.1': [
+    'Fixed a third spot with the same config-diff corruption issue: expanding an "Address Objects" (or similar) section on a diff affected by the earlier parsing issue still showed the raw corrupted text as the row label. It now shows a clean placeholder there too, consistent with the other two fixes from the last update.',
+  ],
   '2.13.0': [
     'Settings now uses a tabbed layout (General / Users / Updates / About) matching the rest of the NocVault app family\'s look, instead of one long scrolling page — including a new About tab showing version/runtime/port details.',
     'Fixed a second, related bug in the Configuration Changes list: the short one-line summary shown before you even open a diff could itself balloon to over 13,000 characters when a config parsing issue corrupted a config path (not just a value) — it now shows a clean, bounded summary in every case, and the one already-affected record in your database is automatically cleaned up on this update.',
