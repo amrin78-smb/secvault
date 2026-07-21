@@ -364,82 +364,6 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         )}
       </div>
 
-      <div className="card" style={{ padding: 20 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {device.snmp_enabled ? (
-              <Badge color="success">Enabled</Badge>
-            ) : snmpDetectedLooksConfigured ? (
-              <Badge color="warning">Detected in config</Badge>
-            ) : (
-              <Badge color="muted">Not Configured</Badge>
-            )}
-            <Link
-              href={`/devices/${device.id}/snmp`}
-              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
-            >
-              {device.snmp_enabled ? 'Full history & config →' : 'Configure →'}
-            </Link>
-          </div>
-        </div>
-
-        {snmpSnapshot ? (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
-              <StatCard
-                label="CPU"
-                value={snmpSnapshot.cpu_percent !== null && snmpSnapshot.cpu_percent !== undefined ? `${snmpSnapshot.cpu_percent}%` : '—'}
-                color="var(--red)"
-              />
-              <StatCard
-                label="Memory"
-                value={snmpSnapshot.memory_percent !== null && snmpSnapshot.memory_percent !== undefined ? `${snmpSnapshot.memory_percent}%` : '—'}
-                color="var(--blue)"
-              />
-              <StatCard label="Sessions" value={snmpSnapshot.session_count ?? '—'} color="var(--accent-teal)" />
-              <StatCard label="Uptime" value={formatSnmpUptime(snmpSnapshot.uptime_seconds)} color="var(--text-muted)" />
-            </div>
-            <p style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-              Last polled: {formatDateTime(snmpSnapshot.sampled_at)}
-            </p>
-          </>
-        ) : device.snmp_enabled ? (
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
-            SNMP polling is enabled but no metrics have been collected yet — the engine worker polls on its
-            own interval.{!snmpHasCredential && ' No SNMP credential is stored yet, so polling will keep failing until one is added.'}
-          </p>
-        ) : snmpDetectedLooksConfigured ? (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '10px 12px',
-              background: 'var(--tint-warn)',
-              borderRadius: 'var(--radius-sm)',
-            }}
-          >
-            <p style={{ fontSize: 'var(--text-base)', color: 'var(--tint-warn-fg)', margin: 0 }}>
-              SNMP appears to already be enabled on this device (found in its collected config
-              {snmpDetected.foundAt ? <> at <code className="mono">{snmpDetected.foundAt}</code></> : null}).
-              We can&apos;t read the actual community string or SNMPv3 credentials — those are never
-              collected or are redacted before storage — but you can confirm and add them below.
-            </p>
-            <Link href={`/devices/${device.id}/snmp`} className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
-              Set up monitoring →
-            </Link>
-          </div>
-        ) : (
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
-            Not configured. Set up an SNMP credential and enable polling to see CPU, memory, session count,
-            and uptime here.
-          </p>
-        )}
-      </div>
-
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {tabLink(device.id, tab, 'overview', 'Overview')}
         {tabLink(device.id, tab, 'cve', 'CVE Posture')}
@@ -450,6 +374,82 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
       {tab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
+              <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {device.snmp_enabled ? (
+                  <Badge color="success">Enabled</Badge>
+                ) : snmpDetectedLooksConfigured ? (
+                  <Badge color="warning">Detected in config</Badge>
+                ) : (
+                  <Badge color="muted">Not Configured</Badge>
+                )}
+                <Link
+                  href={`/devices/${device.id}/snmp`}
+                  style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+                >
+                  {device.snmp_enabled ? 'Full history & config →' : 'Configure →'}
+                </Link>
+              </div>
+            </div>
+
+            {snmpSnapshot ? (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
+                  <StatCard
+                    label="CPU"
+                    value={snmpSnapshot.cpu_percent !== null && snmpSnapshot.cpu_percent !== undefined ? `${snmpSnapshot.cpu_percent}%` : '—'}
+                    color="var(--red)"
+                  />
+                  <StatCard
+                    label="Memory"
+                    value={snmpSnapshot.memory_percent !== null && snmpSnapshot.memory_percent !== undefined ? `${snmpSnapshot.memory_percent}%` : '—'}
+                    color="var(--blue)"
+                  />
+                  <StatCard label="Sessions" value={snmpSnapshot.session_count ?? '—'} color="var(--accent-teal)" />
+                  <StatCard label="Uptime" value={formatSnmpUptime(snmpSnapshot.uptime_seconds)} color="var(--text-muted)" />
+                </div>
+                <p style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  Last polled: {formatDateTime(snmpSnapshot.sampled_at)}
+                </p>
+              </>
+            ) : device.snmp_enabled ? (
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
+                SNMP polling is enabled but no metrics have been collected yet — the engine worker polls on its
+                own interval.{!snmpHasCredential && ' No SNMP credential is stored yet, so polling will keep failing until one is added.'}
+              </p>
+            ) : snmpDetectedLooksConfigured ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '10px 12px',
+                  background: 'var(--tint-warn)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              >
+                <p style={{ fontSize: 'var(--text-base)', color: 'var(--tint-warn-fg)', margin: 0 }}>
+                  SNMP appears to already be enabled on this device (found in its collected config
+                  {snmpDetected.foundAt ? <> at <code className="mono">{snmpDetected.foundAt}</code></> : null}).
+                  We can&apos;t read the actual community string or SNMPv3 credentials — those are never
+                  collected or are redacted before storage — but you can confirm and add them below.
+                </p>
+                <Link href={`/devices/${device.id}/snmp`} className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
+                  Set up monitoring →
+                </Link>
+              </div>
+            ) : (
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
+                Not configured. Set up an SNMP credential and enable polling to see CPU, memory, session count,
+                and uptime here.
+              </p>
+            )}
+          </div>
+
           <OverviewCveCard deviceId={device.id} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewRuleHygieneCard deviceId={device.id} />

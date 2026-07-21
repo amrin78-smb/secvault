@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.17.1': [
+    'The SNMP Monitoring card now only shows on the Overview tab, not on every tab of a device page — it was pinned above the tab bar since before the Overview tab existed.',
+    'Config changes on the Overview tab now show a High/Medium/Low Impact badge (rule/policy changes = High, NAT/VPN/admin/network config = Medium, object catalog and everything else = Low) alongside the existing Acknowledged status.',
+    'Compliance Overview now also shows one blended Compliance Score — a simple average of whichever standards have actually been audited for that device. A standard that\'s never been run is left out of the average, not counted as a zero.',
+  ],
   '2.17.0': [
     'New: an "Overview" tab on every device page, now the default landing view — a real dashboard instead of jumping straight into the CVE table.',
     'Shows top CVEs needing attention, a rule-hygiene breakdown (unused/shadow/redundant/any-any/logging-disabled rules) as a donut chart, recent config changes, and per-standard compliance scores — all data this app already tracked, just not previously visible in one place.',

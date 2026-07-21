@@ -3,6 +3,7 @@ import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import { classifyDiff } from '../../lib/engines/configDiff';
 
 // Per-device Overview tab card: config-change summary over the trailing
 // `days` window for ONE device. Near-exact analog of
@@ -15,15 +16,16 @@ import EmptyState from '../ui/EmptyState';
 //   1. Scoped to one already-resolved device_id -- no `d.active = true`
 //      join needed, unlike the fleet-wide widget which spans every device.
 //   2. Each row also shows a real Acknowledged/Unacknowledged badge, from
-//      config_diffs.acknowledged_at -- NOT a fabricated "impact" badge;
-//      no severity/impact field exists anywhere in this schema.
+//      config_diffs.acknowledged_at, alongside a DERIVED High/Medium/Low
+//      Impact badge -- see impactForDiff() below for why the latter is
+//      computed, not stored.
 //
 // `days` is passed as a numeric bound parameter, never string-concatenated
 // into the query, per CLAUDE.md's "always parameterized queries" rule.
 
 async function getConfigChanges(dbPool, deviceId, days) {
   const { rows } = await dbPool.query(
-    `SELECT cd.id, cd.change_summary, cd.detected_at, cd.acknowledged_at, cd.acknowledged_by,
+    `SELECT cd.id, cd.diff, cd.change_summary, cd.detected_at, cd.acknowledged_at, cd.acknowledged_by,
             COALESCE(jsonb_array_length(cd.diff->'added'), 0) AS added_count,
             COALESCE(jsonb_array_length(cd.diff->'removed'), 0) AS removed_count,
             COALESCE(jsonb_array_length(cd.diff->'modified'), 0) AS modified_count
@@ -35,6 +37,56 @@ async function getConfigChanges(dbPool, deviceId, days) {
   );
   return rows;
 }
+
+// Section labels that classifyDiff() (lib/engines/configDiff.js) can produce
+// which represent an actual rulebase/policy change -- always High regardless
+// of ruleChanges, since a device where individual rule names can't be
+// resolved (e.g. Palo Alto XML/API's array-indexed rulebase -- see that
+// file's own RULE_PATH_MARKER/classifyPath() comments) still lands here via
+// the generic section bucket rather than the rule table.
+const HIGH_IMPACT_LABELS = new Set([
+  'Rules (detail unavailable for this device)',
+  'Policy-Based Forwarding Rules',
+]);
+
+// NAT/VPN/admin/zone/interface/network/device-level config -- meaningful but
+// not a live traffic-policy change.
+const MEDIUM_IMPACT_LABELS = new Set([
+  'NAT Rules',
+  'VPN Configuration',
+  'Admin Accounts',
+  'Admin/Management Config',
+  'Zones/Interfaces',
+  'Network Configuration',
+  'Device Configuration',
+]);
+
+// impactForDiff() is a DERIVED heuristic, computed fresh on every read from
+// the same config_diffs.diff jsonb already persisted -- config_diffs has no
+// impact/severity column of its own, and none is being added. The exact
+// High/Medium/Low section mapping (rulebase/PBF = High; NAT/VPN/admin/zones/
+// network/device config = Medium; objects/SNMP/NTP/DNS/logging/password
+// policy/FortiGuard/system info/anything unrecognized = Low) was a
+// deliberate product decision, not guessed or inferred from the data --
+// reuses classifyDiff()'s already-verified section classification rather
+// than re-parsing diff paths a second time. Any non-empty ruleChanges
+// (an individually-resolved firewall rule add/remove/modify) is always High.
+function impactForDiff(diff) {
+  const { ruleChanges, sections } = classifyDiff(diff || {});
+  if (ruleChanges.length > 0) return 'high';
+  let worst = 'low';
+  for (const s of sections) {
+    if (HIGH_IMPACT_LABELS.has(s.label)) return 'high';
+    if (MEDIUM_IMPACT_LABELS.has(s.label)) worst = 'medium';
+  }
+  return worst;
+}
+
+const IMPACT_BADGE = {
+  high: { color: 'danger', label: 'High' },
+  medium: { color: 'warning', label: 'Medium' },
+  low: { color: 'muted', label: 'Low' },
+};
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -89,7 +141,9 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {recent.map((r) => (
+              {recent.map((r) => {
+                const impact = IMPACT_BADGE[impactForDiff(r.diff)];
+                return (
                 <Link
                   key={r.id}
                   href={changesHref}
@@ -108,11 +162,14 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
                     <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                       {formatDateTime(r.detected_at)}
                     </span>
-                    {r.acknowledged_at ? (
-                      <Badge color="success">Acknowledged</Badge>
-                    ) : (
-                      <Badge color="muted">Unacknowledged</Badge>
-                    )}
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <Badge color={impact.color}>{impact.label}</Badge>
+                      {r.acknowledged_at ? (
+                        <Badge color="success">Acknowledged</Badge>
+                      ) : (
+                        <Badge color="muted">Unacknowledged</Badge>
+                      )}
+                    </div>
                   </div>
                   <span
                     style={{
@@ -127,7 +184,8 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
                     {r.change_summary || 'Config changed'}
                   </span>
                 </Link>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

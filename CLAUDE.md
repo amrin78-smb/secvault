@@ -2663,6 +2663,50 @@ against their frozen contracts before being wired into `devices/[id]/page.js` (p
 own "verify agent diffs before integrating" rule), and `npm run build` was run clean after
 each wiring step.
 
+### Follow-up round, same day — SNMP card relocated, two 🟡 items resolved
+
+**SNMP card moved into the Overview tab.** It used to sit ABOVE the tab bar (always visible
+regardless of active tab — a deliberate choice at the time, made specifically to fix a
+discoverability complaint before this Overview tab existed). Direct user feedback once the
+Overview tab shipped: it was "sticky across all tabs," visible even on Rules/Admins/Config
+Changes, which now reads as redundant clutter rather than a feature — the Overview tab is the
+new, better answer to the original discoverability problem. The whole SNMP Monitoring `<div
+className="card">` block moved unchanged (same JSX, same queries — `snmpSnapshot`/
+`snmpHasCredential`/`snmpDetected`/`snmpDetectedLooksConfigured` are still fetched
+unconditionally at the top of the page, not gated behind `tab === 'overview'`, since the cost
+is negligible and gating them would add complexity for no real benefit) into the top of the
+`tab === 'overview'` block, ahead of `OverviewCveCard`.
+
+**Two 🟡-tier decisions from the earlier feasibility research were resolved by the user
+(via `AskUserQuestion`, not guessed) and built the same day:**
+
+- **Config-change Impact badge** (`components/devices/OverviewConfigChangesCard.js`) — a
+  DERIVED heuristic (no `impact`/`severity` column exists in `config_diffs`, and none was
+  added), computed fresh on every read by reusing `lib/engines/configDiff.js`'s ALREADY-BUILT
+  `classifyDiff()` (never re-parses diff paths a second time). Decided mapping: any resolved
+  individual rule change (`classifyDiff()`'s `ruleChanges` non-empty) or an unresolvable-rule
+  section label (`'Rules (detail unavailable for this device)'`, `'Policy-Based Forwarding
+  Rules'`) → **High**; NAT/VPN/admin/zones/network/device-level config sections → **Medium**;
+  everything else (address/service objects, SNMP, NTP, DNS, logging, password policy,
+  FortiGuard, system info, any unrecognized section) → **Low**. Rendered as a `Badge` next to
+  the existing Acknowledged/Unacknowledged badge on each row. Required adding `cd.diff` to
+  this card's existing SELECT list (it previously only selected the `jsonb_array_length`
+  counts, not the raw diff object needed for classification).
+- **Blended Compliance Score** (`components/devices/OverviewComplianceCard.js`) — this card
+  previously deliberately showed no such number (see its original header comment, now
+  updated). Decided formula: a simple, UNWEIGHTED average of whichever standards have a real
+  (non-null) `scorePct`; a never-audited or unmeasurable standard is EXCLUDED from the average
+  entirely, never coerced to `0` (same tri-state-honesty discipline this file already applies
+  to a single standard's own score); if literally every standard is null, the overall score is
+  null too, rendered as "—" rather than a fabricated number. Rendered as a visually distinct
+  bordered panel with a larger `StandardDonut` above the existing per-standard grid, captioned
+  "Average of N audited standards" — deliberately NOT styled as a 6th grid tile, so it reads
+  as one derived summary rather than a genuine independent standard sitting alongside the 5
+  real ones.
+
+Both diffs were personally reviewed against their frozen contracts before integrating, and
+`npm run build` was run clean after each.
+
 ---
 
 ## Feed Sources

@@ -24,13 +24,36 @@ import { STANDARDS, STANDARD_META } from '../compliance/ComplianceMatrix';
 // per-file-duplication convention for small per-page query/aggregation
 // logic (see CLAUDE.md's Alerts/Compliance query-triplication notes).
 //
-// Deliberately renders NO single blended "overall compliance score" number
-// — that concept does not exist anywhere else in this app (only independent
-// per-standard scores), so this card doesn't invent one either.
+// ⚠️ Previously this card deliberately rendered NO single blended "overall
+// compliance score" — that concept didn't exist anywhere else in this app
+// (only independent per-standard scores). A real, user-decided product
+// change now adds one below: a simple, unweighted average of whichever
+// standards currently have a real (non-null) scorePct, computed by
+// computeOverallScore(). This was a deliberate decision made BY the user
+// (not invented here) — see that function's own comment for the exact rule.
 
 function scorePctFromCounts(counts) {
   const measurable = counts.pass + counts.fail + counts.warning;
   return measurable > 0 ? Math.round((counts.pass / measurable) * 100) : null;
+}
+
+// User-decided aggregation (2026-07-21): a simple, unweighted average across
+// whichever standards currently have a real (non-null) scorePct. A standard
+// that's null (never audited against, or nothing measurable — see
+// scorePctFromCounts() above) is EXCLUDED from the average entirely, never
+// treated as 0 and never blocking the average for the others. If every
+// standard is null, the overall score is null too ("—", not a fabricated
+// number) — reuses the same neverAudited signal the rest of this card
+// already computes, rather than re-deriving it here.
+function computeOverallScore(standards) {
+  const scores = STANDARDS.map((s) => standards[s.key].scorePct).filter(
+    (pct) => pct !== null && pct !== undefined
+  );
+  if (scores.length === 0) return null;
+  return {
+    scorePct: Math.round(scores.reduce((sum, pct) => sum + pct, 0) / scores.length),
+    auditedCount: scores.length,
+  };
 }
 
 async function getFindings(dbPool, deviceId) {
@@ -69,6 +92,7 @@ export default async function OverviewComplianceCard({ deviceId }) {
   const standards = aggregateStandards(findings);
 
   const neverAudited = STANDARDS.every((s) => standards[s.key].total === 0);
+  const overall = neverAudited ? null : computeOverallScore(standards);
 
   return (
     <Card>
@@ -80,15 +104,45 @@ export default async function OverviewComplianceCard({ deviceId }) {
         {neverAudited ? (
           <EmptyState message="This device has not been audited yet." />
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
-              gap: 12,
-              justifyItems: 'center',
-              textAlign: 'center',
-            }}
-          >
+          <>
+            {/* Overall blended score — visually distinct (bordered panel, larger
+                donut) from the per-standard grid below so it reads as ONE derived
+                summary number, not a 6th independent standard sitting alongside
+                real ones. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 16,
+                padding: '12px 16px',
+                marginBottom: 16,
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                background: 'var(--bg-primary)',
+              }}
+            >
+              <StandardDonut pct={overall ? overall.scorePct : null} size={96} />
+              <div>
+                <div style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Compliance Score
+                </div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {overall
+                    ? `Average of ${overall.auditedCount} audited standard${overall.auditedCount === 1 ? '' : 's'}`
+                    : 'No standard currently has a measurable score'}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
+                gap: 12,
+                justifyItems: 'center',
+                textAlign: 'center',
+              }}
+            >
             {STANDARDS.map((s) => {
               const meta = STANDARD_META[s.key] || {};
               return (
@@ -100,7 +154,8 @@ export default async function OverviewComplianceCard({ deviceId }) {
                 </div>
               );
             })}
-          </div>
+            </div>
+          </>
         )}
 
         <div style={{ marginTop: 16 }}>
