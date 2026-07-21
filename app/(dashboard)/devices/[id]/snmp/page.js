@@ -8,6 +8,7 @@ import EmptyState from '../../../../../components/ui/EmptyState';
 import SnmpMetricsCharts from '../../../../../components/snmp/SnmpMetricsCharts';
 import SnmpConfigForm from '../../../../../components/devices/SnmpConfigForm';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { detectSnmpConfig, looksConfigured } from '../../../../../lib/engines/snmpConfigDetection';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,14 @@ async function getSnmpHistory(dbPool, deviceId) {
   return result.rows;
 }
 
+async function getLatestConfigParsed(dbPool, deviceId) {
+  const result = await dbPool.query(
+    `SELECT config_parsed FROM device_configs WHERE device_id = $1 ORDER BY collected_at DESC LIMIT 1`,
+    [deviceId]
+  );
+  return result.rows[0] || null;
+}
+
 function notFound() {
   return (
     <div>
@@ -86,13 +95,16 @@ export default async function DeviceSnmpPage({ params }) {
     return notFound();
   }
 
-  const [history, hasCredential] = await Promise.all([
+  const [history, hasCredential, configRow] = await Promise.all([
     getSnmpHistory(pool, device.id),
     hasSnmpCredential(pool, device.id),
+    device.snmp_enabled ? Promise.resolve(null) : getLatestConfigParsed(pool, device.id),
   ]);
 
   const latest = history.length > 0 ? history[history.length - 1] : null;
   const lowConfidence = LOW_CONFIDENCE_VENDORS.has(device.vendor);
+  const snmpDetected = configRow ? detectSnmpConfig(device.vendor, configRow.config_parsed) : null;
+  const snmpDetectedLooksConfigured = snmpDetected ? looksConfigured(snmpDetected) : false;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -154,6 +166,24 @@ export default async function DeviceSnmpPage({ params }) {
               ? 'An SNMP credential is stored for this device.'
               : 'No SNMP credential stored yet — add one below to enable polling.'}
           </p>
+          {snmpDetectedLooksConfigured && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: '10px 12px',
+                background: 'var(--tint-warn)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--tint-warn-fg)', margin: 0 }}>
+                SNMP appears to already be enabled on this device (found in its collected config
+                {snmpDetected.foundAt ? <> at <code className="mono">{snmpDetected.foundAt}</code></> : null}).
+                We can&apos;t read the actual community string or SNMPv3 credentials — those are never
+                collected, or are redacted before storage. Confirm the version and enter the credential
+                below to start polling.
+              </p>
+            </div>
+          )}
           <SnmpConfigForm
             deviceId={device.id}
             vendor={device.vendor}
@@ -163,6 +193,7 @@ export default async function DeviceSnmpPage({ params }) {
               snmpPort: device.snmp_port,
               hasCredential,
             }}
+            detected={snmpDetectedLooksConfigured}
           />
         </CardBody>
       </Card>

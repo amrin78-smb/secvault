@@ -19,8 +19,15 @@ const SNMP_VERSION_OPTIONS = [
 const AUTH_PROTOCOL_OPTIONS = ['SHA', 'MD5'];
 const PRIV_PROTOCOL_OPTIONS = ['AES', 'DES'];
 
-export default function SnmpConfigForm({ deviceId, vendor, initial }) {
-  const [enabled, setEnabled] = useState(Boolean(initial?.snmpEnabled));
+// `detected` (optional): true when lib/engines/snmpConfigDetection.js found
+// SNMP looking already-enabled in this device's own collected config — used
+// ONLY to pre-check the "Enable" toggle as a convenience default on first
+// landing (never to pre-fill a credential; the actual secret is never
+// available to detect in the first place — see that module's header
+// comment). Only applies while nothing is stored yet (`initial.snmpEnabled`
+// is false) — never overrides an operator's own already-saved choice.
+export default function SnmpConfigForm({ deviceId, vendor, initial, detected = false }) {
+  const [enabled, setEnabled] = useState(Boolean(initial?.snmpEnabled) || detected);
   const [host, setHost] = useState(initial?.snmpHost || '');
   const [port, setPort] = useState(initial?.snmpPort ? String(initial.snmpPort) : '161');
 

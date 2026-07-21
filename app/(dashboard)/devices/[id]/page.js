@@ -16,6 +16,7 @@ import CVETable from '../../../../components/cve/CVETable';
 import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
 import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
+import { detectSnmpConfig, looksConfigured } from '../../../../lib/engines/snmpConfigDetection';
 
 export const dynamic = 'force-dynamic';
 
@@ -231,10 +232,24 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     getLatestVersion(pool, device.id),
     tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
     tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
-    tab === 'admins' ? getLatestConfigParsed(pool, device.id) : Promise.resolve(null),
+    // Fetched UNCONDITIONALLY now, not just for tab === 'admins' — the new
+    // SNMP-detection widget below (always visible, not tab-gated) also
+    // needs the latest config_parsed. Same row, two consumers.
+    getLatestConfigParsed(pool, device.id),
     getLatestSnmpSnapshot(pool, device.id),
     hasSnmpCredential(pool, device.id),
   ]);
+
+  // "Does this device's already-collected config show SNMP enabled?" —
+  // presence/status only, never the community string (either never
+  // collected, or already redacted before config_parsed exists — see
+  // lib/engines/snmpConfigDetection.js's own header comment). Only
+  // meaningful when SNMP polling isn't already turned on for this device.
+  const snmpDetected =
+    !device.snmp_enabled && configRow
+      ? detectSnmpConfig(device.vendor, configRow.config_parsed)
+      : null;
+  const snmpDetectedLooksConfigured = snmpDetected ? looksConfigured(snmpDetected) : false;
 
   const adminSummary =
     tab === 'admins' ? summarizeAdminAccounts(device.vendor, configRow ? configRow.config_parsed : null) : null;
@@ -347,7 +362,13 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
           <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {device.snmp_enabled ? <Badge color="success">Enabled</Badge> : <Badge color="muted">Not Configured</Badge>}
+            {device.snmp_enabled ? (
+              <Badge color="success">Enabled</Badge>
+            ) : snmpDetectedLooksConfigured ? (
+              <Badge color="warning">Detected in config</Badge>
+            ) : (
+              <Badge color="muted">Not Configured</Badge>
+            )}
             <Link
               href={`/devices/${device.id}/snmp`}
               style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
@@ -382,6 +403,29 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             SNMP polling is enabled but no metrics have been collected yet — the engine worker polls on its
             own interval.{!snmpHasCredential && ' No SNMP credential is stored yet, so polling will keep failing until one is added.'}
           </p>
+        ) : snmpDetectedLooksConfigured ? (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '10px 12px',
+              background: 'var(--tint-warn)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--tint-warn-fg)', margin: 0 }}>
+              SNMP appears to already be enabled on this device (found in its collected config
+              {snmpDetected.foundAt ? <> at <code className="mono">{snmpDetected.foundAt}</code></> : null}).
+              We can&apos;t read the actual community string or SNMPv3 credentials — those are never
+              collected or are redacted before storage — but you can confirm and add them below.
+            </p>
+            <Link href={`/devices/${device.id}/snmp`} className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
+              Set up monitoring →
+            </Link>
+          </div>
         ) : (
           <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
             Not configured. Set up an SNMP credential and enable polling to see CPU, memory, session count,

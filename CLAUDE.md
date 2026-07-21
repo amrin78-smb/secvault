@@ -2508,6 +2508,60 @@ state). **The VPN link's identical original placement was NOT changed** — this
 to the specific feature the user flagged, not a blanket redesign of every "→" link on this
 page; revisit VPN's placement separately if the same complaint comes up for it.
 
+### Config-based detection — "SNMP already looks enabled" (added 2026-07-21)
+
+Direct follow-up question from the user during this feature's own proposal review: can
+SecVault tell from already-collected config whether SNMP is already configured, instead of
+always requiring manual entry? Answer, grounded rather than assumed: **detecting that SNMP
+looks enabled is safe and cheap for Fortinet and Palo Alto today; auto-extracting the actual
+community string is deliberately NOT built, and shouldn't be** — see the two reasons below.
+
+`lib/engines/snmpConfigDetection.js` — same architectural family as `vpnSummary.js`/
+`adminAccountSummary.js` (pure, no DB, read-only interpretation of already-collected
+`device_configs.config_parsed`, kept out of the adapters themselves). `detectSnmpConfig(vendor,
+configParsed)` returns `{supported, hasConfig, enabled, foundAt, fields, lowConfidence?}`;
+`looksConfigured(detected)` is the UI convenience predicate (`hasConfig && enabled !== false`).
+
+- **Fortinet**: `config_parsed.snmp` (FortiOS `system snmp sysinfo`, already collected on both
+  transports, zero new adapter work) — `snmp.status === 'enable'/'disable'` (FortiOS's own bare
+  vocabulary) maps to `enabled: true/false`. This adapter never fetches the separate `system
+  snmp community` table (the actual secret) — only this global agent-status object — so there
+  is nothing secret-shaped in the detection result to worry about.
+- **Palo Alto (both transports)**: bounded deep search (same `deepFindKeyByPattern()`
+  approach as `vpnSummary.js`'s GlobalProtect detection, for the identical "PAN-OS nesting
+  varies" reason) for a key matching `/snmp-setting/i` — the real PAN-OS path
+  (`deviceconfig system snmp-setting ...`) was NOT guessed fresh for this feature; it's the
+  same path `lib/adapters/paloalto/{parser,sshParser}.js`'s own pre-existing secret-redaction
+  lists already target (`snmp-community-string`). PAN-OS has no explicit enable/disable toggle
+  the way FortiOS does, so `enabled` is always `null` here — the block's mere presence is the
+  signal, carried via `hasConfig: true` instead. `lowConfidence: true` always, matching this
+  vendor's SNMP-metrics treatment elsewhere in this section.
+
+**Why extracting the actual community string was explicitly rejected, not just deferred:**
+verified directly against the real code (not assumed) that by the time either vendor's
+`config_parsed` exists, the secret is already gone — Fortinet never collects the community
+table at all; Palo Alto's `getConfig()` on both transports builds `parsed` FROM the
+already-redacted raw text/response (`parser.parseConfig(redactedConfigResult, ...)` — see the
+"Palo Alto SSH — RESOLVED" and Check Point/Forcepoint redaction sections above for this app's
+established redact-before-parse discipline). Even if it weren't already redacted, silently
+importing a scraped credential would bypass the SNMPv2c/v1 cleartext-acknowledgment gate this
+feature was built around — an explicit, informed opt-in, not something a config scrape should
+short-circuit.
+
+**UI**: `devices/[id]/page.js`'s always-visible SNMP card shows a "Detected in config" badge
+(instead of "Not Configured") plus an inline nudge naming where it was found, linking to
+`/devices/[id]/snmp`. That page shows the same nudge above the config form and passes
+`detected` to `SnmpConfigForm` to pre-check the Enable toggle — a convenience default only,
+never applied once a real config already exists (`initial.snmpEnabled` already true), and
+never pre-fills any credential field.
+
+Cisco ASA, Forcepoint, and Sangfor have no detector yet — `detectSnmpConfig()` returns
+`supported: false` for them, rendered distinctly from "checked, not there." A natural
+per-vendor follow-up (Cisco ASA's `show snmp-server` equivalent isn't currently collected into
+`config_parsed` either) — not built now.
+
+### Full page
+
 The full `/devices/[id]/snmp` page (linked from the summary card, not removed) still carries
 the deeper content the main-page card intentionally doesn't: stat tiles restated for context,
 `components/snmp/SnmpMetricsCharts.js` (two `recharts` `LineChart`s: CPU%+Memory% on a shared

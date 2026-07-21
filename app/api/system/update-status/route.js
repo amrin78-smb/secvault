@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.16.0': [
+    'New: SNMP auto-detection for Fortinet and Palo Alto. If a device\'s already-collected config shows SNMP looking enabled, the device page now shows a "Detected in config" nudge instead of a generic "Not configured" message.',
+    'This only detects that SNMP appears to be turned on — it never reads or auto-fills the actual community string or SNMPv3 credentials. Those are either never collected in the first place, or already redacted before storage. You still enter the credential yourself.',
+    'Cisco ASA, Forcepoint, and Sangfor don\'t have this detection yet — no comparable config signal is collected for them today.',
+  ],
   '2.15.1': [
     'Moved SNMP metrics onto the main device page. Direct user feedback: the original SNMP link was buried at the bottom of the Rules tab (a tab you don\'t land on by default) and was too easy to miss.',
     'Now a "SNMP Monitoring" card sits at the top of every device page — CPU/memory/session/uptime tiles once configured, or a clear "Configure →" prompt if not.',
