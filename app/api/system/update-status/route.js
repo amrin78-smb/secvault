@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.14.2': [
+    'Fixed the root cause of the in-app "Update Now" button silently not applying updates: the deploy key\'s path was losing its backslashes at a low level every time an update ran through the SYSTEM-scheduled task, which is specifically how "Update Now" always runs.',
+    'This has been broken since the feature was introduced — if this update actually applies (you\'re reading this from inside the app, so it did), the in-app updater is confirmed fixed.',
+  ],
   '2.14.1': [
     'Fixed a real bug: clicking "Collect Now" on a firewall with a larger ruleset could freeze the entire app — every page, every user — for as long as that one collection\'s analysis took.',
     'The fix makes that analysis pause periodically to let other requests through while it runs, instead of running as one uninterrupted block. Nothing about the analysis itself changed — same rule findings, just no longer freezing the app while producing them.',

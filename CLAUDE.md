@@ -2746,6 +2746,52 @@ launched by SYSTEM (which has never run git in this checkout before):
   research and is explicitly not replicated** — every write path in SecVault (including this one)
   requires a valid session at minimum.
 
+### ⛔ The in-app updater's git pull silently never worked at all — root-caused and fixed 2026-07-21
+
+Direct user report: "Update Now" detected an update, ran, reported success (services genuinely
+restarted), but the version never actually changed. Root-caused in two stages — the first stage's
+fix was real but incomplete, and briefly made a live run fail *worse* before the second, complete
+fix landed the same day.
+
+**Stage 1.** `core.sshCommand="ssh -i <deploy key> ..."` uses bare `ssh`, which is PATH-resolved —
+an interactive admin's `PATH` resolves it to Windows' own OpenSSH client
+(`C:\Windows\System32\OpenSSH\ssh.exe`), while the SYSTEM-scheduled task's `PATH` instead resolves
+it to **Git's own bundled MSYS2 `ssh.exe`** — a different build with different default-identity
+behavior. Fixed by pinning the full path to Win32-OpenSSH in both `installer/Update-SecVault.ps1`
+and `lib/updateCheck.js`, instead of trusting bare `ssh` resolution.
+
+**Stage 2 — the actual complete root cause, found the same day after Stage 1's fix caused a live
+run to fail with `command not found`.** `core.sshCommand`'s value is **always interpreted by
+git's own bundled MSYS2 shell** before the named ssh binary ever runs, regardless of which binary
+that is or which account invokes `git`. That shell treats backslash as an escape character in an
+unquoted word — so a native Windows path (`C:\ProgramData\SecVault\ssh\secvault_deploy`, or even
+Stage 1's own pinned `C:\Windows\System32\OpenSSH\ssh.exe` binary path) silently loses every
+backslash before ssh ever sees it. **This explains the "Identity file ... not accessible" warning
+that had appeared on every single run throughout this entire multi-day debugging history,
+including runs that went on to succeed** — an interactive admin's own `~/.ssh/config` (read
+directly by ssh via a real file API, never touched by this shell layer at all) quietly carried
+those connections instead of the mangled `-i` key; `SYSTEM` has no such config and had nothing to
+fall back to, hence total failure specifically (and only) on the real in-app-triggered path.
+
+Fix: stop using backslashes inside this one command string, full stop — convert every path to
+forward slashes (`-replace '\\','/'` in PowerShell, `.replace(/\\/g,'/')` in JS) immediately before
+building `$sshCommand`/`sshCommand`. Forward slashes are not a shell metacharacter and both Windows
+OpenSSH and git's bundled ssh accept them natively on Windows — this sidesteps the escaping problem
+entirely rather than trying to quote backslashes correctly across the three parsing layers already
+in play (PowerShell/JS string interpolation → git config-value parsing → git's own internal shell
+re-invocation of ssh) — the exact fragility this file's own long-standing comment on this code had
+already flagged as a reason to avoid nested quoting, without yet knowing backslashes themselves
+were the live problem.
+
+**Lesson for any future fix to this specific mechanism:** an *interactive* verification (e.g.
+running `ssh -v -i <key> ...` directly by hand in a terminal) does **not** exercise the actual
+failure surface — it bypasses `core.sshCommand`'s shell-interpretation layer entirely, since
+PowerShell passes arguments directly to the process with no shell involved. That gap is exactly
+what made Stage 1's fix look fully confirmed when it wasn't. Any future change to this ssh command
+construction needs to be verified either by triggering the real scheduled task (`schtasks /run /tn
+SecVaultUpdate`) or by re-deriving the exact string that will reach git's `-c
+core.sshCommand=...`, not by testing the named binary directly.
+
 ---
 
 ## Environment Variables

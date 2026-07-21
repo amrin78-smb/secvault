@@ -339,7 +339,42 @@ $knownHostsPath = Join-Path $env:TEMP 'secvault-update-known_hosts'
 # the identical rationale as this file's other install-path checks.
 $win32Ssh = 'C:\Windows\System32\OpenSSH\ssh.exe'
 $sshBinary = if (Test-Path $win32Ssh) { $win32Ssh } else { 'ssh' }
-$sshCommand = "$sshBinary -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
+
+# ⛔ SECOND root cause found 2026-07-21, same day, after the fix above
+# actually made things worse for one SYSTEM-triggered run: pinning the full
+# ssh.exe path above was correct on its own, but every "Identity file ...
+# not accessible" warning throughout this entire multi-day saga -- including
+# on runs that went on to succeed -- turns out to share ONE underlying cause
+# neither earlier fix addressed. `core.sshCommand`'s value is ALWAYS
+# interpreted by git's own bundled MSYS2 shell before the named binary ever
+# runs, regardless of which binary that is or which account invokes git.
+# That shell treats backslash as an ESCAPE CHARACTER in an unquoted word --
+# so `C:\ProgramData\SecVault\ssh\secvault_deploy` silently loses every
+# backslash, becoming the nonsense path `C:ProgramDataSecVaultsshsecvault_
+# deploy` before ssh ever sees the `-i` argument. That explains the "not
+# accessible" warning on EVERY prior run without exception -- interactive
+# admin runs only ever "succeeded" because that admin's OWN ~/.ssh/config
+# (read directly by ssh via a real file API, never touched by this shell)
+# quietly carried the connection instead; SYSTEM has no such config, so it
+# had nothing to fall back to and failed outright. This same day's ssh.exe
+# full-path fix above made it briefly WORSE for one run: now the BINARY
+# NAME itself also got shredded the identical way -- confirmed live,
+# "C:\Windows\System32\OpenSSH\ssh.exe" arrived at the shell as
+# "C:WindowsSystem32OpenSSHssh.exe: command not found".
+# Fix: stop using backslashes inside this one command string entirely.
+# Forward slashes are not a shell metacharacter to MSYS2 (or any POSIX
+# shell), so they survive completely unmangled -- and both Windows' native
+# OpenSSH and git's own bundled ssh accept forward-slash paths natively, no
+# behavior change on the Windows-API side. Simpler and more robust than
+# trying to quote/escape backslashes correctly across the three parsing
+# layers this file's own long-standing comment above already flagged as
+# fragile to reason about (PowerShell interpolation -> git config-value
+# parsing -> git's shell re-invocation of ssh) -- sidesteps that fragility
+# instead of trying to solve it.
+$sshBinarySlash = $sshBinary -replace '\\', '/'
+$deployKeySlash = $deployKey -replace '\\', '/'
+$knownHostsPathSlash = $knownHostsPath -replace '\\', '/'
+$sshCommand = "$sshBinarySlash -i $deployKeySlash -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPathSlash -o BatchMode=yes"
 
 # -----------------------------------------------------------------------
 # 1. Stop SecVault-App
