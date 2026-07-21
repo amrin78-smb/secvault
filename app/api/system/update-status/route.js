@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.17.0': [
+    'New: an "Overview" tab on every device page, now the default landing view — a real dashboard instead of jumping straight into the CVE table.',
+    'Shows top CVEs needing attention, a rule-hygiene breakdown (unused/shadow/redundant/any-any/logging-disabled rules) as a donut chart, recent config changes, and per-standard compliance scores — all data this app already tracked, just not previously visible in one place.',
+    'Every number here links through to the existing full detail page for that topic. Nothing shown is invented — no blended "security score," no fabricated change-impact ratings; where SecVault doesn\'t have real data for something, it\'s left out rather than guessed at.',
+  ],
   '2.16.1': [
     'New: "Test Connectivity" button on the SNMP config page, once a credential is saved — polls the device immediately instead of waiting up to SNMP_POLL_INTERVAL_MINUTES for the next scheduled poll.',
     'A successful test records a real data point on the trend chart above, same as a normal scheduled poll — a failure shows the actual error (timeout, wrong community string, etc.) with nothing recorded.',

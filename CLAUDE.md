@@ -2594,6 +2594,77 @@ a natural Phase 2+ follow-up once per-device data exists to aggregate, not built
 
 ---
 
+## Device Overview Tab (added 2026-07-21)
+
+The user shared a ChatGPT-generated mockup of a much richer per-device dashboard (reached by
+clicking a device from the Devices list) and asked for a feasibility check before building
+anything. A 6-agent parallel research pass (one per widget group) audited the mockup against
+this app's real data model — the findings became a three-tier plan: 🟢 items already fully
+computed elsewhere and just needing to be surfaced, 🟡 items needing modest new work but no
+new product decisions, 🔴 items that don't map to this app's real data or architecture at all
+(a composite "Security Score," a "High Risk Issues" tile, an "Affected Feature" CVE column,
+GDPR/HIPAA compliance standards — neither exists in this app — HA status, a named "Collector"
+field implying a multi-tenant distributed architecture SecVault doesn't have, and a precise
+per-device "Next Collection" time, since the pull interval is a single global env var, not
+per-device). This round built the 🟢 tier only; 🟡 is an explicit, deliberate follow-up.
+
+**New default tab**: `devices/[id]/page.js`'s tab list is now `overview|cve|rules|config|admins`
+(previously `cve|rules|config|admins`), with `overview` as the new default landing tab instead
+of `cve` — matching the mockup's own "Overview first" intent. The other four tabs are
+completely unchanged.
+
+Built as 4 independent card components, each a standalone async server component owning its
+own DB query (same "widget owns its DB access" convention already established by
+`components/dashboard/ConfigChangesWidget.js`) — assembled into the tab by `devices/[id]/
+page.js`, not by any shared query layer:
+
+- **`components/devices/OverviewCveCard.js`** — patch-now/scheduled counts + a top-5 CVE table,
+  reusing the EXISTING `CVETable` component verbatim (same row shape the CVE Posture tab
+  already queries) rather than a new table. Deliberately omits an "Affected Feature" column —
+  `advisories` has no such field, and deriving one reliably from `title`/`description` text
+  would be guesswork, not data.
+- **`components/analysis/RuleHygieneDonut.js`** (new, generic, reusable — no domain wording
+  baked in) + **`components/devices/OverviewRuleHygieneCard.js`** — a genuinely NEW multi-slice
+  categorical donut chart, distinct from `components/compliance/StandardDonut.js` (a single-
+  value 2-segment gauge). Six categories: 5 direct `rule_analysis_results.finding_type` values
+  (`unused`/`shadow`/`redundant`/`any_any`/`log_disabled`) plus an "Other Issues" bucket summing
+  the remaining 5 real types (`correlation`/`risky_service`/`reorder_candidate`/
+  `expiring_soon`/`overly_permissive`) — kept as one bucket, not 10 slices, for legend
+  readability. A finding_type with zero rows still appears in the legend at `0` (the query
+  result is merged onto a fixed category list, never iterated directly, so a missing row can't
+  silently vanish from the legend). Also added an "Expired" rule count
+  (`expiry_date < now()`) alongside the already-existing Total/Active/Disabled — the one
+  genuinely new query in this whole batch; everything else is either identical to or a
+  device-scoped variant of an already-existing query.
+- **`components/devices/OverviewConfigChangesCard.js`** — a per-device analog of
+  `ConfigChangesWidget.js`'s fleet-wide card (same real Added/Removed/Modified counts via
+  `jsonb_array_length(diff->...)`), with one real improvement: each row shows an
+  Acknowledged/Unacknowledged `Badge` from `config_diffs.acknowledged_at` — **deliberately NOT**
+  a fabricated High/Medium/Low "impact" badge, since no severity/impact concept exists
+  anywhere in `config_diffs` (confirmed during the feasibility research; inventing one is
+  explicitly deferred to the 🟡 follow-up, pending a real threshold decision).
+- **`components/devices/OverviewComplianceCard.js`** — a condensed version of the already-
+  fully-built `/compliance/[deviceId]` page: the exact same `getFindings()`/
+  `aggregateStandards()`/`scorePctFromCounts()` logic (tri-state honesty preserved — `na`
+  excluded from the denominator, `null` never coerced to `0`), reusing `StandardDonut` directly
+  at a smaller `size` instead of a new gauge component. Renders the 5 REAL standards (PCI-DSS,
+  ISO 27001, CIS v8, NIST, SANS) side by side — **deliberately no blended overall compliance
+  score**, since no aggregation formula for one exists anywhere in this app; inventing the
+  weighting is explicit 🟡 follow-up work, not done here.
+
+**Deliberately NOT duplicated on the Overview tab**: a "System & Resources" section — the SNMP
+Monitoring card (CPU/Memory/Sessions/Uptime, see above) is already an ALWAYS-VISIBLE card
+sitting above the tab bar on this same page (built earlier the same day, specifically in
+response to a discoverability complaint) — repeating it inside the Overview tab would be
+redundant UI showing the same numbers twice on one page.
+
+**Verified before integrating**: all 4 sub-agents' components were personally read in full
+against their frozen contracts before being wired into `devices/[id]/page.js` (per this file's
+own "verify agent diffs before integrating" rule), and `npm run build` was run clean after
+each wiring step.
+
+---
+
 ## Feed Sources
 
 | Feed | URL | Schedule | Notes |

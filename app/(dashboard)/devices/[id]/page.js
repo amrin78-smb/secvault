@@ -17,6 +17,10 @@ import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
 import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
 import { detectSnmpConfig, looksConfigured } from '../../../../lib/engines/snmpConfigDetection';
+import OverviewCveCard from '../../../../components/devices/OverviewCveCard';
+import OverviewRuleHygieneCard from '../../../../components/devices/OverviewRuleHygieneCard';
+import OverviewConfigChangesCard from '../../../../components/devices/OverviewConfigChangesCard';
+import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -225,7 +229,9 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['cve', 'rules', 'config', 'admins'].includes(searchParams?.tab) ? searchParams.tab : 'cve';
+  const tab = ['overview', 'cve', 'rules', 'config', 'admins'].includes(searchParams?.tab)
+    ? searchParams.tab
+    : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
   const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential] = await Promise.all([
@@ -435,11 +441,23 @@ export default async function DeviceDetailPage({ params, searchParams }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
+        {tabLink(device.id, tab, 'overview', 'Overview')}
         {tabLink(device.id, tab, 'cve', 'CVE Posture')}
         {tabLink(device.id, tab, 'rules', 'Rules')}
         {tabLink(device.id, tab, 'config', 'Config Changes')}
         {tabLink(device.id, tab, 'admins', 'Admins')}
       </div>
+
+      {tab === 'overview' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <OverviewCveCard deviceId={device.id} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+            <OverviewRuleHygieneCard deviceId={device.id} />
+            <OverviewConfigChangesCard deviceId={device.id} />
+          </div>
+          <OverviewComplianceCard deviceId={device.id} />
+        </div>
+      )}
 
       {tab === 'cve' && <CVETable rows={cveRows} showDeviceColumn={false} />}
 
