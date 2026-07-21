@@ -2491,11 +2491,28 @@ per-device failure is logged and skipped, never fatal to the job.
 
 ### UI
 
-Per-device only for Phase 1 (`/devices/[id]/snmp`, linked as "SNMP →" next to the existing
-"VPN →" link on the device overview page) — stat tiles (CPU/Memory/Sessions/Uptime) +
+**⛔ Placement changed 2026-07-21, same day this shipped — direct user feedback.** The
+original entry point was a small "SNMP →" link at the bottom of the Rules tab, mirroring the
+pre-existing VPN link's placement exactly — but the Rules tab isn't the tab a device page
+lands on by default (that's CVE Posture), and a text link stacked after a table is easy to
+miss regardless. The user's ask was explicit: SNMP metrics should show on the main device
+page itself, like a summary widget, not be buried behind a click. Fixed: `devices/[id]/
+page.js` now queries the latest `snmp_metric_snapshots` row (and whether an `snmp`
+credential exists) UNCONDITIONALLY — same as `getLatestVersion()`, not gated behind any tab
+— and renders an always-visible "SNMP Monitoring" card between the device info card and the
+tab bar: 4 `StatCard` tiles (CPU/Memory/Sessions/Uptime) + last-polled timestamp when a
+snapshot exists, an "enabled but nothing polled yet" message when `snmp_enabled` is true with
+no data, or a plain "Not configured" prompt otherwise — each state links to the full
+`/devices/[id]/snmp` page (relabeled "Full history & config →" / "Configure →" depending on
+state). **The VPN link's identical original placement was NOT changed** — this fix was scoped
+to the specific feature the user flagged, not a blanket redesign of every "→" link on this
+page; revisit VPN's placement separately if the same complaint comes up for it.
+
+The full `/devices/[id]/snmp` page (linked from the summary card, not removed) still carries
+the deeper content the main-page card intentionally doesn't: stat tiles restated for context,
 `components/snmp/SnmpMetricsCharts.js` (two `recharts` `LineChart`s: CPU%+Memory% on a shared
 0-100 scale, session count on its own scale — deliberately two charts, not one dual-axis
-chart, so neither axis is a misleading secondary scale) + `components/devices/
+chart, so neither axis is a misleading secondary scale), and `components/devices/
 SnmpConfigForm.js` (enable toggle, host/port, saved-profile picker, manual v3/v2c/v1 entry
 with the cleartext-ack gate). `GET /api/devices/[id]/snmp` supports `?format=csv` export,
 same convention as the VPN page. **No fleet-wide `/snmp` page yet** (VPN has one at `/vpn`) —

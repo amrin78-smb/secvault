@@ -11,6 +11,7 @@ import StatusDot from '../../../../components/ui/StatusDot';
 import EmptyState from '../../../../components/ui/EmptyState';
 import Modal from '../../../../components/ui/Modal';
 import Table from '../../../../components/ui/Table';
+import StatCard from '../../../../components/ui/StatCard';
 import CVETable from '../../../../components/cve/CVETable';
 import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
@@ -135,6 +136,46 @@ async function getLatestConfigParsed(dbPool, id) {
   return result.rows[0] || null;
 }
 
+// SNMP summary widget — fetched UNCONDITIONALLY (like getLatestVersion above),
+// not gated behind a specific tab, since this renders on the main device page
+// itself, not inside a tab body. Direct user feedback: the original SNMP
+// entry point (a small link buried at the bottom of the Rules tab, mirroring
+// the pre-existing VPN link's placement) was too easy to miss — this widget
+// puts the latest polled metrics directly on the page you land on after
+// clicking a device, the same page every other at-a-glance device fact
+// (version/model/last collected) already lives on.
+async function getLatestSnmpSnapshot(dbPool, id) {
+  const result = await dbPool.query(
+    `SELECT cpu_percent, memory_percent, session_count, uptime_seconds, sampled_at
+     FROM snmp_metric_snapshots
+     WHERE device_id = $1
+     ORDER BY sampled_at DESC
+     LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
+async function hasSnmpCredential(dbPool, id) {
+  const result = await dbPool.query(
+    'SELECT 1 FROM device_credentials WHERE device_id = $1 AND credential_type = $2 LIMIT 1',
+    [id, 'snmp']
+  );
+  return result.rows.length > 0;
+}
+
+function formatSnmpUptime(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 0) return '—';
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
 // Module-top-level so a future refactor toward client-side interactive tabs
 // can't accidentally turn this into a component defined inside a component
 // (see CLAUDE.md's "NEVER define a React component inside another React
@@ -186,11 +227,13 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const tab = ['cve', 'rules', 'config', 'admins'].includes(searchParams?.tab) ? searchParams.tab : 'cve';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
-  const [version, cveRows, rules, configRow] = await Promise.all([
+  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential] = await Promise.all([
     getLatestVersion(pool, device.id),
     tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
     tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
     tab === 'admins' ? getLatestConfigParsed(pool, device.id) : Promise.resolve(null),
+    getLatestSnmpSnapshot(pool, device.id),
+    hasSnmpCredential(pool, device.id),
   ]);
 
   const adminSummary =
@@ -300,6 +343,53 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         )}
       </div>
 
+      <div className="card" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {device.snmp_enabled ? <Badge color="success">Enabled</Badge> : <Badge color="muted">Not Configured</Badge>}
+            <Link
+              href={`/devices/${device.id}/snmp`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
+              {device.snmp_enabled ? 'Full history & config →' : 'Configure →'}
+            </Link>
+          </div>
+        </div>
+
+        {snmpSnapshot ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
+              <StatCard
+                label="CPU"
+                value={snmpSnapshot.cpu_percent !== null && snmpSnapshot.cpu_percent !== undefined ? `${snmpSnapshot.cpu_percent}%` : '—'}
+                color="var(--red)"
+              />
+              <StatCard
+                label="Memory"
+                value={snmpSnapshot.memory_percent !== null && snmpSnapshot.memory_percent !== undefined ? `${snmpSnapshot.memory_percent}%` : '—'}
+                color="var(--blue)"
+              />
+              <StatCard label="Sessions" value={snmpSnapshot.session_count ?? '—'} color="var(--accent-teal)" />
+              <StatCard label="Uptime" value={formatSnmpUptime(snmpSnapshot.uptime_seconds)} color="var(--text-muted)" />
+            </div>
+            <p style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+              Last polled: {formatDateTime(snmpSnapshot.sampled_at)}
+            </p>
+          </>
+        ) : device.snmp_enabled ? (
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
+            SNMP polling is enabled but no metrics have been collected yet — the engine worker polls on its
+            own interval.{!snmpHasCredential && ' No SNMP credential is stored yet, so polling will keep failing until one is added.'}
+          </p>
+        ) : (
+          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
+            Not configured. Set up an SNMP credential and enable polling to see CPU, memory, session count,
+            and uptime here.
+          </p>
+        )}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {tabLink(device.id, tab, 'cve', 'CVE Posture')}
         {tabLink(device.id, tab, 'rules', 'Rules')}
@@ -377,12 +467,6 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
             >
               VPN →
-            </Link>
-            <Link
-              href={`/devices/${device.id}/snmp`}
-              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
-            >
-              SNMP →
             </Link>
           </div>
         </div>

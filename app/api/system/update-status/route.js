@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.15.1': [
+    'Moved SNMP metrics onto the main device page. Direct user feedback: the original SNMP link was buried at the bottom of the Rules tab (a tab you don\'t land on by default) and was too easy to miss.',
+    'Now a "SNMP Monitoring" card sits at the top of every device page — CPU/memory/session/uptime tiles once configured, or a clear "Configure →" prompt if not.',
+  ],
   '2.15.0': [
     'New: SNMP monitoring. Poll a firewall for CPU, memory, active session count, and uptime, with a trend chart on a new per-device SNMP tab.',
     'Supported this round: Cisco ASA, Fortinet, Palo Alto, Forcepoint, and Sangfor (generic metrics only). Check Point is not yet supported.',
