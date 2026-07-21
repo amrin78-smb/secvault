@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Button from '../ui/Button';
 import {
   VENDOR_META,
@@ -61,6 +61,23 @@ export default function DeviceForm({ onSubmit }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // Saved connection-profile picker (ManageEngine parity). Deliberately NOT
+  // offered for Forcepoint's 'smc' shape — see the `isSmc` gates below. Fetched
+  // once on mount; a non-2xx (403 on a stale session, network error) just
+  // leaves the list empty rather than showing an error banner, since this form
+  // is only ever reachable by an admin already.
+  const [profiles, setProfiles] = useState([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [saveAsProfile, setSaveAsProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+
+  useEffect(() => {
+    fetch('/api/credential-profiles')
+      .then((res) => (res.ok ? res.json() : { profiles: [] }))
+      .then((data) => setProfiles(Array.isArray(data.profiles) ? data.profiles : []))
+      .catch(() => setProfiles([]));
+  }, []);
+
   const meta = VENDOR_META[vendor] || VENDOR_META.forcepoint;
   // resolveAccessMethod falls back to the vendor's default when accessMethod is
   // stale (e.g. mid-render right after a vendor switch), so `config` is never
@@ -82,6 +99,10 @@ export default function DeviceForm({ onSubmit }) {
   // ssh methods rather than implying it has an effect.
   const showSslToggle = method !== 'ssh';
 
+  // Recomputed on every render — cheap, and `profiles` only ever changes once
+  // (the mount-time fetch), so there's no benefit to memoizing this.
+  const matchingProfiles = profiles.filter((p) => p.credential_type === config.credentialType);
+
   function invalidateTest() {
     setTestResult(null);
   }
@@ -89,12 +110,17 @@ export default function DeviceForm({ onSubmit }) {
   // Clearing the credential inputs on any vendor/method switch is deliberate: the
   // credential SHAPE changes with the method (an API token is not an SSH
   // password), so carrying a value across would silently store the wrong thing.
+  // A profile picked for one credential_type is not valid after switching to a
+  // different vendor/method, for the same reason — reset it alongside the rest.
   function resetCredentialInputs() {
     setAuthMode('apikey');
     setSecret('');
     setUsername('');
     setPassword('');
     setEnablePassword('');
+    setSelectedProfileId('');
+    setSaveAsProfile(false);
+    setNewProfileName('');
   }
 
   // Both ports are cleared back to "" — an empty port field means "use this
@@ -188,7 +214,11 @@ export default function DeviceForm({ onSubmit }) {
         payload.mgmt_ip = mgmtIp;
         payload.mgmt_port = Number(mgmtPort) || config.defaultPort;
       }
-      if (credentialProvided) {
+      if (selectedProfileId) {
+        // A saved profile's plaintext never reaches the browser — the server
+        // applies it directly. Mutually exclusive with credential/credential_type.
+        payload.credential_profile_id = selectedProfileId;
+      } else if (credentialProvided) {
         payload.credential = buildCredentialPlaintext(vendor, method, {
           authMode,
           secret,
@@ -199,6 +229,9 @@ export default function DeviceForm({ onSubmit }) {
         // The server re-derives credential_type from (vendor, mgmt_method) and
         // does not trust this value beyond its CREDENTIAL_TYPES check.
         payload.credential_type = config.credentialType;
+        if (saveAsProfile && newProfileName.trim()) {
+          payload.save_as_profile_name = newProfileName.trim();
+        }
       }
       await onSubmit(payload);
     } catch (err) {
@@ -316,7 +349,30 @@ export default function DeviceForm({ onSubmit }) {
         </>
       )}
 
-      {isApiKeyOrUserPass && (
+      {!isSmc && (
+        <div className="form-field">
+          <label htmlFor="device-cred-profile">Use Saved Profile</label>
+          <select
+            id="device-cred-profile"
+            value={selectedProfileId}
+            onChange={(e) => {
+              setSelectedProfileId(e.target.value);
+              invalidateTest();
+            }}
+            className="input"
+          >
+            <option value="">— Enter credentials manually —</option>
+            {matchingProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.username ? ` — ${p.username}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {!selectedProfileId && isApiKeyOrUserPass && (
         <div className="form-field">
           <label htmlFor="device-auth-mode">Authentication</label>
           <select
@@ -342,67 +398,93 @@ export default function DeviceForm({ onSubmit }) {
         </div>
       )}
 
-      {showSecretInput ? (
-        <div className="form-field">
-          <label htmlFor="device-secret">{config.secretLabel}</label>
-          <input
-            id="device-secret"
-            type="password"
-            autoComplete="new-password"
-            value={secret}
-            onChange={(e) => {
-              setSecret(e.target.value);
-              invalidateTest();
-            }}
-            className="input"
-          />
-        </div>
-      ) : (
-        <>
+      {!selectedProfileId &&
+        (showSecretInput ? (
           <div className="form-field">
-            <label htmlFor="device-cred-username">Username</label>
+            <label htmlFor="device-secret">{config.secretLabel}</label>
             <input
-              id="device-cred-username"
-              type="text"
-              autoComplete="off"
-              value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                invalidateTest();
-              }}
-              className="input"
-            />
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="device-cred-password">Password</label>
-            <input
-              id="device-cred-password"
+              id="device-secret"
               type="password"
               autoComplete="new-password"
-              value={password}
+              value={secret}
               onChange={(e) => {
-                setPassword(e.target.value);
+                setSecret(e.target.value);
                 invalidateTest();
               }}
               className="input"
             />
           </div>
-
-          {hasEnable && (
+        ) : (
+          <>
             <div className="form-field">
-              <label htmlFor="device-cred-enable">Enable Password (optional)</label>
+              <label htmlFor="device-cred-username">Username</label>
               <input
-                id="device-cred-enable"
-                type="password"
-                autoComplete="new-password"
-                value={enablePassword}
-                onChange={(e) => setEnablePassword(e.target.value)}
+                id="device-cred-username"
+                type="text"
+                autoComplete="off"
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  invalidateTest();
+                }}
                 className="input"
               />
             </div>
+
+            <div className="form-field">
+              <label htmlFor="device-cred-password">Password</label>
+              <input
+                id="device-cred-password"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  invalidateTest();
+                }}
+                className="input"
+              />
+            </div>
+
+            {hasEnable && (
+              <div className="form-field">
+                <label htmlFor="device-cred-enable">Enable Password (optional)</label>
+                <input
+                  id="device-cred-enable"
+                  type="password"
+                  autoComplete="new-password"
+                  value={enablePassword}
+                  onChange={(e) => setEnablePassword(e.target.value)}
+                  className="input"
+                />
+              </div>
+            )}
+          </>
+        ))}
+
+      {!selectedProfileId && (
+        <div className="form-field">
+          <label
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
+          >
+            <input
+              type="checkbox"
+              checked={saveAsProfile}
+              onChange={(e) => setSaveAsProfile(e.target.checked)}
+            />
+            Save these credentials as a reusable profile
+          </label>
+          {saveAsProfile && (
+            <input
+              type="text"
+              placeholder="Profile name"
+              value={newProfileName}
+              onChange={(e) => setNewProfileName(e.target.value)}
+              className="input"
+              style={{ marginTop: 8 }}
+            />
           )}
-        </>
+        </div>
       )}
 
       {showSslToggle && (

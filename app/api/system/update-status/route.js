@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.14.0': [
+    'Added Credential Profiles: save a reusable username/password or API key bundle once under a name (Settings → Credential Profiles), then apply it when adding new devices or rotating an existing device\'s credentials instead of retyping the same login every time.',
+    'A saved profile works across every vendor that uses the same connection type (e.g. any SSH-managed firewall, or any REST-API-managed firewall), so one profile can cover multiple devices that share a login.',
+    'You can also save a credential as a new profile at the moment you type it in — no need to visit Settings first.',
+    'Manage profiles (create, rename, rotate secret, delete) from the new Settings tab, or apply one directly from the Add Device screen or a device\'s credential-rotation control via a new "Use Saved Profile" picker.',
+  ],
   '2.13.2': [
     'Security fix: closed a gap where the fleet-wide "re-run analysis" endpoint was missing the read-only role restriction that every similar action already had.',
     'Security fix: a user demoted from admin to read-only (or removed entirely) now loses access on their very next action, instead of keeping admin access for up to 30 days on their existing login.',

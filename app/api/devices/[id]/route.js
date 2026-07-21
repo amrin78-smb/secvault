@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
+import { getProfilePlaintext, createProfile } from '../../../../lib/credentialProfiles';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
@@ -82,7 +83,15 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }
   const body = await request.json().catch(() => ({}));
-  const { smc_api_key, credential, credential_type, mgmt_method, ...rest } = body || {};
+  const {
+    smc_api_key,
+    credential,
+    credential_type,
+    credential_profile_id,
+    save_as_profile_name,
+    mgmt_method,
+    ...rest
+  } = body || {};
 
   let existing;
   try {
@@ -220,9 +229,32 @@ export async function PUT(request, { params }) {
   }
 
   // Resolve credential to store — validated before any write happens.
+  // credential_profile_id applies a saved lib/credentialProfiles.js profile
+  // (checked first); credential + credential_type is the generic manual-entry
+  // path; smc_api_key is the original Forcepoint-only field.
   let credPlaintext = null;
   let credType = null;
-  if (credential) {
+  let usedExistingProfile = false;
+  if (credential_profile_id) {
+    if (!isValidUuid(credential_profile_id)) {
+      return NextResponse.json({ error: 'Invalid credential_profile_id' }, { status: 400 });
+    }
+    const profile = await getProfilePlaintext(credential_profile_id, pool);
+    if (!profile) {
+      return NextResponse.json({ error: 'Credential profile not found' }, { status: 400 });
+    }
+    if (profile.credentialType !== config.credentialType) {
+      return NextResponse.json(
+        {
+          error: `Selected profile is a '${profile.credentialType}' credential, but ${effectiveVendor}/${effectiveMethod} needs '${config.credentialType}'`,
+        },
+        { status: 400 }
+      );
+    }
+    credPlaintext = profile.plaintext;
+    credType = config.credentialType;
+    usedExistingProfile = true;
+  } else if (credential) {
     if (!CREDENTIAL_TYPES.includes(credential_type)) {
       return NextResponse.json(
         { error: `credential_type must be one of: ${CREDENTIAL_TYPES.join(', ')}` },
@@ -258,11 +290,33 @@ export async function PUT(request, { params }) {
       await pool.query('UPDATE devices SET updated_at = now() WHERE id = $1', [params.id]);
     }
 
+    // Optional "save these as a new profile for next time" — only meaningful
+    // for freshly-typed credentials (usedExistingProfile means there was
+    // nothing new to save). Best-effort: a failure here (most commonly a
+    // duplicate name) must never fail the rotation that already succeeded —
+    // surfaced as a `warning` field instead.
+    let warning;
+    const trimmedProfileName = typeof save_as_profile_name === 'string' ? save_as_profile_name.trim() : '';
+    if (trimmedProfileName && credPlaintext && !usedExistingProfile) {
+      try {
+        const dupe = await pool.query('SELECT id FROM credential_profiles WHERE name = $1', [
+          trimmedProfileName,
+        ]);
+        if (dupe.rows.length > 0) {
+          warning = `Credential saved, but a profile named "${trimmedProfileName}" already exists — not overwritten.`;
+        } else {
+          await createProfile({ name: trimmedProfileName, credentialType: credType, plaintext: credPlaintext }, pool);
+        }
+      } catch (err) {
+        warning = `Credential saved, but the profile could not be saved: ${err.message}`;
+      }
+    }
+
     const result = await pool.query('SELECT * FROM devices WHERE id = $1', [params.id]);
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Device not found' }, { status: 404 });
     }
-    return NextResponse.json(result.rows[0]);
+    return NextResponse.json(warning ? { ...result.rows[0], warning } : result.rows[0]);
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to update device' }, { status: 500 });
   }

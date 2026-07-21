@@ -126,6 +126,48 @@ BEGIN
   END IF;
 END $$;
 
+-- Reusable named credential bundles ("connection profiles") — save a
+-- username/password/API-key/enable-password combination once under a name,
+-- then apply it to any NEW device (or an existing device's credential
+-- rotation) without retyping it. Modeled on ManageEngine Firewall Analyzer's
+-- SSH/REST API credential profiles.
+--
+-- Same AES-256-GCM encryption as device_credentials (lib/credStore.js's
+-- encrypt/decrypt, reused directly by lib/credentialProfiles.js — NOT its
+-- device-scoped getCredential/setCredential, which don't apply here).
+--
+-- Deliberately NOT device- or vendor-scoped: credential_type alone (not
+-- vendor) determines which devices a profile can be applied to. This is
+-- safe because the plaintext PARSERS are shared across every vendor for a
+-- given credential_type — lib/adapters/credentials.js's parseApiCredential
+-- for 'rest_api' (fortinet/paloalto/checkpoint), lib/adapters/sshClient.js's
+-- parseJsonCredential for 'ssh' (fortinet/paloalto/cisco_asa/sangfor). A
+-- 'ssh' profile's optional enable_password is a Cisco-ASA-only field that
+-- every other ssh vendor's parser simply never reads — the same JSON shape
+-- safely serves both, exactly as it already does for a single device's own
+-- stored credential (see vendorMeta.js's 'userpass_enable' shape comment).
+--
+-- No FK to devices/device_credentials on purpose: applying a profile COPIES
+-- its plaintext into the target device's own device_credentials row at that
+-- moment — it is a one-time stamp, not a live reference. Renaming, rotating,
+-- or deleting a profile afterward never touches any device that already
+-- used it.
+--
+-- `username` is a deliberately UNENCRYPTED, display-only column (never the
+-- password/api_key/enable_password) so the profile list can show "which
+-- login" without decrypting anything — NULL for an api-key-only profile,
+-- which has no username to show.
+CREATE TABLE IF NOT EXISTS credential_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  credential_type TEXT NOT NULL, -- 'ssh' | 'rest_api' | 'smc_api' — same vocabulary as device_credentials
+  username TEXT,
+  encrypted_data TEXT NOT NULL,
+  iv TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ─────────────────────────────────────────
 -- CONFIG
 -- ─────────────────────────────────────────

@@ -267,6 +267,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `vpn_session_snapshots` | Polled active-VPN-session-count timestamps (Fortinet only — `getVpnSessionSummary()`), a coarse substitute for real syslog-derived VPN usage telemetry | VPN Summary ✅ |
 | `audit_findings` | Per-device compliance results (pass/fail/warning/na), DELETE+reinsert per device per run like `rule_analysis_results` | 7 ✅ |
 | `fleet_dashboard_snapshots` | One row per calendar day (`snapshot_date` UNIQUE), fleet-wide CVE severity counts + compliance scores — feeds the main Dashboard's day-over-day deltas, populated by a daily `engine-worker.js` job | Dashboard Rebuild ✅ |
+| `credential_profiles` | Reusable named credential bundles (`credential_type`-scoped, not vendor-scoped), copied into a device's `device_credentials` at apply-time — no FK, no live reference. Excluded from `claude_readonly`/`nocvault_readonly` entirely, same as `device_credentials` | Credential Profiles ✅ |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
 Tables marked "not yet created" are part of the full architecture (see repo root architecture doc in project history) and will be added via new `CREATE TABLE IF NOT EXISTS` statements in their respective phases — do not pre-create empty tables for features that are not yet implemented.
@@ -2199,6 +2200,125 @@ a human to apply manually, the same recommend-only scope as every other finding 
 (see the Rule Analysis Dashboard section above — no adapter has ever gained a write-back capability).
 `components/analysis/ReorderTab.js` gained an "Export Recommended Order" link pointing at the CSV
 variant.
+
+---
+
+## Credential Profiles (added 2026-07-21)
+
+Reusable named credential bundles ("connection profiles") — save a username/password, API key, or
+SSH login (optionally with a Cisco-ASA-style enable password) once under a name, then apply it when
+adding a device or rotating an existing device's credential, instead of retyping the same secret for
+every firewall that shares it. Modeled on ManageEngine Firewall Analyzer's own SSH/REST-API
+connection-profile concept, built at direct user request.
+
+### Schema — `credential_profiles` is credential_type-scoped, NOT vendor-scoped
+
+`lib/schema.sql`'s `credential_profiles` table (`id`, `name UNIQUE`, `credential_type`, `username`,
+`encrypted_data`, `iv`, timestamps) keys on `credential_type` (`'smc_api' | 'rest_api' | 'ssh'` —
+`components/devices/vendorMeta.js`'s `CREDENTIAL_TYPES`, same vocabulary `device_credentials`
+already uses), not on a vendor slug. This is safe, not a shortcut, because the plaintext PARSERS
+consuming a credential are already shared across every vendor that uses a given credential_type:
+`lib/adapters/credentials.js`'s `parseApiCredential()` for `rest_api` (fortinet/paloalto/checkpoint
+all read the identical JSON shape), `lib/adapters/sshClient.js`'s `parseJsonCredential()` for `ssh`
+(fortinet/paloalto/cisco_asa/sangfor). A single `ssh`-type profile's optional `enable_password` field
+is Cisco-ASA-only — every other `ssh` vendor's parser simply never reads it, the same "one JSON shape
+safely serves every vendor sharing the type" reasoning `vendorMeta.js`'s own `userpass_enable` shape
+comment already documents for a single device's own stored credential. A vendor-scoped table would
+have meant either duplicating an identical profile per vendor or building a vendor→type resolution
+layer neither this feature nor its ManageEngine reference needs.
+
+**No FK to `devices`/`device_credentials`, on purpose.** Applying a profile COPIES its decrypted
+plaintext into the target device's own `device_credentials` row at that moment — a one-time stamp,
+not a live reference. Renaming, rotating, or deleting a profile afterward never touches any device
+that already used it (mirrors this table's own comment block in `schema.sql` almost verbatim — read
+it directly for the full rationale). `username` is stored **unencrypted**, display-only (never the
+password/api_key/enable_password), so the profile list can show "which login" without decrypting
+anything — `NULL` for an api-key-only profile, which has no username to show.
+
+**`lib/schema-grants.sql` deliberately excludes `credential_profiles` from `claude_readonly`/
+`nocvault_readonly` entirely** — same treatment as `device_credentials`, and unlike `settings`/
+`users` it gets **no readonly view either**: the whole row is credential-adjacent secret material
+(the same `encrypted_data`/`iv` shape as `device_credentials`), and there's no "safe subset" column
+worth carving out a view for (the one non-secret column, `username`, isn't worth a view on its own).
+
+### `lib/credentialProfiles.js` — encrypt/decrypt CRUD, reusing `credStore.js` directly
+
+Reuses `credStore.js`'s `encrypt`/`decrypt` functions directly — **not** `credStore.js`'s
+`getCredential`/`setCredential`, which are `device_id`-scoped and don't apply to a profile with no
+device. `buildProfilePlaintext(credentialType, {...})` is a deliberately SEPARATE function from
+`vendorMeta.js`'s `buildCredentialPlaintext` (same JSON-shape rules, same RAW-string special case for
+`smc_api`) rather than a shared import: `buildCredentialPlaintext` resolves its shape from
+`VENDOR_META[vendor][method]`, which a profile — no vendor, no method, only a `credential_type` — has
+no way to supply. Every function here except `getProfilePlaintext()` returns metadata-only rows
+(`id`/`name`/`credential_type`/`username`/timestamps) safe to hand straight to `NextResponse.json()`;
+`getProfilePlaintext()` exists ONLY for server-side use (copying a profile's secret into a device's
+own `device_credentials` row) and its decrypted plaintext must never leave the process — called from
+the devices routes below, never from a GET a browser can see. `deriveDisplayUsername()` best-effort
+parses a `username` out of a JSON-shaped plaintext for the profile list's display column, never
+throwing on a malformed/non-JSON (bare API key) plaintext — cosmetic, not load-bearing.
+`credential_type` is immutable once a profile is created (`updateProfile()` only ever touches
+`name`/`plaintext`) — a shape change means a new profile, the same way rotating a single device's own
+credential never changes its `credential_type` either.
+
+### API — CRUD + the device-routes "apply" contract
+
+`GET/POST /api/credential-profiles` and `PUT/DELETE /api/credential-profiles/[id]` — plain CRUD,
+admin-gated via `lib/rbac.js` on **every** method including GET, matching `GET /api/users`'s same
+posture: a profile is only ever consumed from an already admin-only flow (Add Device, credential
+rotation), so there's no viewer-facing use for the list, and erring toward the credential-adjacent
+default is cheap. Plaintext is always built server-side from typed fields (`buildProfilePlaintext()`)
+— never trusted pre-built from the client — so a profile's stored shape can never disagree with its
+declared `credential_type`. `PUT` treats rotation as DETECTED (any secret-bearing field present) not
+an explicit flag, so a `{name}`-only body renames without touching the secret.
+
+`POST /api/devices` and `PUT /api/devices/[id]` both gained two optional body fields:
+- **`credential_profile_id`** — applies a saved profile. Resolved via `getProfilePlaintext()`,
+  validated with `isValidUuid()`, and its `credentialType` is checked against the resolved
+  vendor+method's own `config.credentialType` **before any write** — a mismatch 400s rather than
+  silently storing a credential shaped for the wrong transport. Checked first, ahead of the existing
+  manual-`credential`-field path and the legacy Forcepoint-only `smc_api_key` field, in both routes.
+- **`save_as_profile_name`** — the inverse: save a freshly-typed (not profile-applied) credential as
+  a new named profile in the same request, so an operator doesn't have to visit Settings first.
+  Best-effort and **non-fatal** — a failure (almost always a duplicate name) never fails the device
+  create/rotation that already succeeded; it's surfaced instead as a `warning` string folded into the
+  200/201 JSON response (`{...device, warning}`) rather than an error status. Skipped entirely when
+  `credential_profile_id` was used instead (`usedExistingProfile` — nothing new to save).
+
+### UI
+
+**Built:** `components/settings/CredentialProfilesPanel.js` — a new Settings tab (`app/(dashboard)/
+settings/page.js`'s tab array gained `{key: 'profiles', label: 'Credential Profiles'}`, rendered only
+`{isAdminUser && ...}`, same pattern as the Updates tab) — full CRUD (create, rename, rotate-secret
+inline-expand, delete), structurally mirroring `UsersPanel.js`: fetch-on-mount list, the same
+visible/loadError 403-vs-network-failure distinction (a genuine `fetch()` rejection keeps the panel
+visible with a Retry button instead of rendering as nothing, which would be indistinguishable from
+the deliberate viewer-role hide), no separate client-side role check beyond reflecting the API's own
+`isAdmin()` gate.
+
+`components/devices/DeviceForm.js` (Add Device) and `components/devices/CredentialForm.js` (rotate an
+existing device's credential) both gained a "Use Saved Profile" `<select>` — a default
+"— Enter credentials manually —" option plus every profile matching the form's currently-resolved
+`config.credentialType`, refetched once on mount (`GET /api/credential-profiles`, silently empty on a
+403/network error rather than showing an error banner — this UI is only ever reachable by an admin
+already). Picking one hides the manual secret/username/password/enable-password inputs entirely (the
+form submits `credential_profile_id` instead of `credential`/`credential_type`) and, in `DeviceForm`,
+invalidates any prior Forcepoint connectivity test the same way every other credential-relevant field
+already does. Switching vendor/access-method (`DeviceForm`'s `resetCredentialInputs()`) or auth mode
+(both files) resets the picker back to manual — a profile picked for one `credential_type` is not
+valid after the shape changes.
+
+**Deliberately scoped OFF Forcepoint's `smc_api` shape** — gated on `!isSmc` in `DeviceForm.js` /
+`!isSecretShape` in `CredentialForm.js`. Reason: Forcepoint's Add Device Save button is gated on a
+successful client-side "Test Connectivity" call (`handleTest`), which POSTs the raw secret from
+browser state to `/api/devices/test-smc` to prove it works *before* Save is enabled — a saved
+profile's plaintext deliberately never reaches the browser, so there is nothing for that existing
+test flow to test against. Re-plumbing the test-gate to work against an opaque profile id was out of
+scope here (and matches the original request, which was explicitly "either via ssh or rest api", not
+SMC) — a Forcepoint operator can still create/apply nothing via the picker, but can still save a
+freshly-typed-and-tested SMC key as a new profile via the "save as profile" checkbox (useful for a
+later manual lookup even though this UI can't apply it back). Both forms also gained that same "save
+these credentials as a reusable profile" checkbox + name field on the manual-entry path, wired to the
+`save_as_profile_name` field described above.
 
 ---
 

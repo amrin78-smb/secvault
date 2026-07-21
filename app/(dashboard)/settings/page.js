@@ -6,11 +6,13 @@ import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Ca
 import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
+import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import pkg from '../../../package.json';
 
 const TABS = [
   { key: 'general', label: 'General' },
   { key: 'users', label: 'Users' },
+  { key: 'profiles', label: 'Credential Profiles' },
   { key: 'updates', label: 'Updates' },
   { key: 'about', label: 'About' },
 ];
@@ -255,6 +257,8 @@ export default function SettingsPage() {
       )}
 
       {activeTab === 'users' && <UsersPanel />}
+
+      {activeTab === 'profiles' && isAdminUser && <CredentialProfilesPanel />}
 
       {activeTab === 'updates' && isAdminUser && (
         <div style={{ maxWidth: 576 }}>

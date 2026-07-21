@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { setCredential } from '../../../lib/credStore';
+import { getProfilePlaintext, createProfile } from '../../../lib/credentialProfiles';
+import { isValidUuid } from '../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
@@ -72,6 +74,8 @@ export async function POST(request) {
     smc_api_key,
     credential,
     credential_type,
+    credential_profile_id,
+    save_as_profile_name,
   } = body || {};
 
   const vendorSlug = vendor || 'forcepoint';
@@ -110,12 +114,34 @@ export async function POST(request) {
   }
 
   // Resolve the credential to store (validated BEFORE the insert so a bad
-  // credential_type can never leave a half-created device behind).
-  // `credential` + `credential_type` is the generic path; `smc_api_key` is the
-  // original Forcepoint-only field, kept for backward compatibility.
+  // credential_type / profile mismatch can never leave a half-created device
+  // behind). Three input shapes, checked in order:
+  //   credential_profile_id → apply a saved lib/credentialProfiles.js profile
+  //   credential + credential_type → the generic manual-entry path
+  //   smc_api_key → the original Forcepoint-only field, kept for backward compat
   let credPlaintext = null;
   let credType = null;
-  if (credential) {
+  let usedExistingProfile = false;
+  if (credential_profile_id) {
+    if (!isValidUuid(credential_profile_id)) {
+      return NextResponse.json({ error: 'Invalid credential_profile_id' }, { status: 400 });
+    }
+    const profile = await getProfilePlaintext(credential_profile_id, pool);
+    if (!profile) {
+      return NextResponse.json({ error: 'Credential profile not found' }, { status: 400 });
+    }
+    if (profile.credentialType !== config.credentialType) {
+      return NextResponse.json(
+        {
+          error: `Selected profile is a '${profile.credentialType}' credential, but ${vendorSlug}/${method} needs '${config.credentialType}'`,
+        },
+        { status: 400 }
+      );
+    }
+    credPlaintext = profile.plaintext;
+    credType = config.credentialType;
+    usedExistingProfile = true;
+  } else if (credential) {
     if (!CREDENTIAL_TYPES.includes(credential_type)) {
       return NextResponse.json(
         { error: `credential_type must be one of: ${CREDENTIAL_TYPES.join(', ')}` },
@@ -169,7 +195,29 @@ export async function POST(request) {
       await setCredential(device.id, credType, credPlaintext, pool);
     }
 
-    return NextResponse.json(device, { status: 201 });
+    // Optional "save these as a new profile for next time" — only meaningful
+    // for freshly-typed credentials (usedExistingProfile means there was
+    // nothing new to save). Best-effort: a failure here (most commonly a
+    // duplicate name) must never fail the device creation that already
+    // succeeded — surfaced as a `warning` field instead.
+    let warning;
+    const trimmedProfileName = typeof save_as_profile_name === 'string' ? save_as_profile_name.trim() : '';
+    if (trimmedProfileName && credPlaintext && !usedExistingProfile) {
+      try {
+        const dupe = await pool.query('SELECT id FROM credential_profiles WHERE name = $1', [
+          trimmedProfileName,
+        ]);
+        if (dupe.rows.length > 0) {
+          warning = `Device saved, but a credential profile named "${trimmedProfileName}" already exists — not overwritten.`;
+        } else {
+          await createProfile({ name: trimmedProfileName, credentialType: credType, plaintext: credPlaintext }, pool);
+        }
+      } catch (err) {
+        warning = `Device saved, but the credential profile could not be saved: ${err.message}`;
+      }
+    }
+
+    return NextResponse.json(warning ? { ...device, warning } : device, { status: 201 });
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to create device' }, { status: 500 });
   }

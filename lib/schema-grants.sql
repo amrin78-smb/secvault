@@ -73,3 +73,9 @@ CREATE OR REPLACE VIEW users_readonly AS
 
 GRANT SELECT ON users_readonly TO claude_readonly, nocvault_readonly;
 -- Exception: device_credentials — NEVER grant to these users
+-- Exception: credential_profiles — holds encrypted secret material (the
+-- same encrypted_data/iv shape as device_credentials), NEVER grant to
+-- these users. No readonly view either, unlike settings/users above —
+-- the whole row is credential-adjacent, there is no "safe subset" column
+-- to expose (its own `username` column is non-secret but not worth a
+-- view for on its own).
