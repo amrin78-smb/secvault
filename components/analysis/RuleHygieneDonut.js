@@ -99,7 +99,7 @@ export default function RuleHygieneDonut({ categories = [], total = 0, size = 14
         </div>
       </div>
 
-      {total > 0 && (
+      {categories.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: '1 1 160px' }}>
           {categories.map((c) => (
             <div key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>

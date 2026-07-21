@@ -170,65 +170,9 @@ export async function PUT(request, { params }) {
     }
   }
 
-  // ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: a vendor and/or
-  // mgmt_method change was accepted with no credential-cleanup step at all
-  // when the caller didn't ALSO supply a fresh credential in the same
-  // request (a legitimate call shape — the existing credential-rotation UI
-  // never sends vendor/mgmt_method, but nothing stops a direct API call
-  // from changing method without rotating credentials). credStore.
-  // setCredential() only ever cleans up rows for the credential_type it is
-  // actively writing — it never touches a device's OTHER credential_type
-  // rows. Concrete failure: change a device from vendor=fortinet/
-  // mgmt_method=ssh to vendor=paloalto/mgmt_method=ssh (both resolve to
-  // credential_type 'ssh') with no new credential supplied — the adapter
-  // dispatch changes to PaloaltoSshAdapter, but getCredential(deviceId,
-  // 'ssh', pool) silently returns the STALE Fortinet SSH username/password,
-  // which the new adapter would then try to use against a Palo Alto device.
-  // Fixed: whenever the vendor or method actually changes, delete every
-  // credential_type row for this device OTHER than the type the device will
-  // need going forward (`config.credentialType`, already resolved above) —
-  // this device can only ever need exactly one credential_type at a time,
-  // so anything else is now-stale by definition. A credential supplied in
-  // THIS same request for the new type is written afterwards by the
-  // existing setCredential() call below, unaffected by this cleanup.
-  if (methodChanged || (rest.vendor !== undefined && rest.vendor !== existing.vendor)) {
-    try {
-      await pool.query(
-        'DELETE FROM device_credentials WHERE device_id = $1 AND credential_type <> $2',
-        [params.id, config.credentialType]
-      );
-    } catch (err) {
-      return NextResponse.json(
-        { error: `Failed to clean up stale credentials for the new vendor/method: ${err.message}` },
-        { status: 500 }
-      );
-    }
-  }
-
-  // ⛔ Bug fixed 2026-07-18, found in a bug-sweep pass: a VENDOR change (not
-  // just a method change within the same vendor) left the previous vendor's
-  // network_objects/object_analysis_results rows behind indefinitely — the
-  // same staleness class as the device_credentials gap fixed above, just
-  // never given the same treatment for this newer feature. Gated on vendor
-  // specifically, not methodChanged: switching transport within the SAME
-  // vendor (e.g. fortinet api -> fortinet ssh) doesn't invalidate what an
-  // object catalog fundamentally IS, only a genuine vendor change does
-  // (Fortinet's addrgrp concept has no meaningful relationship to Palo
-  // Alto's address-group). object_analysis_results cascades automatically
-  // via its ON DELETE CASCADE FK on network_objects.id — no separate
-  // DELETE needed for that table. Best-effort: unlike the credential
-  // cleanup above, a failure here must not block the update (a device
-  // record change is not itself invalid just because a lower-stakes,
-  // non-secret, next-pull-self-correcting table failed to clear).
-  if (rest.vendor !== undefined && rest.vendor !== existing.vendor) {
-    try {
-      await pool.query('DELETE FROM network_objects WHERE device_id = $1', [params.id]);
-    } catch (err) {
-      console.warn(`[devices/${params.id}] failed to clear stale network_objects after vendor change: ${err.message}`);
-    }
-  }
-
-  // Resolve credential to store — validated before any write happens.
+  // Resolve credential to store — validated before any write happens,
+  // and (see the ⛔ note below) BEFORE the stale-credential cleanup DELETE
+  // too, not just before setCredential's own write.
   // credential_profile_id applies a saved lib/credentialProfiles.js profile
   // (checked first); credential + credential_type is the generic manual-entry
   // path; smc_api_key is the original Forcepoint-only field.
@@ -270,6 +214,78 @@ export async function PUT(request, { params }) {
     // Legacy Forcepoint-only field — unchanged behaviour for the live SMC device.
     credPlaintext = smc_api_key;
     credType = 'smc_api';
+  }
+
+  // ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: a vendor and/or
+  // mgmt_method change was accepted with no credential-cleanup step at all
+  // when the caller didn't ALSO supply a fresh credential in the same
+  // request (a legitimate call shape — the existing credential-rotation UI
+  // never sends vendor/mgmt_method, but nothing stops a direct API call
+  // from changing method without rotating credentials). credStore.
+  // setCredential() only ever cleans up rows for the credential_type it is
+  // actively writing — it never touches a device's OTHER credential_type
+  // rows. Concrete failure: change a device from vendor=fortinet/
+  // mgmt_method=ssh to vendor=paloalto/mgmt_method=ssh (both resolve to
+  // credential_type 'ssh') with no new credential supplied — the adapter
+  // dispatch changes to PaloaltoSshAdapter, but getCredential(deviceId,
+  // 'ssh', pool) silently returns the STALE Fortinet SSH username/password,
+  // which the new adapter would then try to use against a Palo Alto device.
+  // Fixed: whenever the vendor or method actually changes, delete every
+  // credential_type row for this device OTHER than the type the device will
+  // need going forward (`config.credentialType`, already resolved above) —
+  // this device can only ever need exactly one credential_type at a time,
+  // so anything else is now-stale by definition. A credential supplied in
+  // THIS same request for the new type is written afterwards by the
+  // existing setCredential() call below, unaffected by this cleanup.
+  //
+  // ⛔ Bug fixed 2026-07-21, found in a bug-sweep pass: this cleanup DELETE
+  // used to run BEFORE the credential_profile_id / credential resolution
+  // block above was reached — so a request that changed vendor/mgmt_method
+  // AND supplied a stale/invalid credential_profile_id would delete the
+  // device's still-working old credential row, then 400 out of the
+  // credential-validation block above, never reaching setCredential() to
+  // write the new one. There is no transaction wrapping this handler (every
+  // pool.query() call commits independently), so that DELETE was permanent
+  // with no rollback — a device left with zero device_credentials rows,
+  // discoverable only on the next Collect/Test failure. Fixed by moving the
+  // credential-resolution block (which is the thing that can still 400)
+  // above this DELETE, so every validation that can reject the request has
+  // already run before anything destructive executes.
+  if (methodChanged || (rest.vendor !== undefined && rest.vendor !== existing.vendor)) {
+    try {
+      await pool.query(
+        'DELETE FROM device_credentials WHERE device_id = $1 AND credential_type <> $2',
+        [params.id, config.credentialType]
+      );
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Failed to clean up stale credentials for the new vendor/method: ${err.message}` },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ⛔ Bug fixed 2026-07-18, found in a bug-sweep pass: a VENDOR change (not
+  // just a method change within the same vendor) left the previous vendor's
+  // network_objects/object_analysis_results rows behind indefinitely — the
+  // same staleness class as the device_credentials gap fixed above, just
+  // never given the same treatment for this newer feature. Gated on vendor
+  // specifically, not methodChanged: switching transport within the SAME
+  // vendor (e.g. fortinet api -> fortinet ssh) doesn't invalidate what an
+  // object catalog fundamentally IS, only a genuine vendor change does
+  // (Fortinet's addrgrp concept has no meaningful relationship to Palo
+  // Alto's address-group). object_analysis_results cascades automatically
+  // via its ON DELETE CASCADE FK on network_objects.id — no separate
+  // DELETE needed for that table. Best-effort: unlike the credential
+  // cleanup above, a failure here must not block the update (a device
+  // record change is not itself invalid just because a lower-stakes,
+  // non-secret, next-pull-self-correcting table failed to clear).
+  if (rest.vendor !== undefined && rest.vendor !== existing.vendor) {
+    try {
+      await pool.query('DELETE FROM network_objects WHERE device_id = $1', [params.id]);
+    } catch (err) {
+      console.warn(`[devices/${params.id}] failed to clear stale network_objects after vendor change: ${err.message}`);
+    }
   }
 
   try {

@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.17.2': [
+    'Security fix: closed a gap where an SNMP credential could be saved without properly requiring the cleartext-transmission acknowledgment for older SNMP versions.',
+    'Fixed a rare case where changing a device\'s vendor/connection method together with an invalid saved credential selection could delete the device\'s working credential instead of rejecting the change cleanly.',
+    'Fixed a data-correctness issue where running rule analysis twice at nearly the same time on the same device (e.g. an automatic collection and a manual "Run Analysis" click overlapping) could save the results from an older run over a newer one.',
+    'Several smaller fixes across today\'s SNMP monitoring and Credential Profiles features: an SNMP status badge that could look inconsistent with the numbers next to it, an SNMP config page missing its read-only restriction for non-admin users, one adapter that could lose all its data on a single failed metric instead of just the affected one, and a rule-hygiene chart that hid its legend for a clean/issue-free device instead of showing all-zero counts.',
+  ],
   '2.17.1': [
     'The SNMP Monitoring card now only shows on the Overview tab, not on every tab of a device page — it was pinned above the tab bar since before the Overview tab existed.',
     'Config changes on the Overview tab now show a High/Medium/Low Impact badge (rule/policy changes = High, NAT/VPN/admin/network config = Medium, object catalog and everything else = Low) alongside the existing Acknowledged status.',

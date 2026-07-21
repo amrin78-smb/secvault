@@ -378,7 +378,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
               <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {device.snmp_enabled ? (
+                {device.snmp_enabled || snmpSnapshot ? (
                   <Badge color="success">Enabled</Badge>
                 ) : snmpDetectedLooksConfigured ? (
                   <Badge color="warning">Detected in config</Badge>
@@ -389,7 +389,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   href={`/devices/${device.id}/snmp`}
                   style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
                 >
-                  {device.snmp_enabled ? 'Full history & config →' : 'Configure →'}
+                  {device.snmp_enabled || snmpSnapshot ? 'Full history & config →' : 'Configure →'}
                 </Link>
               </div>
             </div>

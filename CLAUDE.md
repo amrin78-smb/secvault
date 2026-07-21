@@ -2491,6 +2491,13 @@ per-device failure is logged and skipped, never fatal to the job.
 
 ### UI
 
+**⛔ Superseded 2026-07-21, later the same day — see "Device Overview Tab" → "Follow-up
+round, same day" below.** The always-visible, above-the-tab-bar placement described in this
+subsection was itself relocated a few hours later: the SNMP card now renders inside the
+`tab === 'overview'` block, not between the device info card and the tab bar. Kept below for
+the placement history (why the always-visible design was chosen in the first place), not as
+a description of current behavior.
+
 **⛔ Placement changed 2026-07-21, same day this shipped — direct user feedback.** The
 original entry point was a small "SNMP →" link at the bottom of the Rules tab, mirroring the
 pre-existing VPN link's placement exactly — but the Rules tab isn't the tab a device page
@@ -4693,6 +4700,114 @@ customer deployment.
 ### PostgreSQL via psql in PowerShell
 - `psql` can return exit code `-1` in WinRM sessions even on success (when any output goes to stderr). Accept `-1` as a success code for schema migration.
 - Set `$env:PGPASSWORD` before calling `psql` for unattended execution.
+
+---
+
+### ⚠️ Bugs Found and Fixed — full-day orchestrated sweep (2026-07-21, eighth pass)
+
+Run as a single Workflow (7 parallel dimension finders → adversarial verify-per-finding → fix grouped
+by file → personally re-reviewed the highest-stakes diffs before integrating), scoped to everything
+built in one day: Credential Profiles, SNMP Monitoring (Phase 1, all 5 vendors), the Device Overview
+Tab, and the two infrastructure fixes (in-app updater SSH path handling, the Collect Now event-loop
+freeze fix). 17 findings, all independently confirmed, all fixed same-pass.
+
+**⛔ HIGH — `PUT /api/devices/[id]` could permanently delete a device's working credential on a
+request that ultimately 400s.** The stale-`device_credentials` cleanup `DELETE` (added in an earlier
+bug-sweep pass, for a genuinely different bug) ran *before* the newer `credential_profile_id`
+resolution/validation block introduced by Credential Profiles. A vendor/method change combined with a
+stale or wrong-type `credential_profile_id` in the same request let the DELETE commit (no transaction
+wraps this handler — every `pool.query()` commits independently), then 400 out of the later validation
+check before `setCredential()` ever ran — leaving a device with zero usable credentials, silently,
+discoverable only on the next Collect/Test failure. Fixed by moving the entire credential-resolution/
+validation block ahead of the DELETE, restoring the function's own documented invariant ("validated
+BEFORE any write happens"). **Lesson**: adding a new validated-write path to a handler that already has
+an earlier, unconditional side effect requires checking whether the new validation needs to move
+earlier too — appending new logic at its "natural" spot near the related write is not automatically
+safe when something upstream already commits irreversibly.
+
+**⛔ HIGH — the SNMPv1/v2c cleartext-acknowledgment gate had a truthy-string bypass.** `PUT
+/api/devices/[id]/snmp` checked `!insecure_ack`, so a client sending `insecure_ack: "false"` (a JSON
+string, not the boolean) evaluated as truthy and sailed through the check meant to require an explicit,
+informed opt-in before storing a credential that goes out in cleartext on the wire. Fixed to
+`insecure_ack !== true` — only the literal boolean satisfies the gate now, matching the security intent
+CLAUDE.md's own "SNMP Monitoring" section describes ("the same gate is enforced SERVER-SIDE... a direct
+API call cannot bypass the warning by skipping the UI" — true again after this fix, wasn't quite true
+before it).
+
+**⛔ MEDIUM — the earlier Collect-Now freeze fix (yieldToEventLoop in `analyzeRules()`) widened a
+pre-existing, previously-narrow concurrency race into an actually-reachable one.** `runAnalysisForDevice()`
+has always been callable concurrently for the same device from two independent paths (`collectAndStore()`
+and the manual "Run Analysis" route) with no per-device lock — but before the async-yielding fix, the
+O(n²) analysis ran as one uninterrupted synchronous block, which incidentally made the window for a
+second concurrent call to interleave its own DELETE+INSERT vanishingly small. Making `analyzeRules()`
+yield to the event loop every 25 iterations reopened that window for real: two concurrent runs could now
+each reach BEGIN/DELETE/INSERT/COMMIT while the other was still mid-computation, and whichever committed
+second would silently overwrite the other's just-committed findings with results computed from a
+possibly-stale rule snapshot. Fixed with a `pg_advisory_xact_lock(hashtext(device_id))` inside the
+transaction — the exact same fix `lib/engines/versionMatcher.js` already applies for the identical race
+on `device_cve_assessments`. **Lesson**: a fix that changes *when* control yields (not *what* gets
+computed) can still change correctness, by changing the concurrency exposure of code that was already
+reachable from multiple call sites — re-check every performance/responsiveness fix for this, not just
+its own stated behavior-preservation claim.
+
+**Credential Profiles — two more real bugs**: (1) `app/api/credential-profiles/route.js`'s
+duplicate-name check (`SELECT` then `INSERT`, not atomic) let two concurrent same-name creates both pass
+the pre-check and race to the real `UNIQUE` constraint — the losing request got a raw Postgres
+constraint-violation message as a 500 instead of the intended clean 409; fixed by catching
+`err.code === '23505'` and translating it (the sibling `[id]/route.js` PUT rename path has the identical
+gap, flagged but not fixed in this pass — same fix needed there on a follow-up). (2)
+`CredentialProfilesPanel.js`'s rotate-secret form always reset to SNMPv3 defaults regardless of the
+profile's actual stored version, so rotating an existing v1/v2c SNMP profile showed the wrong fields
+(v3 username/auth/priv instead of the community-string field it needed) — fixed by detecting the stored
+version from the already-fetched, non-secret profile metadata (a v3 profile always has a `username`, v1/
+v2c never does) and defaulting the form accordingly.
+
+**SNMP credential/adapter correctness, five findings**: (1) `lib/credentialProfiles.js`'s SNMPv3
+`buildProfilePlaintext()` branch didn't validate `authProtocol`/`privProtocol` against the real enum or
+enforce "priv requires auth" the way the device-route builder already did, so a profile could be saved
+with an inconsistent shape (e.g. `privPassword` set with no `authPassword` at all) — fixed to mirror the
+device route's construction logic exactly. (2) `lib/adapters/snmpCredential.js`'s `parseSnmpCredential()`
+could silently accept that same inconsistent shape and return a half-populated credential (auth password
+present, protocol null) — now throws a clear, secret-free error instead of letting `snmpClient.js`
+silently downgrade the session to `noAuthNoPriv`. (3) `SnmpConfigForm.js`'s cleartext-ack checkbox never
+reset after a successful save, so a stale acknowledgment could carry into a later, unrelated community-
+string entry in the same session, submitting `insecure_ack: true` without a fresh click — fixed to reset
+alongside the other secret fields. (4) `lib/snmpClient.js`'s outer hard-timeout margin was a flat 3000ms,
+but net-snmp's own retry cycle (1 retry, no backoff growth) needs up to `timeoutMs * 2` to naturally
+exhaust — so the "backstop for the rare case net-snmp's callback never fires" outer race was actually
+firing mid-retry on every ordinary unreachable-device timeout. Fixed to scale the margin with
+`timeoutMs * DEFAULT_RETRIES` so the backstop only ever fires after net-snmp's own natural sequence would
+have completed. (5) Cisco ASA's and Forcepoint's `getSnmpMetrics()` ran their multiple `walkSubtree()`
+calls (CPU/memory/session tables) with no per-table try/catch, so one failing table walk threw and
+discarded every ALREADY-obtained metric (including uptime, which had already succeeded) — a poll that
+should have degraded to partial data (per `interface.js`'s own contract: null for an unresolved OID, not
+a thrown error for the whole call) instead produced nothing at all. Fixed to match the pattern already
+correct in `lib/adapters/paloalto/index.js` — each table walk gets its own try/catch, defaulting to an
+empty result on failure.
+
+**UI-consistency and doc-accuracy gaps**: (1) `app/(dashboard)/devices/[id]/snmp/page.js` had no RBAC
+gating at all — a viewer saw the live Save/Test SNMP config form, which would 403 on submit, instead of
+a read-only view (every other write surface in this session's earlier RBAC pass gates this way; this
+page, built during the SNMP feature the same day, was missed). Fixed by gating `SnmpConfigForm` behind
+the same `canWrite` convention used elsewhere. (2) The always-visible SNMP summary card on
+`devices/[id]/page.js` could show a self-contradicting state — "Not Configured" badge next to real,
+already-polled CPU/Memory/Session numbers — because the badge only checked `device.snmp_enabled` while
+the content below it also treated a present `snmp_metric_snapshots` row as live (reachable via the
+on-demand Test Connectivity flow, which inserts a snapshot without ever setting `snmp_enabled`). Fixed
+to treat either signal as "enabled" for the badge/link. (3) `RuleHygieneDonut.js`'s legend was gated on
+`total > 0`, so a genuinely clean ruleset (zero findings of any kind) showed no legend at all —
+contradicting CLAUDE.md's own documented guarantee that a zero-count category "still appears in the
+legend at 0." Fixed to gate on the category list's own length instead of the total count. (4) Two stale
+comments corrected: `OverviewRuleHygieneCard.js`'s header claimed it was "not wired into any page yet"
+(it already is, on the Overview tab), and the "SNMP Monitoring" CLAUDE.md section's own UI subsection
+still described the SNMP card's original always-visible-above-the-tab-bar placement without noting it
+was superseded by the same-day move into the Overview tab — both corrected/marked.
+
+**Result:** 16 files touched, every fix `node --check`ed individually during the fix phase, the
+highest-stakes diffs (the credential-deletion ordering fix, the cleartext-ack bypass fix, and the
+advisory-lock concurrency fix) personally re-reviewed against their findings before integrating,
+`npm run build` clean end to end (after `npm ci` — `net-snmp` was declared in `package.json` but not yet
+installed in this environment's `node_modules`, unrelated to the sweep itself).
 
 ---
 

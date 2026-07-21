@@ -156,7 +156,8 @@ export async function PUT(request, { params }) {
   // every other vendor — snmp_host is REQUIRED for Forcepoint before
   // enabling SNMP.
   const effectiveHost = host !== undefined ? host : existing.snmp_host;
-  if (enabled === true && existing.vendor === 'forcepoint' && !effectiveHost) {
+  const effectiveEnabled = enabled !== undefined ? Boolean(enabled) : existing.snmp_enabled;
+  if (effectiveEnabled && existing.vendor === 'forcepoint' && !effectiveHost) {
     return NextResponse.json(
       {
         error:
@@ -183,7 +184,7 @@ export async function PUT(request, { params }) {
     }
     credPlaintext = profile.plaintext;
   } else if (snmp_version) {
-    if (snmp_version !== 'v3' && !insecure_ack) {
+    if (snmp_version !== 'v3' && insecure_ack !== true) {
       return NextResponse.json(
         {
           error:

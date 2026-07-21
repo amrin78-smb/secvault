@@ -107,6 +107,7 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
       setAuthPassword('');
       setPrivPassword('');
       setSelectedProfileId('');
+      setInsecureAck(false);
       setTestResult(null);
       // Refreshes the server-rendered `initial` prop (in particular
       // hasCredential) so the "Test Connectivity" button below appears

@@ -4,10 +4,10 @@ import Card, { CardBody } from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import RuleHygieneDonut from '../analysis/RuleHygieneDonut';
 
-// Overview-tab card for the per-device page (app/(dashboard)/devices/[id]/page.js).
+// Overview-tab card for the per-device page (app/(dashboard)/devices/[id]/page.js), which
+// imports and renders this component on its Overview tab.
 // Standalone async server component, same "queries its own DB directly" convention as
-// components/dashboard/ConfigChangesWidget.js -- not wired into any page yet, a separate
-// integration pass does that.
+// components/dashboard/ConfigChangesWidget.js.
 //
 // The 6 donut categories below are 5 of the 10 real rule_analysis_results.finding_type
 // values (unused/shadow/redundant/any_any/log_disabled -- see lib/engines/ruleAnalysis.js,

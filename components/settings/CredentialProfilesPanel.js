@@ -454,9 +454,21 @@ export default function CredentialProfilesPanel() {
     }
   }
 
-  function startRotate(profileId) {
-    setRotatingId(profileId);
-    setRotateFields(emptyFields());
+  function startRotate(profile) {
+    setRotatingId(profile.id);
+    const fields = emptyFields();
+    // emptyFields() defaults snmpVersion to 'v3', which would always show the
+    // v3 username/auth fields instead of the Community String field a v1/v2c
+    // profile actually needs to rotate. There's no snmp_version column to
+    // read (the version lives only inside the encrypted plaintext), but
+    // lib/credentialProfiles.js's buildProfilePlaintext only ever stores a
+    // `username` for v3 -- so an snmp profile with no `username` metadata
+    // (already fetched via listProfiles) can't be v3. Default those to v2c
+    // so the right field renders; the version dropdown remains editable.
+    if (profile.credential_type === 'snmp' && !profile.username) {
+      fields.snmpVersion = 'v2c';
+    }
+    setRotateFields(fields);
     setRotateStatus('');
   }
 
@@ -564,7 +576,7 @@ export default function CredentialProfilesPanel() {
                         </Button>
                         <Button
                           variant="secondary"
-                          onClick={() => (rotatingId === p.id ? cancelRotate() : startRotate(p.id))}
+                          onClick={() => (rotatingId === p.id ? cancelRotate() : startRotate(p))}
                         >
                           {rotatingId === p.id ? 'Cancel' : 'Rotate Secret'}
                         </Button>

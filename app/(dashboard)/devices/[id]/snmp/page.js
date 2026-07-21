@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../../../api/auth/[...nextauth]/route';
+import { isAdmin } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
 import PageHeader from '../../../../../components/ui/PageHeader';
 import Badge from '../../../../../components/ui/Badge';
@@ -95,6 +98,13 @@ export default async function DeviceSnmpPage({ params }) {
     return notFound();
   }
 
+  // Server-side enforces admin-only via lib/rbac.js's isAdmin() on the
+  // PUT/test routes below. Hiding the write form for a viewer is UI
+  // consistency, not the real gate -- same convention as
+  // devices/[id]/page.js's canWrite / changes/page.js's canWrite.
+  const session = await getServerSession(authOptions);
+  const canWrite = isAdmin(session);
+
   const [history, hasCredential, configRow] = await Promise.all([
     getSnmpHistory(pool, device.id),
     hasSnmpCredential(pool, device.id),
@@ -184,17 +194,24 @@ export default async function DeviceSnmpPage({ params }) {
               </p>
             </div>
           )}
-          <SnmpConfigForm
-            deviceId={device.id}
-            vendor={device.vendor}
-            initial={{
-              snmpEnabled: device.snmp_enabled,
-              snmpHost: device.snmp_host,
-              snmpPort: device.snmp_port,
-              hasCredential,
-            }}
-            detected={snmpDetectedLooksConfigured}
-          />
+          {canWrite ? (
+            <SnmpConfigForm
+              deviceId={device.id}
+              vendor={device.vendor}
+              initial={{
+                snmpEnabled: device.snmp_enabled,
+                snmpHost: device.snmp_host,
+                snmpPort: device.snmp_port,
+                hasCredential,
+              }}
+              detected={snmpDetectedLooksConfigured}
+            />
+          ) : (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
+              Host: <code className="mono">{device.snmp_host || '—'}{device.snmp_port ? `:${device.snmp_port}` : ''}</code>
+              {' · '}Contact an administrator to change SNMP configuration.
+            </p>
+          )}
         </CardBody>
       </Card>
     </div>

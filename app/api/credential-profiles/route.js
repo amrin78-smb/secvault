@@ -123,6 +123,13 @@ export async function POST(request) {
     );
     return NextResponse.json({ profile }, { status: 201 });
   } catch (err) {
+    // A concurrent request can slip past the pre-check SELECT above before either
+    // INSERT commits — the DB's own UNIQUE constraint is the real backstop. Translate
+    // that race into the same clean 409 the pre-check path returns, rather than
+    // leaking a raw Postgres constraint-violation message as a 500.
+    if (err.code === '23505') {
+      return NextResponse.json({ error: 'A profile with that name already exists' }, { status: 409 });
+    }
     return NextResponse.json(
       { error: err.message || 'Failed to create credential profile' },
       { status: 500 }
