@@ -308,28 +308,38 @@ if ($deployKey -ne $deployKeyMachineWide) {
 # nested-quoting scheme actually survives all three intact.
 $knownHostsPath = Join-Path $env:TEMP 'secvault-update-known_hosts'
 
-# ⛔ Diagnostic-only addition (2026-07-21): a manual, interactive `ssh -v`
-# test against this exact $deployKey/$sshCommand shape (as the admin account)
-# authenticated cleanly with zero warnings -- proving the key file and its
-# ACL are NOT the problem. Yet the SAME script, invoked by the SYSTEM-run
-# scheduled task ("Update Now" in-app), failed with "Identity file ... not
-# accessible: No such file or directory" followed by "Permission denied
-# (publickey)". Since the failure is specific to the SYSTEM execution
-# context and does not reproduce interactively, the next SYSTEM-triggered
-# run needs to self-report enough to diagnose it without another back-and-
-# forth: -v gives ssh's own real protocol-level diagnostic (why it thinks
-# the identity file is unusable), and logging the resolved account-context
-# values below rules in/out a profile-not-loaded cause (SYSTEM's
-# $env:TEMP/$env:USERPROFILE not resolving the way this script assumes,
-# e.g. containing a space that would break the naive space-split
-# core.sshCommand parsing this file's own comment above already flags as a
-# fragile assumption). Revert the -v (and this logging block) once the real
-# cause is confirmed and fixed -- this is intentionally noisier than the
-# steady-state script should be.
-Write-Log "  [DIAG] Deploy key resolved to: $deployKey"
-Write-Log "  [DIAG] env:TEMP=$env:TEMP  env:USERPROFILE=$env:USERPROFILE"
-Write-Log "  [DIAG] knownHostsPath=$knownHostsPath"
-$sshCommand = "ssh -v -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
+# ⛔ Root cause found 2026-07-21, via a diagnostic -v pass captured from a
+# real SYSTEM-scheduled run (this file's own git history has the temporary
+# diagnostic block that produced it). This was never a key, ACL, or
+# profile-loading problem -- it's that bare "ssh" is PATH-resolved, and
+# resolves to a DIFFERENT BINARY depending on which account's PATH is in
+# effect:
+#   - An interactive admin's PATH resolves "ssh" to Windows' own OpenSSH
+#     client (C:\Windows\System32\OpenSSH\ssh.exe -- "OpenSSH_for_Windows
+#     9.5p1, LibreSSL", reads %USERPROFILE%\.ssh\config). This handles a
+#     native Windows path like C:\ProgramData\...\secvault_deploy passed to
+#     -i correctly -- confirmed live, authenticated cleanly with zero
+#     warnings.
+#   - The SYSTEM-scheduled task's PATH instead resolves "ssh" to GIT'S OWN
+#     BUNDLED ssh.exe (MSYS2-based -- "OpenSSH_10.3p1, OpenSSL", reads
+#     /etc/ssh/ssh_config, an entirely separate build). Confirmed live via
+#     -v: it printed "Identity file ... not accessible" for our -i path and
+#     NEVER attempted it as a candidate at all -- it silently fell straight
+#     to its own default identities (id_rsa/id_ecdsa/id_ed25519 under the
+#     SYSTEM profile, none of which exist), then reported "No more
+#     authentication methods to try." The machine-wide key, its ACL, and
+#     $env:TEMP/$env:USERPROFILE were all confirmed fine in the same pass --
+#     none of that was ever the problem.
+# Fix: stop relying on PATH resolution entirely -- invoke Windows' own
+# OpenSSH client by its full, deterministic path, so both the interactive
+# and SYSTEM-scheduled contexts use the SAME, known-working binary
+# regardless of which account's PATH ordering would otherwise pick the
+# other one. Falls back to bare "ssh" (prior behavior) if that exact path
+# doesn't exist on some future install, rather than hard-failing here --
+# the identical rationale as this file's other install-path checks.
+$win32Ssh = 'C:\Windows\System32\OpenSSH\ssh.exe'
+$sshBinary = if (Test-Path $win32Ssh) { $win32Ssh } else { 'ssh' }
+$sshCommand = "$sshBinary -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
 
 # -----------------------------------------------------------------------
 # 1. Stop SecVault-App
