@@ -307,7 +307,29 @@ if ($deployKey -ne $deployKeyMachineWide) {
 # script cannot be executed/tested outside a real Windows host to verify a
 # nested-quoting scheme actually survives all three intact.
 $knownHostsPath = Join-Path $env:TEMP 'secvault-update-known_hosts'
-$sshCommand = "ssh -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
+
+# ⛔ Diagnostic-only addition (2026-07-21): a manual, interactive `ssh -v`
+# test against this exact $deployKey/$sshCommand shape (as the admin account)
+# authenticated cleanly with zero warnings -- proving the key file and its
+# ACL are NOT the problem. Yet the SAME script, invoked by the SYSTEM-run
+# scheduled task ("Update Now" in-app), failed with "Identity file ... not
+# accessible: No such file or directory" followed by "Permission denied
+# (publickey)". Since the failure is specific to the SYSTEM execution
+# context and does not reproduce interactively, the next SYSTEM-triggered
+# run needs to self-report enough to diagnose it without another back-and-
+# forth: -v gives ssh's own real protocol-level diagnostic (why it thinks
+# the identity file is unusable), and logging the resolved account-context
+# values below rules in/out a profile-not-loaded cause (SYSTEM's
+# $env:TEMP/$env:USERPROFILE not resolving the way this script assumes,
+# e.g. containing a space that would break the naive space-split
+# core.sshCommand parsing this file's own comment above already flags as a
+# fragile assumption). Revert the -v (and this logging block) once the real
+# cause is confirmed and fixed -- this is intentionally noisier than the
+# steady-state script should be.
+Write-Log "  [DIAG] Deploy key resolved to: $deployKey"
+Write-Log "  [DIAG] env:TEMP=$env:TEMP  env:USERPROFILE=$env:USERPROFILE"
+Write-Log "  [DIAG] knownHostsPath=$knownHostsPath"
+$sshCommand = "ssh -v -i $deployKey -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsPath -o BatchMode=yes"
 
 # -----------------------------------------------------------------------
 # 1. Stop SecVault-App
