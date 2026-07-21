@@ -827,6 +827,25 @@ The predicate engine code should not need to change for new CVEs.
   treatment, since CIDR-aware SET equality is a harder bipartite-matching problem once either side has
   more than one item, and a wrong `redundant` finding (suggesting a rule be deleted) is worse than a
   wrong `shadow` finding — flagged as an accepted, un-done follow-up rather than guessed at.
+- **⛔ `analyzeRules()` was blocking the entire app during "Collect Now" — fixed 2026-07-21, reported
+  directly by a user ("clicking Collect makes the app hang sometimes... the whole app, other pages
+  freeze too").** Root cause: this file runs FOUR separate O(n²) passes over the ruleset in one
+  uninterrupted synchronous block (shadow, redundant, correlation, reorder_candidate — up to ~4
+  million pairwise comparisons for a device near the 1000-rule cap), and SecVault is one Node.js
+  process serving every user off a single event loop — nothing was wrong with WHAT was computed, only
+  that nothing ever yielded control back to it while computing. Only showed up on devices with a
+  large-ish ruleset (explaining "sometimes") and froze every other page/user at once (explaining "the
+  whole app"), not just the collecting device's own request. Fixed: `analyzeRules()` is now `async`,
+  and the outer pairwise loop calls a new `yieldToEventLoop()` (`setImmediate`-based) every 25
+  iterations — this only changes WHEN control returns to the event loop, never the iteration order or
+  any computed finding. Verified behavior-preserving by diffing this file's pre-fix vs. post-fix output
+  on a 57-rule synthetic set (with a planted shadow/redundant/correlation/reorder_candidate/any_any/
+  risky_service/log_disabled/disabled-rule case each) AND a 400-rule randomized set — byte-identical
+  findings both times. `runAnalysisForDevice()`'s single call site now `await`s it; no other caller
+  exists in the repo (`analyzeRules` is exported but only ever consumed via that one wrapper).
+  `lib/engines/objectUsage.js`'s transitive-closure loop is a smaller, less-certain version of the same
+  risk on devices with very large object catalogs — flagged as the next place to look if a
+  large-object-catalog device ever shows this same symptom; not changed in this pass.
 
 ### Rule Analysis Dashboard (`lib/engines/riskScore.js`)
 

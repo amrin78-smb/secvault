@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.14.1': [
+    'Fixed a real bug: clicking "Collect Now" on a firewall with a larger ruleset could freeze the entire app — every page, every user — for as long as that one collection\'s analysis took.',
+    'The fix makes that analysis pause periodically to let other requests through while it runs, instead of running as one uninterrupted block. Nothing about the analysis itself changed — same rule findings, just no longer freezing the app while producing them.',
+  ],
   '2.14.0': [
     'Added Credential Profiles: save a reusable username/password or API key bundle once under a name (Settings → Credential Profiles), then apply it when adding new devices or rotating an existing device\'s credentials instead of retyping the same login every time.',
     'A saved profile works across every vendor that uses the same connection type (e.g. any SSH-managed firewall, or any REST-API-managed firewall), so one profile can cover multiple devices that share a login.',
