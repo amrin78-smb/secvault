@@ -268,6 +268,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid()
 | `audit_findings` | Per-device compliance results (pass/fail/warning/na), DELETE+reinsert per device per run like `rule_analysis_results` | 7 ✅ |
 | `fleet_dashboard_snapshots` | One row per calendar day (`snapshot_date` UNIQUE), fleet-wide CVE severity counts + compliance scores — feeds the main Dashboard's day-over-day deltas, populated by a daily `engine-worker.js` job | Dashboard Rebuild ✅ |
 | `credential_profiles` | Reusable named credential bundles (`credential_type`-scoped, not vendor-scoped), copied into a device's `device_credentials` at apply-time — no FK, no live reference. Excluded from `claude_readonly`/`nocvault_readonly` entirely, same as `device_credentials` | Credential Profiles ✅ |
+| `snmp_metric_snapshots` | Polled SNMP metric snapshots (CPU/memory/session-count/uptime) — only successful polls insert a row, same lifecycle as `vpn_session_snapshots` | SNMP Monitoring ✅ |
 | `advisory_signatures` / `device_cve_log_hits` | Exploitation correlation | 8 (not yet created) |
 
 Tables marked "not yet created" are part of the full architecture (see repo root architecture doc in project history) and will be added via new `CREATE TABLE IF NOT EXISTS` statements in their respective phases — do not pre-create empty tables for features that are not yet implemented.
@@ -570,6 +571,17 @@ confirming XML-API rule collection was never affected by this SSH-specific bug.
 ### Core Rule
 **NEVER SSH directly to Forcepoint engines.** Always go through the SMC REST API on `:8082`.
 The SMC is the management plane — all operations happen there.
+
+**⛔ One deliberate, documented exception: SNMP.** Forcepoint SNMP polls engine IPs
+directly (deliberate exception to the SMC-only rule — SNMP only, not SSH/config/rules).
+NGFW engines each run their own SNMP agent; the SMC does not proxy or aggregate engine
+metrics, so there is no way to reach per-engine CPU/memory/session data through the SMC
+REST API at all. `getSnmpMetrics()` (`lib/adapters/forcepoint/index.js`) is the ONLY
+method on this adapter that connects anywhere other than the SMC — it opens a UDP SNMP
+session straight to `devices.snmp_host` (a NEW column, required for this vendor — see
+"SNMP Monitoring" below). Every other method (`testConnectivity`/`getVersion`/
+`getRules`/`getConfig`) is completely unchanged and still goes exclusively through the
+SMC. Do not widen this exception to any other protocol or any other adapter method.
 
 ### Authentication
 
@@ -2338,6 +2350,156 @@ freshly-typed-and-tested SMC key as a new profile via the "save as profile" chec
 later manual lookup even though this UI can't apply it back). Both forms also gained that same "save
 these credentials as a reusable profile" checkbox + name field on the manual-entry path, wired to the
 `save_as_profile_name` field described above.
+
+---
+
+## SNMP Monitoring (Phase 1, added 2026-07-21)
+
+Answers the "SNMP monitoring and metrics collection" gap identified against ManageEngine
+Firewall Analyzer — periodically polls each firewall's own SNMP agent for CPU/memory/
+active-session-count/uptime and stores a timestamped snapshot, shown as gauges + `recharts`
+trend lines on a new per-device tab. Modeled directly on the existing VPN active-session-
+polling feature (`lib/engines/vpnSummary.js` + `vpn_session_snapshots` +
+`services/engine-worker.js`'s `vpn-session-poll` job) — same "optional adapter capability,
+only a successful poll writes a row, no retention job yet" shape, extended to SNMP.
+
+**Phase 1 scope** (explicit, scoped narrowly per this app's own "don't over-build" discipline):
+Cisco ASA, Fortinet, Palo Alto, Forcepoint, Sangfor (generic-only). **Check Point is
+deliberately deferred to Phase 2** — not started, not stubbed.
+
+### Credential — a SEPARATE type from the device's management-plane credential
+
+New `device_credentials`/`credential_profiles` `credential_type`: `'snmp'`
+(`components/devices/vendorMeta.js`'s `CREDENTIAL_TYPES`). Deliberately never routed through
+`resolveAccessMethod()`/`buildCredentialPlaintext()` (vendorMeta.js) or `DeviceForm.js`/
+`CredentialForm.js` — SNMP is an orthogonal, optional MONITORING credential, not part of the
+vendor+`mgmt_method` dispatch those drive, and a device's SNMP config doesn't change when its
+management transport does. Applied through its own dedicated route,
+`PUT /api/devices/[id]/snmp` (`components/devices/SnmpConfigForm.js`), separately from
+`PUT /api/devices/[id]`.
+
+`lib/adapters/snmpCredential.js`'s `parseSnmpCredential(plaintext)` is the read side (mirrors
+`lib/adapters/credentials.js`'s `parseApiCredential` / `lib/adapters/sshClient.js`'s
+`parseJsonCredential`); `lib/credentialProfiles.js`'s `buildProfilePlaintext()` gained an
+`'snmp'` branch as the write side, reused by both the credential-profiles system (a named,
+reusable SNMP credential bundle, same as every other type) and `PUT /api/devices/[id]/snmp`'s
+own inline manual-entry path. Stored plaintext shapes:
+```json
+{"version":"v1"|"v2c","community":"..."}
+{"version":"v3","username":"...","authProtocol":"SHA"|"MD5"|null,"authPassword":"..."|null,"privProtocol":"AES"|"DES"|null,"privPassword":"..."|null}
+```
+
+**Security default: SNMPv3, with an explicit cleartext acknowledgment required for v1/v2c.**
+SNMPv1/v2c sends its community string in CLEARTEXT on the wire — a genuinely new risk class
+for this app (every other credential type here rides an encrypted transport: SSH, HTTPS, or
+the SMC's TLS session). The UI defaults the version picker to v3 and only reveals the "I
+understand this is sent in cleartext" checkbox for v1/v2c; **the same gate is enforced
+SERVER-SIDE** (`app/api/credential-profiles/route.js`'s POST/PUT, and
+`PUT /api/devices/[id]/snmp`) via a required `insecure_ack: true` body field whenever
+`snmp_version !== 'v3'` — a direct API call cannot bypass the warning by skipping the UI.
+
+`credential_profiles`/`device_credentials` already excluded `claude_readonly`/
+`nocvault_readonly` entirely before this feature (see "Credential Profiles" above) — SNMP
+credential rows get that same treatment automatically, no new grant work needed.
+
+### Devices table additions + target host resolution
+
+```sql
+devices.snmp_enabled BOOLEAN NOT NULL DEFAULT false
+devices.snmp_host    TEXT              -- NULL = poll via mgmt_ip (see exception below)
+devices.snmp_port    INTEGER NOT NULL DEFAULT 161
+```
+
+`snmp_host` is an OPTIONAL override for every vendor except Forcepoint, where it is
+**required**: Forcepoint devices store `smc_host` (the SMC's own address), never an engine's
+IP, and `mgmt_ip` doesn't exist on a Forcepoint row at all (it's an `smc`-connection vendor).
+`getSnmpMetrics()` on the Forcepoint adapter throws a clear, actionable error rather than
+falling back to `smc_host` if `snmp_host` is unset — SNMP-polling the SMC server itself would
+silently return nonsense (SMC-server health, not firewall-engine health) if it responded at
+all. See the Forcepoint SMC Integration section's Core Rule above for the full exception
+rationale.
+
+### `lib/snmpClient.js` — shared net-snmp session/GET/WALK wrapper
+
+Thin wrapper over the `net-snmp` npm package (added as a dependency this phase — actively
+maintained, v1/v2c/v3 support). FROZEN CONTRACT, used identically by every vendor adapter:
+`createSession(credential, host, port, timeoutMs)`, `getMetrics(session, oidMap, timeoutMs,
+host)` (GETs a flat map of scalar OIDs, tolerant of PER-OID errors — a vendor not
+implementing one OID in a set doesn't fail the whole poll), `walkSubtree(session, baseOid,
+timeoutMs, host)` (for table-indexed metrics — e.g. Cisco ASA's per-CPU-entry load table),
+`closeSession(session)`.
+
+**Every call is wrapped in an OUTER hard timeout** (`DEFAULT_TIMEOUT_MS` + a margin,
+`Promise.race`), not just `net-snmp`'s own per-request `timeout` option — `net-snmp` has
+documented edge cases (a wrong SNMPv3 auth/priv passphrase in particular) where its internal
+callback never fires at all. Without the outer race, a misconfigured v3 credential could hang
+a poll indefinitely instead of failing cleanly — the same "an SNMP client can silently never
+resolve" risk flagged during this feature's research phase, addressed proactively rather than
+discovered live.
+
+`lib/adapters/interface.js` documents the full `getSnmpMetrics()` contract (optional, same
+pattern as `getObjects()`/`getVpnSessionSummary()` — checked via `typeof adapter.
+getSnmpMetrics === 'function'`, never assumed present):
+```js
+// → { cpuPercent: number|null, memoryPercent: number|null, sessionCount: number|null,
+//     uptimeSeconds: number|null, raw: object, lowConfidence?: boolean, targetHost: string }
+```
+MAY throw (missing credential, timeout, auth failure — the engine-worker job's existing
+per-device try/catch treats it like any other polling failure). MUST NOT guess a metric value
+when an OID didn't resolve — `null` for that field, same "no confident-looking wrong answer"
+discipline as the applicability tri-state rule elsewhere in this file.
+
+### Per-vendor status (2026-07-21) — READ BEFORE TRUSTING ANY VENDOR'S NUMBERS
+
+Every OID below is doc-derived and, except where noted, has NOT been confirmed against a live
+SecVault-connected device — same standing caveat as every other vendor field mapping in this
+file (see "Live Validation Status" above). Each adapter logs the raw OID/table response once
+via a `[Vendor SNMP Debug]` console line, same first-connect verification ritual as every
+other integration in this codebase.
+
+| Vendor | Confidence | Uptime | CPU | Memory | Sessions |
+|---|---|---|---|---|---|
+| Cisco ASA | High — OIDs verified against Cisco's own MIB Reference Guide + oidref.com during this build | `sysUpTime.0` (standard MIB-II) | `cpmCPUTotal5minRev` (CISCO-PROCESS-MIB `1.3.6.1.4.1.9.9.109.1.1.1.1.8`, walked table, first row) | `ciscoMemoryPoolUsed`/`ciscoMemoryPoolFree` (CISCO-MEMORY-POOL-MIB `...48.1.1.1.5`/`.6`, walked, computed %) | `cfwConnectionStatValue` instance `1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.6` (CISCO-FIREWALL-MIB, current global connections) |
+| Fortinet | High — standard, widely-cited FORTIGATE-MIB OIDs, cross-checked via oidref.com/mibs.observium.org | `sysUpTime.0` | `fgSysCpuUsage.0` (`1.3.6.1.4.1.12356.101.4.1.3.0`) | `fgSysMemUsage.0` (`...4.0`) | `fgSysSesCount.0` (`...8.0`) |
+| Palo Alto | **Low — explicit `lowConfidence: true`, UI badge shown** | `sysUpTime.0` | HOST-RESOURCES-MIB `hrProcessorLoad` table (`1.3.6.1.2.1.25.3.3.1.2`, walked, averaged across cores) | HOST-RESOURCES-MIB `hrStorage` table (4-column walk, matched by `hrStorageDescr` text — fiddly, may be `null`) | PAN-COMMON-MIB `panSessionActive.0` (`1.3.6.1.4.1.25461.2.1.2.3.3.0`, a real count — `panSessionUtilization` was checked and rejected as a %, not a count; a candidate `panSysResourceUtilization` CPU OID was checked directly against the real MIB listing and does NOT exist, dropped rather than guessed) |
+| Forcepoint | **Low — explicit `lowConfidence: true`, UI badge shown** | `sysUpTime.0` | `fwCpuTotal` (STONESOFT-FIREWALL-MIB `1.3.6.1.4.1.1369.5.2.1.11.1.1.3`, walked, "total" row) | `fwMemBytesUsed`/`fwMemBytesTotal` (STONESOFT-FIREWALL-MIB `...11.2.5`/`.4`, walked, computed %) | `fwConnNumber` (STONESOFT-FIREWALL-MIB `1.3.6.1.4.1.1369.5.2.1.4`) — Forcepoint NGFW was formerly "Stonesoft"; engines still ship this MIB per Forcepoint's own SNMP docs, confirmed via two independent third-party MIB-browser sites agreeing on every OID (not one uncorroborated guess) |
+| Sangfor | **Low — explicit `lowConfidence: true`, UI badge shown, generic-only by design** | `sysUpTime.0` | HOST-RESOURCES-MIB `hrProcessorLoad` (walked, averaged) | HOST-RESOURCES-MIB `hrStorage` (best-effort, may be `null`) | No generic OID exists — always `null` |
+| Check Point | **Not implemented — Phase 2** | — | — | — | — |
+
+Sangfor's generic-only scope is deliberate, not a gap — same reasoning this file already
+documents for Sangfor's `getObjects()` being unimplemented: no live device, no reliable
+documentation trail, and fabricating a vendor-proprietary OID guess would be exactly the
+"documentation lies, verify against live systems" trap this file warns against elsewhere.
+Forcepoint's `FORCEPOINT-NGFW-ENGINE-MIB` (the modern, 6.11+ MIB name) was searched for
+during this build and only its TRAP definitions were found publicly documented — no polled-
+metric OID catalog for that MIB — which is why Forcepoint's metrics use the older
+Stonesoft-era MIB instead (a real, corroborated source) rather than the modern MIB name with
+guessed OIDs.
+
+### `services/engine-worker.js` — `snmp-poll` job
+
+Third minutes-scale job, alongside `vpn-session-poll` (same `*/n * * * *` cron shape,
+`SNMP_POLL_INTERVAL_MINUTES` env var, default 15, clamped 5-59 — shorter default than VPN's 30
+since SNMP-over-UDP is lighter-weight than an SSH/REST session). Query is
+`WHERE active = true AND snmp_enabled = true` — gated on the DEVICE's own opt-in flag, not
+just adapter capability, since SNMP needs a separately-configured credential (and, for
+Forcepoint, an explicit engine IP) an operator must deliberately set up. Own in-flight guard
+(`snmpPollInFlight`), and defers a whole tick when `rule-version-pull` is already running —
+same same-device-concurrent-session caution as `vpn-session-poll`, even though SNMP is a
+separate UDP protocol from SSH/REST. A row is only ever inserted on a successful poll; a
+per-device failure is logged and skipped, never fatal to the job.
+
+### UI
+
+Per-device only for Phase 1 (`/devices/[id]/snmp`, linked as "SNMP →" next to the existing
+"VPN →" link on the device overview page) — stat tiles (CPU/Memory/Sessions/Uptime) +
+`components/snmp/SnmpMetricsCharts.js` (two `recharts` `LineChart`s: CPU%+Memory% on a shared
+0-100 scale, session count on its own scale — deliberately two charts, not one dual-axis
+chart, so neither axis is a misleading secondary scale) + `components/devices/
+SnmpConfigForm.js` (enable toggle, host/port, saved-profile picker, manual v3/v2c/v1 entry
+with the cleartext-ack gate). `GET /api/devices/[id]/snmp` supports `?format=csv` export,
+same convention as the VPN page. **No fleet-wide `/snmp` page yet** (VPN has one at `/vpn`) —
+a natural Phase 2+ follow-up once per-device data exists to aggregate, not built now.
 
 ---
 

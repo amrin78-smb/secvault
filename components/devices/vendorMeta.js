@@ -137,7 +137,19 @@ export const VENDOR_META = {
 export const VENDOR_SLUGS = Object.keys(VENDOR_META);
 
 // The only credential_type values credStore rows may carry.
-export const CREDENTIAL_TYPES = ['smc_api', 'rest_api', 'ssh'];
+//
+// 'snmp' (added 2026-07-21) is deliberately NOT part of any vendor's
+// accessMethods above — SNMP is an optional, orthogonal MONITORING
+// credential (device_credentials credential_type='snmp'), never the
+// management-plane credential adapter dispatch resolves via
+// resolveAccessMethod(). It is applied through its own dedicated route
+// (app/api/devices/[id]/snmp) and its own form (components/devices/
+// SnmpConfigForm.js), not through DeviceForm.js/CredentialForm.js's
+// vendor+method-driven flow — a device's SNMP config doesn't change when
+// its mgmt_method does. Listed here so it can be validated/reused by the
+// shared credential_profiles system (CREDENTIAL_TYPES is also this file's
+// contribution to that reuse — see lib/credentialProfiles.js).
+export const CREDENTIAL_TYPES = ['smc_api', 'rest_api', 'ssh', 'snmp'];
 
 // The only devices.mgmt_method values that may be stored.
 export const ACCESS_METHODS = ['smc', 'api', 'ssh'];

@@ -378,6 +378,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             >
               VPN →
             </Link>
+            <Link
+              href={`/devices/${device.id}/snmp`}
+              style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
+              SNMP →
+            </Link>
           </div>
         </div>
       )}

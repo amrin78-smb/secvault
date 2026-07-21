@@ -1,6 +1,6 @@
 {
   "name": "secvault",
-  "version": "2.14.2",
+  "version": "2.15.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",
@@ -13,6 +13,7 @@
     "cheerio": "^1.2.0",
     "fast-xml-parser": "^4.5.7",
     "ldapjs": "^3.0.7",
+    "net-snmp": "^3.26.3",
     "next": "14.2.35",
     "next-auth": "^4.24.7",
     "node-cron": "^3.0.3",

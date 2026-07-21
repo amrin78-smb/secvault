@@ -202,6 +202,24 @@ function buildMinutelyCron(intervalMinutes) {
   return `*/${n} * * * *`;
 }
 
+// SNMP metric polling (added 2026-07-21, see CLAUDE.md's "SNMP Monitoring"
+// section) — same minutes-scale rationale as VPN session polling above, but
+// SNMP over UDP is lighter-weight than an SSH/REST session, so the default
+// interval is shorter. Same 5-59 clamp for the same `*/n * * * *` reason.
+function getSnmpPollIntervalMinutes() {
+  const fallback = 15;
+  const raw = parseInt(process.env.SNMP_POLL_INTERVAL_MINUTES, 10);
+  if (Number.isInteger(raw) && raw >= 5 && raw <= 59) {
+    return raw;
+  }
+  if (process.env.SNMP_POLL_INTERVAL_MINUTES) {
+    logger.warn(
+      `SNMP_POLL_INTERVAL_MINUTES value "${process.env.SNMP_POLL_INTERVAL_MINUTES}" is not a valid integer between 5 and 59 — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Job bodies — each independently try/catch'd. A single job failure must
 // never crash the process or stop future scheduled runs.
@@ -255,6 +273,7 @@ async function collectForDevice(device) {
 // higher-priority, authoritative rule-version-pull job.
 let ruleVersionPullInFlight = false;
 let vpnPollInFlight = false;
+let snmpPollInFlight = false;
 
 async function runRuleVersionPullJob() {
   if (ruleVersionPullInFlight) {
@@ -381,6 +400,85 @@ async function runVpnSessionPollJob() {
   }
 }
 
+// SNMP metric snapshot poll — same shape as runVpnSessionPollJob above,
+// gated additionally on the DEVICE's own snmp_enabled flag (not just
+// adapter capability — an operator must opt a device in, since it needs a
+// separately-configured credential and, for Forcepoint, an explicit engine
+// IP). Only devices whose adapter implements the OPTIONAL getSnmpMetrics()
+// are polled; a row is only ever inserted on a successful poll. Deferred
+// (not run) while rule-version-pull is in flight, for the same
+// same-device-concurrent-session reasoning as the VPN poll — though SNMP is
+// a separate UDP protocol from SSH/REST, so this is a lighter precaution
+// than the VPN case, kept for consistency and to avoid three jobs hammering
+// the same device fleet at once.
+async function runSnmpPollJob() {
+  if (snmpPollInFlight) {
+    logger.warn('Job [snmp-poll] previous run still in progress — skipping this tick.');
+    return;
+  }
+  if (ruleVersionPullInFlight) {
+    logger.info('Job [snmp-poll] rule-version-pull is in progress — deferring this tick.');
+    return;
+  }
+  snmpPollInFlight = true;
+  const start = Date.now();
+  logger.info('Job [snmp-poll] starting.');
+  try {
+    const { rows: devices } = await pool.query(
+      'SELECT * FROM devices WHERE active = true AND snmp_enabled = true'
+    );
+
+    let polled = 0;
+    let skipped = 0;
+
+    for (const device of devices) {
+      if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
+
+      let adapter;
+      try {
+        adapter = getAdapter(device, pool);
+      } catch (err) {
+        logger.warn(`Job [snmp-poll] could not build adapter for device ${device.id}: ${err.message}`);
+        continue;
+      }
+
+      if (typeof adapter.getSnmpMetrics !== 'function') {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const metrics = await adapter.getSnmpMetrics();
+        await pool.query(
+          `INSERT INTO snmp_metric_snapshots (device_id, cpu_percent, memory_percent, session_count, uptime_seconds, raw)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          [
+            device.id,
+            metrics.cpuPercent ?? null,
+            metrics.memoryPercent ?? null,
+            metrics.sessionCount ?? null,
+            metrics.uptimeSeconds ?? null,
+            JSON.stringify(metrics.raw || null),
+          ]
+        );
+        polled += 1;
+      } catch (err) {
+        logger.warn(`Job [snmp-poll] failed for device ${device.id} (${device.name || 'unnamed'}): ${err.message}`);
+      }
+    }
+
+    const durationMs = Date.now() - start;
+    logger.info(
+      `Job [snmp-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no SNMP capability) ${skipped}, ${devices.length} SNMP-enabled device(s) total.`
+    );
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [snmp-poll] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  } finally {
+    snmpPollInFlight = false;
+  }
+}
+
 // Fleet Dashboard trend snapshot — one row/day (see lib/schema.sql's
 // fleet_dashboard_snapshots comment). Pure query-only work (no per-device
 // SSH/REST sessions), so unlike rule-version-pull/vpn-session-poll it needs
@@ -484,6 +582,14 @@ async function scheduleJobs() {
     runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
   });
 
+  const snmpPollIntervalMinutes = getSnmpPollIntervalMinutes();
+  const snmpCronExpr = buildMinutelyCron(snmpPollIntervalMinutes);
+  logger.info(`Scheduling [snmp-poll] with cron "${snmpCronExpr}" (every ${snmpPollIntervalMinutes}m).`);
+  const snmpTask = cron.schedule(snmpCronExpr, () => {
+    if (shuttingDown) return;
+    runTrackedJob(runSnmpPollJob, 'snmp-poll');
+  });
+
   // Fixed daily time (00:10 UTC) rather than a configurable interval — see
   // runDashboardSnapshotJob()'s own comment for why.
   logger.info('Scheduling [dashboard-snapshot] with cron "10 0 * * *" (daily).');
@@ -492,7 +598,7 @@ async function scheduleJobs() {
     runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
   });
 
-  scheduledTasks = [feedTask, configTask, vpnTask, dashboardSnapshotTask];
+  scheduledTasks = [feedTask, configTask, vpnTask, snmpTask, dashboardSnapshotTask];
 }
 
 async function main() {
@@ -507,6 +613,7 @@ async function main() {
   await runTrackedJob(runFeedSyncAndMatchJob, 'feed-sync-and-match');
   await runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
   await runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
+  await runTrackedJob(runSnmpPollJob, 'snmp-poll');
   await runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
 
   await scheduleJobs();

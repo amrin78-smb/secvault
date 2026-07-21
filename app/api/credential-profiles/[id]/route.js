@@ -31,22 +31,51 @@ export async function PUT(request, { params }) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const { name, auth_mode, secret, username, password, enable_password } = body || {};
+  const {
+    name,
+    auth_mode,
+    secret,
+    username,
+    password,
+    enable_password,
+    snmp_version,
+    auth_protocol,
+    auth_password,
+    priv_protocol,
+    priv_password,
+    insecure_ack,
+  } = body || {};
 
   const trimmedName = typeof name === 'string' ? name.trim() : undefined;
   if (trimmedName !== undefined && !trimmedName) {
     return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 });
   }
 
-  const rotating = Boolean(secret || (username && password));
+  const rotating = Boolean(secret || (username && password) || (existing.credential_type === 'snmp' && username));
   let plaintext;
   if (rotating) {
+    // Same cleartext-on-the-wire gate as POST above — a v1/v2c profile's
+    // secret rotation is just as exposed as its initial creation.
+    if (existing.credential_type === 'snmp' && snmp_version !== 'v3' && !insecure_ack) {
+      return NextResponse.json(
+        {
+          error:
+            'SNMPv1/v2c sends the community string in cleartext on the wire. Set insecure_ack to confirm you understand the risk, or use SNMPv3 instead.',
+        },
+        { status: 400 }
+      );
+    }
     plaintext = buildProfilePlaintext(existing.credential_type, {
       authMode: auth_mode,
       secret,
       username,
       password,
       enablePassword: enable_password,
+      snmpVersion: snmp_version,
+      authProtocol: auth_protocol,
+      authPassword: auth_password,
+      privProtocol: priv_protocol,
+      privPassword: priv_password,
     });
     if (!plaintext) {
       return NextResponse.json({ error: 'No usable credential fields provided' }, { status: 400 });

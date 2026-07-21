@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.15.0': [
+    'New: SNMP monitoring. Poll a firewall for CPU, memory, active session count, and uptime, with a trend chart on a new per-device SNMP tab.',
+    'Supported this round: Cisco ASA, Fortinet, Palo Alto, Forcepoint, and Sangfor (generic metrics only). Check Point is not yet supported.',
+    'Uses its own separate SNMP credential (SNMPv3 recommended; SNMPv2c/v1 requires an explicit acknowledgment, since those versions send the community string unencrypted).',
+    'Forcepoint SNMP polls the individual firewall engine directly, not the SMC — a deliberate, narrow exception to this app\'s SMC-only rule for SNMP alone; rule/config collection is unchanged.',
+    'Palo Alto, Forcepoint, and Sangfor metrics are flagged "low confidence" in the UI — the underlying OIDs are documented but not yet confirmed against a live device of those vendors.',
+  ],
   '2.14.2': [
     'Fixed the root cause of the in-app "Update Now" button silently not applying updates: the deploy key\'s path was losing its backslashes at a low level every time an update ran through the SYSTEM-scheduled task, which is specifically how "Update Now" always runs.',
     'This has been broken since the feature was introduced — if this update actually applies (you\'re reading this from inside the app, so it did), the in-app updater is confirmed fixed.',

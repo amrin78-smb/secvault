@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_device_versions_collected_at ON device_versions(c
 CREATE TABLE IF NOT EXISTS device_credentials (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  credential_type TEXT NOT NULL, -- 'ssh' | 'rest_api' | 'smc_api'
+  credential_type TEXT NOT NULL, -- 'ssh' | 'rest_api' | 'smc_api' | 'snmp'
   encrypted_data TEXT NOT NULL,
   iv TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -160,7 +160,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS credential_profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
-  credential_type TEXT NOT NULL, -- 'ssh' | 'rest_api' | 'smc_api' — same vocabulary as device_credentials
+  credential_type TEXT NOT NULL, -- 'ssh' | 'rest_api' | 'smc_api' | 'snmp' — same vocabulary as device_credentials
   username TEXT,
   encrypted_data TEXT NOT NULL,
   iv TEXT NOT NULL,
@@ -541,6 +541,53 @@ CREATE TABLE IF NOT EXISTS vpn_session_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_vss_device_id ON vpn_session_snapshots(device_id);
 CREATE INDEX IF NOT EXISTS idx_vss_sampled_at ON vpn_session_snapshots(sampled_at);
+
+-- SNMP monitoring (Phase 1 -- added 2026-07-21). Cisco ASA, Fortinet, Palo
+-- Alto, Forcepoint, Sangfor (generic-only) -- see CLAUDE.md's "SNMP
+-- Monitoring" section for the full per-vendor feasibility/confidence
+-- writeup and the Forcepoint direct-to-engine exception snmp_host exists
+-- for.
+--
+-- Credentials: a device's SNMP community/v3 auth lives in device_credentials
+-- under credential_type = 'snmp' (lib/credStore.js), the same encrypted-
+-- column pattern as ssh/rest_api/smc_api -- entirely separate from the
+-- device's management-plane credential, since SNMP is read-only monitoring
+-- and is never used for rule/config collection.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS snmp_enabled BOOLEAN NOT NULL DEFAULT false;
+-- snmp_host: NULL means "poll the device over its own mgmt_ip" -- the normal
+-- case for Fortinet/Palo Alto/Cisco ASA, all already reached via mgmt_ip.
+-- Forcepoint is the deliberate, documented exception: CLAUDE.md's SMC-only
+-- rule means devices.smc_host is the SMC's address, never an engine's -- an
+-- operator MUST set snmp_host to the individual NGFW engine's own IP for
+-- SNMP polling to reach the right box (SNMP-only exception to the SMC-only
+-- rule; SSH/config/rules collection still goes exclusively through the SMC
+-- REST API, unchanged).
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS snmp_host TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS snmp_port INTEGER NOT NULL DEFAULT 161;
+
+-- Polled SNMP metric snapshots -- same lifecycle/rationale as
+-- vpn_session_snapshots above: only vendors whose adapter implements the
+-- OPTIONAL getSnmpMetrics() are ever polled (services/engine-worker.js's
+-- snmp-poll job), only a SUCCESSFUL poll inserts a row (no confident-looking
+-- zero on a failed/timed-out poll), no retention/cleanup job yet (same
+-- accepted simplification as vpn_session_snapshots).
+-- Per-metric columns are NULLABLE (unlike vpn's NOT NULL
+-- active_session_count) because not every vendor/OID set yields every
+-- metric -- a poll that got CPU but not session count should still record
+-- what it did get rather than discard the whole snapshot.
+CREATE TABLE IF NOT EXISTS snmp_metric_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  cpu_percent NUMERIC(5, 2),
+  memory_percent NUMERIC(5, 2),
+  session_count INTEGER,
+  uptime_seconds BIGINT,
+  raw JSONB,
+  sampled_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_device_id ON snmp_metric_snapshots(device_id);
+CREATE INDEX IF NOT EXISTS idx_sms_sampled_at ON snmp_metric_snapshots(sampled_at);
 
 -- Operator-action audit trail (NOT a general app log -- scheduled/background
 -- jobs already have C:\Apps\SecVault\logs\engine.log for that). Populated

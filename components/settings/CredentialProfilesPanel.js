@@ -17,12 +17,13 @@ import Button from '../ui/Button';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import { CREDENTIAL_TYPES } from '../devices/vendorMeta';
 
-const TYPE_BADGE = { smc_api: 'teal', rest_api: 'info', ssh: 'purple' };
-const TYPE_BADGE_LABEL = { smc_api: 'SMC API Key', rest_api: 'REST API', ssh: 'SSH' };
+const TYPE_BADGE = { smc_api: 'teal', rest_api: 'info', ssh: 'purple', snmp: 'warning' };
+const TYPE_BADGE_LABEL = { smc_api: 'SMC API Key', rest_api: 'REST API', ssh: 'SSH', snmp: 'SNMP' };
 const TYPE_CREATE_LABEL = {
   smc_api: 'SMC API Key (Forcepoint)',
   rest_api: 'REST API (Fortinet / Palo Alto / Check Point)',
   ssh: 'SSH (Fortinet / Palo Alto / Cisco ASA / Sangfor)',
+  snmp: 'SNMP (monitoring — Cisco ASA / Fortinet / Palo Alto / Forcepoint / Sangfor)',
 };
 
 const AUTH_MODE_OPTIONS = [
@@ -30,16 +31,39 @@ const AUTH_MODE_OPTIONS = [
   { value: 'userpass', label: 'Username & Password' },
 ];
 
+const SNMP_VERSION_OPTIONS = [
+  { value: 'v3', label: 'SNMPv3 (recommended — authenticated + encrypted)' },
+  { value: 'v2c', label: 'SNMPv2c (community string — sent in cleartext)' },
+  { value: 'v1', label: 'SNMPv1 (community string — sent in cleartext)' },
+];
+const AUTH_PROTOCOL_OPTIONS = ['SHA', 'MD5'];
+const PRIV_PROTOCOL_OPTIONS = ['AES', 'DES'];
+
 // Fresh, empty field-state object for either the create form or an in-place
 // secret rotation — same shape used by both, so one blank object works for
 // either call site.
 function emptyFields() {
-  return { authMode: 'apikey', secret: '', username: '', password: '', enablePassword: '' };
+  return {
+    authMode: 'apikey',
+    secret: '',
+    username: '',
+    password: '',
+    enablePassword: '',
+    snmpVersion: 'v3',
+    authProtocol: 'SHA',
+    authPassword: '',
+    privProtocol: 'AES',
+    privPassword: '',
+    insecureAck: false,
+  };
 }
 
 // Whether `fields` currently has enough to submit, given `credentialType`.
 // Mirrors CredentialForm.js's `ready` boolean, generalized across all three
-// credential_type shapes instead of one resolved vendor/method config.
+// (now four) credential_type shapes instead of one resolved vendor/method
+// config. SNMP v1/v2c additionally requires the insecure-ack checkbox —
+// this is the CLIENT-side half of the gate; app/api/credential-profiles
+// enforces the same rule server-side so a direct API call can't bypass it.
 function isReady(credentialType, fields) {
   if (credentialType === 'smc_api') return Boolean(fields.secret);
   if (credentialType === 'rest_api') {
@@ -48,6 +72,11 @@ function isReady(credentialType, fields) {
       : Boolean(fields.secret);
   }
   if (credentialType === 'ssh') return Boolean(fields.username && fields.password);
+  if (credentialType === 'snmp') {
+    const hasCreds = fields.snmpVersion === 'v3' ? Boolean(fields.username) : Boolean(fields.secret);
+    const ackOk = fields.snmpVersion === 'v3' || fields.insecureAck;
+    return hasCreds && ackOk;
+  }
   return false;
 }
 
@@ -65,6 +94,23 @@ function fieldsForRequest(credentialType, fields) {
   if (credentialType === 'ssh') {
     const body = { username: fields.username, password: fields.password };
     if (fields.enablePassword) body.enable_password = fields.enablePassword;
+    return body;
+  }
+  if (credentialType === 'snmp') {
+    const body = { snmp_version: fields.snmpVersion, insecure_ack: fields.insecureAck };
+    if (fields.snmpVersion === 'v3') {
+      body.username = fields.username;
+      if (fields.authPassword) {
+        body.auth_protocol = fields.authProtocol;
+        body.auth_password = fields.authPassword;
+        if (fields.privPassword) {
+          body.priv_protocol = fields.privProtocol;
+          body.priv_password = fields.privPassword;
+        }
+      }
+    } else {
+      body.secret = fields.secret;
+    }
     return body;
   }
   return {};
@@ -194,6 +240,127 @@ function renderCredentialFields(credentialType, fields, setFields, idPrefix) {
             className="input"
           />
         </div>
+      </>
+    );
+  }
+
+  if (credentialType === 'snmp') {
+    const isV3 = fields.snmpVersion === 'v3';
+    return (
+      <>
+        <div className="form-field">
+          <label htmlFor={`${idPrefix}_snmp_version`}>SNMP Version</label>
+          <select
+            id={`${idPrefix}_snmp_version`}
+            className="select"
+            value={fields.snmpVersion}
+            onChange={(e) => setFields({ ...fields, snmpVersion: e.target.value, insecureAck: false })}
+          >
+            {SNMP_VERSION_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {isV3 ? (
+          <>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}_snmp_username`}>Username</label>
+              <input
+                id={`${idPrefix}_snmp_username`}
+                type="text"
+                autoComplete="off"
+                value={fields.username}
+                onChange={(e) => setFields({ ...fields, username: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}_auth_protocol`}>Auth Protocol</label>
+              <select
+                id={`${idPrefix}_auth_protocol`}
+                className="select"
+                value={fields.authProtocol}
+                onChange={(e) => setFields({ ...fields, authProtocol: e.target.value })}
+              >
+                {AUTH_PROTOCOL_OPTIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}_auth_password`}>Auth Password (optional — noAuthNoPriv if blank)</label>
+              <input
+                id={`${idPrefix}_auth_password`}
+                type="password"
+                autoComplete="new-password"
+                value={fields.authPassword}
+                onChange={(e) => setFields({ ...fields, authPassword: e.target.value })}
+                className="input"
+              />
+            </div>
+            {fields.authPassword && (
+              <>
+                <div className="form-field">
+                  <label htmlFor={`${idPrefix}_priv_protocol`}>Privacy Protocol</label>
+                  <select
+                    id={`${idPrefix}_priv_protocol`}
+                    className="select"
+                    value={fields.privProtocol}
+                    onChange={(e) => setFields({ ...fields, privProtocol: e.target.value })}
+                  >
+                    {PRIV_PROTOCOL_OPTIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor={`${idPrefix}_priv_password`}>
+                    Privacy Password (optional — authNoPriv if blank)
+                  </label>
+                  <input
+                    id={`${idPrefix}_priv_password`}
+                    type="password"
+                    autoComplete="new-password"
+                    value={fields.privPassword}
+                    onChange={(e) => setFields({ ...fields, privPassword: e.target.value })}
+                    className="input"
+                  />
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="form-field">
+              <label htmlFor={`${idPrefix}_snmp_secret`}>Community String</label>
+              <input
+                id={`${idPrefix}_snmp_secret`}
+                type="password"
+                autoComplete="new-password"
+                value={fields.secret}
+                onChange={(e) => setFields({ ...fields, secret: e.target.value })}
+                className="input"
+              />
+            </div>
+            <label
+              style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--red)' }}
+            >
+              <input
+                type="checkbox"
+                checked={fields.insecureAck}
+                onChange={(e) => setFields({ ...fields, insecureAck: e.target.checked })}
+              />
+              I understand SNMP{fields.snmpVersion} sends this community string in cleartext on the network.
+            </label>
+          </>
+        )}
       </>
     );
   }
@@ -386,7 +553,10 @@ export default function CredentialProfilesPanel() {
                           {TYPE_BADGE_LABEL[p.credential_type] || p.credential_type}
                         </Badge>
                       </td>
-                      <td>{p.username || (p.credential_type === 'ssh' ? '—' : 'API key')}</td>
+                      <td>
+                        {p.username ||
+                          (p.credential_type === 'ssh' || p.credential_type === 'snmp' ? '—' : 'API key')}
+                      </td>
                       <td>{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
                       <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button variant="secondary" onClick={() => handleRename(p.id, p.name)}>
