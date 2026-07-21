@@ -2560,6 +2560,26 @@ Cisco ASA, Forcepoint, and Sangfor have no detector yet — `detectSnmpConfig()`
 per-vendor follow-up (Cisco ASA's `show snmp-server` equivalent isn't currently collected into
 `config_parsed` either) — not built now.
 
+### On-demand test — `POST /api/devices/[id]/snmp/test` (added 2026-07-21)
+
+Direct user feedback: after configuring an SNMP credential, there was no way to find out
+whether it actually works without waiting up to `SNMP_POLL_INTERVAL_MINUTES` for the next
+scheduled poll. Mirrors `POST /api/devices/[id]/test`'s shape (`{ok, message}`) and
+`DeviceActions.js`'s save-then-test convention — tests the ALREADY-SAVED credential (not a
+client-supplied one; there is no pre-save dry-run the way Forcepoint's SMC form has one),
+by calling the adapter's `getSnmpMetrics()` directly, once, outside the scheduled job. **On
+success it ALSO inserts a `snmp_metric_snapshots` row** — a real metrics fetch just happened;
+discarding it would be wasteful and would leave the trend chart looking unchanged right after
+a successful test. On failure, nothing is inserted — same "only a successful poll writes a
+row" discipline as the scheduled job. Returns a clear, distinct message when the vendor's
+adapter has no `getSnmpMetrics()` at all (Check Point, or any future vendor before its adapter
+work lands) rather than a generic 500.
+
+`components/devices/SnmpConfigForm.js`'s "Test Connectivity" button only appears once
+`initial.hasCredential` is true (nothing to test before a credential is saved) — `handleSave()`
+now calls `router.refresh()` on success specifically so this button appears immediately after
+a first-time save without a manual page reload.
+
 ### Full page
 
 The full `/devices/[id]/snmp` page (linked from the summary card, not removed) still carries

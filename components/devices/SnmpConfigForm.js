@@ -9,7 +9,9 @@
 // snmp_enabled/snmp_host/snmp_port columns instead of vendor/mgmt_method.
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Button from '../ui/Button';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 const SNMP_VERSION_OPTIONS = [
   { value: 'v3', label: 'SNMPv3 (recommended)' },
@@ -27,6 +29,7 @@ const PRIV_PROTOCOL_OPTIONS = ['AES', 'DES'];
 // comment). Only applies while nothing is stored yet (`initial.snmpEnabled`
 // is false) — never overrides an operator's own already-saved choice.
 export default function SnmpConfigForm({ deviceId, vendor, initial, detected = false }) {
+  const router = useRouter();
   const [enabled, setEnabled] = useState(Boolean(initial?.snmpEnabled) || detected);
   const [host, setHost] = useState(initial?.snmpHost || '');
   const [port, setPort] = useState(initial?.snmpPort ? String(initial.snmpPort) : '161');
@@ -45,6 +48,8 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
 
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { ok, text, metrics? }
 
   useEffect(() => {
     fetch('/api/credential-profiles')
@@ -102,10 +107,37 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
       setAuthPassword('');
       setPrivPassword('');
       setSelectedProfileId('');
+      setTestResult(null);
+      // Refreshes the server-rendered `initial` prop (in particular
+      // hasCredential) so the "Test Connectivity" button below appears
+      // immediately after a first-time save, without a manual reload.
+      router.refresh();
     } catch (err) {
       setResult({ ok: false, text: err.message || 'Failed to save SNMP config' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Tests the ALREADY-SAVED SNMP credential against the live device — see
+  // app/api/devices/[id]/snmp/test/route.js. Deliberately separate from
+  // handleSave: mirrors DeviceActions.js's "Test Connectivity" pattern for
+  // the device's main management credential (save first, then test what
+  // was saved as its own action), not a pre-save dry run.
+  async function handleTest() {
+    if (testing) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/devices/${deviceId}/snmp/test`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Test failed');
+      setTestResult({ ok: data.ok === true, text: data.message || (data.ok ? 'Connected' : 'Test failed'), metrics: data.metrics });
+      if (data.ok) router.refresh(); // a real snapshot was just recorded — refresh the trend chart/tiles above
+    } catch (err) {
+      setTestResult({ ok: false, text: err.message || 'Test failed' });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -291,9 +323,17 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
         </>
       )}
 
-      <Button type="button" variant="primary" onClick={handleSave} disabled={saving || (enabled && hostRequired)}>
-        {saving ? 'Saving…' : 'Save SNMP Configuration'}
-      </Button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <Button type="button" variant="primary" onClick={handleSave} disabled={saving || (enabled && hostRequired)}>
+          {saving ? 'Saving…' : 'Save SNMP Configuration'}
+        </Button>
+        {initial?.hasCredential && (
+          <Button type="button" variant="secondary" onClick={handleTest} disabled={testing}>
+            {testing && <LoadingSpinner size={14} />}
+            {testing ? 'Testing…' : 'Test Connectivity'}
+          </Button>
+        )}
+      </div>
       {enabled && hostRequired && (
         <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: 0 }}>
           Set an SNMP host before enabling polling for this device.
@@ -303,6 +343,19 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
         <span style={{ fontSize: 'var(--text-base)', color: result.ok ? 'var(--green)' : 'var(--red)' }}>
           {result.text}
         </span>
+      )}
+      {testResult && (
+        <div>
+          <span style={{ fontSize: 'var(--text-base)', color: testResult.ok ? 'var(--green)' : 'var(--red)' }}>
+            {testResult.text}
+          </span>
+          {testResult.ok && testResult.metrics && (
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              CPU {testResult.metrics.cpuPercent ?? '—'}% · Memory {testResult.metrics.memoryPercent ?? '—'}% ·
+              Sessions {testResult.metrics.sessionCount ?? '—'} — recorded as a new data point above.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

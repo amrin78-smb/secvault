@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.16.1': [
+    'New: "Test Connectivity" button on the SNMP config page, once a credential is saved — polls the device immediately instead of waiting up to SNMP_POLL_INTERVAL_MINUTES for the next scheduled poll.',
+    'A successful test records a real data point on the trend chart above, same as a normal scheduled poll — a failure shows the actual error (timeout, wrong community string, etc.) with nothing recorded.',
+  ],
   '2.16.0': [
     'New: SNMP auto-detection for Fortinet and Palo Alto. If a device\'s already-collected config shows SNMP looking enabled, the device page now shows a "Detected in config" nudge instead of a generic "Not configured" message.',
     'This only detects that SNMP appears to be turned on — it never reads or auto-fills the actual community string or SNMPv3 credentials. Those are either never collected in the first place, or already redacted before storage. You still enter the credential yourself.',
