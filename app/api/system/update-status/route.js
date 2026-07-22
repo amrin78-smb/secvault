@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.18.0': [
+    'Redesigned the device detail page: tabs now sit at the top of the page as the main way to navigate, instead of below a large always-visible info block.',
+    'Device management actions (Collect Now, Test Connectivity, Rotate Credentials, Delete) now live together on a new "Manage" tab, visible only to admins, instead of being scattered across the top of the page.',
+    'Device details (management IP, version, model, build, serial, last collected) now show at the top of the Overview tab instead of in a separate block above the tabs.',
+  ],
   '2.17.2': [
     'Security fix: closed a gap where an SNMP credential could be saved without properly requiring the cleartext-transmission acknowledgment for older SNMP versions.',
     'Fixed a rare case where changing a device\'s vendor/connection method together with an invalid saved credential selection could delete the device\'s working credential instead of rejecting the change cleanly.',

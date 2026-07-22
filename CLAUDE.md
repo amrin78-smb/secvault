@@ -2491,6 +2491,17 @@ per-device failure is logged and skipped, never fatal to the job.
 
 ### UI
 
+**⛔ Superseded again 2026-07-21, later still the same day — see "Device Overview Tab" →
+"Identity card removed, tab bar moved to top of page" below.** The note immediately below this
+one already corrected the SNMP card's placement once (into the `tab === 'overview'` block); a
+second page restructuring the same day moved the "device info card" and "tab bar" that note
+refers to as well — the always-visible identity card was replaced with a bare identity strip,
+and the tab bar itself relocated to the very top of the page, immediately after "← Back to
+devices". The SNMP card's position RELATIVE TO the Overview tab's own content is unchanged by
+that later move: it is still the first thing rendered inside `tab === 'overview'`, now directly
+beneath a new "Device Details" card (the old device-info grid, relocated into that tab's body)
+rather than beneath nothing. See that subsection for the current, real page structure.
+
 **⛔ Superseded 2026-07-21, later the same day — see "Device Overview Tab" → "Follow-up
 round, same day" below.** The always-visible, above-the-tab-bar placement described in this
 subsection was itself relocated a few hours later: the SNMP card now renders inside the
@@ -2618,7 +2629,10 @@ per-device). This round built the 🟢 tier only; 🟡 is an explicit, deliberat
 **New default tab**: `devices/[id]/page.js`'s tab list is now `overview|cve|rules|config|admins`
 (previously `cve|rules|config|admins`), with `overview` as the new default landing tab instead
 of `cve` — matching the mockup's own "Overview first" intent. The other four tabs are
-completely unchanged.
+completely unchanged. **Updated later the same day**: a sixth tab, `manage`, was added
+(`overview|cve|rules|config|admins|manage`) — admin-only, does not render at all for a
+`viewer`-role session, either as a tab link or as content. See "Identity card removed, tab bar
+moved to top of page" below.
 
 Built as 4 independent card components, each a standalone async server component owning its
 own DB query (same "widget owns its DB access" convention already established by
@@ -2659,6 +2673,14 @@ page.js`, not by any shared query layer:
   score**, since no aggregation formula for one exists anywhere in this app; inventing the
   weighting is explicit 🟡 follow-up work, not done here.
 
+**⛔ Placement description superseded twice, see "Follow-up round, same day" immediately below
+and "Identity card removed, tab bar moved to top of page" further below** — by the time this
+paragraph was written the SNMP card had not yet moved into the Overview tab (that happened a
+few hours later the same day, documented in the very next subsection), and the page structure
+around it changed again later still. The REASONING here (don't show the same numbers twice on
+one page) still holds and is why the SNMP card was never duplicated inside `OverviewCveCard`'s
+grouping either — only the "above the tab bar" placement claim is stale.
+
 **Deliberately NOT duplicated on the Overview tab**: a "System & Resources" section — the SNMP
 Monitoring card (CPU/Memory/Sessions/Uptime, see above) is already an ALWAYS-VISIBLE card
 sitting above the tab bar on this same page (built earlier the same day, specifically in
@@ -2683,6 +2705,13 @@ className="card">` block moved unchanged (same JSX, same queries — `snmpSnapsh
 unconditionally at the top of the page, not gated behind `tab === 'overview'`, since the cost
 is negligible and gating them would add complexity for no real benefit) into the top of the
 `tab === 'overview'` block, ahead of `OverviewCveCard`.
+
+**⛔ Position note added 2026-07-21, later still the same day**: "top of the `tab === 'overview'`
+block" above is still accurate, but it's no longer the first CARD an operator's eye lands on
+when the tab opens — a later restructuring (see "Identity card removed, tab bar moved to top of
+page" below) inserted a new "Device Details" card ahead of it, inside the same tab body. The SNMP
+card is now second, not first, within `overview` — still unconditionally fetched, still unchanged
+JSX, just no longer the leading element.
 
 **Two 🟡-tier decisions from the earlier feasibility research were resolved by the user
 (via `AskUserQuestion`, not guessed) and built the same day:**
@@ -2713,6 +2742,62 @@ is negligible and gating them would add complexity for no real benefit) into the
 
 Both diffs were personally reviewed against their frozen contracts before integrating, and
 `npm run build` was run clean after each.
+
+### Identity card removed, tab bar moved to top of page (added 2026-07-21, later still the same day)
+
+Direct follow-up user request, applying the exact same lesson the SNMP card relocation above
+already established a few hours earlier: an always-visible, above-the-tabs card reads as
+clutter once tabs exist as the page's real navigation — "sticky across all tabs" was the
+precise complaint that moved the SNMP card into the Overview tab; the user asked for that
+identical reasoning applied a second time, to the device identity card itself. Tabs should be
+the page's primary navigation, device-management actions belong grouped together instead of
+scattered across an always-visible control strip, and device-summary data (the IP/version/
+model/build/serial grid) belongs inside Overview alongside the SNMP tiles it's the same kind
+of fact as, not as a permanent widget everyone sees regardless of which tab they're on.
+
+The card that used to sit at the top of the page — status dot/name/vendor badge, Collect Now/
+Test Connectivity/Delete buttons, the Management IP/Version/Model/Build/Serial/Last Collected
+grid, and (admin-only) the Rotate Credentials form — was replaced with a bare identity strip:
+just the status dot, device name, and vendor `Badge`, no card chrome, no buttons, no data. The
+tab bar itself moved from partway down the page to immediately below that strip — now the
+first thing under "← Back to devices", ahead of every card on the page, including the Overview
+tab's own content.
+
+The device-details grid (Management IP/SMC Host, Version, Model, Build, Serial, Last Collected)
+moved into a new "Device Details" card — now the FIRST card inside the `overview` tab body,
+ahead of the SNMP Monitoring card (see "Position note added 2026-07-21" above) — same query
+(`getLatestVersion()`), same fields, same `'—'` fallbacks, just relocated wholesale rather than
+rebuilt. Its heading (`fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)'`)
+deliberately matches the SNMP Monitoring card's own heading style, since the two are now
+adjacent siblings in the same tab.
+
+**New tab: `manage`** — a sixth entry on the tab bar (`overview|cve|rules|config|admins|manage`,
+see "New default tab" above). Holds two cards, both moved verbatim from the old identity card:
+"Device Actions" (`DeviceActions` — Collect Now/Test Connectivity — plus the Delete button) and
+"Rotate Credentials" (`CredentialForm`, unchanged). **Double-gated on `canWrite` for defense in
+depth**, matching every other admin-only control in this app: the tab LINK itself only renders
+via `{canWrite && tabLink(device.id, tab, 'manage', 'Manage')}` (a viewer never sees the tab at
+all), and the tab's CONTENT is separately gated via `{tab === 'manage' && canWrite && (...)}` —
+a viewer hand-typing `?tab=manage` into the URL bar sees nothing, not a link that happens to be
+hidden elsewhere. As always, this is UI-hiding only, not the real enforcement — every route
+these controls call (`PUT`/`DELETE devices/[id]`, `POST devices/[id]/test`, `POST
+devices/[id]/collect`) is independently `isAdmin()`-gated server-side regardless of what this
+page shows or hides.
+
+**Name deliberately chosen to avoid colliding with the pre-existing `admins` tab.** `admins` is
+a completely different, unrelated concept — the FIREWALL's own admin/user accounts, rendered via
+`summarizeAdminAccounts()` (see "Admin Account Summary" above) — left entirely unchanged by this
+round. `manage` reads unambiguously as "manage this SecVault device entry," distinct from
+"view the firewall's own admin accounts."
+
+**Delete confirmation URL now always uses `tab=manage`.** The Delete button (now inside the
+`manage` tab) and the confirmation `Modal`'s Cancel link both point at
+`/devices/[id]?tab=manage&confirmDelete=1` / `?tab=manage` unconditionally — previously the
+identity card's Delete button preserved whatever tab happened to be active
+(`?tab=${tab}&confirmDelete=1`), which made sense when Delete lived in a card visible from every
+tab. Now that Delete only lives inside `manage`, returning to some other tab after Cancel would
+be a confusing non-sequitur — Cancel now always lands back on `manage`, where the button that
+opened the dialog actually lives.
 
 ---
 

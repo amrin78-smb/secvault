@@ -229,7 +229,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['overview', 'cve', 'rules', 'config', 'admins'].includes(searchParams?.tab)
+  const tab = ['overview', 'cve', 'rules', 'config', 'admins', 'manage'].includes(searchParams?.tab)
     ? searchParams.tab
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
@@ -271,97 +271,10 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </Link>
       </div>
 
-      <div className="card" style={{ padding: 20 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <StatusDot status={status} />
-            <div className="page-title">{device.name}</div>
-            <Badge color="info">{device.vendor}</Badge>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {canWrite && <DeviceActions deviceId={device.id} />}
-            {canWrite && (
-              <Link href={`/devices/${device.id}?tab=${tab}&confirmDelete=1`} className="btn btn-danger">
-                Delete
-              </Link>
-            )}
-          </div>
-        </div>
-
-        <div
-          style={{
-            marginTop: 12,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: 16,
-            fontSize: 'var(--text-base)',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              {device.vendor === 'forcepoint' ? 'SMC Host' : 'Management IP'}
-            </div>
-            <div style={{ color: 'var(--text-primary)' }}>
-              {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              Version
-            </div>
-            <div style={{ color: 'var(--text-primary)' }}>{version?.version_string || '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              Model
-            </div>
-            <div style={{ color: 'var(--text-primary)' }}>{version?.model || '—'}</div>
-          </div>
-          {/* Build and Serial: fixed 2026-07-19 -- Build was already queried by
-              getLatestVersion() above and never rendered here (pure UI gap);
-              Serial was parsed by the Fortinet/Palo Alto SSH adapters and
-              silently dropped before it ever reached this table (adapter +
-              schema fix, see lib/schema.sql's device_versions.serial comment
-              and lib/adapters/fortinet/ssh.js's getVersion()). Both render as
-              '—' for any device/transport that doesn't supply one, same as
-              every other tile here. */}
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              Build
-            </div>
-            <div style={{ color: 'var(--text-primary)' }}>{version?.build || '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              Serial
-            </div>
-            <div style={{ color: 'var(--text-primary)' }} className="mono">
-              {version?.serial || '—'}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
-              Last Collected
-            </div>
-            <div style={{ color: 'var(--text-primary)' }}>{formatDateTime(device.last_collected_at)}</div>
-          </div>
-        </div>
-
-        {canWrite && (
-          <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-            <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
-              Rotate Credentials
-            </h2>
-            {/* mgmt_method comes from the STORED row — the credential shape must follow
-                the access method this device was actually saved with, not the vendor's
-                default (an ssh fortinet must not be handed an API-token input). */}
-            <CredentialForm
-              deviceId={device.id}
-              vendor={device.vendor}
-              mgmtMethod={device.mgmt_method}
-            />
-          </div>
-        )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <StatusDot status={status} />
+        <div className="page-title">{device.name}</div>
+        <Badge color="info">{device.vendor}</Badge>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
@@ -370,10 +283,74 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'rules', 'Rules')}
         {tabLink(device.id, tab, 'config', 'Config Changes')}
         {tabLink(device.id, tab, 'admins', 'Admins')}
+        {canWrite && tabLink(device.id, tab, 'manage', 'Manage')}
       </div>
 
       {tab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16 }}>
+              Device Details
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: 16,
+                fontSize: 'var(--text-base)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  {device.vendor === 'forcepoint' ? 'SMC Host' : 'Management IP'}
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>
+                  {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Version
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>{version?.version_string || '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Model
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>{version?.model || '—'}</div>
+              </div>
+              {/* Build and Serial: fixed 2026-07-19 -- Build was already queried by
+                  getLatestVersion() above and never rendered here (pure UI gap);
+                  Serial was parsed by the Fortinet/Palo Alto SSH adapters and
+                  silently dropped before it ever reached this table (adapter +
+                  schema fix, see lib/schema.sql's device_versions.serial comment
+                  and lib/adapters/fortinet/ssh.js's getVersion()). Both render as
+                  '—' for any device/transport that doesn't supply one, same as
+                  every other tile here. */}
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Build
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>{version?.build || '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Serial
+                </div>
+                <div style={{ color: 'var(--text-primary)' }} className="mono">
+                  {version?.serial || '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Last Collected
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>{formatDateTime(device.last_collected_at)}</div>
+              </div>
+            </div>
+          </div>
+
           <div className="card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: snmpSnapshot ? 16 : 0 }}>
               <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>SNMP Monitoring</div>
@@ -598,6 +575,36 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </div>
       )}
 
+      {tab === 'manage' && canWrite && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16 }}>
+              Device Actions
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <DeviceActions deviceId={device.id} />
+              <Link href={`/devices/${device.id}?tab=manage&confirmDelete=1`} className="btn btn-danger">
+                Delete
+              </Link>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
+              Rotate Credentials
+            </h2>
+            {/* mgmt_method comes from the STORED row — the credential shape must follow
+                the access method this device was actually saved with, not the vendor's
+                default (an ssh fortinet must not be handed an API-token input). */}
+            <CredentialForm
+              deviceId={device.id}
+              vendor={device.vendor}
+              mgmtMethod={device.mgmt_method}
+            />
+          </div>
+        </div>
+      )}
+
       <Modal open={confirmDelete} title="Delete Device">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
@@ -612,7 +619,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               </Button>
             </form>
             <Link
-              href={`/devices/${device.id}?tab=${tab}`}
+              href={`/devices/${device.id}?tab=manage`}
               style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
             >
               Cancel
