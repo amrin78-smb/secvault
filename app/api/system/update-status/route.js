@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.2': [
+    'Security/RBAC fix: the Delete Device confirmation dialog could be reached directly by a non-admin user via a direct link, showing a working-looking delete button (the delete itself was still correctly blocked server-side, but the dialog shouldn\'t have been reachable at all).',
+    'Fixed: the Exposure Risk card on a device\'s Overview tab could keep showing a rule finding or CVE as "open" after you\'d already dismissed or actioned it elsewhere in the app.',
+    'Fixed: the new "External Exposure" rule finding could occasionally be double-reported alongside an unrelated Shadow or Correlation finding for the same two rules, with contradictory advice.',
+    'Fixed a leftover reference to the old Settings > Zones page (removed earlier today) in one compliance-check message — it now correctly points to the device\'s own Manage tab.',
+  ],
   '2.21.1': [
     'Fixed: the zone-classification database migration in the previous update could fail with a "column does not exist" error and abort the whole update, leaving the app on the old version. If you hit this, running Update Now (or the update script) again will pick up the fix and complete normally.',
   ],

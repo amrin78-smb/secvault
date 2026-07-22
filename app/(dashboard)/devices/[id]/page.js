@@ -644,28 +644,30 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </div>
       )}
 
-      <Modal open={confirmDelete} title="Delete Device">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
-            Delete <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{device.name}</span>? This removes
-            all associated versions, rules, credentials, and CVE assessments.
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <form action={deleteDeviceAction}>
-              <input type="hidden" name="deviceId" value={device.id} />
-              <Button type="submit" variant="danger">
-                Delete
-              </Button>
-            </form>
-            <Link
-              href={`/devices/${device.id}?tab=manage`}
-              style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
-            >
-              Cancel
-            </Link>
+      {canWrite && (
+        <Modal open={confirmDelete} title="Delete Device">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+              Delete <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{device.name}</span>? This removes
+              all associated versions, rules, credentials, and CVE assessments.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <form action={deleteDeviceAction}>
+                <input type="hidden" name="deviceId" value={device.id} />
+                <Button type="submit" variant="danger">
+                  Delete
+                </Button>
+              </form>
+              <Link
+                href={`/devices/${device.id}?tab=manage`}
+                style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
+              >
+                Cancel
+              </Link>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -5324,6 +5324,78 @@ advisory-lock concurrency fix) personally re-reviewed against their findings bef
 `npm run build` clean end to end (after `npm ci` — `net-snmp` was declared in `package.json` but not yet
 installed in this environment's `node_modules`, unrelated to the sweep itself).
 
+### ⚠️ Bugs Found and Fixed — full-day orchestrated sweep (2026-07-22, ninth pass)
+
+Requested as "a complete bug sweep for all changes we made today" — the whole day's work, from the
+device-detail-page restructure through the Rule Analysis Intelligence round ("Path A":
+`generalization`, `external_exposure`, exposure correlation, the Reachability and Relationships tabs)
+through Zone Classification's two full rebuilds (global → per-device) and the live migration-ordering
+production incident fixed earlier the same day. Run as a single Workflow: 6 parallel finders, one per
+subsystem, each told to read the real current file content rather than trust a description; every
+candidate finding individually adversarially verified (told to default to REFUTED unless it could
+personally trace the exact failure through the actual code); confirmed findings grouped by file and
+fixed by one agent per group so nothing collided; every fix diff personally re-reviewed against its
+finding, plus a full rebuild and re-run of every existing smoke test, before integrating. 11 candidate
+findings, all 11 survived verification — collapsing to 5 real distinct bugs (several findings across
+different dimensions independently rediscovered the same 2 underlying bugs, a good convergent-validity
+signal rather than 11 separate problems).
+
+- **`app/(dashboard)/devices/[id]/page.js`**: the Delete Device confirmation `<Modal>` was gated only on
+  the `confirmDelete` query param, not on `canWrite` — a viewer session navigating directly to
+  `/devices/<id>?confirmDelete=1` (works from any tab, not just Manage) saw a fully-rendered delete
+  confirmation with a real, working-looking Delete button, escaping this page's own documented
+  "double-gated, tab link and content both" admin-only design for the Manage tab this dialog is reached
+  from. Not a data-loss bug — `deleteDeviceAction`'s own server-side `isAdmin()` check still blocked the
+  actual delete — but a real UI/defense-in-depth gap exposing an admin-only workflow to non-admins.
+  Fixed by wrapping the whole `<Modal>` in `{canWrite && (...)}`, matching every other admin-only control
+  on this page.
+- **`lib/engines/exposureCorrelation.js`** (Path A, shipped this same day) — two real bugs, found
+  independently by 4 of the 6 dimensions between them: (1) `EXPOSURE_FINDING_TYPES` was never updated
+  to include `external_exposure` after that finding type shipped later the same day, despite it being —
+  per the file's own header comment framing "exposure-widening" findings — arguably the single most
+  on-point finding type of the four for this exact feature. (2) Neither the rule-findings query nor the
+  CVE-assessments query joined against their respective acknowledgement tables
+  (`finding_acknowledgements` / `cve_assessment_acknowledgements`), so a rule finding or CVE an operator
+  had already dismissed or actioned elsewhere in the app still rendered on the Overview tab's Exposure
+  Risk card labeled "open" — directly contradicting both the UI's own copy and every other "open"
+  query's established convention in this codebase. Fixed: added `external_exposure` to the type list;
+  added the same `LEFT JOIN ... WHERE (status IS NULL OR status = 'new')` shape `app/api/events/route.js`'s
+  `fetchPatchNow()` already uses (the STRICTER of two historical definitions this codebase already
+  debated and settled on 2026-07-18 — see that section above — "acknowledged" does not count as open,
+  only a bare `new`/unset status does) to both queries.
+- **`lib/engines/ruleAnalysis.js`** — the new `generalization` pairwise loop (Path A) could double-report
+  the identical rule pair as both `generalization` and `shadow`, or both `generalization` and
+  `correlation`, with contradictory remediation advice on the same two rules. It only excluded pairs
+  already claimed by `redundant` (via its `fieldsFullyEqual` check) — unlike the `correlation` loop's own
+  already-established guards, it never checked the reciprocal `ruleCovers(s, r)` direction or
+  `shadowPairs`/`correlationPairs`. Fixed by adding the identical three guards `correlation`'s loop
+  already has. Verified against two synthetic constructions that previously reproduced the double-report
+  exactly (a literal-superset-destination pair that should be `correlation`-only, and a mutual-CIDR-
+  coverage pair via differing host bits that should be `shadow`-only) — both now report exactly one
+  finding type, confirmed via the existing smoke-test file, extended with these two new cases.
+- **`lib/engines/configAuditor.js`** — `evaluateExternalToInternalExposure()`'s `'na'` detail string
+  (shown on the compliance check detail page, the standards page, the print report, and the CSV export)
+  still told the operator to go to "Settings > Zones" — found independently by 3 of the 6 dimensions,
+  all pointing at the exact same line. That page was deleted the same day, hours earlier, when Zone
+  Classification was rebuilt per-device onto each device's own Manage tab (see that section above) — this
+  one string was the only place in the whole rebuild that never got updated to match. Fixed to reference
+  "this device's Manage tab" instead, matching the wording already used correctly in
+  `ZoneClassificationBanner.js`/`OverviewComplianceCard.js`.
+- **`lib/migrate.js`** — low severity, real but narrow: `migrateZoneClassificationsToPerDevice()`'s
+  `DROP CONSTRAINT` cleanup only targeted the ORIGINAL global schema's constraint name
+  (`zone_classifications_zone_name_key`), not the incorrectly-named duplicate constraint
+  (`zone_classifications_device_zone_key`) an EARLIER revision of this exact same function (commit
+  `ad0a0a7`, live for roughly 23 minutes before being superseded by the `6abc1d4` production-incident
+  fix) would have mistakenly created on any server fresh-installed during that narrow window. Added a
+  second `DROP CONSTRAINT IF EXISTS` for that name too — a safe no-op on every server outside that window,
+  real cleanup for any server that happened to install during it.
+
+All 5 fixes verified independently (not just trusted from each fix agent's own report): every diff
+personally re-read against its finding, `node --check` on all 4 CommonJS files, a full `npm run build`,
+and a full re-run of every pre-existing smoke test for the touched engines (`ruleAnalysis.js`'s
+`generalization`/`external_exposure` cases, `configAuditor.js`'s na/pass/fail cases) — all green, no
+regressions.
+
 ---
 
 ## Claude Code Workflow
