@@ -2410,6 +2410,14 @@ rather than trying to avoid it.
 
 ## Zone Classification (added 2026-07-22)
 
+**⛔ Superseded the SAME DAY — see "Rebuilt PER-DEVICE the same day" near the end of this section.**
+The `zone_classifications` table/UI described immediately below shipped as GLOBAL (fleet-wide), was
+found unusable within hours (a flat list mixing every device's zones with no way to tell which
+firewall each belonged to), and was rebuilt per-device. Kept below for the history of why the global
+design was chosen in the first place — not a description of current behavior. Current: per-device
+table, per-device `lib/engines/zoneClassification.js` functions, per-device API route, UI on each
+device's own Manage tab (NOT Settings).
+
 Direct follow-up to the Reachability tab (see "Path A" above): the user asked whether SecVault should
 do what ManageEngine Firewall Analyzer does — explicitly ask the operator which zone is Internal/
 External/DMZ, so compliance/reachability features don't misreport. This is a genuinely different
@@ -2533,6 +2541,61 @@ fetches for its `StandardCard` grid (no new query in any of the three call sites
 to their existing, already-duplicated `getFindings()` SELECT; `OverviewComplianceCard.js` (the device
 Overview tab's condensed version) got the same column added and shows a smaller inline text note
 instead of the full banner box, since there's no room for one among several Overview-tab cards).
+
+### ⛔ Rebuilt PER-DEVICE the same day — the global design was reported as unusable
+
+Direct user report, with a screenshot: the fleet-wide Settings > Zones list rendered as one giant
+alphabetical table mixing every device's zone names together with no indication of which firewall each
+belonged to — `3bb`, `apc`, `awsvpn`, `azure-express`, `backup-vpn`, `dmz1`..`dmz6`, all in one flat
+list. This exposed that the ORIGINAL design's core assumption ("the same zone name means the same
+thing on every device that reports it") was wrong for this fleet: these are per-device VPN tunnel/site
+identifiers, not shared role names reused identically across devices. The fix wasn't a UI filter
+dropdown bolted onto the global list — it was changing the data model itself to PER-DEVICE, which
+turned out to be the more natural fit anyway: all three consumers (`ruleAnalysis.js`'s
+`runAnalysisForDevice(deviceId)`, `configAuditor.js`'s `runComplianceAuditForDevice(deviceId)`,
+`ReachabilityTab({ deviceId })`) already operate on one device at a time, so `getZoneRoleMap(deviceId,
+pool)` is a more direct fit than the global version ever was.
+
+**Schema**: `zone_classifications` gained a `device_id UUID NOT NULL REFERENCES devices(id) ON DELETE
+CASCADE`, unique on `(device_id, zone_name)` instead of `zone_name` alone. Per this file's own standing
+"`CREATE TABLE IF NOT EXISTS` doesn't add columns to an already-existing table" rule, an already-deployed
+server (this table shipped mere hours earlier, same session) needs a real migration, not just a schema.sql
+edit — `lib/migrate.js`'s `migrateZoneClassificationsToPerDevice()` (best-effort, wired into `main()`):
+adds `device_id` as nullable first, **deletes any row where it's still NULL** (a legacy global-scoped row
+can't be retroactively attributed to a device — confirmed harmless to discard, since every row on the one
+deployment checked directly was still "Unclassified", meaning zero real classification work existed
+anywhere yet), drops the old single-column `UNIQUE` constraint, adds the new composite one inside a `DO $$
+... IF NOT EXISTS ... END $$` block (Postgres has no native `ADD CONSTRAINT IF NOT EXISTS`), then sets
+`device_id NOT NULL`. Every step is independently idempotent, so re-running this on a server that's already
+migrated (or a fresh install, where `CREATE TABLE` already produced the final shape) is a safe no-op.
+
+**`lib/engines/zoneClassification.js`** rewritten per-device: `getZoneRoleMap(deviceId, pool)`,
+`getDeviceZones(deviceId, pool)` (replaces the old fleet-wide `getDistinctFleetZones` — now scoped to one
+device's own `firewall_rules`), `setZoneRole(deviceId, zoneName, role, pool)`, `clearZoneRole(deviceId,
+zoneName, pool)`. The old global API route, `app/api/zone-classifications/route.js`, was deleted outright
+and replaced with `app/api/devices/[id]/zone-classifications/route.js` (GET not admin-gated, same "zone
+data isn't secret" reasoning as before; PUT admin-gated).
+
+**UI moved out of Settings entirely, onto each device's own Manage tab.** `components/settings/
+ZoneClassificationsPanel.js` and the Settings "Zones" tab are both gone. `components/devices/
+ZoneClassificationPanel.js` (new) renders as a third card on the Manage tab, right after "Rotate
+Credentials", inside the same `tab === 'manage' && canWrite` block those two cards already live in —
+meaning it needs no client-side admin check of its own (the whole block is already fully admin-gated,
+tab link and content both) and always shows the edit `<select>`s directly, unlike the old Settings
+version's `canWrite`-conditional read-only fallback. Same per-row auto-save pattern as
+`AcknowledgeControl.js` (optimistic update, revert on error).
+
+Every place that used to link to `/settings?tab=zones` was updated to `/devices/${deviceId}?tab=manage`
+instead: `ZoneClassificationBanner.js` (gained a required `deviceId` prop, threaded through from all 3
+call sites), `OverviewComplianceCard.js`'s own separate inline note, and — found only via a full grep
+sweep during this round, not one of the originally-identified call sites — `ReachabilityTab.js`'s own
+explanatory caption text, which had an identical stale link.
+
+Built via 2 parallel sub-agents after the schema/engine/API-route foundation was done directly by the
+primary agent (same "high-risk foundation first, then fan out" sequencing as the earlier Path A round):
+one built the new `ZoneClassificationPanel.js` + Manage-tab wiring, the other removed the old Settings
+UI and fixed every stale link — zero file overlap between the two by construction (the primary agent
+pre-built the API route contract both could depend on independently).
 
 ---
 

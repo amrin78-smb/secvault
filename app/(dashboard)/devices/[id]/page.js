@@ -23,6 +23,7 @@ import OverviewRuleHygieneCard from '../../../../components/devices/OverviewRule
 import OverviewConfigChangesCard from '../../../../components/devices/OverviewConfigChangesCard';
 import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
 import SnmpTrendMini from '../../../../components/snmp/SnmpTrendMini';
+import ZoneClassificationPanel from '../../../../components/devices/ZoneClassificationPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -632,6 +633,13 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               vendor={device.vendor}
               mgmtMethod={device.mgmt_method}
             />
+          </div>
+
+          <div className="card" style={{ padding: 20 }}>
+            <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
+              Zone Classification
+            </h2>
+            <ZoneClassificationPanel deviceId={device.id} />
           </div>
         </div>
       )}

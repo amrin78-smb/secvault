@@ -227,7 +227,7 @@ export default async function DeviceCompliancePage({ params }) {
         }
       />
 
-      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} />}
+      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={device.id} />}
 
       {zones.length > 0 && (
         <Card>

@@ -316,7 +316,7 @@ export default async function CompliancePage({ searchParams }) {
 
       <DeviceSelect devices={activeDevices} selectedId={selected.id} />
 
-      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} />}
+      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={selected.id} />}
 
       {zones.length > 0 && (
         <Card>

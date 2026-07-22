@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.0': [
+    'Zone classification (Internal/External/DMZ) is now per-firewall instead of one shared fleet-wide list — it moved from Settings into each device\'s own Manage tab, and only shows that device\'s own zones.',
+    'Fixed: the fleet-wide zone list mixed every firewall\'s zones together with no way to tell which device a zone belonged to — reported directly and fixed the same day.',
+  ],
   '2.20.1': [
     'The Compliance page now shows a notice when a device\'s zones haven\'t been classified yet, explaining that the External-to-Internal check is excluded from that score — instead of hiding the whole compliance score, since every other check still scores correctly.',
   ],

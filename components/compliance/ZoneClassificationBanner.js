@@ -2,12 +2,13 @@ import Link from 'next/link';
 
 // Shown on a compliance page when the External-to-Internal zone
 // segmentation check (rule-no-external-to-internal-access) resolved 'na'
-// for this device -- i.e. its own zones haven't been classified yet
-// (Settings > Zones). Every OTHER check on this device still scores
-// normally: scorePctFromCounts() already excludes 'na' results from the
-// denominator, so the standard scores shown alongside this banner are real,
-// computed numbers, not placeholders -- this banner exists only to make the
-// one excluded check visible, not to cast doubt on everything else.
+// for this device -- i.e. its own zones haven't been classified yet (from
+// that device's own Manage tab, devices/[id]?tab=manage). Every OTHER check
+// on this device still scores normally: scorePctFromCounts() already
+// excludes 'na' results from the denominator, so the standard scores shown
+// alongside this banner are real, computed numbers, not placeholders --
+// this banner exists only to make the one excluded check visible, not to
+// cast doubt on everything else.
 //
 // Deliberately NOT a page-wide "no score until classified" block (the full
 // ManageEngine-style behavior this was compared against, then explicitly
@@ -17,7 +18,11 @@ import Link from 'next/link';
 //
 // Presentational only, no DB access -- each caller derives `standards`
 // from data it already fetched for its own render (no new query needed).
-export default function ZoneClassificationBanner({ standards }) {
+// `deviceId` is required -- zone classification is per-device (rebuilt
+// 2026-07-22 off the original fleet-wide Settings > Zones page, which mixed
+// every device's zones into one unusable flat list), so the link below must
+// point at THIS device's own Manage tab, not a global settings page.
+export default function ZoneClassificationBanner({ standards, deviceId }) {
   const list = Array.isArray(standards) && standards.length > 0 ? standards.join(', ') : 'PCI-DSS, NIST, CIS v8';
   return (
     <div
@@ -39,7 +44,7 @@ export default function ZoneClassificationBanner({ standards }) {
         {list} score{Array.isArray(standards) && standards.length === 1 ? '' : 's'} below.
       </span>
       <Link
-        href="/settings?tab=zones"
+        href={`/devices/${deviceId}?tab=manage`}
         style={{ fontWeight: 600, color: 'inherit', textDecoration: 'underline', whiteSpace: 'nowrap' }}
       >
         Classify zones →

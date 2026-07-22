@@ -171,7 +171,7 @@ export default async function OverviewComplianceCard({ deviceId }) {
         {zoneCheckIsNa && (
           <div style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--tint-warn-fg)' }}>
             Zones not classified — the External-to-Internal check is excluded.{' '}
-            <Link href="/settings?tab=zones" style={{ fontWeight: 600, color: 'inherit', textDecoration: 'underline' }}>
+            <Link href={`/devices/${deviceId}?tab=manage`} style={{ fontWeight: 600, color: 'inherit', textDecoration: 'underline' }}>
               Classify →
             </Link>
           </div>

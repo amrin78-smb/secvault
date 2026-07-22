@@ -280,23 +280,44 @@ CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
 -- AUTOMATIC zone-name pattern matching ("TFM-HQ"/"YCC"/"VRZ" aren't
 -- reliably classifiable by name), but an explicit, admin-supplied mapping
 -- sidesteps that exact risk since it's a fact the operator supplies, not a
--- guess this app makes. Keyed on the NORMALIZED (lowercased, trimmed) zone
--- name, global across the fleet (not per-device) -- the same zone name is
--- assumed to mean the same thing across every device that reports it,
--- matching how these names are actually assigned in practice (a real
--- deployment's "DMZ" zone means the same thing on every firewall that has
--- one). Deliberately does NOT try to auto-classify: a zone with no row
--- here is simply unclassified, never silently assumed to be any role --
--- every consumer of this table must treat "no row" as "we don't know",
--- the same tri-state-honesty discipline this app already applies to CVE
--- applicability and compliance predicate evaluation.
+-- guess this app makes. Keyed on (device_id, NORMALIZED zone name) --
+-- **PER-DEVICE, not global** (changed 2026-07-22, the same day the global
+-- version first shipped): a real fleet's zone names turned out to be
+-- per-device/per-tunnel identifiers (VPN site names like "3bb"/"awsvpn",
+-- numbered DMZ zones like "dmz1".."dmz6"), not shared role names reused
+-- identically across devices the way the original design assumed -- a
+-- flat global list mixing every device's zones together with no device
+-- context was reported directly as unusable. Deliberately does NOT try to
+-- auto-classify: a zone with no row here is simply unclassified, never
+-- silently assumed to be any role -- every consumer of this table must
+-- treat "no row" as "we don't know", the same tri-state-honesty discipline
+-- this app already applies to CVE applicability and compliance predicate
+-- evaluation.
 CREATE TABLE IF NOT EXISTS zone_classifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  zone_name TEXT NOT NULL UNIQUE, -- already normalized (lowercase, trimmed) by the writer
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  zone_name TEXT NOT NULL, -- already normalized (lowercase, trimmed) by the writer
   role TEXT NOT NULL, -- 'internal' | 'external' | 'dmz'
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (device_id, zone_name)
 );
+
+CREATE INDEX IF NOT EXISTS idx_zone_classifications_device_id ON zone_classifications(device_id);
+
+-- ⛔ Migrating an ALREADY-DEPLOYED server from the original global shape
+-- (zone_name TEXT UNIQUE, no device_id) to the per-device shape above:
+-- CREATE TABLE IF NOT EXISTS is a no-op on a server that already has this
+-- table (see this file's own standing "adding a column to an existing
+-- table" warning elsewhere), so a plain column addition here would never
+-- reach an existing install. Handled instead as an idempotent JS migration
+-- in lib/migrate.js (migrateZoneClassificationsToPerDevice) -- see that
+-- function's own comment for why this needs conditional constraint
+-- manipulation (DROP the old single-column UNIQUE, ADD the new composite
+-- one) that plain "IF NOT EXISTS" SQL can't cleanly express, and why any
+-- pre-existing global-scoped row is safely discarded rather than migrated
+-- (this table shipped and was redesigned in the same session, before any
+-- real classification work existed on any deployed server).
 
 -- Object catalog collection (address/service objects + groups), added
 -- alongside the "Unused Objects"/"Duplicate Objects" analysis feature --

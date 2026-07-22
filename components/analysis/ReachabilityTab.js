@@ -30,8 +30,8 @@ const ROLE_LABEL = { internal: 'Internal', external: 'External', dmz: 'DMZ' };
 // ALLOW verdict -- standard network segmentation reasoning, not a made-up
 // scale: External should reach DMZ, not Internal directly; DMZ reaching
 // Internal is a common real-world pivot path and worth a second look too.
-// Only applies when BOTH zones are actually classified (see
-// Settings > Zones) -- an unclassified zone never gets flagged either way,
+// Only applies when BOTH zones are actually classified (see this device's
+// own Manage tab) -- an unclassified zone never gets flagged either way,
 // same tri-state-honesty discipline as everything else zone-classification
 // touches.
 function riskTier(srcRole, dstRole, verdict) {
@@ -59,7 +59,7 @@ export default async function ReachabilityTab({ deviceId }) {
   // render (identical to "nothing classified yet").
   let zoneRoles = {};
   try {
-    zoneRoles = await getZoneRoleMap(pool);
+    zoneRoles = await getZoneRoleMap(deviceId, pool);
   } catch (err) {
     console.warn(`[ReachabilityTab] Failed to load zone classifications: ${err.message}`);
   }
@@ -83,9 +83,9 @@ export default async function ReachabilityTab({ deviceId }) {
         Reflects zone-to-zone paths only (not full address/service granularity within a zone pair), based on this
         device&apos;s own ruleset only (not cross-device network topology). &quot;—&quot; means no explicit rule was
         found for that path — check the device&apos;s own default policy, this is not a claim that the path is
-        blocked or allowed. Zone roles (Internal/External/DMZ) are set in{' '}
-        <a href="/settings?tab=zones" style={{ color: 'var(--primary)' }}>
-          Settings &gt; Zones
+        blocked or allowed. Zone roles (Internal/External/DMZ) are set on{' '}
+        <a href={`/devices/${deviceId}?tab=manage`} style={{ color: 'var(--primary)' }}>
+          this device&apos;s Manage tab
         </a>
         ; cells outlined in red are an Allow from a classified External zone straight to a classified Internal
         one, and cells outlined in amber are an Allow from a classified DMZ zone to a classified Internal one —
