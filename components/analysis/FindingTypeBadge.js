@@ -13,6 +13,7 @@ const TYPE_LABELS = {
   log_disabled: 'Logging Off',
   overly_permissive: 'Overly Permissive',
   correlation: 'Correlation',
+  generalization: 'Generalization',
 };
 
 export default function FindingTypeBadge({ type }) {

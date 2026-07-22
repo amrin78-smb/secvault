@@ -6,9 +6,9 @@ import FindingTypeBadge from './FindingTypeBadge';
 import AcknowledgeControl from './AcknowledgeControl';
 
 // Cleanup tab (Rule Analysis Dashboard Phase 2): unused / redundant /
-// overly_permissive / correlation findings, with a per-row acknowledge
-// status control. correlation (added alongside the 10th finding type) is a
-// ruleset-simplification suggestion, same class as redundant -- belongs here
+// overly_permissive / correlation / generalization findings, with a per-row
+// acknowledge status control. correlation and generalization are both
+// ruleset-simplification suggestions, same class as redundant -- belong here
 // alongside it. Async server component -- does its own pool.query, same
 // pattern as app/(dashboard)/devices/[id]/analysis/page.js. Do not add
 // 'use client'.
@@ -37,7 +37,7 @@ async function getCleanupFindings(dbPool, deviceId) {
        AND fa.rule_id_vendor = fr.rule_id_vendor
        AND fa.finding_type = rar.finding_type
      WHERE rar.device_id = $1
-       AND rar.finding_type IN ('unused', 'redundant', 'overly_permissive', 'correlation')
+       AND rar.finding_type IN ('unused', 'redundant', 'overly_permissive', 'correlation', 'generalization')
      ORDER BY
        CASE rar.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
        rar.finding_type ASC,

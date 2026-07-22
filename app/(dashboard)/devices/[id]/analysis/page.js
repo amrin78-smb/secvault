@@ -21,17 +21,23 @@ import RiskTab from '../../../../../components/analysis/RiskTab';
 import RiskyRulesTab from '../../../../../components/analysis/RiskyRulesTab';
 import ObjectsTab from '../../../../../components/analysis/ObjectsTab';
 import TrackingTab from '../../../../../components/analysis/TrackingTab';
+import ReachabilityTab from '../../../../../components/analysis/ReachabilityTab';
+import RuleRelationshipTab from '../../../../../components/analysis/RuleRelationshipTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
 export const dynamic = 'force-dynamic';
 
-// The 10 finding types in the fixed severity order CLAUDE.md documents for
+// The 11 finding types in the fixed severity order CLAUDE.md documents for
 // the rule analysis engine, used both for the findings-tab filter dropdown
 // and for the summary-tab bar chart (so the bar order never depends on
 // whatever happens to be present in a given device's results). 'correlation'
 // (medium — mergeable rules, added alongside the Risky Rules view) sits
-// next to 'redundant'/'overly_permissive', the other two ruleset-simplification
-// (not security-exposure) finding types.
+// next to 'redundant'/'overly_permissive', the other ruleset-simplification
+// (not security-exposure) finding types. 'generalization' (added in the
+// "Path A" rule-analysis intelligence round) is the mirror direction of
+// shadow/redundant — an earlier, narrower same-action rule made pointless
+// by a later, broader one — and sits in that same ruleset-simplification
+// group, not the security-exposure group.
 const FINDING_TYPES = [
   'any_any',
   'risky_service',
@@ -39,6 +45,7 @@ const FINDING_TYPES = [
   'reorder_candidate',
   'redundant',
   'correlation',
+  'generalization',
   'overly_permissive',
   'unused',
   'expiring_soon',
@@ -228,6 +235,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     'risky-rules',
     'objects',
     'tracking',
+    'reachability',
+    'relationships',
   ].includes(searchParams?.tab)
     ? searchParams.tab
     : 'summary';
@@ -279,6 +288,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'risky-rules', 'Risky Rules')}
         {tabLink(device.id, tab, 'objects', 'Objects')}
         {tabLink(device.id, tab, 'tracking', 'Tracking')}
+        {tabLink(device.id, tab, 'reachability', 'Reachability')}
+        {tabLink(device.id, tab, 'relationships', 'Relationships')}
       </div>
 
       {tab === 'summary' && (
@@ -384,6 +395,9 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'objects' && <ObjectsTab deviceId={device.id} />}
 
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
+
+      {tab === 'reachability' && <ReachabilityTab deviceId={device.id} />}
+      {tab === 'relationships' && <RuleRelationshipTab deviceId={device.id} />}
 
       {tab === 'findings' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

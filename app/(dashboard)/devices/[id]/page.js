@@ -18,6 +18,7 @@ import DeviceActions from '../../../../components/devices/DeviceActions';
 import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
 import { detectSnmpConfig, looksConfigured } from '../../../../lib/engines/snmpConfigDetection';
 import OverviewCveCard from '../../../../components/devices/OverviewCveCard';
+import OverviewExposureCard from '../../../../components/devices/OverviewExposureCard';
 import OverviewRuleHygieneCard from '../../../../components/devices/OverviewRuleHygieneCard';
 import OverviewConfigChangesCard from '../../../../components/devices/OverviewConfigChangesCard';
 import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
@@ -457,6 +458,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           </div>
 
           <OverviewCveCard deviceId={device.id} />
+          <OverviewExposureCard deviceId={device.id} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewRuleHygieneCard deviceId={device.id} />
             <OverviewConfigChangesCard deviceId={device.id} />

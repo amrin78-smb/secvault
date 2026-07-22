@@ -12,11 +12,14 @@ import RuleHygieneDonut from '../analysis/RuleHygieneDonut';
 // The 6 donut categories below are 5 of the 10 real rule_analysis_results.finding_type
 // values (unused/shadow/redundant/any_any/log_disabled -- see lib/engines/ruleAnalysis.js,
 // confirmed directly against that file) plus a 6th "Other Issues" bucket summing the
-// remaining 5 (correlation/risky_service/reorder_candidate/expiring_soon/
-// overly_permissive) -- kept as one bucket rather than 10 slices so the donut/legend
-// stays readable, mirroring CLAUDE.md's own "Cleanup/Optimization/Reorder" tab split
-// philosophy of grouping finding types by what an operator actually acts on.
-const OTHER_FINDING_TYPES = ['correlation', 'risky_service', 'reorder_candidate', 'expiring_soon', 'overly_permissive'];
+// remaining finding types (correlation/risky_service/reorder_candidate/expiring_soon/
+// overly_permissive/generalization) -- kept as one bucket rather than many slices so the
+// donut/legend stays readable, mirroring CLAUDE.md's own "Cleanup/Optimization/Reorder" tab
+// split philosophy of grouping finding types by what an operator actually acts on.
+// generalization (an earlier, narrower rule made pointless by a later, broader same-action
+// rule) is the same ruleset-simplification class as correlation -- belongs in this bucket
+// alongside it, not one of the 5 headline categories.
+const OTHER_FINDING_TYPES = ['correlation', 'risky_service', 'reorder_candidate', 'expiring_soon', 'overly_permissive', 'generalization'];
 
 const CATEGORY_DEFS = [
   { key: 'unused', label: 'Unused Rules', color: 'var(--red)' },

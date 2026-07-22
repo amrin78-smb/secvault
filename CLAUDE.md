@@ -2234,6 +2234,180 @@ variant.
 
 ---
 
+## Rule Analysis Intelligence Round — "Path A" (added 2026-07-22)
+
+A competitive deep-research pass (Tufin/AlgoSec/FireMon/Skybox/Palo Alto Policy Optimizer/Cisco
+Policy Analyzer, plus the academic literature the whole "shadow/redundant/correlation" taxonomy
+traces back to — Al-Shaer & Hamed, INFOCOM 2004) found that SecVault's rule-analysis engine is a
+faithful, correctly-implemented version of that same foundational academic model — not naive — but
+that every commercial "intelligent" competitor layers one of: traffic/log data, cross-device
+topology, or vulnerability/exposure context on top of the identical static analysis SecVault already
+has. That research split into two paths: things needing real traffic-log ingestion (Phase 8, not
+built — deferred, not attempted) and things buildable today, config-only, from data already
+collected. This round built the config-only path ("Path A") in full: 4 pieces, fanned to 4 parallel
+sub-agents after the two correctness-critical core-engine pieces were built by the primary agent
+directly (per this file's own "high-risk refactors done by primary agent, not sub-agents" rule —
+modifying `ruleAnalysis.js` itself and designing the exposure-correlation join both qualify). Every
+sub-agent diff was personally re-read against its own file before integrating (not just trusted from
+the agent's self-report) — this pass caught and fixed one real bug (`lib/engines/ruleRelationships.js`
+shipped with `'use strict';` trapped inside a `//`-comment line, silently never active) and one
+pre-existing, unrelated gap flagged by the first sub-agent while it worked (`FindingsBarChart.js` was
+already missing a `correlation` entry in its hardcoded type/color list, from before this round even
+started) — both fixed in the same pass.
+
+### 1. `generalization` — an 11th finding type, closing a real direction gap
+
+Every existing pairwise check (`shadow`, `redundant`, `correlation`, `reorder_candidate`) only ever
+tests whether an EARLIER rule covers/equals a LATER one. None test the opposite direction: a LATER,
+BROADER same-action rule that fully covers an EARLIER, NARROWER rule. That earlier rule still fires
+first and isn't unreachable (unlike `shadow` — order matters, it's not dead code) — but for every
+packet it matches, the later, broader rule (same action) would produce the identical decision, so it
+adds no behavior beyond what the later rule already provides. `severity: 'medium'`, the same
+ruleset-simplification class as `redundant`/`correlation`/`overly_permissive`, not a security-exposure
+finding (same action either way). Stores `rule_id` = the earlier, narrower (now-pointless) rule,
+`affected_rule_ids` = `[the later, broader rule]`.
+
+Implemented as one more pass inside `ruleAnalysis.js`'s existing O(n²) pairwise block (same
+`ruleCovers()`/`fieldEquals()` helpers, same `yieldToEventLoop()` interruptibility, same per-pair
+`break`-after-first-match convention as every sibling check) — reusing `ruleCovers(r, s)` with the
+roles reversed from every other check (`r` = later/outer-loop rule, `s` = earlier/inner-loop rule).
+**Deliberately excludes the case where `s` and `r`'s fields are fully equal** — that pair is already
+reported by `redundant` (which runs in the `s`-covers-`r` direction and flags `r` as the duplicate);
+without this exclusion, an exact-duplicate pair would be double-reported under two different finding
+types in opposite directions. Verified with a 5-case synthetic smoke test before shipping (narrower
+rule correctly flagged; exact duplicates correctly produce `shadow` only — see below — never
+`generalization`; different-action pairs never fire; the pre-existing `shadow`/`reorder_candidate`
+cases are unaffected).
+
+**A real, useful side-finding from writing that test**: in a simple 2-rule universe, two EXACTLY
+duplicate same-action rules are always reported as `shadow` by the pre-existing engine, never
+`redundant` — equal fields trivially satisfy `ruleCovers()` too, and `shadow`'s loop runs first and
+wins (`redundant`'s loop explicitly skips any pair already recorded in `shadowPairs`). This isn't a
+bug and wasn't changed — just a pre-existing engine behavior worth knowing before ever touching this
+area again: `redundant` only fires today when the exact-duplicate rule isn't the FIRST covering match
+`shadow`'s own loop happens to land on.
+
+Propagated everywhere the app enumerates finding types: `CleanupTab.js` (added alongside
+`unused`/`redundant`/`overly_permissive`/`correlation` — same "simplify the ruleset" bucket),
+`FindingTypeBadge.js`, `FindingsBarChart.js` (medium-severity color group), `OverviewRuleHygieneCard.js`
+(folded into the "Other Issues" donut bucket, same bucket as `correlation`), and — most importantly —
+`app/api/devices/[id]/acknowledgements/route.js`'s `FINDING_TYPES` allow-list, the exact list this file
+already documents a real historical incident about (`correlation` was once left out of this same list,
+permanently 400ing every acknowledge attempt for that type). Also added to
+`devices/[id]/analysis/page.js`'s `FINDING_TYPES` array (the Findings-tab filter dropdown + summary bar
+chart zero-fill list) directly by the primary agent, alongside two new tab-scaffolding entries (see
+below).
+
+### 2. Exposure Risk correlation — CVE engine × rule engine, joined for the first time
+
+`lib/engines/exposureCorrelation.js` (new, pure-ish DB-backed engine): SecVault has run a rule-hygiene
+engine and a CVE-prioritization engine completely independently since Phase 3/5 — they have never once
+been queried together. This is the single highest-ROI item from the competitive research: Tufin's and
+FireMon's own headline "intelligent" differentiator (config analysis correlated with vulnerability/
+exposure data) needed zero new data sources here, only a join. `getExposureCorrelationForDevice(deviceId,
+pool)` pairs every open exposure-widening rule finding (`any_any` / `overly_permissive` / `risky_service`
+— deliberately NOT the ruleset-hygiene types like `shadow`/`redundant`/`generalization`, which say
+nothing about exposure) with that SAME device's open `priority_band = 'patch_now'` CVE assessments.
+
+**This is a DEVICE-LEVEL correlation, not a claim that a specific rule and a specific CVE target the
+same port/service** — no such mapping exists anywhere in this app's data model
+(`device_cve_assessments` only knows "this device's installed version is affected," never "on which
+port/service"). The finding is "this rule widens what can reach this box, and this same box also has
+an actively relevant, unpatched vulnerability," matching exactly how the competitive research describes
+Tufin's/FireMon's own exposure-context risk framing — not a per-port claim stronger than the underlying
+data supports.
+
+Deliberately **computed at read time, never stored** — same convention as `riskScore.js`'s
+`computeRiskScore()`/`configAuditor.js`'s `scorePctFromCounts()`. `rule_analysis_results` and
+`device_cve_assessments` refresh on two independent schedules (rule analysis: every rule pull or manual
+"Run Analysis"; CVE assessment: every feed sync, or a config-change-triggered re-match) — storing a
+derived join would need its own staleness/invalidation model for no real benefit; a live join is always
+accurate as of the two inputs' own last-refresh times and is cheap (bounded by matches per device, not
+the O(n²) cost `ruleAnalysis.js` itself has to manage).
+
+`components/devices/OverviewExposureCard.js` (new) renders it on the device Overview tab, immediately
+after `OverviewCveCard` (the most CVE-adjacent existing neighbor) — reuses `SeverityBadge`/
+`FindingTypeBadge`/`CVEBadge` verbatim rather than inventing new badge styling (`CVEBadge` already
+returns `null` for a non-KEV CVE, so it's safe to render unconditionally). The empty case (no
+correlation — the common outcome, since it requires both an exposure finding AND an open patch-now CVE
+on the same device) renders as a calm one-line message, not an alarming empty-state box, matching
+`OverviewComplianceCard.js`'s own "don't over-dramatize a good outcome" precedent. A fleet-wide count
+helper, `countDevicesWithExposureCorrelation(pool)`, exists in the engine file for potential future use
+(a Dashboard summary tile) but is **not wired into any UI yet** — deliberately scoped out of this round
+to keep it to the per-device card, not a new fleet-wide page invented ad hoc.
+
+### 3. Reachability tab — single-device, config-only zone reachability
+
+The competitive research's one genuinely "big swing" differentiator — multi-hop, cross-device network
+path analysis (Tufin/AlgoSec's most expensive tier) — is **not attempted**: SecVault has no topology
+model of how devices connect to each other (which subnet sits behind which device/interface), and
+building one is a real, separate, much larger feature, not something to fake. What WAS built instead is
+the single-device slice that's honestly answerable from data already collected:
+`lib/engines/reachabilityMatrix.js`'s `computeZoneReachability(rules)` — a pure function answering
+"given this device's own enabled ruleset, which zone-to-zone paths does it currently allow, deny, or
+leave unspecified?"
+
+Algorithm (deliberately a simple, defensible first-match-wins model, not a full 5-tuple packet
+simulator): collect every distinct REAL (non-wildcard) zone name across all rules' `src_zones`/
+`dst_zones`; for every ordered `(srcZone, dstZone)` pair including same-zone pairs, walk the enabled
+rules in `sequence_number` order — the FIRST rule whose zones cover that pair (wildcard or explicit
+membership) decides the verdict. No match at all is `'unspecified'` — **deliberately never coerced to
+"deny by default"**, since different vendors have different default policies and this codebase doesn't
+reliably know each device's own default; same tri-state-honesty discipline as the CVE applicability
+engine's "`unknown` never collapses to `no`" rule. A device with no zone data at all (several vendors'
+adapters don't collect it) returns `hasZoneData: false` rather than fabricating a matrix from nothing.
+Local `isAny()`/`normList()`/`actionCategory()` helpers are duplicated from `ruleAnalysis.js` rather than
+imported (that file doesn't export them — matches this codebase's own established small-helper-
+duplication convention).
+
+`components/analysis/ReachabilityTab.js` (new tab, `?tab=reachability` on `devices/[id]/analysis`)
+renders the matrix as a plain `<table>` (via the shared `Table` wrapper, which already enforces
+`tableLayout: 'fixed'` internally) — `Badge` colors (`success`/`danger`/`muted`) per cell, a tooltip
+naming the deciding rule, and an explicit caption stating the three scope limits verbatim: zone-only
+granularity (not full address/service matching within a zone pair), single-device only (not cross-device
+topology), and `'unspecified'` meaning "no explicit rule found," never a claim about the device's
+default policy either way.
+
+### 4. Relationships tab — clustering the 5 relationship-shaped finding types
+
+A PhD thesis surfaced in the competitive research found that matrix/tree/sunburst visualizations are
+inadequate for representing firewall rule-anomaly relationships and built custom hive-plot/
+dynamic-slice visualizations instead — evidence that the flat-table status quo (SecVault's own Findings
+tab) is a recognized, real usability gap in this exact problem space, not a cosmetic nice-to-have.
+`lib/engines/ruleRelationships.js`'s `clusterRelationshipFindings(findings)` (new, pure, standard
+union-find with path compression) groups the 5 finding types that each describe a relationship between
+two specific rules — `shadow` / `redundant` / `correlation` / `generalization` / `reorder_candidate` —
+into connected clusters via the `rule_id` ↔ `affected_rule_ids` edges every one of those finding rows
+already carries. A 2-rule cluster (a single shadow/redundant/correlation/generalization/reorder pair) is
+just as valid a result as a larger one — never filtered out. Clusters sort worst-severity-first, then by
+rule count descending.
+
+**Deliberately not a new graph-drawing dependency or a hand-rolled force-directed SVG layout** — this
+codebase has no graph-visualization library (only `recharts`, which isn't suited to relationship graphs),
+and a badly-executed node-link diagram is worse than a clean list; a full graph renderer was explicitly
+scoped out as too risky for this round, matching this codebase's own bias toward the simpler, safer
+option when uncertain. `components/analysis/RuleRelationshipTab.js` (new tab, `?tab=relationships`)
+instead renders one `Card` per cluster: a severity/rule-count/relationship-count summary header, an
+optional chip-row overview for 3+ rule clusters (skipped for the common 2-rule case, where the single
+edge row below already shows the same two rules as a chip → chip chain — repeating them above would be
+pure redundancy), and a stacked list of edge rows each showing rule → affected-rule chips, the finding's
+own real `detail`/`remediation` text verbatim (never re-derived), and its badges. `affected_rule_ids` is
+resolved against a same-request snapshot of the device's rules — never persisted or cached — same
+discipline `ReorderTab.js`'s own header comment already documents (`firewall_rules` is fully
+DELETE+reinserted on every collect, so these ids aren't stable across pulls).
+
+### Tab scaffolding
+
+Both new tabs' plumbing (`?tab=reachability|relationships` validity, tab-bar links, conditional render
+blocks, component imports) was added directly by the primary agent to
+`app/(dashboard)/devices/[id]/analysis/page.js` BEFORE fanning the two building sub-agents — this let
+each sub-agent own exactly one new component file with zero risk of two agents racing on the same
+shared page file, the same "frozen contract, no file written by more than one agent" discipline this
+file's own "Parallel Sub-Agents" section documents, applied by pre-building the shared integration point
+rather than trying to avoid it.
+
+---
+
 ## Credential Profiles (added 2026-07-21)
 
 Reusable named credential bundles ("connection profiles") — save a username/password, API key, or

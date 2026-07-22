@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   rule_id UUID NOT NULL REFERENCES firewall_rules(id) ON DELETE CASCADE,
-  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'correlation' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
+  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'correlation' | 'generalization' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
   severity TEXT NOT NULL DEFAULT 'info', -- 'critical' | 'high' | 'medium' | 'info'
   detail TEXT,
   affected_rule_ids JSONB NOT NULL DEFAULT '[]'::jsonb, -- e.g. for shadow: the rule(s) doing the shadowing

@@ -3,7 +3,7 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import Card, { CardBody } from '../ui/Card';
 
-// The 9 finding types in the fixed severity order CLAUDE.md documents for the
+// The finding types in the fixed severity order CLAUDE.md documents for the
 // rule analysis engine (lib/engines/ruleAnalysis.js), each mapped to the
 // severity it's always emitted at -- used to color bars the same way
 // SeverityBadge.js colors severity pills, so this chart and that badge always
@@ -14,9 +14,11 @@ const FINDING_TYPE_ORDER = [
   { type: 'shadow', label: 'Shadow', severity: 'high' },
   { type: 'reorder_candidate', label: 'Reorder', severity: 'high' },
   { type: 'redundant', label: 'Redundant', severity: 'medium' },
+  { type: 'correlation', label: 'Correlation', severity: 'medium' },
   { type: 'overly_permissive', label: 'Overly Perm.', severity: 'medium' },
   { type: 'unused', label: 'Unused', severity: 'medium' },
   { type: 'expiring_soon', label: 'Expiring', severity: 'medium' },
+  { type: 'generalization', label: 'Generalization', severity: 'medium' },
   { type: 'log_disabled', label: 'Log Off', severity: 'info' },
 ];
 

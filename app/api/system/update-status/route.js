@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.19.0': [
+    'Added a new "Generalization" rule finding: catches an earlier, narrower rule made pointless by a later, broader rule with the same action — a gap the existing shadow/redundant checks didn\'t cover, since they only ever compared in the other direction.',
+    'Devices now show an "Exposure Risk" card correlating rule findings that widen access (any-to-any, overly permissive, risky services) with that same device\'s open patch-now CVEs — the two were always tracked separately and have never been connected until now.',
+    'New "Reachability" tab on the Rule Analysis page: a zone-to-zone matrix showing what a device\'s current ruleset actually allows or denies between zones, based on real rule order and coverage — not a claim about network topology across other devices.',
+    'New "Relationships" tab groups shadow/redundant/correlation/generalization/reorder-candidate findings into connected clusters of related rules, instead of a flat table where each row has to be manually cross-referenced against the others.',
+    'Fixed a pre-existing gap where the Findings bar chart on the Rule Analysis summary tab was missing a color/label entry for the "Correlation" finding type.',
+  ],
   '2.18.1': [
     'The SNMP Monitoring card on a device\'s Overview tab now shows a small recent trend chart for CPU/Memory and Sessions under the current numbers, instead of just the latest value.',
   ],
