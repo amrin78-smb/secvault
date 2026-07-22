@@ -2507,6 +2507,33 @@ path), applied only when BOTH zones in the pair are actually classified. A load 
 cell highlighted this render" (best-effort, same posture as the other two consumers), never breaks the
 tab.
 
+### Follow-up, same day: considered and rejected the full ManageEngine-style score block
+
+Direct follow-up question: should the compliance page do what ManageEngine Firewall Analyzer
+apparently does — show NO compliance score for ANY standard until zones are classified? **Decided
+against it, deliberately**, and built a narrower alternative instead (`ZoneClassificationBanner`).
+Reasoning: ManageEngine's all-or-nothing block makes sense for ITS OWN check composition, where most/
+all checks likely depend on zone/segment context. SecVault's doesn't work that way — of PCI-DSS's/
+NIST's/CIS v8's full check lists, only ONE check (`rule-no-external-to-internal-access`) actually
+depends on zone data; everything else (explicit deny-all, ICMP blocked, logging enabled, password
+policy, 2FA required, etc.) is fully computable with zero zone data. `scorePctFromCounts()` already
+excludes `na` results from the denominator (see the Compliance Engine section above), so a standard's
+score today is ALREADY correctly computed from every other check when this one is `na` — blocking the
+whole score over one excluded check would throw away real, valid results for the other 15-20+ checks
+per standard, which is worse than showing the (already-correct) partial score plainly.
+
+`components/compliance/ZoneClassificationBanner.js` (new, presentational only, no DB access — each
+caller derives `standards` from data it already fetched, no new query) renders a `--tint-warn`-styled
+notice ("Zones haven't been classified yet — the External-to-Internal segmentation check is excluded
+from the [standards] score(s) below") with a link to Settings > Zones, whenever the zone-dependent
+check's `audit_findings` row for that device has `status === 'na'` — found by matching
+`ac.check_id === 'rule-no-external-to-internal-access'` in the SAME `findings` array each page already
+fetches for its `StandardCard` grid (no new query in any of the three call sites: both
+`compliance/[deviceId]/page.js` and `compliance/page.js`'s Cards view added `ac.check_id AS check_slug`
+to their existing, already-duplicated `getFindings()` SELECT; `OverviewComplianceCard.js` (the device
+Overview tab's condensed version) got the same column added and shows a smaller inline text note
+instead of the full banner box, since there's no room for one among several Overview-tab cards).
+
 ---
 
 ## Credential Profiles (added 2026-07-21)

@@ -6,6 +6,7 @@ import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
 import ComplianceMatrix, { STANDARDS, STANDARD_META } from '../../../components/compliance/ComplianceMatrix';
 import StandardCard from '../../../components/compliance/StandardCard';
+import ZoneClassificationBanner from '../../../components/compliance/ZoneClassificationBanner';
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
 import { isValidUuid } from '../../../lib/apiUtils';
 
@@ -117,7 +118,7 @@ async function getActiveDevicesForSelect(dbPool) {
 // failed-check quick-list, never matched_rule_ids/rule evidence.
 async function getFindings(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT af.id, ac.name, ac.standards, af.status, af.detected_at
+    `SELECT af.id, ac.check_id AS check_slug, ac.name, ac.standards, af.status, af.detected_at
      FROM audit_findings af
      JOIN audit_checks ac ON ac.id = af.check_id
      WHERE af.device_id = $1`,
@@ -125,12 +126,17 @@ async function getFindings(dbPool, deviceId) {
   );
   return result.rows.map((r) => ({
     id: r.id,
+    checkSlug: r.check_slug,
     name: r.name,
     standards: Array.isArray(r.standards) ? r.standards : [],
     status: r.status,
     detectedAt: r.detected_at,
   }));
 }
+
+// Same zone-dependent check slug as compliance/[deviceId]/page.js's own
+// constant -- see that file's comment.
+const ZONE_DEPENDENT_CHECK_SLUG = 'rule-no-external-to-internal-access';
 
 // Distinct zone names seen across this device's collected rules (src_zones +
 // dst_zones, both JSONB). Mirrors compliance/[deviceId]/page.js's
@@ -264,6 +270,8 @@ export default async function CompliancePage({ searchParams }) {
   const zones = await getDeviceZones(pool, selected.id);
 
   const standards = aggregateStandards(findings);
+  const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
+  const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
   const lastRunAt = findings.reduce((latest, f) => {
     if (!f.detectedAt) return latest;
     return !latest || new Date(f.detectedAt) > new Date(latest) ? f.detectedAt : latest;
@@ -307,6 +315,8 @@ export default async function CompliancePage({ searchParams }) {
       {viewToggle(view)}
 
       <DeviceSelect devices={activeDevices} selectedId={selected.id} />
+
+      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} />}
 
       {zones.length > 0 && (
         <Card>

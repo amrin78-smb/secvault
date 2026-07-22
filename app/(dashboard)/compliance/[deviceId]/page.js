@@ -8,6 +8,7 @@ import Badge from '../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../components/ui/Card';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
 import StandardCard from '../../../../components/compliance/StandardCard';
+import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
 import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../lib/apiUtils';
 
@@ -59,7 +60,7 @@ async function getDevice(dbPool, id) {
 // failed-check quick-list, never matched_rule_ids/rule evidence.
 async function getFindings(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT af.id, ac.name, ac.standards, af.status, af.detected_at
+    `SELECT af.id, ac.check_id AS check_slug, ac.name, ac.standards, af.status, af.detected_at
      FROM audit_findings af
      JOIN audit_checks ac ON ac.id = af.check_id
      WHERE af.device_id = $1`,
@@ -67,12 +68,20 @@ async function getFindings(dbPool, deviceId) {
   );
   return result.rows.map((r) => ({
     id: r.id,
+    checkSlug: r.check_slug,
     name: r.name,
     standards: Array.isArray(r.standards) ? r.standards : [],
     status: r.status,
     detectedAt: r.detected_at,
   }));
 }
+
+// Slug of the one compliance check that depends on operator-supplied zone
+// classification (Settings > Zones) -- see lib/auditChecksSeed.js and
+// configAuditor.js's evaluateExternalToInternalExposure(). Finding this
+// specific row's status in the already-fetched `findings` array (no new
+// query) tells this page whether to show ZoneClassificationBanner.
+const ZONE_DEPENDENT_CHECK_SLUG = 'rule-no-external-to-internal-access';
 
 // Distinct zone names seen across this device's collected rules (src_zones +
 // dst_zones, both JSONB). Vendor parsers don't all guarantee these columns
@@ -158,6 +167,8 @@ export default async function DeviceCompliancePage({ params }) {
   const zones = await getDeviceZones(pool, device.id);
 
   const standards = aggregateStandards(findings);
+  const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
+  const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
   const lastRunAt = findings.reduce((latest, f) => {
     if (!f.detectedAt) return latest;
     return !latest || new Date(f.detectedAt) > new Date(latest) ? f.detectedAt : latest;
@@ -215,6 +226,8 @@ export default async function DeviceCompliancePage({ params }) {
           </>
         }
       />
+
+      {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} />}
 
       {zones.length > 0 && (
         <Card>

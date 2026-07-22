@@ -58,17 +58,25 @@ function computeOverallScore(standards) {
 
 async function getFindings(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT ac.standards, af.status
+    `SELECT ac.check_id AS check_slug, ac.standards, af.status
      FROM audit_findings af
      JOIN audit_checks ac ON ac.id = af.check_id
      WHERE af.device_id = $1`,
     [deviceId]
   );
   return result.rows.map((r) => ({
+    checkSlug: r.check_slug,
     standards: Array.isArray(r.standards) ? r.standards : [],
     status: r.status,
   }));
 }
+
+// Same zone-dependent check slug as the full Compliance page's own
+// ZONE_DEPENDENT_CHECK_SLUG constant. This condensed card shows a small
+// inline note instead of the full ZoneClassificationBanner (no room for a
+// whole banner box among several Overview-tab cards) -- see that
+// component's own header comment for the full reasoning.
+const ZONE_DEPENDENT_CHECK_SLUG = 'rule-no-external-to-internal-access';
 
 function aggregateStandards(findings) {
   const counts = {};
@@ -93,6 +101,8 @@ export default async function OverviewComplianceCard({ deviceId }) {
 
   const neverAudited = STANDARDS.every((s) => standards[s.key].total === 0);
   const overall = neverAudited ? null : computeOverallScore(standards);
+  const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
+  const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
 
   return (
     <Card>
@@ -156,6 +166,15 @@ export default async function OverviewComplianceCard({ deviceId }) {
             })}
             </div>
           </>
+        )}
+
+        {zoneCheckIsNa && (
+          <div style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--tint-warn-fg)' }}>
+            Zones not classified — the External-to-Internal check is excluded.{' '}
+            <Link href="/settings?tab=zones" style={{ fontWeight: 600, color: 'inherit', textDecoration: 'underline' }}>
+              Classify →
+            </Link>
+          </div>
         )}
 
         <div style={{ marginTop: 16 }}>

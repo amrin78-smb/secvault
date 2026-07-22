@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.20.1': [
+    'The Compliance page now shows a notice when a device\'s zones haven\'t been classified yet, explaining that the External-to-Internal check is excluded from that score — instead of hiding the whole compliance score, since every other check still scores correctly.',
+  ],
   '2.20.0': [
     'Added a new Settings > Zones page where you can explicitly tag each firewall zone name as Internal, External, or DMZ — SecVault never guesses this from the zone name itself, only from what you tell it.',
     'The Reachability tab now highlights zone-to-zone paths worth a second look — a red outline for an Allow path from an External zone straight to an Internal one, amber for DMZ-to-Internal — once you\'ve classified those zones.',
