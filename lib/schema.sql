@@ -303,7 +303,33 @@ CREATE TABLE IF NOT EXISTS zone_classifications (
   UNIQUE (device_id, zone_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_zone_classifications_device_id ON zone_classifications(device_id);
+-- ⛔ idx_zone_classifications_device_id is DELIBERATELY NOT created here.
+-- Found live 2026-07-22: a plain `CREATE INDEX IF NOT EXISTS ...
+-- (device_id)` in this file runs as part of runSchema(), which executes
+-- BEFORE lib/migrate.js's main() ever reaches
+-- migrateZoneClassificationsToPerDevice() (the function that actually adds
+-- the device_id column on an already-deployed server -- see that function's
+-- own comment). On a server that already had this table in its ORIGINAL
+-- global shape (zone_name TEXT UNIQUE, no device_id at all -- exactly the
+-- state of every server that deployed this table before this fix), that
+-- CREATE INDEX statement tried to index a column that did not exist yet,
+-- threw a raw "column device_id does not exist" error, and aborted the
+-- ENTIRE runSchema() call before ANY other schema.sql statement after it
+-- could run -- not just before the real per-device migration got a chance
+-- to fix this same table. A fresh install was never affected (CREATE TABLE
+-- already includes device_id, so the index statement immediately after it
+-- in the same batch succeeded) -- this only broke servers upgrading from
+-- the original global-shape table, which in practice meant every server
+-- that had deployed since this table first shipped hours earlier the same
+-- day. Fixed by moving this index's creation into
+-- migrateZoneClassificationsToPerDevice() itself, run AFTER that function's
+-- own ALTER TABLE ADD COLUMN -- guaranteeing device_id always exists by the
+-- time anything tries to index it, on a fresh install or an upgrade alike.
+-- Lesson for any future column added to an EXISTING table: a companion
+-- CREATE INDEX on that new column belongs in the JS migration alongside the
+-- ALTER TABLE that adds it, never as a bare schema.sql statement -- schema.sql
+-- statements all run in runSchema(), before any JS migration in main() has
+-- a chance to prepare an upgrading server's table for them.
 
 -- ⛔ Migrating an ALREADY-DEPLOYED server from the original global shape
 -- (zone_name TEXT UNIQUE, no device_id) to the per-device shape above:

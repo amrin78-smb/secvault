@@ -2597,6 +2597,43 @@ one built the new `ZoneClassificationPanel.js` + Manage-tab wiring, the other re
 UI and fixed every stale link — zero file overlap between the two by construction (the primary agent
 pre-built the API route contract both could depend on independently).
 
+### ⛔ Live production failure the SAME DAY: the per-device migration's own CREATE INDEX broke every upgrading server
+
+Reported directly by the user, with the real `Update-SecVault.ps1` transcript: `node lib\migrate.js`
+failed with `error: column "device_id" does not exist` (Postgres code 42703, routine
+`ComputeIndexAttrs` — an index-creation error), and the whole update aborted before `SecVault-App` was
+allowed to restart (correctly, per this file's own `$migrateSucceeded` gating — a broken/incomplete
+schema must never serve traffic). Root cause: `lib/schema.sql` had a bare
+`CREATE INDEX IF NOT EXISTS idx_zone_classifications_device_id ON zone_classifications(device_id);`
+statement right after the table definition — this runs inside `runSchema()`, which is the FIRST thing
+`migrate.js`'s `main()` calls, BEFORE `migrateZoneClassificationsToPerDevice()` (the function that
+actually adds `device_id` to an already-deployed server's table) ever gets a chance to run. On a fresh
+install this was invisible (`CREATE TABLE` already includes `device_id`, so the index statement right
+after it in the same batch succeeded) — it only broke a server upgrading from the table's original
+GLOBAL shape, which in practice meant every server that had deployed since this table first shipped
+hours earlier the same day, including this one. `runSchema()` throwing aborted the ENTIRE schema
+migration, not just this one table — the per-device migration function never even got called.
+
+**Fixed** by moving the index creation OUT of `schema.sql` and into
+`migrateZoneClassificationsToPerDevice()` itself (`lib/migrate.js`), issued last, after that function's
+own `ALTER TABLE ADD COLUMN` unconditionally guarantees `device_id` exists — safe on a fresh install
+(no-op, index already implied by nothing conflicting) or an upgrade alike. Fixed in the same pass, found
+while re-reading this function rather than a second live incident: the composite `UNIQUE` constraint
+name the migration checked for (`zone_classifications_device_zone_key`) didn't match Postgres's own
+default auto-generated name for `CREATE TABLE`'s inline `UNIQUE (device_id, zone_name)`
+(`zone_classifications_device_id_zone_name_key`, following the `<table>_<col1>_<col2>_key` convention)
+— harmless on its own (Postgres allows two differently-named UNIQUE constraints over the same columns),
+but would have left every FRESH install with a redundant, confusingly-named duplicate constraint;
+corrected to use Postgres's own auto-generated name so a fresh install and an upgraded one converge on
+the identical constraint.
+
+**Lesson, stated plainly for next time**: a companion `CREATE INDEX` (or any other DDL) for a column
+added to an EXISTING table by a JS migration belongs in that JS migration, run after the column-adding
+step — never as a bare `schema.sql` statement. Every `schema.sql` statement runs inside `runSchema()`,
+which always executes before any JS migration in `main()` gets a chance to prepare an upgrading
+server's table for it, regardless of how that statement is guarded (`IF NOT EXISTS` guards against the
+INDEX already existing, not against the COLUMN it references not existing yet).
+
 ---
 
 ## Credential Profiles (added 2026-07-21)
