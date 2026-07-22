@@ -21,6 +21,7 @@ import OverviewCveCard from '../../../../components/devices/OverviewCveCard';
 import OverviewRuleHygieneCard from '../../../../components/devices/OverviewRuleHygieneCard';
 import OverviewConfigChangesCard from '../../../../components/devices/OverviewConfigChangesCard';
 import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
+import SnmpTrendMini from '../../../../components/snmp/SnmpTrendMini';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,6 +162,29 @@ async function getLatestSnmpSnapshot(dbPool, id) {
   return result.rows[0] || null;
 }
 
+// Recent history for the Overview tab's compact trend charts (SnmpTrendMini) --
+// a bounded window, not the full unlimited history the dedicated
+// /devices/[id]/snmp page's SnmpMetricsCharts uses, since this is a
+// glanceable summary widget, not the detailed history view. Capped at the
+// most recent 30 snapshots (~7.5h of trend at the default 15-minute poll
+// interval) via a subquery ordered DESC, then re-ordered ASC in JS to match
+// the oldest-to-newest convention every chart component in this app expects.
+async function getRecentSnmpHistory(dbPool, id) {
+  const result = await dbPool.query(
+    `SELECT cpu_percent, memory_percent, session_count, sampled_at
+     FROM (
+       SELECT cpu_percent, memory_percent, session_count, sampled_at
+       FROM snmp_metric_snapshots
+       WHERE device_id = $1
+       ORDER BY sampled_at DESC
+       LIMIT 30
+     ) recent
+     ORDER BY sampled_at ASC`,
+    [id]
+  );
+  return result.rows;
+}
+
 async function hasSnmpCredential(dbPool, id) {
   const result = await dbPool.query(
     'SELECT 1 FROM device_credentials WHERE device_id = $1 AND credential_type = $2 LIMIT 1',
@@ -234,7 +258,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
-  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential] = await Promise.all([
+  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory] = await Promise.all([
     getLatestVersion(pool, device.id),
     tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
     tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
@@ -244,6 +268,10 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     getLatestConfigParsed(pool, device.id),
     getLatestSnmpSnapshot(pool, device.id),
     hasSnmpCredential(pool, device.id),
+    // Only needed for the Overview tab's trend charts -- skip the query
+    // entirely on every other tab, same conditional-fetch convention as
+    // cveRows/rules above.
+    tab === 'overview' ? getRecentSnmpHistory(pool, device.id) : Promise.resolve([]),
   ]);
 
   // "Does this device's already-collected config show SNMP enabled?" —
@@ -387,6 +415,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   <StatCard label="Sessions" value={snmpSnapshot.session_count ?? '—'} color="var(--accent-teal)" />
                   <StatCard label="Uptime" value={formatSnmpUptime(snmpSnapshot.uptime_seconds)} color="var(--text-muted)" />
                 </div>
+                <SnmpTrendMini points={snmpHistory} />
                 <p style={{ marginTop: 12, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
                   Last polled: {formatDateTime(snmpSnapshot.sampled_at)}
                 </p>

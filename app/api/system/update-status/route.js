@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.18.1': [
+    'The SNMP Monitoring card on a device\'s Overview tab now shows a small recent trend chart for CPU/Memory and Sessions under the current numbers, instead of just the latest value.',
+  ],
   '2.18.0': [
     'Redesigned the device detail page: tabs now sit at the top of the page as the main way to navigate, instead of below a large always-visible info block.',
     'Device management actions (Collect Now, Test Connectivity, Rotate Credentials, Delete) now live together on a new "Manage" tab, visible only to admins, instead of being scattered across the top of the page.',

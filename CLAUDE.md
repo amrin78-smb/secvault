@@ -2610,6 +2610,34 @@ with the cleartext-ack gate). `GET /api/devices/[id]/snmp` supports `?format=csv
 same convention as the VPN page. **No fleet-wide `/snmp` page yet** (VPN has one at `/vpn`) —
 a natural Phase 2+ follow-up once per-device data exists to aggregate, not built now.
 
+### Trend charts on the summary card (added 2026-07-21, later still)
+
+Direct user request: the always-visible SNMP Monitoring card (now inside the Overview tab, see
+"Identity card removed, tab bar moved to top of page" above) originally showed only the LATEST
+polled value per metric (`getLatestSnmpSnapshot()`, a single row) — no trend, just a number, even
+though the full `/devices/[id]/snmp` page already had real trend charts. `components/snmp/
+SnmpTrendMini.js` is a compact sibling of `SnmpMetricsCharts.js` (same CPU+Memory-shared-scale /
+Sessions-own-scale two-chart split, same `resolveColor()` CSS-custom-property pattern, same
+tooltip content) but deliberately smaller and stripped down for a summary-widget context: no Y
+axis, minimal X axis (time-of-day only, not a full date), 90px tall instead of 220px, no
+gridlines. It renders directly under the existing CPU/Memory/Sessions/Uptime `StatCard` row inside
+the same card — the numbers stay (still the fastest way to read "what's the value right now"), the
+chart adds "what's it been doing" underneath. Uptime deliberately has no sparkline (it's
+monotonically increasing until a reboot — a flat line carries no information a single number
+doesn't already give).
+
+Data source: a new `getRecentSnmpHistory()` query, capped at the most recent 30 snapshots (a
+subquery `ORDER BY sampled_at DESC LIMIT 30`, then re-ordered `ASC` in JS to match every chart
+component's oldest-to-newest convention) — roughly 7.5 hours of trend at the default 15-minute
+`SNMP_POLL_INTERVAL_MINUTES`. Deliberately NOT the full unlimited history
+`/devices/[id]/snmp`'s own `SnmpMetricsCharts.js` uses — this is a glanceable recent-trend
+indicator on a page that already has a lot on it, not the detailed history view (which stays
+exactly as it was, unchanged, for whenever a longer look-back is actually needed). Only fetched
+when `tab === 'overview'`, same conditional-fetch convention `cveRows`/`rules` already use on this
+page for their own tab-specific queries. `SnmpTrendMini` renders nothing (`return null`) when
+fewer than 2 points exist — a lone snapshot can't show a trend, and the `StatCard` row above it
+already covers that case.
+
 ---
 
 ## Device Overview Tab (added 2026-07-21)
