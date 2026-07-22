@@ -2408,6 +2408,107 @@ rather than trying to avoid it.
 
 ---
 
+## Zone Classification (added 2026-07-22)
+
+Direct follow-up to the Reachability tab (see "Path A" above): the user asked whether SecVault should
+do what ManageEngine Firewall Analyzer does — explicitly ask the operator which zone is Internal/
+External/DMZ, so compliance/reachability features don't misreport. This is a genuinely different
+proposal from something already tried and rejected once: the Compliance page's Network Details card
+(see that section above) already tried AUTOMATIC zone-name pattern matching and correctly rejected
+it, since this deployment's real zone names (`TFM-HQ`/`YCC`/`VRZ`) aren't reliably classifiable by
+name. An explicit, operator-supplied mapping sidesteps that exact risk entirely — it's a fact the
+admin supplies, not a guess this app makes — so it was built.
+
+### `zone_classifications` — a small, global, operator-only table
+
+`lib/schema.sql`'s `zone_classifications` (`zone_name TEXT UNIQUE`, `role: 'internal'|'external'|
+'dmz'`) is keyed on the NORMALIZED (lowercase, trimmed) zone name, **global across the fleet, not
+per-device** — the same zone name is assumed to mean the same thing on every device that reports it,
+matching how these names are actually assigned in real deployments (a real org's "DMZ" zone means the
+same thing on every firewall that has one). Every consumer MUST treat "no row for this zone" as
+"unclassified" — never silently assumed any particular role — the same tri-state-honesty discipline
+this app already applies to CVE applicability (`unknown` never collapses to `no`) and compliance
+predicate evaluation (`na` when nothing is measurable). Not secret data — granted to
+`claude_readonly`/`nocvault_readonly` like any other non-credential table.
+
+`lib/engines/zoneClassification.js`: `getZoneRoleMap(pool)` (the plain lookup map every consumer
+below actually uses), `getDistinctFleetZones(pool)` (every distinct real zone name ever observed
+across the WHOLE fleet's `firewall_rules`, left-joined against its current classification — the
+Settings UI's data source, wrapped in try/catch/`jsonb_typeof(...) = 'array'` guards, same defensive
+pattern the Network Details card already established for this exact jsonb shape), `setZoneRole()` /
+`clearZoneRole()` (upsert/delete, admin-only via the API route).
+
+`GET/PUT /api/zone-classifications` — GET is **not** admin-gated (unlike credential-profiles' own GET,
+which IS gated because that data is credential-adjacent; zone names/roles carry no secret material at
+all, so the general "GET routes are never gated" rule applies instead). PUT is admin-only, matching
+every other mutating route in this app. A `role: null` PUT clears the classification rather than
+needing a separate DELETE endpoint for a one-row-per-zone table.
+
+**Settings > Zones** (`components/settings/ZoneClassificationsPanel.js`, new tab in
+`app/(dashboard)/settings/page.js`) lists every distinct fleet zone with a role `<select>` that
+auto-saves on change (optimistic, reverts on error — same pattern as
+`components/analysis/AcknowledgeControl.js`). Visible to every authenticated user (a viewer sees a
+read-only `Badge` instead of the `<select>`) — the real enforcement is the API route's own
+`isAdmin()` check, this is UI-hiding only, same "defense in depth, not the boundary" posture as
+every other admin-only Settings surface.
+
+### Three consumers, all reusing the same classification data
+
+**1. `external_exposure` — a 12th `rule_analysis_results` finding type.** An enabled ALLOW rule
+whose source zone(s) explicitly include one classified External AND destination zone(s) explicitly
+include one classified Internal. Deliberately does NOT treat an "any"/wildcard zone as "could be
+External" — that's already what `any_any`/`overly_permissive` exist to flag; this check's only job is
+catching an EXPLICITLY named External zone reaching an EXPLICITLY named Internal one. `severity:
+'medium'` (not high/critical) — a real External-to-Internal path is often entirely legitimate (a VPN
+termination zone, a partner site-to-site link), so this is a "worth reviewing" flag, the same posture
+already taken for `overly_permissive`, not a "definite problem" claim like `any_any`.
+`loadOptionsFromSettings()`'s sibling call, `getZoneRoleMap()`, is loaded once per `runAnalysisForDevice()`
+run and passed into `analyzeRules()` via `options.zoneRoles` (default `{}` — so with no classification
+data at all, this check simply never fires, never treated as "assume the worst" or "assume the
+best"). Verified with a 6-case synthetic smoke test (explicit match fires; no zone data at all never
+fires; External→DMZ doesn't fire; a wildcard `any` src doesn't count as External; a deny action never
+fires; Internal→Internal doesn't fire) before shipping. Propagated through the same checklist as
+`generalization` before it: `OptimizationTab.js` (joins `risky_service`/`any_any`/`overly_permissive`
+— a genuine security-exposure finding, not the ruleset-simplification group `generalization` joined),
+`FindingTypeBadge.js`, `FindingsBarChart.js`, `OverviewRuleHygieneCard.js`'s "Other Issues" bucket, and
+— critically — the acknowledgements route's `FINDING_TYPES` allow-list (see that file's own comment
+on the `correlation` incident this keeps not repeating).
+
+**2. `rule-no-external-to-internal-access` — a compliance check that is NOT a plain `rule_scan` check,
+on purpose.** Every existing `rule_scan` check (`rule-no-any-any-allow` etc.) treats zero matching
+findings as an unconditional PASS — correct for those checks, because their underlying detection data
+(risky ports, CVE assessments, etc.) always has SOME baseline coverage. `zone_classifications` starts
+completely EMPTY on every fresh install with no possible sane default (real zone names are
+deployment-specific) — reusing the plain `rule_scan` shape here would mean every device, fleet-wide,
+shows a false "PASS" with 100% certainty until an admin manually classifies at least one zone. That is
+exactly the "looks fine, isn't" trap this compliance engine's whole tri-state design exists to
+prevent — and directly the risk the user was originally asking about. Fixed by building it as a THIRD
+`ruleset_property` (alongside `has_explicit_deny_all`/`blocks_icmp`), with its own dedicated
+`evaluateExternalToInternalExposure()` in `lib/engines/configAuditor.js`: first checks whether THIS
+device's own rules reference zones classified BOTH External and Internal at all (via a small,
+duplicated `collectDeviceZoneNames()` helper — same per-file-duplication convention as everywhere
+else in this app) — if not, resolves `'na'`, never a false `'pass'`. If both roles ARE represented,
+reuses `ruleAnalysis.js`'s ALREADY-COMPUTED `external_exposure` finding (via the same
+`ruleFindingsByType` map `evaluateRuleScanCheck()` already loads) for the actual pass/fail decision and
+`matched_rule_ids` — the detection logic itself lives in exactly one place, never duplicated a second
+time. Verified with a 4-case synthetic smoke test (no zone data → `na`; both roles classified fleet-wide
+but this device's own rules only touch Internal zones → still `na`; both roles present on this device,
+zero matches → real `pass`; matches present → `fail` with `matchedRuleIds`) before shipping — case 1 is
+the one that would have silently misreported under a naive `rule_scan` reuse. Tagged `PCI_DSS`/`NIST`/
+`CIS_V8` (network segmentation is a core requirement across all three — PCI-DSS Requirement 1's network
+security controls between the CDE and other networks is the most direct citation).
+
+**3. Reachability tab enhancement.** `components/analysis/ReachabilityTab.js` now fetches
+`getZoneRoleMap()` alongside the rule set, shows each zone's role under its name in both the row and
+column headers, and outlines a cell in red when it's an Allow from a classified External zone straight
+to a classified Internal one, or amber for DMZ→Internal — standard network segmentation reasoning
+(External should reach DMZ, not Internal directly; DMZ reaching Internal is a common real-world pivot
+path), applied only when BOTH zones in the pair are actually classified. A load failure degrades to "no
+cell highlighted this render" (best-effort, same posture as the other two consumers), never breaks the
+tab.
+
+---
+
 ## Credential Profiles (added 2026-07-21)
 
 Reusable named credential bundles ("connection profiles") — save a username/password, API key, or

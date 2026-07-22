@@ -5,14 +5,17 @@ import SeverityBadge from './SeverityBadge';
 import FindingTypeBadge from './FindingTypeBadge';
 import AcknowledgeControl from './AcknowledgeControl';
 
-// Rule Analysis Dashboard Phase 2 -- "Optimization" tab. Surfaces the three
+// Rule Analysis Dashboard Phase 2 -- "Optimization" tab. Surfaces the
 // finding types that represent avoidable rule-hygiene risk an operator can
 // act on directly (as opposed to the Cleanup tab's unused/expiring/redundant
 // findings, or the Reorder tab's shadow/reorder_candidate findings): risky
-// services, any-any rules, and overly permissive rules. Same query shape as
-// getFindings() in app/(dashboard)/devices/[id]/analysis/page.js, narrowed
-// to this tab's finding types and joined to finding_acknowledgements for the
-// per-row Status control.
+// services, any-any rules, overly permissive rules, and (added alongside
+// operator-supplied Zone Classification -- Settings > Zones)
+// external_exposure, an enabled allow rule spanning an explicitly-classified
+// External zone directly to an explicitly-classified Internal one. Same
+// query shape as getFindings() in app/(dashboard)/devices/[id]/analysis/page.js,
+// narrowed to this tab's finding types and joined to finding_acknowledgements
+// for the per-row Status control.
 async function getOptimizationFindings(dbPool, deviceId) {
   const result = await dbPool.query(
     `SELECT
@@ -32,7 +35,7 @@ async function getOptimizationFindings(dbPool, deviceId) {
        AND fa.rule_id_vendor = fr.rule_id_vendor
        AND fa.finding_type = rar.finding_type
      WHERE rar.device_id = $1
-       AND rar.finding_type IN ('risky_service', 'any_any', 'overly_permissive')
+       AND rar.finding_type IN ('risky_service', 'any_any', 'overly_permissive', 'external_exposure')
      ORDER BY
        CASE rar.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
        rar.finding_type ASC,

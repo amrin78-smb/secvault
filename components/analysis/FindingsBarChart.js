@@ -19,6 +19,7 @@ const FINDING_TYPE_ORDER = [
   { type: 'unused', label: 'Unused', severity: 'medium' },
   { type: 'expiring_soon', label: 'Expiring', severity: 'medium' },
   { type: 'generalization', label: 'Generalization', severity: 'medium' },
+  { type: 'external_exposure', label: 'Ext. Exposure', severity: 'medium' },
   { type: 'log_disabled', label: 'Log Off', severity: 'info' },
 ];
 

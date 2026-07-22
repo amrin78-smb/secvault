@@ -14,6 +14,7 @@ const TYPE_LABELS = {
   overly_permissive: 'Overly Permissive',
   correlation: 'Correlation',
   generalization: 'Generalization',
+  external_exposure: 'External Exposure',
 };
 
 export default function FindingTypeBadge({ type }) {

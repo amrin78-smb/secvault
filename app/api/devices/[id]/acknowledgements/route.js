@@ -7,12 +7,12 @@ import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
-// Same 11 finding types lib/engines/ruleAnalysis.js emits — kept in step
+// Same 12 finding types lib/engines/ruleAnalysis.js emits — kept in step
 // manually (no shared module exports this list as a constant today). See
 // CLAUDE.md's "Rule Analysis Engine" section for the documented incident
 // where 'correlation' was left out of this exact list and permanently
 // 400'd every acknowledge attempt for that finding type — do not repeat
-// that omission for 'generalization'.
+// that omission for any future finding type either.
 const FINDING_TYPES = new Set([
   'any_any',
   'risky_service',
@@ -25,6 +25,7 @@ const FINDING_TYPES = new Set([
   'expiring_soon',
   'log_disabled',
   'generalization',
+  'external_exposure',
 ]);
 
 const STATUSES = new Set(['new', 'acknowledged', 'dismissed', 'actioned']);

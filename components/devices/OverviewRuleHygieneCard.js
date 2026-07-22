@@ -18,8 +18,20 @@ import RuleHygieneDonut from '../analysis/RuleHygieneDonut';
 // split philosophy of grouping finding types by what an operator actually acts on.
 // generalization (an earlier, narrower rule made pointless by a later, broader same-action
 // rule) is the same ruleset-simplification class as correlation -- belongs in this bucket
-// alongside it, not one of the 5 headline categories.
-const OTHER_FINDING_TYPES = ['correlation', 'risky_service', 'reorder_candidate', 'expiring_soon', 'overly_permissive', 'generalization'];
+// alongside it, not one of the 5 headline categories. external_exposure (an explicitly
+// classified External zone reaching an explicitly classified Internal one -- see
+// lib/engines/zoneClassification.js) is a security-exposure finding, same class as
+// risky_service/overly_permissive already in this bucket, not one of the 5 headline
+// categories either.
+const OTHER_FINDING_TYPES = [
+  'correlation',
+  'risky_service',
+  'reorder_candidate',
+  'expiring_soon',
+  'overly_permissive',
+  'generalization',
+  'external_exposure',
+];
 
 const CATEGORY_DEFS = [
   { key: 'unused', label: 'Unused Rules', color: 'var(--red)' },

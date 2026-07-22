@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
   rule_id UUID NOT NULL REFERENCES firewall_rules(id) ON DELETE CASCADE,
-  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'correlation' | 'generalization' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive'
+  finding_type TEXT NOT NULL, -- 'unused' | 'shadow' | 'redundant' | 'correlation' | 'generalization' | 'any_any' | 'risky_service' | 'reorder_candidate' | 'expiring_soon' | 'log_disabled' | 'overly_permissive' | 'external_exposure'
   severity TEXT NOT NULL DEFAULT 'info', -- 'critical' | 'high' | 'medium' | 'info'
   detail TEXT,
   affected_rule_ids JSONB NOT NULL DEFAULT '[]'::jsonb, -- e.g. for shadow: the rule(s) doing the shadowing
@@ -273,6 +273,30 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
 CREATE INDEX IF NOT EXISTS idx_rar_device_id ON rule_analysis_results(device_id);
 CREATE INDEX IF NOT EXISTS idx_rar_finding_type ON rule_analysis_results(finding_type);
 CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
+
+-- Operator-provided (never auto-inferred) zone role classification -- see
+-- CLAUDE.md's "Zone Classification" section. A prior feature (the
+-- Compliance page's "Network Details" card) deliberately rejected
+-- AUTOMATIC zone-name pattern matching ("TFM-HQ"/"YCC"/"VRZ" aren't
+-- reliably classifiable by name), but an explicit, admin-supplied mapping
+-- sidesteps that exact risk since it's a fact the operator supplies, not a
+-- guess this app makes. Keyed on the NORMALIZED (lowercased, trimmed) zone
+-- name, global across the fleet (not per-device) -- the same zone name is
+-- assumed to mean the same thing across every device that reports it,
+-- matching how these names are actually assigned in practice (a real
+-- deployment's "DMZ" zone means the same thing on every firewall that has
+-- one). Deliberately does NOT try to auto-classify: a zone with no row
+-- here is simply unclassified, never silently assumed to be any role --
+-- every consumer of this table must treat "no row" as "we don't know",
+-- the same tri-state-honesty discipline this app already applies to CVE
+-- applicability and compliance predicate evaluation.
+CREATE TABLE IF NOT EXISTS zone_classifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  zone_name TEXT NOT NULL UNIQUE, -- already normalized (lowercase, trimmed) by the writer
+  role TEXT NOT NULL, -- 'internal' | 'external' | 'dmz'
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Object catalog collection (address/service objects + groups), added
 -- alongside the "Unused Objects"/"Duplicate Objects" analysis feature --

@@ -27,7 +27,7 @@ import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore
 
 export const dynamic = 'force-dynamic';
 
-// The 11 finding types in the fixed severity order CLAUDE.md documents for
+// The 12 finding types in the fixed severity order CLAUDE.md documents for
 // the rule analysis engine, used both for the findings-tab filter dropdown
 // and for the summary-tab bar chart (so the bar order never depends on
 // whatever happens to be present in a given device's results). 'correlation'
@@ -37,10 +37,14 @@ export const dynamic = 'force-dynamic';
 // "Path A" rule-analysis intelligence round) is the mirror direction of
 // shadow/redundant — an earlier, narrower same-action rule made pointless
 // by a later, broader one — and sits in that same ruleset-simplification
-// group, not the security-exposure group.
+// group, not the security-exposure group. 'external_exposure' (added
+// alongside operator-supplied Zone Classification — Settings > Zones) is a
+// security-exposure finding, same class as risky_service/any_any/
+// overly_permissive, not ruleset-simplification.
 const FINDING_TYPES = [
   'any_any',
   'risky_service',
+  'external_exposure',
   'shadow',
   'reorder_candidate',
   'redundant',

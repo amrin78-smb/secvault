@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.20.0': [
+    'Added a new Settings > Zones page where you can explicitly tag each firewall zone name as Internal, External, or DMZ — SecVault never guesses this from the zone name itself, only from what you tell it.',
+    'The Reachability tab now highlights zone-to-zone paths worth a second look — a red outline for an Allow path from an External zone straight to an Internal one, amber for DMZ-to-Internal — once you\'ve classified those zones.',
+    'New "External Exposure" rule finding: flags an allow rule that spans an explicitly-classified External zone directly to an explicitly-classified Internal zone.',
+    'New compliance check for unrestricted External-to-Internal zone access (PCI-DSS / NIST / CIS v8) — correctly shows "not applicable" rather than a false pass on devices whose zones haven\'t been classified yet.',
+  ],
   '2.19.0': [
     'Added a new "Generalization" rule finding: catches an earlier, narrower rule made pointless by a later, broader rule with the same action — a gap the existing shadow/redundant checks didn\'t cover, since they only ever compared in the other direction.',
     'Devices now show an "Exposure Risk" card correlating rule findings that widen access (any-to-any, overly permissive, risky services) with that same device\'s open patch-now CVEs — the two were always tracked separately and have never been connected until now.',
