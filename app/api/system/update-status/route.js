@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.3': [
+    'The device Overview tab now shows the firewall\'s own reported Hostname alongside Model/Build/Serial — separate from the device name you typed in when adding it, since the two can legitimately differ.',
+    'Currently populated for Palo Alto (both API and SSH) and Fortinet (both API and SSH); other vendors show "—" until their adapters are extended the same way.',
+    'Improved diagnostics for Palo Alto SSH rule collection: when a device\'s config genuinely has no rulebase/pre-rulebase/post-rulebase section anywhere (seen on a real Panorama-managed firewall), the debug log now lists every config section that IS present instead of just saying "not found" — makes the next case like this much faster to diagnose.',
+  ],
   '2.21.2': [
     'Security/RBAC fix: the Delete Device confirmation dialog could be reached directly by a non-admin user via a direct link, showing a working-looking delete button (the delete itself was still correctly blocked server-side, but the dialog shouldn\'t have been reachable at all).',
     'Fixed: the Exposure Risk card on a device\'s Overview tab could keep showing a rule finding or CVE as "open" after you\'d already dismissed or actioned it elsewhere in the app.',

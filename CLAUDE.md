@@ -537,6 +537,35 @@ assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no c
 there. PAN-OS API/username-password method has separately worked on these same devices,
 confirming XML-API rule collection was never affected by this SSH-specific bug.
 
+#### Palo Alto SSH — OPEN CASE: Panorama-managed device with no rulebase text at all (2026-07-23)
+
+A real device (Panorama-managed, PA-3410, PAN-OS 11.1.13-h5) returned a genuine, large
+(617,170-char) config dump via the exact same `configure` → `set cli config-output-format set`
+→ bare `show` sequence documented as resolved above — but the dump contains **neither**
+`rulebase` **nor** `pre-rulebase`/`post-rulebase` anywhere in it (the existing
+`/rulebase/i` search is already substring-inclusive of both, so this rules out the whole
+established PAN-OS naming pattern, not just an unexpected nesting depth). `getRules()`
+correctly threw rather than storing an empty ruleset (`no \`rulebase.security.rules\`
+container was found anywhere in the parsed config tree`), so no data was lost — this is a
+collection gap, not a correctness bug.
+
+Leading theory, **not yet confirmed**: a restricted local admin role. PAN-OS admin roles can
+toggle the "Policy" permission category off independently of System/Network/Device — plausible
+specifically on a Panorama-managed firewall, where policy is meant to be owned centrally by
+Panorama rather than edited locally. This would explain the exact symptom: `show system info`
+(a different permission category) succeeds fully, the config dump is large and real (not an
+error, not empty), but the policy/rulebase section specifically is never in it. **Not verified
+against the device's actual assigned admin role yet** — flagged as the leading hypothesis, not
+asserted as fact, per this section's own standing "verify before guessing" discipline.
+
+Fixed defensively either way: when `/rulebase/i` finds nothing, `_getConfigText()`
+(`lib/adapters/paloalto/ssh.js`) now also logs every shallow (depth ≤ 3) brace-block key
+actually present in the dump (`extractShallowBlockKeys()`, a deliberately naive depth-counting
+scanner — debug-only, never used for real parsing) — a real "table of contents" instead of
+guessing a fifth keyword blind. Next step when this recurs: check the new shallow-key log
+output, AND separately check the SSH account's assigned PAN-OS admin role for a disabled
+Policy permission (Device tab → Admin Roles on the firewall or its managing Panorama).
+
 ### Known Limitations (by design — documented, not bugs)
 
 - **Fortinet over SSH has no hit counts.** The CLI has no reliable per-rule hit-count equivalent, so

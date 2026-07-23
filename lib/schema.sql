@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS device_versions (
 -- already-deployed table too.
 ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS serial TEXT;
 
+-- Added 2026-07-23, same class of gap as serial above: the device's own
+-- reported hostname (distinct from devices.name, which is whatever the
+-- operator typed when adding the device — the two can legitimately differ)
+-- is already parsed by several adapters for debug/identification purposes
+-- but was never carried through to getVersion()'s return object or stored
+-- anywhere. Direct user request after noticing it in the [PaloAlto SSH
+-- Debug] logs. See collectAndStore() (lib/adapters/index.js) and each
+-- vendor's getVersion() for which transports actually populate this —
+-- NULL for any vendor/transport that doesn't, same as every other
+-- per-vendor-optional column here.
+ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS hostname TEXT;
+
 -- Tier 1 multi-vendor support: generic management port (API vendors default to
 -- 443, SSH vendors to 22, applied in the adapter when NULL). smc_port remains
 -- Forcepoint-specific. ADD COLUMN IF NOT EXISTS is idempotent — safe to re-run.

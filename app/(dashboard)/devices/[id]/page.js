@@ -100,7 +100,7 @@ async function getDevice(dbPool, id) {
 
 async function getLatestVersion(dbPool, id) {
   const result = await dbPool.query(
-    `SELECT version_string, model, build, serial, collected_at
+    `SELECT version_string, model, build, serial, hostname, collected_at
      FROM device_versions
      WHERE device_id = $1
      ORDER BY collected_at DESC
@@ -337,6 +337,19 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                 <div style={{ color: 'var(--text-primary)' }}>
                   {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
                 </div>
+              </div>
+              {/* Hostname: added 2026-07-23, direct user request after noticing it
+                  already flowing through the [PaloAlto SSH Debug] logs. Distinct
+                  from `device.name` (whatever the operator typed when adding the
+                  device — the two can legitimately differ) -- this is what the
+                  device itself reports. Only populated for vendors/transports that
+                  parse it (see lib/schema.sql's device_versions.hostname comment);
+                  '—' for everything else, same as Build/Serial below. */}
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  Hostname
+                </div>
+                <div style={{ color: 'var(--text-primary)' }}>{version?.hostname || '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
