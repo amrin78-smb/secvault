@@ -99,7 +99,7 @@ DeviceStatusSummary  no props — active-device counts by last connectivity test
 RecentActivityFeed  limit — fleet-wide recent activity_log table
 RecentCriticalAlerts  limit — most recent open patch-now CVE assessments
 RiskByCategory  no props — CVE counts by CWE-derived vulnerability category, bar list
-RulesetOverview  no props — fleet-wide rule totals + finding-type stat tiles
+RulesetOverview  no props — fleet-wide rule totals + finding-type stat tiles (Total/Enabled/Disabled/Unused/Shadow/Redundant/Any-Any; Disabled added 2026-07-23, fleet-wide analog of the per-device Inactive/Disabled tiles on the Analysis Summary tab and Overview Rule Hygiene card)
 TopRiskyDevices  limit — top active devices by latest rule-analysis risk score
 VendorDistribution  no props — active-device count by vendor, bar list
 

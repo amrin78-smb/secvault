@@ -12,7 +12,8 @@ import { IconChart } from '../icons';
 async function getFleetRuleTotals(dbPool) {
   const { rows } = await dbPool.query(
     `SELECT COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE fr.enabled = true)::int AS enabled
+            COUNT(*) FILTER (WHERE fr.enabled = true)::int AS enabled,
+            COUNT(*) FILTER (WHERE fr.enabled = false)::int AS disabled
      FROM firewall_rules fr
      JOIN devices d ON d.id = fr.device_id
      WHERE d.active = true`
@@ -84,6 +85,7 @@ export default async function RulesetOverview() {
   const tiles = [
     { label: 'Total Rules', value: totals.total, color: 'var(--text-primary)' },
     { label: 'Enabled', value: totals.enabled, color: 'var(--green)' },
+    { label: 'Disabled', value: totals.disabled, color: 'var(--text-muted)' },
     { label: 'Unused', value: findings.unused, color: findings.unused > 0 ? 'var(--blue)' : 'var(--text-muted)' },
     { label: 'Shadow', value: findings.shadow, color: findings.shadow > 0 ? 'var(--yellow)' : 'var(--text-muted)' },
     {

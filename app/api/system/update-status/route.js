@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.23.2': [
+    'The Dashboard\'s "Ruleset Overview" widget now shows a fleet-wide "Disabled" rule count alongside "Enabled" — previously disabled/inactive rules were only visible per-device (Rule Analysis tab, device Overview tab, or the Rules table filter), with no fleet-wide total.',
+  ],
   '2.23.1': [
     'Fixed the Rule Health risk score showing "Critical (100)" for almost every device (13 of 14 on the real fleet) — it wasn\'t actually measuring severity, just whether a device had accumulated enough routine "unused rule" findings over time (which is nearly all of them). The score now weighs critical/high/medium findings independently instead of letting a large pile of low-stakes medium findings alone max out the number. Devices with genuinely dangerous findings (critical/any-any rules) now score higher than devices that just have a big backlog of housekeeping items.',
     'One side effect: the Risk Trend chart on a device\'s Risk tab will show a one-time drop the next time analysis runs, since old trend points were recorded under the old (inflated) scoring and can\'t be recalculated after the fact — this is expected, not a data loss.',
