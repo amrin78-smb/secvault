@@ -537,34 +537,65 @@ assumptions exactly (`hostname`, `sw-version`, `model`, `serial`, etc.) — no c
 there. PAN-OS API/username-password method has separately worked on these same devices,
 confirming XML-API rule collection was never affected by this SSH-specific bug.
 
-#### Palo Alto SSH — OPEN CASE: Panorama-managed device with no rulebase text at all (2026-07-23)
+#### Palo Alto SSH — RESOLVED: Panorama-managed device with no rulebase text at all (2026-07-23)
 
 A real device (Panorama-managed, PA-3410, PAN-OS 11.1.13-h5) returned a genuine, large
 (617,170-char) config dump via the exact same `configure` → `set cli config-output-format set`
-→ bare `show` sequence documented as resolved above — but the dump contains **neither**
+→ bare `show` sequence documented as resolved above — but the dump contained **neither**
 `rulebase` **nor** `pre-rulebase`/`post-rulebase` anywhere in it (the existing
-`/rulebase/i` search is already substring-inclusive of both, so this rules out the whole
+`/rulebase/i` search is already substring-inclusive of both, so this ruled out the whole
 established PAN-OS naming pattern, not just an unexpected nesting depth). `getRules()`
-correctly threw rather than storing an empty ruleset (`no \`rulebase.security.rules\`
-container was found anywhere in the parsed config tree`), so no data was lost — this is a
-collection gap, not a correctness bug.
+correctly threw rather than storing an empty ruleset, so no data was lost — this was a
+collection gap, not a correctness bug. Switching the same device's `mgmt_method` to the XML/API
+transport reproduced the identical zero-rules result, confirming this wasn't SSH-specific.
 
-Leading theory, **not yet confirmed**: a restricted local admin role. PAN-OS admin roles can
-toggle the "Policy" permission category off independently of System/Network/Device — plausible
-specifically on a Panorama-managed firewall, where policy is meant to be owned centrally by
-Panorama rather than edited locally. This would explain the exact symptom: `show system info`
-(a different permission category) succeeds fully, the config dump is large and real (not an
-error, not empty), but the policy/rulebase section specifically is never in it. **Not verified
-against the device's actual assigned admin role yet** — flagged as the leading hypothesis, not
-asserted as fact, per this section's own standing "verify before guessing" discipline.
+Root cause, confirmed (not the earlier restricted-admin-role hypothesis — see below for why
+that was superseded): a wholly Panorama-managed device's LOCAL config tree genuinely has no
+rulebase content at all when every security rule is Panorama-pushed — Panorama's pre-rulebase/
+post-rulebase only merge into the device's policy at the **effective/enforced** level, never
+into the local config tree this adapter's normal `show` dump reads. Confirmed directly:
+`ManageEngine Firewall Analyzer`'s own Add Device form has a "Managed by Panorama" checkbox
+that was REQUIRED to collect rules for this exact device — strong independent confirmation
+this is a real, known distinction other tools also have to special-case, not a guess.
 
-Fixed defensively either way: when `/rulebase/i` finds nothing, `_getConfigText()`
-(`lib/adapters/paloalto/ssh.js`) now also logs every shallow (depth ≤ 3) brace-block key
-actually present in the dump (`extractShallowBlockKeys()`, a deliberately naive depth-counting
-scanner — debug-only, never used for real parsing) — a real "table of contents" instead of
-guessing a fifth keyword blind. Next step when this recurs: check the new shallow-key log
-output, AND separately check the SSH account's assigned PAN-OS admin role for a disabled
-Policy permission (Device tab → Admin Roles on the firewall or its managing Panorama).
+**Fix**: `ssh.js`'s `getRules()` now falls back automatically — no new device-level toggle,
+no schema change — to PAN-OS's `show running security-policy` operational command (a
+genuinely different command from the config dump; no `configure`/set-format step needed)
+whenever the normal rulebase-container search finds zero containers. This command returns the
+MERGED effective policy (local + Panorama pre/post-rulebase combined) in its own distinct
+format, parsed by a new `sshParser.js` function, `parseEffectiveSecurityPolicy()`. **Verified
+against the real, complete captured output from the confirmed device before shipping** (not a
+doc-derived guess) — 33/33 rules extracted correctly, including the two PAN-OS built-in
+default rules (`intrazone-default`/`interzone-default`), multi-value zone/address/category
+lists, and the composite `application/service` field's app/protocol/port splitting — matching
+this file's own established "verify against real captured data, not just live-shaped samples"
+discipline (see the PA-3220 15/15-rules precedent above).
+
+**Known, documented limitations of this fallback path** (real gaps in what this command's
+output contains, not bugs): `enabled` is always `true` for every rule it returns — a rule
+disabled in Panorama or locally is, by definition, not part of the *enforced* policy, so it
+never appears in this output at all, meaning there's no way to tell "doesn't exist" from
+"exists but disabled" here. `log_enabled` defaults to `true` (PAN-OS's own platform default) —
+this command carries no logging-state field. `hit_count` is always `0` — the existing
+`show rule-hit-count` enrichment needs the brace-tree `configTree` this fallback path never
+builds, the same accepted gap class as Fortinet-over-SSH's zero-hit-count limitation below.
+NAT/schedule/expiry/comment are always false/null — NAT is a separate rulebase entirely, and
+the others simply have no field here. Net effect: Phase 5's `log_disabled`/`unused`/
+`expiring_soon` findings will never fire for a device collected via this fallback — an accepted
+tradeoff, since the real ruleset with reduced finding coverage beats no ruleset at all.
+
+**The earlier restricted-Policy-permission theory was investigated and superseded**, not
+confirmed — worth noting so a future reader doesn't chase it again for this same symptom: the
+real cause was structural (Panorama-pushed rules never reaching the local config tree at all),
+not a permission gap. `extractShallowBlockKeys()`'s diagnostic (added alongside that earlier
+hypothesis) is still in place as a general-purpose fallback for any FUTURE "no rulebase found"
+case that isn't this same Panorama-managed shape.
+
+**Not yet covered**: the XML/API transport still has no equivalent fallback — PAN-OS's XML API
+supports the same operational command via a `type=op` request, but its response shape (XML-
+wrapped, not necessarily the same curly-brace text) has not been live-verified, so it wasn't
+guessed at here. Devices needing this fix today should use the SSH transport (`mgmt_method:
+'ssh'`) until the XML/API fallback is built the same verify-first way.
 
 ### Known Limitations (by design — documented, not bugs)
 

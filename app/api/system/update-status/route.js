@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.4': [
+    'Fixed: Palo Alto firewalls fully managed by Panorama (every security rule pushed centrally, none stored locally) were collecting 0 rules over SSH. SecVault now automatically falls back to PAN-OS\'s effective/merged policy view when the normal config read finds no rulebase — verified against a real device\'s actual output before shipping.',
+    'This fallback has a few honest gaps: it can\'t tell if a rule is disabled (a disabled rule isn\'t part of the enforced policy, so it\'s simply not visible this way), logging state, or hit counts. Real rules with real rule content beat no rules at all, but be aware "unused"/"logging disabled" findings won\'t fire for a device collected this way.',
+    'This fix is SSH-only for now — the XML/API transport needs its own separate fix once its equivalent response format has been checked against a live device. If you hit this on a Panorama-managed firewall, switch it to SSH in the meantime.',
+  ],
   '2.21.3': [
     'The device Overview tab now shows the firewall\'s own reported Hostname alongside Model/Build/Serial — separate from the device name you typed in when adding it, since the two can legitimately differ.',
     'Currently populated for Palo Alto (both API and SSH) and Fortinet (both API and SSH); other vendors show "—" until their adapters are extended the same way.',
