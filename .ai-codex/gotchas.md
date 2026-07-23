@@ -32,6 +32,17 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   category/vendor-distribution count) — those keep their fixed color regardless of value.
 - `tableLayout: 'fixed'` is required with percentage column widths, or columns collapse
   unpredictably on overflow. `components/ui/Table.js` already enforces this internally.
+- `tableLayout: 'fixed'` only fixes column WIDTHS — it does NOT clip overflowing cell content on its
+  own. Found live 2026-07-23: `app/globals.css`'s base `td` rule has `overflow: hidden; text-overflow:
+  ellipsis;` but the base `th` rule never did (`white-space: nowrap` only) — a `<colgroup>` column
+  narrower than its header text (the Rules table's `rules/page.js` had Schedule at 3% and Hits at 2%)
+  rendered the header text spilling visibly into the NEXT column's header ("SCHEDULE"+"LOG" merging
+  into "SCHEDULLOG"), not truncating. Fixed globally by adding `overflow: hidden; text-overflow:
+  ellipsis;` to the base `th` rule (matching `td`) — every other table in the app already uses ≥6%
+  columns and was unaffected; only `rules/page.js`'s colgroup also needed rebalancing (Schedule
+  3%→6%, Hits 2%→4%, borrowed from the wider address/comment columns) since 2-3% is too narrow to
+  show anything useful even once clipped. When adding a new narrow `<col>` percentage, sanity-check
+  it can fit its header's shortest reasonable ellipsis form, not just that the percentages sum to 100.
 - A CSS Grid item's default `min-width: auto` lets one pathologically long unbroken string (e.g. a
   corrupted config-diff summary) blow an entire grid column to tens of thousands of px, pushing
   siblings off-screen. `.dashboard-widget-grid > * { min-width: 0; }` fixes this generically —

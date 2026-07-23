@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.23.3': [
+    'Fixed a visual bug on the device Rules table where the "Schedule" and "Log" column headers overlapped into unreadable merged text ("SCHEDULLOG") and the "Hits" header ran off the edge — those columns were far too narrow for their labels. Widened them and fixed the underlying issue so no table header in the app can overlap into its neighbor like this again.',
+  ],
   '2.23.2': [
     'The Dashboard\'s "Ruleset Overview" widget now shows a fleet-wide "Disabled" rule count alongside "Enabled" — previously disabled/inactive rules were only visible per-device (Rule Analysis tab, device Overview tab, or the Rules table filter), with no fleet-wide total.',
   ],

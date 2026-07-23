@@ -134,6 +134,8 @@ th {
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 td {
   padding: 12px 16px;
