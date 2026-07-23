@@ -1017,12 +1017,38 @@ grid + bar chart + a single glanceable risk number), while staying **recommend-o
 adapter gained a write-back/push-to-device capability, and none is planned — see the
 "Rule Analysis → Firewall-Analyzer-style Dashboard" plan for the full phased scope.
 
-- `computeRiskScoreFromCounts({critical,high,medium,info})` → weighted sum (10/5/2/0),
-  clamped to 0–100, banded into `low`/`medium`/`high`/`critical`. `computeRiskScore(findings)`
+- `computeRiskScoreFromCounts({critical,high,medium,info})` → weighted (10/5/2/0), **each tier's
+  contribution capped independently BEFORE summing** (critical 40 / high 30 / medium 20 / info 10,
+  summing to exactly 100), banded into `low`/`medium`/`high`/`critical`. `computeRiskScore(findings)`
   is a convenience wrapper that tallies severity counts from a raw findings array first.
 - Deliberately coarse (a triage signal, not a tuned risk model) — see the file's own comments
   for why the band cut points land where they do (a single critical finding scores `medium`,
   not `low`; three or more escalates to `high`).
+- **⛔ Bug fixed 2026-07-25, found via a live UI audit + confirmed against the real production
+  fleet: 13 of 14 devices scored "Critical (100)" — useless as a triage signal, since it couldn't
+  differentiate anything.** The ORIGINAL formula summed all four weighted counts and clamped the
+  TOTAL to 100. 7 of this app's 12 rule-finding types are medium severity
+  (`unused`/`redundant`/`correlation`/`overly_permissive`/`expiring_soon`/`generalization`/
+  `external_exposure`), and `unused` in particular accumulates naturally on any long-lived
+  firewall — real medium counts on this fleet ranged 7–551. At `medium >= 50`, `2 * medium` alone
+  already exceeded 100, so the score stopped measuring severity and started just measuring "does
+  this ruleset have any accumulated clutter," true of nearly every real device — a device with 0
+  critical/high findings and a big unused-rule backlog scored identically "Critical (100)" as a
+  device with 40 critical findings. Fixed by capping each tier's contribution independently (see
+  above) so medium's high real-world counts can no longer saturate the total on their own — same
+  bands, same 0–100 scale, same documented "1 critical → medium band" edge case, both unchanged
+  (verified). **Verified against the real fleet before shipping, not synthetic data**: distribution
+  went from 13 critical/1 high to 7 critical/4 high(/3 unlisted at the time of scoping), with the
+  split landing exactly on "has a real critical/high finding" vs. "zero critical, just a
+  medium-severity backlog" — the intended differentiation restored.
+  `device_risk_history` (the per-device Risk tab's trend chart, see below) only stores the final
+  `score`/`band` per snapshot, never the underlying counts, so historical rows CANNOT be
+  retroactively recomputed under the new formula — expect a one-time visible drop in the trend
+  chart the next time analysis runs after this ships, self-resolving from there. No backfill is
+  possible or attempted, same class of "can't retroactively fix an already-stored derived value"
+  limitation this file documents elsewhere (e.g. `config_diffs.change_summary`). Re-verified
+  against the real shipped function (not a scratch reimplementation) before this shipped: the full
+  14-device fleet went from a 13-critical/1-high distribution to 7-critical/7-high.
 - Computed on read wherever it's needed (the `/api/devices/[id]/analysis` GET summary, the
   per-device analysis page, the fleet analysis page) — no caching column, no scheduled job.
   A future phase may snapshot it periodically for a trend view; not built yet.

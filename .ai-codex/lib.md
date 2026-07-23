@@ -151,9 +151,10 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 ## lib/engines/riskScore.js
 
 `computeRiskScore(findings)` -> `{score: number, band: 'low'|'medium'|'high'|'critical', raw: number}` — tallies severity counts from a raw findings array then scores.
-`computeRiskScoreFromCounts(counts)` -> `{score, band, raw}` — weighted sum (critical:10/high:5/medium:2/info:0), clamped to 100, banded.
-`computeRuleRiskBand(ruleFindings, enabled)` -> `'low'|'medium'|'high'|'critical'|'attention'` — per-rule risk band = worst severity among the rule's own findings; `'attention'` for an enabled rule with zero findings, `'low'` for a disabled one.
+`computeRiskScoreFromCounts(counts)` -> `{score, band, raw}` — weighted (critical:10/high:5/medium:2/info:0), **each tier's contribution capped independently BEFORE summing** (critical 40/high 30/medium 20/info 10, sums to 100) — fixed 2026-07-25, see CLAUDE.md's Rule Analysis Dashboard section for why the old "clamp the total" formula saturated at 100 for 13/14 of a real fleet. `raw` is the true UNCAPPED sum, diagnostic only, no current caller reads it.
+`computeRuleRiskBand(ruleFindings, enabled)` -> `'low'|'medium'|'high'|'critical'|'attention'` — per-rule risk band = worst severity among the rule's own findings; `'attention'` for an enabled rule with zero findings, `'low'` for a disabled one. Untouched by the 2026-07-25 fix (different function, per-rule not per-device).
 `SEVERITY_WEIGHTS` -> `object` — `{critical:10, high:5, medium:2, info:0}`.
+`TIER_CAPS` -> `object` — `{critical:40, high:30, medium:20, info:10}` (2026-07-25).
 `MAX_SCORE` -> `number` — `100`.
 
 ## lib/engines/ruleReorder.js

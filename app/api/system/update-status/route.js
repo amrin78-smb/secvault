@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.23.1': [
+    'Fixed the Rule Health risk score showing "Critical (100)" for almost every device (13 of 14 on the real fleet) — it wasn\'t actually measuring severity, just whether a device had accumulated enough routine "unused rule" findings over time (which is nearly all of them). The score now weighs critical/high/medium findings independently instead of letting a large pile of low-stakes medium findings alone max out the number. Devices with genuinely dangerous findings (critical/any-any rules) now score higher than devices that just have a big backlog of housekeeping items.',
+    'One side effect: the Risk Trend chart on a device\'s Risk tab will show a one-time drop the next time analysis runs, since old trend points were recorded under the old (inflated) scoring and can\'t be recalculated after the fact — this is expected, not a data loss.',
+  ],
   '2.23.0': [
     'Visual polish pass across the whole app, based on a full UI audit: device names, CVE IDs, and rule/check names in tables no longer render in the same alarm-red used for actual critical findings — that color is now reserved for real severity signals. "Patch Now"/critical-count tiles that were showing red even at zero (misleadingly, since zero is the good outcome) now go neutral gray until the count is actually non-zero.',
     'The Devices list\'s row actions (View/Collect/Test/Delete, previously 4 stacked underlined links per row) are now a single "⋮" menu per row.',

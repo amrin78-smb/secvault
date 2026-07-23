@@ -181,6 +181,17 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   every time a new `rule_analysis_results.finding_type` value is introduced.
 - Shadow/redundant/reorder analysis is O(n²) and skipped entirely above 1000 rules (warning logged,
   not silently truncated).
+- `riskScore.js`'s `computeRiskScoreFromCounts()` caps each severity tier's contribution
+  INDEPENDENTLY before summing (critical 40/high 30/medium 20/info 10) — do NOT revert this to a
+  single "sum everything then clamp the total to 100" formula. That was the actual shipped
+  behavior until 2026-07-25 and it saturated at "Critical (100)" for 13 of 14 real fleet devices,
+  because medium-severity findings (7 of 12 finding types, `unused` especially) commonly run into
+  the hundreds and `2 * medium` alone exceeds 100 long before critical/high are even considered.
+  If you ever need to add a new severity tier or change a weight, cap it independently too.
+- `device_risk_history` only stores `(device_id, score, band, recorded_at)` — never the underlying
+  severity counts. Any future change to the risk-scoring formula can NEVER retroactively correct
+  historical trend rows, only new snapshots going forward. Don't promise a backfill for this table;
+  it isn't possible without also storing the raw counts (which it doesn't).
 
 ---
 
