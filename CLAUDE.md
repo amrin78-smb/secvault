@@ -141,6 +141,12 @@ npm run build                               # must pass with zero errors
 
 ### File Structure
 
+⚠️ This is a high-level sketch from the MVP build, kept for a quick orientation — it has NOT been
+rewritten to include every directory the app has grown since (compliance/, vpn/, alerts/,
+credential-profiles/, snmp/, vulnerability/, and more). For the current, exhaustive, machine-checked
+file/route/component inventory, use `.ai-codex/` (see "Codebase Index — READ FIRST" at the top of
+this file) — it's what future sessions should actually rely on instead of this tree.
+
 ```
 secvault/
 ├── CLAUDE.md                        ← you are here
@@ -157,8 +163,10 @@ secvault/
 │   │   ├── layout.js                ← sidebar + header wrapper (.sv-shell/.sv-body/.sv-content)
 │   │   ├── page.js                  ← main dashboard
 │   │   ├── devices/                 ← device inventory
-│   │   ├── cve/                     ← fleet CVE posture
-│   │   ├── advisories/              ← advisory browser
+│   │   ├── vulnerability/           ← merged fleet CVE posture + advisory browser (cve/ and
+│   │   │                               advisories/ were separate page routes originally; merged
+│   │   │                               here — the API routes at app/api/cve/ and
+│   │   │                               app/api/advisories/ were NOT merged, still separate)
 │   │   ├── analysis/                ← rule analysis dashboard
 │   │   └── settings/
 │   └── api/
@@ -207,8 +215,10 @@ secvault/
 │   ├── layout/                      ← Header (server), Sidebar, HeaderSearch, NotificationBell,
 │   │                                   UserMenu, ThemeToggle
 │   ├── devices/
-│   ├── cve/
+│   ├── cve/                         ← still separate from advisories/ and vulnerability/ below —
+│   │                                   components were not consolidated when the pages merged
 │   ├── advisories/
+│   ├── vulnerability/               ← new components built for the merged vulnerability/ page route
 │   ├── analysis/                    ← rule analysis dashboard tabs + charts
 │   └── config/                      ← config change/backup/predicate UI
 └── installer/
@@ -384,6 +394,19 @@ function decrypt(encrypted, iv) {
   ]).toString('utf8');
 }
 ```
+
+⚠️ **The sample above is `encrypt`/`decrypt` only — kept as originally written for the key-derivation
+and stored-format explanation.** The two functions every caller actually uses,
+`getCredential(deviceId, credentialType, pool)` / `setCredential(deviceId, credentialType, plaintext,
+pool)`, aren't shown above; both require `pool` (see the "Pool Warning" section). **`setCredential` is
+a single atomic `INSERT ... ON CONFLICT (device_id, credential_type) DO UPDATE`, not DELETE+INSERT** —
+changed 2026-07-19 after a bug sweep found the original DELETE+INSERT-in-a-transaction was atomic for
+one request but not against two CONCURRENT calls for the same `(device_id, credential_type)` (e.g. a
+double-submitted credential rotation could leave two rows behind). This relies on a
+`UNIQUE(device_id, credential_type)` constraint added to `device_credentials` the same day (with a
+dedupe pass run ahead of adding it, for any server that had already accumulated a duplicate).
+`getCredential` still reads via `ORDER BY created_at DESC LIMIT 1` for defense in depth, but with the
+constraint in place there should only ever be one row per `(device_id, credential_type)` pair.
 
 ### Key Generation (at install time)
 
@@ -1522,6 +1545,14 @@ tradeoff `affected_version_ranges`/`fixed_in_versions` already make as JSONB ins
 tables). `node-postgres` returns this as a real JS array automatically — no parsing needed on read.
 
 ### Seed library — `lib/auditChecksSeed.js`, called from `lib/migrate.js`
+
+⛔ **Count corrected 2026-07-23**: the "44 checks" figure below is a Dashboard-Rebuild-era snapshot
+and has drifted since — several rounds documented later in this section (the Fortinet gap-closing
+rounds, the Cisco ASA checks, the SANS-standard checks, the rule-evidence `rule_scan` checks) each
+added more. Directly counted via `grep -c "checkId:" lib/auditChecksSeed.js` on 2026-07-23: **45**
+checks. This exact class of miscount has happened before in this same section (see the "count
+corrected again 2026-07-19" note further down for the `not_evaluable_from_config` sub-count) — if
+you touch this file, recount directly rather than trusting either number here, and update this note.
 
 44 checks as of the Dashboard Rebuild round (42 vendor-specific/shared config-path checks + the 2
 new `ruleset_property` checks above, which are `vendor: null` and apply fleet-wide — see that
@@ -4916,6 +4947,20 @@ never parsed `serial` at all before this — added, doc-derived, not yet live-ve
 specific transport). `collectAndStore()`'s INSERT extended to include it. Separately, `build` was
 already queried by `getLatestVersion()` on the device detail page and simply never rendered in the
 JSX — pure UI gap, no data/adapter issue. Both now render as new tiles on the device summary card.
+
+**Follow-up, same shape, `hostname` (2026-07-23):** the exact same "parsed by an adapter but never
+carried through to storage" gap as `serial` above, this time for the device's own reported hostname
+(distinct from `devices.name`, which is whatever the operator typed in when adding the device — the
+two can legitimately differ). `ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS hostname TEXT`
+(same pattern `serial` already established for this table — an `ALTER TABLE` statement placed right
+after the `CREATE TABLE IF NOT EXISTS` body rather than duplicated inside it; both run unconditionally
+on every `schema.sql` execution, so this is correct for a fresh install too, not just an upgrade),
+`collectAndStore()`'s INSERT extended to include it. Populated for Palo Alto (both SSH — live-
+confirmed field — and XML/API — doc-derived, not yet independently live-verified for that one
+specific transport, same standing caveat as everywhere else in this file for unverified Palo Alto
+XML/API fields) and Fortinet (both REST and SSH). Other vendors render `'—'` until their adapters are
+extended the same way. Renders as a new tile on the device Overview tab's "Device Details" card,
+alongside Model/Build/Serial.
 
 **`lib/engines/ruleAnalysis.js` — dead condition in the `unused` finding, simplified:** the
 condition read `Number(rule.hit_count) === 0 && !rule.last_hit_at`. No adapter, for any vendor, has

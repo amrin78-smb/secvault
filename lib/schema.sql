@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS devices (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   vendor TEXT NOT NULL DEFAULT 'forcepoint',
-  mgmt_method TEXT NOT NULL DEFAULT 'smc', -- 'api' | 'ssh' | 'smc' | 'file'
+  mgmt_method TEXT NOT NULL DEFAULT 'smc', -- 'api' | 'ssh' | 'smc' (the real, current dispatch set —
+    -- see lib/adapters/index.js's ADAPTERS table. 'file' was never a real dispatched value; comment
+    -- corrected 2026-07-23, found stale during a codebase-index audit)
   mgmt_ip TEXT,
   smc_host TEXT,
   smc_port INTEGER DEFAULT 8082,
@@ -206,7 +208,10 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
   rule_id_vendor TEXT,
   sequence_number INTEGER,
   enabled BOOLEAN NOT NULL DEFAULT true,
-  action TEXT, -- 'allow' | 'deny' | 'drop' | 'reject'
+  action TEXT, -- 'allow' | 'deny' | 'drop' | 'reject' | 'block' ('block' added to this comment
+    -- 2026-07-23 — lib/engines/{ruleAnalysis,configAuditor,reachabilityMatrix}.js's DENY_ACTIONS
+    -- sets already treat it as a deny-family action alongside the other three; no vendor adapter's
+    -- mapAction() currently emits it, but the engines accept it defensively/forward-compatibly)
   src_zones JSONB,
   dst_zones JSONB,
   src_addresses JSONB,
@@ -797,7 +802,9 @@ CREATE INDEX IF NOT EXISTS idx_vrr_vendor ON vendor_recommended_releases(vendor)
 
 CREATE TABLE IF NOT EXISTS feed_sync_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  feed_name TEXT NOT NULL, -- 'nvd' | 'kev'
+  feed_name TEXT NOT NULL, -- 'nvd' | 'paloalto_psirt' | 'fortinet_psirt' | 'kev' (comment corrected
+    -- 2026-07-23 — the latter two vendor PSIRT feeds were added after this comment was first
+    -- written and never updated; see CLAUDE.md's "Feed Sources" table for the full sync-order list)
   status TEXT NOT NULL, -- 'success' | 'error' | 'partial'
   inserted INTEGER NOT NULL DEFAULT 0,
   updated INTEGER NOT NULL DEFAULT 0,
