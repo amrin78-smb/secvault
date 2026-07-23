@@ -66,7 +66,7 @@ export default async function TopRiskyDevices({ limit = 5 }) {
         {devices.map((device) => (
           <tr key={device.id}>
             <td>
-              <Link href={`/devices/${device.id}/analysis?tab=risk`} style={{ color: 'var(--primary)' }}>
+              <Link href={`/devices/${device.id}/analysis?tab=risk`} className="link-quiet">
                 {device.name}
               </Link>
             </td>

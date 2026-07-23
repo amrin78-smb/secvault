@@ -116,7 +116,7 @@ export default async function OverviewRuleHygieneCard({ deviceId }) {
           <StatCard label="Total Rules" value={ruleStats.total} color="var(--text-muted)" />
           <StatCard label="Active" value={ruleStats.active} color="var(--green)" />
           <StatCard label="Disabled" value={ruleStats.disabled} color="var(--text-muted)" />
-          <StatCard label="Expired" value={ruleStats.expired} color="var(--red)" />
+          <StatCard label="Expired" value={ruleStats.expired} color={ruleStats.expired > 0 ? 'var(--red)' : 'var(--text-muted)'} />
         </div>
 
         <RuleHygieneDonut categories={categories} total={totalFindings} />

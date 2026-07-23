@@ -207,3 +207,16 @@ export function IconGrid(p) {
     </svg>
   );
 }
+
+// Row-actions overflow trigger (components/ui/RowActionsMenu.js). Solid dots
+// (fill/no-stroke) rather than base()'s outline convention -- a 1px-radius
+// stroked circle renders as a near-invisible ring at this size.
+export function IconMoreVertical(p) {
+  return (
+    <svg {...base(p)} stroke="none">
+      <circle cx="12" cy="5" r="2" fill="currentColor" />
+      <circle cx="12" cy="12" r="2" fill="currentColor" />
+      <circle cx="12" cy="19" r="2" fill="currentColor" />
+    </svg>
+  );
+}

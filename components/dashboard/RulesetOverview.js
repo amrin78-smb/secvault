@@ -84,10 +84,14 @@ export default async function RulesetOverview() {
   const tiles = [
     { label: 'Total Rules', value: totals.total, color: 'var(--text-primary)' },
     { label: 'Enabled', value: totals.enabled, color: 'var(--green)' },
-    { label: 'Unused', value: findings.unused, color: 'var(--blue)' },
-    { label: 'Shadow', value: findings.shadow, color: 'var(--yellow)' },
-    { label: 'Redundant', value: findings.redundant, color: 'var(--yellow)' },
-    { label: 'Any-Any', value: findings.any_any, color: 'var(--red)' },
+    { label: 'Unused', value: findings.unused, color: findings.unused > 0 ? 'var(--blue)' : 'var(--text-muted)' },
+    { label: 'Shadow', value: findings.shadow, color: findings.shadow > 0 ? 'var(--yellow)' : 'var(--text-muted)' },
+    {
+      label: 'Redundant',
+      value: findings.redundant,
+      color: findings.redundant > 0 ? 'var(--yellow)' : 'var(--text-muted)',
+    },
+    { label: 'Any-Any', value: findings.any_any, color: findings.any_any > 0 ? 'var(--red)' : 'var(--text-muted)' },
   ];
 
   return (

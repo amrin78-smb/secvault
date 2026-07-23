@@ -67,7 +67,7 @@ function statusPanel({ stats, failedChecks, failedChecksTotal, viewMoreHref }) {
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)' }}>
           {shown.map((c) => (
             <li key={c.id}>
-              <Link href={c.href} style={{ color: 'var(--primary)' }}>
+              <Link href={c.href} className="link-quiet">
                 {c.name}
               </Link>
             </li>
@@ -76,7 +76,8 @@ function statusPanel({ stats, failedChecks, failedChecksTotal, viewMoreHref }) {
         {remaining > 0 && viewMoreHref && (
           <Link
             href={viewMoreHref}
-            style={{ display: 'inline-block', marginTop: 6, fontSize: 'var(--text-sm)', color: 'var(--primary)' }}
+            className="link-quiet"
+            style={{ display: 'inline-block', marginTop: 6, fontSize: 'var(--text-sm)' }}
           >
             +{remaining} more
           </Link>

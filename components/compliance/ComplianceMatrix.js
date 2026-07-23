@@ -133,7 +133,7 @@ export default function ComplianceMatrix({ devices }) {
         {devices.map((d) => (
           <tr key={d.deviceId}>
             <td title={d.deviceName}>
-              <Link href={`/compliance/${d.deviceId}`} style={{ color: 'var(--primary)' }}>
+              <Link href={`/compliance/${d.deviceId}`} className="link-quiet">
                 {d.deviceName}
               </Link>
             </td>

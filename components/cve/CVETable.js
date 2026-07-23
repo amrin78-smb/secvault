@@ -75,7 +75,17 @@ export default function CVETable({ rows = [], showDeviceColumn = false, deviceCo
           return (
             <tr key={rowKey}>
               <td style={{ padding: 0 }}>
-                <Link href={href} style={{ ...linkCellStyle, fontWeight: 500, color: 'var(--primary)' }}>
+                <Link
+                  href={href}
+                  className="link-quiet"
+                  style={{
+                    display: 'block',
+                    padding: '12px 16px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {row.cve_id}
                 </Link>
               </td>

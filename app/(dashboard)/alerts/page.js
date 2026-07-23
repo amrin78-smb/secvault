@@ -240,7 +240,7 @@ export default async function AlertsPage({ searchParams }) {
                       <Badge color={typeMeta.color}>{typeMeta.label}</Badge>
                     </td>
                     <td title={item.deviceName}>
-                      <Link href={`/devices/${item.deviceId}`} style={{ color: 'var(--primary)' }}>
+                      <Link href={`/devices/${item.deviceId}`} className="link-quiet">
                         {item.deviceName}
                       </Link>
                     </td>

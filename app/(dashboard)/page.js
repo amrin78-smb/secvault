@@ -81,7 +81,7 @@ export default async function DashboardPage() {
         <StatCard
           label="Patch Now"
           value={summary.patch_now_count}
-          color="var(--red)"
+          color={summary.patch_now_count > 0 ? 'var(--red)' : 'var(--text-muted)'}
           compact
           icon={IconAlertTriangle}
           iconColor="#f87171"

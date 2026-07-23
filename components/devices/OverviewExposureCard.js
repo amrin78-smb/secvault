@@ -73,7 +73,7 @@ export default async function OverviewExposureCard({ deviceId }) {
                           href={cve.advisory_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          style={{ fontWeight: 500, color: 'var(--primary)' }}
+                          className="link-quiet"
                         >
                           {cve.cve_id}
                         </a>

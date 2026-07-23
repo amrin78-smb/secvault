@@ -205,7 +205,7 @@ export default async function DevicesPage({ searchParams }) {
             {devices.map((d) => (
               <tr key={d.id}>
                 <td>
-                  <Link href={`/devices/${d.id}`} style={{ fontWeight: 500, color: 'var(--primary)', textDecoration: 'none' }}>
+                  <Link href={`/devices/${d.id}`} className="link-quiet">
                     {d.name}
                   </Link>
                 </td>
@@ -214,8 +214,12 @@ export default async function DevicesPage({ searchParams }) {
                 </td>
                 <td>{d.vendor === 'forcepoint' ? d.smc_host || '—' : d.mgmt_ip || '—'}</td>
                 <td>{d.version_string || '—'}</td>
-                <td style={{ color: 'var(--red)' }}>{d.patch_now_count}</td>
-                <td style={{ color: 'var(--yellow)' }}>{d.scheduled_count}</td>
+                <td style={{ color: d.patch_now_count > 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+                  {d.patch_now_count}
+                </td>
+                <td style={{ color: d.scheduled_count > 0 ? 'var(--yellow)' : 'var(--text-muted)' }}>
+                  {d.scheduled_count}
+                </td>
                 <td style={{ color: 'var(--text-muted)' }}>{d.monitor_count}</td>
                 <td>{formatDateTime(d.last_collected_at)}</td>
                 <td>
@@ -226,20 +230,7 @@ export default async function DevicesPage({ searchParams }) {
                   />
                 </td>
                 <td>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)' }}>
-                    <Link href={`/devices/${d.id}`} style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
-                      View
-                    </Link>
-                    {canWrite && <DeviceRowActions deviceId={d.id} />}
-                    {canWrite && (
-                      <Link
-                        href={`/devices?sort=${sortKey}&confirmDelete=${d.id}`}
-                        style={{ color: 'var(--red)', textDecoration: 'underline' }}
-                      >
-                        Delete
-                      </Link>
-                    )}
-                  </div>
+                  <DeviceRowActions deviceId={d.id} sortKey={sortKey} canWrite={canWrite} />
                 </td>
               </tr>
             ))}

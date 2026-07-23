@@ -51,8 +51,8 @@ export default async function OverviewCveCard({ deviceId }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16, marginBottom: 16 }}>
-          <StatCard label="Patch Now" value={patchNowCount} color="var(--red)" />
-          <StatCard label="Scheduled" value={scheduledCount} color="var(--yellow)" />
+          <StatCard label="Patch Now" value={patchNowCount} color={patchNowCount > 0 ? 'var(--red)' : 'var(--text-muted)'} />
+          <StatCard label="Scheduled" value={scheduledCount} color={scheduledCount > 0 ? 'var(--yellow)' : 'var(--text-muted)'} />
           <StatCard label="Total Tracked CVEs" value={total} color="var(--text-muted)" />
         </div>
 

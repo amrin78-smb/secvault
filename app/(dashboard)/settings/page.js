@@ -177,7 +177,15 @@ export default function SettingsPage() {
       </div>
 
       {activeTab === 'general' && (
-        <div style={{ maxWidth: 576, display: 'flex', flexDirection: 'column', gap: 32 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
+            gap: 24,
+            alignItems: 'start',
+            maxWidth: 1200,
+          }}
+        >
           <Card>
             <CardHeader>
               <CardTitle>Feed Sync</CardTitle>

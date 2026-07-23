@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.23.0': [
+    'Visual polish pass across the whole app, based on a full UI audit: device names, CVE IDs, and rule/check names in tables no longer render in the same alarm-red used for actual critical findings — that color is now reserved for real severity signals. "Patch Now"/critical-count tiles that were showing red even at zero (misleadingly, since zero is the good outcome) now go neutral gray until the count is actually non-zero.',
+    'The Devices list\'s row actions (View/Collect/Test/Delete, previously 4 stacked underlined links per row) are now a single "⋮" menu per row.',
+    'Redesigned the login page — it was a plain white box floating on an empty navy background with no visual identity; it now has real product context alongside the sign-in form.',
+    'Settings > General no longer leaves two-thirds of a wide screen empty — the Feed Sync and Change Password cards now use the available width.',
+    'Dark mode: cards now stand out a bit more clearly against the page background (the two were nearly the same shade before).',
+    'This was a large, mostly-mechanical styling pass across ~25 files — functionality is unchanged everywhere; please flag anything that looks visually off after this deploys.',
+  ],
   '2.22.0': [
     'Added a fallback for Panorama-managed Palo Alto firewalls (every rule pushed centrally, none stored locally) on the API/XML management transport — the same fix already shipped for the SSH transport a few days ago, now also available when a device is set up to connect via API.',
     '⚠️ Unlike the SSH version, this one has not yet been confirmed against a real device\'s actual response — it was built to fail safely (falls through to the existing error rather than guessing wrong) and logs full diagnostic detail for the first device it runs against, but should be treated as provisional until checked against a real Panorama-managed API-transport firewall.',

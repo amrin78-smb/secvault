@@ -83,7 +83,7 @@ export default async function RecentActivityFeed({ limit = 8 }) {
                   <td title={row.detail || ''}>{actionLabel(row.action)}</td>
                   <td>
                     {row.device_id ? (
-                      <Link href={`/devices/${row.device_id}`} style={{ color: 'var(--primary)' }}>
+                      <Link href={`/devices/${row.device_id}`} className="link-quiet">
                         {row.device_name || row.device_id}
                       </Link>
                     ) : (

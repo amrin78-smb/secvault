@@ -8,6 +8,28 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - Never define a React component inside another component's function body — full remount on every
   keystroke, loses input focus. Verified clean as of 2026-07-23 (see components.md's Violations
   section) — re-check this every time you add a new component.
+- **`var(--primary)`/`var(--red)` is NOT the default link color for identity/navigation links**
+  (device names, CVE IDs, rule names) — as of the 2026-07-24 UI audit, use `className="link-quiet"`
+  (globals.css) instead: plain `--text-primary` at rest, `--primary` + underline only on hover.
+  Red/primary as a resting link color dilutes red's meaning as a genuine severity signal elsewhere
+  on the same page — reserve it for real danger/critical states, brand buttons, and the active-nav
+  accent bar. Breadcrumbs, "Back to X"/"View all →" action-prose links, and badges/pills were
+  deliberately left alone in that pass (not considered "identity links") — don't retroactively
+  "fix" those without a reason.
+- If you set an inline `style={{ color: 'inherit' }}` (or any resting color) on the SAME element as
+  a CSS class with a `:hover` rule (like `.link-quiet`), the inline style still wins for the RESTING
+  state (inline beats an external class at equal/lower specificity) — but the class's `:hover` rule
+  still applies on hover, since inline styles have no way to express pseudo-classes. Net effect: the
+  hover color still works, but the resting color silently stays whatever the inline style said,
+  which is very easy to miss when applying `.link-quiet` to an element that has its own inline
+  `color`/`linkCellStyle`-style spread — check for and remove any inline resting-color override,
+  don't just add the className alongside it. (Confirmed live during the 2026-07-24 audit fix in
+  `components/cve/CVETable.js`.)
+- A count that CAN legitimately be zero and represents "how many bad things exist" (Patch Now,
+  Critical findings, etc.) should render zero in `var(--text-muted)`, not the severity color — the
+  severity color should only appear once the count is actually non-zero. Don't apply this to a
+  count where zero isn't inherently good (a total count, a "Denied Rules"/"NAT Enabled" count, a
+  category/vendor-distribution count) — those keep their fixed color regardless of value.
 - `tableLayout: 'fixed'` is required with percentage column widths, or columns collapse
   unpredictably on overflow. `components/ui/Table.js` already enforces this internally.
 - A CSS Grid item's default `min-width: auto` lets one pathologically long unbroken string (e.g. a

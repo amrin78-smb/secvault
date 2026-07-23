@@ -179,7 +179,7 @@ export default function StandardTabs({ standards, findings, deviceId }) {
                 <tr key={f.id}>
                   <td title={f.name}>
                     {deviceId ? (
-                      <Link href={`/compliance/${deviceId}/checks/${f.id}`} style={{ color: 'var(--primary)' }}>
+                      <Link href={`/compliance/${deviceId}/checks/${f.id}`} className="link-quiet">
                         {f.name}
                       </Link>
                     ) : (

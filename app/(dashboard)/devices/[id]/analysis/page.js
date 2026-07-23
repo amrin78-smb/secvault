@@ -333,7 +333,11 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
               href={`/devices/${device.id}/analysis?tab=findings&finding_type=any_any`}
               style={{ textDecoration: 'none' }}
             >
-              <StatCard label="Allowed Any-to-Any" value={findingTypeCounts.any_any} color="var(--red)" />
+              <StatCard
+                label="Allowed Any-to-Any"
+                value={findingTypeCounts.any_any}
+                color={findingTypeCounts.any_any > 0 ? 'var(--red)' : 'var(--text-muted)'}
+              />
             </Link>
             <Link
               href={`/devices/${device.id}/analysis?tab=findings&finding_type=log_disabled`}
@@ -344,9 +348,21 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-            <StatCard label="Critical" value={severitySummary.critical} color="var(--red)" />
-            <StatCard label="High" value={severitySummary.high} color="var(--yellow)" />
-            <StatCard label="Medium" value={severitySummary.medium} color="var(--blue)" />
+            <StatCard
+              label="Critical"
+              value={severitySummary.critical}
+              color={severitySummary.critical > 0 ? 'var(--red)' : 'var(--text-muted)'}
+            />
+            <StatCard
+              label="High"
+              value={severitySummary.high}
+              color={severitySummary.high > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
+            />
+            <StatCard
+              label="Medium"
+              value={severitySummary.medium}
+              color={severitySummary.medium > 0 ? 'var(--blue)' : 'var(--text-muted)'}
+            />
             <StatCard label="Info" value={severitySummary.info} color="var(--text-muted)" />
             <StatCard label="Total Findings" value={severitySummary.total} />
             {/* A datetime string, not a KPI number -- kept at the smaller
@@ -464,7 +480,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                       <FindingTypeBadge type={f.finding_type} />
                     </td>
                     <td title={ruleLabel(f)}>
-                      <Link href={`/devices/${device.id}/rules`} style={{ color: 'var(--primary)' }}>
+                      <Link href={`/devices/${device.id}/rules`} className="link-quiet">
                         {ruleLabel(f)}
                       </Link>
                     </td>

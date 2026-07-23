@@ -80,7 +80,7 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --primary-light:  rgba(200,16,46,0.18);
-  --bg-primary:     #0d1220;
+  --bg-primary:     #0a0e1a;
   --bg-card:        #1a2235;
   --border:         #2d3a52;
   --border-light:   #243050;
@@ -342,6 +342,49 @@ tbody tr:hover td { background: var(--bg-primary); }
   background: var(--chip-bg); color: var(--chip-color);
 }
 .widget-icon-chip svg { width: 14px; height: 14px; }
+
+/* ── Login page brand panel ───────────────────────────────────
+   Wide-viewport split-panel login (app/(auth)/login/page.js) -- dark brand
+   panel with product context on the left, form on the right. Below 900px
+   there's no room for both, so the brand panel is dropped in favor of a
+   compact wordmark above the form instead. */
+.login-brand-panel {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  background: var(--navy);
+  overflow: hidden;
+}
+.login-compact-brand { display: none; }
+@media (max-width: 900px) {
+  .login-brand-panel { display: none; }
+  .login-compact-brand { display: block; }
+}
+
+/* ── Quiet identity link ───────────────────────────────────────
+   For a name/ID that's clickable purely as navigation (a device name, CVE
+   ID, rule name, check name inside a table/list row) -- NOT a real action,
+   a brand element, or a danger/severity signal. Added 2026-07-24 (UI audit):
+   these were previously styled in var(--primary)/var(--red) throughout the
+   app purely to signal "this is a link," which diluted red's meaning as a
+   severity color everywhere else on the same page. Resting state reads as
+   plain text; --primary only appears on hover/focus, as an affordance, not
+   a permanent tag. Use via className="link-quiet" on next/link's <Link> or
+   a plain <a> -- do NOT use this for buttons, breadcrumbs, badges, or any
+   genuine error/danger text, all of which keep their existing treatment. */
+.link-quiet {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.12s;
+}
+.link-quiet:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn, .btn-primary, .btn-secondary, .btn-navy, .btn-danger {

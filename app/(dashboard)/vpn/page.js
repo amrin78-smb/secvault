@@ -122,7 +122,7 @@ export default async function VpnFleetPage() {
             {devices.map((d) => (
               <tr key={d.device_id}>
                 <td title={d.device_name}>
-                  <Link href={`/devices/${d.device_id}/vpn`} style={{ color: 'var(--primary)' }}>
+                  <Link href={`/devices/${d.device_id}/vpn`} className="link-quiet">
                     {d.device_name}
                   </Link>
                 </td>

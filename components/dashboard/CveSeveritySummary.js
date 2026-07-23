@@ -39,7 +39,8 @@ export default async function CveSeveritySummary() {
           const sub = comparison
             ? deltaLabel(live[key] - Number(comparison[snapshotKey[key]] ?? 0), comparisonGapDays)
             : undefined;
-          return <StatCard key={key} label={label} value={live[key]} color={color} sub={sub} compact />;
+          const tileColor = live[key] > 0 ? color : 'var(--text-muted)';
+          return <StatCard key={key} label={label} value={live[key]} color={tileColor} sub={sub} compact />;
         })}
       </div>
       <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>

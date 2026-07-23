@@ -56,9 +56,9 @@ export default async function FleetAnalysisPage() {
       <PageHeader title="Rule Health — Fleet" />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        <StatCard label="Critical" value={totals.critical} color="var(--red)" />
-        <StatCard label="High" value={totals.high} color="var(--yellow)" />
-        <StatCard label="Medium" value={totals.medium} color="var(--blue)" />
+        <StatCard label="Critical" value={totals.critical} color={totals.critical > 0 ? 'var(--red)' : 'var(--text-muted)'} />
+        <StatCard label="High" value={totals.high} color={totals.high > 0 ? 'var(--yellow)' : 'var(--text-muted)'} />
+        <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? 'var(--blue)' : 'var(--text-muted)'} />
         <StatCard label="Info" value={totals.info} color="var(--text-muted)" />
         <StatCard label="Total Findings" value={totals.total} color="var(--text-primary)" />
       </div>
@@ -95,7 +95,7 @@ export default async function FleetAnalysisPage() {
             {rows.map((r) => (
               <tr key={r.id}>
                 <td title={r.name}>
-                  <Link href={`/devices/${r.id}/analysis`} style={{ color: 'var(--primary)' }}>
+                  <Link href={`/devices/${r.id}/analysis`} className="link-quiet">
                     {r.name}
                   </Link>
                 </td>

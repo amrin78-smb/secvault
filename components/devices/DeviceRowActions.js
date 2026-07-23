@@ -2,33 +2,22 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import RowActionsMenu from '../ui/RowActionsMenu';
 
-// Compact Collect/Test actions for one row of the devices list table
-// (app/(dashboard)/devices/page.js). Same fetch+pending+router.refresh()
-// pattern as components/devices/DeviceActions.js (the device detail page's
-// version) -- this is a separate component because that page's dense table
-// row uses small inline text links ("View"/"Edit"/"Delete"), not full
-// <Button> elements, and matching that existing visual style here (rather
-// than dropping in full-size buttons) keeps the row from ballooning in height.
+// Devices-list row actions (app/(dashboard)/devices/page.js) -- View +
+// Collect + Test + Delete, consolidated into one "⋮" overflow menu.
 //
-// Replaces what used to be two 'use server' actions (collectNowAction /
-// testConnectivityAction) wired to plain <form action={...}> elements with an
-// internalFetch() cookie-forwarding helper -- the same root cause as the
-// device-detail-page hang fixed earlier: no client JS in front of them meant
-// a genuine top-level form navigation with zero pending UI, on a call that
-// can legitimately take up to ~2 minutes on an unreachable device.
-const linkBtnStyle = (running) => ({
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  font: 'inherit',
-  color: 'var(--primary)',
-  textDecoration: 'underline',
-  cursor: running ? 'not-allowed' : 'pointer',
-  opacity: running ? 0.5 : 1,
-});
-
-export default function DeviceRowActions({ deviceId }) {
+// ⛔ Changed 2026-07-24 (UI audit): this used to render Collect/Test as two
+// small underlined text links sitting inline next to a separately-built
+// View link and (conditionally) a Delete link in the page's own JSX -- four
+// stacked underlined links per row, wrapping to 2 lines, all in the same
+// brand-red color regardless of what they actually did. Consolidated here
+// so the page only needs to render <DeviceRowActions deviceId sortKey
+// canWrite />; View is always offered (read-only, safe for a viewer
+// session), Collect/Test/Delete only when canWrite -- same permission
+// shape this component already had, just centralized instead of split
+// between here and the page.
+export default function DeviceRowActions({ deviceId, sortKey, canWrite }) {
   const router = useRouter();
   const [running, setRunning] = useState(null); // 'collect' | 'test' | null
   const [error, setError] = useState(null);
@@ -51,29 +40,43 @@ export default function DeviceRowActions({ deviceId }) {
     }
   }
 
+  const actions = [{ type: 'link', label: 'View', href: `/devices/${deviceId}` }];
+
+  if (canWrite) {
+    actions.push(
+      {
+        type: 'button',
+        label: 'Collect Now',
+        pending: running === 'collect',
+        pendingLabel: 'Collecting…',
+        disabled: Boolean(running),
+        onClick: () => runAction('collect', `/api/devices/${deviceId}/collect`),
+      },
+      {
+        type: 'button',
+        label: 'Test Connectivity',
+        pending: running === 'test',
+        pendingLabel: 'Testing…',
+        disabled: Boolean(running),
+        onClick: () => runAction('test', `/api/devices/${deviceId}/test`),
+      },
+      {
+        type: 'link',
+        label: 'Delete',
+        href: `/devices?sort=${sortKey}&confirmDelete=${deviceId}`,
+        danger: true,
+      }
+    );
+  }
+
   return (
-    <>
-      <button
-        type="button"
-        style={linkBtnStyle(running)}
-        disabled={Boolean(running)}
-        onClick={() => runAction('collect', `/api/devices/${deviceId}/collect`)}
-      >
-        {running === 'collect' ? 'Collecting…' : 'Collect'}
-      </button>
-      <button
-        type="button"
-        style={linkBtnStyle(running)}
-        disabled={Boolean(running)}
-        onClick={() => runAction('test', `/api/devices/${deviceId}/test`)}
-      >
-        {running === 'test' ? 'Testing…' : 'Test'}
-      </button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <RowActionsMenu actions={actions} />
       {error && (
-        <span style={{ color: 'var(--red)' }} title={error}>
+        <span style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }} title={error}>
           ⚠
         </span>
       )}
-    </>
+    </div>
   );
 }
