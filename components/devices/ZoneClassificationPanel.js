@@ -36,6 +36,7 @@
 // admin check of its own and always shows the edit controls directly.
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 const ROLE_OPTIONS = [
   { value: '', label: 'Unclassified' },
@@ -45,6 +46,7 @@ const ROLE_OPTIONS = [
 ];
 
 function ZoneRoleSelect({ deviceId, zoneName, role }) {
+  const router = useRouter();
   const [value, setValue] = useState(role || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -75,6 +77,7 @@ function ZoneRoleSelect({ deviceId, zoneName, role }) {
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Failed to save');
       }
+      router.refresh();
     } catch (err) {
       setValue(previous); // revert the optimistic update
       setError(err.message || 'Failed to save');

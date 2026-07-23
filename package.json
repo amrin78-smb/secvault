@@ -1,6 +1,6 @@
 {
   "name": "secvault",
-  "version": "2.23.3",
+  "version": "2.23.4",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",

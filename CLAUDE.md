@@ -648,7 +648,7 @@ not a permission gap. `extractShallowBlockKeys()`'s diagnostic (added alongside 
 hypothesis) is still in place as a general-purpose fallback for any FUTURE "no rulebase found"
 case that isn't this same Panorama-managed shape.
 
-#### XML/API transport fallback — BUILT 2026-07-24, response shape NOT YET LIVE-VERIFIED
+#### XML/API transport fallback — BUILT 2026-07-23, response shape NOT YET LIVE-VERIFIED
 
 The gap described immediately above ("Not yet covered") is now built, not open — but flagged
 distinctly from the SSH version above because the RESPONSE SHAPE is doc-derived, not confirmed
@@ -1018,13 +1018,14 @@ adapter gained a write-back/push-to-device capability, and none is planned — s
 "Rule Analysis → Firewall-Analyzer-style Dashboard" plan for the full phased scope.
 
 - `computeRiskScoreFromCounts({critical,high,medium,info})` → weighted (10/5/2/0), **each tier's
-  contribution capped independently BEFORE summing** (critical 40 / high 30 / medium 20 / info 10,
-  summing to exactly 100), banded into `low`/`medium`/`high`/`critical`. `computeRiskScore(findings)`
-  is a convenience wrapper that tallies severity counts from a raw findings array first.
+  contribution capped independently BEFORE summing** (critical 60 / high 30 / medium 20 — info has
+  no cap, since its weight is already 0), banded into `low`/`medium`/`high`/`critical`.
+  `computeRiskScore(findings)` is a convenience wrapper that tallies severity counts from a raw
+  findings array first.
 - Deliberately coarse (a triage signal, not a tuned risk model) — see the file's own comments
   for why the band cut points land where they do (a single critical finding scores `medium`,
-  not `low`; three or more escalates to `high`).
-- **⛔ Bug fixed 2026-07-25, found via a live UI audit + confirmed against the real production
+  not `low`; three escalates to `high`; six or more reaches `critical` on that tier alone).
+- **⛔ Bug fixed 2026-07-23, found via a live UI audit + confirmed against the real production
   fleet: 13 of 14 devices scored "Critical (100)" — useless as a triage signal, since it couldn't
   differentiate anything.** The ORIGINAL formula summed all four weighted counts and clamped the
   TOTAL to 100. 7 of this app's 12 rule-finding types are medium severity
@@ -1034,13 +1035,23 @@ adapter gained a write-back/push-to-device capability, and none is planned — s
   already exceeded 100, so the score stopped measuring severity and started just measuring "does
   this ruleset have any accumulated clutter," true of nearly every real device — a device with 0
   critical/high findings and a big unused-rule backlog scored identically "Critical (100)" as a
-  device with 40 critical findings. Fixed by capping each tier's contribution independently (see
-  above) so medium's high real-world counts can no longer saturate the total on their own — same
-  bands, same 0–100 scale, same documented "1 critical → medium band" edge case, both unchanged
-  (verified). **Verified against the real fleet before shipping, not synthetic data**: distribution
-  went from 13 critical/1 high to 7 critical/4 high(/3 unlisted at the time of scoping), with the
-  split landing exactly on "has a real critical/high finding" vs. "zero critical, just a
-  medium-severity backlog" — the intended differentiation restored.
+  device with 40 critical findings. Fixed by capping each tier's contribution independently so
+  medium's high real-world counts can no longer saturate the total on their own. **Verified against
+  the real fleet before shipping, not synthetic data**: distribution went from 13 critical/1 high to
+  7 critical/7 high, with the split landing exactly on "has a real critical/high finding" vs. "zero
+  critical, just a medium-severity backlog" — the intended differentiation restored.
+- **⛔ Follow-up fix, same day, found by adversarial re-verification, not a second live incident**:
+  the first cut of the caps above used `critical: 40` — still BELOW the `high`→`critical` band
+  boundary (a score must exceed 59 to band as `critical`), so a device dominated purely by critical
+  findings could never score above 40 and was permanently stuck in `high` regardless of how many
+  critical findings it had (50 criticals scored identically to 50 high-severity findings). Raised
+  `critical` to 60 (above the `high` band's own ceiling) so a critical-heavy device (6+ criticals)
+  can reach `critical` on that tier alone, while the low-count edge cases above (1 critical →
+  `medium`, 3 → `high`) are unchanged. Also dropped the `info` cap entirely — `SEVERITY_WEIGHTS.info`
+  is `0`, so a cap on it could never bind regardless of its value; it was dead weight that made the
+  old "caps sum to exactly 100" framing accidental, not intentional. The caps now deliberately sum
+  above 100 (60+30+20=110), so the function's outer `Math.min(100, ...)` clamp is genuinely
+  load-bearing, not the defensive-only backstop the original fix's comment described.
   `device_risk_history` (the per-device Risk tab's trend chart, see below) only stores the final
   `score`/`band` per snapshot, never the underlying counts, so historical rows CANNOT be
   retroactively recomputed under the new formula — expect a one-time visible drop in the trend
@@ -5629,6 +5640,108 @@ personally re-read against its finding, `node --check` on all 4 CommonJS files, 
 and a full re-run of every pre-existing smoke test for the touched engines (`ruleAnalysis.js`'s
 `generalization`/`external_exposure` cases, `configAuditor.js`'s na/pass/fail cases) — all green, no
 regressions.
+
+### ⚠️ Bugs Found and Fixed — full-day orchestrated sweep (2026-07-23, tenth pass)
+
+Requested as "a lot of changes in secvault today... fan agents to bug sweep" — this pass covered work
+that happened OUTSIDE this conversation's own memory (13 commits, v2.21.3 through v2.23.3: live-device
+Palo Alto/Panorama fixes, a Fortinet SSL-VPN monitoring fix, a real NVD CVE version-matching
+under-reporting bug, a new `.ai-codex/` codebase index, a broad UI audit pass, and several dashboard/
+table fixes) layered on top of the ninth pass's own fixes from earlier the same day. Run as a single
+Workflow: 6 parallel finders scoped to the actual commits (not a description of them), every candidate
+adversarially verified (default to REFUTED unless traceable through the real code), confirmed findings
+fixed one file-group per agent, every diff personally re-reviewed against its finding before
+integrating, plus hand-derived math checks and a full rebuild. 15 candidates, 14 confirmed.
+
+- **`lib/adapters/paloalto/ssh.js`** (high) — the SSH transport's Panorama-managed-device fallback
+  (added a few commits earlier the same day) was gated on `containersFound === 0` only, while the
+  parallel XML/API transport's fallback triggers on `rules.length === 0` — despite this file's own
+  comments and CLAUDE.md claiming these were "the identical trigger point." A Panorama-managed device
+  with an explicit-but-EMPTY rulebase container (`containersFound === 1`, zero parsed rules) took the
+  `containersFound === 0` branch's false path, skipped the fallback entirely, logged "genuinely empty,"
+  and returned `[]` without throwing — `collectAndStore()` then silently wiped the device's real stored
+  ruleset, the exact class of bug this fallback was built to prevent in the first place. Fixed by
+  re-gating on `rules.length === 0` (matching the XML/API transport exactly), using `containersFound`
+  only to choose the wording of the eventual throw vs. the "genuinely empty" log.
+- **`lib/adapters/paloalto/sshParser.js`** (low) — `parseEffectiveSecurityPolicy()` returned `[]` (an
+  honest empty result) for a format-recognized-but-zero-rule-blocks capture, even though this file's own
+  documentation states a real device's merged effective policy always includes PAN-OS's two built-in
+  default rules — so zero rules here can only mean a truncated/malformed capture, not a genuinely empty
+  policy. Fixed to return `null` instead, mirroring the XML-transport sibling in `parser.js` exactly;
+  the caller in `ssh.js` already branches on `!== null` to decide whether the fallback succeeded, so this
+  correctly routes a corrupted capture into the existing throw path instead of silently accepting it.
+- **`lib/adapters/paloalto/parser.js`** (medium) — `extractEffectiveAppsAndServices()` tried an
+  `entry['application/service']` combined-key branch FIRST, documented as "the primary, confirmed-live
+  shape." XML element/attribute names cannot contain a `/` character, so a real PAN-OS XML API response
+  can never produce that literal key — the branch was permanently dead code presented as the expected
+  path. Removed it (and its now-unused token-parsing helper), leaving only the separate-fields shape
+  that's actually possible under XML naming rules.
+- **`lib/engines/versionComparator.js`** (2 findings, both high) — two real CVE-matching bugs found
+  while re-verifying the version-matching fix that shipped earlier the same day: (1) Check Point's
+  parser discarded any dotted segment past major.minor whenever no explicit "Take N" text was present,
+  so `nvd.js`'s wildcard-branch-widening fix (`"81.20.*"` → `{min:"81.20.0", max:"81.20.999"}`) collapsed
+  to the identical tuple for both bounds, silently defeating the widening for this one vendor — fixed by
+  falling back to the parsed 3rd segment as the take number when no explicit "Take N" text exists. (2)
+  The Forcepoint/shared base parser's own trailing-dot noise fix over-filtered: it stripped EVERY empty
+  split segment anywhere in the string, not just a trailing one, so an embedded double-dot (`"6..21"`)
+  shifted every later real segment one position left — directly contradicting that fix's own "changes NO
+  comparison outcome" claim. Fixed to only strip a trailing run of empty segments, leaving an embedded
+  one to zero-pad in its original position exactly as before that noise fix existed.
+- **`lib/feeds/paloalto.js`** (medium) — `backfillPaloAltoVersionRanges()` (the retroactive cleanup for
+  the NVD wildcard-CPE bug) only reprocessed `vendor='paloalto'` rows shaped like a CVE Record
+  (`raw_data.containers.cna` present) — the shape produced by the PSIRT feed and the CIRCL fallback. It
+  silently skipped rows sourced from `nvd.js`'s own NATIVE CPE-matching path (`raw_data.configurations`,
+  no `containers` key), which is exactly the shape the wildcard-CPE bug actually lives in. Fixed by
+  duplicating `nvd.js`'s own (already-fixed) extraction functions, scoped to Palo Alto's CPE prefix, and
+  branching the backfill on each row's actual shape — explicitly flagged as still NOT covering the other
+  five `VENDOR_CPES` vendors' own native-NVD-shaped rows (out of scope for a Palo-Alto-specific file) or
+  refreshing already-computed `device_cve_assessments` rows (only the next natural sync/re-match does).
+- **`lib/engines/riskScore.js`** (high) — the risk-score saturation fix that shipped earlier the same
+  day had its own bug: `TIER_CAPS.critical` was set to 40, still below the `high`→`critical` band
+  boundary (59), so a device dominated purely by critical findings could never reach the `critical` band
+  no matter how many it had — permanently indistinguishable from a device with the same count of
+  high-severity findings instead. Fixed by raising the cap to 60 (verified by hand: 1 critical → `medium`,
+  3 → `high`, 6+ → `critical`, all matching the documented edge cases) and removing the dead `info` cap
+  (weight 0, so a cap on it could never bind — see the Rule Analysis Dashboard section above for the
+  full before/after).
+- **RBAC gap, found twice** — `app/(dashboard)/devices/[id]/page.js`'s Delete-confirmation Modal being
+  reachable by a non-admin via direct link was already fixed in the ninth pass; this pass found the
+  IDENTICAL gap on the sibling fleet-wide list, `app/(dashboard)/devices/page.js` — its own
+  Delete-confirmation Modal had no `canWrite` gate either. Fixed the same way (`{canWrite && <Modal
+  ...>}`), matching the per-device page's already-fixed pattern.
+- **`components/devices/ZoneClassificationPanel.js`** (medium) — `ZoneRoleSelect`'s save handler never
+  called `router.refresh()` after a successful PUT, unlike the `AcknowledgeControl.js` pattern it was
+  built to mirror — a re-mounted panel (e.g. switching tabs and back) could show a stale, already-reverted
+  zone role. Fixed by adding the missing `router.refresh()` call.
+- **`app/(dashboard)/page.js`** (low) — the Dashboard's "Scheduled" StatCard was left with a hardcoded
+  `color="var(--yellow)"` while its sibling "Patch Now" tile two rows above it, in the same UI-audit
+  commit, was converted to conditional zero-count coloring. Fixed to match.
+- **Two `actionBorderColor()` copies, one fixed twice** — `app/(dashboard)/devices/[id]/rules/page.js`'s
+  helper was missing `'block'` from its deny-family check (inconsistent with `DENY_ACTIONS` everywhere
+  else in this codebase); the sub-agent fix only touched that one copy — the identical duplicated helper
+  on `app/(dashboard)/devices/[id]/page.js` (line 91) had the exact same gap and was found and fixed
+  separately during integration review, since the original finding explicitly named both locations but
+  the fix agent was scoped to only one file.
+- **Missing version bump** — commit `c05811a` (the RowActionsMenu dropdown-clipping fix) shipped with no
+  `package.json` bump and no `releaseNotes` entry, violating this file's own Versioning Policy. The
+  sub-agent assigned to `RowActionsMenu.js` correctly identified this but had no scope to fix
+  `package.json`/`update-status/route.js` — retroactively documented as a bullet under the `2.23.1`
+  entry (the next version that actually shipped) during integration review, rather than cutting a new
+  version number after the fact.
+- **Future-dated comments/docs** — several comments and `.ai-codex/*.md` entries from the same day's
+  commits self-dated to `2026-07-24`/`2026-07-25`, one to two days ahead of the actual commit timestamps
+  and the stated current date (`2026-07-23`, confirmed via `git log --pretty=%ad`). Corrected across
+  `CLAUDE.md` and all of `.ai-codex/*.md` during integration review — the sub-agent fix only corrected
+  `riskScore.js`'s own comment, not the wider spread the finding actually named. `.ai-codex/lib.md`'s
+  `TIER_CAPS`/`computeRiskScoreFromCounts` entries were also found to be substantively stale (still
+  showing the pre-fix `{critical:40,...,info:10}` values) while fixing the dates, and corrected to match
+  the real current code — a reminder that this new codebase index needs to be kept in step with future
+  fixes the same way CLAUDE.md already is, not a one-time snapshot.
+
+All fixes verified independently before integrating: every diff personally re-read against its finding,
+`node --check` on all 6 touched CommonJS files, a full `npm run build`, and hand-derived risk-score
+math executed directly against the real function (1/3/6/50 critical findings, 551 medium findings,
+zero findings) confirming every documented edge case actually holds in the shipped code.
 
 ---
 

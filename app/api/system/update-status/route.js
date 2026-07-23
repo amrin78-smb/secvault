@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.23.4': [
+    'Fixed a real bug in today\'s Panorama-managed-firewall fix: a device whose local config has an empty (but present) rulebase section was still skipping the fallback that reads the actual merged policy, silently wiping its stored rules instead. Devices affected by this would have shown 0 rules after a Collect Now since the last update — a re-collect after this update will restore them.',
+    'Fixed two real CVE-matching gaps found while double-checking today\'s NVD version-matching fix: a Check Point-specific bug that silently undid the fix for that vendor, and a separate case (an unusual version string with two dots in a row) that could have flipped a comparison result for any vendor.',
+    'Fixed: the Rule Health risk score fix from earlier today still couldn\'t reach "Critical" for a device with only critical-severity findings, no matter how many it had — it was capped just below that band. A device with 6 or more critical findings will now correctly show "Critical".',
+    'Fixed the same "Delete" dialog visibility gap from earlier today on the fleet-wide Devices list too (the per-device page was already fixed) — a non-admin could reach a working-looking delete confirmation via a direct link.',
+    'Fixed: the Zone Classification panel on a device\'s Manage tab could show a stale role after switching away and back to that tab.',
+    'A few smaller consistency fixes: a rule action type ("block") wasn\'t always colored the same as other denied actions across two different pages; one dashboard tile wasn\'t following the same "gray when zero" styling as its neighbors; and a version-bump bookkeeping gap from earlier today\'s row-actions-menu fix is now recorded properly.',
+  ],
   '2.23.3': [
     'Fixed a visual bug on the device Rules table where the "Schedule" and "Log" column headers overlapped into unreadable merged text ("SCHEDULLOG") and the "Hits" header ran off the edge — those columns were far too narrow for their labels. Widened them and fixed the underlying issue so no table header in the app can overlap into its neighbor like this again.',
   ],
@@ -16,6 +24,7 @@ const releaseNotes = {
   '2.23.1': [
     'Fixed the Rule Health risk score showing "Critical (100)" for almost every device (13 of 14 on the real fleet) — it wasn\'t actually measuring severity, just whether a device had accumulated enough routine "unused rule" findings over time (which is nearly all of them). The score now weighs critical/high/medium findings independently instead of letting a large pile of low-stakes medium findings alone max out the number. Devices with genuinely dangerous findings (critical/any-any rules) now score higher than devices that just have a big backlog of housekeeping items.',
     'One side effect: the Risk Trend chart on a device\'s Risk tab will show a one-time drop the next time analysis runs, since old trend points were recorded under the old (inflated) scoring and can\'t be recalculated after the fact — this is expected, not a data loss.',
+    'Also included (shipped without its own version bump at the time): fixed the "⋮" row-actions menu on the Devices list rendering invisible/cut off on rows near the bottom of the table, clipped by the table\'s own scroll container.',
   ],
   '2.23.0': [
     'Visual polish pass across the whole app, based on a full UI audit: device names, CVE IDs, and rule/check names in tables no longer render in the same alarm-red used for actual critical findings — that color is now reserved for real severity signals. "Patch Now"/critical-count tiles that were showing red even at zero (misleadingly, since zero is the good outcome) now go neutral gray until the count is actually non-zero.',

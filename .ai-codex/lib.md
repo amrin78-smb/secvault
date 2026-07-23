@@ -151,10 +151,10 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 ## lib/engines/riskScore.js
 
 `computeRiskScore(findings)` -> `{score: number, band: 'low'|'medium'|'high'|'critical', raw: number}` — tallies severity counts from a raw findings array then scores.
-`computeRiskScoreFromCounts(counts)` -> `{score, band, raw}` — weighted (critical:10/high:5/medium:2/info:0), **each tier's contribution capped independently BEFORE summing** (critical 40/high 30/medium 20/info 10, sums to 100) — fixed 2026-07-25, see CLAUDE.md's Rule Analysis Dashboard section for why the old "clamp the total" formula saturated at 100 for 13/14 of a real fleet. `raw` is the true UNCAPPED sum, diagnostic only, no current caller reads it.
-`computeRuleRiskBand(ruleFindings, enabled)` -> `'low'|'medium'|'high'|'critical'|'attention'` — per-rule risk band = worst severity among the rule's own findings; `'attention'` for an enabled rule with zero findings, `'low'` for a disabled one. Untouched by the 2026-07-25 fix (different function, per-rule not per-device).
+`computeRiskScoreFromCounts(counts)` -> `{score, band, raw}` — weighted (critical:10/high:5/medium:2/info:0), **each tier's contribution capped independently BEFORE summing** (critical 60/high 30/medium 20, info uncapped since its weight is already 0 — caps deliberately sum above 100, so the outer `Math.min(100,...)` clamp is load-bearing) — fixed 2026-07-23, see CLAUDE.md's Rule Analysis Dashboard section for why the old "clamp the total" formula saturated at 100 for 13/14 of a real fleet, and for the same-day follow-up that raised the critical cap from an initial 40 (still below the high/critical band boundary) to 60. `raw` is the true UNCAPPED sum, diagnostic only, no current caller reads it.
+`computeRuleRiskBand(ruleFindings, enabled)` -> `'low'|'medium'|'high'|'critical'|'attention'` — per-rule risk band = worst severity among the rule's own findings; `'attention'` for an enabled rule with zero findings, `'low'` for a disabled one. Untouched by the 2026-07-23 fix (different function, per-rule not per-device).
 `SEVERITY_WEIGHTS` -> `object` — `{critical:10, high:5, medium:2, info:0}`.
-`TIER_CAPS` -> `object` — `{critical:40, high:30, medium:20, info:10}` (2026-07-25).
+`TIER_CAPS` -> `object` — `{critical:60, high:30, medium:20}` (no `info` key — its weight is 0, so a cap could never bind; 2026-07-23).
 `MAX_SCORE` -> `number` — `100`.
 
 ## lib/engines/ruleReorder.js
@@ -385,7 +385,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `getSecurityRulesAnyVsys(conn)` -> `Promise<object>` — config-get, predicate-free xpath across all device/vsys entries.
 `showRunningConfig(conn)` -> `Promise<{raw, result}>` — op `show config running`, 120s timeout.
 `getRuleHitCount(conn, vsysName)` -> `Promise<object>` — op `show rule-hit-count vsys <name> ...`.
-`getEffectiveSecurityPolicy(conn)` -> `Promise<{raw, result}>` — op `show running security-policy`, the Panorama-managed-device merged-policy fallback (2026-07-24). Request construction proven (same CLI-to-XML convention as every other op command here); response SHAPE is doc-derived, not yet live-verified — see `parser.parseEffectiveSecurityPolicy()`.
+`getEffectiveSecurityPolicy(conn)` -> `Promise<{raw, result}>` — op `show running security-policy`, the Panorama-managed-device merged-policy fallback (2026-07-23). Request construction proven (same CLI-to-XML convention as every other op command here); response SHAPE is doc-derived, not yet live-verified — see `parser.parseEffectiveSecurityPolicy()`.
 `DEFAULT_VSYS` (const string) — `'vsys1'`.
 `SECURITY_RULES_XPATH` (const string) — default-vsys rulebase xpath.
 `SECURITY_RULES_XPATH_ANY_VSYS` (const string) — predicate-free fallback xpath.
@@ -399,7 +399,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `parseRules(rulesResult)` -> `NormalizedRule[]` — parses default-vsys rulebase `<entry>` list.
 `parseRulesDeep(rulesResult)` -> `NormalizedRule[]` — shape-agnostic deep walk for the any-vsys fallback, collects every `security.rules` container.
 `parseRuleHitCount(hitCountResult)` -> `{[ruleName]: hitCount}` — shape-agnostic deep walk for `show rule-hit-count` response.
-`parseEffectiveSecurityPolicy(result)` -> `NormalizedRule[]|null` — Panorama-managed-device merged-policy fallback (2026-07-24), XML/API transport. Deep-walks for any `@_name`+`action`-bearing entry (shape-agnostic by design, mirroring `parseRulesDeep`'s approach); tolerant of both the SSH-transport's confirmed-live combined `"application/service"` field and a separate application/service fallback shape. Returns `null` (not `[]`) when nothing rule-like is found — caller (`index.js`) treats `null` as "fallback not usable." DOC-DERIVED, NOT YET LIVE-VERIFIED — see CLAUDE.md's "Palo Alto SSH — RESOLVED" section, "XML/API transport fallback" subsection.
+`parseEffectiveSecurityPolicy(result)` -> `NormalizedRule[]|null` — Panorama-managed-device merged-policy fallback (2026-07-23), XML/API transport. Deep-walks for any `@_name`+`action`-bearing entry (shape-agnostic by design, mirroring `parseRulesDeep`'s approach); tolerant of both the SSH-transport's confirmed-live combined `"application/service"` field and a separate application/service fallback shape. Returns `null` (not `[]`) when nothing rule-like is found — caller (`index.js`) treats `null` as "fallback not usable." DOC-DERIVED, NOT YET LIVE-VERIFIED — see CLAUDE.md's "Palo Alto SSH — RESOLVED" section, "XML/API transport fallback" subsection.
 `parseConfig(configResult, systemInfoResult)` -> `object` — builds getConfig()'s parsed tree, merges `system_info`.
 `redactConfigXml(text)` -> `string` — regex-redacts `<tag>value</tag>` and `tag="value"` for SECRET_TAGS in raw XML, runs BEFORE parseConfig(). [SENSITIVE]
 `redactConfigTree(node)` -> `any` — recursive secret-key redaction of the parsed object tree. [SENSITIVE]

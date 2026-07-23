@@ -9,7 +9,7 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   keystroke, loses input focus. Verified clean as of 2026-07-23 (see components.md's Violations
   section) — re-check this every time you add a new component.
 - **`var(--primary)`/`var(--red)` is NOT the default link color for identity/navigation links**
-  (device names, CVE IDs, rule names) — as of the 2026-07-24 UI audit, use `className="link-quiet"`
+  (device names, CVE IDs, rule names) — as of the 2026-07-23 UI audit, use `className="link-quiet"`
   (globals.css) instead: plain `--text-primary` at rest, `--primary` + underline only on hover.
   Red/primary as a resting link color dilutes red's meaning as a genuine severity signal elsewhere
   on the same page — reserve it for real danger/critical states, brand buttons, and the active-nav
@@ -23,7 +23,7 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   hover color still works, but the resting color silently stays whatever the inline style said,
   which is very easy to miss when applying `.link-quiet` to an element that has its own inline
   `color`/`linkCellStyle`-style spread — check for and remove any inline resting-color override,
-  don't just add the className alongside it. (Confirmed live during the 2026-07-24 audit fix in
+  don't just add the className alongside it. (Confirmed live during the 2026-07-23 audit fix in
   `components/cve/CVETable.js`.)
 - A count that CAN legitimately be zero and represents "how many bad things exist" (Patch Now,
   Critical findings, etc.) should render zero in `var(--text-muted)`, not the severity color — the
@@ -121,7 +121,7 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   security policy in that case, on BOTH transports. Known permanent gaps in that fallback: no
   disabled-rule visibility, no real logging state, no hit counts, no NAT. **The SSH transport's
   version is live-verified (33/33 rules confirmed); the XML/API transport's version (added
-  2026-07-24) is NOT yet live-verified** — its request construction is proven, but the response
+  2026-07-23) is NOT yet live-verified** — its request construction is proven, but the response
   shape is doc-derived. Don't assume the API-transport fallback is trustworthy until checked
   against a real device's `[PaloAlto Debug] effective security-policy raw response` log line.
 - Sangfor has no live device, no documentation trail — every field mapping is doc-derived and
@@ -195,7 +195,7 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - `riskScore.js`'s `computeRiskScoreFromCounts()` caps each severity tier's contribution
   INDEPENDENTLY before summing (critical 40/high 30/medium 20/info 10) — do NOT revert this to a
   single "sum everything then clamp the total to 100" formula. That was the actual shipped
-  behavior until 2026-07-25 and it saturated at "Critical (100)" for 13 of 14 real fleet devices,
+  behavior until 2026-07-23 and it saturated at "Critical (100)" for 13 of 14 real fleet devices,
   because medium-severity findings (7 of 12 finding types, `unused` especially) commonly run into
   the hundreds and `2 * medium` alone exceeds 100 long before critical/high are even considered.
   If you ever need to add a new severity tier or change a weight, cap it independently too.

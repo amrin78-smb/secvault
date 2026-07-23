@@ -90,7 +90,7 @@ export default async function DashboardPage() {
         <StatCard
           label="Scheduled"
           value={summary.scheduled_count}
-          color="var(--yellow)"
+          color={summary.scheduled_count > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
           compact
           icon={IconClock}
           iconColor="#fbbf24"

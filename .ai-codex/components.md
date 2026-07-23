@@ -22,7 +22,7 @@ Table  children, className — bordered table wrapper, enforces tableLayout:'fix
 IconChip  icon, color, bg — small colored icon badge
 (c) Modal  open, onClose, title, children — focus-trapped dialog overlay
 StatCard  label, value, sub, color, className, compact, icon, iconColor, iconBg — colored-border stat tile
-(c) RowActionsMenu  actions[] — "⋮" overflow menu for table-row actions (2026-07-24 UI audit; replaces stacked underlined text links). actions: {type:'link'|'button', label, href|onClick, disabled?, pending?, pendingLabel?, danger?}. Does NOT auto-close on a pending button click (needs somewhere to show "Collecting…"/etc.) — only closes on outside-click or a link navigation.
+(c) RowActionsMenu  actions[] — "⋮" overflow menu for table-row actions (2026-07-23 UI audit; replaces stacked underlined text links). actions: {type:'link'|'button', label, href|onClick, disabled?, pending?, pendingLabel?, danger?}. Does NOT auto-close on a pending button click (needs somewhere to show "Collecting…"/etc.) — only closes on outside-click or a link navigation.
 
 ## layout/
 
@@ -37,7 +37,7 @@ Header (async server)  session — top navy header bar: logo, search, sync pill,
 ## devices/
 
 (c) DeviceActions  deviceId — Collect Now / Test Connectivity buttons with pending state
-(c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-24, was 4 separate stacked links)
+(c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-23, was 4 separate stacked links)
 (c) DeviceForm  onSubmit — Add Device form (vendor/method/credentials/saved-profile picker)
 (c) CredentialForm  deviceId, vendor="forcepoint", mgmtMethod=null — rotate an existing device's credential
 vendorMeta.js — no component; pure data/logic module (VENDOR_META table + credential-shape helpers)

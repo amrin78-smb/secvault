@@ -27,6 +27,15 @@ import { IconMoreVertical } from '../icons';
 // getBoundingClientRect() -- `fixed` positioning escapes every ancestor's
 // `overflow`, so this is now safe to use inside ANY scrollable container,
 // not just this one table.
+//
+// ⛔ Found in the 2026-07-23 bug sweep: the commit that shipped this fix
+// (c05811a) carried no package.json version bump and no matching entry in
+// `releaseNotes` (app/api/system/update-status/route.js), violating this
+// repo's own Versioning Policy ("bump patch on any push that touches UI or
+// logic... update releaseNotes alongside every version bump"). Retroactively
+// documented as a bullet under the 2.23.1 release notes entry (the next
+// version that actually shipped after this fix) rather than cutting a new
+// version number after the fact.
 export default function RowActionsMenu({ actions }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null); // { top, right } in viewport px

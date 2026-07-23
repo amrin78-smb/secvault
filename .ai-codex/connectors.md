@@ -297,7 +297,7 @@ Neither implements `getVpnSessionSummary`.
    finds ≥1, this fallback is never attempted, even if that container turns out empty (that's an
    honest `[]`, not a failure). **This SSH-transport version IS live-verified** (33/33 rules
    confirmed against a real captured device output).
-   — **XML/API transport equivalent added 2026-07-24, NOT YET LIVE-VERIFIED.**
+   — **XML/API transport equivalent added 2026-07-23, NOT YET LIVE-VERIFIED.**
    `index.js:getRules()` tries `api.getEffectiveSecurityPolicy()` (`type=op&cmd=<show><running>
    <security-policy/></running></show>`, same proven CLI-to-XML translation convention as every
    other op command in `api.js`) at the identical trigger point — after BOTH the default-vsys AND

@@ -15,7 +15,7 @@ const SORT_OPTIONS = {
 
 function actionBorderColor(action) {
   if (action === 'allow') return 'var(--green)';
-  if (action === 'deny' || action === 'drop' || action === 'reject') return 'var(--red)';
+  if (action === 'deny' || action === 'drop' || action === 'reject' || action === 'block') return 'var(--red)';
   return 'var(--border)';
 }
 
