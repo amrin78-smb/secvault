@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.6': [
+    'Fixed: on a device\'s Manage tab, the Zone Classification list could keep showing "No zone data yet" even right after a successful "Collect Now" that pulled real rules for the first time (e.g. the Panorama-managed-rules fix in the previous update). The zone list only ever loaded once, when the tab first opened, and never refreshed itself afterward — a full page reload was the only way to see it update. It now refreshes automatically whenever a collection completes.',
+  ],
   '2.21.5': [
     'Fixed: SSL-VPN active-session monitoring for FortiGate devices was silently failing on every poll, for every FortiGate with SSL-VPN, since this feature launched — found by reviewing engine.log after a user asked "did you see any other weird things or errors?" The device\'s real output uses "SSL-VPN" (with a hyphen); the code was only looking for "SSL VPN" (a space), so it never matched.',
     'This didn\'t affect firewall collection or CVE data at all — only the SSL-VPN session-count trend chart on the VPN Summary page, which was blank/stuck for every affected device until now.',

@@ -1,12 +1,27 @@
 'use client';
 
 // Per-device Zone Classification panel — lives on the device's own Manage
-// tab (devices/[id]/page.js, tab === 'manage'). Self-fetches
-// GET /api/devices/[id]/zone-classifications on mount, then auto-saves each
-// zone's role via PUT on <select> change (optimistic update, reverts on
-// error) — same pattern as components/analysis/AcknowledgeControl.js, just
-// without router.refresh() (this data isn't rendered anywhere else on this
-// page, so there's nothing else to re-sync).
+// tab (devices/[id]/page.js, tab === 'manage'). Seeded from the `initialZones`
+// prop — devices/[id]/page.js (a server component) fetches getDeviceZones()
+// itself and passes the result down, same pattern as SnmpConfigForm's own
+// `initial` prop. Auto-saves each zone's role via PUT on <select> change
+// (optimistic update, reverts on error) — same pattern as
+// components/analysis/AcknowledgeControl.js.
+//
+// ⛔ Bug fixed 2026-07-23, reported directly by a user: this used to
+// self-fetch GET /api/devices/[id]/zone-classifications ONCE on mount and
+// never again — the header comment at the time reasoned "this data isn't
+// rendered anywhere else on this page, so there's nothing else to re-sync",
+// which missed the actual real trigger: clicking "Collect Now" on this same
+// tab for a device's FIRST successful rule collection is exactly when a
+// zone list first has anything to show. DeviceActions' router.refresh()
+// re-renders devices/[id]/page.js with fresh data, but a client component's
+// own useEffect(fetchOnMount, [deviceId]) doesn't re-run just because its
+// parent re-rendered — deviceId never changes, so the stale empty "No zone
+// data yet" state from before the collect silently persisted until a full
+// page reload. Fixed by taking the zone list as a prop instead (which DOES
+// flow through on every re-render) and resyncing local state whenever it
+// changes, mirroring the existing per-row resync pattern below.
 //
 // This is a per-device rebuild of a feature that originally shipped as a
 // single fleet-wide Settings > Zones list — reported directly as unusable,
@@ -93,50 +108,22 @@ function ZoneRoleSelect({ deviceId, zoneName, role }) {
   );
 }
 
-export default function ZoneClassificationPanel({ deviceId }) {
-  const [zones, setZones] = useState(null); // null = loading, [] = loaded empty
-  const [loadError, setLoadError] = useState(false); // true = fetch() itself failed (network), distinct from a genuinely empty list
+export default function ZoneClassificationPanel({ deviceId, initialZones }) {
+  const [zones, setZones] = useState(initialZones || []);
 
-  async function loadZones() {
-    setLoadError(false);
-    try {
-      const res = await fetch(`/api/devices/${deviceId}/zone-classifications`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to load zones');
-      }
-      setZones(data.zones || []);
-    } catch (err) {
-      setLoadError(true);
-    }
-  }
-
+  // Resync whenever the server-fetched prop changes — i.e. after every
+  // router.refresh() (a fresh Collect Now, most importantly). getDeviceZones()
+  // itself already fails soft (returns [] on any DB error, never throws — see
+  // its own header comment), so there's no separate error state to track here
+  // the way the old client-fetch version needed one.
   useEffect(() => {
-    loadZones();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId]);
+    setZones(initialZones || []);
+  }, [initialZones]);
 
   const introText =
     'Tag each zone below as Internal, External, or DMZ. This powers the External Exposure rule finding, the ' +
     'External-to-Internal compliance check, and highlighting on the Reachability tab. SecVault never guesses a ' +
     "zone's role from its name — only what you tell it here.";
-
-  if (loadError) {
-    return (
-      <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
-        Failed to load zones.{' '}
-        <button type="button" onClick={loadZones} className="btn btn-secondary" style={{ marginLeft: 8 }}>
-          Retry
-        </button>
-      </p>
-    );
-  }
-
-  if (zones === null) {
-    return (
-      <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>Loading zones…</p>
-    );
-  }
 
   return (
     <div>

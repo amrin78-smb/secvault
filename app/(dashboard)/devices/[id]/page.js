@@ -24,6 +24,7 @@ import OverviewConfigChangesCard from '../../../../components/devices/OverviewCo
 import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
 import SnmpTrendMini from '../../../../components/snmp/SnmpTrendMini';
 import ZoneClassificationPanel from '../../../../components/devices/ZoneClassificationPanel';
+import { getDeviceZones } from '../../../../lib/engines/zoneClassification';
 
 export const dynamic = 'force-dynamic';
 
@@ -260,21 +261,35 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
-  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory] = await Promise.all([
-    getLatestVersion(pool, device.id),
-    tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
-    tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
-    // Fetched UNCONDITIONALLY now, not just for tab === 'admins' — the new
-    // SNMP-detection widget below (always visible, not tab-gated) also
-    // needs the latest config_parsed. Same row, two consumers.
-    getLatestConfigParsed(pool, device.id),
-    getLatestSnmpSnapshot(pool, device.id),
-    hasSnmpCredential(pool, device.id),
-    // Only needed for the Overview tab's trend charts -- skip the query
-    // entirely on every other tab, same conditional-fetch convention as
-    // cveRows/rules above.
-    tab === 'overview' ? getRecentSnmpHistory(pool, device.id) : Promise.resolve([]),
-  ]);
+  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
+    await Promise.all([
+      getLatestVersion(pool, device.id),
+      tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
+      tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
+      // Fetched UNCONDITIONALLY now, not just for tab === 'admins' — the new
+      // SNMP-detection widget below (always visible, not tab-gated) also
+      // needs the latest config_parsed. Same row, two consumers.
+      getLatestConfigParsed(pool, device.id),
+      getLatestSnmpSnapshot(pool, device.id),
+      hasSnmpCredential(pool, device.id),
+      // Only needed for the Overview tab's trend charts -- skip the query
+      // entirely on every other tab, same conditional-fetch convention as
+      // cveRows/rules above.
+      tab === 'overview' ? getRecentSnmpHistory(pool, device.id) : Promise.resolve([]),
+      // ⛔ Bug fixed 2026-07-23, reported directly by a user right after the
+      // Panorama-managed-rules fix landed: ZoneClassificationPanel used to be
+      // purely client-fetch-on-mount (see its own now-corrected header
+      // comment), so clicking "Collect Now" on the Manage tab and getting a
+      // device's first-ever real ruleset never updated the already-mounted
+      // panel's zone list — DeviceActions' router.refresh() re-renders this
+      // SERVER component with fresh data, but a client component's own
+      // useEffect(..., [deviceId]) doesn't re-run just because its parent
+      // re-rendered. Fetching it here and passing it down as a prop means a
+      // fresh Collect Now naturally flows the new zone list through on the
+      // very next render, the same way SnmpConfigForm's `initial` prop
+      // already works.
+      tab === 'manage' && canWrite ? getDeviceZones(device.id, pool) : Promise.resolve([]),
+    ]);
 
   // "Does this device's already-collected config show SNMP enabled?" —
   // presence/status only, never the community string (either never
@@ -652,7 +667,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             <h2 style={{ marginBottom: 8, fontSize: 'var(--text-base)', fontWeight: 500, color: 'var(--text-primary)' }}>
               Zone Classification
             </h2>
-            <ZoneClassificationPanel deviceId={device.id} />
+            <ZoneClassificationPanel deviceId={device.id} initialZones={deviceZones} />
           </div>
         </div>
       )}
