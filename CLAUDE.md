@@ -5,6 +5,40 @@
 
 ---
 
+## Codebase Index — READ FIRST
+
+Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
+- `.ai-codex/routes.md`         — API routes
+- `.ai-codex/pages.md`          — page tree
+- `.ai-codex/lib.md`            — library exports
+- `.ai-codex/schema.md`         — schema + debt + privilege notes
+- `.ai-codex/connectors.md`     — vendor integrations and their quirks
+- `.ai-codex/cve-pipeline.md`   — CVE source -> assessment flow
+- `.ai-codex/components.md`     — component index
+- `.ai-codex/gotchas.md`        — footguns and redaction rules
+
+### Maintaining the index — MANDATORY
+
+A stale index is worse than none: it sends sessions confidently to the wrong place.
+On a security product it can also send them to the wrong redaction assumption.
+
+Any commit that changes the shape of the codebase MUST update the matching index
+file in the SAME commit:
+- Route added / removed / renamed, method or auth changed   -> routes.md
+- Page added / removed, client<->server flipped            -> pages.md
+- lib export added / removed / signature changed           -> lib.md
+- schema.sql or any migration touched                      -> schema.md
+- Vendor connector added, or its auth / parsing / quirks
+  changed in any way                                       -> connectors.md
+- CVE source, matching logic, or clearing logic changed     -> cve-pipeline.md
+- Component added / removed, props changed                 -> components.md
+- New footgun or new field needing redaction discovered    -> gotchas.md
+
+This runs at the same point as the version bump. If you are bumping the version,
+check the index. Do not defer it.
+
+---
+
 ## What SecVault Is
 
 Standalone on-premises **firewall security and management platform**.
