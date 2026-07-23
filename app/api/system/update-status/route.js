@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.5': [
+    'Fixed: SSL-VPN active-session monitoring for FortiGate devices was silently failing on every poll, for every FortiGate with SSL-VPN, since this feature launched — found by reviewing engine.log after a user asked "did you see any other weird things or errors?" The device\'s real output uses "SSL-VPN" (with a hyphen); the code was only looking for "SSL VPN" (a space), so it never matched.',
+    'This didn\'t affect firewall collection or CVE data at all — only the SSL-VPN session-count trend chart on the VPN Summary page, which was blank/stuck for every affected device until now.',
+  ],
   '2.21.4': [
     'Fixed: Palo Alto firewalls fully managed by Panorama (every security rule pushed centrally, none stored locally) were collecting 0 rules over SSH. SecVault now automatically falls back to PAN-OS\'s effective/merged policy view when the normal config read finds no rulebase — verified against a real device\'s actual output before shipping.',
     'This fallback has a few honest gaps: it can\'t tell if a rule is disabled (a disabled rule isn\'t part of the enforced policy, so it\'s simply not visible this way), logging state, or hit counts. Real rules with real rule content beat no rules at all, but be aware "unused"/"logging disabled" findings won\'t fire for a device collected this way.',
