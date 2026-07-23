@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.21.7': [
+    'Fixed a real CVE-matching gap for Palo Alto (and any other vendor whose CVE data comes through NVD): when NVD\'s own vulnerability data named a whole version branch with a wildcard (e.g. "10.0.*") instead of an exact version, SecVault was mis-parsing that into a single point release instead of the whole branch — meaning a device running any OTHER build within that same branch (e.g. 10.0.5, not exactly 10.0.0) could silently be treated as not vulnerable when it actually was. Found while investigating log warnings, not reported by a user — now correctly treated as the whole named branch.',
+    'Cleaned up harmless log noise from a couple of old, already-fixed data quality issues (a stray trailing "." in some stored version numbers, and a handful of pre-2026-07-17 Palo Alto advisory rows that still had unparseable placeholder text in their version data) — no effect on CVE accuracy, just quieter logs.',
+  ],
   '2.21.6': [
     'Fixed: on a device\'s Manage tab, the Zone Classification list could keep showing "No zone data yet" even right after a successful "Collect Now" that pulled real rules for the first time (e.g. the Panorama-managed-rules fix in the previous update). The zone list only ever loaded once, when the tab first opened, and never refreshed itself afterward — a full page reload was the only way to see it update. It now refreshes automatically whenever a collection completes.',
   ],

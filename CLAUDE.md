@@ -5254,6 +5254,42 @@ customer deployment.
 - **CPE strings are approximate.** The exact vendor/product strings in NVD CPE dictionary may differ from what is documented. Verify via: `https://services.nvd.nist.gov/rest/json/cpes/2.0?keywordSearch=forcepoint`
 - **Forcepoint rebrand coverage**: Some NVD entries for FlexEdge versions may still reference the NGFW CPE string (vendors are inconsistent about updating CVE records after rebrand). Query both strings always.
 - **Version ranges in NVD**: `versionEndIncluding` means the vulnerability affects UP TO AND INCLUDING that version. `versionEndExcluding` means UP TO BUT NOT INCLUDING. Get this backwards and you'll mark patched devices as vulnerable.
+- **⛔ A CPE `criteria` version field can itself carry a wildcard (e.g. `"10.0.*"`), not just the
+  whole-field sentinels `'*'`/`'-'`.** Found 2026-07-23 while investigating repeat
+  `[versionComparator] Unparseable version segment` log spam: `lib/feeds/nvd.js`'s native NVD API 2.0
+  extraction (`extractVersionFromCriteria`, used by `extractAffectedRanges` as the `vulnerable:
+  true`-with-no-range-fields fallback — "this exact CPE version is affected") used to reject only the
+  exact sentinels, so a partially-wildcarded segment like `"10.0.*"` was returned as if it were one
+  specific pinned version — flowing into a range as `min: max: "10.0.*"` with no cleaning step (unlike
+  the CVE-Record-Format extraction path in this same file and in `lib/feeds/paloalto.js`, which already
+  ran `cleanVersionString`/`looksLikeVersion`). At match time the trailing `*` segment failed to parse
+  in `versionComparator.js` and silently defaulted to 0, collapsing the "range" to the single point
+  `[10,0,0]` for BOTH bounds — a real device on any OTHER build in that branch (e.g. 10.0.5) then
+  compared as outside the range and was silently **not flagged**, a genuine under-reporting bug, not
+  just log noise. Fixed: `extractVersionFromCriteria` now rejects any version segment containing `*`;
+  a new `branchRangeFromWildcardCriteria` expands a wildcarded segment into a real `{min: "10.0.0", max:
+  "10.0.999"}` branch range instead — the same conservative "whole named branch, still bounded, never
+  unbounded" interpretation this codebase already uses in `boundBranchEnd()`
+  (`lib/feeds/paloalto.js`) and Fortinet's "X.Y all versions" convention, rather than silently dropping
+  the entry (this file's `isInRange` tri-state philosophy: widening an uncertain bound is the safe
+  direction, narrowing or discarding it is not). Verified against a synthetic reproduction of the real
+  observed shape before shipping — a device on 10.0.5 now correctly matches, a device on 10.1.0 correctly
+  does not.
+- **A code fix to version-range extraction does not retroactively repair a value already persisted in
+  the DB** — same lesson as every other retroactive-cleanup migration in this file. A handful of
+  pre-2026-07-17 Palo Alto advisory rows (informational bulletins like PAN-SA-2023-0004, which describe
+  CONFIGURATION SCENARIOS in their `versions[].version` field rather than firmware versions — e.g. "with
+  GlobalProtect app on Windows, macOS, and Linux LocalNet: Configurations allowing local network access,
+  ServerIP: Gateways with address set as an FQDN") were still spamming the same warning in production
+  logs on 2026-07-23, months after `looksLikeVersion()` was added to reject exactly this shape on any
+  fresh sync — almost certainly because these are old bulletins Palo Alto's live PSIRT bulk endpoint no
+  longer returns, so `upsertAdvisory()` never gets a chance to naturally overwrite them.
+  `backfillPaloAltoVersionRanges()` (`lib/feeds/paloalto.js`, wired into `lib/migrate.js`'s `main()`,
+  best-effort/non-fatal) re-runs the same, unchanged, already-correct extraction functions against each
+  row's own stored `raw_data` — no re-fetch needed — scoped to `vendor = 'paloalto'` rows whose
+  `raw_data.containers.cna` confirms a genuine CVE-Record shape. These rows were already confirmed
+  non-security-impacting (the garbage range self-cancels against every real device tuple) — this is a
+  noise cleanup, not a correctness fix; the correctness fix is the wildcard-criteria fix above.
 
 ### Next.js API Routes
 - **Every API route that hits the DB must export `dynamic = 'force-dynamic'`** — see MVP bug #2 above. Without it, `npm run build`'s prerendering step will crash on any route calling `pool.query()`.
