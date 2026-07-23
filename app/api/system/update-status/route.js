@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.22.0': [
+    'Added a fallback for Panorama-managed Palo Alto firewalls (every rule pushed centrally, none stored locally) on the API/XML management transport — the same fix already shipped for the SSH transport a few days ago, now also available when a device is set up to connect via API.',
+    '⚠️ Unlike the SSH version, this one has not yet been confirmed against a real device\'s actual response — it was built to fail safely (falls through to the existing error rather than guessing wrong) and logs full diagnostic detail for the first device it runs against, but should be treated as provisional until checked against a real Panorama-managed API-transport firewall.',
+    'If you have a Panorama-managed firewall on the API transport still showing 0 rules, this may now fix it automatically on the next collect — but please let me know what you see so it can be confirmed or corrected.',
+  ],
   '2.21.7': [
     'Fixed a real CVE-matching gap for Palo Alto (and any other vendor whose CVE data comes through NVD): when NVD\'s own vulnerability data named a whole version branch with a wildcard (e.g. "10.0.*") instead of an exact version, SecVault was mis-parsing that into a single point release instead of the whole branch — meaning a device running any OTHER build within that same branch (e.g. 10.0.5, not exactly 10.0.0) could silently be treated as not vulnerable when it actually was. Found while investigating log warnings, not reported by a user — now correctly treated as the whole named branch.',
     'Cleaned up harmless log noise from a couple of old, already-fixed data quality issues (a stray trailing "." in some stored version numbers, and a handful of pre-2026-07-17 Palo Alto advisory rows that still had unparseable placeholder text in their version data) — no effect on CVE accuracy, just quieter logs.',

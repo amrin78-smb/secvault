@@ -295,7 +295,23 @@ Neither implements `getVpnSessionSummary`.
    enrichment needs the brace-tree this fallback never builds); NAT/schedule/expiry/comment are
    always false/null. Only used when the primary container search finds ZERO containers — if it
    finds ≥1, this fallback is never attempted, even if that container turns out empty (that's an
-   honest `[]`, not a failure).
+   honest `[]`, not a failure). **This SSH-transport version IS live-verified** (33/33 rules
+   confirmed against a real captured device output).
+   — **XML/API transport equivalent added 2026-07-24, NOT YET LIVE-VERIFIED.**
+   `index.js:getRules()` tries `api.getEffectiveSecurityPolicy()` (`type=op&cmd=<show><running>
+   <security-policy/></running></show>`, same proven CLI-to-XML translation convention as every
+   other op command in `api.js`) at the identical trigger point — after BOTH the default-vsys AND
+   any-vsys config-get xpaths have already found zero rules. Parsed by `parser.js:
+   parseEffectiveSecurityPolicy()`, which deep-walks for any `@_name`+`action`-bearing entry
+   (shape-agnostic, same discipline as `parseRulesDeep`) rather than assuming one guessed XML
+   wrapper — the RESPONSE SHAPE itself is doc-derived, unlike the SSH version's confirmed-live
+   format. Field extraction tries the SSH transport's own confirmed-live combined
+   `"application/service"` field first, falls back to separate `application`/`service` fields.
+   Returns `null` (not `[]`) when nothing rule-like is found, so `getRules()` falls through to its
+   existing (separately documented, known-limitation) behavior rather than reporting a false empty
+   success. **Do not treat this as verified** — check `[PaloAlto Debug] effective security-policy
+   raw response` against a real Panorama-managed API-transport device before trusting its output;
+   see CLAUDE.md's "Palo Alto SSH — RESOLVED" → "XML/API transport fallback" subsection.
 5. **XML API's default xpath is single-vsys only** (`vsys1`, hardcoded as `DEFAULT_VSYS`). Zero
    rules from that xpath is ambiguous — could be genuinely empty OR a multi-vsys device whose rules
    live under vsys2/vsys3. `index.js:getRules()` only tries the predicate-free any-vsys fallback

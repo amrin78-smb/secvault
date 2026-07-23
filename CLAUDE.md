@@ -648,11 +648,44 @@ not a permission gap. `extractShallowBlockKeys()`'s diagnostic (added alongside 
 hypothesis) is still in place as a general-purpose fallback for any FUTURE "no rulebase found"
 case that isn't this same Panorama-managed shape.
 
-**Not yet covered**: the XML/API transport still has no equivalent fallback — PAN-OS's XML API
-supports the same operational command via a `type=op` request, but its response shape (XML-
-wrapped, not necessarily the same curly-brace text) has not been live-verified, so it wasn't
-guessed at here. Devices needing this fix today should use the SSH transport (`mgmt_method:
-'ssh'`) until the XML/API fallback is built the same verify-first way.
+#### XML/API transport fallback — BUILT 2026-07-24, response shape NOT YET LIVE-VERIFIED
+
+The gap described immediately above ("Not yet covered") is now built, not open — but flagged
+distinctly from the SSH version above because the RESPONSE SHAPE is doc-derived, not confirmed
+against a real device the way the SSH/CLI text format is (that took 3 rounds of live debugging to
+pin down correctly — see above — guessing wrong here carries the identical risk).
+
+`api.getEffectiveSecurityPolicy(conn)` issues `type=op&cmd=<show><running><security-policy/>
+</running></show>` — the CLI-to-XML translation follows this file's own already-proven convention
+(`showSystemInfo`/`showRunningConfig` already use this exact "each CLI token becomes a nested tag
+pair" pattern successfully). `parser.parseEffectiveSecurityPolicy(result)` parses the response, but
+rather than commit to one guessed wrapper shape, it deep-walks the parsed XML for any object
+carrying both a rule-identifying `@_name` attribute and a sibling `action` field — the single most
+universal signal PAN-OS uses across every rule representation already confirmed in this codebase
+(plain rulebase entries, and the SSH transport's own effective-policy entries). Field-level
+extraction is tolerant of TWO possible shapes for applications/services: the SSH/CLI transport's
+own confirmed-live combined `"application/service"` field (`"0:appname/proto/srcport/dstport"`,
+same parsing as `sshParser.js`'s `parseAppServiceToken()`) is tried first, falling back to separate
+`application`/`service` fields (the plain rulebase config-get shape) if the combined field isn't
+present — so a wrong guess about which shape the XML uses doesn't silently drop every application/
+service, just picks the less-likely of two real possibilities.
+
+`getRules()` (`lib/adapters/paloalto/index.js`) tries this fallback at the exact same trigger point
+as the SSH transport's — after BOTH the default-vsys AND any-vsys config-get xpaths have already
+found nothing, the identical "no rulebase found anywhere in the local config tree" signal. On
+success it logs a loud, explicit warning (not just a debug line) stating the result is unverified
+and naming the exact known limitations once verified — same set as the SSH transport's: no
+disabled-rule visibility, no real logging state, no hit counts, no NAT. The full raw XML response is
+logged via `[PaloAlto Debug]` on first use, same first-connect verification ritual as everywhere
+else in this file.
+
+**Before trusting this on a real device**: trigger a collect on a Panorama-managed device using the
+API transport (`mgmt_method: 'api'`), then check the `[PaloAlto Debug] effective security-policy raw
+response` log line against what `parseEffectiveSecurityPolicy()` actually extracted. If the field
+names differ from what's assumed above, only `parser.js`'s `looksLikeEffectivePolicyEntry()`/
+`extractEffectiveAppsAndServices()`/`effectivePolicyEntryToNormalizedRule()` need to change — the
+request-construction side (`api.js`) is already proven, not part of what needs re-checking. Until
+verified, a device needing this fix today should still prefer the SSH transport, which IS confirmed.
 
 ### Known Limitations (by design — documented, not bugs)
 

@@ -83,10 +83,14 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - Palo Alto SSH parses the PAN-OS brace tree, NOT `set`-format output, despite running
   `set cli config-output-format set` first (that command's effect turned out not to matter — three
   rounds of live debugging established this; don't re-attempt the `set`-format theory).
-- Palo Alto SSH: a fully Panorama-managed device can have ZERO rulebase content in its LOCAL config
-  tree at all (every rule is Panorama-pushed) — `getRules()` falls back to
-  `show running security-policy` (the MERGED effective policy) in that case. Known permanent gaps
-  in that fallback: no disabled-rule visibility, no real logging state, no hit counts, no NAT.
+- Palo Alto: a fully Panorama-managed device can have ZERO rulebase content in its LOCAL config
+  tree at all (every rule is Panorama-pushed) — `getRules()` falls back to the effective/merged
+  security policy in that case, on BOTH transports. Known permanent gaps in that fallback: no
+  disabled-rule visibility, no real logging state, no hit counts, no NAT. **The SSH transport's
+  version is live-verified (33/33 rules confirmed); the XML/API transport's version (added
+  2026-07-24) is NOT yet live-verified** — its request construction is proven, but the response
+  shape is doc-derived. Don't assume the API-transport fallback is trustworthy until checked
+  against a real device's `[PaloAlto Debug] effective security-policy raw response` log line.
 - Sangfor has no live device, no documentation trail — every field mapping is doc-derived and
   explicitly marked low-confidence; `getObjects()` deliberately returns an empty stub rather than
   guess at unverified block syntax.

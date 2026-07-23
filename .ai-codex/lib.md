@@ -384,6 +384,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `getSecurityRulesAnyVsys(conn)` -> `Promise<object>` — config-get, predicate-free xpath across all device/vsys entries.
 `showRunningConfig(conn)` -> `Promise<{raw, result}>` — op `show config running`, 120s timeout.
 `getRuleHitCount(conn, vsysName)` -> `Promise<object>` — op `show rule-hit-count vsys <name> ...`.
+`getEffectiveSecurityPolicy(conn)` -> `Promise<{raw, result}>` — op `show running security-policy`, the Panorama-managed-device merged-policy fallback (2026-07-24). Request construction proven (same CLI-to-XML convention as every other op command here); response SHAPE is doc-derived, not yet live-verified — see `parser.parseEffectiveSecurityPolicy()`.
 `DEFAULT_VSYS` (const string) — `'vsys1'`.
 `SECURITY_RULES_XPATH` (const string) — default-vsys rulebase xpath.
 `SECURITY_RULES_XPATH_ANY_VSYS` (const string) — predicate-free fallback xpath.
@@ -397,6 +398,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `parseRules(rulesResult)` -> `NormalizedRule[]` — parses default-vsys rulebase `<entry>` list.
 `parseRulesDeep(rulesResult)` -> `NormalizedRule[]` — shape-agnostic deep walk for the any-vsys fallback, collects every `security.rules` container.
 `parseRuleHitCount(hitCountResult)` -> `{[ruleName]: hitCount}` — shape-agnostic deep walk for `show rule-hit-count` response.
+`parseEffectiveSecurityPolicy(result)` -> `NormalizedRule[]|null` — Panorama-managed-device merged-policy fallback (2026-07-24), XML/API transport. Deep-walks for any `@_name`+`action`-bearing entry (shape-agnostic by design, mirroring `parseRulesDeep`'s approach); tolerant of both the SSH-transport's confirmed-live combined `"application/service"` field and a separate application/service fallback shape. Returns `null` (not `[]`) when nothing rule-like is found — caller (`index.js`) treats `null` as "fallback not usable." DOC-DERIVED, NOT YET LIVE-VERIFIED — see CLAUDE.md's "Palo Alto SSH — RESOLVED" section, "XML/API transport fallback" subsection.
 `parseConfig(configResult, systemInfoResult)` -> `object` — builds getConfig()'s parsed tree, merges `system_info`.
 `redactConfigXml(text)` -> `string` — regex-redacts `<tag>value</tag>` and `tag="value"` for SECRET_TAGS in raw XML, runs BEFORE parseConfig(). [SENSITIVE]
 `redactConfigTree(node)` -> `any` — recursive secret-key redaction of the parsed object tree. [SENSITIVE]
