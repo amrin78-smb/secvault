@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.28.1': [
+    'Fixed noisy config-change alerts on Palo Alto devices: PAN-OS periodically stages a preview of pending App-ID content updates internally, which was being reported as a real "1 removed"/"1 added" configuration change even though nothing an admin controls actually changed. This no longer generates an alert.',
+  ],
   '2.28.0': [
     'Configuration Changes now shows a proper table instead of raw technical JSON for a whole added or removed firewall rule — the same Name/Action/Src Zone/Dst Zone/Source/Destination/Service/Applications/Log columns as the Rules page, similar to how other firewall change-tracking tools present rule changes.',
     'The same idea now applies everywhere else too: an added, removed, or changed address object, zone, VPN setting, or admin account shows as a clean labeled table instead of raw JSON, wherever the underlying data is simple enough to lay out that way — a "before vs. after" table for changes, so it\'s obvious at a glance which specific field changed.',

@@ -359,6 +359,23 @@ changed", the field that also triggers the CVE re-match hook; `hostname` → "De
 `deviceconfig` and `network.*` interface entries were deliberately left `null` — no clean, confidently
 groundable single-field pattern found for either.
 
+**Volatile-subtree filtering (`MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR`) gained `content-preview` and a
+segment-scan rewrite (2026-07-30)**: `shared.content-preview` is PAN-OS's own staging area for a
+pending New/Modified App-ID content update (confirmed via Palo Alto's community/docs, not assumed)
+— cleared automatically once the update installs or is discarded, never an admin decision. A real
+user report showed it firing "1 removed"/"1 added" config-diff alerts across many unrelated devices
+at similar times — the exact noise signature `system_info` filtering already existed for. Registered
+with an EMPTY allowlist (`new Set([])`), unlike `system_info`'s curated one — there is no
+admin-meaningful field inside this node at all, so every field under it is excluded, not just an
+unlisted subset. Required a real mechanism change, not just a new entry: `isVolatilePath()`/
+`isRegisteredSubtreeRoot()` used to require the volatile root to be an EXACT PREFIX from the start of
+`path` (works for `system_info`, which both parsers merge in at the top of `config_parsed` directly),
+but `content-preview` sits nested (`tree.shared.content-preview` on SSH, differently on XML/API) —
+`findSubtreeRootIndex()` now scans for the root as a segment ANYWHERE in the path instead. Verified
+this is a safe broadening for `system_info` too (it never appears nested elsewhere) and does NOT
+suppress a real sibling change under the same `shared` node (e.g. an address object edit) — only the
+registered root segment itself and its own descendants are affected.
+
 **⛔ Real bug found and fixed while verifying the above**: `SECTION_LABELS` used to include
 `rulebase`/`pre-rulebase`/`post-rulebase` as ordinary entries in the same flat array as `nat`/`pbf`/
 etc. `sectionLabelFor()` scans PATH SEGMENTS in order and returns on the first match anywhere in
