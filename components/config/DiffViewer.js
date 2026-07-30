@@ -4,6 +4,7 @@ import { useState } from 'react';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+import { ruleFromBraceEntry } from '../../lib/adapters/paloalto/sshParser';
 
 // Renders one grouped section of a config diff (Added / Removed / Modified).
 // Defined at module top level (never nested inside DiffViewer — CLAUDE.md rule).
@@ -144,6 +145,173 @@ function renderBlockValue(value) {
   return isExpandableValue(value) ? <CollapsibleValue value={value} /> : <CollapsibleString value={value} />;
 }
 
+// ---------------------------------------------------------------------------
+// Generic "flat object" Field|Value table — the non-rule counterpart to
+// RuleDetailTable further down this file. Address/service objects, zones,
+// VPN records, admin accounts, NAT/PBF rules etc. have no per-domain
+// normalizer (unlike PAN-OS security rules, which reuse ruleFromBraceEntry())
+// — they're just whatever flat-ish raw dict the vendor's config tree happens
+// to contain. Rather than guess at a domain-specific shape, this renders ANY
+// object whose own values are all primitives (or arrays of primitives) as a
+// clean field/value table; anything with deeper nesting falls back to
+// exactly the pre-existing raw-JSON CollapsibleValue rendering above — a
+// wrong/guessed table is worse than the reliable raw fallback.
+// ---------------------------------------------------------------------------
+
+// Gate deciding table-vs-raw-JSON. Deliberately conservative: ANY nested
+// object, or an array containing so much as one object element, returns
+// false and the caller keeps the existing raw-JSON treatment. An empty
+// object ({}) also returns false — a zero-row table renders as nothing
+// visible, which is a worse presentation than CollapsibleValue's existing
+// one-line "{0 keys}" summary for that already-rare shape.
+function isFlatObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return false;
+  for (const key of keys) {
+    const v = value[key];
+    if (v === null || v === undefined) continue;
+    const t = typeof v;
+    if (t === 'string' || t === 'number' || t === 'boolean') continue;
+    if (Array.isArray(v)) {
+      const hasNestedObject = v.some((item) => item !== null && typeof item === 'object');
+      if (hasNestedObject) return false;
+      continue;
+    }
+    // Nested object (and not an array) — too deep to safely table-ize.
+    return false;
+  }
+  return true;
+}
+
+// Small per-file mechanical field-label transform — matches this file's
+// existing convention of duplicating a two-line helper locally rather than
+// reaching into another module (see joinArray/actionBorderColor's comment
+// further down, and configDiff.js's own per-adapter SECRET_KEY_PATTERN
+// duplication). Deliberately NOT the same casing as configDiff.js's
+// humanizeFieldForSentence() (that one lowercases for mid-sentence use) —
+// this wants Title Case for a table column header, matching how the Rules
+// page's own columns ("Src Zone", "Dst Zone") read. A straightforward
+// mechanical split-and-capitalize; a slightly awkward label (e.g.
+// "Accprofile" for a field with no separator) beats a guessed-nicer one.
+function titleCaseField(field) {
+  return String(field)
+    .replace(/[-_]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+// Placeholder for an array-valued field with zero elements. Distinct from
+// formatValue()'s '—' (which means "this single value is null/undefined") —
+// this means "the array itself is empty," a different fact worth reading
+// differently at a glance.
+const EMPTY_ARRAY_PLACEHOLDER = '(empty)';
+
+// Joins an array of primitives for one table cell. Deliberately NOT
+// RuleDetailTable's joinArray() below (which is tied to that table's own
+// '—'-for-empty convention) — kept separate per this file's small-local-
+// duplication convention, and because the two tables' empty-value
+// conventions don't need to match each other.
+function joinPrimitiveArray(value) {
+  if (!Array.isArray(value) || value.length === 0) return EMPTY_ARRAY_PLACEHOLDER;
+  return value.map((item) => formatValue(item)).join(', ');
+}
+
+// Display string for one field's value inside a flat-object table cell —
+// array-of-primitives joins, everything else (already guaranteed a
+// primitive by isFlatObject()'s gate) goes through the existing
+// formatValue().
+function flatFieldDisplay(value) {
+  return Array.isArray(value) ? joinPrimitiveArray(value) : formatValue(value);
+}
+
+// One added/removed flat-object value, e.g. an address object
+// ({"ip-netmask": "10.0.0.5", "description": "web server"}) or a Fortinet
+// admin record. Caller must already know isFlatObject(value) is true.
+function FlatObjectTable({ value }) {
+  const keys = Object.keys(value);
+  return (
+    <Table>
+      <colgroup>
+        <col style={{ width: '30%' }} />
+        <col style={{ width: '70%' }} />
+      </colgroup>
+      <tbody>
+        {keys.map((key) => {
+          const display = flatFieldDisplay(value[key]);
+          return (
+            <tr key={key}>
+              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{titleCaseField(key)}</td>
+              <td title={typeof display === 'string' ? display : undefined} style={{ wordBreak: 'break-word' }}>
+                {display}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
+
+// Placeholder for a key that exists on only one side of a modified flat
+// object — distinct from an empty-string value, which reads instead as
+// formatValue('') i.e. a genuinely blank field that WAS present.
+const KEY_NOT_PRESENT_PLACEHOLDER = '(not present)';
+
+// A modified flat-object value where BOTH old and new are flat objects, e.g.
+// "only the ip-netmask changed, everything else on this address object
+// stayed the same" — a three-column Field | Old | New table over the union
+// of keys present on either side, changed rows highlighted the same red/
+// green convention this file already uses for "− old" / "+ new" lines.
+// Caller must already know isFlatObject(oldValue) && isFlatObject(newValue).
+function FlatObjectDiffTable({ oldValue, newValue }) {
+  const keys = Array.from(new Set([...Object.keys(oldValue), ...Object.keys(newValue)]));
+  return (
+    <Table>
+      <colgroup>
+        <col style={{ width: '26%' }} />
+        <col style={{ width: '37%' }} />
+        <col style={{ width: '37%' }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Old</th>
+          <th>New</th>
+        </tr>
+      </thead>
+      <tbody>
+        {keys.map((key) => {
+          const hasOld = Object.prototype.hasOwnProperty.call(oldValue, key);
+          const hasNew = Object.prototype.hasOwnProperty.call(newValue, key);
+          const oldDisplay = hasOld ? flatFieldDisplay(oldValue[key]) : KEY_NOT_PRESENT_PLACEHOLDER;
+          const newDisplay = hasNew ? flatFieldDisplay(newValue[key]) : KEY_NOT_PRESENT_PLACEHOLDER;
+          const changed = !hasOld || !hasNew || oldDisplay !== newDisplay;
+          return (
+            <tr key={key}>
+              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{titleCaseField(key)}</td>
+              <td
+                title={typeof oldDisplay === 'string' ? oldDisplay : undefined}
+                style={{ wordBreak: 'break-word', color: changed ? 'var(--red)' : undefined }}
+              >
+                {oldDisplay}
+              </td>
+              <td
+                title={typeof newDisplay === 'string' ? newDisplay : undefined}
+                style={{ wordBreak: 'break-word', color: changed ? 'var(--green)' : undefined }}
+              >
+                {newDisplay}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
+
 // One "path: value" row for an Added/Removed entry. Value is inline for
 // small primitives, block-rendered (and possibly collapsible) below the path
 // for objects/arrays and large strings.
@@ -158,6 +326,11 @@ function renderBlockValue(value) {
 // it always has.
 function DiffValueRow({ path, value, friendlyDescription }) {
   const block = needsBlockRender(value);
+  // isFlatObject() is only ever checked once block is already true (it can
+  // only be true for an object/array/large-string value) — a flat object
+  // swaps in the Field|Value table in place of the raw-JSON CollapsibleValue,
+  // everything else about the block/inline colon logic below is untouched.
+  const flatTable = block && isFlatObject(value);
   const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
   const label = hasDescription ? friendlyDescription : path;
   return (
@@ -165,7 +338,7 @@ function DiffValueRow({ path, value, friendlyDescription }) {
       <span style={PATH_LABEL_STYLE} title={hasDescription ? path : undefined}>
         {label}{block ? ':' : ''}
       </span>
-      {block ? renderBlockValue(value) : <span>: {formatValue(value)}</span>}
+      {block ? (flatTable ? <FlatObjectTable value={value} /> : renderBlockValue(value)) : <span>: {formatValue(value)}</span>}
     </span>
   );
 }
@@ -194,6 +367,12 @@ function LabeledValue({ label, labelColor, value }) {
 // actually changed.
 function DiffModifiedRow({ path, oldValue, newValue, friendlyDescription }) {
   const anyBlock = needsBlockRender(oldValue) || needsBlockRender(newValue);
+  // Both sides flat objects (e.g. an address object where only ip-netmask
+  // changed) get the three-column Field|Old|New table instead of two stacked
+  // raw-JSON blobs. Either side failing the flat-object gate (nested, or a
+  // totally different shape/type) keeps exactly the existing stacked
+  // LabeledValue rendering below — never guessed at a mismatched pair.
+  const bothFlat = isFlatObject(oldValue) && isFlatObject(newValue);
   const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
   const label = hasDescription ? friendlyDescription : path;
   const labelTitle = hasDescription ? path : undefined;
@@ -203,6 +382,17 @@ function DiffModifiedRow({ path, oldValue, newValue, friendlyDescription }) {
       <span style={{ display: 'block' }}>
         <span style={PATH_LABEL_STYLE} title={labelTitle}>{label}</span>
         <span>: {formatValue(oldValue)} → {formatValue(newValue)}</span>
+      </span>
+    );
+  }
+
+  if (bothFlat) {
+    return (
+      <span style={{ display: 'block' }}>
+        <span style={PATH_LABEL_STYLE} title={labelTitle}>{label}</span>
+        <span style={{ display: 'block', marginTop: 4 }}>
+          <FlatObjectDiffTable oldValue={oldValue} newValue={newValue} />
+        </span>
       </span>
     );
   }
@@ -290,6 +480,120 @@ function RuleChangeBadge({ changeType }) {
   return <Badge color={CHANGE_BADGE_COLOR[changeType] || 'muted'}>{CHANGE_BADGE_LABEL[changeType] || changeType}</Badge>;
 }
 
+// ---------------------------------------------------------------------------
+// Whole-rule added/removed detail table — renders ruleFromBraceEntry()'s
+// NormalizedRule-shaped output as a small "Field | Value" table instead of
+// the raw JSON blob a whole-added/removed rule used to dump inline. Same
+// column set (and same labels) as the fleet Rules page
+// (app/(dashboard)/devices/[id]/rules/page.js), minus `#`/`Hits` — a
+// point-in-time historical diff has no stable sequence number and no live
+// hit count.
+//
+// `joinArray`/`actionBorderColor` are DELIBERATELY duplicated here rather
+// than imported from the Rules page — that page is a server component page
+// module, not a shared lib export, and this codebase's own established
+// convention is small per-file duplication over reaching into a page file
+// (e.g. SECRET_KEY_PATTERN is duplicated per-adapter rather than
+// centralized). Keep these two in sync with the Rules page's copies if the
+// value-formatting conventions ever change there.
+function joinArray(value) {
+  if (!Array.isArray(value) || value.length === 0) return '—';
+  return value.join(', ');
+}
+
+function actionBorderColor(action) {
+  if (action === 'allow') return 'var(--green)';
+  if (action === 'deny' || action === 'drop' || action === 'reject' || action === 'block') return 'var(--red)';
+  return 'var(--border)';
+}
+
+// One row per NormalizedRule field. Order matches the Rules page's column
+// order (skipping `#` and `Hits`, which don't apply to a single historical
+// rule snapshot).
+const RULE_DETAIL_FIELDS = [
+  { label: 'Name', render: (r) => r.rule_name || '—' },
+  { label: 'Enabled', render: (r) => (r.enabled ? 'Yes' : 'No') },
+  { label: 'Action', render: (r) => r.action || '—' },
+  { label: 'Src Zone', render: (r) => joinArray(r.src_zones) },
+  { label: 'Dst Zone', render: (r) => joinArray(r.dst_zones) },
+  { label: 'Src Address', render: (r) => joinArray(r.src_addresses) },
+  { label: 'Dst Address', render: (r) => joinArray(r.dst_addresses) },
+  { label: 'Services', render: (r) => joinArray(r.services) },
+  { label: 'Comment', render: (r) => r.comment || '—' },
+  { label: 'Applications', render: (r) => joinArray(r.applications) },
+  { label: 'Schedule', render: (r) => r.schedule || '—' },
+  { label: 'Log', render: (r) => (r.log_enabled ? 'Yes' : 'No') },
+];
+
+// Single-rule "Field | Value" table — NOT a full multi-row rule listing
+// (there's exactly one rule here: the whole rule that was added/removed).
+// Left border colored by the rule's action, same green/red/neutral mapping
+// as the Rules page's <tr> left border, applied per-row here since this
+// table has one row per FIELD rather than one row per rule.
+function RuleDetailTable({ rule }) {
+  const borderColor = actionBorderColor(rule.action);
+  return (
+    <Table>
+      <colgroup>
+        <col style={{ width: '30%' }} />
+        <col style={{ width: '70%' }} />
+      </colgroup>
+      <tbody>
+        {RULE_DETAIL_FIELDS.map(({ label, render }) => {
+          const value = render(rule);
+          return (
+            <tr key={label} style={{ borderLeft: `4px solid ${borderColor}` }}>
+              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{label}</td>
+              <td title={typeof value === 'string' ? value : undefined} style={{ wordBreak: 'break-word' }}>
+                {value}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  );
+}
+
+// True when `rule` (ruleFromBraceEntry()'s output) actually looks like a
+// real rule rather than an all-blank result from a malformed/unexpected
+// `change.value` shape (e.g. `{}`) — a name with zero populated fields is
+// exactly what an empty-object input produces, and that must fall back to
+// the raw-JSON rendering rather than show an empty-looking table.
+function looksLikeRealRule(rule) {
+  if (!rule || typeof rule !== 'object') return false;
+  const hasName = typeof rule.rule_name === 'string' && rule.rule_name.length > 0;
+  const hasAnyField =
+    (typeof rule.action === 'string' && rule.action.length > 0) ||
+    (Array.isArray(rule.src_zones) && rule.src_zones.length > 0) ||
+    (Array.isArray(rule.dst_zones) && rule.dst_zones.length > 0) ||
+    (Array.isArray(rule.src_addresses) && rule.src_addresses.length > 0) ||
+    (Array.isArray(rule.dst_addresses) && rule.dst_addresses.length > 0) ||
+    (Array.isArray(rule.services) && rule.services.length > 0) ||
+    (Array.isArray(rule.applications) && rule.applications.length > 0);
+  return hasName && hasAnyField;
+}
+
+// Attempts to build a NormalizedRule from a whole-rule added/removed
+// change's `value` (the raw PAN-OS SSH-brace-tree rule dict — the only
+// transport whose rule dicts reach the Rule Changes table, per
+// classifyPath()'s existing XML/API-unresolvable-index gap). Defensive at
+// every step, same discipline this whole file already uses everywhere else:
+// never let a malformed/unexpected `change.value` shape throw up into the
+// page render — returns null on ANY doubt, and the caller falls back to the
+// existing raw-JSON rendering.
+function tryBuildRuleFromChange(change) {
+  const attrs = change && change.value;
+  if (!attrs || typeof attrs !== 'object' || Array.isArray(attrs)) return null;
+  const ruleName = typeof change.ruleName === 'string' && change.ruleName.length > 0 ? change.ruleName : null;
+  try {
+    const rule = ruleFromBraceEntry(ruleName, attrs, null);
+    return looksLikeRealRule(rule) ? rule : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
 // Value cell for one rule-level change — adapts DiffModifiedRow's own
 // old/new logic (inline "old → new" for small primitives, stacked "− old"/
 // "+ new" for objects/arrays or large strings) to a table cell instead of a
@@ -306,6 +610,30 @@ function RuleChangeBadge({ changeType }) {
 // zero wrapping, so it's byte-for-byte identical to the prior output.
 function RuleChangeValueCell({ change }) {
   const hasDescription = typeof change.friendlyDescription === 'string' && change.friendlyDescription.length > 0;
+
+  // Whole-rule added/removed: `change.field === null` is classifyDiff()'s
+  // signal for "this IS the entire rule object, not one field of it" (see
+  // configDiff.js's pushRuleChange()). When ruleFromBraceEntry() can turn
+  // `change.value` into a real-looking NormalizedRule, render the
+  // friendlyDescription sentence (unchanged) ABOVE a proper Field|Value
+  // table INSTEAD OF the raw JSON blob — the whole point of this table is
+  // that the raw JSON was the unreadable part. Falls through to the
+  // existing raw-JSON rendering below on ANY doubt (malformed `value`,
+  // ruleFromBraceEntry throwing, or an all-blank-looking result) — never
+  // shows a broken/empty table in place of the reliable raw fallback.
+  if (change.field === null && (change.changeType === 'added' || change.changeType === 'removed')) {
+    const rule = tryBuildRuleFromChange(change);
+    if (rule) {
+      return (
+        <span style={{ display: 'block' }}>
+          {hasDescription && (
+            <span style={{ ...PATH_LABEL_STYLE, display: 'block', marginBottom: 4 }}>{change.friendlyDescription}</span>
+          )}
+          <RuleDetailTable rule={rule} />
+        </span>
+      );
+    }
+  }
 
   let content;
   if (change.changeType === 'modified') {

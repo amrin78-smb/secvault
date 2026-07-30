@@ -346,6 +346,52 @@ not an actual secret. Harmless (the field is simply never usefully displayable a
 here), but worth a narrower fix in `lib/adapters/checkpoint/parser.js` if this field ever needs to
 be shown.
 
+**`friendlyDescription` extended further, same day**: also covers NAT Rules (Palo Alto SSH only,
+same brace-attrs treatment as security rules — `from`/`to` always named, translation sub-shape
+described when cleanly resolvable, e.g. `dynamic-ip-and-port`/`static-ip`, omitted otherwise), PBF
+Rules (same treatment, forwarding action named when resolvable), Zones (reuses
+`friendlyDescriptionForNetworkObject()` directly rather than a parallel copy), Fortinet's remaining
+flat settings sections (`snmp`/`ntp`/`dns`/`log_syslogd`/`password_policy`/`fortiguard`/
+`autoupdate_schedule` — field names grounded in `lib/auditChecksSeed.js`'s own live compliance
+predicates, e.g. `ntp.ntpsync`, `dns.primary`, `log_syslogd.status`), and `system_info` (gated by the
+existing `MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR` allowlist — `sw-version` → "Firmware version was
+changed", the field that also triggers the CVE re-match hook; `hostname` → "Device was renamed").
+`deviceconfig` and `network.*` interface entries were deliberately left `null` — no clean, confidently
+groundable single-field pattern found for either.
+
+**⛔ Real bug found and fixed while verifying the above**: `SECTION_LABELS` used to include
+`rulebase`/`pre-rulebase`/`post-rulebase` as ordinary entries in the same flat array as `nat`/`pbf`/
+etc. `sectionLabelFor()` scans PATH SEGMENTS in order and returns on the first match anywhere in
+`SECTION_LABELS` — a NAT rule's path is `...rulebase.nat.rules.<name>...`, so the `rulebase` segment
+(appearing before `nat`) always won first, meaning every NAT/PBF change was mislabeled "Rules (detail
+unavailable for this device)" and never reached the correct "NAT Rules"/"Policy-Based Forwarding
+Rules" label. Fixed by moving `rulebase`/`pre-rulebase`/`post-rulebase` into a separate
+`FALLBACK_RULEBASE_LABELS` map, checked only after the main `SECTION_LABELS` scan finds nothing —
+preserves the original intent (an unresolvable-index XML/API security-rule path still gets that
+label) without letting it shadow more specific labels further down the same path.
+
+**Rule Changes table gets a real detail table, not just a sentence (added 2026-07-30)**: a whole PAN-OS
+security rule added/removed (the raw brace-attrs `change.value`, SSH transport only) is now converted
+via `lib/adapters/paloalto/sshParser.js`'s existing `ruleFromBraceEntry()` (newly exported — it
+wasn't before) into the same NormalizedRule shape the fleet Rules page already renders, and shown as a
+small "Field | Value" table (same column labels: Name/Enabled/Action/Src Zone/Dst Zone/Src Address/
+Dst Address/Services/Comment/Applications/Schedule/Log) INSTEAD of the raw JSON blob — the
+`friendlyDescription` sentence still renders above it. Falls back to exactly the old raw-JSON
+rendering on any doubt (`ruleFromBraceEntry()` throwing, a malformed `change.value`, or a
+suspiciously-empty-looking result) — `components/config/DiffViewer.js`'s `looksLikeRealRule()`/
+`tryBuildRuleFromChange()` guard this. Only ever reachable via the SSH transport (same
+XML/API-unresolvable-index gap as everywhere else in this feature).
+
+**Generic flat-object table for every OTHER whole-object change (added 2026-07-30)**: unlike PAN-OS
+rules, address/service objects, zones, VPN records, and admin records have no existing per-domain
+normalizer to reuse — `components/config/DiffViewer.js`'s `isFlatObject()` gate (conservative: any
+nested object or array-of-objects anywhere inside disqualifies it, falls back to raw JSON) decides
+whether an added/removed/modified object value gets a generic "Field | Value" table
+(`FlatObjectTable`) or, for a modified pair where BOTH sides are flat, a three-column "Field | Old |
+New" comparison table (`FlatObjectDiffTable`, changed cells colored red/green) instead of two stacked
+raw-JSON blobs. Field labels are a local, purely mechanical Title Case transform (`titleCaseField()`)
+— deliberately NOT the same helper as `configDiff.js`'s sentence-casing one, different casing need.
+
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/
 `CollapsibleString`, not a redaction pass — but a rendering surface added for `config_diffs` data has

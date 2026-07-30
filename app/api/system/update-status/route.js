@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.28.0': [
+    'Configuration Changes now shows a proper table instead of raw technical JSON for a whole added or removed firewall rule — the same Name/Action/Src Zone/Dst Zone/Source/Destination/Service/Applications/Log columns as the Rules page, similar to how other firewall change-tracking tools present rule changes.',
+    'The same idea now applies everywhere else too: an added, removed, or changed address object, zone, VPN setting, or admin account shows as a clean labeled table instead of raw JSON, wherever the underlying data is simple enough to lay out that way — a "before vs. after" table for changes, so it\'s obvious at a glance which specific field changed.',
+    'Configuration Changes now also describes NAT rules, policy-based-forwarding rules, zones, and several device settings (SNMP, NTP, DNS, syslog, password policy, FortiGuard, firmware version) in plain English, on top of the local users, address/service objects, VPN, and admin accounts covered earlier.',
+    'Fixed a real bug found while testing the above: NAT and policy-based-forwarding rule changes were being filed under the wrong, unhelpful category ("Rules (detail unavailable for this device)") instead of "NAT Rules"/"Policy-Based Forwarding Rules" — a path-matching order issue, not a data problem.',
+  ],
   '2.27.0': [
     'Configuration Changes now describes VPN and admin-account changes in plain English too (e.g. "Admin account \'jdoe\' was added", "SSL VPN port was changed to \'10443\'"), covering Fortinet, Palo Alto, Cisco ASA, Check Point, and Forcepoint.',
     'The Rule Changes table no longer shows just a raw technical dump for an added or removed firewall rule — it now shows a plain-English summary first (e.g. "ALLOW rule from zone \'LAN\' to zones \'Local Internet, WAN\' was added — source Subnet_172.40.0.0_16, service application-default, application(s): claude, google-gemini"), with the full technical detail still available right below it.',
