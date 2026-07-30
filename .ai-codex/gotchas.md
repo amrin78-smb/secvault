@@ -298,20 +298,53 @@ primitive (string/number/boolean/null); arrays containing any object/array eleme
 positional behavior unchanged (no identity field to align object entries by, out of scope). Same
 `isVolatilePath()` filtering applies to LCS-produced entries as every other push site.
 
-**`friendlyDescription` (added 2026-07-30)**: `classifyDiff()` entries now carry an extra
-`friendlyDescription: string|null` field — a plain-English one-line description (e.g. `Local user
-"satish" was removed`) for two recognized path shapes only: `local-user-database.user(-group)` and
-`address`/`address-group`/`service`/`service-group` object leaves. Computed against the entry's
-REAL untruncated path before `truncatePathForDisplay()` runs — classifying against an
-already-truncated path would silently misfire. Never names a secret-shaped or `<redacted>` field in
-a sentence (reuses `SECRET_PATH_PATTERN`/`SECRET_PATH_EXCEPTIONS`) — falls back to a generic
-"...'s settings were changed" instead. `null` for everything else, including every Fortinet path
-(Fortinet's config_parsed is flat named sections, never a `local-user-database`/`address`/etc.
-segment, so this feature is a structural no-op for that vendor) and the XML/API transport's
-`entry[N]`/`@_name`-shaped object arrays (same "can't resolve without the live tree" gap
-`classifyPath()`'s rule-name resolution already documents). `components/config/DiffViewer.js`
-renders it as the primary label with the raw path moved to a hover tooltip; falls back to exactly
-today's raw-path rendering when `null`.
+**`friendlyDescription` (added 2026-07-30, extended same day)**: `classifyDiff()` entries carry an
+extra `friendlyDescription: string|null` field — a plain-English one-line description (e.g. `Local
+user "satish" was removed`) for these recognized shapes:
+- `local-user-database.user(-group)` and `address`/`address-group`/`service`/`service-group` object
+  leaves (the original two).
+- VPN config: Fortinet's flat `ssl_vpn` dict, Palo Alto's GlobalProtect config (detected via the
+  same `/global.?protect/i` deep-scan `vpnSummary.js` already uses — its exact nesting varies, so
+  only a shallow field is ever named, deeper nesting gets a generic-but-accurate "GlobalProtect
+  configuration was changed"), and Forcepoint's top-level tri-state `smc_vpn_gateway_configured`
+  (never describes the `null`/"undetected" state confidently).
+- Admin accounts: Fortinet `admins[]`, Palo Alto `mgt-config.users` (SSH transport resolves the
+  username; XML/API's opaque `entry[N]`/`@_name` array returns `null`, same gap as below), Cisco ASA
+  `usernames[]`, Check Point `administrators[]`, Forcepoint `smc_administrators[]`. **Known gap,
+  accepted, not a bug**: a FIELD-LEVEL modify to an EXISTING admin on the three array-of-objects
+  vendors (Fortinet/Check Point/Forcepoint) always resolves `null` — the diff entry only carries the
+  changed leaf's old/new value, never the sibling `name` needed to say WHICH admin changed; only a
+  whole admin record added/removed (where the full record IS the value) gets a description. Fixing
+  this would need entry-level friendlyDescription computation to see the surrounding array, not just
+  one entry — a bigger change, not done.
+- Rule Changes table (`pushRuleChange()`'s separate `ruleChanges[]`, not a `classifyDiff()` section):
+  a whole PAN-OS rule added/removed (SSH transport only — see below) gets a full sentence built from
+  its raw brace-attrs fields (`action`/`from`/`to` always named; `source`/`destination`/`service`/
+  `application`/`category` named only when present and not the PAN-OS `"any"` no-op default). Each
+  rule-table row also gained a separate `fieldLabel: string|null` (humanized raw field name, e.g.
+  `log-end` → `log end`, for the Field column) — a DIFFERENT field from `friendlyDescription`, both
+  always present, `null` when not applicable.
+
+Computed against the entry's REAL untruncated path/value before `truncatePathForDisplay()` runs —
+classifying against an already-truncated path/value would silently misfire. Never names a
+secret-shaped or `<redacted>` field in a sentence (reuses `SECRET_PATH_PATTERN`/
+`SECRET_PATH_EXCEPTIONS` — confirmed `must_change_password` false-positives this pattern and is
+correctly never named). `null` for everything else, including every Fortinet path under this
+feature's first two shapes (Fortinet's config_parsed has no `local-user-database`/`address`/etc.
+segment — structural no-op there, not a vendor check) and the XML/API transport's `entry[N]`/
+`@_name`-shaped object arrays throughout (rule table, admin accounts) — same "can't resolve without
+the live tree" gap `classifyPath()`'s rule-name resolution already documents; the raw-rule sentence
+is therefore only ever reachable via the SSH transport. `components/config/DiffViewer.js` renders
+`friendlyDescription` as the primary label (raw path moved to a hover tooltip) and `fieldLabel` in
+place of the raw field name in the Rule Changes table's Field column — falls back to exactly
+today's raw rendering wherever either is `null`.
+
+**Separately found, NOT fixed here (out of scope for this feature)**: Check Point's adapter-level
+`redactSecrets()` already masks `administrators[].must_change_password`'s VALUE to `'<redacted>'` —
+an over-redaction of a plain boolean field that happens to contain the word "password" in its name,
+not an actual secret. Harmless (the field is simply never usefully displayable anywhere, including
+here), but worth a narrower fix in `lib/adapters/checkpoint/parser.js` if this field ever needs to
+be shown.
 
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/

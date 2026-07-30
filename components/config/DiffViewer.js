@@ -295,21 +295,44 @@ function RuleChangeBadge({ changeType }) {
 // "+ new" for objects/arrays or large strings) to a table cell instead of a
 // <li> block, and reuses the same block-render helpers so an object-valued
 // or very long string field doesn't dump raw text inline.
+//
+// When classifyDiff() supplies `change.friendlyDescription` (e.g. the
+// "entire rule added" case with a plain-English summary of what the rule
+// does), that renders as a bold primary line — same PATH_LABEL_STYLE weight
+// used for the equivalent role in DiffValueRow/DiffModifiedRow above — sitting
+// ABOVE the existing raw value display, which still renders exactly as
+// before underneath it. When there's no description (still the overwhelming
+// majority of rows), this returns the untouched pre-existing content with
+// zero wrapping, so it's byte-for-byte identical to the prior output.
 function RuleChangeValueCell({ change }) {
+  const hasDescription = typeof change.friendlyDescription === 'string' && change.friendlyDescription.length > 0;
+
+  let content;
   if (change.changeType === 'modified') {
     const anyBlock = needsBlockRender(change.old) || needsBlockRender(change.new);
     if (!anyBlock) {
-      return <span>{formatValue(change.old)} → {formatValue(change.new)}</span>;
+      content = <span>{formatValue(change.old)} → {formatValue(change.new)}</span>;
+    } else {
+      content = (
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <LabeledValue label="− old" labelColor="var(--red)" value={change.old} />
+          <LabeledValue label="+ new" labelColor="var(--green)" value={change.new} />
+        </span>
+      );
     }
-    return (
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <LabeledValue label="− old" labelColor="var(--red)" value={change.old} />
-        <LabeledValue label="+ new" labelColor="var(--green)" value={change.new} />
-      </span>
-    );
+  } else {
+    // added / removed
+    content = needsBlockRender(change.value) ? renderBlockValue(change.value) : <span>{formatValue(change.value)}</span>;
   }
-  // added / removed
-  return needsBlockRender(change.value) ? renderBlockValue(change.value) : <span>{formatValue(change.value)}</span>;
+
+  if (!hasDescription) return content;
+
+  return (
+    <span style={{ display: 'block' }}>
+      <span style={{ ...PATH_LABEL_STYLE, display: 'block', marginBottom: 4 }}>{change.friendlyDescription}</span>
+      {content}
+    </span>
+  );
 }
 
 // Rule name is repeated on every field-level change row rather than
@@ -359,8 +382,12 @@ function RuleChangesTable({ ruleChanges }) {
                 <td>
                   <RuleChangeBadge changeType={change.changeType} />
                 </td>
-                <td className="mono" title={change.field || '(entire rule)'} style={{ wordBreak: 'break-word' }}>
-                  {change.field || '(entire rule)'}
+                <td
+                  className="mono"
+                  title={change.fieldLabel ? change.field : (change.field || '(entire rule)')}
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  {change.fieldLabel || change.field || '(entire rule)'}
                 </td>
                 <td className="mono" style={{ wordBreak: 'break-word' }}>
                   <RuleChangeValueCell change={change} />

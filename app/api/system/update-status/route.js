@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.27.0': [
+    'Configuration Changes now describes VPN and admin-account changes in plain English too (e.g. "Admin account \'jdoe\' was added", "SSL VPN port was changed to \'10443\'"), covering Fortinet, Palo Alto, Cisco ASA, Check Point, and Forcepoint.',
+    'The Rule Changes table no longer shows just a raw technical dump for an added or removed firewall rule — it now shows a plain-English summary first (e.g. "ALLOW rule from zone \'LAN\' to zones \'Local Internet, WAN\' was added — source Subnet_172.40.0.0_16, service application-default, application(s): claude, google-gemini"), with the full technical detail still available right below it.',
+    'Known limitation: a permission change to an existing admin account (as opposed to adding/removing one entirely) doesn\'t get a plain-English description yet on some vendors — it still shows the raw technical view. Worth revisiting if this comes up in practice.',
+  ],
   '2.26.0': [
     'Fixed a real bug in Configuration Changes: removing one entry from the middle of a list (e.g. a user removed from a VPN group\'s member list) was being reported as a dozen-plus separate "modified" changes, because the diff only compared list positions, not values — a single removal shifted everyone after it down one slot and each shift looked like a change. It\'s now correctly reported as the one real removal.',
     'Configuration Changes now describes common changes in plain English (e.g. "Local user \'satish\' was removed", "Address object \'DMZ-WEB01\' was added") instead of showing only the raw internal path — currently covers local user/user-group and address/service object changes. The raw technical path is still available on hover for anyone who wants it, and anything not yet covered still shows exactly as before.',
