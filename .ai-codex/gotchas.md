@@ -231,12 +231,10 @@ product — `device_configs`/`config_backups`/`config_diffs` are `GRANT SELECT`'
 **Universal keyword pattern** (independently duplicated per adapter/file — NOT a shared module, by
 this codebase's own convention; keep every copy in step if you widen one):
 `secret | password | passwd | psk | pre[-_]?shared | private[-_]?key | phash | community | credential | token | api[-_]?key | keytab`
-— current canonical copies: `lib/adapters/forcepoint/parser.js` (`SECRET_KEY_PATTERN`),
-`lib/engines/configDiff.js` (`SECRET_PATH_PATTERN`, the widened/fixed version — includes `phash` and
-`pre[-_]?shared`, which a narrower `private[-_]?key`-only check does NOT match). Widen ALL copies
-together — `lib/adapters/checkpoint/parser.js`'s own `SECRET_KEY_PATTERN` is the OLDER, narrower
-form (missing `phash`/`pre-shared`/`keytab`) and should be checked against this list whenever any
-sibling copy changes.
+— current canonical copies, all now in step as of 2026-07-30: `lib/adapters/forcepoint/parser.js`,
+`lib/adapters/checkpoint/parser.js` (widened 2026-07-30 — used to be the one narrower, out-of-step
+copy, missing `phash`/`pre-shared`/`keytab`), and `lib/engines/configDiff.js`'s
+`SECRET_PATH_PATTERN`. Widen ALL copies together whenever any one changes.
 
 **Specific known secret-bearing fields, by vendor/format**:
 - **Palo Alto XML/API** (`lib/adapters/paloalto/parser.js` `SECRET_TAGS`): `phash`, `password`,

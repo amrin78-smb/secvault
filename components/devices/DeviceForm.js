@@ -22,7 +22,7 @@ const AUTH_MODE_OPTIONS = [
   { value: 'userpass', label: 'Username & Password' },
 ];
 
-// Add device form, driven by VENDOR_META (frozen Tier 1 vendor table).
+// Add/Edit device form, driven by VENDOR_META (frozen Tier 1 vendor table).
 //
 // Two independent axes, both sourced from VENDOR_META — do not conflate them:
 //   meta.connection  → PER VENDOR. 'smc' uses smc_host/smc_port, 'mgmt' uses
@@ -33,28 +33,64 @@ const AUTH_MODE_OPTIONS = [
 //                      mgmt_method and validated server-side against
 //                      VENDOR_META[vendor].accessMethods.
 //
-// Forcepoint keeps the original behavior: Save is only enabled once a
-// "Test Connectivity" call against POST /api/devices/test-smc has succeeded in this
-// session, and any change to a connection-relevant field invalidates the previous
-// test result so a stale "Connected" state can never be carried into Save.
-// Other vendors have no pre-save test endpoint yet, so Save is gated only on the
-// required fields being present.
-export default function DeviceForm({ onSubmit }) {
-  const [name, setName] = useState('');
-  const [vendor, setVendor] = useState('forcepoint');
-  const [accessMethod, setAccessMethod] = useState(VENDOR_META.forcepoint.defaultAccessMethod);
-  const [smcHost, setSmcHost] = useState('');
-  const [smcPort, setSmcPort] = useState('');
-  const [mgmtIp, setMgmtIp] = useState('');
-  const [mgmtPort, setMgmtPort] = useState('');
+// Forcepoint keeps the original behavior IN CREATE MODE: Save is only enabled
+// once a "Test Connectivity" call against POST /api/devices/test-smc has
+// succeeded in this session, and any change to a connection-relevant field
+// invalidates the previous test result so a stale "Connected" state can never
+// be carried into Save. Other vendors have no pre-save test endpoint yet, so
+// Save is gated only on the required fields being present. In EDIT MODE this
+// gate is skipped entirely (see `saveBlocked` below) — the device was already
+// tested when it was created/last edited, and forcing a fresh Test
+// Connectivity (which would need the stored secret retyped, since it never
+// comes back down to the browser) just to change something unrelated like
+// `site` would be an unreasonable tax on the common case.
+//
+// mode: 'create' | 'edit'. In 'edit' mode, `initialDevice` (the full devices
+// row) pre-fills every field, credential inputs are OPTIONAL (blank = "don't
+// touch the stored credential", mirroring how PUT /api/devices/[id] already
+// behaves — it only calls setCredential when credential/credential_type,
+// credential_profile_id, or smc_api_key is present in the body), and the
+// caller's `onSubmit` is expected to PUT rather than POST. This component
+// never picks the HTTP method or URL itself — same as create mode, that's the
+// caller's job (see app/(dashboard)/devices/new/page.js for create,
+// components/devices/EditDeviceModal.js for edit) — it only ever calls
+// `onSubmit(payload)`.
+export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = null }) {
+  const isEdit = Boolean(mode === 'edit' && initialDevice);
+
+  // Lazy initializers so pre-fill only ever runs once, on mount — this
+  // component is remounted (via a `key` prop) by EditDeviceModal every time
+  // the modal re-opens, rather than kept alive and re-synced, so there is no
+  // need to react to `initialDevice` changing after mount.
+  const [name, setName] = useState(() => (isEdit ? initialDevice.name || '' : ''));
+  const [vendor, setVendor] = useState(() => (isEdit ? initialDevice.vendor : 'forcepoint'));
+  const [accessMethod, setAccessMethod] = useState(() => {
+    if (isEdit) {
+      const resolved = resolveAccessMethod(initialDevice.vendor, initialDevice.mgmt_method);
+      return resolved ? resolved.method : VENDOR_META.forcepoint.defaultAccessMethod;
+    }
+    return VENDOR_META.forcepoint.defaultAccessMethod;
+  });
+  const [smcHost, setSmcHost] = useState(() => (isEdit ? initialDevice.smc_host || '' : ''));
+  const [smcPort, setSmcPort] = useState(() =>
+    isEdit && initialDevice.smc_port != null ? String(initialDevice.smc_port) : ''
+  );
+  const [mgmtIp, setMgmtIp] = useState(() => (isEdit ? initialDevice.mgmt_ip || '' : ''));
+  const [mgmtPort, setMgmtPort] = useState(() =>
+    isEdit && initialDevice.mgmt_port != null ? String(initialDevice.mgmt_port) : ''
+  );
   const [authMode, setAuthMode] = useState('apikey');
   const [secret, setSecret] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [enablePassword, setEnablePassword] = useState('');
-  const [allowSelfSignedSsl, setAllowSelfSignedSsl] = useState(true);
-  const [site, setSite] = useState('');
-  const [assetCriticality, setAssetCriticality] = useState('medium');
+  const [allowSelfSignedSsl, setAllowSelfSignedSsl] = useState(() =>
+    isEdit ? initialDevice.allow_self_signed_ssl !== false : true
+  );
+  const [site, setSite] = useState(() => (isEdit ? initialDevice.site || '' : ''));
+  const [assetCriticality, setAssetCriticality] = useState(() =>
+    isEdit ? initialDevice.asset_criticality || 'medium' : 'medium'
+  );
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // { ok, message, engineCount }
@@ -186,8 +222,10 @@ export default function DeviceForm({ onSubmit }) {
     }
   }
 
-  // Forcepoint keeps the test-before-save gate; other vendors can save directly.
-  const saveBlocked = isSmc ? !testResult?.ok : false;
+  // Forcepoint keeps the test-before-save gate in CREATE mode only; other
+  // vendors, and Forcepoint in EDIT mode, can save directly (see the header
+  // comment for why edit mode skips this).
+  const saveBlocked = isSmc && mode === 'create' ? !testResult?.ok : false;
 
   const credentialProvided = showSecretInput ? Boolean(secret) : Boolean(username && password);
 
@@ -398,6 +436,17 @@ export default function DeviceForm({ onSubmit }) {
         </div>
       )}
 
+      {/* Edit mode only: credential fields below are optional. Blank stays
+          blank all the way to PUT /api/devices/[id], which only rotates the
+          stored credential when `credential`/`credential_profile_id` is
+          actually present in the body — see `credentialProvided` in
+          handleSubmit below, unchanged from create mode. */}
+      {isEdit && !selectedProfileId && (
+        <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+          Leave the field{showSecretInput ? '' : 's'} below blank to keep the currently stored credential.
+        </p>
+      )}
+
       {!selectedProfileId &&
         (showSecretInput ? (
           <div className="form-field">
@@ -406,6 +455,7 @@ export default function DeviceForm({ onSubmit }) {
               id="device-secret"
               type="password"
               autoComplete="new-password"
+              placeholder={isEdit ? 'Leave blank to keep the existing credential' : undefined}
               value={secret}
               onChange={(e) => {
                 setSecret(e.target.value);
@@ -422,6 +472,7 @@ export default function DeviceForm({ onSubmit }) {
                 id="device-cred-username"
                 type="text"
                 autoComplete="off"
+                placeholder={isEdit ? 'Leave blank to keep existing' : undefined}
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value);
@@ -437,6 +488,7 @@ export default function DeviceForm({ onSubmit }) {
                 id="device-cred-password"
                 type="password"
                 autoComplete="new-password"
+                placeholder={isEdit ? 'Leave blank to keep existing' : undefined}
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);

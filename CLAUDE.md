@@ -277,11 +277,8 @@ Each adapter logs its raw response (`[<Vendor> Debug]` in `engine.log`) on first
 connections are a verification step, not a smoke test. Full verification history and confirmed
 field mappings: `.ai-codex/connectors.md` — check there before assuming a field name.
 
-**Known limitations (by design, not bugs)** — Fortinet/Sangfor SSH hit counts, Check Point
-multi-package gateway resolution, Palo Alto's Panorama-managed effective-policy fallback (and its
-live-verification status per transport): all detailed in `gotchas.md`'s Vendor adapters section.
-Shadow/redundant/reorder analysis is VDOM-aware as of 2026-07-30 (Fortinet only — see
-`gotchas.md`'s Rule analysis engine section); `network_objects` has no equivalent fix yet.
+**Known limitations (by design, not bugs)** — hit counts, gateway resolution, Panorama fallback,
+VDOM-aware analysis status: all detailed in `gotchas.md`'s Vendor adapters / Rule analysis sections.
 
 ---
 
@@ -571,9 +568,10 @@ Full component-level detail is in `.ai-codex/components.md` / `pages.md` — kep
 none of these carry Critical-Rules-level footguns.
 
 - **Fleet Alerts** (`/alerts`): cross-entity feed of finding/CVE/diff alerts, filterable via query params (`AlertsFilters`), per-row ack (`AlertAckControl`).
-- **VPN Summary**: per-device active session count + trend chart, polled every `VPN_POLL_INTERVAL_MINUTES`.
+- **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
-- **Admin Account Summary**: RBAC user list + CRUD, admin-only (`UsersPanel`).
+- **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.
+- **Admin Account Summary**: RBAC user list + CRUD, admin-only (`UsersPanel`) — SecVault's own users.
 - **Credential Profiles**: reusable named credential bundles, separate from per-device rotation, excluded from readonly grants same as `device_credentials`.
 - **SNMP Monitoring**: per-vendor CPU/memory/session metrics, `lowConfidence:true` when only generic MIB-II/HOST-RESOURCES-MIB support exists (no vendor MIB).
 - **Rule Reorder Recommendation**: `reorder_candidate` finding type, CSV export via `ReorderTab`.

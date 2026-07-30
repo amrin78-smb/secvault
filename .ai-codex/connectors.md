@@ -434,8 +434,10 @@ sends the enable password, waits for the prompt again. `terminal pager 0` is sen
 command to disable `--More--` pagination.
 
 **What is collected**: `testConnectivity`, `getVersion`, `getRules`, `getConfig`, `getObjects`,
-`getSnmpMetrics` all implemented. `getVpnSessionSummary` **not implemented** (only a minimal
-presence-only `webvpn.enabled` config field exists — see below).
+`getSnmpMetrics`, `getVpnSessionSummary` all implemented (the last one added 2026-07-30, `show
+vpn-sessiondb summary` — see the cross-vendor table above). `webvpn.enabled`/`webvpn.enabled_interface`
+(see quirk #7 below) remains a separate, minimal, presence-only config-level VPN signal — distinct
+from the live active-session count `getVpnSessionSummary` now provides.
 
 **Parsing entry point**: rules → `parser.js:parseAccessListConfig(text)` (iterates `access-list `
 lines from `show running-config access-list`, delegates single-ACE parsing to
@@ -520,7 +522,13 @@ via a shared `_tryCommands()` helper, since "Sangfor CLI syntax varies by firmwa
 `getSnmpMetrics` implemented. `getObjects()` **exists as a real function but is an unconditional
 empty-array stub** (see quirk below) — it IS callable (so `collectAndStore()`'s
 `typeof adapter.getObjects === 'function'` check is true), it just never attempts parsing.
-`getVpnSessionSummary` not implemented at all.
+`getVpnSessionSummary` not implemented at all — researched 2026-07-30 (Sangfor community forum,
+NGAF User Manuals v8.0.6/v8.0.35/v8.0.47): no documented CLI command for VPN/session state was
+found with reasonable confidence, and the v8.0.47 manual states the CONSOLE/CLI interface is
+"for development, test, and debugging only" — VPN and admin-account management are web-GUI-first
+by design on this vendor, a stronger and more specific reason than "just unverified yet" for why
+this vendor's CLI surface is less discoverable-by-documentation than Fortinet/Cisco/Palo Alto.
+Admin-account collection was researched on the same pass and skipped for the identical reason.
 
 **Parsing entry point**: rules → `parser.js:parseRulesFromConfig(text)` — two-pass: groups lines
 into blocks starting at a header regex (`policy`/`rule`, optionally prefixed
@@ -589,15 +597,24 @@ block, skipping blocks with no recognizable action keyword. Config `parsed` →
 
 | Vendor | Transport(s) | credential_type | testConn | getVersion | getRules | getConfig | getObjects | getSnmpMetrics | getVpnSessionSummary | getRules() [] on failure? |
 |---|---|---|---|---|---|---|---|---|---|---|
-| forcepoint | SMC REST | `smc_api` (raw string) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (SMC-bypass exception) | ✗ | never — throws |
+| forcepoint | SMC REST | `smc_api` (raw string) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (SMC-bypass exception) | ✗ (researched 2026-07-30 — no SMC monitoring endpoint found) | never — throws |
 | fortinet | REST + SSH | `rest_api` / `ssh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | never — throws |
-| paloalto | XML API + SSH | `rest_api` / `ssh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | never — throws (SSH has a Panorama fallback before throwing) |
-| checkpoint | Mgmt API | `rest_api` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (Phase 2) | ✗ | never — throws |
-| cisco_asa | SSH | `ssh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (presence-only `webvpn.enabled` in config only) | never — throws |
-| sangfor | SSH | `ssh` | ✓ | ✓ | ✓ | ✓ | stub (always empty) | ✓ (MIB-II/HR-MIB only) | ✗ | never — throws |
+| paloalto | XML API + SSH | `rest_api` / `ssh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (added 2026-07-30, GlobalProtect current-user only, both transports — doc-derived) | never — throws (SSH has a Panorama fallback before throwing) |
+| checkpoint | Mgmt API | `rest_api` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (added 2026-07-30, generic MIB-II/HR-MIB only, `snmp_host` required, no mgmt_ip fallback — same exception class as Forcepoint) | ✗ (researched 2026-07-30 — Management API has no VPN tunnel/session-status endpoint at all; live state needs SmartView Monitor/Log Server/gateway access this adapter doesn't have) | never — throws |
+| cisco_asa | SSH | `ssh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (added 2026-07-30, `show vpn-sessiondb summary`, sums each VPN-type row's Active column — doc-derived, not live-verified) | never — throws |
+| sangfor | SSH | `ssh` | ✓ | ✓ | ✓ | ✓ | stub (always empty) | ✓ (MIB-II/HR-MIB only) | ✗ (researched 2026-07-30 — no documented Sangfor CLI surface found with reasonable confidence; VPN/admin management is web-GUI-first per Sangfor's own manual) | never — throws |
 
 All 6 vendors additionally use a SEPARATE `credential_type='snmp'` for `getSnmpMetrics()`, never
 mixed with the management-plane credential.
+
+**`getConfig()` config_parsed additions (2026-07-30)**: Check Point now includes `administrators`
+(`show-administrators`, doc-derived) alongside `{gateway, api_versions}`. Forcepoint now includes
+`smc_vpn_gateway_configured` (tri-state, from the engine element's `internal_gateway` field) and
+`smc_administrators` (SMC-wide admin list) alongside the existing engine-element shape — both
+`smc_`-prefixed to avoid colliding with a real unprefixed field on the spread engine element, both
+independently try/caught (a fetch failure degrades that one field to `null`/absent, never fails the
+whole collect). Both vendors' new admin-account data flows through the same redaction pass as the
+rest of their config before being persisted.
 
 ## CLAUDE.md contradictions / staleness found
 

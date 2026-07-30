@@ -15,6 +15,7 @@ import StatCard from '../../../../components/ui/StatCard';
 import CVETable from '../../../../components/cve/CVETable';
 import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
+import EditDeviceModal from '../../../../components/devices/EditDeviceModal';
 import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
 import { detectSnmpConfig, looksConfigured } from '../../../../lib/engines/snmpConfigDetection';
 import OverviewCveCard from '../../../../components/devices/OverviewCveCard';
@@ -643,6 +644,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <DeviceActions deviceId={device.id} />
+              <EditDeviceModal device={device} />
               <Link href={`/devices/${device.id}?tab=manage&confirmDelete=1`} className="btn btn-danger">
                 Delete
               </Link>

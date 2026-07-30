@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.25.0': [
+    'Devices can now be edited (name, vendor, access method, address/port, self-signed SSL, site, criticality) directly from a device\'s Manage tab — previously only credential rotation was available; changing other details required going through the API directly.',
+    'VPN active-session monitoring now covers Cisco ASA and Palo Alto (GlobalProtect) in addition to Fortinet.',
+    'Check Point now has SNMP monitoring (CPU/memory/uptime) alongside the other five vendors.',
+    'The per-device "Admins" tab (local firewall admin accounts) now covers Check Point and Forcepoint in addition to Fortinet/Palo Alto/Cisco ASA.',
+    'Forcepoint\'s config collection now detects whether a VPN gateway is configured on the engine, feeding the VPN Summary page for that vendor.',
+    'Sangfor and Check Point VPN-session polling and Sangfor admin-account collection were investigated and intentionally not added — no reliably documented data source could be confirmed for either, and this app never guesses at unverified vendor behavior.',
+  ],
   '2.24.0': [
     'Fixed a real false-positive bug in Rule Analysis on multi-VDOM Fortinet devices: two identical rules living in different VDOMs on the same firewall could be flagged as "shadow"/"redundant"/etc. against each other, even though VDOMs are independent rule-processing contexts. Rules are now tracked per-VDOM, so this cross-VDOM false-positive can no longer happen (single-VDOM devices and every other vendor are unaffected).',
     'Added a daily cleanup job for VPN session and SNMP metric history so those tables no longer grow unbounded — configurable via the new SNMP_VPN_RETENTION_DAYS setting (default 180 days).',
