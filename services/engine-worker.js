@@ -220,6 +220,24 @@ function getSnmpPollIntervalMinutes() {
   return fallback;
 }
 
+// Retention for vpn_session_snapshots/snmp_metric_snapshots (added 2026-07-30
+// — see lib/schema.sql's "no retention/cleanup job yet" notes on both
+// tables). Day-granularity, not hour/minute like the poll jobs above — this
+// is a housekeeping job, not a data-freshness one.
+function getSnapshotRetentionDays() {
+  const fallback = 180;
+  const raw = parseInt(process.env.SNMP_VPN_RETENTION_DAYS, 10);
+  if (Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (process.env.SNMP_VPN_RETENTION_DAYS) {
+    logger.warn(
+      `SNMP_VPN_RETENTION_DAYS value "${process.env.SNMP_VPN_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Job bodies — each independently try/catch'd. A single job failure must
 // never crash the process or stop future scheduled runs.
@@ -502,6 +520,44 @@ async function runDashboardSnapshotJob() {
   }
 }
 
+// Snapshot retention — deletes rows older than getSnapshotRetentionDays() from
+// vpn_session_snapshots and snmp_metric_snapshots (see lib/schema.sql's
+// comments on both tables — this closes the "no retention/cleanup job yet"
+// gap noted there). Pure query-only work, same "no in-flight guard needed"
+// reasoning as runDashboardSnapshotJob — it never opens a per-device SSH/REST
+// session, so it can't contend with rule-version-pull/vpn-session-poll/
+// snmp-poll for a device connection. Each table's DELETE is independently
+// try/caught so one table's failure doesn't block the other's cleanup.
+async function runSnapshotRetentionJob() {
+  const start = Date.now();
+  const retentionDays = getSnapshotRetentionDays();
+  logger.info(`Job [snapshot-retention] starting (retention: ${retentionDays}d).`);
+  let vpnDeleted = 0;
+  let snmpDeleted = 0;
+  try {
+    const vpnResult = await pool.query(
+      `DELETE FROM vpn_session_snapshots WHERE sampled_at < now() - ($1 || ' days')::interval`,
+      [retentionDays]
+    );
+    vpnDeleted = vpnResult.rowCount || 0;
+  } catch (err) {
+    logger.error(`Job [snapshot-retention] vpn_session_snapshots cleanup failed: ${err.stack || err.message}`);
+  }
+  try {
+    const snmpResult = await pool.query(
+      `DELETE FROM snmp_metric_snapshots WHERE sampled_at < now() - ($1 || ' days')::interval`,
+      [retentionDays]
+    );
+    snmpDeleted = snmpResult.rowCount || 0;
+  } catch (err) {
+    logger.error(`Job [snapshot-retention] snmp_metric_snapshots cleanup failed: ${err.stack || err.message}`);
+  }
+  const durationMs = Date.now() - start;
+  logger.info(
+    `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s).`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
@@ -598,7 +654,17 @@ async function scheduleJobs() {
     runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
   });
 
-  scheduledTasks = [feedTask, configTask, vpnTask, snmpTask, dashboardSnapshotTask];
+  // Fixed daily time (00:30 UTC, offset from dashboard-snapshot above so the
+  // two don't tick at the exact same second) — same "housekeeping, not
+  // freshness" reasoning as dashboard-snapshot for why this isn't a
+  // configurable interval.
+  logger.info('Scheduling [snapshot-retention] with cron "30 0 * * *" (daily).');
+  const snapshotRetentionTask = cron.schedule('30 0 * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
+  });
+
+  scheduledTasks = [feedTask, configTask, vpnTask, snmpTask, dashboardSnapshotTask, snapshotRetentionTask];
 }
 
 async function main() {

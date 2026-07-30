@@ -176,11 +176,11 @@ last_hit_at       TIMESTAMPTZ                                -- NEVER populated 
 bytes_transferred BIGINT NOT NULL DEFAULT 0
 collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 raw_rule          JSONB
+vdom              TEXT                                       -- NULL except Fortinet (added 2026-07-30, both transports). See ruleAnalysis.js's isStrictlyEarlier().
 ```
 Indexes: `idx_firewall_rules_device_id`, `idx_firewall_rules_device_seq(device_id, sequence_number)`.
 **FULLY DELETE+reinserted on every collect (every 24h by default)** — every downstream table keying
 on `firewall_rules.id` inherits this churn (see rule_analysis_results/object_analysis_results below).
-No VDOM column — shadow analysis is NOT VDOM-aware (known gap, see Known schema debt).
 
 ### zone_classifications
 ```
@@ -507,12 +507,14 @@ Indexes: `idx_feed_sync_log_feed_name`, `idx_feed_sync_log_started_at`.
   global-scoped row is unconditionally discarded (`device_id IS NULL` rows deleted) rather than
   migrated — there's no way to attribute a legacy zone_name row to a specific device, and every row on
   the one deployment checked was still "Unclassified" at the time.
-- **No VDOM column on `firewall_rules` or `network_objects`.** `ruleAnalysis.js`'s shadow/redundant/
-  correlation/reorder_candidate analysis orders by `sequence_number` per *device* with no VDOM
-  dimension — identical rules in different Fortinet VDOMs can false-positive as `shadow`. Fixing this
-  needs a real schema change (a VDOM column), not just an engine fix — flagged, not done.
-  `network_objects` has the identical gap: a same-named object across two VDOMs on the same device
-  silently collapses to whichever was collected last.
+- **`firewall_rules.vdom` fixed 2026-07-30; `network_objects` still has the identical gap, not
+  fixed.** `ruleAnalysis.js`'s shadow/redundant/correlation/generalization/reorder_candidate analysis
+  now partitions by `(device_id, vdom)` via `isStrictlyEarlier()`, closing the false-positive-
+  across-Fortinet-VDOMs bug. `network_objects` has no `vdom` column and no equivalent engine fix — a
+  same-named object collected from two different VDOMs on the same device still silently collapses
+  to whichever was inserted last. Real, separate, still-open debt — fixing it needs both a schema
+  change AND fixing whatever downstream name-based object resolution (`objectUsage.js`,
+  `reachabilityMatrix.js`) currently assumes one name = one object per device.
 - **`finding_acknowledgements` is keyed on `(device_id, rule_id_vendor, finding_type)`, a natural key,
   not a UUID FK to `firewall_rules.id`/`rule_analysis_results.id`.** Deliberate: both parent tables are
   fully DELETE+reinserted on every pull/run (`firewall_rules` every 24h collect, `rule_analysis_results`

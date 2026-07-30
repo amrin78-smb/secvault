@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.24.0': [
+    'Fixed a real false-positive bug in Rule Analysis on multi-VDOM Fortinet devices: two identical rules living in different VDOMs on the same firewall could be flagged as "shadow"/"redundant"/etc. against each other, even though VDOMs are independent rule-processing contexts. Rules are now tracked per-VDOM, so this cross-VDOM false-positive can no longer happen (single-VDOM devices and every other vendor are unaffected).',
+    'Added a daily cleanup job for VPN session and SNMP metric history so those tables no longer grow unbounded — configurable via the new SNMP_VPN_RETENTION_DAYS setting (default 180 days).',
+  ],
   '2.23.4': [
     'Fixed a real bug in today\'s Panorama-managed-firewall fix: a device whose local config has an empty (but present) rulebase section was still skipping the fallback that reads the actual merged policy, silently wiping its stored rules instead. Devices affected by this would have shown 0 rules after a Collect Now since the last update — a re-collect after this update will restore them.',
     'Fixed two real CVE-matching gaps found while double-checking today\'s NVD version-matching fix: a Check Point-specific bug that silently undid the fix for that vendor, and a separate case (an unusual version string with two dots in a row) that could have flipped a comparison result for any vendor.',

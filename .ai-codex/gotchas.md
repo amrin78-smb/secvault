@@ -88,6 +88,12 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   (not `schema.sql`'s own `CREATE TABLE` body) breaks every upgrading server, because `schema.sql`
   always runs before any JS migration in `migrate.js`'s `main()`. Any DDL for a JS-migration-added
   column belongs IN that JS migration, issued after the column-adding step, never in `schema.sql`.
+- Windows Server tool paths are fixed, not on `PATH` by default: `psql.exe` at
+  `C:\Program Files\PostgreSQL\16\bin\psql.exe`, `git.exe` at `C:\Program Files\Git\cmd\git.exe`,
+  `nssm.exe` at `C:\Windows\System32\nssm.exe`. PowerShell script paths must use `\`, not `/`.
+- `psql` invoked from PowerShell/WinRM can return exit code `-1` even when the command actually
+  succeeded (output went to stderr, not a real failure) — accept `-1` as success for schema
+  migration steps. Set `$env:PGPASSWORD` before calling `psql` for unattended execution.
 
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
@@ -127,6 +133,9 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - Sangfor has no live device, no documentation trail — every field mapping is doc-derived and
   explicitly marked low-confidence; `getObjects()` deliberately returns an empty stub rather than
   guess at unverified block syntax.
+- Fortinet/Sangfor over SSH report `hit_count: 0` on every rule (by design, not a bug) — Phase 5
+  flags every rule `unused` as a result. Use Fortinet's REST method instead if unused-rule findings
+  need to be trustworthy.
 
 ## CVE pipeline (see cve-pipeline.md for the full flow)
 - NVD wildcard CPE queries need `virtualMatchString`, never `cpeName` — `cpeName` 404s on wildcard
@@ -192,6 +201,12 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   every time a new `rule_analysis_results.finding_type` value is introduced.
 - Shadow/redundant/reorder analysis is O(n²) and skipped entirely above 1000 rules (warning logged,
   not silently truncated).
+- Shadow/redundant/correlation/generalization/reorder_candidate analysis is VDOM-aware as of
+  2026-07-30 — `firewall_rules.vdom` (new column, Fortinet-only, both transports) plus
+  `isStrictlyEarlier()` treating any pair with differing `vdom` values as never comparable, closing
+  the false-positive-across-VDOMs bug this used to have. `network_objects` has NO equivalent fix —
+  an identically-named object collected from two different VDOMs on the same device still silently
+  collapses to whichever was inserted last; a real, separate, still-open gap.
 - `riskScore.js`'s `computeRiskScoreFromCounts()` caps each severity tier's contribution
   INDEPENDENTLY before summing (critical 40/high 30/medium 20/info 10) — do NOT revert this to a
   single "sum everything then clamp the total to 100" formula. That was the actual shipped

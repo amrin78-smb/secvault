@@ -16,6 +16,7 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/cve-pipeline.md`   — CVE source -> assessment flow
 - `.ai-codex/components.md`     — component index
 - `.ai-codex/gotchas.md`        — footguns and redaction rules
+- `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 
 ### Maintaining the index — MANDATORY
 
@@ -26,14 +27,13 @@ point as the version bump, don't defer it:
 
 route → routes.md · page → pages.md · lib export → lib.md · schema/migration → schema.md · vendor
 connector auth/parsing/quirks → connectors.md · CVE source/matching/clearing logic → cve-pipeline.md
-· component added/removed/props changed → components.md · new footgun or redaction field →
-gotchas.md
+· compliance check/predicate logic → compliance-pipeline.md · component added/removed/props changed
+→ components.md · new footgun or redaction field → gotchas.md
 
-This file (CLAUDE.md) is the durable-rules/architecture document. It is NOT a
-changelog — do not add dated incident narrative here going forward; put durable
-lessons in the matching `.ai-codex/*.md` file instead. (This file was trimmed
-2026-07-30 from ~5,800 lines of accumulated bug-sweep narrative down to this;
-the full history is still in git log / `.ai-codex/gotchas.md` if ever needed.)
+This file (CLAUDE.md) is the durable-rules/architecture document. It is NOT a changelog — do not
+add dated incident narrative here; put durable lessons in the matching `.ai-codex/*.md` file instead.
+Trimmed twice on 2026-07-30 (once from ~5,800 lines, again to move detail already duplicated in
+`.ai-codex/` out of here) — full history in git log if needed.
 
 ---
 
@@ -201,12 +201,7 @@ grants same as `device_credentials`).
 
 Two readonly users exist for Claude Code to query the live DB directly: `claude_readonly` and `nocvault_readonly` (same password, `ClaudeRead@2026!`).
 
-**These users must NEVER have access to `device_credentials`.** Grant per-table explicitly, in `lib/schema-grants.sql` — **NOT** in `lib/schema.sql`:
-```sql
-GRANT SELECT ON TABLE new_table_name TO claude_readonly;
-GRANT SELECT ON TABLE new_table_name TO nocvault_readonly;
--- Exception: device_credentials — NEVER grant to these users
-```
+**These users must NEVER have access to `device_credentials`.** Grant per-table explicitly, in `lib/schema-grants.sql` — **NOT** in `lib/schema.sql`: `GRANT SELECT ON TABLE new_table_name TO claude_readonly;` (and identically to `nocvault_readonly`), never a blanket `ON ALL TABLES`.
 **Second exception: `settings`, granted via a `settings_readonly` VIEW, never the base table** — it stores the local admin's bcrypt hash under `key='admin_password_hash'`; a blanket table grant let readonly roles read it via raw SQL even though the app's `HIDDEN_KEYS` filter hid it from HTTP. Any future secret-bearing row added to `settings` needs the same treatment. `users` gets the identical treatment (`users_readonly` view, excludes `password_hash`).
 
 ---
@@ -271,8 +266,7 @@ string as an api-key — deliberate backward compatibility, don't remove it.
 #### Dispatch rules
 - **Adapters implement ONLY the FirewallAdapter interface** (testConnectivity/getVersion/getRules/getConfig) — the shared persistence pipeline lives ONCE in `lib/adapters/index.js` (`collectAndStore`), never copied into a vendor folder. New vendor = adapter folder + `ADAPTERS`/`DEFAULT_METHOD` + `VENDOR_PARSERS` + `VENDOR_CPES` + `VENDOR_META` entries.
 - **`getRules()` must THROW, never return `[]`, on a retrieval failure** (see Critical Rules above).
-- **Check Point: never pick a policy package positionally** — one mgmt server can manage many gateways with different packages, `packages[0]` can store *another device's* rules. Resolution order: gateway's own installed policy → its installation-targets → the only package if exactly one → throw, naming candidates.
-- **Fortinet: collect every VDOM, or fail** — requests without `?vdom=` silently return only the default VDOM; a partial VDOM failure should throw, not return the rest.
+- **Check Point: never pick a policy package positionally** (`packages[0]` was a real, fixed bug) and **Fortinet: collect every VDOM or fail** (a partial VDOM failure must throw, not return the rest) — both detailed in `gotchas.md`'s Vendor adapters section.
 - SSH vendors share `lib/adapters/sshClient.js` (legacy algorithm compat for old ASA images) — don't open raw ssh2 connections in adapters. `mgmt_port` is nullable, each adapter applies its own default (443 API / 22 SSH / 8082 SMC).
 - `advisories.cve_id` is UNIQUE with a single `vendor` — a CVE affecting two vendors stays with
   whichever ingested it first.
@@ -283,11 +277,11 @@ Each adapter logs its raw response (`[<Vendor> Debug]` in `engine.log`) on first
 connections are a verification step, not a smoke test. Full verification history and confirmed
 field mappings: `.ai-codex/connectors.md` — check there before assuming a field name.
 
-**Known limitations (by design, not bugs):**
-- **Fortinet/Sangfor over SSH have no hit counts** — every rule reports `hit_count: 0`, so Phase 5 flags every rule `unused`. Use Fortinet's REST method if unused-rule findings matter.
-- **Shadow analysis is not VDOM-aware** — identical rules in different Fortinet VDOMs can false-positive as `shadow`.
-- **Check Point distributed deployment**: gateway identity rests on `devices.name` matching the gateway object's name; a multi-package mgmt server hard-fails (naming candidates) rather than guessing.
-- **Palo Alto, Panorama-managed with no local rulebase**: falls back to merged effective policy (`show running security-policy`); on this path `enabled`/`log_enabled` are always `true`, `hit_count` always `0`, NAT/schedule/expiry/comment always false/null. Doc-derived, not live-verified — prefer SSH for Panorama-managed devices until confirmed.
+**Known limitations (by design, not bugs)** — Fortinet/Sangfor SSH hit counts, Check Point
+multi-package gateway resolution, Palo Alto's Panorama-managed effective-policy fallback (and its
+live-verification status per transport): all detailed in `gotchas.md`'s Vendor adapters section.
+Shadow/redundant/reorder analysis is VDOM-aware as of 2026-07-30 (Fortinet only — see
+`gotchas.md`'s Rule analysis engine section); `network_objects` has no equivalent fix yet.
 
 ---
 
@@ -336,13 +330,20 @@ Asset criticality modifier (apply after base band):
 
 ### Applicability Tri-State Default
 
-When no `advisory_conditions` predicate exists for an advisory, `config_applies` = `'unknown'` (never `'no'`). "No usable config" includes an EMPTY object, not just null (`hasUsableConfig()`) — `{}`, a non-object, and an array all mean the config pull produced nothing interrogable; an adapter meeting an unexpected live shape can return `{}`, so this is a real reachable failure, not a hypothetical one. Without the guard, a KEV-listed CVE would be silently downgraded from `patch_now` to `monitor`.
+See Critical Rules above for the core "never collapse `unknown` to `no`" rule. Specifics not covered
+there: no `advisory_conditions` row for an advisory → `config_applies = 'unknown'`. "No usable
+config" (`hasUsableConfig()`) also means an EMPTY object, not just null/non-object/array — a real
+reachable failure (an adapter meeting an unexpected live shape can return `{}`), not a hypothetical
+one.
 
-Predicate types: `config_key_exists` / `config_value_equals` / `config_value_matches` (path missing → `'no'`), `feature_enabled`, `port_exposed` / `admin_access_from_zone` (not found → `'unknown'`). Conditions for an advisory are ANDed: any `'no'` → `'no'`; else any `'unknown'` → `'unknown'`; else `'yes'`. `evaluatePredicate()` never throws — internal errors resolve to `'unknown'`. A third predicate type, `ruleset_property`, exists only in the Compliance Engine's `configAuditor.js` (reads `firewall_rules` directly). Conditions are DATA in `advisory_conditions`, not code — new CVE conditions are new DB rows via `/advisories/[cveId]/conditions`.
+Predicate types: `config_key_exists` / `config_value_equals` / `config_value_matches` (path missing → `'no'`), `feature_enabled`, `port_exposed` / `admin_access_from_zone` (not found → `'unknown'`). Conditions for an advisory are ANDed: any `'no'` → `'no'`; else any `'unknown'` → `'unknown'`; else `'yes'`. `evaluatePredicate()` never throws — internal errors resolve to `'unknown'`. A third predicate type, `ruleset_property`, exists only in the Compliance Engine. Conditions are DATA (new CVE conditions are new DB rows via `/advisories/[cveId]/conditions`), not code.
 
 ### ⛔ Stored configs are REDACTED — do not "fix" this
 
-Adapters retrieving a full text config (`cisco_asa`, `sangfor`) run it through a fail-closed redactor before persisting, so secrets never reach `device_configs.config_raw` / `config_backups.config_raw` — tables `GRANT SELECT`'d to the same readonly roles barred from `device_credentials`. Redaction is deterministic (never causes spurious diffs) and irrelevant to diffing (`configDiff.js` diffs `config_parsed`, never `config_raw`). Any new adapter returning a raw text config MUST redact before returning from `getConfig()`.
+See Critical Rules above for the requirement; full per-vendor redacted-field list, the universal
+keyword pattern (and its per-file duplication convention), and the database-level exclusions are in
+`.ai-codex/gotchas.md`'s Redaction rules section — read that before touching any adapter's config
+retrieval or `configDiff.js`.
 
 Rule analysis (10 finding types), the risk-scoring dashboard, cleanup/optimization/reorder tabs, risk trend history, and config-diff classification/redaction internals are documented in `.ai-codex/cve-pipeline.md` / `lib.md` / `gotchas.md` — read those before touching `lib/engines/ruleAnalysis.js`, `riskScore.js`, or `configDiff.js`.
 
@@ -350,23 +351,15 @@ Rule analysis (10 finding types), the risk-scoring dashboard, cleanup/optimizati
 
 ## Compliance Engine (Phase 7 — `/compliance`)
 
-Reuses `applicability.js`'s predicate evaluator (`evaluatePredicate`/`hasUsableConfig`) — compliance checks and CVE-applicability conditions both "evaluate a predicate against `device_configs.config_parsed`," for different purposes.
+Full stage-by-stage mechanics (seed library, all three predicate-evaluation shapes, write/trigger/
+score flow) live in `.ai-codex/compliance-pipeline.md` — this section keeps only what must not
+drift without updating this file first.
 
-### The tri-state → four-state polarity problem
+Reuses `applicability.js`'s predicate evaluator (`evaluatePredicate`/`hasUsableConfig`) — compliance checks and CVE-applicability conditions both "evaluate a predicate against `device_configs.config_parsed`," for different purposes. `evaluatePredicate()` only returns `yes`/`no`/`unknown` — a compliance check needs a fourth state (`pass`/`fail`/`warning`/`na`), and different checks need **opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `yes`=PASS; `admin_access_from_zone` on the WAN zone wants `yes`=FAIL). Resolved via each check's `pass_when: 'yes'|'no'`: predicate `unknown` → `warning`; result `=== pass_when` → `pass`, else `fail`; no usable config at all → `na`; **`pass_when` missing or not exactly `yes`/`no`** → `warning`, never a silent default polarity (a curated-data bug, not a device problem).
 
-`evaluatePredicate()` returns `yes`/`no`/`unknown` with no concept of "good." A compliance check needs four states (`pass`/`fail`/`warning`/`na`), and different checks need **opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `yes`=PASS; `admin_access_from_zone` on the WAN zone wants `yes`=FAIL). Resolved via `pass_when: 'yes'|'no'`, evaluated by `configAuditor.js`'s `evaluateCheck()`: no usable config → `na` for every check on that device; predicate `unknown` → `warning`; result `=== pass_when` → `pass`, else `fail`; **`pass_when` missing or not exactly `yes`/`no`** → `warning`, never a silent default polarity (a curated-data bug, not a device problem).
+A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **45 checks** — recount via `grep -c "checkId:"` if you touch that file, it has drifted before.
 
-### A third predicate type — `ruleset_property`
-
-Two checks ("explicit deny-all rule present", "unwanted ICMP blocked") are positive existence questions across the whole ruleset, evaluated entirely inside `configAuditor.js` (reads `firewall_rules` directly). `predicate_config: {predicate_type: 'ruleset_property', property: 'has_explicit_deny_all' | 'blocks_icmp'}`, `vendor: null` (fleet-wide). `audit_checks.standards` is `TEXT[]` (a check can score against multiple standards — plain array, avoids a join table, same tradeoff as `advisories.cwe_ids`).
-
-### Seed library — `lib/auditChecksSeed.js`
-
-**Current count: 45 checks** (`grep -c "checkId:" lib/auditChecksSeed.js` — recount directly if you touch it, this has drifted before). Idempotent seed (`ON CONFLICT (check_id) DO UPDATE`) called unguarded from `migrate.js`'s `main()` — a seed failure means zero compliance checks, which should fail the migrate run loudly. A handful of checks are `predicate_type: 'not_evaluable_from_config'` (deliberate honest degradation — falls through to `unknown`/`warning` rather than guessing a path the adapter doesn't collect; see the file's header comment for which checks are structurally not evaluable vs. just not yet wired up).
-
-### Engine + API
-
-`runComplianceAuditForDevice(deviceId, pool)` mirrors `runAnalysisForDevice()`'s shape: load device + latest `config_parsed` + applicable checks, evaluate, DELETE+reinsert `audit_findings` in one transaction. Runs automatically in `collectAndStore` after the config-diff block; also on-demand via `POST /api/compliance/[deviceId]/run`. `scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
+`scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
 
 ---
 
@@ -374,12 +367,7 @@ Two checks ("explicit deny-all rule present", "unwanted ICMP blocked") are posit
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
 
-`lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then:
-```javascript
-const session = await getServerSession(authOptions);
-if (!isAdmin(session)) return forbiddenResponse();
-```
-Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
+`lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then checks `if (!isAdmin(session)) return forbiddenResponse();`. Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
 
 **LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
 
@@ -396,11 +384,7 @@ Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never ga
 
 Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV. Each feed's failure is isolated (its own try/catch) and never blocks the next; each gets its own `feed_sync_log` row.
 
-**NVD → CIRCL fallback** (`vulnerability.circl.lu`) triggers ONLY on a true network-level failure (`err.status == null` — timeout/DNS/connection refused); any NVD HTTP response (429/403/5xx) does NOT trigger it, NVD stays primary. Endpoint: `GET /api/vulnerability/search/{vendor}/{product}` (NOT `/api/query`/`cpesearch`), `per_page` clamped at 100, no API key needed. `FETCH_TIMEOUT_MS = 20000` on every NVD call.
-
-### Exact mechanics (condensed — full detail in `.ai-codex/cve-pipeline.md`)
-**Palo Alto**: only the beta bulk endpoint (`GET /api/v1/products/PAN-OS/advisories`) — the `/json` endpoints return just the 25 most recent bulletins with no valid CVSS vector. `metrics[]` cascade `cvssV4_0 → cvssV3_1 → cvssV3_0`, first match wins, not highest score.
-**Fortinet**: RSS is discovery-only; CSAF 2.0 JSON (via the advisory page's `csaf_url=` param) is the real structured source, HTML scrape only as fallback. **1-second delay required between advisory fetches** — real sequential loop, never `Promise.all`.
+**NVD → CIRCL fallback** (`vulnerability.circl.lu`) triggers ONLY on a true network-level failure (`err.status == null` — timeout/DNS/connection refused), never on an NVD HTTP error response. `FETCH_TIMEOUT_MS = 20000` on every feed call. Full triggering condition, endpoint, and per-vendor fetch quirks (Palo Alto's beta-bulk-endpoint-only rule, Fortinet's CSAF-over-RSS + 1-second inter-fetch delay): `.ai-codex/cve-pipeline.md`, stages 1-2.
 
 ---
 
@@ -418,6 +402,10 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Rule analysis (Phase 5) | After each rule pull | (inside `collectAndStore`) |
 | Config diff + auto backup (Phase 6) | After each config pull | (inside `collectAndStore`) |
 | CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
+| VPN session poll (vendors with `getVpnSessionSummary()`) | 5-59 min | `VPN_POLL_INTERVAL_MINUTES` |
+| SNMP metric poll (vendors with `getSnmpMetrics()`, `snmp_enabled` devices) | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
+| Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
+| Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
 
 ### Reliability Rules (learned from LogVault collector)
 
@@ -435,10 +423,11 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 repo) — it doesn't assume any are already on the target server. Gitignored except `README.txt`;
 copy from the existing NocVault-Suite distribution package. NSSM is extracted to
 `C:\Apps\SecVault\nssm\nssm-2.24\win64\nssm.exe` — always this exact path, never assumed on `PATH`.
-`secvault_deploy` is copied to `%USERPROFILE%\.ssh\`, pinned via SSH config with an absolute
-`IdentityFile` path, `known_hosts` pre-seeded via `ssh-keyscan`, and auth tested (`ssh -T
-git@github.com`, text-match on `successfully authenticated` since GitHub's `-T` handshake always
-exits non-zero) before `git clone`.
+`secvault_deploy` is copied to **both** `%USERPROFILE%\.ssh\` (the installing admin's own profile —
+pinned via SSH config, `known_hosts` pre-seeded, auth-tested before `git clone`) **and**
+`C:\ProgramData\SecVault\ssh\` machine-wide, since the SYSTEM-scheduled update task (below) runs
+under a different profile than whoever installed. Both copies must exist — see `gotchas.md`'s Deploy
+section.
 
 ### Update Script — Exact Order (do not change without testing)
 
@@ -466,9 +455,7 @@ Step 5b re-runs `schema-grants.sql` unconditionally (idempotent) using `PG_ADMIN
 & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production"
 ```
 
-**⚠️ `AppEnvironmentExtra` path casing must match the filesystem exactly** — wrong casing causes duplicate React instances and silent rendering failures.
-
-**⚠️ Never point `AppParameters` at `node_modules\.bin\next`** — npm's generated POSIX shell-script wrapper (actual bash, not JS); `node` tries to parse it as JS and crashes with `SyntaxError` on every start. NSSM marks the service `Paused` after enough rapid failures, but `sc.exe start` still reports success (it only confirms the SCM accepted the request, not that the process stayed up) — install can complete and print success while the app never comes up. Use `node_modules\next\dist\bin\next`, the real JS entry point.
+**⚠️ `AppEnvironmentExtra` casing and `AppParameters` target are both load-bearing** — wrong path casing causes duplicate React instances and silent rendering failures; pointing at `node_modules\.bin\next` (npm's POSIX shell wrapper, not JS) crashes on every start while `sc.exe start` still reports success. Full explanation of both: `gotchas.md`'s Services section. Always use `node_modules\next\dist\bin\next`.
 
 Uninstall removes services via `sc.exe delete` — no NSSM path needed.
 
@@ -499,9 +486,9 @@ as "recovered"; 3 consecutive healthy probes required), then compares `current_c
 success vs. `verify_failed`.
 
 **Past silent-no-op git pull, root cause**: `core.sshCommand` is interpreted by git's bundled MSYS2
-shell, which treats backslash as an escape character — silently eats Windows path backslashes before
-ssh sees them. Fix: use forward slashes when building `sshCommand`. Testing `ssh` by hand does NOT
-exercise this (bypasses `core.sshCommand`) — verify via the real scheduled task.
+shell, which silently eats Windows path backslashes — build it with forward slashes only. Testing
+`ssh` by hand does NOT exercise this (bypasses `core.sshCommand`). Full detail: `gotchas.md`'s Deploy
+section.
 
 ---
 
@@ -538,6 +525,8 @@ FEED_POLL_INTERVAL_HOURS=6
 CONFIG_PULL_INTERVAL_HOURS=24
 NVD_API_KEY=                               # Optional — increases NVD rate limit
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
+SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
+SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -576,15 +565,6 @@ are byte-for-byte identical on tokens; SecVault ports the same `app/globals.css`
 
 ---
 
-## Adapted Patterns From NocVault Suite
-
-- **DDIVault**: credStore.js AES-256-GCM pattern (own `CREDENTIAL_KEY`); PS5 rules; three-service NSSM architecture; `pg` pool singleton passed as parameter.
-- **SpanVault**: pre-commit `node --check`+`npm run build`; migration before restart; live API verification before writing a parser; parallel sub-agent strategy (frozen contracts); per-table `GRANT SELECT`.
-- **LogVault**: engine job isolation; durable spool pattern for a future collector; `winston` daily rotation; hot/warm/archive retention tiers; collect-raw → enrich-async → store-enriched pipeline.
-- **NetVault**: UUID PKs; `CREATE TABLE IF NOT EXISTS`; separate install/update/uninstall scripts; `.env.local.example` committed, `.env.local` gitignored; `NODE_ENV=production` in NSSM.
-
----
-
 ## Other Features (brief reference)
 
 Full component-level detail is in `.ai-codex/components.md` / `pages.md` — kept short here since
@@ -605,9 +585,8 @@ none of these carry Critical-Rules-level footguns.
 - **NVD CPE matching**: CPE strings are approximate — verify via NVD's own CPE dictionary endpoint. `versionEndIncluding` = up to AND including; `versionEndExcluding` = up to BUT NOT including — reversed, patched devices get marked vulnerable. **A CPE `criteria` version field can carry a wildcard** (e.g. `"10.0.*"`), not just whole-field `*`/`-` sentinels — `branchRangeFromWildcardCriteria` expands it into a bounded range rather than collapsing to a point (which under-reported real vulnerable devices). A code fix doesn't retroactively fix already-persisted values — see `backfillPaloAltoVersionRanges()`.
 - **Next.js API routes**: every DB-touching route must export `dynamic = 'force-dynamic'`, or `npm run build`'s prerendering step crashes hitting the DB at build time.
 - **Schema files**: two files, two privilege levels — never merge `schema-grants.sql` back into `schema.sql`. Every new table needs both a `CREATE TABLE IF NOT EXISTS` entry AND a `GRANT SELECT` entry; both installer scripts apply grants automatically.
-- **Rule shadow analysis** is O(n²) against rule count — capped at 1000 rules (warning above threshold), run off-hours for 500+ rulesets. Address/service object resolution needs all elements loaded before analysis — cache per device per session.
-- **Windows Server tool paths**: `psql.exe` at `C:\Program Files\PostgreSQL\16\bin\psql.exe`, `git.exe` at `C:\Program Files\Git\cmd\git.exe`, `nssm.exe` at `C:\Windows\System32\nssm.exe`. PowerShell script paths must use `\` not `/`.
-- **`psql` in PowerShell/WinRM** can return exit code `-1` even on success (output went to stderr) — accept `-1` as success for schema migration. Set `$env:PGPASSWORD` before calling `psql` for unattended execution.
+- **Rule shadow analysis** is O(n²) against rule count — capped at 1000 rules (warning above threshold, not silently truncated), run off-hours for 500+ rulesets. Address/service object resolution needs all elements loaded before analysis — cache per device per session.
+- **Windows Server tool paths and `psql` exit-code quirks**: see `gotchas.md`'s Deploy section.
 
 ---
 

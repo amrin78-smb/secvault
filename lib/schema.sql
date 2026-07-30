@@ -228,8 +228,14 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
   last_hit_at TIMESTAMPTZ,
   bytes_transferred BIGINT NOT NULL DEFAULT 0,
   collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  raw_rule JSONB
+  raw_rule JSONB,
+  vdom TEXT -- NULL for every non-VDOM vendor/device. Only Fortinet populates this today (2026-07-30
+    -- fix) -- lib/engines/ruleAnalysis.js's isStrictlyEarlier() treats two rules with different
+    -- vdom values as never comparable, so shadow/redundant/correlation/generalization/
+    -- reorder_candidate no longer false-positive across VDOMs on the same device. Added here (not
+    -- just via ALTER TABLE below) for fresh installs -- see the companion ALTER for upgrades.
 );
+ALTER TABLE firewall_rules ADD COLUMN IF NOT EXISTS vdom TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_id ON firewall_rules(device_id);
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_seq ON firewall_rules(device_id, sequence_number);
@@ -614,11 +620,10 @@ CREATE INDEX IF NOT EXISTS idx_fds_snapshot_date ON fleet_dashboard_snapshots(sn
 -- `raw` keeps the adapter's raw parsed response for future debugging /
 -- extending which fields get surfaced, without a schema change.
 --
--- No retention/cleanup job exists for this table yet (accepted simplification
--- -- at a realistic 30-minute poll interval this is ~17.5k rows/device/year,
--- not a near-term scaling concern; a real retention policy is a documented
--- follow-up, not built now, same spirit as LOG_RETENTION_HOT_DAYS/WARM_DAYS
--- existing today for the not-yet-built Phase 8 firewall_logs table).
+-- Retention: services/engine-worker.js's daily [snapshot-retention] job (added
+-- 2026-07-30) deletes rows older than SNMP_VPN_RETENTION_DAYS (default 180d) --
+-- see getSnapshotRetentionDays()/runSnapshotRetentionJob() there. Shared with
+-- snmp_metric_snapshots below, same job.
 CREATE TABLE IF NOT EXISTS vpn_session_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -657,8 +662,8 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS snmp_port INTEGER NOT NULL DEFAULT 
 -- vpn_session_snapshots above: only vendors whose adapter implements the
 -- OPTIONAL getSnmpMetrics() are ever polled (services/engine-worker.js's
 -- snmp-poll job), only a SUCCESSFUL poll inserts a row (no confident-looking
--- zero on a failed/timed-out poll), no retention/cleanup job yet (same
--- accepted simplification as vpn_session_snapshots).
+-- zero on a failed/timed-out poll). Retention: same daily [snapshot-retention]
+-- job as vpn_session_snapshots above (SNMP_VPN_RETENTION_DAYS, default 180d).
 -- Per-metric columns are NULLABLE (unlike vpn's NOT NULL
 -- active_session_count) because not every vendor/OID set yields every
 -- metric -- a poll that got CPU but not session count should still record
