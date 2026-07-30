@@ -288,6 +288,31 @@ that the path-only check would miss). `isRegisteredSubtreeRoot()` decomposes a w
 add/remove of a volatile root into per-leaf diff entries so the noise-filter still applies correctly
 even when an entire section appears/disappears as one entry instead of field-by-field.
 
+**Array diffing was purely positional until 2026-07-30 — a real bug, not a hypothetical one.**
+`diffValue()`'s array branch used to compare `oldArr[i]` vs `newArr[i]` by INDEX only — removing one
+entry from the middle of a plain-value array (e.g. a VPN group's username list) shifted every
+later entry down one slot, and each shift was reported as a separate "modified" entry (a real
+production report: one real removal showed up as a dozen-plus fake modifications). Fixed via
+`diffPrimitiveArrayLCS()` — an LCS-based diff used ONLY when every element on both sides is a plain
+primitive (string/number/boolean/null); arrays containing any object/array element keep the original
+positional behavior unchanged (no identity field to align object entries by, out of scope). Same
+`isVolatilePath()` filtering applies to LCS-produced entries as every other push site.
+
+**`friendlyDescription` (added 2026-07-30)**: `classifyDiff()` entries now carry an extra
+`friendlyDescription: string|null` field — a plain-English one-line description (e.g. `Local user
+"satish" was removed`) for two recognized path shapes only: `local-user-database.user(-group)` and
+`address`/`address-group`/`service`/`service-group` object leaves. Computed against the entry's
+REAL untruncated path before `truncatePathForDisplay()` runs — classifying against an
+already-truncated path would silently misfire. Never names a secret-shaped or `<redacted>` field in
+a sentence (reuses `SECRET_PATH_PATTERN`/`SECRET_PATH_EXCEPTIONS`) — falls back to a generic
+"...'s settings were changed" instead. `null` for everything else, including every Fortinet path
+(Fortinet's config_parsed is flat named sections, never a `local-user-database`/`address`/etc.
+segment, so this feature is a structural no-op for that vendor) and the XML/API transport's
+`entry[N]`/`@_name`-shaped object arrays (same "can't resolve without the live tree" gap
+`classifyPath()`'s rule-name resolution already documents). `components/config/DiffViewer.js`
+renders it as the primary label with the raw path moved to a hover tooltip; falls back to exactly
+today's raw-path rendering when `null`.
+
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/
 `CollapsibleString`, not a redaction pass — but a rendering surface added for `config_diffs` data has

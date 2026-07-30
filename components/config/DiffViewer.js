@@ -147,11 +147,24 @@ function renderBlockValue(value) {
 // One "path: value" row for an Added/Removed entry. Value is inline for
 // small primitives, block-rendered (and possibly collapsible) below the path
 // for objects/arrays and large strings.
-function DiffValueRow({ path, value }) {
+//
+// When classifyDiff() recognizes the path shape it supplies
+// `friendlyDescription` (e.g. `Local user "satish" was removed`) — that
+// renders as the bold primary label instead of the raw path, with the raw
+// path moved to a `title` tooltip for transparency/debugging. Same
+// hover-for-the-technical-value convention already used in this file by
+// RuleChangesTable's `<td title={...}>` cells. When there's no description
+// (the overwhelming majority of rows today), this renders byte-for-byte what
+// it always has.
+function DiffValueRow({ path, value, friendlyDescription }) {
   const block = needsBlockRender(value);
+  const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
+  const label = hasDescription ? friendlyDescription : path;
   return (
     <span style={{ display: 'block' }}>
-      <span style={PATH_LABEL_STYLE}>{path}{block ? ':' : ''}</span>
+      <span style={PATH_LABEL_STYLE} title={hasDescription ? path : undefined}>
+        {label}{block ? ':' : ''}
+      </span>
       {block ? renderBlockValue(value) : <span>: {formatValue(value)}</span>}
     </span>
   );
@@ -173,13 +186,22 @@ function LabeledValue({ label, labelColor, value }) {
 // an object/array or a large string — stacked (not side-by-side) so both are
 // fully readable without a cramped two-column squeeze, which matters for a
 // tool operators use to actually compare configs, not just glance at them.
-function DiffModifiedRow({ path, oldValue, newValue }) {
+//
+// Same friendlyDescription treatment as DiffValueRow above: recognized shape
+// swaps the bold label for the plain-English description (raw path moved to
+// a `title` tooltip); the old → new values themselves are always shown
+// regardless — the description supplements the label, it never hides what
+// actually changed.
+function DiffModifiedRow({ path, oldValue, newValue, friendlyDescription }) {
   const anyBlock = needsBlockRender(oldValue) || needsBlockRender(newValue);
+  const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
+  const label = hasDescription ? friendlyDescription : path;
+  const labelTitle = hasDescription ? path : undefined;
 
   if (!anyBlock) {
     return (
       <span style={{ display: 'block' }}>
-        <span style={PATH_LABEL_STYLE}>{path}</span>
+        <span style={PATH_LABEL_STYLE} title={labelTitle}>{label}</span>
         <span>: {formatValue(oldValue)} → {formatValue(newValue)}</span>
       </span>
     );
@@ -187,7 +209,7 @@ function DiffModifiedRow({ path, oldValue, newValue }) {
 
   return (
     <span style={{ display: 'block' }}>
-      <span style={PATH_LABEL_STYLE}>{path}</span>
+      <span style={PATH_LABEL_STYLE} title={labelTitle}>{label}</span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
         <LabeledValue label="− old" labelColor="var(--red)" value={oldValue} />
         <LabeledValue label="+ new" labelColor="var(--green)" value={newValue} />
@@ -236,15 +258,22 @@ function DiffSection({ title, tone, rows, renderRow }) {
 }
 
 function renderAddedRow(row) {
-  return <DiffValueRow path={row.path} value={row.value} />;
+  return <DiffValueRow path={row.path} value={row.value} friendlyDescription={row.friendlyDescription} />;
 }
 
 function renderRemovedRow(row) {
-  return <DiffValueRow path={row.path} value={row.value} />;
+  return <DiffValueRow path={row.path} value={row.value} friendlyDescription={row.friendlyDescription} />;
 }
 
 function renderModifiedRow(row) {
-  return <DiffModifiedRow path={row.path} oldValue={row.old} newValue={row.new} />;
+  return (
+    <DiffModifiedRow
+      path={row.path}
+      oldValue={row.old}
+      newValue={row.new}
+      friendlyDescription={row.friendlyDescription}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
