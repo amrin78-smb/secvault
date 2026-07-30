@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.25.1': [
+    'Fixed: a "Config Diff" row on the Alerts page couldn\'t be clicked through to the actual change — only the device name link worked. Clicking a config diff\'s description now jumps straight to that change on the device\'s Configuration Changes page and briefly highlights it.',
+  ],
   '2.25.0': [
     'Devices can now be edited (name, vendor, access method, address/port, self-signed SSL, site, criticality) directly from a device\'s Manage tab — previously only credential rotation was available; changing other details required going through the API directly.',
     'VPN active-session monitoring now covers Cisco ASA and Palo Alto (GlobalProtect) in addition to Fortinet.',

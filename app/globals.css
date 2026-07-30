@@ -258,6 +258,13 @@ tbody tr:hover td { background: var(--bg-primary); }
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
+/* Landed on via a #diff-<id>/#backup-<id>-style URL fragment (e.g. the Alerts
+   page's config-diff links) — briefly highlights which card the link meant,
+   since the target list has no other visual distinction between rows. */
+.card:target {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 .card-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-light);

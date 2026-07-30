@@ -114,7 +114,7 @@ export default async function DeviceChangesPage({ params }) {
         ) : (
           <ul style={{ display: 'flex', flexDirection: 'column', gap: 12, listStyle: 'none' }}>
             {diffs.map((d) => (
-              <li key={d.id} className="card" style={{ padding: 16 }}>
+              <li key={d.id} id={`diff-${d.id}`} className="card" style={{ padding: 16 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>

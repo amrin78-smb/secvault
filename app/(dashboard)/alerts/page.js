@@ -245,7 +245,16 @@ export default async function AlertsPage({ searchParams }) {
                       </Link>
                     </td>
                     <td style={{ color: 'var(--text-primary)' }} title={item.label}>
-                      {item.label}
+                      {item.type === 'config_diff' ? (
+                        <Link
+                          href={`/devices/${item.deviceId}/changes#diff-${item.id}`}
+                          className="link-quiet"
+                        >
+                          {item.label}
+                        </Link>
+                      ) : (
+                        item.label
+                      )}
                       {item.severity && (
                         <span style={{ color: 'var(--text-muted)' }}> ({item.severity})</span>
                       )}
