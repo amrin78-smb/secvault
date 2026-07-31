@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.2': [
+    'Diagnostic improvement for Palo Alto VPN user detail: the one-time raw-output log now captures a device that actually has connected users (and just one sample user), so the exact field labels can be confirmed and the remaining Assigned IP / Duration columns mapped correctly. No functional change to collection.',
+  ],
   '2.38.1': [
     'The Active VPN Users list no longer runs off the screen on busy firewalls: it now has a search box (filter by user, IP, or client) and pages 25 users at a time instead of one endless scroll.',
     'Cleaned up the Source IP column so it no longer shows an empty "::" for users connected over IPv4 — it now shows the real address (or "—" when the device doesn\'t report one).',
