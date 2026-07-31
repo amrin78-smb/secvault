@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.31.0': [
+    'Configuration Changes readability polish: local firewall users, application filters, and the rule-count summary now show under clear section names ("Local Users", "Application Filters", "Rule Count") instead of a generic "Other (…)" label.',
+    'Fixed a redundant line on group-membership changes — it read "…membership changed: X → Y: X → Y", now shows the change once, and correctly says "Group" rather than "User".',
+    'Historical "Content Preview" noise (Palo Alto\'s internal staging area for pending content updates, all-empty values) that had been recorded as a whole block before it was recognized as noise is now cleaned up on update; the same cleanup also trims embedded device telemetry (clock/uptime) out of older whole-block system-info change records, keeping only the meaningful fields like hostname and firmware version.',
+  ],
   '2.30.0': [
     'Fixed the root cause of inflated Configuration Changes counts on Palo Alto devices managed over the XML/API: because firewall rules were compared by their position in the list, inserting or removing a single rule shifted every rule below it and each shift was wrongly reported as a "modified" rule — one small change could show up as dozens or hundreds of fake modifications. Rules (and address/service objects and admin accounts) are now matched by their own name, so only real additions, removals, and field changes are reported.',
     'A side effect of the same fix: simply reordering rules without changing any of them no longer generates config-change noise (rule-ordering concerns are handled separately by Rule Analysis).',
