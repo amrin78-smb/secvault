@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.33.0': [
+    'Redesigned the Rule Changes view in Configuration Changes to be far more compact — each changed rule is now a single collapsed line (rule name, change type, and a one-line summary), expandable on click, with Expand all / Collapse all. Previously every added/removed rule dumped a full-height 12-row table that was always open and took over the screen.',
+    'When expanded, a rule\'s details lay out in a tidy multi-column grid that wraps cleanly instead of a tall single-column stack, and the long summary text no longer runs off the right edge of the screen (it truncates with the full text on hover).',
+  ],
   '2.32.1': [
     'Removed the duplicate credential fields from the Edit Device Details popup. Credential entry and rotation now live in one place — the dedicated "Rotate Credentials" control on the Manage tab — so editing a device\'s details (name, vendor, access method, address, site, criticality) can never accidentally touch its stored credential. The Add Device form is unchanged and still collects credentials when creating a device.',
   ],

@@ -147,7 +147,7 @@ function renderBlockValue(value) {
 
 // ---------------------------------------------------------------------------
 // Generic "flat object" Field|Value table — the non-rule counterpart to
-// RuleDetailTable further down this file. Address/service objects, zones,
+// RuleDetailGrid further down this file. Address/service objects, zones,
 // VPN records, admin accounts, NAT/PBF rules etc. have no per-domain
 // normalizer (unlike PAN-OS security rules, which reuse ruleFromBraceEntry())
 // — they're just whatever flat-ish raw dict the vendor's config tree happens
@@ -210,7 +210,7 @@ function titleCaseField(field) {
 const EMPTY_ARRAY_PLACEHOLDER = '(empty)';
 
 // Joins an array of primitives for one table cell. Deliberately NOT
-// RuleDetailTable's joinArray() below (which is tied to that table's own
+// RuleDetailGrid's joinArray() below (which is tied to that grid's own
 // '—'-for-empty convention) — kept separate per this file's small-local-
 // duplication convention, and because the two tables' empty-value
 // conventions don't need to match each other.
@@ -525,33 +525,60 @@ const RULE_DETAIL_FIELDS = [
   { label: 'Log', render: (r) => (r.log_enabled ? 'Yes' : 'No') },
 ];
 
-// Single-rule "Field | Value" table — NOT a full multi-row rule listing
-// (there's exactly one rule here: the whole rule that was added/removed).
-// Left border colored by the rule's action, same green/red/neutral mapping
-// as the Rules page's <tr> left border, applied per-row here since this
-// table has one row per FIELD rather than one row per rule.
-function RuleDetailTable({ rule }) {
-  const borderColor = actionBorderColor(rule.action);
+// Per-change-type accent (left border + status square), reused by the rule
+// accordion below. Maps to the same green/red/yellow the Badge tones use.
+const CHANGE_TONE = {
+  added: 'var(--green)',
+  removed: 'var(--red)',
+  modified: 'var(--yellow)',
+};
+
+// Compact single-rule detail — the fields flow into a RESPONSIVE grid
+// (auto-fit, ~3-4 columns on a wide diff) instead of the old 12-row vertical
+// "Field | Value" table, which was the single biggest space hog in this view
+// (a real user complaint: every added rule dumped a full-height stacked table,
+// always expanded). Each cell is a small label-over-value block that wraps
+// cleanly, so a long Applications list flows within its own cell rather than
+// clipping off-screen. `Name` is dropped here — it's already the accordion
+// card's title. Left border keeps the action color cue.
+function RuleDetailGrid({ rule }) {
+  const accent = actionBorderColor(rule.action);
   return (
-    <Table>
-      <colgroup>
-        <col style={{ width: '30%' }} />
-        <col style={{ width: '70%' }} />
-      </colgroup>
-      <tbody>
-        {RULE_DETAIL_FIELDS.map(({ label, render }) => {
-          const value = render(rule);
-          return (
-            <tr key={label} style={{ borderLeft: `4px solid ${borderColor}` }}>
-              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{label}</td>
-              <td title={typeof value === 'string' ? value : undefined} style={{ wordBreak: 'break-word' }}>
-                {value}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </Table>
+    <div
+      style={{
+        borderLeft: `3px solid ${accent}`,
+        paddingLeft: 10,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+        gap: '10px 16px',
+      }}
+    >
+      {RULE_DETAIL_FIELDS.filter((f) => f.label !== 'Name').map(({ label, render }) => {
+        const value = render(rule);
+        return (
+          <div key={label} style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 'var(--text-xs)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                color: 'var(--text-muted)',
+                marginBottom: 2,
+              }}
+            >
+              {label}
+            </div>
+            <div
+              className="mono"
+              style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
+              title={typeof value === 'string' ? value : undefined}
+            >
+              {value}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -594,137 +621,198 @@ function tryBuildRuleFromChange(change) {
   }
 }
 
-// Value cell for one rule-level change — adapts DiffModifiedRow's own
-// old/new logic (inline "old → new" for small primitives, stacked "− old"/
-// "+ new" for objects/arrays or large strings) to a table cell instead of a
-// <li> block, and reuses the same block-render helpers so an object-valued
-// or very long string field doesn't dump raw text inline.
-//
-// When classifyDiff() supplies `change.friendlyDescription` (e.g. the
-// "entire rule added" case with a plain-English summary of what the rule
-// does), that renders as a bold primary line — same PATH_LABEL_STYLE weight
-// used for the equivalent role in DiffValueRow/DiffModifiedRow above — sitting
-// ABOVE the existing raw value display, which still renders exactly as
-// before underneath it. When there's no description (still the overwhelming
-// majority of rows), this returns the untouched pre-existing content with
-// zero wrapping, so it's byte-for-byte identical to the prior output.
-function RuleChangeValueCell({ change }) {
-  const hasDescription = typeof change.friendlyDescription === 'string' && change.friendlyDescription.length > 0;
-
-  // Whole-rule added/removed: `change.field === null` is classifyDiff()'s
-  // signal for "this IS the entire rule object, not one field of it" (see
-  // configDiff.js's pushRuleChange()). When ruleFromBraceEntry() can turn
-  // `change.value` into a real-looking NormalizedRule, render the
-  // friendlyDescription sentence (unchanged) ABOVE a proper Field|Value
-  // table INSTEAD OF the raw JSON blob — the whole point of this table is
-  // that the raw JSON was the unreadable part. Falls through to the
-  // existing raw-JSON rendering below on ANY doubt (malformed `value`,
-  // ruleFromBraceEntry throwing, or an all-blank-looking result) — never
-  // shows a broken/empty table in place of the reliable raw fallback.
-  if (change.field === null && (change.changeType === 'added' || change.changeType === 'removed')) {
-    const rule = tryBuildRuleFromChange(change);
-    if (rule) {
-      return (
-        <span style={{ display: 'block' }}>
-          {hasDescription && (
-            <span style={{ ...PATH_LABEL_STYLE, display: 'block', marginBottom: 4 }}>{change.friendlyDescription}</span>
-          )}
-          <RuleDetailTable rule={rule} />
-        </span>
-      );
-    }
-  }
-
-  let content;
+// Compact value renderer for ONE field-level rule change — inline "old → new"
+// for small primitives (colored red/green), stacked for objects/large strings.
+function RuleFieldValue({ change }) {
   if (change.changeType === 'modified') {
     const anyBlock = needsBlockRender(change.old) || needsBlockRender(change.new);
     if (!anyBlock) {
-      content = <span>{formatValue(change.old)} → {formatValue(change.new)}</span>;
-    } else {
-      content = (
-        <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <LabeledValue label="− old" labelColor="var(--red)" value={change.old} />
-          <LabeledValue label="+ new" labelColor="var(--green)" value={change.new} />
+      return (
+        <span>
+          <span style={{ color: 'var(--red)' }}>{formatValue(change.old)}</span>
+          {' → '}
+          <span style={{ color: 'var(--green)' }}>{formatValue(change.new)}</span>
         </span>
       );
     }
-  } else {
-    // added / removed
-    content = needsBlockRender(change.value) ? renderBlockValue(change.value) : <span>{formatValue(change.value)}</span>;
+    return (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <LabeledValue label="− old" labelColor="var(--red)" value={change.old} />
+        <LabeledValue label="+ new" labelColor="var(--green)" value={change.new} />
+      </span>
+    );
   }
+  return needsBlockRender(change.value) ? renderBlockValue(change.value) : <span>{formatValue(change.value)}</span>;
+}
 
-  if (!hasDescription) return content;
-
+// Field-level changes (a rule that had individual fields edited, not wholly
+// added/removed) rendered as a responsive label-over-value grid — same compact
+// shape as RuleDetailGrid, one cell per changed field, so N field edits take a
+// few rows, not N stacked table rows.
+function RuleFieldChangeList({ changes }) {
   return (
-    <span style={{ display: 'block' }}>
-      <span style={{ ...PATH_LABEL_STYLE, display: 'block', marginBottom: 4 }}>{change.friendlyDescription}</span>
-      {content}
-    </span>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px 16px' }}>
+      {changes.map((change, i) => (
+        <div key={i} style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+            <span
+              style={{
+                fontSize: 'var(--text-xs)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                color: 'var(--text-muted)',
+              }}
+            >
+              {change.fieldLabel || change.field}
+            </span>
+            <RuleChangeBadge changeType={change.changeType} />
+          </div>
+          <div className="mono" style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+            <RuleFieldValue change={change} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
-// Rule name is repeated on every field-level change row rather than
-// rowSpan'd across a group — this app doesn't use rowSpan anywhere else
-// (checked before deciding), and repeating a short rule name per row is
-// simpler and avoids the layout/border edge cases rowSpan introduces inside
-// this app's <Table> wrapper.
+// One accordion card per rule — COLLAPSED by default (the key space saving,
+// matching ManageEngine Firewall Analyzer's rule-change tracking). The header
+// is a single line: a ▸/▾ affordance, the rule name, a badge per change type,
+// and a one-line summary that ellipsis-truncates instead of clipping off the
+// right edge (full text on hover + in the expanded body). Expanding shows the
+// compact detail grid (whole rule) and/or the field-change grid.
+function RuleChangeCard({ group, expanded, onToggle }) {
+  const changes = Array.isArray(group.changes) ? group.changes : [];
+  const wholeRule = changes.find((c) => c.field === null && (c.changeType === 'added' || c.changeType === 'removed'));
+  const fieldChanges = changes.filter((c) => c.field !== null);
+  const builtRule = wholeRule ? tryBuildRuleFromChange(wholeRule) : null;
+
+  const types = [...new Set(changes.map((c) => c.changeType))];
+  const primaryType = types.length === 1 ? types[0] : 'modified';
+  const accent = CHANGE_TONE[primaryType] || CHANGE_TONE.modified;
+
+  let summary;
+  if (wholeRule && typeof wholeRule.friendlyDescription === 'string' && wholeRule.friendlyDescription.length > 0) {
+    summary = wholeRule.friendlyDescription;
+  } else if (wholeRule) {
+    summary = `Entire rule ${wholeRule.changeType === 'added' ? 'added' : 'removed'}`;
+  } else {
+    const n = fieldChanges.length;
+    summary = `${n} field${n === 1 ? '' : 's'} changed`;
+  }
+
+  return (
+    <div
+      style={{
+        border: '1px solid var(--border)',
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 10px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: 'inherit',
+        }}
+      >
+        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{expanded ? '▾' : '▸'}</span>
+        <span className="mono" style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+          {group.ruleName}
+        </span>
+        {types.map((t) => (
+          <RuleChangeBadge key={t} changeType={t} />
+        ))}
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--text-xs)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={summary}
+        >
+          {summary}
+        </span>
+      </button>
+      {expanded && (
+        <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {builtRule && <RuleDetailGrid rule={builtRule} />}
+          {/* Whole-rule add/remove that couldn't be parsed into a NormalizedRule
+              falls back to the reliable raw-value rendering, same as before. */}
+          {wholeRule && !builtRule &&
+            (needsBlockRender(wholeRule.value) ? renderBlockValue(wholeRule.value) : <span className="mono">{formatValue(wholeRule.value)}</span>)}
+          {fieldChanges.length > 0 && <RuleFieldChangeList changes={fieldChanges} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Accordion list of rule-change cards with Expand all / Collapse all, replacing
+// the old always-expanded 4-column table (Rule Name | Change | Field | Value)
+// whose Value column embedded a full-height per-rule table — the space hog and
+// off-screen clipping a user reported. Collapsed by default; each card owns its
+// own expand state via a shared Set keyed by index.
 function RuleChangesTable({ ruleChanges }) {
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   if (!Array.isArray(ruleChanges) || ruleChanges.length === 0) return null;
+
+  const keys = ruleChanges.map((rc, i) => `${rc.ruleName}-${i}`);
+
+  function toggle(key) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const linkBtn = { ...TOGGLE_BUTTON_STYLE, marginLeft: 0 };
 
   return (
     <div>
-      <div
-        style={{
-          marginBottom: 4,
-          fontSize: 'var(--text-xs)',
-          fontWeight: 600,
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: 'var(--text-muted)',
-        }}
-      >
-        Rule Changes
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 'var(--text-xs)',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: 'var(--text-muted)',
+          }}
+        >
+          Rule Changes ({ruleChanges.length})
+        </span>
+        <span style={{ display: 'flex', gap: 12 }}>
+          <button type="button" onClick={() => setExpandedKeys(new Set(keys))} style={linkBtn}>
+            Expand all
+          </button>
+          <button type="button" onClick={() => setExpandedKeys(new Set())} style={linkBtn}>
+            Collapse all
+          </button>
+        </span>
       </div>
-      <Table>
-        <colgroup>
-          <col style={{ width: '22%' }} />
-          <col style={{ width: '12%' }} />
-          <col style={{ width: '20%' }} />
-          <col style={{ width: '46%' }} />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Rule Name</th>
-            <th>Change</th>
-            <th>Field</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ruleChanges.flatMap((rc) =>
-            rc.changes.map((change, i) => (
-              <tr key={`${rc.ruleName}-${i}`}>
-                <td className="mono" title={rc.ruleName} style={{ wordBreak: 'break-word' }}>
-                  {rc.ruleName}
-                </td>
-                <td>
-                  <RuleChangeBadge changeType={change.changeType} />
-                </td>
-                <td
-                  className="mono"
-                  title={change.fieldLabel ? change.field : (change.field || '(entire rule)')}
-                  style={{ wordBreak: 'break-word' }}
-                >
-                  {change.fieldLabel || change.field || '(entire rule)'}
-                </td>
-                <td className="mono" style={{ wordBreak: 'break-word' }}>
-                  <RuleChangeValueCell change={change} />
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {ruleChanges.map((rc, i) => (
+          <RuleChangeCard key={keys[i]} group={rc} expanded={expandedKeys.has(keys[i])} onToggle={() => toggle(keys[i])} />
+        ))}
+      </div>
     </div>
   );
 }

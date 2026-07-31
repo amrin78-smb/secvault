@@ -87,7 +87,7 @@ ClusterCard  cluster, ruleMap — card rendering one relationship cluster (modul
 (c) BackupActions  deviceId — button to create a manual config backup
 (c) AcknowledgeButton  deviceId, diffId — acknowledges a config diff, optional note
 (c) ConditionsManager  cveId, initialConditions, devices, canWrite — CRUD + test UI for advisory applicability conditions
-(c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff; renders classifyDiff()'s named Rule Changes table, per-section groups, flat-object/rule detail tables, and (2.29.0) per-rule tables for Palo Alto XML/API "Security Rules" entries regrouped by ruleIndex (index-labelled "Rule #N", or the real name when a whole-rule add/remove carries @_name)
+(c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff. Rule Changes (2.33.0) is a COLLAPSED-by-default accordion (RuleChangeCard) with Expand/Collapse all — one line per rule (name + change badge + ellipsis summary); expanding shows a compact responsive detail grid (RuleDetailGrid, replaced the tall 12-row RuleDetailTable) or a field-change grid (RuleFieldChangeList). Also: per-section groups, flat-object/diff tables, and (2.29.0) per-rule tables for Palo Alto XML/API "Security Rules" entries regrouped by ruleIndex ("Rule #N", or the real @_name on a whole-rule add/remove)
 
 ## dashboard/
 
