@@ -444,6 +444,8 @@ down the rulebase — see the "Array diffing" note below. Grouping still needed 
 complementary. Paths keep the positional `entry[N]` grammar (matched/added → new index, removed → old
 index), so name-in-path fragility was avoided entirely.
 
+**Whole-subtree-root volatile entries need DECOMPOSITION in the cleanup path, not just `isVolatilePath` (added 2026-07-31, v2.31.0).** `isVolatilePath()` only matches a nested LEAF under a registered root, never the bare root captured as one object (`{path:'tree.shared.content-preview', value:{…}}`). At compute time `diffValue`'s `isRegisteredSubtreeRoot` branch decomposes those, but `filterDiffForCurrentRules()` (the `cleanupVolatileConfigDiffs` migration) only ran the leaf filter — so a HISTORICAL whole-`content-preview`-object add (recorded before decomposition existed, or when vendor was unknown) rendered as a permanent "1 added" noise row. `filterDiffForCurrentRules()` now re-runs `diffValue({}, e.value, …)`/`diffValue(e.value, {}, …)` on any added/removed registered-root entry so the current allowlist applies per-leaf: `content-preview` (empty allowlist) drops entirely; `system_info` keeps only allowlisted fields and sheds embedded clock/uptime telemetry. Runs on every migrate, idempotent.
+
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/
 `CollapsibleString`, not a redaction pass — but a rendering surface added for `config_diffs` data has
