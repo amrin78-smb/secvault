@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Button from '../ui/Button';
 import { VENDOR_META, buildCredentialPlaintext, resolveAccessMethod } from './vendorMeta';
 
@@ -55,6 +55,42 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
       .then((data) => setProfiles(Array.isArray(data.profiles) ? data.profiles : []))
       .catch(() => setProfiles([]));
   }, []);
+
+  // This instance stays mounted for the life of the device page (no `key`
+  // prop upstream) while `vendor`/`mgmtMethod` are server-refreshed props —
+  // an admin editing "Edit Device Details" on the same tab can change them
+  // out from under an in-progress "Rotate Credentials" entry via
+  // router.refresh(). `config`/`shape` above are recomputed from the new
+  // props every render regardless, so any typed-but-unsubmitted secret/
+  // username/password/enablePassword/profile selection must be dropped here
+  // too — otherwise it either goes silently invisible (shape changed) or
+  // stays visible and gets submitted under the NEW vendor/method via
+  // buildCredentialPlaintext (shape unchanged), matching neither what was
+  // shown nor intended when it was typed. Mirrors DeviceForm's own
+  // resetCredentialInputs()/invalidateTest() for the identical situation.
+  const shapeKey = `${vendor}:${mgmtMethod}`;
+  const prevShapeKeyRef = useRef(shapeKey);
+  useEffect(() => {
+    if (prevShapeKeyRef.current === shapeKey) return;
+    prevShapeKeyRef.current = shapeKey;
+    const hadTypedInput = Boolean(secret || username || password || enablePassword || selectedProfileId);
+    setAuthMode('apikey');
+    setSecret('');
+    setUsername('');
+    setPassword('');
+    setEnablePassword('');
+    resetProfilePicker();
+    setResult(
+      hadTypedInput
+        ? {
+            ok: false,
+            text: 'Device access method changed — in-progress credential entry was cleared. Please re-enter and save again.',
+          }
+        : null
+    );
+    // Deliberately keyed on shapeKey only — see comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shapeKey]);
 
   // Recomputed on every render — cheap, and `profiles` only ever changes once
   // (the mount-time fetch), so there's no benefit to memoizing this.

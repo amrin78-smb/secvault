@@ -542,11 +542,11 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+          <div className="device-overview-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewCveCard deviceId={device.id} />
             <OverviewExposureCard deviceId={device.id} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+          <div className="device-overview-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewRuleHygieneCard deviceId={device.id} />
             <OverviewConfigChangesCard deviceId={device.id} />
             <OverviewComplianceCard deviceId={device.id} />

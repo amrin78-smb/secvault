@@ -356,8 +356,11 @@ name/IP against `show-gateways-and-servers` results. Base URL
 call. `credential_type='rest_api'` via the shared `parseApiCredential`.
 
 **What is collected**: `testConnectivity`, `getVersion`, `getRules`, `getConfig`, `getObjects` all
-implemented. `getSnmpMetrics` and `getVpnSessionSummary` **not implemented** (Check Point is
-explicitly deferred to "SNMP Phase 2," not started).
+implemented. `getSnmpMetrics` implemented (added 2026-07-30/commit 0e4e2d9, v2.25.0 — generic
+MIB-II/HR-MIB only, `snmp_host` required, no `mgmt_ip` fallback, same exception class as
+Forcepoint; see `lib/adapters/checkpoint/index.js:613`). `getVpnSessionSummary` **not implemented**
+(Management API has no VPN tunnel/session-status endpoint at all — researched 2026-07-30; live
+state needs SmartView Monitor/Log Server/gateway access this adapter doesn't have).
 
 **Parsing entry point**: rules → `parser.js:parseRulebasePages(pages)` (merges every page's
 `objects-dictionary` into a uid→object map, flattens sectioned rulebase, normalizes each rule).

@@ -48,12 +48,17 @@ async function getDevice(dbPool, id) {
 }
 
 async function getDiffs(dbPool, deviceId) {
+  // Cap matches the fleet-wide LIMIT 500 in the Alerts page's fetchConfigDiffs()
+  // (app/(dashboard)/alerts) -- that page links each config-diff alert to
+  // /devices/[id]/changes#diff-[id]. Since a single device can account for at
+  // most that many rows of the fleet-wide 500, this cap must stay >= 500 or
+  // an alert for an older diff produces a dead #diff-<id> anchor here.
   const result = await dbPool.query(
     `SELECT id, change_summary, detected_at, acknowledged_at, acknowledged_by, acknowledged_note
      FROM config_diffs
      WHERE device_id = $1
      ORDER BY detected_at DESC
-     LIMIT 50`,
+     LIMIT 500`,
     [deviceId]
   );
   return result.rows;

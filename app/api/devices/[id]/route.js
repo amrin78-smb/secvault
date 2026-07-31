@@ -251,12 +251,23 @@ export async function PUT(request, { params }) {
   // credential-resolution block (which is the thing that can still 400)
   // above this DELETE, so every validation that can reject the request has
   // already run before anything destructive executes.
+  // Tracks whether this request cleared out the device's stale credential
+  // rows (vendor/method change) WITHOUT a replacement credential being
+  // supplied in the same request — the caller-facing modal that only edits
+  // vendor/mgmt_method (no credential fields) hits exactly this path, and
+  // without a signal here the device silently ends up with zero usable
+  // device_credentials rows until someone separately visits Rotate
+  // Credentials. Surfaced via the `warning` field on the response below.
+  let credentialCleared = false;
   if (methodChanged || (rest.vendor !== undefined && rest.vendor !== existing.vendor)) {
     try {
       await pool.query(
         'DELETE FROM device_credentials WHERE device_id = $1 AND credential_type <> $2',
         [params.id, config.credentialType]
       );
+      if (!credPlaintext) {
+        credentialCleared = true;
+      }
     } catch (err) {
       return NextResponse.json(
         { error: `Failed to clean up stale credentials for the new vendor/method: ${err.message}` },
@@ -312,6 +323,9 @@ export async function PUT(request, { params }) {
     // duplicate name) must never fail the rotation that already succeeded —
     // surfaced as a `warning` field instead.
     let warning;
+    if (credentialCleared) {
+      warning = `Vendor/access method changed — the device's stored credential (for the previous method) was removed and no replacement was supplied. This device will fail Test Connectivity/Collect Now until a new credential is set via Rotate Credentials.`;
+    }
     const trimmedProfileName = typeof save_as_profile_name === 'string' ? save_as_profile_name.trim() : '';
     if (trimmedProfileName && credPlaintext && !usedExistingProfile) {
       try {
@@ -332,7 +346,9 @@ export async function PUT(request, { params }) {
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Device not found' }, { status: 404 });
     }
-    return NextResponse.json(warning ? { ...result.rows[0], warning } : result.rows[0]);
+    return NextResponse.json(
+      warning ? { ...result.rows[0], warning, credentialCleared } : result.rows[0]
+    );
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to update device' }, { status: 500 });
   }

@@ -112,7 +112,16 @@ function ConfigChips({ config }) {
           <span style={{ color: 'var(--text-muted)' }}>=</span>
           <span
             className="mono"
-            style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            style={{
+              display: 'inline-block',
+              maxWidth: 200,
+              minWidth: 0,
+              color: 'var(--text-secondary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              verticalAlign: 'bottom',
+            }}
           >
             {formatConfigValue(value)}
           </span>

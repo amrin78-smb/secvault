@@ -432,7 +432,9 @@ active_session_count    INTEGER NOT NULL                        -- only successf
 raw                     JSONB
 sampled_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
-Indexes: `idx_vss_device_id`, `idx_vss_sampled_at`. No retention/cleanup job yet.
+Indexes: `idx_vss_device_id`, `idx_vss_sampled_at`. Daily `[snapshot-retention]` cron job (`30 0 * * *`,
+`runSnapshotRetentionJob()` in `services/engine-worker.js`) deletes rows older than
+`SNMP_VPN_RETENTION_DAYS` (default 180d).
 
 ### vpn_active_sessions
 ```
@@ -479,8 +481,11 @@ uptime_seconds    BIGINT
 raw               JSONB
 sampled_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
-Indexes: `idx_sms_device_id`, `idx_sms_sampled_at`. Cisco ASA/Fortinet/Palo Alto/Forcepoint/Sangfor
-(generic-only); Check Point deferred to Phase 2. No retention/cleanup job yet.
+Indexes: `idx_sms_device_id`, `idx_sms_sampled_at`. All six Tier-1 vendors implement `getSnmpMetrics`
+(generic MIB-II/HOST-RESOURCES-MIB only, no vendor MIB) — see `.ai-codex/connectors.md`'s per-vendor
+entries for confidence-level caveats. Same daily `[snapshot-retention]` cron job as
+`vpn_session_snapshots` above (`30 0 * * *`), deletes rows older than `SNMP_VPN_RETENTION_DAYS`
+(default 180d).
 
 ### activity_log
 ```

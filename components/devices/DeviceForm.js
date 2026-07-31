@@ -333,6 +333,8 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           value={vendor}
           onChange={(e) => handleVendorChange(e.target.value)}
           className="input"
+          disabled={isEdit}
+          title={isEdit ? 'Vendor cannot be changed on an existing device — delete and re-add it instead.' : undefined}
         >
           {VENDOR_SLUGS.map((slug) => (
             <option key={slug} value={slug}>
@@ -340,6 +342,20 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
             </option>
           ))}
         </select>
+        {/* Edit mode: vendor is locked, not just hidden-credential-guarded. This
+            modal never shows credential inputs (see header comment), so a vendor
+            switch here would submit metadata-only. The server's PUT handler
+            deletes any stored device_credentials row whose credential_type no
+            longer matches the (possibly new) vendor+method when no replacement
+            credential is supplied in the same request — silently leaving the
+            device with zero working credentials. Locking the dropdown forces a
+            vendor change through device recreation instead, which is the only
+            path that also collects a fresh credential. */}
+        {isEdit && (
+          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>
+            Vendor can’t be changed on an existing device — delete and re-add it to switch vendors.
+          </p>
+        )}
       </div>
 
       {showMethodSelector && (

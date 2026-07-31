@@ -783,6 +783,13 @@ function RuleFieldChangeList({ changes }) {
 function RuleChangeCard({ group, expanded, onToggle }) {
   const changes = Array.isArray(group.changes) ? group.changes : [];
   const wholeRule = changes.find((c) => c.field === null && (c.changeType === 'added' || c.changeType === 'removed'));
+  // A whole-rule entry can also arrive as 'modified' (a bare rulebase path
+  // whose value type-mismatched between two snapshots, e.g. a partial SSH
+  // brace-parse) — field is still null so it falls outside both wholeRule
+  // (added/removed only) and fieldChanges (field !== null) below. Tracked
+  // separately so it still gets a body rendering instead of silently
+  // vanishing behind an empty "0 fields changed" summary.
+  const wholeRuleModified = changes.find((c) => c.field === null && c.changeType === 'modified');
   const fieldChanges = changes.filter((c) => c.field !== null);
   const builtRule = wholeRule ? tryBuildRuleFromChange(wholeRule) : null;
 
@@ -795,6 +802,11 @@ function RuleChangeCard({ group, expanded, onToggle }) {
     summary = wholeRule.friendlyDescription;
   } else if (wholeRule) {
     summary = `Entire rule ${wholeRule.changeType === 'added' ? 'added' : 'removed'}`;
+  } else if (wholeRuleModified) {
+    summary =
+      typeof wholeRuleModified.friendlyDescription === 'string' && wholeRuleModified.friendlyDescription.length > 0
+        ? wholeRuleModified.friendlyDescription
+        : 'Entire rule modified';
   } else {
     const n = fieldChanges.length;
     summary = `${n} field${n === 1 ? '' : 's'} changed`;
@@ -854,6 +866,16 @@ function RuleChangeCard({ group, expanded, onToggle }) {
               falls back to the reliable raw-value rendering, same as before. */}
           {wholeRule && !builtRule &&
             (needsBlockRender(wholeRule.value) ? renderBlockValue(wholeRule.value) : <span className="mono">{formatValue(wholeRule.value)}</span>)}
+          {/* Same raw-fallback discipline as the wholeRule-without-builtRule
+              case above, but for the field:null + changeType:'modified' shape
+              (old/new instead of a single value) — otherwise this change is
+              silently dropped from the rendered body entirely. */}
+          {wholeRuleModified && (
+            <span className="mono" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <LabeledValue label="− old" labelColor="var(--red)" value={wholeRuleModified.old} />
+              <LabeledValue label="+ new" labelColor="var(--green)" value={wholeRuleModified.new} />
+            </span>
+          )}
           {fieldChanges.length > 0 && <RuleFieldChangeList changes={fieldChanges} />}
         </div>
       )}

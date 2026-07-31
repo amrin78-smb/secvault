@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.5': [
+    'Fixed Active VPN Users on Palo Alto (SSH): Source IP and Assigned IP were always blank, and the username showed a stray leading backslash — the device\'s actual field names weren\'t in the code\'s lookup list. All three now populate correctly, and Duration is now estimated from the session\'s login time when the device doesn\'t report it directly.',
+    'Fixed IPSec tunnel Peer showing blank for Palo Alto tunnels collected over the API/XML path.',
+    'Fixed the Config Changes viewer silently showing "0 fields changed" (with nothing in the expanded detail) for a rare rule-modification shape, and fixed a case where a real multi-rule change could be misread as unrelated background noise and hidden entirely.',
+    'Fixed two device credential safety gaps: changing a device\'s Vendor from the Edit Details screen could silently wipe its stored credential with no warning (Vendor is now locked once a device exists — delete and re-add to switch vendors), and an in-progress credential entry could be silently lost if Edit Details was saved in another tab.',
+    'Fixed two diagnostic log lines (Check Point admin accounts, Forcepoint admin accounts) that could write unredacted secret material to the server log on first connection to a device.',
+    'Assorted smaller fixes: a broken link from Alerts into a device\'s Changes history for older changes, an undefined color on the CVE advisory page, a truncation display issue on the Conditions screen, and the VPN/SNMP snapshot cleanup job now actually runs on every service start instead of only at its scheduled time.',
+  ],
   '2.38.4': [
     'Internal diagnostic: the engine now logs a single sample VPN session (with the device\'s own field names) through the main log, so per-user field mappings can be confirmed against real firmware output without relying on stdout capture. No functional change.',
   ],

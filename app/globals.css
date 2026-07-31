@@ -341,6 +341,15 @@ tbody tr:hover td { background: var(--bg-primary); }
    (not a global `.card` change) so no other page's card layout is affected. */
 .dashboard-widget-grid > * { min-width: 0; }
 
+/* Device Overview tab's card rows (OverviewCveCard/OverviewExposureCard,
+   OverviewRuleHygieneCard/OverviewConfigChangesCard/OverviewComplianceCard)
+   -- same auto-fit CSS Grid shape as .dashboard-widget-grid above, and
+   OverviewConfigChangesCard nests a white-space:nowrap change_summary span
+   the same number of DOM levels below the grid item, so it is exposed to
+   the identical min-width:auto blowout documented there. Same fix, scoped
+   to this grid only. */
+.device-overview-grid > * { min-width: 0; }
+
 /* Small colored icon badge for Dashboard widget headers -- same visual
    language as the sidebar's per-route nav chips (Sidebar.js's
    .sv-nav-chip), just always-colored (not hover/active-gated) since it

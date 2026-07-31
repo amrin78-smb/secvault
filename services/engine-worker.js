@@ -452,8 +452,15 @@ async function runVpnSessionPollJob() {
         }
         polled += 1;
       } catch (err) {
+        // Full stack (not just err.message) plus vendor/mgmt_method — engine.log
+        // is currently the ONLY trail for a device that fails every single
+        // poll (no per-device error column exists to persist to yet). Keeping
+        // this line grep-able by device id/vendor is what makes "genuinely
+        // idle, 0 sessions" vs "silently failing every tick" diagnosable at
+        // all until a DB-visible last-error column is added (out of scope
+        // here — see devices table in lib/schema.sql).
         logger.warn(
-          `Job [vpn-session-poll] failed for device ${device.id} (${device.name || 'unnamed'}): ${err.message}`
+          `Job [vpn-session-poll] failed for device ${device.id} (${device.name || 'unnamed'}, vendor=${device.vendor}, mgmt_method=${device.mgmt_method}): ${err.stack || err.message}`
         );
       }
     }
@@ -733,6 +740,12 @@ async function main() {
   await runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
   await runTrackedJob(runSnmpPollJob, 'snmp-poll');
   await runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
+  // Runs on every startup (not just its 00:30 UTC cron tick) — cheap,
+  // idempotent DELETEs, and this service restarts on every deploy (see
+  // installer/Update-SecVault.ps1), so relying on the cron tick alone meant
+  // it rarely ran in practice, leaving vpn_session_snapshots/
+  // snmp_metric_snapshots to grow unbounded — the exact gap it exists to close.
+  await runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
 
   await scheduleJobs();
 
