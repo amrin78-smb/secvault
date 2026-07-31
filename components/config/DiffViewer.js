@@ -746,12 +746,165 @@ function sectionSummaryLine(section) {
   return parts.join(', ');
 }
 
+// ---------------------------------------------------------------------------
+// Indexed-rule groups (Palo Alto XML/API "Security Rules" section) — regroups
+// the flat per-field entries classifyDiff() tags with ruleIndex/ruleField
+// (see extractIndexedRuleEntry() in lib/engines/configDiff.js) back into one
+// ManageEngine-style table per rule, keyed by the rule's positional array
+// index. The rule NAME can't be resolved from an indexed diff entry, so a
+// group is labelled by position ("Rule #6") — except a whole-rule add/remove
+// carries the full rule object including its @_name sibling, which IS surfaced
+// when present. Defined at module top level per CLAUDE.md.
+// ---------------------------------------------------------------------------
+
+// Friendlier labels for the raw PAN-OS security-rule tag names that surface as
+// ruleField here (`log-end`, `disabled`, ...). These are PAN-OS's own XML
+// element names (fast-xml-parser keeps them verbatim — see
+// lib/adapters/paloalto/parser.js), so the keys are exact, not guessed; a tag
+// not in this map falls back to a mechanical Title Case of its own name
+// (titleCaseField), never dropped. Display-only — a slightly-off label never
+// affects parsing or classification.
+const RULE_FIELD_LABELS = {
+  'log-start': 'Log at Session Start',
+  'log-end': 'Log at Session End',
+  disabled: 'Disabled',
+  action: 'Action',
+  from: 'Source Zone',
+  to: 'Destination Zone',
+  source: 'Source Address',
+  destination: 'Destination Address',
+  'source-user': 'Source User',
+  service: 'Service',
+  application: 'Application',
+  category: 'URL Category',
+  'profile-setting': 'Security Profile',
+  'rule-type': 'Rule Type',
+  'negate-source': 'Negate Source',
+  'negate-destination': 'Negate Destination',
+  description: 'Description',
+  tag: 'Tag',
+  'log-setting': 'Log Forwarding',
+  schedule: 'Schedule',
+};
+
+// ruleField runs one or two levels deep (`log-end`, or `profile-setting.profiles`).
+// The first segment gets a curated/Title-Cased label; any deeper segments are
+// appended with a small separator so a nested field still reads as one label.
+function humanizeRuleField(field) {
+  if (!field) return '(entire rule)';
+  const segments = String(field).split('.');
+  const head = RULE_FIELD_LABELS[segments[0]] || titleCaseField(segments[0]);
+  if (segments.length === 1) return head;
+  return [head, ...segments.slice(1).map(titleCaseField)].join(' › ');
+}
+
+// Value cell for one indexed-rule field change — same old→new / block-render
+// logic the rest of this file uses, adapted to the {changeType, value|old|new}
+// shape classifyDiff() attaches to a section entry.
+function IndexedRuleValueCell({ entry }) {
+  if (entry.changeType === 'modified') {
+    const anyBlock = needsBlockRender(entry.old) || needsBlockRender(entry.new);
+    if (!anyBlock) {
+      return <span>{formatValue(entry.old)} → {formatValue(entry.new)}</span>;
+    }
+    return (
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <LabeledValue label="− old" labelColor="var(--red)" value={entry.old} />
+        <LabeledValue label="+ new" labelColor="var(--green)" value={entry.new} />
+      </span>
+    );
+  }
+  // added / removed
+  const value = entry.value;
+  if (needsBlockRender(value)) {
+    return isFlatObject(value) ? <FlatObjectTable value={value} /> : renderBlockValue(value);
+  }
+  return <span>{formatValue(value)}</span>;
+}
+
+// A whole-rule add/remove entry (ruleField === null) carries the full rule
+// object, whose @_name sibling IS the rule's real name — surface it to label
+// the group when present. Returns null when no group entry carries a name
+// (the common per-field-modify case), so the caller falls back to the
+// positional "Rule #N" label.
+function resolveGroupRuleName(entries) {
+  for (const e of entries) {
+    if (e.ruleField === null && e.value && typeof e.value === 'object' && !Array.isArray(e.value)) {
+      const name = e.value['@_name'];
+      if (typeof name === 'string' && name.length > 0) return name;
+    }
+  }
+  return null;
+}
+
+function IndexedRuleGroup({ index, entries }) {
+  const name = resolveGroupRuleName(entries);
+  const title = name ? `Rule "${name}"` : `Rule #${index + 1}`;
+  const count = entries.length;
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px' }}>
+      <div style={{ marginBottom: 4 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
+        <span style={{ color: 'var(--text-muted)' }}> — {count} change{count === 1 ? '' : 's'}</span>
+      </div>
+      <Table>
+        <colgroup>
+          <col style={{ width: '32%' }} />
+          <col style={{ width: '16%' }} />
+          <col style={{ width: '52%' }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Change</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e, i) => (
+            <tr key={i}>
+              <td style={{ fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-word' }}>
+                {humanizeRuleField(e.ruleField)}
+              </td>
+              <td>
+                <RuleChangeBadge changeType={e.changeType} />
+              </td>
+              <td className="mono" style={{ wordBreak: 'break-word' }}>
+                <IndexedRuleValueCell entry={e} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
+// Groups a section's indexed-rule entries by their positional ruleIndex,
+// returning [index, entries][] sorted by position. Entries without a numeric
+// ruleIndex (every non-indexed-rule path) are ignored here and rendered by
+// the existing Added/Removed/Modified lists instead.
+function groupIndexedRuleEntries(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    if (typeof e.ruleIndex !== 'number') continue;
+    if (!groups.has(e.ruleIndex)) groups.set(e.ruleIndex, []);
+    groups.get(e.ruleIndex).push(e);
+  }
+  return [...groups.entries()].sort((a, b) => a[0] - b[0]);
+}
+
 function SectionGroup({ section }) {
   const [expanded, setExpanded] = useState(false);
   const entries = Array.isArray(section.entries) ? section.entries : [];
-  const addedEntries = entries.filter((e) => e.changeType === 'added');
-  const removedEntries = entries.filter((e) => e.changeType === 'removed');
-  const modifiedEntries = entries.filter((e) => e.changeType === 'modified');
+
+  // Indexed (XML/API) rulebase entries get regrouped into one table per rule;
+  // everything else keeps the existing flat Added/Removed/Modified rendering.
+  const ruleGroups = groupIndexedRuleEntries(entries);
+  const nonRuleEntries = entries.filter((e) => typeof e.ruleIndex !== 'number');
+  const addedEntries = nonRuleEntries.filter((e) => e.changeType === 'added');
+  const removedEntries = nonRuleEntries.filter((e) => e.changeType === 'removed');
+  const modifiedEntries = nonRuleEntries.filter((e) => e.changeType === 'modified');
 
   return (
     <div
@@ -772,6 +925,13 @@ function SectionGroup({ section }) {
       </div>
       {expanded && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {ruleGroups.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {ruleGroups.map(([index, groupEntries]) => (
+                <IndexedRuleGroup key={index} index={index} entries={groupEntries} />
+              ))}
+            </div>
+          )}
           <DiffSection title="Added" tone="success" rows={addedEntries} renderRow={renderAddedRow} />
           <DiffSection title="Removed" tone="danger" rows={removedEntries} renderRow={renderRemovedRow} />
           <DiffSection title="Modified" tone="warning" rows={modifiedEntries} renderRow={renderModifiedRow} />

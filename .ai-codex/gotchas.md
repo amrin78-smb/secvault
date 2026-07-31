@@ -409,6 +409,24 @@ New" comparison table (`FlatObjectDiffTable`, changed cells colored red/green) i
 raw-JSON blobs. Field labels are a local, purely mechanical Title Case transform (`titleCaseField()`)
 — deliberately NOT the same helper as `configDiff.js`'s sentence-casing one, different casing need.
 
+**Indexed-rule grouping — Palo Alto XML/API "Security Rules" (added 2026-07-31, v2.29.0).** The XML/API
+transport stores each rulebase (security/nat/pbf) as an array of `<entry name="…">` objects, so a diff
+path is `…rulebase.security.rules.entry[N].<field>` — `entry[N]` is an opaque positional index and the
+rule NAME is a sibling `@_name`, unresolvable from one diff entry (same gap `classifyPath()`/
+`isUnresolvableIndex` already documents). These used to render as a flat wall of `entry[5].log-end: yes`
+rows + raw JSON under the section then labelled "Rules (detail unavailable for this device)". Fix is
+PRESENTATION-ONLY — the diff algorithm/counts are unchanged: `classifyDiff()` now tags each such section
+entry with `ruleIndex`/`ruleField` (via `extractIndexedRuleEntry()`, computed against the REAL untruncated
+path; both `null` for every other shape), and `components/config/DiffViewer.js` regroups entries sharing an
+index into one Field/Change/Value table per rule (labelled "Rule #N" by position, or the real name when a
+whole-rule add/remove carries `@_name`). Section renamed "Security Rules" — a stable classification key,
+also in `OverviewConfigChangesCard.js`'s `HIGH_IMPACT_LABELS`, change both together. **Known NOT fixed
+(deeper root cause, deliberately out of scope):** the object-array diff is still POSITIONAL (`diffValue`'s
+`bothArrays` branch only uses LCS for all-primitive arrays), so inserting one rule near the top can still
+produce a shift cascade of false "modified" fields down the rulebase — grouping makes that navigable but
+doesn't cure it. A real fix needs keyed alignment by `@_name`, which name-in-path fragility (PAN-OS rule
+names contain `.`/spaces) makes non-trivial; left for a dedicated change.
+
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/
 `CollapsibleString`, not a redaction pass — but a rendering surface added for `config_diffs` data has

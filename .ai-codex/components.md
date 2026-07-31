@@ -87,7 +87,7 @@ ClusterCard  cluster, ruleMap — card rendering one relationship cluster (modul
 (c) BackupActions  deviceId — button to create a manual config backup
 (c) AcknowledgeButton  deviceId, diffId — acknowledges a config diff, optional note
 (c) ConditionsManager  cveId, initialConditions, devices, canWrite — CRUD + test UI for advisory applicability conditions
-(c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff
+(c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff; renders classifyDiff()'s named Rule Changes table, per-section groups, flat-object/rule detail tables, and (2.29.0) per-rule tables for Palo Alto XML/API "Security Rules" entries regrouped by ruleIndex (index-labelled "Rule #N", or the real name when a whole-rule add/remove carries @_name)
 
 ## dashboard/
 

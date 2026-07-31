@@ -45,7 +45,7 @@ async function getConfigChanges(dbPool, deviceId, days) {
 // file's own RULE_PATH_MARKER/classifyPath() comments) still lands here via
 // the generic section bucket rather than the rule table.
 const HIGH_IMPACT_LABELS = new Set([
-  'Rules (detail unavailable for this device)',
+  'Security Rules',
   'Policy-Based Forwarding Rules',
 ]);
 

@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.29.0': [
+    'Configuration Changes are now far easier to read for Palo Alto devices managed over the XML/API: a firewall-rule change used to appear as a long flat list of raw entries (e.g. "…rules.entry[5].log-end: yes", "…rules.entry[6].log-start: yes") plus raw JSON blocks, because those rules identify themselves only by list position, not name. Those entries are now regrouped into one clean table per rule (Field / Change / Value), the way other firewall change-tracking tools present rule changes.',
+    'Each rule table uses plain-English field names ("Log at Session End", "Security Profile", "Source Zone", …) instead of the raw internal tag names, and shows a clear before → after for a changed value.',
+    'When a whole rule was added or removed, its real name is now shown (read from the rule itself); rules that only had individual fields changed are labelled by their position in the rulebase ("Rule #6"), since the name isn\'t recoverable from that kind of change alone.',
+    'Renamed the section previously labelled "Rules (detail unavailable for this device)" to "Security Rules" — per-rule detail IS now shown, so the old wording was misleading.',
+  ],
   '2.28.1': [
     'Fixed noisy config-change alerts on Palo Alto devices: PAN-OS periodically stages a preview of pending App-ID content updates internally, which was being reported as a real "1 removed"/"1 added" configuration change even though nothing an admin controls actually changed. This no longer generates an alert.',
   ],
