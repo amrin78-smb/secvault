@@ -444,6 +444,14 @@ down the rulebase — see the "Array diffing" note below. Grouping still needed 
 complementary. Paths keep the positional `entry[N]` grammar (matched/added → new index, removed → old
 index), so name-in-path fragility was avoided entirely.
 
+**Vendor-agnostic noise leaves (`UNIVERSAL_VOLATILE_LEAF_FIELDS`, added v2.31.1).** Separate from the
+per-vendor `MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR` allowlists: a small set of derived/computed summary leaf
+fields filtered by LEAF NAME on EVERY vendor (and the no-vendor `diffConfigs` call). Currently just
+`security_rules_count` — Palo Alto's parser derives it (rulebase size), it moves on every rule add/remove and
+duplicates the per-rule change table. `isVolatilePath()` checks this FIRST, before the per-vendor subtree
+lookup. Add a new always-noise leaf here (not to a per-vendor allowlist) when it's a computed value no admin
+edits directly. Cleaned from historical rows by the same `cleanupVolatileConfigDiffs` migration.
+
 **Whole-subtree-root volatile entries need DECOMPOSITION in the cleanup path, not just `isVolatilePath` (added 2026-07-31, v2.31.0).** `isVolatilePath()` only matches a nested LEAF under a registered root, never the bare root captured as one object (`{path:'tree.shared.content-preview', value:{…}}`). At compute time `diffValue`'s `isRegisteredSubtreeRoot` branch decomposes those, but `filterDiffForCurrentRules()` (the `cleanupVolatileConfigDiffs` migration) only ran the leaf filter — so a HISTORICAL whole-`content-preview`-object add (recorded before decomposition existed, or when vendor was unknown) rendered as a permanent "1 added" noise row. `filterDiffForCurrentRules()` now re-runs `diffValue({}, e.value, …)`/`diffValue(e.value, {}, …)` on any added/removed registered-root entry so the current allowlist applies per-leaf: `content-preview` (empty allowlist) drops entirely; `system_info` keeps only allowlisted fields and sheds embedded clock/uptime telemetry. Runs on every migrate, idempotent.
 
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted

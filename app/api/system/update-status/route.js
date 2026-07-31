@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.31.1': [
+    'The internal "security_rules_count" value (a running total of security rules) no longer appears as its own Configuration Change. It moved on every single rule add/remove, duplicating what the per-rule change view already shows far more usefully. Filtered as noise across all firewall brands; existing change records containing only this value are cleaned up on update.',
+  ],
   '2.31.0': [
     'Configuration Changes readability polish: local firewall users, application filters, and the rule-count summary now show under clear section names ("Local Users", "Application Filters", "Rule Count") instead of a generic "Other (…)" label.',
     'Fixed a redundant line on group-membership changes — it read "…membership changed: X → Y: X → Y", now shows the change once, and correctly says "Group" rather than "User".',
