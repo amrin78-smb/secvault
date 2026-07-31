@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.37.0': [
+    'The Active VPN Users table now covers Fortinet and Cisco ASA too, in addition to Palo Alto. Fortinet SSL-VPN and Cisco ASA AnyConnect sessions show the connected user, source and assigned IP, duration, and (for these two vendors) data transferred in/out — all from the device query that already reported the session count, no syslog needed.',
+    'Added a "Data" (in/out bytes) column to the table for vendors that report it.',
+    'As with Palo Alto, the per-user detail is additive: the session count is unchanged, and the exact device-output field labels are logged once ([Fortinet Debug] / [CiscoASA Debug]) on first collection so they can be confirmed against your firmware.',
+  ],
   '2.36.0': [
     'VPN now shows the live list of connected users, not just a count. A device\'s VPN page has a new "Active VPN Users" table — username, tunnel type, source IP, assigned IP, login time, duration, and client — pulled from the same device query that already reported the session count (no syslog needed).',
     'This first release covers Palo Alto (GlobalProtect) on both SSH and API. Fortinet and Cisco ASA per-user detail are next. The session count itself is unchanged; the per-user detail is purely additive.',

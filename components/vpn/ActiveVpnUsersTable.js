@@ -20,6 +20,31 @@ function formatDuration(seconds) {
   return `${s}s`;
 }
 
+function formatBytes(n) {
+  if (n == null) return null;
+  const b = Number(n);
+  if (!Number.isFinite(b) || b < 0) return null;
+  if (b < 1024) return `${b} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = b / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+// "↓ in / ↑ out" data-volume cell — only vendors that report byte counters
+// (Cisco ASA, Fortinet) populate these; Palo Alto GlobalProtect current-user
+// doesn't, so it shows "—".
+function dataCell(bytesIn, bytesOut) {
+  const din = formatBytes(bytesIn);
+  const dout = formatBytes(bytesOut);
+  if (din == null && dout == null) return '—';
+  return `↓ ${din || '—'} / ↑ ${dout || '—'}`;
+}
+
 export default function ActiveVpnUsersTable({ sessions }) {
   const rows = Array.isArray(sessions) ? sessions : [];
   return (
@@ -32,13 +57,14 @@ export default function ActiveVpnUsersTable({ sessions }) {
       ) : (
         <Table>
           <colgroup>
-            <col style={{ width: '19%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '9%' }} />
             <col style={{ width: '16%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '12%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -48,6 +74,7 @@ export default function ActiveVpnUsersTable({ sessions }) {
               <th>Assigned IP</th>
               <th>Login Time</th>
               <th>Duration</th>
+              <th>Data</th>
               <th>Client</th>
             </tr>
           </thead>
@@ -64,6 +91,7 @@ export default function ActiveVpnUsersTable({ sessions }) {
                   {r.login_time || '—'}
                 </td>
                 <td>{formatDuration(r.duration_seconds)}</td>
+                <td className="mono" style={{ whiteSpace: 'normal' }}>{dataCell(r.bytes_in, r.bytes_out)}</td>
                 <td title={r.client || ''} style={{ wordBreak: 'break-word' }}>
                   {r.client || '—'}
                 </td>
