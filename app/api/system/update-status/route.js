@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.34.2': [
+    'Configuration Changes no longer shows raw JSON for nested values (e.g. an Application Filter). They now render as a clean, indented key/value tree — "AI-Apps-Filter → category: business-systems, saas → subcategory: artificial-intelligence" — instead of a braces-and-quotes block.',
+    'Long change lists (such as an older VPN user-group membership record that listed 200+ shifted entries) now show the first 12 with a "Show all (N)" toggle, so a single section can no longer flood the page. (New changes don\'t produce those long lists — this only affects change records saved before the underlying fix; the toggle keeps them tidy either way.)',
+  ],
   '2.34.1': [
     'Continued the UI density pass: the CVE detail page\'s Affected Devices table now collapses to the first 10 rows with a show-all toggle, and the device Rules table wraps its multi-value columns (zones, services) as readable pills instead of cutting them off.',
     'Compliance standard cards trim their long descriptions to two lines (full text on hover) so the score is the focus, and a couple of verbose explanatory paragraphs were condensed.',

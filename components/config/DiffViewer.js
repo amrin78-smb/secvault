@@ -88,18 +88,96 @@ const TOGGLE_BUTTON_STYLE = {
   fontFamily: 'inherit',
 };
 
-// Pretty-prints an object/array value. Small values render inline; large
-// ones (per LARGE_VALUE_THRESHOLD) render collapsed behind a toggle so a
-// ~4000-character subtree doesn't dump an unreadable wall of text into the
-// row list. Top-level function per CLAUDE.md — never nest a component
-// definition inside another component's function body.
+// ---------------------------------------------------------------------------
+// ValueTree — readable nested object/array renderer (replaces raw JSON)
+// ---------------------------------------------------------------------------
+// A one-sided added/removed (or old→new) value that isn't a FLAT object (which
+// gets FlatObjectTable) used to fall back to a pretty-printed JSON.stringify
+// wall — e.g. an `application-filter` object `{ "AI-Apps-Filter": { category:
+// [...], subcategory: "..." } }` rendered as raw braces. This renders ANY
+// value as a labeled, indented key/value tree instead: primitives inline,
+// arrays-of-primitives joined, nested objects/arrays indented under their key
+// with a thin rule — no JSON braces. Keys are shown VERBATIM (not title-cased)
+// because a config key is often a meaningful identifier/name (e.g. the filter
+// name "AI-Apps-Filter") that a Title-Case transform would mangle.
+const TREE_BOX_STYLE = {
+  margin: '4px 0 0',
+  padding: '8px 10px',
+  background: 'var(--bg-primary)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-sm)',
+  color: 'var(--text-primary)',
+  maxHeight: 320,
+  overflow: 'auto',
+};
+
+function isTreePrimitive(v) {
+  return v === null || typeof v !== 'object';
+}
+
+function joinTreePrimitives(arr) {
+  return arr.map((v) => formatValue(v)).join(', ');
+}
+
+function ValueTree({ value }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span style={{ color: 'var(--text-muted)' }}>(empty)</span>;
+    if (value.every(isTreePrimitive)) {
+      return <span style={{ wordBreak: 'break-word' }}>{joinTreePrimitives(value)}</span>;
+    }
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {value.map((item, i) => (
+          <div key={i} style={{ borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
+            <ValueTree value={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return <span style={{ color: 'var(--text-muted)' }}>(empty)</span>;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {keys.map((k) => {
+          const v = value[k];
+          const inline = isTreePrimitive(v) || (Array.isArray(v) && v.every(isTreePrimitive));
+          return (
+            <div key={k} style={inline ? { display: 'flex', gap: 6, flexWrap: 'wrap' } : undefined}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{k}:</span>
+              {inline ? (
+                <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
+                  {Array.isArray(v) ? (v.length === 0 ? '(empty)' : joinTreePrimitives(v)) : formatValue(v)}
+                </span>
+              ) : (
+                <div style={{ marginTop: 2, paddingLeft: 10, borderLeft: '2px solid var(--border)' }}>
+                  <ValueTree value={v} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  return <span style={{ wordBreak: 'break-word' }}>{formatValue(value)}</span>;
+}
+
+// Renders an object/array value as a readable ValueTree (see above). Large
+// values (per LARGE_VALUE_THRESHOLD) collapse behind a toggle so a big subtree
+// doesn't dominate the row list. Top-level function per CLAUDE.md — never nest
+// a component definition inside another component's function body.
 function CollapsibleValue({ value }) {
   const [expanded, setExpanded] = useState(false);
-  const pretty = JSON.stringify(value, null, 2);
-  const isLarge = pretty.length > LARGE_VALUE_THRESHOLD;
+  const isLarge = JSON.stringify(value).length > LARGE_VALUE_THRESHOLD;
 
   if (!isLarge) {
-    return <pre style={PRE_STYLE}>{pretty}</pre>;
+    return (
+      <div style={TREE_BOX_STYLE}>
+        <ValueTree value={value} />
+      </div>
+    );
   }
 
   return (
@@ -108,7 +186,11 @@ function CollapsibleValue({ value }) {
       <button type="button" onClick={() => setExpanded((e) => !e)} style={TOGGLE_BUTTON_STYLE}>
         {expanded ? '▾ Hide details' : '▸ Show details'}
       </button>
-      {expanded && <pre style={PRE_STYLE}>{pretty}</pre>}
+      {expanded && (
+        <div style={TREE_BOX_STYLE}>
+          <ValueTree value={value} />
+        </div>
+      )}
     </span>
   );
 }
@@ -408,9 +490,20 @@ function DiffModifiedRow({ path, oldValue, newValue, friendlyDescription }) {
   );
 }
 
+// A single Added/Removed/Modified list can be huge — a real case is a HISTORICAL
+// user-group membership row recorded before the value-based array diff existed,
+// which shows one "membership changed: X → Y" line per shifted entry (200+ rows).
+// Those old rows can't be re-diffed (the source snapshots are gone), so cap the
+// visible rows here and hide the rest behind a "Show all (N)" toggle so the list
+// never floods the page. Applies to every section list, not just that case.
+const SECTION_ROW_LIMIT = 12;
+
 function DiffSection({ title, tone, rows, renderRow }) {
+  const [showAll, setShowAll] = useState(false);
   if (!Array.isArray(rows) || rows.length === 0) return null;
   const toneStyle = TONE_STYLES[tone] || TONE_STYLES.warning;
+  const overLimit = rows.length > SECTION_ROW_LIMIT;
+  const visibleRows = showAll ? rows : rows.slice(0, SECTION_ROW_LIMIT);
 
   return (
     <div
@@ -437,12 +530,17 @@ function DiffSection({ title, tone, rows, renderRow }) {
         className="mono"
         style={{ display: 'flex', flexDirection: 'column', gap: 2, color: 'var(--text-primary)', listStyle: 'none' }}
       >
-        {rows.map((row, i) => (
+        {visibleRows.map((row, i) => (
           <li key={i} style={{ wordBreak: 'break-all' }}>
             {renderRow(row)}
           </li>
         ))}
       </ul>
+      {overLimit && (
+        <button type="button" onClick={() => setShowAll((s) => !s)} style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0, marginTop: 6 }}>
+          {showAll ? '▾ Show fewer' : `▸ Show all ${rows.length}`}
+        </button>
+      )}
     </div>
   );
 }
