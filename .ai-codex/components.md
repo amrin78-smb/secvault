@@ -38,7 +38,7 @@ Header (async server)  session — top navy header bar: logo, search, sync pill,
 
 (c) DeviceActions  deviceId — Collect Now / Test Connectivity buttons with pending state
 (c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-23, was 4 separate stacked links)
-(c) DeviceForm  onSubmit, mode, initialDevice — Add/Edit Device form (vendor/method/credentials/saved-profile picker); responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH
+(c) DeviceForm  onSubmit, mode, initialDevice — Add/Edit Device form; responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH. Credential inputs (secret/user/pass/saved-profile/save-as-profile/SMC test row) render in CREATE mode ONLY — edit mode is metadata-only, rotation lives in CredentialForm on the Manage tab (dedup, credential-only PUT never touches mgmt_method)
 (c) CredentialForm  deviceId, vendor="forcepoint", mgmtMethod=null — rotate an existing device's credential
 vendorMeta.js — no component; pure data/logic module (VENDOR_META table + credential-shape helpers)
 OverviewCveCard  deviceId — top CVEs needing attention card (Overview tab)

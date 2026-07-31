@@ -51,14 +51,26 @@ const FULL_WIDTH = { gridColumn: '1 / -1' };
 // `site` would be an unreasonable tax on the common case.
 //
 // mode: 'create' | 'edit'. In 'edit' mode, `initialDevice` (the full devices
-// row) pre-fills every field, credential inputs are OPTIONAL (blank = "don't
-// touch the stored credential", mirroring how PUT /api/devices/[id] already
-// behaves — it only calls setCredential when credential/credential_type,
-// credential_profile_id, or smc_api_key is present in the body), and the
-// caller's `onSubmit` is expected to PUT rather than POST. This component
-// never picks the HTTP method or URL itself — same as create mode, that's the
-// caller's job (see app/(dashboard)/devices/new/page.js for create,
-// components/devices/EditDeviceModal.js for edit) — it only ever calls
+// row) pre-fills every field and the caller's `onSubmit` is expected to PUT
+// rather than POST.
+//
+// ⛔ CREDENTIAL INPUTS ARE HIDDEN IN EDIT MODE (all `{!isEdit && …}` below).
+// Credential rotation lives in ONE place — the dedicated, credential-only
+// `components/devices/CredentialForm.js` ("Rotate Credentials" on the Manage
+// tab), which PUTs ONLY `{credential, credential_type}` and never `mgmt_method`
+// or any other device field. This modal is metadata-only (name/vendor/access
+// method/connection/SSL/site/criticality); with no credential inputs, its own
+// handleSubmit never puts a credential (credentialProvided stays false), so a
+// metadata edit can never touch the stored secret. Deliberate de-duplication
+// (chosen 2026-07-31) — the two used to overlap. Create mode STILL shows every
+// credential input, since a brand-new device has no stored credential to keep.
+// (Minor accepted trade: changing a device's access method here, then rotating
+// its credential, is now two steps — method in this modal, new secret in Rotate
+// Credentials — but that's a rare flow and the separation is cleaner/safer.)
+//
+// This component never picks the HTTP method or URL itself — same as create
+// mode, that's the caller's job (see app/(dashboard)/devices/new/page.js for
+// create, components/devices/EditDeviceModal.js for edit) — it only ever calls
 // `onSubmit(payload)`.
 export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = null }) {
   const isEdit = Boolean(mode === 'edit' && initialDevice);
@@ -408,7 +420,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </>
       )}
 
-      {!isSmc && (
+      {!isSmc && !isEdit && (
         <div className="form-field">
           <label htmlFor="device-cred-profile">Use Saved Profile</label>
           <select
@@ -431,7 +443,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </div>
       )}
 
-      {!selectedProfileId && isApiKeyOrUserPass && (
+      {!isEdit && !selectedProfileId && isApiKeyOrUserPass && (
         <div className="form-field">
           <label htmlFor="device-auth-mode">Authentication</label>
           <select
@@ -457,18 +469,11 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </div>
       )}
 
-      {/* Edit mode only: credential fields below are optional. Blank stays
-          blank all the way to PUT /api/devices/[id], which only rotates the
-          stored credential when `credential`/`credential_profile_id` is
-          actually present in the body — see `credentialProvided` in
-          handleSubmit below, unchanged from create mode. */}
-      {isEdit && !selectedProfileId && (
-        <p style={{ ...FULL_WIDTH, margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Leave the field{showSecretInput ? '' : 's'} below blank to keep the currently stored credential.
-        </p>
-      )}
-
-      {!selectedProfileId &&
+      {/* Credential inputs — create mode only. In edit mode these are hidden
+          entirely (see the header comment): rotation lives in CredentialForm
+          ("Rotate Credentials" on the Manage tab), so this modal stays
+          metadata-only and its handleSubmit never sends a credential. */}
+      {!isEdit && !selectedProfileId &&
         (showSecretInput ? (
           <div className="form-field">
             <label htmlFor="device-secret">{config.secretLabel}</label>
@@ -535,7 +540,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           </>
         ))}
 
-      {!selectedProfileId && (
+      {!isEdit && !selectedProfileId && (
         <div className="form-field" style={FULL_WIDTH}>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
@@ -603,7 +608,11 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </select>
       </div>
 
-      {isSmc && (
+      {/* SMC in-form Test Connectivity is create-mode only — it tests using the
+          api-key typed above, which no longer exists in edit mode. Post-edit
+          testing uses the page-level Test Connectivity in Device Actions, which
+          runs against the STORED credential. */}
+      {isSmc && !isEdit && (
         <div
           style={{
             ...FULL_WIDTH,

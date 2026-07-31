@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.32.1': [
+    'Removed the duplicate credential fields from the Edit Device Details popup. Credential entry and rotation now live in one place — the dedicated "Rotate Credentials" control on the Manage tab — so editing a device\'s details (name, vendor, access method, address, site, criticality) can never accidentally touch its stored credential. The Add Device form is unchanged and still collects credentials when creating a device.',
+  ],
   '2.32.0': [
     'The Edit Device Details popup no longer runs off the bottom of the screen: it now lays its fields out in two columns and is wider, so everything including the Save button fits. If a dialog is ever still taller than the screen, it now scrolls inside the popup instead of clipping.',
     'The Add Device form uses the same tidier two-column layout.',
