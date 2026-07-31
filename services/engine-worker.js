@@ -295,6 +295,16 @@ let ruleVersionPullInFlight = false;
 let vpnPollInFlight = false;
 let snmpPollInFlight = false;
 
+// One-time (per process) diagnostic sample of a real per-user VPN session,
+// logged through winston (-> engine.log, unlike the adapters' console.log
+// [*Debug] dumps whose stdout capture depends on the NSSM redirect config).
+// Fires on the FIRST device that actually returns a session, so the sample has
+// populated fields. Includes the normalized shape AND its `raw` (the device's
+// own field names — XML entry keys, or the SSH text-block labels), which is
+// exactly what's needed to correct any field mapping (e.g. Assigned IP /
+// Duration) against real firmware output.
+let loggedVpnUserSample = false;
+
 async function runRuleVersionPullJob() {
   if (ruleVersionPullInFlight) {
     logger.warn('Job [rule-version-pull] previous run still in progress — skipping this tick.');
@@ -406,6 +416,16 @@ async function runVpnSessionPollJob() {
         // wipes the last-known set. An empty array from a successful poll
         // legitimately clears the device's rows (nobody connected right now).
         if (Array.isArray(summary.sessions)) {
+          if (!loggedVpnUserSample && summary.sessions.length > 0) {
+            loggedVpnUserSample = true;
+            try {
+              logger.info(
+                `[VPN-USER-SAMPLE] device ${device.name || device.id} (${device.vendor}) first of ${summary.sessions.length}: ${JSON.stringify(summary.sessions[0])}`
+              );
+            } catch (_logErr) {
+              /* never let a diagnostic log break the poll */
+            }
+          }
           try {
             await storeVpnSessions(device.id, summary.sessions, pool);
           } catch (sessErr) {
