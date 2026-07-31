@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.3': [
+    'Palo Alto firewalls that don\'t run GlobalProtect (no remote-access VPN gateway configured) no longer log a repeated error on every VPN poll. That state is now correctly treated as "0 active users" instead of a failure — clearing the recurring warning seen for devices like TFM-RN.',
+  ],
   '2.38.2': [
     'Diagnostic improvement for Palo Alto VPN user detail: the one-time raw-output log now captures a device that actually has connected users (and just one sample user), so the exact field labels can be confirmed and the remaining Assigned IP / Duration columns mapped correctly. No functional change to collection.',
   ],
