@@ -225,9 +225,9 @@ export default async function RuleRelationshipTab({ deviceId }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-        {clusters.length} cluster{clusters.length === 1 ? '' : 's'} of related rules, grouped from{' '}
-        {findings.length} relationship finding{findings.length === 1 ? '' : 's'} (shadow, redundant, correlation,
-        generalization, reorder-candidate) — sorted worst severity and largest cluster first.
+        {clusters.length} cluster{clusters.length === 1 ? '' : 's'} of connected rules from{' '}
+        {findings.length} shadow/redundant/correlation/generalization/reorder finding
+        {findings.length === 1 ? '' : 's'}, worst severity and largest cluster first.
       </p>
       {clusters.map((cluster, i) => (
         <ClusterCard key={cluster.ruleIds[0] || i} cluster={cluster} ruleMap={ruleMap} />

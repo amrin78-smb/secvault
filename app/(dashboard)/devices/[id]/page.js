@@ -71,6 +71,61 @@ function joinArray(value) {
   return value.join(', ');
 }
 
+// ── Wrapped multi-value list cells (mirrors components/compliance/
+// RuleEvidenceTable.js). The app's global `td` rule (app/globals.css) forces
+// every cell to `white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+// max-width:220px`, so a rule with many zones/services would show only the
+// first value + "…" (full list only on hover). Because the shared Table
+// enforces `tableLayout:'fixed'` with a <colgroup>, column widths come from the
+// colgroup, NOT the td max-width — overriding these td styles to wrap grows the
+// row taller within its allocated column width without disturbing the layout.
+const WRAP_CELL = {
+  whiteSpace: 'normal',
+  overflow: 'visible',
+  textOverflow: 'clip',
+  maxWidth: 'none',
+  wordBreak: 'break-word',
+  verticalAlign: 'top',
+};
+
+// Neutral pill: theme surface/text tokens (which flip in dark mode) + a border,
+// never a hardcoded hex, per the design system's adaptive-surface rule.
+const PILL = {
+  display: 'inline-block',
+  padding: '2px 8px',
+  background: 'var(--bg-primary)',
+  color: 'var(--text-secondary)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: 'var(--text-xs)',
+  lineHeight: 1.4,
+  whiteSpace: 'normal',
+  wordBreak: 'break-word',
+};
+
+const PILL_WRAP = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: '4px',
+};
+
+// Module-top-level (NEVER defined inside DeviceDetailPage — see CLAUDE.md's
+// "NEVER define a React component inside another React component" rule).
+// Renders a JSONB array field as a wrapped pill set, "—" for empty/null/
+// non-array — same fallback as joinArray() above.
+function ListPills({ value }) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  }
+  return (
+    <span style={PILL_WRAP}>
+      {value.map((v, i) => (
+        <span key={i} style={PILL}>{String(v)}</span>
+      ))}
+    </span>
+  );
+}
+
 // Plain functions returning JSX, called imperatively ({twoFactorBadge(...)}),
 // same "not a nested component" pattern as tabLink() above -- 3-state
 // rendering (true/false/null → Enabled/Disabled/Unknown), never collapsing
@@ -506,12 +561,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           <Table>
             <colgroup>
               <col style={{ width: '6%' }} />
-              <col style={{ width: '17%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '7%' }} />
               <col style={{ width: '8%' }} />
-              <col style={{ width: '9%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '14%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
               <col style={{ width: '9%' }} />
               <col style={{ width: '9%' }} />
             </colgroup>
@@ -535,9 +590,15 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
                   <td>{r.enabled ? 'Yes' : 'No'}</td>
                   <td>{r.action || '—'}</td>
-                  <td title={joinArray(r.src_zones)}>{joinArray(r.src_zones)}</td>
-                  <td title={joinArray(r.dst_zones)}>{joinArray(r.dst_zones)}</td>
-                  <td title={joinArray(r.services)}>{joinArray(r.services)}</td>
+                  <td style={WRAP_CELL} title={joinArray(r.src_zones)}>
+                    <ListPills value={r.src_zones} />
+                  </td>
+                  <td style={WRAP_CELL} title={joinArray(r.dst_zones)}>
+                    <ListPills value={r.dst_zones} />
+                  </td>
+                  <td style={WRAP_CELL} title={joinArray(r.services)}>
+                    <ListPills value={r.services} />
+                  </td>
                   <td>{r.log_enabled ? 'Yes' : 'No'}</td>
                   <td>{r.hit_count ?? 0}</td>
                 </tr>

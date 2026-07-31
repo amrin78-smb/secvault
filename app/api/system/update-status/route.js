@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.34.1': [
+    'Continued the UI density pass: the CVE detail page\'s Affected Devices table now collapses to the first 10 rows with a show-all toggle, and the device Rules table wraps its multi-value columns (zones, services) as readable pills instead of cutting them off.',
+    'Compliance standard cards trim their long descriptions to two lines (full text on hover) so the score is the focus, and a couple of verbose explanatory paragraphs were condensed.',
+  ],
   '2.34.0': [
     'Broad UI density and readability pass across several pages. Device Overview now lays its cards out in multi-column rows instead of a tall single-column stack, so wide screens are used properly.',
     'The zone-to-zone Reachability matrix no longer squeezes and clips its Allow/Deny badges when a device has many zones — the table now scrolls sideways with each column kept readable.',

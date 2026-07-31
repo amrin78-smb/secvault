@@ -138,19 +138,30 @@ export default function StandardCard({
         </div>
 
         <p style={{ margin: '0 0 16px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-          {description}
+          {/* Clamp long standard blurbs to 2 lines to cut vertical bulk (this
+              card renders ~5x). Full text stays reachable via the title tooltip
+              and the "Learn more" link, which is kept outside the clamp so it is
+              never truncated. A short description still shows in full. */}
+          <span
+            title={description}
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {description}
+          </span>
           {referenceUrl && (
-            <>
-              {' '}
-              <a
-                href={referenceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: 'var(--primary)', whiteSpace: 'nowrap' }}
-              >
-                Learn more
-              </a>
-            </>
+            <a
+              href={referenceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--primary)', whiteSpace: 'nowrap' }}
+            >
+              Learn more
+            </a>
           )}
         </p>
 
