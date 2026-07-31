@@ -126,7 +126,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 
 ## lib/engines/configDiff.js
 
-`diffConfigs(oldParsed, newParsed, vendor?)` -> `{added, removed, modified}` (pure) — deep recursive diff of two parsed config trees; applies vendor-specific volatile-path filtering + defense-in-depth secret redaction; caps at 500 entries.
+`diffConfigs(oldParsed, newParsed, vendor?)` -> `{added, removed, modified}` (pure) — deep recursive diff of two parsed config trees; applies vendor-specific volatile-path filtering + defense-in-depth secret redaction; caps at 500 entries. Arrays are aligned by VALUE not position: all-primitive arrays via LCS (`diffPrimitiveArrayLCS`), all-object arrays sharing a unique `@_name`/`name` key via identity alignment (`diffObjectArrayByIdentity`, added 2026-07-31 — kills the Palo Alto XML/API rulebase shift cascade); everything else falls back to positional. Forward-only, no backfill for existing rows.
 `summarizeDiff(diff)` -> `string` — human one-liner (`"N added, M removed — e.g. path1, path2"`), with sanitized/truncated example paths.
 `isEmptyDiff(diff)` -> `boolean` — true if added/removed/modified are all empty.
 `detectAndStoreDiff(deviceId, pool, vendor?)` -> `Promise<{changed: boolean, diffId: string|null, summary: string|null}>` — diffs the 2 latest `device_configs` snapshots and inserts a `config_diffs` row if changed.

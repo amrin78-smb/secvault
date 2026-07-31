@@ -294,9 +294,25 @@ entry from the middle of a plain-value array (e.g. a VPN group's username list) 
 later entry down one slot, and each shift was reported as a separate "modified" entry (a real
 production report: one real removal showed up as a dozen-plus fake modifications). Fixed via
 `diffPrimitiveArrayLCS()` — an LCS-based diff used ONLY when every element on both sides is a plain
-primitive (string/number/boolean/null); arrays containing any object/array element keep the original
-positional behavior unchanged (no identity field to align object entries by, out of scope). Same
-`isVolatilePath()` filtering applies to LCS-produced entries as every other push site.
+primitive (string/number/boolean/null). Same `isVolatilePath()` filtering applies to LCS-produced
+entries as every other push site.
+
+**Object arrays got the same treatment 2026-07-31 (v2.30.0)** — arrays of OBJECTS were still positional
+until this, which is what produced the Palo Alto XML/API rulebase shift cascade (one rule inserted near the
+top → every later rule diffed against a different rule → dozens/hundreds of fake "modified" fields; a real
+report showed 37 added / 38 removed / 152 modified for one small change). `diffValue`'s `bothArrays` branch
+now, BEFORE the positional fallback, aligns arrays of objects by a shared UNIQUE identity key
+(`ARRAY_IDENTITY_KEYS = ['@_name','name']` — `@_name` = every XML/API `<entry name>` array, `name` = the
+flat Fortinet/Check Point/Forcepoint admin arrays) via `chooseArrayIdentityKey()`/
+`diffObjectArrayByIdentity()`. Matched elements diff field-by-field (a pure REORDER with no field change now
+produces NO entry at all — deliberate; ordering concerns belong to rule-analysis's `reorder_candidate`, not
+config-diff), an element only on one side is a real add/remove. Emits the SAME positional `entry[N]` paths as
+before (matched/added → new index, removed → old index) so classifyPath/redaction/truncation/DiffViewer
+grouping are all unchanged — only the PAIRING changed. Gated hard: falls back to positional unless EVERY
+element on BOTH sides is a plain object with a usable, unique identity value at the chosen key (a missing key
+or a duplicate identity → positional). **Forward-only** — like every diff fix here, it can't retroactively
+un-cascade already-persisted `config_diffs` rows (the two source snapshots are gone); only new pulls are
+clean. No backfill is possible for this, same as `device_risk_history`'s documented limitation.
 
 **`friendlyDescription` (added 2026-07-30, extended same day)**: `classifyDiff()` entries carry an
 extra `friendlyDescription: string|null` field — a plain-English one-line description (e.g. `Local
@@ -420,12 +436,13 @@ entry with `ruleIndex`/`ruleField` (via `extractIndexedRuleEntry()`, computed ag
 path; both `null` for every other shape), and `components/config/DiffViewer.js` regroups entries sharing an
 index into one Field/Change/Value table per rule (labelled "Rule #N" by position, or the real name when a
 whole-rule add/remove carries `@_name`). Section renamed "Security Rules" — a stable classification key,
-also in `OverviewConfigChangesCard.js`'s `HIGH_IMPACT_LABELS`, change both together. **Known NOT fixed
-(deeper root cause, deliberately out of scope):** the object-array diff is still POSITIONAL (`diffValue`'s
-`bothArrays` branch only uses LCS for all-primitive arrays), so inserting one rule near the top can still
-produce a shift cascade of false "modified" fields down the rulebase — grouping makes that navigable but
-doesn't cure it. A real fix needs keyed alignment by `@_name`, which name-in-path fragility (PAN-OS rule
-names contain `.`/spaces) makes non-trivial; left for a dedicated change.
+also in `OverviewConfigChangesCard.js`'s `HIGH_IMPACT_LABELS`, change both together. **Root-cause shift
+cascade FIXED 2026-07-31 (v2.30.0):** `diffValue`'s `bothArrays` branch now aligns arrays of objects by a
+shared unique identity key (`@_name`/`name`) instead of by position (`chooseArrayIdentityKey`/
+`diffObjectArrayByIdentity`), so inserting/removing one rule no longer cascades into false "modified" fields
+down the rulebase — see the "Array diffing" note below. Grouping still needed for readability; the two are
+complementary. Paths keep the positional `entry[N]` grammar (matched/added → new index, removed → old
+index), so name-in-path fragility was avoided entirely.
 
 **Display-layer truncation is a SEPARATE concern from redaction — don't conflate them.** A corrupted
 (not secret, just malformed/oversized) path or value needs `truncatePathForDisplay()`/

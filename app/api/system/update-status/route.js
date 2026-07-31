@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.30.0': [
+    'Fixed the root cause of inflated Configuration Changes counts on Palo Alto devices managed over the XML/API: because firewall rules were compared by their position in the list, inserting or removing a single rule shifted every rule below it and each shift was wrongly reported as a "modified" rule — one small change could show up as dozens or hundreds of fake modifications. Rules (and address/service objects and admin accounts) are now matched by their own name, so only real additions, removals, and field changes are reported.',
+    'A side effect of the same fix: simply reordering rules without changing any of them no longer generates config-change noise (rule-ordering concerns are handled separately by Rule Analysis).',
+    'This applies to new configuration pulls going forward; it cannot retroactively clean up change records that were already saved with the old position-based comparison.',
+  ],
   '2.29.0': [
     'Configuration Changes are now far easier to read for Palo Alto devices managed over the XML/API: a firewall-rule change used to appear as a long flat list of raw entries (e.g. "…rules.entry[5].log-end: yes", "…rules.entry[6].log-start: yes") plus raw JSON blocks, because those rules identify themselves only by list position, not name. Those entries are now regrouped into one clean table per rule (Field / Change / Value), the way other firewall change-tracking tools present rule changes.',
     'Each rule table uses plain-English field names ("Log at Session End", "Security Profile", "Source Zone", …) instead of the raw internal tag names, and shows a clear before → after for a changed value.',
