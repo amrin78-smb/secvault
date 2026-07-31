@@ -111,7 +111,7 @@ VendorDistribution  no props — active-device count by vendor, bar list
 ## vpn/
 
 (c) VpnSessionTrendChart  points — active VPN session-count trend line chart
-ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Data/Client) from vpn_active_sessions; Data column = ↓in/↑out bytes (Fortinet/Cisco). Server-safe, empty-state when no detail. Added 2026-07-31.
+(c) ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Data/Client) from vpn_active_sessions; Data column = ↓in/↑out bytes (Fortinet/Cisco). CLIENT component (2.38.1): search box (filters user/IP/client) + 25-per-page pagination for busy firewalls (100s of users). Added 2026-07-31.
 IpsecTunnelsTable  tunnels — live IPSec site-to-site tunnel table (Tunnel/Peer/Status/IKE/Data) from vpn_ipsec_tunnels; up/down status badge, server-safe. Added 2026-07-31.
 
 ## compliance/

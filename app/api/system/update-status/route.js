@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.1': [
+    'The Active VPN Users list no longer runs off the screen on busy firewalls: it now has a search box (filter by user, IP, or client) and pages 25 users at a time instead of one endless scroll.',
+    'Cleaned up the Source IP column so it no longer shows an empty "::" for users connected over IPv4 — it now shows the real address (or "—" when the device doesn\'t report one).',
+  ],
   '2.38.0': [
     'A device\'s VPN page now shows IPSec site-to-site tunnels: a table of each tunnel with its peer, up/down status, IKE version, and data transferred — collected from the device (Palo Alto, Fortinet, Cisco ASA), no syslog needed.',
     'The VPN config summary now lists the actual GlobalProtect gateway and portal names on Palo Alto devices, instead of only saying "Configured".',
