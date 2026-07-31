@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.35.0': [
+    'Fixed the misleading "whole membership list changed" config-change records. Older records showed a single user being added to or removed from a group as a long list of "membership changed: X → Y" modifications (and often named the wrong user as removed) — an artifact of how the list was compared back then. These records are now automatically corrected on update to show the real change: e.g. one user removed from the group, named correctly. New records were already correct; this repairs the historical ones and fixes their summary text to match.',
+  ],
   '2.34.2': [
     'Configuration Changes no longer shows raw JSON for nested values (e.g. an Application Filter). They now render as a clean, indented key/value tree — "AI-Apps-Filter → category: business-systems, saas → subcategory: artificial-intelligence" — instead of a braces-and-quotes block.',
     'Long change lists (such as an older VPN user-group membership record that listed 200+ shifted entries) now show the first 12 with a "Show all (N)" toggle, so a single section can no longer flood the page. (New changes don\'t produce those long lists — this only affects change records saved before the underlying fix; the toggle keeps them tidy either way.)',
