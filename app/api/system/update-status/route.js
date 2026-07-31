@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.6': [
+    'Diagnostic fix: two Fortinet firewalls (TSR_EKC, Vietnam-YCC) have been silently failing the Active VPN Users poll since the feature launched — their CLI output doesn\'t match the format the parser expects, likely due to a different firmware version. The one-time debug log meant to capture that raw output for exactly this situation was being consumed by the first (working) device in the poll order every time, so the actual mismatched output was never recorded. Now logs per-device on a parse failure specifically, so the next poll captures what these two devices really send.',
+  ],
   '2.38.5': [
     'Fixed Active VPN Users on Palo Alto (SSH): Source IP and Assigned IP were always blank, and the username showed a stray leading backslash — the device\'s actual field names weren\'t in the code\'s lookup list. All three now populate correctly, and Duration is now estimated from the session\'s login time when the device doesn\'t report it directly.',
     'Fixed IPSec tunnel Peer showing blank for Palo Alto tunnels collected over the API/XML path.',
