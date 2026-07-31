@@ -55,6 +55,73 @@ function prettyConfig(config) {
   }
 }
 
+// Renders a single predicate-config value inline. Primitives print as-is;
+// objects/arrays collapse to a compact single-line JSON string (never a
+// multi-line pre block). Module top level (never nested — CLAUDE.md rule).
+function formatConfigValue(value) {
+  if (value === null) return 'null';
+  if (value === undefined) return '—';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch (err) {
+    return String(value);
+  }
+}
+
+const CONFIG_CHIP_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'baseline',
+  gap: 4,
+  maxWidth: '100%',
+  overflow: 'hidden',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-card)',
+  padding: '2px 8px',
+  fontSize: 'var(--text-xs)',
+  lineHeight: 1.5,
+};
+
+// Compact inline rendering of a flat predicate config as "key = value" chips.
+// Module top level (never nested — CLAUDE.md rule).
+function ConfigChips({ config }) {
+  if (config === null || config === undefined) {
+    return <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>—</span>;
+  }
+  // Non-object (or array) configs have no key/value shape — show compact JSON.
+  if (typeof config !== 'object' || Array.isArray(config)) {
+    return (
+      <span className="mono" style={{ ...CONFIG_CHIP_STYLE, color: 'var(--text-secondary)' }}>
+        {formatConfigValue(config)}
+      </span>
+    );
+  }
+
+  const entries = Object.entries(config);
+  if (entries.length === 0) {
+    return <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>No config</span>;
+  }
+
+  return (
+    <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {entries.map(([key, value]) => (
+        <span key={key} style={CONFIG_CHIP_STYLE} title={`${key} = ${formatConfigValue(value)}`}>
+          <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{key}</span>
+          <span style={{ color: 'var(--text-muted)' }}>=</span>
+          <span
+            className="mono"
+            style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {formatConfigValue(value)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // Normalizes an overall or per-condition applicability result to the shared
 // tri-state badge encoding. Module top level (never nested — CLAUDE.md rule).
 function applicabilityBadgeProps(result) {
@@ -257,19 +324,7 @@ export default function ConditionsManager({ cveId, initialConditions, devices, c
                       </div>
                     )}
                   </div>
-                  <pre
-                    className="mono"
-                    style={{
-                      marginTop: 8,
-                      overflowX: 'auto',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'var(--bg-card)',
-                      padding: 8,
-                      color: 'var(--text-secondary)',
-                    }}
-                  >
-                    {prettyConfig(c.predicate_config)}
-                  </pre>
+                  <ConfigChips config={c.predicate_config} />
                 </li>
               ))}
             </ul>

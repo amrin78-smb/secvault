@@ -79,24 +79,31 @@ export default async function ReachabilityTab({ deviceId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-        Reflects zone-to-zone paths only (not full address/service granularity within a zone pair), based on this
-        device&apos;s own ruleset only (not cross-device network topology). &quot;—&quot; means no explicit rule was
-        found for that path — check the device&apos;s own default policy, this is not a claim that the path is
-        blocked or allowed. Zone roles (Internal/External/DMZ) are set on{' '}
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
+        Zone-to-zone paths from this device&apos;s own ruleset only; &quot;—&quot; means no explicit rule found (check
+        default policy). Red/amber outlines flag Allows into a classified Internal zone; set roles on{' '}
         <a href={`/devices/${deviceId}?tab=manage`} style={{ color: 'var(--primary)' }}>
           this device&apos;s Manage tab
         </a>
-        ; cells outlined in red are an Allow from a classified External zone straight to a classified Internal
-        one, and cells outlined in amber are an Allow from a classified DMZ zone to a classified Internal one —
-        both worth a second look, neither is an automatic claim of misconfiguration.
+        .
       </p>
 
       <Table>
+        {/*
+          Fixed PIXEL column widths, not percentages. The Table wrapper enforces
+          tableLayout:'fixed' on a width:100% table inside an overflow-x:auto div.
+          Percentages always summed to 100%, so many zones just squeezed every cell
+          until the verdict Badge clipped under the global td ellipsis rule and the
+          wrapper never scrolled. With fixed pixel col widths, once the columns'
+          total exceeds the container the table grows past 100% and the wrapper
+          scrolls horizontally instead; with few zones the fixed layout distributes
+          the slack so columns stay comfortably wide. 110px per zone column leaves
+          ample room for the (short) Allow/Deny/— badge.
+        */}
         <colgroup>
-          <col style={{ width: `${100 / (zones.length + 1)}%` }} />
+          <col style={{ width: 160, minWidth: 160 }} />
           {zones.map((z) => (
-            <col key={z} style={{ width: `${100 / (zones.length + 1)}%` }} />
+            <col key={z} style={{ width: 110, minWidth: 110 }} />
           ))}
         </colgroup>
         <thead>

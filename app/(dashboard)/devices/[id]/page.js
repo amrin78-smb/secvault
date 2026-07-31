@@ -487,13 +487,15 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             )}
           </div>
 
-          <OverviewCveCard deviceId={device.id} />
-          <OverviewExposureCard deviceId={device.id} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+            <OverviewCveCard deviceId={device.id} />
+            <OverviewExposureCard deviceId={device.id} />
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewRuleHygieneCard deviceId={device.id} />
             <OverviewConfigChangesCard deviceId={device.id} />
+            <OverviewComplianceCard deviceId={device.id} />
           </div>
-          <OverviewComplianceCard deviceId={device.id} />
         </div>
       )}
 

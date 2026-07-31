@@ -68,7 +68,7 @@ RiskTab  deviceId — renders device risk-score trend history
 (c) RiskTrendChart  points — line chart of risk score over time
 (c) RunAnalysisButton  deviceId — button to trigger a rule analysis run
 TrackingTab  deviceId — table of device operator activity log
-ObjectsTab  deviceId — unused/duplicate network object catalog view
+ObjectsTab  deviceId — unused/duplicate network object catalog view; each table caps at 10 rows with a <details>-based "Show all (N)"/"Show fewer" toggle (server component, no useState)
 ReorderTab  deviceId, canWrite — table of reorder_candidate findings + CSV export
 RiskyRulesTab  deviceId — per-rule risk banding table + stat tiles
 (c) RuleStatsBarChart  ruleStats, findingTypeCounts — bar chart of rule composition stats
@@ -76,7 +76,7 @@ CleanupTab  deviceId, canWrite — table of unused/redundant/generalization/corr
 FindingTypeBadge  type — muted badge labeling a finding_type
 (c) FindingsBarChart  counts — bar chart of findings by type/severity
 OptimizationTab  deviceId, canWrite — table of risky/any-any/exposure findings
-ReachabilityTab  deviceId — zone-to-zone reachability matrix table
+ReachabilityTab  deviceId — zone-to-zone reachability matrix table; columns use fixed px widths (160 + 110/zone) so many-zone matrices scroll in the overflow-x wrapper instead of clipping badges
 (c) RuleHygieneDonut  categories, total, size — generic multi-slice categorical donut chart
 RuleRelationshipTab  deviceId — clustered view of related-rule (shadow/redundant/etc) findings
 RuleChip  ruleId, ruleMap — chip rendering one rule's label (module-level helper, RuleRelationshipTab.js)
@@ -86,7 +86,7 @@ ClusterCard  cluster, ruleMap — card rendering one relationship cluster (modul
 
 (c) BackupActions  deviceId — button to create a manual config backup
 (c) AcknowledgeButton  deviceId, diffId — acknowledges a config diff, optional note
-(c) ConditionsManager  cveId, initialConditions, devices, canWrite — CRUD + test UI for advisory applicability conditions
+(c) ConditionsManager  cveId, initialConditions, devices, canWrite — CRUD + test UI for advisory applicability conditions; list renders each predicate config as compact key=value chips (ConfigChips), not a raw JSON <pre> block
 (c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff. Rule Changes (2.33.0) is a COLLAPSED-by-default accordion (RuleChangeCard) with Expand/Collapse all — one line per rule (name + change badge + ellipsis summary); expanding shows a compact responsive detail grid (RuleDetailGrid, replaced the tall 12-row RuleDetailTable) or a field-change grid (RuleFieldChangeList). Also: per-section groups, flat-object/diff tables, and (2.29.0) per-rule tables for Palo Alto XML/API "Security Rules" entries regrouped by ruleIndex ("Rule #N", or the real @_name on a whole-rule add/remove)
 
 ## dashboard/
@@ -117,7 +117,7 @@ VendorDistribution  no props — active-device count by vendor, bar list
 ComplianceMatrix  devices — fleet table of device compliance scores by standard ("Compare Devices")
 (c) DeviceSelect  devices, selectedId — dropdown to switch device in Cards view
 (c) PrintReportButton  no props — triggers window.print() for the print report page
-RuleEvidenceTable  rules — table of offending rules for a failed compliance check
+RuleEvidenceTable  rules — table of offending rules for a failed compliance check; multi-value columns (src/dst addr, service, zones) wrap as pills (ListPills) instead of single-line ellipsis truncation
 StandardCard  standard, description, referenceUrl, stats, failedChecks, failedChecksTotal, viewMoreHref, lastRunAt — donut card summarizing one standard
 (c) StandardDonut  pct, size — single-value donut/gauge chart for a score
 (c) StandardTabs  standards, findings, deviceId — tabbed findings table per standard

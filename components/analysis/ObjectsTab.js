@@ -72,6 +72,113 @@ function detailFor(row, findingType) {
   return (match && match.detail) || '—';
 }
 
+// How many rows each object table shows before it collapses the remainder
+// behind a "Show all (N)" toggle. Keeps the tab compact when a device has a
+// large object catalog — otherwise both tables render every matching row
+// inline, producing two very long tables on one tab.
+const OBJECT_ROW_LIMIT = 10;
+
+// This tab is an async SERVER component (it does its own pool.query), so it
+// can't hold React state / use hooks. The collapse is done with a native
+// <details>/<summary> element instead of useState — independent per table
+// (each <details> tracks its own open state), no client boundary needed,
+// presentation-only. The tiny stylesheet below swaps the summary label
+// between "Show all (N)" (collapsed) and "Show fewer" (expanded).
+const COLLAPSE_CSS = `
+.sv-obj-overflow > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  padding: 4px 0;
+  color: var(--primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.sv-obj-overflow > summary::-webkit-details-marker { display: none; }
+.sv-obj-overflow > summary:hover { text-decoration: underline; }
+.sv-obj-overflow .sv-obj-less { display: none; }
+.sv-obj-overflow[open] .sv-obj-more { display: none; }
+.sv-obj-overflow[open] .sv-obj-less { display: inline; }
+`;
+
+function ObjectColgroup() {
+  return (
+    <colgroup>
+      <col style={{ width: '25%' }} />
+      <col style={{ width: '15%' }} />
+      <col style={{ width: '25%' }} />
+      <col style={{ width: '35%' }} />
+    </colgroup>
+  );
+}
+
+// valueMode: 'members' → value-or-joined-members (Unused table); 'value' →
+// raw value (Duplicate table). Titles preserved exactly as the originals.
+function objectCell(o, valueMode) {
+  if (valueMode === 'members') {
+    const v = valueOrMembers(o);
+    return { display: v, title: v };
+  }
+  return { display: o.value || '—', title: o.value || '' };
+}
+
+function ObjectRows({ rows, valueMode, detailType }) {
+  return rows.map((o) => {
+    const cell = objectCell(o, valueMode);
+    return (
+      <tr key={o.id}>
+        <td title={o.name}>{o.name}</td>
+        <td>{typeBadge(o.object_type)}</td>
+        <td title={cell.title}>{cell.display}</td>
+        <td style={{ color: 'var(--text-secondary)' }}>{detailFor(o, detailType)}</td>
+      </tr>
+    );
+  });
+}
+
+// Renders the first OBJECT_ROW_LIMIT rows always; any remainder goes inside a
+// <details> whose <summary> is the "Show all (N)" / "Show fewer" toggle. The
+// overflow table reuses the same fixed-width colgroup so it lines up under
+// the first table as one continuous list.
+function CollapsibleObjectTable({ rows, headers, valueMode, detailType, limit = OBJECT_ROW_LIMIT }) {
+  const head = rows.slice(0, limit);
+  const rest = rows.slice(limit);
+  return (
+    <div>
+      <Table>
+        <ObjectColgroup />
+        <thead>
+          <tr>
+            {headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <ObjectRows rows={head} valueMode={valueMode} detailType={detailType} />
+        </tbody>
+      </Table>
+      {rest.length > 0 && (
+        <details className="sv-obj-overflow" style={{ marginTop: 8 }}>
+          <summary>
+            <span className="sv-obj-more">Show all ({rows.length})</span>
+            <span className="sv-obj-less">Show fewer</span>
+          </summary>
+          <div style={{ marginTop: 8 }}>
+            <Table>
+              <ObjectColgroup />
+              <tbody>
+                <ObjectRows rows={rest} valueMode={valueMode} detailType={detailType} />
+              </tbody>
+            </Table>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 export default async function ObjectsTab({ deviceId }) {
   const objects = await getObjectsWithFindings(pool, deviceId);
 
@@ -90,6 +197,7 @@ export default async function ObjectsTab({ deviceId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <style>{COLLAPSE_CSS}</style>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
         <StatCard label="Total Objects" value={objects.length} color="var(--text-muted)" />
         <StatCard label="Unused" value={unused.length} color="var(--yellow)" />
@@ -107,32 +215,12 @@ export default async function ObjectsTab({ deviceId }) {
         {unused.length === 0 ? (
           <EmptyState message="No unused objects found." />
         ) : (
-          <Table>
-            <colgroup>
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '15%' }} />
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '35%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Value / Members</th>
-                <th>Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {unused.map((o) => (
-                <tr key={o.id}>
-                  <td title={o.name}>{o.name}</td>
-                  <td>{typeBadge(o.object_type)}</td>
-                  <td title={valueOrMembers(o)}>{valueOrMembers(o)}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{detailFor(o, 'unused')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <CollapsibleObjectTable
+            rows={unused}
+            headers={['Name', 'Type', 'Value / Members', 'Detail']}
+            valueMode="members"
+            detailType="unused"
+          />
         )}
       </div>
 
@@ -141,32 +229,12 @@ export default async function ObjectsTab({ deviceId }) {
         {duplicates.length === 0 ? (
           <EmptyState message="No duplicate objects found." />
         ) : (
-          <Table>
-            <colgroup>
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '15%' }} />
-              <col style={{ width: '25%' }} />
-              <col style={{ width: '35%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Value</th>
-                <th>Duplicate Of</th>
-              </tr>
-            </thead>
-            <tbody>
-              {duplicates.map((o) => (
-                <tr key={o.id}>
-                  <td title={o.name}>{o.name}</td>
-                  <td>{typeBadge(o.object_type)}</td>
-                  <td title={o.value || ''}>{o.value || '—'}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{detailFor(o, 'duplicate')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <CollapsibleObjectTable
+            rows={duplicates}
+            headers={['Name', 'Type', 'Value', 'Duplicate Of']}
+            valueMode="value"
+            detailType="duplicate"
+          />
         )}
       </div>
     </div>

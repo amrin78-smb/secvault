@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.34.0': [
+    'Broad UI density and readability pass across several pages. Device Overview now lays its cards out in multi-column rows instead of a tall single-column stack, so wide screens are used properly.',
+    'The zone-to-zone Reachability matrix no longer squeezes and clips its Allow/Deny badges when a device has many zones — the table now scrolls sideways with each column kept readable.',
+    'Compliance rule-evidence tables now wrap multi-value cells (source/destination addresses, services, zones) as readable pills instead of cutting them off at the first value.',
+    'The object catalog (Unused/Duplicate objects) and CVE advisory pages are more compact — long tables/lists collapse to the first several entries with a show-all toggle, and small advisory sections sit side by side.',
+    'Applicability conditions show as clean "key = value" chips instead of a raw JSON block.',
+  ],
   '2.33.0': [
     'Redesigned the Rule Changes view in Configuration Changes to be far more compact — each changed rule is now a single collapsed line (rule name, change type, and a one-line summary), expandable on click, with Expand all / Collapse all. Previously every added/removed rule dumped a full-height 12-row table that was always open and took over the screen.',
     'When expanded, a rule\'s details lay out in a tidy multi-column grid that wraps cleanly instead of a tall single-column stack, and the long summary text no longer runs off the right edge of the screen (it truncates with the full text on hover).',

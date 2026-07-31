@@ -196,7 +196,7 @@ export default async function DeviceCompliancePage({ params }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <Link href="/compliance" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
           ← Back to Compliance
