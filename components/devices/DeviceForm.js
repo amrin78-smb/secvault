@@ -22,6 +22,11 @@ const AUTH_MODE_OPTIONS = [
   { value: 'userpass', label: 'Username & Password' },
 ];
 
+// Spans both columns of the DeviceForm grid (see the <form> comment below) —
+// used for text prose, checkboxes, the connectivity-test row, and the submit
+// button, which read better full-width than squeezed into one grid column.
+const FULL_WIDTH = { gridColumn: '1 / -1' };
+
 // Add/Edit device form, driven by VENDOR_META (frozen Tier 1 vendor table).
 //
 // Two independent axes, both sourced from VENDOR_META — do not conflate them:
@@ -280,8 +285,24 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="form-field">
+    // Responsive 2-column grid: paired inputs (vendor/method, IP/port,
+    // username/password, site/criticality) sit side by side when there's room
+    // and collapse to a single column on a narrow container (auto-fit +
+    // minmax). Text, checkboxes, the connectivity-test row, and the submit
+    // button span the full width via FULL_WIDTH. This roughly halves the form's
+    // height so it doesn't run off the bottom of the Edit Device modal.
+    // Unchanged in create mode (devices/new) — the same grid just renders in a
+    // wider page container there.
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: 16,
+        alignItems: 'start',
+      }}
+    >
+      <div className="form-field" style={FULL_WIDTH}>
         <label htmlFor="device-name">Name</label>
         <input
           id="device-name"
@@ -442,7 +463,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           actually present in the body — see `credentialProvided` in
           handleSubmit below, unchanged from create mode. */}
       {isEdit && !selectedProfileId && (
-        <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+        <p style={{ ...FULL_WIDTH, margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           Leave the field{showSecretInput ? '' : 's'} below blank to keep the currently stored credential.
         </p>
       )}
@@ -515,7 +536,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         ))}
 
       {!selectedProfileId && (
-        <div className="form-field">
+        <div className="form-field" style={FULL_WIDTH}>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
           >
@@ -541,7 +562,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
 
       {showSslToggle && (
         <label
-          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
+          style={{ ...FULL_WIDTH, display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
         >
           <input
             type="checkbox"
@@ -585,6 +606,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
       {isSmc && (
         <div
           style={{
+            ...FULL_WIDTH,
             display: 'flex',
             flexWrap: 'wrap',
             alignItems: 'center',
@@ -606,13 +628,13 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </div>
       )}
 
-      {submitError && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{submitError}</p>}
+      {submitError && <p style={{ ...FULL_WIDTH, fontSize: 'var(--text-base)', color: 'var(--red)' }}>{submitError}</p>}
 
-      <Button type="submit" variant="primary" disabled={saveBlocked || submitting}>
+      <Button type="submit" variant="primary" disabled={saveBlocked || submitting} style={FULL_WIDTH}>
         {submitting ? 'Saving…' : 'Save'}
       </Button>
       {saveBlocked && (
-        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+        <p style={{ ...FULL_WIDTH, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
           Run a successful connectivity test before saving.
         </p>
       )}

@@ -9,7 +9,12 @@ const FOCUSABLE_SELECTOR =
 // Suite `.modal-overlay` class (app/globals.css) for the backdrop; the panel
 // itself uses `.card`-equivalent surface styling inline (shadow-lg instead of
 // shadow-sm, since a modal floats above everything).
-export default function Modal({ open, onClose, title, children }) {
+// `maxWidth` (default 420) lets a caller widen the panel for a content-dense
+// modal (e.g. the multi-field Edit Device form, which renders a 2-column grid
+// that needs the extra width). The panel is ALWAYS height-capped to the
+// viewport and scrolls internally — a long form must never clip its own
+// submit button off-screen the way it did before this cap existed.
+export default function Modal({ open, onClose, title, children, maxWidth = 420 }) {
   const panelRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
 
@@ -70,7 +75,12 @@ export default function Modal({ open, onClose, title, children }) {
         tabIndex={-1}
         style={{
           width: '100%',
-          maxWidth: 420,
+          maxWidth,
+          // Overlay adds 16px padding each side (.modal-overlay) — cap the panel
+          // to the remaining viewport height and scroll its own content so a
+          // tall form is always fully reachable, submit button included.
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
           background: 'var(--bg-card)',
           border: '1px solid var(--border)',
           borderRadius: 'var(--radius)',

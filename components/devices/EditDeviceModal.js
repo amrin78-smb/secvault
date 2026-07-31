@@ -61,7 +61,7 @@ export default function EditDeviceModal({ device }) {
       <Button type="button" variant="secondary" onClick={() => setOpen(true)}>
         Edit Device Details
       </Button>
-      <Modal open={open} onClose={handleClose} title="Edit Device Details">
+      <Modal open={open} onClose={handleClose} title="Edit Device Details" maxWidth={680}>
         {/* `key` forces a fresh DeviceForm instance (and fresh pre-fill) each
             time the modal opens — see the `instance` comment above. Errors
             from a failed save render inside DeviceForm itself (submitError),

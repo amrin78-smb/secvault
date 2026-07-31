@@ -20,7 +20,7 @@ PageHeader  title, subtitle, actions — page title/subtitle/actions row
 StatusDot  status, className — colored status indicator dot
 Table  children, className — bordered table wrapper, enforces tableLayout:'fixed'
 IconChip  icon, color, bg — small colored icon badge
-(c) Modal  open, onClose, title, children — focus-trapped dialog overlay
+(c) Modal  open, onClose, title, children, maxWidth=420 — focus-trapped dialog overlay; panel is viewport-height-capped + scrolls internally (never clips a tall form's submit button); maxWidth widens the panel for dense content (Edit Device passes 680)
 StatCard  label, value, sub, color, className, compact, icon, iconColor, iconBg — colored-border stat tile
 (c) RowActionsMenu  actions[] — "⋮" overflow menu for table-row actions (2026-07-23 UI audit; replaces stacked underlined text links). actions: {type:'link'|'button', label, href|onClick, disabled?, pending?, pendingLabel?, danger?}. Does NOT auto-close on a pending button click (needs somewhere to show "Collecting…"/etc.) — only closes on outside-click or a link navigation.
 
@@ -38,7 +38,7 @@ Header (async server)  session — top navy header bar: logo, search, sync pill,
 
 (c) DeviceActions  deviceId — Collect Now / Test Connectivity buttons with pending state
 (c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-23, was 4 separate stacked links)
-(c) DeviceForm  onSubmit — Add Device form (vendor/method/credentials/saved-profile picker)
+(c) DeviceForm  onSubmit, mode, initialDevice — Add/Edit Device form (vendor/method/credentials/saved-profile picker); responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH
 (c) CredentialForm  deviceId, vendor="forcepoint", mgmtMethod=null — rotate an existing device's credential
 vendorMeta.js — no component; pure data/logic module (VENDOR_META table + credential-shape helpers)
 OverviewCveCard  deviceId — top CVEs needing attention card (Overview tab)
