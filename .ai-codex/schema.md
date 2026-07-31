@@ -451,7 +451,22 @@ gateway           TEXT
 raw               JSONB
 collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
-Index: `idx_vas_device_id`. LIVE per-user snapshot (one row per connected VPN user), DELETE+reinsert per successful poll — NO history, no retention. Added 2026-07-31. The per-user detail the management-plane commands already return (Palo Alto `show global-protect-gateway current-user`; Fortinet/Cisco to follow), NOT syslog. Written by `lib/engines/vpnSessions.js` `storeVpnSessions()` from `getVpnSessionSummary().sessions`. GRANT SELECT to both readonly roles (no secrets — session metadata).
+Index: `idx_vas_device_id`. LIVE per-user snapshot (one row per connected VPN user), DELETE+reinsert per successful poll — NO history, no retention. Added 2026-07-31. The per-user detail the management-plane commands already return (Palo Alto `show global-protect-gateway current-user`, Fortinet `get vpn ssl monitor`, Cisco ASA `show vpn-sessiondb anyconnect`), NOT syslog. Written by `lib/engines/vpnSessions.js` `storeVpnSessions()` from `getVpnSessionSummary().sessions`. GRANT SELECT to both readonly roles (no secrets — session metadata).
+
+### vpn_ipsec_tunnels
+```
+id           UUID PK DEFAULT gen_random_uuid()
+device_id    UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+name         TEXT
+peer         TEXT
+status       TEXT        -- normalized 'up'/'down' where derivable, else raw
+ike_version  TEXT        -- 'IKEv1'/'IKEv2'/null
+bytes_in     BIGINT
+bytes_out    BIGINT
+raw          JSONB
+collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Index: `idx_vit_device_id`. LIVE IPSec site-to-site tunnel snapshot (DELETE+reinsert per successful poll, no history). Added 2026-07-31. From the NEW optional adapter method `getVpnTunnels()`: Palo Alto `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list` / `/api/v2/monitor/vpn/ipsec`, Cisco ASA `show vpn-sessiondb l2l`. Written by `lib/engines/vpnTunnels.js` `storeVpnTunnels()`. GRANT SELECT to both readonly roles.
 
 ### snmp_metric_snapshots
 ```

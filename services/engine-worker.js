@@ -59,6 +59,7 @@ const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
 const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapters');
 const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSnapshot');
 const { storeVpnSessions } = require('../lib/engines/vpnSessions');
+const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -410,6 +411,22 @@ async function runVpnSessionPollJob() {
           } catch (sessErr) {
             logger.warn(
               `Job [vpn-session-poll] stored the count for device ${device.id} but failed to store session detail: ${sessErr.message}`
+            );
+          }
+        }
+
+        // IPSec site-to-site tunnel status (additive, 2026-07-31) — a SEPARATE
+        // optional adapter method + command. Isolated in its own try/catch so a
+        // tunnel-pull failure (a different command, may have its own access
+        // requirements) never fails the session poll above. Only a successful
+        // pull writes; [] legitimately clears (no tunnels).
+        if (typeof adapter.getVpnTunnels === 'function') {
+          try {
+            const tunnels = await adapter.getVpnTunnels();
+            await storeVpnTunnels(device.id, tunnels, pool);
+          } catch (tunErr) {
+            logger.warn(
+              `Job [vpn-session-poll] IPSec tunnel pull failed for device ${device.id} (${device.name || 'unnamed'}): ${tunErr.message}`
             );
           }
         }

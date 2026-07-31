@@ -607,6 +607,18 @@ block, skipping blocks with no recognizable action keyword. Config `parsed` →
 All 6 vendors additionally use a SEPARATE `credential_type='snmp'` for `getSnmpMetrics()`, never
 mixed with the management-plane credential.
 
+**Optional `getVpnTunnels()`** (IPSec site-to-site tunnel status → `vpn_ipsec_tunnels`, added 2026-07-31,
+a SEPARATE method + command from `getVpnSessionSummary`; engine-worker calls it in its own try/catch so a
+tunnel-pull failure never fails the session poll). Shape `{name, peer, status, ike_version, bytes_in,
+bytes_out, raw}`, `[]` = no tunnels (legit). Implemented for **paloalto** (`show vpn ipsec-sa`, both
+transports — SSH `sshParser.parseIpsecTunnels` tabular dedupe, XML `parser.normalizeIpsecTunnels`),
+**fortinet** (`diagnose vpn tunnel list` SSH `cliParser.parseIpsecTunnelList` + `/api/v2/monitor/vpn/ipsec`
+REST, VDOM-aware), **cisco_asa** (`show vpn-sessiondb l2l` → `parser.parseVpnSessiondbL2l`). All doc-derived,
+`[Vendor Debug]`-logged on first use, best-effort ([] on parse doubt). Not implemented for forcepoint/
+checkpoint/sangfor (same no-endpoint findings as their `getVpnSessionSummary` column). Also 2026-07-31:
+`vpnSummary.summarizePaloAlto` now surfaces GlobalProtect **gateway/portal names** (config inventory,
+`extractEntryNames`, both transports) instead of only the opaque found-at path.
+
 **`getConfig()` config_parsed additions (2026-07-30)**: Check Point now includes `administrators`
 (`show-administrators`, doc-derived) alongside `{gateway, api_versions}`. Forcepoint now includes
 `smc_vpn_gateway_configured` (tri-state, from the engine element's `internal_gateway` field) and

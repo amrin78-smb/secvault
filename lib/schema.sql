@@ -670,6 +670,29 @@ CREATE TABLE IF NOT EXISTS vpn_active_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_vas_device_id ON vpn_active_sessions(device_id);
 
+-- IPSec site-to-site TUNNEL status (added 2026-07-31) — a LIVE snapshot of the
+-- device's configured/active IPSec VPN tunnels (one row per tunnel), replaced
+-- wholesale each poll (DELETE+reinsert, no history, no retention), same live-
+-- snapshot semantics as vpn_active_sessions above. Populated from a NEW
+-- optional adapter method getVpnTunnels() (distinct from getVpnSessionSummary):
+-- Palo Alto `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco ASA
+-- `show vpn-sessiondb l2l`. NOT syslog. Only a SUCCESSFUL poll writes; an empty
+-- result legitimately clears the device's tunnels (none configured/up). `status`
+-- is a normalized 'up'/'down' where derivable, else the device's raw string.
+CREATE TABLE IF NOT EXISTS vpn_ipsec_tunnels (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  name TEXT,
+  peer TEXT,
+  status TEXT,
+  ike_version TEXT,
+  bytes_in BIGINT,
+  bytes_out BIGINT,
+  raw JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vit_device_id ON vpn_ipsec_tunnels(device_id);
+
 -- SNMP monitoring (Phase 1 -- added 2026-07-21). Cisco ASA, Fortinet, Palo
 -- Alto, Forcepoint, Sangfor (generic-only) -- see CLAUDE.md's "SNMP
 -- Monitoring" section for the full per-vendor feasibility/confidence

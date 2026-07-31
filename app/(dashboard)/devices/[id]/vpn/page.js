@@ -6,8 +6,10 @@ import Card, { CardBody } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import VpnSessionTrendChart from '../../../../../components/vpn/VpnSessionTrendChart';
 import ActiveVpnUsersTable from '../../../../../components/vpn/ActiveVpnUsersTable';
+import IpsecTunnelsTable from '../../../../../components/vpn/IpsecTunnelsTable';
 import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
 import { getVpnSessions } from '../../../../../lib/engines/vpnSessions';
+import { getVpnTunnels as getStoredVpnTunnels } from '../../../../../lib/engines/vpnTunnels';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
@@ -97,10 +99,11 @@ export default async function DeviceVpnPage({ params }) {
     return notFound();
   }
 
-  const [configRow, sessionHistory, activeSessions] = await Promise.all([
+  const [configRow, sessionHistory, activeSessions, ipsecTunnels] = await Promise.all([
     getLatestConfigParsed(pool, device.id),
     getVpnSessionHistory(pool, device.id),
     getVpnSessions(device.id, pool),
+    getStoredVpnTunnels(device.id, pool),
   ]);
 
   const summary = summarizeVpnConfig(device.vendor, configRow ? configRow.config_parsed : null);
@@ -162,6 +165,18 @@ export default async function DeviceVpnPage({ params }) {
             )}
 
             <div>
+              {fieldRow(
+                'GlobalProtect gateways',
+                Array.isArray(summary.gateways) && summary.gateways.length > 0
+                  ? `${summary.gateways.length} — ${summary.gateways.join(', ')}`
+                  : null
+              )}
+              {fieldRow(
+                'GlobalProtect portals',
+                Array.isArray(summary.portals) && summary.portals.length > 0
+                  ? `${summary.portals.length} — ${summary.portals.join(', ')}`
+                  : null
+              )}
               {fieldRow('Source interface', summary.sourceInterface)}
               {fieldRow('Port', summary.port)}
               {fieldRow('Idle timeout', summary.idleTimeout)}
@@ -179,6 +194,8 @@ export default async function DeviceVpnPage({ params }) {
       )}
 
       <ActiveVpnUsersTable sessions={activeSessions} />
+
+      <IpsecTunnelsTable tunnels={ipsecTunnels} />
 
       {sessionHistory.length > 0 ? (
         <VpnSessionTrendChart points={sessionHistory} />

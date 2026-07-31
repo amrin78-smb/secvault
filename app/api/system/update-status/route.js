@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.0': [
+    'A device\'s VPN page now shows IPSec site-to-site tunnels: a table of each tunnel with its peer, up/down status, IKE version, and data transferred — collected from the device (Palo Alto, Fortinet, Cisco ASA), no syslog needed.',
+    'The VPN config summary now lists the actual GlobalProtect gateway and portal names on Palo Alto devices, instead of only saying "Configured".',
+    'Same additive/best-effort approach as the active-user detail: tunnel collection runs separately from the session count and can never affect it, and raw device output is logged once per vendor for field-label validation.',
+    'This completes the no-syslog VPN picture (live users + tunnels + config inventory). Historical trends, failed connections, and per-session usage-over-time still require the syslog collector (a future phase).',
+  ],
   '2.37.0': [
     'The Active VPN Users table now covers Fortinet and Cisco ASA too, in addition to Palo Alto. Fortinet SSL-VPN and Cisco ASA AnyConnect sessions show the connected user, source and assigned IP, duration, and (for these two vendors) data transferred in/out — all from the device query that already reported the session count, no syslog needed.',
     'Added a "Data" (in/out bytes) column to the table for vendors that report it.',

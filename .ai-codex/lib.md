@@ -143,6 +143,10 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `storeVpnSessions(deviceId, sessions, pool)` -> `Promise<{count}>` — DELETE+reinsert (one transaction) the LIVE per-user active-session set into `vpn_active_sessions`. Engine-worker calls it only after a SUCCESSFUL poll (a failed pull never wipes; an empty array clears — nobody connected). Session objects: `{username, tunnel_type, source_ip, assigned_ip, login_time, duration_seconds, bytes_in, bytes_out, client, gateway, raw}` (any field nullable). Added 2026-07-31.
 `getVpnSessions(deviceId, pool)` -> `Promise<object[]>` — current active-session rows for the per-device VPN page.
 
+## lib/engines/vpnTunnels.js
+
+`storeVpnTunnels(deviceId, tunnels, pool)` / `getVpnTunnels(deviceId, pool)` — same live-snapshot DELETE+reinsert + read pattern as vpnSessions.js, for `vpn_ipsec_tunnels`. Tunnel shape: `{name, peer, status, ike_version, bytes_in, bytes_out, raw}`. Fed by the adapters' optional `getVpnTunnels()` (PAN-OS `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco `show vpn-sessiondb l2l`), stored by the engine-worker VPN poll in its own try/catch (a tunnel-pull failure never fails the session poll). Added 2026-07-31.
+
 ## lib/engines/dashboardSnapshot.js
 
 `computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
