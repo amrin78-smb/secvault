@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.38.7': [
+    'Fixed the Active VPN Users poll that was failing every ~30 minutes for two Fortinet firewalls (TSR_EKC, Vietnam-YCC). Their firmware returns a completely blank response for the session-count command when nobody is connected, instead of the empty table older firmware prints — the poll now recognizes that as a confirmed 0 active users instead of treating it as an error.',
+  ],
   '2.38.6': [
     'Diagnostic fix: two Fortinet firewalls (TSR_EKC, Vietnam-YCC) have been silently failing the Active VPN Users poll since the feature launched — their CLI output doesn\'t match the format the parser expects, likely due to a different firmware version. The one-time debug log meant to capture that raw output for exactly this situation was being consumed by the first (working) device in the poll order every time, so the actual mismatched output was never recorded. Now logs per-device on a parse failure specifically, so the next poll captures what these two devices really send.',
   ],
