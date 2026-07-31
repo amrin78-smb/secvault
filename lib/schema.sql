@@ -635,6 +635,41 @@ CREATE TABLE IF NOT EXISTS vpn_session_snapshots (
 CREATE INDEX IF NOT EXISTS idx_vss_device_id ON vpn_session_snapshots(device_id);
 CREATE INDEX IF NOT EXISTS idx_vss_sampled_at ON vpn_session_snapshots(sampled_at);
 
+-- VPN active-session DETAIL (added 2026-07-31) — a LIVE snapshot of the users
+-- currently connected to a device's remote-access VPN, one row per connected
+-- user, replaced wholesale each poll (DELETE+reinsert, so only the CURRENT
+-- set is ever stored — no history table, no retention job). This is the
+-- per-user detail the management-plane commands SecVault ALREADY runs return
+-- but that used to be discarded down to just the header count in
+-- vpn_session_snapshots above: Palo Alto `show global-protect-gateway
+-- current-user`, Fortinet `get vpn ssl monitor`, Cisco ASA `show
+-- vpn-sessiondb`. NOT syslog-derived (that's still Phase 8) — this is what a
+-- live device query can answer without any log ingestion. Only a SUCCESSFUL
+-- poll writes (a failed pull leaves the last snapshot intact — see
+-- services/engine-worker.js's runVpnSessionPollJob()); an empty result set
+-- from a successful poll legitimately clears the table (nobody connected).
+-- `login_time` is TEXT (the device's own raw string — parsing every vendor's
+-- timestamp/tz format to timestamptz is fragile and unnecessary for display);
+-- `duration_seconds`/`bytes_*` are the reliable numeric fields when a vendor
+-- provides them, NULL otherwise (not every vendor reports all of them).
+CREATE TABLE IF NOT EXISTS vpn_active_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  username TEXT,
+  tunnel_type TEXT,
+  source_ip TEXT,
+  assigned_ip TEXT,
+  login_time TEXT,
+  duration_seconds BIGINT,
+  bytes_in BIGINT,
+  bytes_out BIGINT,
+  client TEXT,
+  gateway TEXT,
+  raw JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_vas_device_id ON vpn_active_sessions(device_id);
+
 -- SNMP monitoring (Phase 1 -- added 2026-07-21). Cisco ASA, Fortinet, Palo
 -- Alto, Forcepoint, Sangfor (generic-only) -- see CLAUDE.md's "SNMP
 -- Monitoring" section for the full per-vendor feasibility/confidence

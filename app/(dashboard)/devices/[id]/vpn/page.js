@@ -5,7 +5,9 @@ import Badge from '../../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import VpnSessionTrendChart from '../../../../../components/vpn/VpnSessionTrendChart';
+import ActiveVpnUsersTable from '../../../../../components/vpn/ActiveVpnUsersTable';
 import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
+import { getVpnSessions } from '../../../../../lib/engines/vpnSessions';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
@@ -95,9 +97,10 @@ export default async function DeviceVpnPage({ params }) {
     return notFound();
   }
 
-  const [configRow, sessionHistory] = await Promise.all([
+  const [configRow, sessionHistory, activeSessions] = await Promise.all([
     getLatestConfigParsed(pool, device.id),
     getVpnSessionHistory(pool, device.id),
+    getVpnSessions(device.id, pool),
   ]);
 
   const summary = summarizeVpnConfig(device.vendor, configRow ? configRow.config_parsed : null);
@@ -175,10 +178,12 @@ export default async function DeviceVpnPage({ params }) {
         </Card>
       )}
 
+      <ActiveVpnUsersTable sessions={activeSessions} />
+
       {sessionHistory.length > 0 ? (
         <VpnSessionTrendChart points={sessionHistory} />
       ) : (
-        <EmptyState message="No VPN session polling data yet. Active-session polling is currently only implemented for Fortinet devices (SSH/REST) — see CLAUDE.md's VPN Session Polling notes." />
+        <EmptyState message="No VPN session-count polling data yet. Session polling covers Fortinet, Palo Alto (GlobalProtect), and Cisco ASA — see CLAUDE.md's VPN Session Polling notes." />
       )}
     </div>
   );

@@ -111,6 +111,7 @@ VendorDistribution  no props — active-device count by vendor, bar list
 ## vpn/
 
 (c) VpnSessionTrendChart  points — active VPN session-count trend line chart
+ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Client) from vpn_active_sessions; empty-state when no per-user detail (server-safe, no hooks). Added 2026-07-31.
 
 ## compliance/
 

@@ -432,7 +432,26 @@ active_session_count    INTEGER NOT NULL                        -- only successf
 raw                     JSONB
 sampled_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
-Indexes: `idx_vss_device_id`, `idx_vss_sampled_at`. Fortinet-only. No retention/cleanup job yet.
+Indexes: `idx_vss_device_id`, `idx_vss_sampled_at`. No retention/cleanup job yet.
+
+### vpn_active_sessions
+```
+id                UUID PK DEFAULT gen_random_uuid()
+device_id         UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+username          TEXT
+tunnel_type       TEXT
+source_ip         TEXT
+assigned_ip       TEXT
+login_time        TEXT        -- device's raw string, not parsed to timestamptz (per-vendor tz fragility)
+duration_seconds  BIGINT
+bytes_in          BIGINT
+bytes_out         BIGINT
+client            TEXT
+gateway           TEXT
+raw               JSONB
+collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Index: `idx_vas_device_id`. LIVE per-user snapshot (one row per connected VPN user), DELETE+reinsert per successful poll — NO history, no retention. Added 2026-07-31. The per-user detail the management-plane commands already return (Palo Alto `show global-protect-gateway current-user`; Fortinet/Cisco to follow), NOT syslog. Written by `lib/engines/vpnSessions.js` `storeVpnSessions()` from `getVpnSessionSummary().sessions`. GRANT SELECT to both readonly roles (no secrets — session metadata).
 
 ### snmp_metric_snapshots
 ```

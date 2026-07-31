@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.36.0': [
+    'VPN now shows the live list of connected users, not just a count. A device\'s VPN page has a new "Active VPN Users" table — username, tunnel type, source IP, assigned IP, login time, duration, and client — pulled from the same device query that already reported the session count (no syslog needed).',
+    'This first release covers Palo Alto (GlobalProtect) on both SSH and API. Fortinet and Cisco ASA per-user detail are next. The session count itself is unchanged; the per-user detail is purely additive.',
+    'Note for admins: the per-user fields are read from the device\'s own command output and are logged once (as [PaloAlto Debug]) on first collection so the exact field labels can be confirmed against your firmware.',
+  ],
   '2.35.0': [
     'Fixed the misleading "whole membership list changed" config-change records. Older records showed a single user being added to or removed from a group as a long list of "membership changed: X → Y" modifications (and often named the wrong user as removed) — an artifact of how the list was compared back then. These records are now automatically corrected on update to show the real change: e.g. one user removed from the group, named correctly. New records were already correct; this repairs the historical ones and fixes their summary text to match.',
   ],

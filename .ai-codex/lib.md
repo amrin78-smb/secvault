@@ -138,6 +138,11 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `collapsePrimitiveArrayShifts(diff)` -> `diff` (pure) — collapses a primitive-array positional-shift cascade (a set-like membership list where the OLD positional diff reported a 1-element insert/remove as N "modified" + a mis-named tail add/remove) back to the true added/removed via LCS reconstruction of the changed region. Gated: ≥3 primitive modified entries at one array path + contiguous indices. Uses `lcsPrimitiveDiff`.
 `collapseHistoricalArrayShiftCascades(pool)` -> `Promise<{checked, updated}>` — migration applying the above to every stored `config_diffs` row + re-deriving `change_summary`; idempotent, best-effort. Wired into migrate.js. Fixes the historical "246 modified" membership-list rows (new diffs never produce them — their array branch already uses LCS).
 
+## lib/engines/vpnSessions.js
+
+`storeVpnSessions(deviceId, sessions, pool)` -> `Promise<{count}>` — DELETE+reinsert (one transaction) the LIVE per-user active-session set into `vpn_active_sessions`. Engine-worker calls it only after a SUCCESSFUL poll (a failed pull never wipes; an empty array clears — nobody connected). Session objects: `{username, tunnel_type, source_ip, assigned_ip, login_time, duration_seconds, bytes_in, bytes_out, client, gateway, raw}` (any field nullable). Added 2026-07-31.
+`getVpnSessions(deviceId, pool)` -> `Promise<object[]>` — current active-session rows for the per-device VPN page.
+
 ## lib/engines/dashboardSnapshot.js
 
 `computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.

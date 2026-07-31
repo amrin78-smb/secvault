@@ -58,6 +58,7 @@ const { runFullSync } = require('../lib/feeds');
 const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
 const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapters');
 const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSnapshot');
+const { storeVpnSessions } = require('../lib/engines/vpnSessions');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -398,6 +399,20 @@ async function runVpnSessionPollJob() {
            VALUES ($1, $2, $3::jsonb)`,
           [device.id, summary.active_session_count, JSON.stringify(summary.raw || null)]
         );
+        // Per-user active-session DETAIL (additive, 2026-07-31). Only when the
+        // adapter provided it (vendors not yet emitting `sessions` are simply
+        // skipped) — and only on THIS successful poll, so a failed pull never
+        // wipes the last-known set. An empty array from a successful poll
+        // legitimately clears the device's rows (nobody connected right now).
+        if (Array.isArray(summary.sessions)) {
+          try {
+            await storeVpnSessions(device.id, summary.sessions, pool);
+          } catch (sessErr) {
+            logger.warn(
+              `Job [vpn-session-poll] stored the count for device ${device.id} but failed to store session detail: ${sessErr.message}`
+            );
+          }
+        }
         polled += 1;
       } catch (err) {
         logger.warn(
