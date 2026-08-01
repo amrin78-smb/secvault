@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.40.2': [
+    'Further widened the Notifications channel table columns — the "Enabled" header and channel name/type were still clipping after the previous fix. Also added hover tooltips to the name/type/status cells so nothing is ever fully unreadable, regardless of column width.',
+  ],
   '2.40.1': [
     'Fixed the new Notifications channel table (Settings → Notifications) clipping the channel name, type, "Enabled" label, and status text on real-world content — found in a post-deploy visual check and widened.',
   ],

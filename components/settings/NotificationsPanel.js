@@ -337,11 +337,11 @@ export default function NotificationsPanel() {
             <Table>
               <thead>
                 <tr>
-                  <th style={{ width: '16%' }}>Name</th>
-                  <th style={{ width: '12%' }}>Type</th>
-                  <th style={{ width: '12%' }}>Enabled</th>
-                  <th style={{ width: '32%' }}>Status</th>
-                  <th style={{ width: '28%' }}>Actions</th>
+                  <th style={{ width: '18%' }}>Name</th>
+                  <th style={{ width: '15%' }}>Type</th>
+                  <th style={{ width: '15%' }}>Enabled</th>
+                  <th style={{ width: '30%' }}>Status</th>
+                  <th style={{ width: '22%' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -352,7 +352,7 @@ export default function NotificationsPanel() {
                     <Fragment key={c.id}>
                       <tr>
                         <td title={c.name}>{c.name}</td>
-                        <td>
+                        <td title={CHANNEL_TYPE_LABEL[c.channel_type] || c.channel_type}>
                           <Badge color={CHANNEL_TYPE_BADGE[c.channel_type] || 'muted'}>
                             {CHANNEL_TYPE_LABEL[c.channel_type] || c.channel_type}
                           </Badge>
