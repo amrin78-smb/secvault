@@ -337,10 +337,10 @@ export default function NotificationsPanel() {
             <Table>
               <thead>
                 <tr>
-                  <th style={{ width: '18%' }}>Name</th>
-                  <th style={{ width: '14%' }}>Type</th>
-                  <th style={{ width: '10%' }}>Enabled</th>
-                  <th style={{ width: '30%' }}>Status</th>
+                  <th style={{ width: '16%' }}>Name</th>
+                  <th style={{ width: '12%' }}>Type</th>
+                  <th style={{ width: '12%' }}>Enabled</th>
+                  <th style={{ width: '32%' }}>Status</th>
                   <th style={{ width: '28%' }}>Actions</th>
                 </tr>
               </thead>
@@ -351,7 +351,7 @@ export default function NotificationsPanel() {
                   return (
                     <Fragment key={c.id}>
                       <tr>
-                        <td>{c.name}</td>
+                        <td title={c.name}>{c.name}</td>
                         <td>
                           <Badge color={CHANNEL_TYPE_BADGE[c.channel_type] || 'muted'}>
                             {CHANNEL_TYPE_LABEL[c.channel_type] || c.channel_type}
@@ -362,8 +362,10 @@ export default function NotificationsPanel() {
                             {c.enabled ? 'Enabled' : 'Disabled'}
                           </Button>
                         </td>
-                        <td style={{ fontSize: 'var(--text-sm)', color: last.color }}>{last.text}</td>
-                        <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <td title={last.text} style={{ fontSize: 'var(--text-sm)', color: last.color }}>
+                          {last.text}
+                        </td>
+                        <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap', overflow: 'visible', whiteSpace: 'normal' }}>
                           <Button
                             variant="secondary"
                             disabled={testingId === c.id}
