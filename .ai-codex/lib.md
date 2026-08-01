@@ -88,7 +88,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 
 `runSchema(pool)` -> `Promise<void>` — executes `lib/schema.sql` verbatim against the DB.
 `seedUsers(pool)` -> `Promise<{migrated: boolean, seeded: boolean, username?: string}>` — guarded on `users` table being empty: migrates legacy `settings.admin_username/admin_password_hash` into `users`, or seeds default `admin/changeme`. [SENSITIVE] (touches password hash migration)
-`main()` -> `Promise<void>` (not exported, run via `require.main === module`) — orchestrates: runSchema → seedUsers → seedAuditChecks (NOT best-effort, throws loud) → backfillVulnerabilityCategories (best-effort) → cleanupVolatileConfigDiffs (best-effort) → regenerateOversizedChangeSummaries (best-effort) → migrateZoneClassificationsToPerDevice (best-effort) → backfillPaloAltoVersionRanges (best-effort).
+`main()` -> `Promise<void>` (not exported, run via `require.main === module`) — orchestrates: runSchema → seedUsers → seedAuditChecks (NOT best-effort, throws loud) → backfillVulnerabilityCategories (best-effort) → cleanupVolatileConfigDiffs (best-effort) → regenerateOversizedChangeSummaries (best-effort) → migrateZoneClassificationsToPerDevice (best-effort) → backfillPaloAltoVersionRanges (best-effort) → backfillNvdNativeVersionRanges (best-effort, added 2026-07-31, the other five vendors).
 (internal, not exported: `loadEnvLocal()`; `migrateZoneClassificationsToPerDevice(pool)` -> `Promise<{discardedGlobalRows: number}>` — migrates `zone_classifications` from global to per-device schema shape, adds `device_id` column/constraint/index — the index creation lives HERE not in schema.sql, see schema.md's "Known schema debt".)
 
 ---
@@ -533,6 +533,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `fetchAndUpsertVendorCves(pool)` -> `Promise<{inserted, updated, errors, byVendor}>` — runs NVD API 2.0 sync for every vendor in `VENDOR_CPES`, with CIRCL fallback on network-level failure (`err.status == null`).
 `fetchAndUpsertForcepointCves(pool)` -> `Promise<{inserted, updated, errors}>` — deprecated back-compat wrapper, Forcepoint-only.
 `VENDOR_CPES` (const object) — `{forcepoint, fortinet, paloalto, cisco_asa, checkpoint, sangfor}` → live-verified `virtualMatchString` CPE arrays. Forcepoint has 2 entries (dual-CPE, pre/post v7.1 rebrand) — see cve-pipeline.md. `FETCH_TIMEOUT_MS = 20000`, independently defined.
+`backfillNvdNativeVersionRanges(pool)` -> `Promise<{checked, updated}>` — added 2026-07-31, same shape as paloalto.js's `backfillPaloAltoVersionRanges` below but for the other five vendors' NVD-native-shaped (`raw_data.configurations` present) rows only; explicitly excludes `vendor='paloalto'` (already fully covered) and skips any row whose `raw_data` isn't NVD-native shape (a PSIRT/CSAF/CIRCL CVE Record uses a different, unaffected version model — see the function's own header comment). Reuses this file's own `extractAffectedRanges`/`extractFixedVersions` directly, no duplicated logic.
 (internal: `extractVersionFromCriteria` — rejects any wildcard-containing CPE version segment as of 2026-07-23 fix; `branchRangeFromWildcardCriteria` — expands a wildcarded segment into a real branch range instead.)
 
 ## lib/feeds/paloalto.js

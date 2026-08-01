@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.39.0': [
+    'Extended a CVE data-quality fix to all six firewall vendors. A bug fixed in July only corrected version-range data for Palo Alto going forward — a CVE naming a whole affected version branch (e.g. "10.0.x") could still under-report on Forcepoint, Fortinet, Cisco ASA, Check Point, and Sangfor advisories that were pulled from NVD before the fix shipped. Those five vendors\' existing advisories are now re-checked and corrected on every update.',
+  ],
   '2.38.7': [
     'Fixed the Active VPN Users poll that was failing every ~30 minutes for two Fortinet firewalls (TSR_EKC, Vietnam-YCC). Their firmware returns a completely blank response for the session-count command when nobody is connected, instead of the empty table older firmware prints — the poll now recognizes that as a confirmed 0 active users instead of treating it as an error.',
   ],
