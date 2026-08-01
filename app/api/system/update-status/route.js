@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.40.3': [
+    'Gave the Notifications channel table\'s Status column significantly more room — the "Last sent"/"Last failure" timestamp was still getting cut off at the edge. Sized this time from the actual rendered pixel widths on the live page, not an estimate.',
+  ],
   '2.40.2': [
     'Further widened the Notifications channel table columns — the "Enabled" header and channel name/type were still clipping after the previous fix. Also added hover tooltips to the name/type/status cells so nothing is ever fully unreadable, regardless of column width.',
   ],

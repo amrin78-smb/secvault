@@ -337,10 +337,10 @@ export default function NotificationsPanel() {
             <Table>
               <thead>
                 <tr>
-                  <th style={{ width: '18%' }}>Name</th>
-                  <th style={{ width: '15%' }}>Type</th>
+                  <th style={{ width: '14%' }}>Name</th>
+                  <th style={{ width: '13%' }}>Type</th>
                   <th style={{ width: '15%' }}>Enabled</th>
-                  <th style={{ width: '30%' }}>Status</th>
+                  <th style={{ width: '36%' }}>Status</th>
                   <th style={{ width: '22%' }}>Actions</th>
                 </tr>
               </thead>
