@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.40.0': [
+    'New: Outbound alerting. Configure a Slack, Microsoft Teams, email, or generic webhook channel under Settings → Notifications, and SecVault will notify it automatically when a device reaches Patch Now on a CVE, fails a critical compliance check, or has an unacknowledged config change — no more needing to have the dashboard open to find out.',
+    'Each channel can be scoped to only the alert types it should receive, and shows its last successful send (or last error) right on the settings page, so a broken webhook is visible immediately instead of silently going dark.',
+    'A "Test" button on each channel sends a one-off sample message immediately, so a new webhook/email setup can be verified without waiting for a real alert.',
+    'Checked automatically every 15 minutes by default (configurable). An alert that clears (e.g. a compliance check gets fixed) and later genuinely recurs will notify again.',
+  ],
   '2.39.0': [
     'Extended a CVE data-quality fix to all six firewall vendors. A bug fixed in July only corrected version-range data for Palo Alto going forward — a CVE naming a whole affected version branch (e.g. "10.0.x") could still under-report on Forcepoint, Fortinet, Cisco ASA, Check Point, and Sangfor advisories that were pulled from NVD before the fix shipped. Those five vendors\' existing advisories are now re-checked and corrected on every update.',
   ],

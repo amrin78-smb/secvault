@@ -880,6 +880,67 @@ CREATE TABLE IF NOT EXISTS feed_sync_log (
 CREATE INDEX IF NOT EXISTS idx_feed_sync_log_feed_name ON feed_sync_log(feed_name);
 CREATE INDEX IF NOT EXISTS idx_feed_sync_log_started_at ON feed_sync_log(started_at);
 
+-- ─────────────────────────────────────────
+-- OUTBOUND ALERTING (2026-08-01)
+-- ─────────────────────────────────────────
+
+-- Named outbound notification targets (Slack/Teams incoming webhooks, email,
+-- a generic JSON webhook) — mirrors credential_profiles above: not
+-- device-scoped, secret material (webhook URL / SMTP password) lives in
+-- encrypted_data+iv via credStore.js's encrypt/decrypt, non-secret target
+-- info (email to/from/host/port; {} for the webhook types, since the URL
+-- itself IS the secret) lives in `config`. alert_types is a routing filter,
+-- not a join table -- same "array beats a join table for small, curated
+-- data" tradeoff audit_checks.standards already makes below. Populated by
+-- lib/notificationChannels.js, sent to by lib/notify.js, read by
+-- lib/engines/notificationDispatch.js's runNotificationDispatch() (see
+-- services/engine-worker.js's runNotificationDispatchJob()).
+-- last_success_at/last_error/last_error_at exist because a silently-failing
+-- notification channel defeats the entire purpose of this feature -- unlike
+-- a missing trend-metric datapoint elsewhere in this schema, this is
+-- alerting infrastructure and its failures must be visible, not just logged.
+CREATE TABLE IF NOT EXISTS notification_channels (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  channel_type TEXT NOT NULL, -- 'slack_webhook' | 'teams_webhook' | 'email' | 'generic_webhook'
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  alert_types TEXT[] NOT NULL DEFAULT ARRAY['patch_now_cve','compliance_critical','config_diff'],
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  encrypted_data TEXT NOT NULL,
+  iv TEXT NOT NULL,
+  last_success_at TIMESTAMPTZ,
+  last_error TEXT,
+  last_error_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Dedup ledger for runNotificationDispatch()'s poll job. natural_key is the
+-- STABLE identity across each source table's own churn: device_cve_assessments
+-- is upserted in place, keyed 'device_id:advisory_id'; audit_findings is
+-- fully DELETE+reinserted every compliance run (see that table's own
+-- comment above), keyed 'device_id:check_id' since audit_checks.id is
+-- stable curated data; config_diffs is append-only, keyed on its own id.
+-- cleared_at (nullable, rows are never deleted) is what lets a GENUINE
+-- re-occurrence notify again -- a plain one-time UNIQUE row with no way to
+-- "reopen" would otherwise suppress that alert_type/natural_key FOREVER
+-- after its first firing, even if it later legitimately recurs (a fixed
+-- compliance check failing again, a CVE re-entering patch_now). cleared_at
+-- IS NULL means "currently open and already notified"; a cleared row is
+-- re-claimed via ON CONFLICT DO UPDATE, never a fresh INSERT.
+CREATE TABLE IF NOT EXISTS notification_dispatch_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_type TEXT NOT NULL, -- 'patch_now_cve' | 'compliance_critical' | 'config_diff'
+  natural_key TEXT NOT NULL,
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  dispatched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  cleared_at TIMESTAMPTZ,
+  UNIQUE (alert_type, natural_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ndl_device_id ON notification_dispatch_log(device_id);
+CREATE INDEX IF NOT EXISTS idx_ndl_alert_type_cleared ON notification_dispatch_log(alert_type, cleared_at);
+
 -- Readonly diagnostic roles + per-table grants are NOT created here.
 -- Creating a ROLE requires CREATEROLE/superuser privilege, which secvault_user
 -- (the account this file normally runs as, via lib/migrate.js) does not have —

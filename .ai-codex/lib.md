@@ -75,6 +75,26 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `updateProfile(id, {name, plaintext}, pool)` -> `Promise<object|null>` — rename and/or rotate-secret (either omittable); `credential_type` immutable. [SENSITIVE]
 `deleteProfile(id, pool)` -> `Promise<void>` — deletes a credential profile row.
 
+## lib/notificationChannels.js
+[SENSITIVE] — entire file (outbound notification channels: webhook URLs, SMTP passwords). Added 2026-08-01, mirrors lib/credentialProfiles.js's shape exactly.
+
+`NOTIFICATION_CHANNEL_TYPES` -> `string[]` — `['slack_webhook','teams_webhook','email','generic_webhook']`.
+`ALERT_TYPES` -> `string[]` — `['patch_now_cve','compliance_critical','config_diff']`.
+`buildChannelPlaintext(channelType, {webhookUrl, smtpPassword})` -> `string|null` — the three webhook types store the raw URL as the whole secret; `email` stores the SMTP password only (host/port/from/to live in the non-secret `config` JSONB). [SENSITIVE]
+`listChannels(pool)` -> `Promise<object[]>` — metadata-only rows, safe for HTTP response.
+`getChannelMeta(id, pool)` -> `Promise<object|null>` — metadata-only single channel row.
+`getChannelPlaintext(id, pool)` -> `Promise<{id, name, channelType, alertTypes, config, plaintext}|null>` — decrypts one channel; SERVER-SIDE USE ONLY (the test-send route). [SENSITIVE]
+`listEnabledChannelsWithSecrets(pool)` -> `Promise<object[]>` — decrypts every ENABLED channel in one query; used by lib/engines/notificationDispatch.js's poll job. SERVER-SIDE USE ONLY. [SENSITIVE]
+`createChannel({name, channelType, alertTypes, config, plaintext}, pool)` -> `Promise<object>` — encrypts + inserts, returns metadata row. [SENSITIVE]
+`updateChannel(id, {name, enabled, alertTypes, config, plaintext}, pool)` -> `Promise<object|null>` — partial update (each field omittable); `channel_type` immutable. [SENSITIVE]
+`deleteChannel(id, pool)` -> `Promise<void>`.
+`recordChannelSuccess(id, pool)` / `recordChannelError(id, message, pool)` -> `Promise<void>` — updates `last_success_at`/`last_error`/`last_error_at`, called by lib/notify.js's callers after every dispatch attempt.
+
+## lib/notify.js
+Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an already-decrypted channel object.
+
+`dispatchNotification(channel, message)` -> `Promise<void>` — single entry point, routes to the per-`channel_type` sender ({alertType, title, summary, url, deviceName} message shape); throws on failure. `NOTIFY_TIMEOUT_MS = 8000` (shorter than every other outbound timeout in this codebase — fire-and-forget inside a poll loop over N channels x M items). Teams payload (Adaptive Card via a `message` envelope, the current Power Automate Workflows webhook shape) logs its raw response once on first live send (`loggedFirstTeamsResponse`) — live-verification risk, not a settled spec, same `loggedFirst*` convention as the vendor adapters. `email` uses `nodemailer` (new dependency, 2026-08-01 — none existed in this codebase before).
+
 ## lib/snmpClient.js
 [SENSITIVE] — entire file (SNMP session/credential handling)
 
@@ -197,6 +217,12 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `evaluateRuleScanCheck(check, ruleFindingsByType)` -> `{status: 'pass'|'fail'|'warning', detail, matchedRuleIds: string[]}` — checks whether any rule carries one of the check's target Phase-5 finding types.
 `evaluateRulesetPropertyCheck(check, rules, zoneRoleMap?, ruleFindingsByType?)` -> `{status: 'pass'|'fail'|'warning'|'na', detail, matchedRuleIds?}` — evaluates `has_explicit_deny_all`/`blocks_icmp`/`no_external_to_internal_access` against a device's live rule set.
 `statusFromResult(result, passWhen)` -> `'pass'|'fail'|'warning'` — maps a tri-state predicate result + polarity to a compliance status.
+
+## lib/engines/notificationDispatch.js
+Added 2026-08-01. Consumed by services/engine-worker.js's `notification-dispatch` job (5-59 min, `NOTIFICATIONS_POLL_INTERVAL_MINUTES`).
+
+`runNotificationDispatch(pool)` -> `Promise<{dispatched: number, errors: number}>` — for each of the 3 alert types (`patch_now_cve`/`compliance_critical`/`config_diff`), fetches currently-open items (near-verbatim copies of app/api/events/route.js's `fetchPatchNow`/`fetchConfigDiffs` query shapes, plus a new `audit_findings`+`audit_checks.severity='critical'` query — compliance has no ack mechanism, so "open" there is just every currently-failing critical check), reconciles `notification_dispatch_log` (clears anything no longer open), skips anything already dispatched+still-open, else sends via lib/notify.js's `dispatchNotification` to every channel whose `alert_types` matches, THEN writes the dispatch-log row (send-before-log, so a crash mid-send risks a duplicate message next tick rather than a silently-lost alert). Best-effort per item/channel — one bad webhook or malformed item never stops the rest.
+(internal, not exported: `fetchOpenPatchNowCve`/`fetchOpenComplianceCritical`/`fetchOpenConfigDiff`, `buildMessage`.)
 
 ## lib/engines/exposureCorrelation.js
 

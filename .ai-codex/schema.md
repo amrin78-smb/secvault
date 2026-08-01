@@ -513,6 +513,48 @@ finished_at       TIMESTAMPTZ
 ```
 Indexes: `idx_feed_sync_log_feed_name`, `idx_feed_sync_log_started_at`.
 
+### notification_channels  ⛔ EXCLUDED from readonly roles (no view either)
+```
+id                UUID PK DEFAULT gen_random_uuid()
+name              TEXT NOT NULL UNIQUE
+channel_type      TEXT NOT NULL                           -- 'slack_webhook' | 'teams_webhook' | 'email' | 'generic_webhook'
+enabled           BOOLEAN NOT NULL DEFAULT true
+alert_types       TEXT[] NOT NULL DEFAULT ARRAY['patch_now_cve','compliance_critical','config_diff']
+config            JSONB NOT NULL DEFAULT '{}'::jsonb      -- non-secret target info (email host/port/from/to); {} for webhook types
+encrypted_data    TEXT NOT NULL                            -- webhook URL, or SMTP password for email
+iv                TEXT NOT NULL
+last_success_at   TIMESTAMPTZ
+last_error        TEXT
+last_error_at     TIMESTAMPTZ
+created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Added 2026-08-01. Mirrors `credential_profiles` above (not device-scoped, same encrypted_data/iv
+shape via `credStore.js`'s exported `encrypt`/`decrypt`). `alert_types` is a routing filter (array,
+not a join table — same tradeoff `audit_checks.standards` makes). `last_success_at`/`last_error`/
+`last_error_at` are populated by `lib/notificationChannels.js`'s `recordChannelSuccess`/
+`recordChannelError` on every dispatch attempt (see `notification_dispatch_log` below) — a silently-
+failing channel would defeat this feature's purpose, so failures are visible, not just logged.
+
+### notification_dispatch_log
+```
+id                UUID PK DEFAULT gen_random_uuid()
+alert_type        TEXT NOT NULL              -- 'patch_now_cve' | 'compliance_critical' | 'config_diff'
+natural_key       TEXT NOT NULL              -- 'device_id:advisory_id' | 'device_id:check_id' | config_diffs.id
+device_id         UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+dispatched_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+cleared_at        TIMESTAMPTZ                -- NULL = currently open + already notified; set = eligible to re-notify
+```
+Added 2026-08-01. Indexes: `idx_ndl_device_id`, `idx_ndl_alert_type_cleared`. `UNIQUE(alert_type,
+natural_key)`. Dedup ledger for `lib/engines/notificationDispatch.js`'s poll job. `cleared_at` (rows
+are never deleted) is the load-bearing design choice here: a plain one-time row would permanently
+suppress a genuine re-occurrence (a compliance check failing, getting fixed, then failing again) —
+see that file's own header comment for the full reconcile-then-claim algorithm. `natural_key`'s
+shape differs per alert_type specifically because each source table has different churn semantics:
+`device_cve_assessments` is upserted in place, `audit_findings` is fully DELETE+reinserted every
+compliance run (`check_id` is the only stable identity across that churn), `config_diffs` is
+append-only (its own `id` is already stable).
+
 ---
 
 ## Known schema debt

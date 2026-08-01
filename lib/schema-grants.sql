@@ -65,6 +65,7 @@ GRANT SELECT ON TABLE vpn_session_snapshots TO claude_readonly, nocvault_readonl
 GRANT SELECT ON TABLE vpn_active_sessions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_ipsec_tunnels TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE snmp_metric_snapshots TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE notification_dispatch_log TO claude_readonly, nocvault_readonly;
 
 -- users carries password_hash — same secret-bearing-column treatment as
 -- settings.admin_password_hash above (a view excluding it, never a bare
@@ -83,3 +84,6 @@ GRANT SELECT ON users_readonly TO claude_readonly, nocvault_readonly;
 -- the whole row is credential-adjacent, there is no "safe subset" column
 -- to expose (its own `username` column is non-secret but not worth a
 -- view for on its own).
+-- Exception: notification_channels — same encrypted_data/iv shape as
+-- credential_profiles (webhook URL / SMTP password), NEVER grant to these
+-- users. notification_dispatch_log holds no secrets and is granted above.

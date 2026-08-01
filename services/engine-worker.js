@@ -60,6 +60,7 @@ const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapt
 const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSnapshot');
 const { storeVpnSessions } = require('../lib/engines/vpnSessions');
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
+const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -226,6 +227,25 @@ function getSnmpPollIntervalMinutes() {
 // — see lib/schema.sql's "no retention/cleanup job yet" notes on both
 // tables). Day-granularity, not hour/minute like the poll jobs above — this
 // is a housekeeping job, not a data-freshness one.
+// Outbound alerting (added 2026-08-01) — same minutes-scale rationale as VPN/
+// SNMP polling above (patch_now CVEs/critical compliance failures/config
+// diffs need to reach a human within minutes, not hours), same 5-59 clamp
+// for the same `*/n * * * *` reason. Default shorter than SNMP's since a
+// missed patch_now alert is more consequential than a missed metric sample.
+function getNotificationsPollIntervalMinutes() {
+  const fallback = 15;
+  const raw = parseInt(process.env.NOTIFICATIONS_POLL_INTERVAL_MINUTES, 10);
+  if (Number.isInteger(raw) && raw >= 5 && raw <= 59) {
+    return raw;
+  }
+  if (process.env.NOTIFICATIONS_POLL_INTERVAL_MINUTES) {
+    logger.warn(
+      `NOTIFICATIONS_POLL_INTERVAL_MINUTES value "${process.env.NOTIFICATIONS_POLL_INTERVAL_MINUTES}" is not a valid integer between 5 and 59 — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
 function getSnapshotRetentionDays() {
   const fallback = 180;
   const raw = parseInt(process.env.SNMP_VPN_RETENTION_DAYS, 10);
@@ -617,6 +637,32 @@ async function runSnapshotRetentionJob() {
   );
 }
 
+// Outbound alerting poll — checks for new patch_now CVEs / critical
+// compliance failures / unacknowledged config diffs and dispatches to every
+// enabled notification_channels row whose alert_types matches (see
+// lib/engines/notificationDispatch.js for the full algorithm and
+// lib/schema.sql's table comments for the dedup design). Decoupled from
+// rule-version-pull/feed-sync-and-match (unrelated cadences: 24h/on-demand
+// vs 6h) rather than hooked inline into either — a slow/dead webhook must
+// never stall real data collection. Same "no in-flight guard needed"
+// reasoning as runDashboardSnapshotJob/runSnapshotRetentionJob: this job
+// never opens a per-device SSH/REST/SNMP session, so it can't contend for a
+// device connection.
+async function runNotificationDispatchJob() {
+  const start = Date.now();
+  logger.info('Job [notification-dispatch] starting.');
+  try {
+    const { dispatched, errors } = await runNotificationDispatch(pool);
+    const durationMs = Date.now() - start;
+    logger.info(
+      `Job [notification-dispatch] finished in ${durationMs}ms — dispatched ${dispatched} alert(s), ${errors} error(s).`
+    );
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [notification-dispatch] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
@@ -723,7 +769,25 @@ async function scheduleJobs() {
     runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
   });
 
-  scheduledTasks = [feedTask, configTask, vpnTask, snmpTask, dashboardSnapshotTask, snapshotRetentionTask];
+  const notificationsPollIntervalMinutes = getNotificationsPollIntervalMinutes();
+  const notificationsCronExpr = buildMinutelyCron(notificationsPollIntervalMinutes);
+  logger.info(
+    `Scheduling [notification-dispatch] with cron "${notificationsCronExpr}" (every ${notificationsPollIntervalMinutes}m).`
+  );
+  const notificationsTask = cron.schedule(notificationsCronExpr, () => {
+    if (shuttingDown) return;
+    runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
+  });
+
+  scheduledTasks = [
+    feedTask,
+    configTask,
+    vpnTask,
+    snmpTask,
+    dashboardSnapshotTask,
+    snapshotRetentionTask,
+    notificationsTask,
+  ];
 }
 
 async function main() {
@@ -746,6 +810,7 @@ async function main() {
   // it rarely ran in practice, leaving vpn_session_snapshots/
   // snmp_metric_snapshots to grow unbounded — the exact gap it exists to close.
   await runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
+  await runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
 
   await scheduleJobs();
 

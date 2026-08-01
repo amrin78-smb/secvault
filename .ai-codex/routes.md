@@ -141,6 +141,20 @@ POST /api/credential-profiles [admin] [db] — create profile; plaintext built s
 PUT /api/credential-profiles/[id] [admin] [db] — rename and/or rotate secret (rotation auto-detected from presence of secret fields); `credential_type` immutable.
 DELETE /api/credential-profiles/[id] [admin] [db] — delete profile (no cascade — applying a profile already copied plaintext into the consuming device at that time).
 
+## /api/notification-channels
+
+GET /api/notification-channels [admin] [db] — list configured outbound alert channels, metadata only (never the encrypted secret). Same credential-adjacent admin gate as `GET /api/credential-profiles`.
+POST /api/notification-channels [admin] [db] — create channel (`slack_webhook`/`teams_webhook`/`generic_webhook`/`email`); secret built server-side via `buildChannelPlaintext()`; translates duplicate-name races (`err.code==='23505'`) to 409.
+
+## /api/notification-channels/[id]
+
+PUT /api/notification-channels/[id] [admin] [db] — rename/enable-disable/reroute (`alert_types`)/rotate secret; `channel_type` immutable.
+DELETE /api/notification-channels/[id] [admin] [db] — delete channel.
+
+## /api/notification-channels/[id]/test
+
+POST /api/notification-channels/[id]/test [admin] [db] — sends a synthetic message through this channel immediately via `dispatchNotification()`; does NOT touch `notification_dispatch_log` (manual verification send, not a real alert).
+
 ## /api/cve
 
 POST /api/cve/assess [admin] [db,cve-feed] — `runMatchForAllDevices(pool)`, synchronous fleet-wide CVE re-match against all 6 vendors.

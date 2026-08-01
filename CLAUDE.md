@@ -195,7 +195,9 @@ here. Notable groupings: `devices`/`device_versions`/`device_credentials`/`devic
 `audit_checks`/`audit_findings` (compliance), `rule_analysis_results`/`finding_acknowledgements`/
 `device_risk_history` (rule analysis), `config_diffs`/`config_backups` (change tracking),
 `activity_log` (operator audit trail), `credential_profiles` (reusable creds, excluded from readonly
-grants same as `device_credentials`).
+grants same as `device_credentials`), `notification_channels`/`notification_dispatch_log` (outbound
+alerting — Slack/Teams/email/webhook, see Outbound Alerting section below; `notification_channels`
+excluded from readonly grants same as `credential_profiles`).
 
 ### Readonly Access for Diagnostics
 
@@ -403,6 +405,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | SNMP metric poll (vendors with `getSnmpMetrics()`, `snmp_enabled` devices) | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
 | Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
+| Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 
 ### Reliability Rules (learned from LogVault collector)
 
@@ -524,6 +527,7 @@ NVD_API_KEY=                               # Optional — increases NVD rate lim
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
+NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -568,6 +572,17 @@ Full component-level detail is in `.ai-codex/components.md` / `pages.md` — kep
 none of these carry Critical-Rules-level footguns.
 
 - **Fleet Alerts** (`/alerts`): cross-entity feed of finding/CVE/diff alerts, filterable via query params (`AlertsFilters`), per-row ack (`AlertAckControl`).
+- **Outbound Alerting** (`Settings` → `Notifications`, admin-only): Slack/Teams/email/generic-webhook
+  notifications for patch_now CVEs, critical compliance failures, and unacknowledged config diffs.
+  Named channels (`notification_channels`, mirrors `credential_profiles`' secret-storage shape) each
+  filter to a subset of the three alert types (`alert_types TEXT[]`). Dispatched by
+  `lib/engines/notificationDispatch.js`, polled by `services/engine-worker.js`'s
+  `notification-dispatch` job — decoupled from feed-sync/rule-version-pull (unrelated cadences; a
+  slow/dead webhook must never stall real data collection). `notification_dispatch_log` dedupes by a
+  per-alert-type stable natural key with a `cleared_at` column (not a one-time row) so a genuine
+  re-occurrence (a fixed compliance check failing again, a CVE re-entering `patch_now`) can re-notify
+  — critical compliance failures have no acknowledgement mechanism today (see `audit_findings`'s own
+  gap, above), so "open" there is simply every currently-failing critical check.
 - **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
 - **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.
