@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.41.2': [
+    'Fixed "Download PDF Report" still failing after the previous fix — the browser engine that renders the PDF couldn\'t start when running as a Windows service. Only reproducible on the real server, not in local testing.',
+  ],
   '2.41.1': [
     'Fixed "Download PDF Report" returning a server error on every click — found in a post-deploy visual check. The report generator couldn\'t find the app\'s stylesheet when running inside the built app (only worked when tested locally in dev mode).',
   ],
