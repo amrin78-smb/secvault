@@ -61,6 +61,7 @@ const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSn
 const { storeVpnSessions } = require('../lib/engines/vpnSessions');
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
+const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -663,6 +664,36 @@ async function runNotificationDispatchJob() {
   }
 }
 
+// Monthly fleet compliance PDF report — email to every notification_channels
+// row of channel_type='email' whose alert_types includes 'compliance_report'
+// (see lib/engines/complianceReport.js's dispatchMonthlyReport, the SAME
+// function POST /api/compliance/report/generate calls for a manual/ops send
+// — one code path, not two). Idempotent per calendar month via
+// compliance_report_log's partial unique index; a call that finds a
+// 'success' row already logged this period is a fast, cheap no-op. Fixed
+// monthly cron (not a configurable interval env var), same "housekeeping,
+// not freshness" bucket as runDashboardSnapshotJob/runSnapshotRetentionJob.
+// Same "no in-flight guard needed" reasoning as those two jobs as well —
+// this never opens a per-device SSH/REST/SNMP session.
+async function runComplianceReportJob() {
+  const start = Date.now();
+  logger.info('Job [compliance-report] starting.');
+  try {
+    const result = await dispatchMonthlyReport(pool);
+    const durationMs = Date.now() - start;
+    if (result.skipped) {
+      logger.info(`Job [compliance-report] finished in ${durationMs}ms — skipped (${result.reason}).`);
+    } else {
+      logger.info(
+        `Job [compliance-report] finished in ${durationMs}ms — period ${result.period}, sent to ${result.sent} channel(s).`
+      );
+    }
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [compliance-report] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
@@ -779,6 +810,17 @@ async function scheduleJobs() {
     runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
   });
 
+  // Fixed monthly time (06:00 UTC on the 1st) — same "housekeeping, not
+  // freshness" reasoning as dashboard-snapshot/snapshot-retention for why
+  // this isn't a configurable interval; dispatchMonthlyReport()'s own
+  // per-period idempotency check makes the immediate startup run in main()
+  // below a safe no-op mid-month.
+  logger.info('Scheduling [compliance-report] with cron "0 6 1 * *" (monthly).');
+  const complianceReportTask = cron.schedule('0 6 1 * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runComplianceReportJob, 'compliance-report');
+  });
+
   scheduledTasks = [
     feedTask,
     configTask,
@@ -787,6 +829,7 @@ async function scheduleJobs() {
     dashboardSnapshotTask,
     snapshotRetentionTask,
     notificationsTask,
+    complianceReportTask,
   ];
 }
 
@@ -811,6 +854,11 @@ async function main() {
   // snmp_metric_snapshots to grow unbounded — the exact gap it exists to close.
   await runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
   await runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
+  // Safe no-op mid-month — dispatchMonthlyReport()'s own per-period
+  // idempotency check (compliance_report_log) skips instantly once a
+  // 'success' row already exists this period, same as every other job's
+  // immediate-on-startup run.
+  await runTrackedJob(runComplianceReportJob, 'compliance-report');
 
   await scheduleJobs();
 

@@ -79,7 +79,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 [SENSITIVE] — entire file (outbound notification channels: webhook URLs, SMTP passwords). Added 2026-08-01, mirrors lib/credentialProfiles.js's shape exactly.
 
 `NOTIFICATION_CHANNEL_TYPES` -> `string[]` — `['slack_webhook','teams_webhook','email','generic_webhook']`.
-`ALERT_TYPES` -> `string[]` — `['patch_now_cve','compliance_critical','config_diff']`.
+`ALERT_TYPES` -> `string[]` — `['patch_now_cve','compliance_critical','config_diff','compliance_report']` (4th value added 2026-08-02, email-only — see `components/settings/NotificationsPanel.js`'s `EMAIL_ONLY_ALERT_TYPES` gate and `lib/engines/complianceReport.js`).
 `buildChannelPlaintext(channelType, {webhookUrl, smtpPassword})` -> `string|null` — the three webhook types store the raw URL as the whole secret; `email` stores the SMTP password only (host/port/from/to live in the non-secret `config` JSONB). [SENSITIVE]
 `listChannels(pool)` -> `Promise<object[]>` — metadata-only rows, safe for HTTP response.
 `getChannelMeta(id, pool)` -> `Promise<object|null>` — metadata-only single channel row.
@@ -93,7 +93,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 ## lib/notify.js
 Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an already-decrypted channel object.
 
-`dispatchNotification(channel, message)` -> `Promise<void>` — single entry point, routes to the per-`channel_type` sender ({alertType, title, summary, url, deviceName} message shape); throws on failure. `NOTIFY_TIMEOUT_MS = 8000` (shorter than every other outbound timeout in this codebase — fire-and-forget inside a poll loop over N channels x M items). Teams payload (Adaptive Card via a `message` envelope, the current Power Automate Workflows webhook shape) logs its raw response once on first live send (`loggedFirstTeamsResponse`) — live-verification risk, not a settled spec, same `loggedFirst*` convention as the vendor adapters. `email` uses `nodemailer` (new dependency, 2026-08-01 — none existed in this codebase before).
+`dispatchNotification(channel, message)` -> `Promise<void>` — single entry point, routes to the per-`channel_type` sender ({alertType, title, summary, url, deviceName, attachments?} message shape); throws on failure. `NOTIFY_TIMEOUT_MS = 8000` (shorter than every other outbound timeout in this codebase — fire-and-forget inside a poll loop over N channels x M items). Teams payload (Adaptive Card via a `message` envelope, the current Power Automate Workflows webhook shape) logs its raw response once on first live send (`loggedFirstTeamsResponse`) — live-verification risk, not a settled spec, same `loggedFirst*` convention as the vendor adapters. `email` uses `nodemailer` (new dependency, 2026-08-01 — none existed in this codebase before); `message.attachments` (added 2026-08-02, nodemailer-native `[{filename, content: Buffer, contentType}]`) passes straight through to `sendMail()` — used by `lib/engines/complianceReport.js` for the PDF report, ignored by every webhook sender.
 
 ## lib/snmpClient.js
 [SENSITIVE] — entire file (SNMP session/credential handling)
@@ -170,7 +170,7 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 ## lib/engines/dashboardSnapshot.js
 
 `computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
-`computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable.
+`computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>, byStandardCounts: Record<string, {pass,fail,warning}>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable. `byStandardCounts` (added 2026-08-02, additive — `computeAndStoreDashboardSnapshot` below ignores it) is the raw counts behind each percentage, for `lib/engines/complianceReport.js`'s fleet summary section.
 `computeAndStoreDashboardSnapshot(pool)` -> `Promise<{cve, compliance}>` — computes + `UPSERT`s today's `fleet_dashboard_snapshots` row (idempotent per calendar day).
 
 ## lib/engines/objectUsage.js
@@ -223,6 +223,15 @@ Added 2026-08-01. Consumed by services/engine-worker.js's `notification-dispatch
 
 `runNotificationDispatch(pool)` -> `Promise<{dispatched: number, errors: number}>` — for each of the 3 alert types (`patch_now_cve`/`compliance_critical`/`config_diff`), fetches currently-open items (near-verbatim copies of app/api/events/route.js's `fetchPatchNow`/`fetchConfigDiffs` query shapes, plus a new `audit_findings`+`audit_checks.severity='critical'` query — compliance has no ack mechanism, so "open" there is just every currently-failing critical check), reconciles `notification_dispatch_log` (clears anything no longer open), skips anything already dispatched+still-open, else sends via lib/notify.js's `dispatchNotification` to every channel whose `alert_types` matches, THEN writes the dispatch-log row (send-before-log, so a crash mid-send risks a duplicate message next tick rather than a silently-lost alert). Best-effort per item/channel — one bad webhook or malformed item never stops the rest.
 (internal, not exported: `fetchOpenPatchNowCve`/`fetchOpenComplianceCritical`/`fetchOpenConfigDiff`, `buildMessage`.)
+
+## lib/engines/complianceReport.js
+Added 2026-08-02. Consumed by `app/api/compliance/report/{pdf,generate}` and `services/engine-worker.js`'s monthly `compliance-report` job.
+
+`buildReportData(pool)` -> `Promise<{fleet, perDevice, findingsAppendix, generatedAt}>` — `fleet` via `dashboardSnapshot.js`'s `computeFleetComplianceScores`; `perDevice` and `findingsAppendix` (fail+warning only, grouped by device) are each a deliberate 5th duplicate of the fleet-scoring formula (see `app/api/compliance/fleet/route.js`'s own "kept as a literal array, not an import" comment — same established convention, not unified).
+`renderReportHtml(data)` -> `string` — self-contained HTML; inlines the real `app/globals.css` off disk (stripped of its Google Fonts `@import` — zero external network dependents in a background job), visual grammar mirrors `compliance/[deviceId]/print/page.js`.
+`generateReportPdf(pool)` -> `Promise<Buffer>` — `puppeteer-core` (NOT bundled `puppeteer`) launched against `PUPPETEER_EXECUTABLE_PATH` (defaults to the server's own Microsoft Edge, confirmed present on the real production box), `page.setContent()` + `page.pdf()`. Renders from an in-memory HTML string, never by navigating to a live authenticated app URL.
+`dispatchMonthlyReport(pool)` -> `Promise<{skipped: boolean, reason?, period, sent?}>` — shared orchestration for BOTH the scheduled job and the manual `POST /generate` route (one code path). Idempotent per `'YYYY-MM'` period via `compliance_report_log`'s partial unique index; emails every `notification_channels` row with `channel_type='email'` + `'compliance_report'` in `alert_types`; logs `status='error'` (not `'success'` with 0 recipients) if every channel send fails, so the unique index never blocks a same-month retry.
+(internal, not exported: `buildPerDeviceStandards`, `buildFindingsAppendix`, `loadInlineableGlobalsCss`, `currentPeriod`, `scoreColorVar`.)
 
 ## lib/engines/exposureCorrelation.js
 

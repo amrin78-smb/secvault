@@ -136,7 +136,7 @@ ZoneClassificationBanner  standards, deviceId — notice that zone classificatio
 (c) UpdatePanel  no props — software update status check/trigger + progress overlay
 (c) UsersPanel  no props — RBAC user management CRUD table
 (c) CredentialProfilesPanel  no props — reusable credential-bundle CRUD table
-(c) NotificationsPanel  no props — outbound alert channel (Slack/Teams/email/webhook) CRUD table + test-send, added 2026-08-01
+(c) NotificationsPanel  no props — outbound alert channel (Slack/Teams/email/webhook) CRUD table + test-send, added 2026-08-01. 4th alert type `compliance_report` (added 2026-08-02) gated to `channel_type==='email'` only via its own `EMAIL_ONLY_ALERT_TYPES` set — the checkbox is hidden entirely for Slack/Teams/generic-webhook channels, not just unchecked.
 
 ## vulnerability/
 

@@ -406,6 +406,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
+| Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
 
 ### Reliability Rules (learned from LogVault collector)
 
@@ -528,6 +529,7 @@ VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
 NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
+PUPPETEER_EXECUTABLE_PATH=                 # defaults to the server's Edge if unset — see compliance report PDF section
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -582,7 +584,26 @@ none of these carry Critical-Rules-level footguns.
   per-alert-type stable natural key with a `cleared_at` column (not a one-time row) so a genuine
   re-occurrence (a fixed compliance check failing again, a CVE re-entering `patch_now`) can re-notify
   — critical compliance failures have no acknowledgement mechanism today (see `audit_findings`'s own
-  gap, above), so "open" there is simply every currently-failing critical check.
+  gap, above), so "open" there is simply every currently-failing critical check. A 4th alert type,
+  `compliance_report`, routes the monthly fleet compliance PDF (see below) — `email`-only, gated in
+  `NotificationsPanel.js` (a Slack/webhook channel opted into it would just be silently skipped by the
+  job forever, with no error surfaced).
+- **Compliance Reports** (`/compliance` download link, admin `Settings` → `Notifications` for the
+  monthly email list): a fleet-wide PDF (fleet summary + per-device scores + a fail/warning findings
+  appendix across PCI DSS/ISO 27001/CIS v8/NIST/SANS) — on-demand via `GET /api/compliance/report/pdf`
+  (ungated, same as every other compliance GET route) or scheduled via `services/engine-worker.js`'s
+  fixed-monthly `compliance-report` job. Rendered by `lib/engines/complianceReport.js`: a
+  self-contained HTML string (inlines the real `app/globals.css`, stripped of its Google Fonts
+  `@import` — a background job must have zero external network dependents) fed to **`puppeteer-core`**
+  (not bundled `puppeteer`) pointed at the server's own Microsoft Edge via `PUPPETEER_EXECUTABLE_PATH`
+  — deliberately not a Chromium download, since `Install-SecVault.ps1`'s whole philosophy is bundling
+  dependencies rather than assuming outbound internet access, and `SecVault-Engine` runs as
+  `LocalSystem`, a different profile than whichever account runs `Update-SecVault.ps1` (a bundled
+  browser's cache path could go invisible to the service at runtime). `compliance_report_log` tracks
+  one `'success'` per calendar month via a **partial unique index** (`WHERE status='success'`), not
+  just app logic — the job runs both on cron and once at every service startup, so a real DB
+  constraint is what prevents a double-send if a deploy lands near the monthly tick; failed attempts
+  don't block a retry.
 - **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
 - **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.

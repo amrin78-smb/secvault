@@ -25,17 +25,37 @@ const CHANNEL_TYPE_LABEL = {
   generic_webhook: 'Generic Webhook',
 };
 
-const ALERT_TYPES = ['patch_now_cve', 'compliance_critical', 'config_diff'];
+// Separate hardcoded literal from lib/notificationChannels.js's own
+// ALERT_TYPES export, not a shared import — that file is CommonJS
+// (required by services/engine-worker.js under plain node), this is a
+// 'use client' component bundled by Next's webpack/ESM pipeline; same
+// dual-registry-kept-in-sync-by-hand convention CLAUDE.md documents for
+// components/devices/vendorMeta.js <-> lib/adapters/index.js.
+const ALERT_TYPES = ['patch_now_cve', 'compliance_critical', 'config_diff', 'compliance_report'];
 const ALERT_TYPE_LABEL = {
   patch_now_cve: 'Patch Now CVEs',
   compliance_critical: 'Critical Compliance Failures',
   config_diff: 'Config Changes',
+  compliance_report: 'Monthly Compliance Report',
 };
+// 'compliance_report' only ever means anything for an email channel (a PDF
+// attachment has no Slack/Teams/generic-webhook analog) — the checkbox
+// itself is hidden for every other channel_type (see renderChannelFields
+// below) so an admin can never opt a webhook channel into a report type
+// the engine-worker job will just silently skip forever.
+const EMAIL_ONLY_ALERT_TYPES = new Set(['compliance_report']);
 
 // Fresh, empty field-state object for either the create form or an in-place
 // rotation — same shape used by both, same convention as
-// CredentialProfilesPanel.js's emptyFields().
-function emptyFields() {
+// CredentialProfilesPanel.js's emptyFields(). `channelType` (optional)
+// scopes the default alertTypes selection to only the checkboxes that will
+// actually be visible for that type — otherwise a non-email channel's
+// hidden, unreachable 'compliance_report' checkbox would still default to
+// "checked" in the submitted data despite never being shown.
+function emptyFields(channelType) {
+  const defaultAlertTypes = ALERT_TYPES.filter(
+    (t) => !EMAIL_ONLY_ALERT_TYPES.has(t) || channelType === 'email'
+  );
   return {
     webhookUrl: '',
     smtpHost: '',
@@ -45,7 +65,7 @@ function emptyFields() {
     smtpTo: '',
     smtpUser: '',
     smtpPassword: '',
-    alertTypes: [...ALERT_TYPES],
+    alertTypes: defaultAlertTypes,
   };
 }
 
@@ -173,7 +193,7 @@ function renderChannelFields(channelType, fields, setFields, idPrefix) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <span style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>Alert on</span>
-        {ALERT_TYPES.map((t) => (
+        {ALERT_TYPES.filter((t) => !EMAIL_ONLY_ALERT_TYPES.has(t) || channelType === 'email').map((t) => (
           <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)' }}>
             <input
               type="checkbox"
@@ -214,7 +234,7 @@ export default function NotificationsPanel() {
 
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState(CHANNEL_TYPES[0]);
-  const [newFields, setNewFields] = useState(emptyFields());
+  const [newFields, setNewFields] = useState(emptyFields(CHANNEL_TYPES[0]));
 
   const [testingId, setTestingId] = useState(null);
   const [testResult, setTestResult] = useState({});
@@ -256,7 +276,7 @@ export default function NotificationsPanel() {
       setStatus('Channel created.');
       setNewName('');
       setNewType(CHANNEL_TYPES[0]);
-      setNewFields(emptyFields());
+      setNewFields(emptyFields(CHANNEL_TYPES[0]));
       loadChannels();
     } else {
       setStatus(data.error || 'Failed to create channel.');
@@ -412,7 +432,7 @@ export default function NotificationsPanel() {
                 value={newType}
                 onChange={(e) => {
                   setNewType(e.target.value);
-                  setNewFields(emptyFields());
+                  setNewFields(emptyFields(e.target.value));
                 }}
               >
                 {CHANNEL_TYPES.map((t) => (

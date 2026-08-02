@@ -222,9 +222,14 @@ export default async function CompliancePage({ searchParams }) {
           title="Compliance"
           subtitle="Compare PCI DSS, ISO 27001, CIS v8, NIST, and SANS scores across every active device. Switch to Cards to see one firewall's full donut breakdown."
           actions={
-            <a href="/api/compliance/fleet?format=csv" className="btn btn-secondary">
-              Export CSV
-            </a>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <a href="/api/compliance/fleet?format=csv" className="btn btn-secondary">
+                Export CSV
+              </a>
+              <a href="/api/compliance/report/pdf" className="btn btn-secondary">
+                Download PDF Report
+              </a>
+            </span>
           }
         />
         {viewToggle(view)}

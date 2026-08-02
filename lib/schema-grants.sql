@@ -66,6 +66,7 @@ GRANT SELECT ON TABLE vpn_active_sessions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_ipsec_tunnels TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE snmp_metric_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE notification_dispatch_log TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE compliance_report_log TO claude_readonly, nocvault_readonly;
 
 -- users carries password_hash — same secret-bearing-column treatment as
 -- settings.admin_password_hash above (a view excluding it, never a bare

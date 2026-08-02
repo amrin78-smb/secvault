@@ -555,6 +555,29 @@ shape differs per alert_type specifically because each source table has differen
 compliance run (`check_id` is the only stable identity across that churn), `config_diffs` is
 append-only (its own `id` is already stable).
 
+### compliance_report_log
+```
+id                UUID PK DEFAULT gen_random_uuid()
+period            TEXT NOT NULL              -- 'YYYY-MM'
+status            TEXT NOT NULL              -- 'success' | 'error'
+recipient_count   INTEGER NOT NULL DEFAULT 0
+error             TEXT
+started_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+finished_at       TIMESTAMPTZ
+```
+Added 2026-08-02. Indexes: `idx_compliance_report_log_period` (plain), plus a **partial unique
+index** `idx_compliance_report_log_period_success` on `(period) WHERE status='success'` — the
+load-bearing constraint, not the plain index. Only one `'success'` row can ever exist per
+calendar month, but unlimited `'error'` rows can accumulate — a transient SMTP failure must be
+retryable within the same month, never a permanent block, but a real DB constraint is required
+(not just an app-level check) because `runComplianceReportJob()` runs both on its monthly cron
+tick AND once immediately at every `SecVault-Engine` startup, and the service restarts on every
+deploy. Written by `lib/engines/complianceReport.js`'s `dispatchMonthlyReport()` — the single
+shared code path both the scheduled job and `POST /api/compliance/report/generate` call, so
+`status='success'` requires at least one `notification_channels` row to have actually received
+the report (if every matching channel's send fails, this logs `'error'` with
+`recipient_count=0` instead, specifically so the unique index doesn't block a same-month retry).
+
 ---
 
 ## Known schema debt

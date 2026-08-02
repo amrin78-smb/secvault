@@ -130,6 +130,8 @@ POST /api/analysis/run [admin] [db] — re-run rule analysis for every active de
 GET /api/compliance/[deviceId] [auth] [db] — per-device audit findings + per-standard pass/fail/warning/na/scorePct; `?format=csv` (bulk-resolves matched_rule_ids to rule names first).
 POST /api/compliance/[deviceId]/run [admin] [db] — on-demand `runComplianceAuditForDevice()`, 404s cleanly on "Device not found", best-effort `logActivity`.
 GET /api/compliance/fleet [auth] [db] — one row per active device with the same per-standard scorePct breakdown; `?format=csv`.
+GET /api/compliance/report/pdf [auth] [db] — on-demand fleet compliance PDF download via `generateReportPdf()`; ungated like every other compliance GET route (ungated here means "no isAdmin check", not "no auth" — still behind the dashboard's session middleware). Does NOT touch `compliance_report_log` or email anyone (pure render-and-return).
+POST /api/compliance/report/generate [admin] [db] — manual trigger for `dispatchMonthlyReport()`, the SAME function the scheduled `compliance-report` job calls; still respects the per-calendar-month idempotency check (not a way to force a second send).
 
 ## /api/credential-profiles
 

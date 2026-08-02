@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.41.0': [
+    'New: Scheduled/exportable compliance audit reports. Click "Download PDF Report" on the Compliance page (Compare Devices view) for an instant fleet-wide PDF — every device\'s PCI DSS/ISO 27001/CIS v8/NIST/SANS score, plus every failing or warning finding across the fleet.',
+    'The same report can now also be emailed automatically once a month — check "Monthly Compliance Report" on any email channel under Settings → Notifications.',
+    'A monthly report never sends twice, but a failed send (e.g. a down mail relay) is automatically retried rather than silently skipped for the rest of the month.',
+  ],
   '2.40.3': [
     'Gave the Notifications channel table\'s Status column significantly more room — the "Last sent"/"Last failure" timestamp was still getting cut off at the edge. Sized this time from the actual rendered pixel widths on the live page, not an estimate.',
   ],

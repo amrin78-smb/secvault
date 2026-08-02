@@ -941,6 +941,41 @@ CREATE TABLE IF NOT EXISTS notification_dispatch_log (
 CREATE INDEX IF NOT EXISTS idx_ndl_device_id ON notification_dispatch_log(device_id);
 CREATE INDEX IF NOT EXISTS idx_ndl_alert_type_cleared ON notification_dispatch_log(alert_type, cleared_at);
 
+-- ─────────────────────────────────────────
+-- COMPLIANCE REPORTS (2026-08-02)
+-- ─────────────────────────────────────────
+
+-- Run-history log for the monthly fleet compliance PDF report (see
+-- services/engine-worker.js's runComplianceReportJob() and
+-- lib/engines/complianceReport.js). Same shape/purpose as feed_sync_log
+-- above -- "did this scheduled thing run, when, how'd it go". `period` is
+-- 'YYYY-MM', the calendar month the report covers.
+--
+-- The partial unique index (not a plain UNIQUE(period)) is the load-bearing
+-- part: only ONE 'success' row can ever exist per period, but unlimited
+-- 'error' rows can accumulate -- a transient SMTP failure on generation day
+-- must be retryable (by the next cron tick, or by POST /api/compliance/
+-- report/generate), never permanently block that month's report. This is a
+-- real DB-level guarantee, not just an app-level "check the log first"
+-- race, because runComplianceReportJob() runs BOTH on its monthly cron tick
+-- AND once immediately on every SecVault-Engine startup (same pattern as
+-- every other job in engine-worker.js), and this service restarts on every
+-- deploy -- a deploy landing near the monthly tick is a real double-send
+-- window without a hard constraint.
+CREATE TABLE IF NOT EXISTS compliance_report_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  period TEXT NOT NULL, -- 'YYYY-MM'
+  status TEXT NOT NULL, -- 'success' | 'error'
+  recipient_count INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_report_log_period_success
+  ON compliance_report_log(period) WHERE status = 'success';
+CREATE INDEX IF NOT EXISTS idx_compliance_report_log_period ON compliance_report_log(period);
+
 -- Readonly diagnostic roles + per-table grants are NOT created here.
 -- Creating a ROLE requires CREATEROLE/superuser privilege, which secvault_user
 -- (the account this file normally runs as, via lib/migrate.js) does not have —
