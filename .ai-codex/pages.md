@@ -54,7 +54,7 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 ## Topology
 
-[server] /topology — TopologyPage — top-level nav entry (added 2026-08-02, between VPN and Settings), renders `<PathQueryTab />` (fleet-wide, no props). See `components.md`'s `topology/` entry and `lib.md`'s `topology.js` engine entry.
+[server] /topology — TopologyPage — top-level nav entry (added 2026-08-02, between VPN and Settings). `?view=query|map` toggle (same pattern as `/compliance`'s `?view=cards|table`), default `query` renders `<PathQueryTab />` (fleet-wide, no props); `map` (added 2026-08-02) renders `<FleetMap />`, a visual diagram of every active device + inferred link. See `components.md`'s `topology/` entry and `lib.md`'s `topology.js` engine entry.
 
 ## Alerts
 

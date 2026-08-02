@@ -216,6 +216,10 @@ GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one ro
 
 POST /api/topology/path-query [auth] [db] — `{srcIp, dstIp, protocol?, port?}` -> `simulateMultiHopPath()` (`lib/engines/topology.js`), fleet-wide (no `[id]` param — loads every active device's rules/objects/interfaces/routes/nat_rules). Deliberately NOT admin-gated, same reasoning as `access-path`. Added 2026-08-02.
 
+## /api/topology/graph
+
+GET /api/topology/graph [auth] [db] — `{nodes, edges}` -> `buildFleetTopologyGraph()`, every active device + every deduped inferred adjacency link. Powers `components/topology/FleetMap.js`'s visual diagram (which also queries the DB directly server-side — this route exists for API consistency, not because the page needs it). Added 2026-08-02.
+
 ---
 
 ## Needs force-dynamic

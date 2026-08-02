@@ -147,6 +147,7 @@ CvePostureTab  searchParams — fleet CVE posture stat grid + filterable table
 ## topology/
 
 (c) PathQueryTab  no props — fleet-wide "Path Query": src/dst IP + optional protocol/port form -> `POST /api/topology/path-query` -> overall verdict + horizontal hop-chain (one card per device crossed: verdict, deciding rule, NAT badge, caveat badge) in an `overflow-x:auto` wrapper. Fleet-scoped successor to `AccessPathTab` — same form/fetch shape, renders a chain instead of one device's result. `HopCard` is a separate top-level function (never nested). Added 2026-08-02.
+FleetMap  no props — async server component, queries `pool` directly (same convention as `ReachabilityTab`) -> `buildFleetTopologyGraph()` -> hand-rolled inline SVG circular-layout diagram (no diagramming library). Every active device as a node (dashed/muted when `hasInterfaceData:false`), every inferred link as a line, native `<title>` hover tooltips. Added 2026-08-02, `/topology?view=map`.
 
 ## Violations
 

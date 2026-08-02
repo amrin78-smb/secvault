@@ -282,6 +282,11 @@ front" convention as `objectResolver.js`).
 ranges overlap (via `cidrUtils.rangeOverlaps`) are adjacent; O(n²) over total fleet interface count
 (accepted, same precedent as `ruleAnalysis.js`'s O(n²) shadow analysis — interface counts are orders
 of magnitude smaller than rule counts).
+`buildFleetTopologyGraph(devices, interfacesByDevice)` -> `{nodes: {id,name,vendor,hasInterfaceData}[], edges: {sourceDeviceId,sourceInterface,targetDeviceId,targetInterface}[]}`
+(added 2026-08-02, for `components/topology/FleetMap.js`'s visual diagram) — reuses `buildAdjacencyGraph()`
+internally, deduping its bidirectional entries into one edge per device PAIR; every active device becomes
+a node EVEN with zero `device_interfaces` rows (`hasInterfaceData:false`), so the map stays honest about
+fleet coverage gaps instead of silently omitting uncollected devices.
 `resolveRoute(routes, destIpUint32)` -> `{nextHopIp:string|null, interfaceName}|null` — longest-prefix-match
 against one device's `device_routes`; `nextHopIp:null` means directly-connected (path ends here,
 successfully) — callers MUST distinguish this from "no route at all" (`null` return).

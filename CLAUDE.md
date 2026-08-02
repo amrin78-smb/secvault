@@ -378,15 +378,22 @@ the second reuses the first UNCHANGED as its per-hop evaluator:
    `'deny'`** — no default/implicit-policy data exists anywhere in this codebase, for any vendor.
    Single-device, config-only — has no idea what any other firewall does.
 
-2. **Fleet-wide multi-hop Path Query** (`/topology`) — `lib/engines/topology.js` adds ONE
-   orchestration layer on top: infers which devices are adjacent (two DIFFERENT devices' interfaces
-   whose `device_interfaces.ip_address` ranges overlap share a link), applies NAT translation
-   between hops, and crosses devices via longest-prefix-match routing against `device_routes`. At
-   each hop it calls `objectResolver.queryAccessPath()` unmodified — this file never re-implements
-   or duplicates rule evaluation, only decides which device is next. Stops on a `deny`, a dead-end
-   route, the fleet boundary (egress subnet not shared with any known device), or a defensive
-   25-hop cap (guards a routing loop between misconfigured devices) — each case returns an
-   explanatory `note`, never silently upgrading an unresolved/trailing path to a confident verdict.
+2. **Fleet-wide multi-hop Path Query** (`/topology?view=query`, the default view) —
+   `lib/engines/topology.js` adds ONE orchestration layer on top: infers which devices are adjacent
+   (two DIFFERENT devices' interfaces whose `device_interfaces.ip_address` ranges overlap share a
+   link), applies NAT translation between hops, and crosses devices via longest-prefix-match routing
+   against `device_routes`. At each hop it calls `objectResolver.queryAccessPath()` unmodified — this
+   file never re-implements or duplicates rule evaluation, only decides which device is next. Stops
+   on a `deny`, a dead-end route, the fleet boundary (egress subnet not shared with any known
+   device), or a defensive 25-hop cap (guards a routing loop between misconfigured devices) — each
+   case returns an explanatory `note`, never silently upgrading an unresolved/trailing path to a
+   confident verdict.
+3. **Fleet Map** (`/topology?view=map`, added 2026-08-02) — `buildFleetTopologyGraph()` (same file)
+   dedupes that same adjacency computation into one visual diagram: every active device as a node
+   (hand-rolled inline SVG, circular layout — no diagramming library in this codebase), every
+   inferred link as a line. Every active device appears as a node EVEN with zero
+   `device_interfaces` rows (dashed/muted, `hasInterfaceData:false`) — the map stays honest about
+   fleet coverage gaps instead of silently omitting uncollected devices.
 
 **Collection (Phase 1 vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
 adapter methods (`getInterfaces()`/`getRoutingTable()`/`getNatRules()`, see `lib/adapters/interface.js`),

@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.44.0': [
+    'New: Fleet Map, a visual diagram view on the Topology page (Topology → "Fleet Map"). See every managed firewall and every inferred connection between them at a glance, instead of running one path query at a time.',
+    'Devices with no collected routing/interface data yet show up dashed and muted rather than being left off the map — so a gap in coverage is visible, not silently hidden.',
+  ],
   '2.43.2': [
     'Fixed Fortinet destination NAT (VIP-based) never actually matching on real devices — found in a live post-deploy check. A firewall policy referencing a VIP with different letter casing than the VIP was defined with (a real, valid FortiOS config) was silently skipped instead of matched.',
   ],
