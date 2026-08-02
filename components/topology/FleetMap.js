@@ -108,9 +108,13 @@ export default async function FleetMap() {
                     stroke="var(--border)"
                     strokeWidth={2}
                   >
-                    <title>
-                      {a.name} ({edge.sourceInterface}) &harr; {b.name} ({edge.targetInterface})
-                    </title>
+                    {/* ⛔ react-dom's server renderer special-cases <title>
+                        (SVG or HTML) to accept only ONE text-node child --
+                        multiple mixed string/expression children silently
+                        render empty on the server, then mismatch on
+                        hydration (React error #418). Always pass a single
+                        pre-concatenated template-literal string here. */}
+                    <title>{`${a.name} (${edge.sourceInterface}) <-> ${b.name} (${edge.targetInterface})`}</title>
                   </line>
                 );
               })}
@@ -130,9 +134,9 @@ export default async function FleetMap() {
                       strokeDasharray={node.hasInterfaceData ? undefined : '3,3'}
                       opacity={node.hasInterfaceData ? 1 : 0.6}
                     >
-                      <title>
-                        {node.name} ({node.vendor}){!node.hasInterfaceData ? ' — no interface data collected' : ''}
-                      </title>
+                      {/* Same single-string-child requirement as the edge
+                          <title> above. */}
+                      <title>{`${node.name} (${node.vendor})${node.hasInterfaceData ? '' : ' - no interface data collected'}`}</title>
                     </circle>
                     <text
                       x={node.x}

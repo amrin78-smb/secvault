@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.44.1': [
+    'Fixed a console error on the new Fleet Map view — found in a post-deploy check. The connection tooltips (hover text on each line/device) were silently failing to render due to a React quirk, which also made the page do a wasted extra re-render on every load. No visible change other than a cleaner page load.',
+  ],
   '2.44.0': [
     'New: Fleet Map, a visual diagram view on the Topology page (Topology → "Fleet Map"). See every managed firewall and every inferred connection between them at a glance, instead of running one path query at a time.',
     'Devices with no collected routing/interface data yet show up dashed and muted rather than being left off the map — so a gap in coverage is visible, not silently hidden.',
