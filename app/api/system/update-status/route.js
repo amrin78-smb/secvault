@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.43.2': [
+    'Fixed Fortinet destination NAT (VIP-based) never actually matching on real devices — found in a live post-deploy check. A firewall policy referencing a VIP with different letter casing than the VIP was defined with (a real, valid FortiOS config) was silently skipped instead of matched.',
+  ],
   '2.43.1': [
     'Network Topology now understands Fortinet NAT too (was Palo Alto-only). Destination NAT (public IP → internal server, via VIP objects) resolves fully; source NAT resolves to a real address when possible, and is honestly flagged as unresolved — never guessed — when a policy uses SD-WAN link selection SecVault can\'t see into.',
   ],
