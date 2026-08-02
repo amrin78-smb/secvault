@@ -529,7 +529,6 @@ VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
 NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
-PUPPETEER_EXECUTABLE_PATH=                 # defaults to the server's Edge if unset — see compliance report PDF section
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -592,18 +591,22 @@ none of these carry Critical-Rules-level footguns.
   monthly email list): a fleet-wide PDF (fleet summary + per-device scores + a fail/warning findings
   appendix across PCI DSS/ISO 27001/CIS v8/NIST/SANS) — on-demand via `GET /api/compliance/report/pdf`
   (ungated, same as every other compliance GET route) or scheduled via `services/engine-worker.js`'s
-  fixed-monthly `compliance-report` job. Rendered by `lib/engines/complianceReport.js`: a
-  self-contained HTML string (inlines the real `app/globals.css`, stripped of its Google Fonts
-  `@import` — a background job must have zero external network dependents) fed to **`puppeteer-core`**
-  (not bundled `puppeteer`) pointed at the server's own Microsoft Edge via `PUPPETEER_EXECUTABLE_PATH`
-  — deliberately not a Chromium download, since `Install-SecVault.ps1`'s whole philosophy is bundling
-  dependencies rather than assuming outbound internet access, and `SecVault-Engine` runs as
-  `LocalSystem`, a different profile than whichever account runs `Update-SecVault.ps1` (a bundled
-  browser's cache path could go invisible to the service at runtime). `compliance_report_log` tracks
-  one `'success'` per calendar month via a **partial unique index** (`WHERE status='success'`), not
-  just app logic — the job runs both on cron and once at every service startup, so a real DB
-  constraint is what prevents a double-send if a deploy lands near the monthly tick; failed attempts
-  don't block a retry.
+  fixed-monthly `compliance-report` job. Rendered by `lib/engines/complianceReport.js` via **`pdfkit`**
+  — pure-JS vector PDF drawing, no browser/native process spawned at all — the same convention already
+  used successfully by every sibling NocVault suite app (LogVault/DDIVault/SpanVault). This replaced an
+  earlier `puppeteer-core` + headless-Edge implementation (v2.41.0-v2.41.3) that worked in every manual
+  test but consistently failed to launch specifically when spawned from inside the `SecVault-App`/
+  `SecVault-Engine` NSSM Windows services (`LocalSystem`, Session 0) — root cause never conclusively
+  identified; pdfkit sidesteps the whole class of "can a browser launch under this service account"
+  problems by not needing a browser at all. Cover page/tables/headers-footers are hand-drawn helpers
+  (`drawCover`/`drawTable`/`stampHeadersFooters`/`sectionTitle`) ported from `spanvault/api/reportsPdf.js`
+  — read-only reference on this dev machine, never a runtime dependency (SecVault has no import/require
+  on any sibling suite app's code, per this file's "SEPARATE PRODUCT" rule above). `generateReportPdf(pool)`
+  returns a `Buffer` (collected from `doc.on('data'/'end'/'error')`), used identically by the on-demand
+  download route and the email-attachment scheduler. `compliance_report_log` tracks one `'success'` per
+  calendar month via a **partial unique index** (`WHERE status='success'`), not just app logic — the job
+  runs both on cron and once at every service startup, so a real DB constraint is what prevents a
+  double-send if a deploy lands near the monthly tick; failed attempts don't block a retry.
 - **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
 - **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.
