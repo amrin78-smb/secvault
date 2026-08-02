@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.41.5': [
+    'Fixed "Download PDF Report" 500ing immediately after the previous fix — the new report generator built and deployed fine but crashed at runtime because the app\'s build step was bundling it incorrectly. No functional change beyond making it actually work.',
+  ],
   '2.41.4': [
     'Fixed "Download PDF Report" for real this time — the previous approach rendered the report with a browser engine that would never reliably start when running as a Windows service, root cause never fully pinned down after several attempts. Rewrote the report generator to draw the PDF directly, the same reliable approach already used by the rest of the NocVault suite\'s report features, removing that entire class of failure.',
     'No visible change to the report itself — same fleet summary, per-device scores, and findings appendix, same monthly email delivery.',
