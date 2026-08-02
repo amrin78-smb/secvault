@@ -366,7 +366,7 @@ A third predicate type, `ruleset_property` (**3 checks**, not 2 — see complian
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
 
-`lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then checks `if (!isAdmin(session)) return forbiddenResponse();`. Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
+`lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then checks `if (!isAdmin(session)) return forbiddenResponse();`. Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **A non-mutating POST that only computes over already-collected data and persists nothing is treated like a GET, not gated** — e.g. `POST /api/devices/[id]/access-path` (query-only, no DB write) — the "mutating" test is about persistence, not HTTP verb; don't read the rule as "every POST needs isAdmin." **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
 
 **LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
 
@@ -614,6 +614,15 @@ none of these carry Critical-Rules-level footguns.
 - **Credential Profiles**: reusable named credential bundles, separate from per-device rotation, excluded from readonly grants same as `device_credentials`.
 - **SNMP Monitoring**: per-vendor CPU/memory/session metrics, `lowConfidence:true` when only generic MIB-II/HOST-RESOURCES-MIB support exists (no vendor MIB).
 - **Rule Reorder Recommendation**: `reorder_candidate` finding type, CSV export via `ReorderTab`.
+- **Access Path Query** (`/devices/[id]/analysis?tab=access-path`, added 2026-08-02): per-device
+  "what does this ruleset do with this specific IP/port pair" tool — resolves real address/service
+  OBJECTS (not just zone names like the Reachability tab) via `lib/engines/objectResolver.js`,
+  recursively expanding group membership, and walks enabled rules in order to find the deciding
+  rule. Deliberately single-device, config-only, same scope limit `reachabilityMatrix.js` already
+  states — no cross-device topology data exists in this codebase. Never asserts `deny` when no
+  rule matches (no default-policy data exists for any vendor) and never silently drops an
+  unresolved object (FQDN address, Sangfor's empty object catalog) into a false non-match — both
+  surface as an explicit caveat instead.
 
 ---
 

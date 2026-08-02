@@ -143,6 +143,9 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `parseCidrOrIp(str)` -> `{network: number, prefixLen: number}|null` — parses IPv4 literal/CIDR into masked network + prefix; `null` for anything non-IPv4-shaped (IPv6, object names, "any").
 `cidrContains(outerStr, innerStr)` -> `boolean|null` — true if outer CIDR range contains inner; `null` if either isn't parseable (never coerced to `false`).
 `cidrEquals(aStr, bStr)` -> `boolean|null` — true if both denote the same masked range; `null` if either isn't parseable.
+`parseIpRange(str)` -> `{start,end}|null` (added 2026-08-02, for `objectResolver.js`) — parses a literal `"start-end"` IPv4 range (both sides bare `/32`s); `null` for anything else.
+`rangeContains(outer, inner)` / `rangeOverlaps(a, b)` -> `boolean` — numeric `{start,end}` containment/overlap, uniform across CIDR and range shapes.
+`cidrToRange(cidr)` -> `{start,end}` — widens a parsed CIDR to a `{start,end}` range. ⛔ `/32` needs a special case (`0xffffffff >>> 32` is a no-op in JS, same mod-32 footgun `maskForPrefixLen()` already guards for `/0` — get this backwards and every single-host CIDR silently widens to the whole address space).
 
 ## lib/engines/configDiff.js
 
@@ -241,6 +244,26 @@ Added 2026-08-02. Consumed by `app/api/compliance/report/{pdf,generate}` and `se
 ## lib/engines/reachabilityMatrix.js
 
 `computeZoneReachability(rules)` -> `{zones: string[], matrix: Object<string, Object<string, {verdict: 'allow'|'deny'|'unspecified', ruleName: string|null}>>, hasZoneData: boolean}` (pure) — single-device zone×zone reachability matrix via first-matching-enabled-rule-wins walk in `sequence_number` order.
+
+## lib/engines/objectResolver.js
+
+Added 2026-08-02, for `app/api/devices/[id]/access-path`'s per-device "Access Path Query" tool
+(`components/analysis/AccessPathTab.js`) — resolves `firewall_rules` address/service field entries
+(almost always OBJECT NAMES, e.g. `"LAN-subnet"`) to real IP ranges/ports via a device's
+`network_objects` rows, recursively expanding `address_group`/`service_group` membership
+(cycle-guarded). Nothing else in this codebase resolves object NAMES — `ruleAnalysis.js`'s
+`fieldCovers`/`fieldEquals` only compare address-list values as strings/sets. Pure, no DB access —
+caller loads a device's `firewall_rules` + `network_objects` once and passes both in.
+
+`resolveAddressField(fieldValues, addressObjectsByName)` -> `{ranges: {start,end}[], unresolvedFqdns: string[], unresolvedNames: string[], isAny: boolean}` — literal IP/CIDR/range first, else object lookup + recursive group expansion; an FQDN value or an unmatched name never silently becomes a non-match.
+`resolveServiceField(fieldValues, serviceObjectsByName)` -> `{protocols: {proto, portStart:number|null, portEnd:number|null}[], unresolvedNames: string[], isAny: boolean}` — ⛔ object-name lookup MUST come first, literal-parse fallback second (opposite order from `resolveAddressField`) — a bare object name like `"HTTPS"` is shape-indistinguishable from a bare protocol keyword like `"icmp"`; parsing the raw entry first would silently misread the object name as a protocol literal.
+`matchesAddress(resolved, queryIpUint32)` / `matchesService(resolved, queryProto?, queryPort?)` -> `'match'|'no-match'|'unresolved'` — tri-state; an unresolved object is never coerced to `'no-match'`.
+`queryAccessPath(rules, objects, {srcIp, dstIp, protocol?, port?})` -> `{verdict, matchedRule, hasCaveat, walk}` — walks enabled rules in `sequence_number` order; the FIRST rule not definitively excluded (none of src/dst/service resolved `'no-match'`) decides — including a rule whose match involved an `'unresolved'` object, which still wins but sets `hasCaveat:true` rather than being skipped past. No rule decides -> `verdict:'unspecified'`, NEVER `'deny'` — no default/implicit-policy data exists anywhere in this codebase. `walk` includes every excluded rule that was still partially relevant (at least one dimension not `'no-match'`), for audit transparency.
+
+Deliberately single-device, config-only — same scope limit `reachabilityMatrix.js` already states
+(no cross-device topology data exists). Sangfor's `getObjects()` is a stub (always empty) — on
+Sangfor devices only literal IP/port values typed directly into a rule can ever resolve; the API
+route surfaces this as an explicit `note`, not a silently-wrong verdict.
 
 ## lib/engines/ruleAnalysis.js
 

@@ -22,6 +22,7 @@ import RiskyRulesTab from '../../../../../components/analysis/RiskyRulesTab';
 import ObjectsTab from '../../../../../components/analysis/ObjectsTab';
 import TrackingTab from '../../../../../components/analysis/TrackingTab';
 import ReachabilityTab from '../../../../../components/analysis/ReachabilityTab';
+import AccessPathTab from '../../../../../components/analysis/AccessPathTab';
 import RuleRelationshipTab from '../../../../../components/analysis/RuleRelationshipTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
 
@@ -240,6 +241,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     'objects',
     'tracking',
     'reachability',
+    'access-path',
     'relationships',
   ].includes(searchParams?.tab)
     ? searchParams.tab
@@ -293,6 +295,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'objects', 'Objects')}
         {tabLink(device.id, tab, 'tracking', 'Tracking')}
         {tabLink(device.id, tab, 'reachability', 'Reachability')}
+        {tabLink(device.id, tab, 'access-path', 'Access Path')}
         {tabLink(device.id, tab, 'relationships', 'Relationships')}
       </div>
 
@@ -417,6 +420,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 
       {tab === 'reachability' && <ReachabilityTab deviceId={device.id} />}
+      {tab === 'access-path' && <AccessPathTab deviceId={device.id} />}
       {tab === 'relationships' && <RuleRelationshipTab deviceId={device.id} />}
 
       {tab === 'findings' && (

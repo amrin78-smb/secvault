@@ -53,6 +53,10 @@ POST /api/devices/[id]/acknowledgements [admin] [db] — upsert one `finding_ack
 GET /api/devices/[id]/analysis [auth] [db] — rule hygiene findings joined to rule + summary (by_type/by_severity counts, risk score, allow/deny/inactive counts); `?format=csv` export.
 POST /api/devices/[id]/analysis [admin] [db] — re-run `runAnalysisForDevice(id, pool)`, best-effort `logActivity`.
 
+## /api/devices/[id]/access-path
+
+POST /api/devices/[id]/access-path [auth] [db] — `{srcIp, dstIp, protocol?, port?}` -> `queryAccessPath()` (`lib/engines/objectResolver.js`) over this device's `firewall_rules`+`network_objects`. Deliberately NOT admin-gated — pure read-only computation, no persistence, matches every other analysis view rendering identically for both roles. Returns a `note` when the device has zero `network_objects` rows (Sangfor's `getObjects()` stub).
+
 ## /api/devices/[id]/backups
 
 GET /api/devices/[id]/backups [auth] [db] — list `config_backups` metadata (id/label/backed_up_at/size), newest first, no raw config.

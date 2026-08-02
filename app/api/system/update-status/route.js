@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.42.0': [
+    'New: Access Path Query, on the Rule Analysis page (per-device, "Access Path" tab). Type a source IP, destination IP, and optional protocol/port, and see exactly which rule decides that traffic — resolving real address/service objects and group membership, not just zone names.',
+    'Unlike the existing Reachability tab (zone-level only), this follows object references (e.g. "LAN-subnet") down to their real IP ranges, including nested groups, so the answer reflects what the firewall actually does with a specific IP/port pair.',
+    'Never guesses: an object this tool can\'t fully resolve (a domain-name address object, or a device with no object data collected) is flagged explicitly rather than silently treated as a non-match.',
+  ],
   '2.41.5': [
     'Fixed "Download PDF Report" 500ing immediately after the previous fix — the new report generator built and deployed fine but crashed at runtime because the app\'s build step was bundling it incorrectly. No functional change beyond making it actually work.',
   ],

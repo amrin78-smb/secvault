@@ -79,6 +79,7 @@ OptimizationTab  deviceId, canWrite — table of risky/any-any/exposure findings
 ReachabilityTab  deviceId — zone-to-zone reachability matrix table; columns use fixed px widths (160 + 110/zone) so many-zone matrices scroll in the overflow-x wrapper instead of clipping badges
 (c) RuleHygieneDonut  categories, total, size — generic multi-slice categorical donut chart
 RuleRelationshipTab  deviceId — clustered view of related-rule (shadow/redundant/etc) findings
+(c) AccessPathTab  deviceId — "Access Path Query": src/dst IP + optional protocol/port form -> `POST /api/devices/[id]/access-path` -> deciding-rule verdict + expandable "earlier partial matches" walk. Client component (needs live form input), unlike ReachabilityTab's server-rendered zone matrix. Added 2026-08-02.
 RuleChip  ruleId, ruleMap — chip rendering one rule's label (module-level helper, RuleRelationshipTab.js)
 ClusterCard  cluster, ruleMap — card rendering one relationship cluster (module-level helper, RuleRelationshipTab.js)
 
