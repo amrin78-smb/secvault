@@ -211,19 +211,24 @@ already-redacted input (documented in its own header).
    real device sent `SSL-VPN Login Users:` (hyphen) — silently broke the feature on every poll until
    fixed. Returns `null` (not `0`) if the header isn't found at all — callers must not treat that as
    a confirmed zero.
-9. **Topology collection (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`, SSH transport
-   only, live-verified against TSR-TL)**: `get system interface physical` — one `==[<name>]` block
-   per interface, `ip: <ip> <mask>` line converted to CIDR via the existing `ipMaskToPrefixLength()`
-   (already used for `getObjects()`); unconfigured interfaces report `0.0.0.0` and are skipped.
-   `get router info routing-table all` — primary routes start at column 0 with a one-letter code
-   (`C`/`S`/`O`/`B`/`R`) + optional `*`; ECMP/backup continuation lines are indented and start with
-   `[`, naturally excluded (only the first/primary path per destination is kept). **No
-   `getNatRules()`** — FortiOS models NAT as a per-policy `set nat enable` flag (source NAT, usually
-   to the egress interface's own address) plus separate VIP objects for destination NAT referenced
-   from a policy's `dstaddr` — a structurally different shape from Palo Alto's ordered NAT rulebase
-   that needs its own live verification (`show firewall vip` was not captured) before writing a
-   parser. A Fortinet hop's NAT is therefore unresolved, not silently wrong, in
-   `lib/engines/topology.js`'s simulation.
+9. **Topology collection (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`/`getNatRules()`,
+   SSH transport only, live-verified against TSR-TL)**: `get system interface physical` — one
+   `==[<name>]` block per interface, `ip: <ip> <mask>` line converted to CIDR via the existing
+   `ipMaskToPrefixLength()` (already used for `getObjects()`); unconfigured interfaces report
+   `0.0.0.0` and are skipped. `get router info routing-table all` — primary routes start at column 0
+   with a one-letter code (`C`/`S`/`O`/`B`/`R`) + optional `*`; ECMP/backup continuation lines are
+   indented and start with `[`, naturally excluded (only the first/primary path per destination is
+   kept). `getNatRules()` derives NAT from `show firewall policy` + `vip` + `ippool` (FortiOS has no
+   separate ordered NAT rulebase like Palo Alto — NAT is a per-policy `set nat enable` flag plus VIP
+   objects referenced from `dstaddr`) by reusing the EXISTING `policiesFromConfigText()`/
+   `entriesFromConfigText()` config-tree parsers, no bespoke text parsing needed. Destination NAT via
+   a VIP resolves cleanly (VIPs bind to a real physical `extintf`). Source NAT resolves to the egress
+   interface's own IP ONLY when `dstintf` names a real `device_interfaces` entry — **live-confirmed
+   that every policy on this device uses an SD-WAN virtual interface (`"virtual-wan-link"`) as
+   `dstintf`**, which has no IP of its own (SecVault has no visibility into which physical WAN link
+   an SD-WAN policy actually egresses through at any moment) — that case reports
+   `translatedSrcAddresses: null` (`natUnresolved` downstream in `topology.js`), never a guessed WAN
+   link. An explicit `ippool` reference is also resolved when present (empty on this device).
 
 ---
 

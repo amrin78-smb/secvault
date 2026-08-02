@@ -300,12 +300,17 @@ Never silently upgrades a trailing/unresolved path to a confident verdict.
 
 **Phase 1 vendor scope**: `getInterfaces()`/`getRoutingTable()`/`getNatRules()` (optional adapter
 methods, see `lib/adapters/interface.js`) are implemented ONLY by `paloalto`/`fortinet`'s SSH
-transport — API transport and the other 4 vendors are not yet wired. Fortinet additionally has no
-`getNatRules()` at all (NAT there is a per-policy flag + separate VIP objects, not a rulebase —
-needs its own live verification before writing a parser). A device pair not covered by either
-vendor's collection simply won't chain together in the adjacency graph — the query still returns a
-result, just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the
-real network topology.
+transport — API transport and the other 4 vendors are not yet wired. Fortinet's `getNatRules()`
+(added 2026-08-02, live-verified against TSR-TL — see `cliParser.parseFortinetNatRulesOutput()`)
+derives NAT from `show firewall policy`/`vip`/`ippool` rather than a separate rulebase: destination
+NAT resolves cleanly via VIP objects (they bind to a real physical `extintf`); source NAT
+(`set nat enable`) resolves to the egress interface's own IP ONLY when `dstintf` names a real
+interface — an SD-WAN virtual interface (e.g. `"virtual-wan-link"`, the common case on live
+policies) has no IP of its own, so that case reports `translatedSrcAddresses: null`
+(`natUnresolved`), never a guessed WAN link. A device pair not covered by either vendor's
+collection simply won't chain together in the adjacency graph — the query still returns a result,
+just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the real
+network topology.
 
 ## lib/engines/ruleAnalysis.js
 
@@ -340,7 +345,7 @@ real network topology.
 
 ## lib/adapters/interface.js
 
-`FirewallAdapter` (abstract base class) — constructor({device, pool}); defines the adapter contract: `testConnectivity()` -> `{ok, latency_ms, message}`, `getVersion()` -> `{version_string, version_tuple, build, model}`, `getRules()` -> `NormalizedRule[]`, `getConfig()` -> `{raw, parsed}`, optional `getObjects()` -> `{addresses, addressGroups, services, serviceGroups}`, optional `getSnmpMetrics()` -> `{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence?, targetHost}`, optional `getInterfaces()` -> `{interfaces: {name,ipAddress,zone,vdom,enabled}[]}`, optional `getRoutingTable()` -> `{routes: {destinationCidr,nextHopIp,interfaceName,protocol,metric,vdom}[]}`, optional `getNatRules()` -> `{rules: {sequenceNumber,enabled,natType,original*Addresses,translated*Addresses}[]}` (added 2026-08-02, for `lib/engines/topology.js` — paloalto/fortinet SSH transport only as of Phase 1, Fortinet omits `getNatRules()` entirely) — every concrete adapter extends this. [SENSITIVE]
+`FirewallAdapter` (abstract base class) — constructor({device, pool}); defines the adapter contract: `testConnectivity()` -> `{ok, latency_ms, message}`, `getVersion()` -> `{version_string, version_tuple, build, model}`, `getRules()` -> `NormalizedRule[]`, `getConfig()` -> `{raw, parsed}`, optional `getObjects()` -> `{addresses, addressGroups, services, serviceGroups}`, optional `getSnmpMetrics()` -> `{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence?, targetHost}`, optional `getInterfaces()` -> `{interfaces: {name,ipAddress,zone,vdom,enabled}[]}`, optional `getRoutingTable()` -> `{routes: {destinationCidr,nextHopIp,interfaceName,protocol,metric,vdom}[]}`, optional `getNatRules()` -> `{rules: {sequenceNumber,enabled,natType,original*Addresses,translated*Addresses}[]}` (added 2026-08-02, for `lib/engines/topology.js` — paloalto/fortinet SSH transport only as of Phase 1; both implement it, see `topology.js`'s own entry for Fortinet's per-policy-derived NAT shape) — every concrete adapter extends this. [SENSITIVE]
 
 ## lib/adapters/index.js
 

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.43.1': [
+    'Network Topology now understands Fortinet NAT too (was Palo Alto-only). Destination NAT (public IP → internal server, via VIP objects) resolves fully; source NAT resolves to a real address when possible, and is honestly flagged as unresolved — never guessed — when a policy uses SD-WAN link selection SecVault can\'t see into.',
+  ],
   '2.43.0': [
     'New: Network Topology (top-level "Topology" page). Query a source IP and destination IP and see the actual multi-hop path traffic takes ACROSS your whole managed firewall fleet — which device decided what, in order, including where NAT changed the addresses along the way.',
     'This is the fleet-wide successor to the per-device Access Path Query tool shipped earlier — it now crosses multiple firewalls by inferring which devices are directly connected to each other, instead of only answering for one device at a time.',

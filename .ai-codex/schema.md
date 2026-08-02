@@ -267,8 +267,9 @@ Indexes: `idx_nat_rules_device_id`. `original_*`/`translated_*` columns use the 
 `lib/engines/objectResolver.js`'s `resolveAddressField()`/`matchesAddress()` work UNCHANGED against
 these rows, zero new address-matching logic for NAT. `firewall_rules.nat_enabled` has ALWAYS been a
 hardcoded schema default (`DEFAULT false`, never vendor-derived) until this table — real NAT data.
-Optional per-adapter (`getNatRules()`) — **Palo Alto only** as of Phase 1: Fortinet's NAT is a
-per-policy flag + separate VIP objects, structurally different, not yet live-verified/parsed.
+Optional per-adapter (`getNatRules()`) — implemented for both Palo Alto (separate ordered NAT
+rulebase) and Fortinet (added 2026-08-02, derived from per-policy `nat enable` + VIP objects — see
+`lib.md`'s `topology.js` entry for the SD-WAN-interface `natUnresolved` case).
 
 ---
 

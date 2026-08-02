@@ -394,11 +394,16 @@ implemented ONLY by `paloalto`/`fortinet`'s **SSH transport** — the two vendor
 this deployment to verify real command output against, per this file's own "verify against live
 responses before writing any parser" rule (Cisco ASA/Check Point/Sangfor/Forcepoint, and both
 vendors' API transport, are not yet wired — add later following the identical adapter-method
-pattern). **Fortinet has no `getNatRules()` at all** — FortiOS models NAT as a per-policy flag plus
-separate VIP objects, structurally different from Palo Alto's ordered NAT rulebase, and needs its
-own live verification before a parser gets written. A device pair not covered by either vendor's
-collection simply won't chain together in the adjacency graph — the query still returns a result,
-just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the real
+pattern). Fortinet's `getNatRules()` (added 2026-08-02, live-verified against TSR-TL) derives NAT
+from `show firewall policy`/`vip`/`ippool` — FortiOS has no separate ordered NAT rulebase like Palo
+Alto, NAT is a per-policy `set nat enable` flag plus VIP objects referenced from `dstaddr`.
+Destination NAT via a VIP resolves cleanly (VIPs bind to a real physical interface). Source NAT
+resolves to the egress interface's own IP only when the policy's `dstintf` names a real interface —
+**every policy on the live device uses an SD-WAN virtual interface (`"virtual-wan-link"`) instead**,
+which has no IP of its own, so that case reports the translation as unresolved rather than guessing
+which physical WAN link the traffic actually egresses through. A device pair not covered by either
+vendor's collection simply won't chain together in the adjacency graph — the query still returns a
+result, just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the real
 network actually does. Collection runs inline inside the existing `rule-version-pull` job
 (`CONFIG_PULL_INTERVAL_HOURS`, no new cron job, no new env var) — routing/interface data is
 structural, slow-changing, not live session state.
