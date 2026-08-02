@@ -13,6 +13,7 @@ import {
   IconSettings,
   IconChevronLeft,
   IconUser,
+  IconTopology,
 } from '../icons';
 
 // Icon reuse note (Phase 7, Compliance): IconShield is already taken by
@@ -34,6 +35,7 @@ const NAV = [
   // a new SVG file, same "reuse what's there even if not a perfect semantic
   // match" call this file already made for Compliance -> IconSearch.
   { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
+  { href: '/topology', label: 'Topology', Icon: IconTopology, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
   { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
 ];
 

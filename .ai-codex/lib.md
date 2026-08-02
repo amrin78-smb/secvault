@@ -260,10 +260,52 @@ caller loads a device's `firewall_rules` + `network_objects` once and passes bot
 `matchesAddress(resolved, queryIpUint32)` / `matchesService(resolved, queryProto?, queryPort?)` -> `'match'|'no-match'|'unresolved'` — tri-state; an unresolved object is never coerced to `'no-match'`.
 `queryAccessPath(rules, objects, {srcIp, dstIp, protocol?, port?})` -> `{verdict, matchedRule, hasCaveat, walk}` — walks enabled rules in `sequence_number` order; the FIRST rule not definitively excluded (none of src/dst/service resolved `'no-match'`) decides — including a rule whose match involved an `'unresolved'` object, which still wins but sets `hasCaveat:true` rather than being skipped past. No rule decides -> `verdict:'unspecified'`, NEVER `'deny'` — no default/implicit-policy data exists anywhere in this codebase. `walk` includes every excluded rule that was still partially relevant (at least one dimension not `'no-match'`), for audit transparency.
 
-Deliberately single-device, config-only — same scope limit `reachabilityMatrix.js` already states
-(no cross-device topology data exists). Sangfor's `getObjects()` is a stub (always empty) — on
-Sangfor devices only literal IP/port values typed directly into a rule can ever resolve; the API
-route surfaces this as an explicit `note`, not a silently-wrong verdict.
+Deliberately single-device, config-only — was true unconditionally until `topology.js` (below,
+added 2026-08-02) added a cross-device layer ON TOP of this file, reusing `queryAccessPath()`
+UNCHANGED per hop; `objectResolver.js` itself still never touches more than one device's data.
+Sangfor's `getObjects()` is a stub (always empty) — on Sangfor devices only literal IP/port values
+typed directly into a rule can ever resolve; the API route surfaces this as an explicit `note`, not
+a silently-wrong verdict.
+
+## lib/engines/topology.js
+
+Added 2026-08-02, for `app/api/topology/path-query`'s fleet-wide "Path Query" tool
+(`components/topology/PathQueryTab.js`) — Phase 1 of a multi-hop, cross-device path simulator
+(Tufin/AlgoSec-style). Adds ONE layer on top of `objectResolver.js`'s already-shipped, UNCHANGED
+`queryAccessPath()`: infers which devices are adjacent (shared subnet), applies NAT translation
+between hops, and crosses devices via longest-prefix-match routing. Pure functions except the API
+route itself, which owns all DB querying (`fleetData` is fully pre-loaded, same "load everything up
+front" convention as `objectResolver.js`).
+
+`buildAdjacencyGraph(interfacesByDevice)` -> `Map<string, {deviceId,interfaceName}[]>` keyed by
+`` `${deviceId}::${interfaceName}` `` — two DIFFERENT devices' interfaces whose `device_interfaces.ip_address`
+ranges overlap (via `cidrUtils.rangeOverlaps`) are adjacent; O(n²) over total fleet interface count
+(accepted, same precedent as `ruleAnalysis.js`'s O(n²) shadow analysis — interface counts are orders
+of magnitude smaller than rule counts).
+`resolveRoute(routes, destIpUint32)` -> `{nextHopIp:string|null, interfaceName}|null` — longest-prefix-match
+against one device's `device_routes`; `nextHopIp:null` means directly-connected (path ends here,
+successfully) — callers MUST distinguish this from "no route at all" (`null` return).
+`applyNat(natRules, addressObjectsByName, srcIp, dstIp)` -> `{srcIp, dstIp, natApplied, natRuleName, natUnresolved}`
+— reuses `objectResolver.resolveAddressField`/`matchesAddress` UNCHANGED against `nat_rules`' `original_*`
+fields (same JSONB-array-of-object-names shape as `firewall_rules`); translates via the first literal
+`/32` found in `translated_*`, flags `natUnresolved` rather than guessing when a matched rule has no
+usable literal.
+`simulateMultiHopPath(fleetData, {srcIp, dstIp, protocol?, port?})` -> `{finalVerdict, hops, note?}`
+— finds the entry device by source-IP-in-interface-subnet match (no match -> `unspecified`, never
+guessed), then loops (capped at `MAX_HOPS = 25`, defensive against a routing loop between
+misconfigured devices) calling `queryAccessPath()` per device, applying NAT, resolving the route,
+and crossing the adjacency graph — stopping on a `deny`, a dead-end route, the fleet boundary
+(egress subnet not shared with any known device), or the hop cap, each with an explanatory `note`.
+Never silently upgrades a trailing/unresolved path to a confident verdict.
+
+**Phase 1 vendor scope**: `getInterfaces()`/`getRoutingTable()`/`getNatRules()` (optional adapter
+methods, see `lib/adapters/interface.js`) are implemented ONLY by `paloalto`/`fortinet`'s SSH
+transport — API transport and the other 4 vendors are not yet wired. Fortinet additionally has no
+`getNatRules()` at all (NAT there is a per-policy flag + separate VIP objects, not a rulebase —
+needs its own live verification before writing a parser). A device pair not covered by either
+vendor's collection simply won't chain together in the adjacency graph — the query still returns a
+result, just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the
+real network topology.
 
 ## lib/engines/ruleAnalysis.js
 
@@ -298,12 +340,13 @@ route surfaces this as an explicit `note`, not a silently-wrong verdict.
 
 ## lib/adapters/interface.js
 
-`FirewallAdapter` (abstract base class) — constructor({device, pool}); defines the adapter contract: `testConnectivity()` -> `{ok, latency_ms, message}`, `getVersion()` -> `{version_string, version_tuple, build, model}`, `getRules()` -> `NormalizedRule[]`, `getConfig()` -> `{raw, parsed}`, optional `getObjects()` -> `{addresses, addressGroups, services, serviceGroups}`, optional `getSnmpMetrics()` -> `{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence?, targetHost}` — every concrete adapter extends this. [SENSITIVE]
+`FirewallAdapter` (abstract base class) — constructor({device, pool}); defines the adapter contract: `testConnectivity()` -> `{ok, latency_ms, message}`, `getVersion()` -> `{version_string, version_tuple, build, model}`, `getRules()` -> `NormalizedRule[]`, `getConfig()` -> `{raw, parsed}`, optional `getObjects()` -> `{addresses, addressGroups, services, serviceGroups}`, optional `getSnmpMetrics()` -> `{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence?, targetHost}`, optional `getInterfaces()` -> `{interfaces: {name,ipAddress,zone,vdom,enabled}[]}`, optional `getRoutingTable()` -> `{routes: {destinationCidr,nextHopIp,interfaceName,protocol,metric,vdom}[]}`, optional `getNatRules()` -> `{rules: {sequenceNumber,enabled,natType,original*Addresses,translated*Addresses}[]}` (added 2026-08-02, for `lib/engines/topology.js` — paloalto/fortinet SSH transport only as of Phase 1, Fortinet omits `getNatRules()` entirely) — every concrete adapter extends this. [SENSITIVE]
 
 ## lib/adapters/index.js
 
 `getAdapter(device, pool)` -> `FirewallAdapter instance` — resolves vendor+mgmt_method to a concrete adapter class via `ADAPTERS`/`DEFAULT_METHOD` tables. [SENSITIVE]
-`collectAndStore(device, pool)` -> `Promise<{version, rulesCount, configCollected, configChanged, analysisFindings, complianceFindings, objectsCollected?, objectFindings?, errors[]}>` — full per-device collect pipeline: version/rules/config persistence + Phase 5 rule analysis + Phase 6 diff/backup + Phase 7 compliance audit + optional object-catalog/usage analysis, each step isolated in try/catch. [SENSITIVE]
+`collectAndStore(device, pool)` -> `Promise<{version, rulesCount, configCollected, configChanged, analysisFindings, complianceFindings, objectsCollected?, objectFindings?, interfacesCollected?, routesCollected?, natRulesCollected?, errors[]}>` — full per-device collect pipeline: version/rules/config persistence + Phase 5 rule analysis + Phase 6 diff/backup + Phase 7 compliance audit + optional object-catalog/usage analysis + optional topology data (interfaces/routes/NAT, added 2026-08-02 — each of the 3 checked/stored independently, one failing never blocks the others), each step isolated in try/catch. [SENSITIVE]
+`storeDeviceInterfaces(deviceId, interfaces, pool)` / `storeDeviceRoutes(deviceId, routes, pool)` / `storeNatRules(deviceId, rules, pool)` (internal, not exported) -> DELETE+reinsert per device in one transaction, same pattern as `lib/engines/objectUsage.js`'s `storeObjects()`.
 `SUPPORTED_VENDORS` (const array) — `Object.keys(ADAPTERS)`, the 6 canonical vendor slugs.
 
 ## lib/adapters/credentials.js

@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.43.0': [
+    'New: Network Topology (top-level "Topology" page). Query a source IP and destination IP and see the actual multi-hop path traffic takes ACROSS your whole managed firewall fleet — which device decided what, in order, including where NAT changed the addresses along the way.',
+    'This is the fleet-wide successor to the per-device Access Path Query tool shipped earlier — it now crosses multiple firewalls by inferring which devices are directly connected to each other, instead of only answering for one device at a time.',
+    'Currently covers Palo Alto and Fortinet devices only — the two vendors this was verified against on a real device before being trusted. A path through an unsupported device pair will say so explicitly rather than guessing.',
+    'Never overstates confidence: a path that leaves the managed fleet, hits a routing dead-end, or involves an address this tool can\'t fully resolve says so plainly instead of reporting a false Allow/Deny.',
+  ],
   '2.42.0': [
     'New: Access Path Query, on the Rule Analysis page (per-device, "Access Path" tab). Type a source IP, destination IP, and optional protocol/port, and see exactly which rule decides that traffic — resolving real address/service objects and group membership, not just zone names.',
     'Unlike the existing Reachability tab (zone-level only), this follows object references (e.g. "LAN-subnet") down to their real IP ranges, including nested groups, so the answer reflects what the firewall actually does with a specific IP/port pair.',

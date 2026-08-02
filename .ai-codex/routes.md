@@ -212,6 +212,10 @@ DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own lo
 
 GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
 
+## /api/topology/path-query
+
+POST /api/topology/path-query [auth] [db] — `{srcIp, dstIp, protocol?, port?}` -> `simulateMultiHopPath()` (`lib/engines/topology.js`), fleet-wide (no `[id]` param — loads every active device's rules/objects/interfaces/routes/nat_rules). Deliberately NOT admin-gated, same reasoning as `access-path`. Added 2026-08-02.
+
 ---
 
 ## Needs force-dynamic
@@ -224,4 +228,5 @@ implicitly opts it out of static prerendering under Next.js's App Router), but i
 `app/api/**` that calls `pool.query()` without the export CLAUDE.md's documented MVP bug #2 requires
 for every DB-hitting route — worth adding explicitly for consistency with the rest of the codebase.
 
-All other 44 DB-hitting route files verified to export `dynamic = 'force-dynamic'`.
+All other DB-hitting route files (45 as of 2026-08-02's `/api/topology/path-query` addition)
+verified to export `dynamic = 'force-dynamic'`.

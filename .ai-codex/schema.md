@@ -6,7 +6,8 @@ an already-deployed table) + `lib/schema-grants.sql` (readonly roles, applied se
 PostgreSQL 16. All PKs are `UUID DEFAULT gen_random_uuid()` except `settings` (TEXT key-value PK).
 No `SERIAL` anywhere — a deliberate choice, see "Known schema debt" below.
 
-28 tables total. Dense format per table:
+36 tables total (this count was stale at 28 before 2026-08-02 — several prior features' tables were
+never reflected here; corrected while adding this session's 3 new tables). Dense format per table:
 ```
 col_name          TYPE  CONSTRAINTS                    -- notes / FK target
 ```
@@ -213,6 +214,61 @@ Indexes: `idx_network_objects_device_id`, `idx_network_objects_type(object_type)
 Optional per-adapter (`getObjects()`) — Sangfor deliberately unimplemented (returns empty catalog).
 DELETE+reinsert per device per pull, same lifecycle as `firewall_rules`. No VDOM column (Fortinet:
 same-named object across VDOMs collapses to whichever collected last — accepted, documented gap).
+
+### device_interfaces
+```
+id                UUID PK DEFAULT gen_random_uuid()
+device_id         UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+interface_name    TEXT NOT NULL
+ip_address        TEXT                                        -- CIDR, e.g. "10.1.1.1/24" -- the interface's OWN address+mask
+zone              TEXT
+vdom              TEXT                                        -- NULL except Fortinet, same convention as firewall_rules.vdom
+enabled           BOOLEAN NOT NULL DEFAULT true
+collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_interfaces_device_id`. Added 2026-08-02 for `lib/engines/topology.js`'s
+multi-hop path simulation. Live-snapshot (DELETE+reinsert per pull), optional per-adapter
+(`getInterfaces()`) — Phase 1: paloalto/fortinet only, SSH transport only.
+
+### device_routes
+```
+id                UUID PK DEFAULT gen_random_uuid()
+device_id         UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+destination_cidr  TEXT NOT NULL
+next_hop_ip       TEXT                                        -- NULL means directly-connected/local -- topology.js's resolveRoute() treats this as "path ends here successfully", never collapse to a real IP
+interface_name    TEXT
+protocol          TEXT                                        -- 'connected' | 'static' | 'ospf' | 'bgp' | 'rip' | 'other'
+metric            INTEGER
+vdom              TEXT
+collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_routes_device_id`. Same lifecycle/scope as `device_interfaces`
+(`getRoutingTable()`). Host (`/32`, PAN-OS flag `H`) routes are deliberately excluded by the Palo
+Alto parser — a route to an interface's own address adds no path-decision value and would
+wrongly out-rank real routes as the most-specific longest-prefix match.
+
+### nat_rules
+```
+id                       UUID PK DEFAULT gen_random_uuid()
+device_id                UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+sequence_number          INTEGER
+enabled                  BOOLEAN NOT NULL DEFAULT true
+nat_type                 TEXT NOT NULL                        -- 'source' | 'destination' | 'static'
+original_src_addresses   JSONB
+original_dst_addresses   JSONB
+original_services        JSONB
+translated_src_addresses JSONB
+translated_dst_addresses JSONB
+translated_services      JSONB
+collected_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_nat_rules_device_id`. `original_*`/`translated_*` columns use the EXACT SAME shape as
+`firewall_rules.src_addresses` etc (JSONB array of literal IPs or object names) — deliberate, so
+`lib/engines/objectResolver.js`'s `resolveAddressField()`/`matchesAddress()` work UNCHANGED against
+these rows, zero new address-matching logic for NAT. `firewall_rules.nat_enabled` has ALWAYS been a
+hardcoded schema default (`DEFAULT false`, never vendor-derived) until this table — real NAT data.
+Optional per-adapter (`getNatRules()`) — **Palo Alto only** as of Phase 1: Fortinet's NAT is a
+per-policy flag + separate VIP objects, structurally different, not yet live-verified/parsed.
 
 ---
 

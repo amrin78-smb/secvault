@@ -52,6 +52,10 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 [server] /vpn — VpnFleetPage — fleet table of VPN status per active device (`summarizeVpnConfig()`, config-derived from latest `device_configs.config_parsed`) + latest polled active-session count/timestamp (Fortinet-only capability) + CSV export.
 [server] /devices/[id]/vpn — DeviceVpnPage — one device's VPN config summary card (SSL-VPN/remote-access: source interface/port/idle-timeout/min-TLS, enabled/disabled/unknown badge, low-confidence badge for doc-derived vendors) + `VpnSessionTrendChart` (session-count history) + CSV export.
 
+## Topology
+
+[server] /topology — TopologyPage — top-level nav entry (added 2026-08-02, between VPN and Settings), renders `<PathQueryTab />` (fleet-wide, no props). See `components.md`'s `topology/` entry and `lib.md`'s `topology.js` engine entry.
+
 ## Alerts
 
 [server] /alerts — AlertsPage — fleet-wide chronological event feed merging open `patch_now` CVE assessments + unacknowledged `config_diffs` (⛔ `new_finding`/rule-level findings deliberately removed 2026-07-20 — those live in Rule Analysis's Cleanup/Optimization/Reorder tabs instead). Filters: `type` (patch_now|config_diff), `status` (open|all), `device_id`; paginated 25/page; inline `AlertAckControl` (admin-gated) per row.

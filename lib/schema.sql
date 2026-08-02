@@ -240,6 +240,61 @@ ALTER TABLE firewall_rules ADD COLUMN IF NOT EXISTS vdom TEXT;
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_id ON firewall_rules(device_id);
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_seq ON firewall_rules(device_id, sequence_number);
 
+-- Topology collection (added 2026-08-02, for lib/engines/topology.js's multi-hop path
+-- simulation). Live-snapshot shape (DELETE+reinsert per collectAndStore run), same
+-- convention as vpn_active_sessions -- no history needed, only "what is the current
+-- state." Populated ONLY for adapters implementing the optional getInterfaces()/
+-- getRoutingTable()/getNatRules() methods (Palo Alto + Fortinet as of this add) --
+-- a device with an adapter lacking these simply has zero rows in all three tables,
+-- same "missing capability, not an error" treatment as every other optional adapter
+-- method (getObjects/getVpnSessionSummary/getSnmpMetrics).
+CREATE TABLE IF NOT EXISTS device_interfaces (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  interface_name TEXT NOT NULL,
+  ip_address TEXT, -- CIDR, e.g. "10.1.1.1/24" -- the interface's own address+mask
+  zone TEXT, -- vendor zone name, if the interface has one (ties into zone_classifications)
+  vdom TEXT, -- NULL except Fortinet, same convention as firewall_rules.vdom
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_interfaces_device_id ON device_interfaces(device_id);
+
+CREATE TABLE IF NOT EXISTS device_routes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  destination_cidr TEXT NOT NULL,
+  next_hop_ip TEXT, -- NULL for a directly-connected/local route
+  interface_name TEXT,
+  protocol TEXT, -- 'connected' | 'static' | 'ospf' | 'bgp' | ... (as reported by the device)
+  metric INTEGER,
+  vdom TEXT,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_routes_device_id ON device_routes(device_id);
+
+-- Real NAT translation data -- firewall_rules.nat_enabled has ALWAYS been a hardcoded
+-- schema default (never vendor-derived, never included in any adapter's INSERT column
+-- list) until this table. Address fields use the SAME JSONB-array-of-object-names shape
+-- as firewall_rules.src_addresses/dst_addresses so lib/engines/objectResolver.js's
+-- resolveAddressField()/matchesAddress() work UNCHANGED against nat_rules rows -- no new
+-- address-matching logic needed for NAT.
+CREATE TABLE IF NOT EXISTS nat_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  sequence_number INTEGER,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  nat_type TEXT NOT NULL, -- 'source' | 'destination' | 'static'
+  original_src_addresses JSONB,
+  original_dst_addresses JSONB,
+  original_services JSONB,
+  translated_src_addresses JSONB,
+  translated_dst_addresses JSONB,
+  translated_services JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_nat_rules_device_id ON nat_rules(device_id);
+
 -- Structured diffs between consecutive device_configs snapshots (Phase 6).
 CREATE TABLE IF NOT EXISTS config_diffs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

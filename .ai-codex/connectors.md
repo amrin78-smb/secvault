@@ -211,6 +211,19 @@ already-redacted input (documented in its own header).
    real device sent `SSL-VPN Login Users:` (hyphen) — silently broke the feature on every poll until
    fixed. Returns `null` (not `0`) if the header isn't found at all — callers must not treat that as
    a confirmed zero.
+9. **Topology collection (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`, SSH transport
+   only, live-verified against TSR-TL)**: `get system interface physical` — one `==[<name>]` block
+   per interface, `ip: <ip> <mask>` line converted to CIDR via the existing `ipMaskToPrefixLength()`
+   (already used for `getObjects()`); unconfigured interfaces report `0.0.0.0` and are skipped.
+   `get router info routing-table all` — primary routes start at column 0 with a one-letter code
+   (`C`/`S`/`O`/`B`/`R`) + optional `*`; ECMP/backup continuation lines are indented and start with
+   `[`, naturally excluded (only the first/primary path per destination is kept). **No
+   `getNatRules()`** — FortiOS models NAT as a per-policy `set nat enable` flag (source NAT, usually
+   to the egress interface's own address) plus separate VIP objects for destination NAT referenced
+   from a policy's `dstaddr` — a structurally different shape from Palo Alto's ordered NAT rulebase
+   that needs its own live verification (`show firewall vip` was not captured) before writing a
+   parser. A Fortinet hop's NAT is therefore unresolved, not silently wrong, in
+   `lib/engines/topology.js`'s simulation.
 
 ---
 
@@ -341,6 +354,18 @@ Neither implements `getVpnSessionSummary`.
    one-shot logs exist specifically to confirm this on next live connect. XML/API transport's rule
    collection has separately worked live on real devices (confirms the XML API path independently of
    the SSH-specific brace-tree bug history).
+9. **Topology collection (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`/`getNatRules()`,
+   SSH transport only, live-verified against HRIS)**: `show interface all`'s logical-interface table
+   is column-padded with 2+ spaces (split on `/\s{2,}/`, not plain whitespace — the "zone" column can
+   be entirely empty, collapsing 7 tokens to 6, handled explicitly). `show routing route`'s "flags"
+   column can hold MULTIPLE space-separated codes (e.g. `"A S"`, `"A C"`) — parsed by classifying
+   tokens positionally (destination/nexthop/metric fixed, then consume flag-shaped tokens, then the
+   next token is the interface) rather than a fixed column count; host (`H`) routes are dropped
+   (self-route to the interface's own `/32`, no path-decision value). `show running nat-policy` shows
+   the COMPILED policy — a bidirectional static NAT rule appears as TWO separate blocks (one
+   `source <ip>`/`translate-to "src: ..."` for the outbound direction, one `destination
+   <ip>`/`translate-to "dst: ..."` for the return direction) — each parsed as its own independent
+   `nat_rules` row; `lib/engines/topology.js` never needs to know they're a matched pair.
 
 ---
 

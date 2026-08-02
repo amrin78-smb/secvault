@@ -362,6 +362,58 @@ A third predicate type, `ruleset_property` (**3 checks**, not 2 — see complian
 
 ---
 
+## Network Topology & Path Analysis (`/topology`, added 2026-08-02)
+
+Two layers, built in this order — read `lib/engines/objectResolver.js` before `lib/engines/topology.js`,
+the second reuses the first UNCHANGED as its per-hop evaluator:
+
+1. **Per-device Access Path Query** (`/devices/[id]/analysis?tab=access-path`, shipped first) —
+   `lib/engines/objectResolver.js`'s `queryAccessPath()` resolves a device's `firewall_rules`
+   address/service fields (almost always OBJECT NAMES) down to real IP ranges/ports via
+   `network_objects`, recursively expanding group membership, and walks enabled rules in
+   `sequence_number` order. Tri-state throughout (`'match'|'no-match'|'unresolved'`) — an
+   unresolved object (FQDN address, unmatched name) is never coerced to a non-match. The first rule
+   not definitively excluded decides, including one whose match involved an unresolved object
+   (flagged `hasCaveat:true`, not skipped past). No rule decides → `verdict:'unspecified'`, **never
+   `'deny'`** — no default/implicit-policy data exists anywhere in this codebase, for any vendor.
+   Single-device, config-only — has no idea what any other firewall does.
+
+2. **Fleet-wide multi-hop Path Query** (`/topology`) — `lib/engines/topology.js` adds ONE
+   orchestration layer on top: infers which devices are adjacent (two DIFFERENT devices' interfaces
+   whose `device_interfaces.ip_address` ranges overlap share a link), applies NAT translation
+   between hops, and crosses devices via longest-prefix-match routing against `device_routes`. At
+   each hop it calls `objectResolver.queryAccessPath()` unmodified — this file never re-implements
+   or duplicates rule evaluation, only decides which device is next. Stops on a `deny`, a dead-end
+   route, the fleet boundary (egress subnet not shared with any known device), or a defensive
+   25-hop cap (guards a routing loop between misconfigured devices) — each case returns an
+   explanatory `note`, never silently upgrading an unresolved/trailing path to a confident verdict.
+
+**Collection (Phase 1 vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
+adapter methods (`getInterfaces()`/`getRoutingTable()`/`getNatRules()`, see `lib/adapters/interface.js`),
+implemented ONLY by `paloalto`/`fortinet`'s **SSH transport** — the two vendors with a live device in
+this deployment to verify real command output against, per this file's own "verify against live
+responses before writing any parser" rule (Cisco ASA/Check Point/Sangfor/Forcepoint, and both
+vendors' API transport, are not yet wired — add later following the identical adapter-method
+pattern). **Fortinet has no `getNatRules()` at all** — FortiOS models NAT as a per-policy flag plus
+separate VIP objects, structurally different from Palo Alto's ordered NAT rulebase, and needs its
+own live verification before a parser gets written. A device pair not covered by either vendor's
+collection simply won't chain together in the adjacency graph — the query still returns a result,
+just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the real
+network actually does. Collection runs inline inside the existing `rule-version-pull` job
+(`CONFIG_PULL_INTERVAL_HOURS`, no new cron job, no new env var) — routing/interface data is
+structural, slow-changing, not live session state.
+
+Three new live-snapshot tables (`device_interfaces`/`device_routes`/`nat_rules`, DELETE+reinsert per
+pull, same lifecycle as `network_objects`) — `nat_rules`' `original_*`/`translated_*` columns use the
+EXACT SAME shape as `firewall_rules.src_addresses` (JSONB array of literal IPs or object names),
+deliberately, so `objectResolver.js`'s address resolver works unchanged against NAT rows too.
+
+**Not admin-gated** (`POST /api/devices/[id]/access-path`, `POST /api/topology/path-query`) — both
+are pure read-only computations over already-collected data with no persistence. See the RBAC
+section below for why a non-mutating POST is treated like a GET here.
+
+---
+
 ## Role-Based Access Control
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
@@ -614,15 +666,8 @@ none of these carry Critical-Rules-level footguns.
 - **Credential Profiles**: reusable named credential bundles, separate from per-device rotation, excluded from readonly grants same as `device_credentials`.
 - **SNMP Monitoring**: per-vendor CPU/memory/session metrics, `lowConfidence:true` when only generic MIB-II/HOST-RESOURCES-MIB support exists (no vendor MIB).
 - **Rule Reorder Recommendation**: `reorder_candidate` finding type, CSV export via `ReorderTab`.
-- **Access Path Query** (`/devices/[id]/analysis?tab=access-path`, added 2026-08-02): per-device
-  "what does this ruleset do with this specific IP/port pair" tool — resolves real address/service
-  OBJECTS (not just zone names like the Reachability tab) via `lib/engines/objectResolver.js`,
-  recursively expanding group membership, and walks enabled rules in order to find the deciding
-  rule. Deliberately single-device, config-only, same scope limit `reachabilityMatrix.js` already
-  states — no cross-device topology data exists in this codebase. Never asserts `deny` when no
-  rule matches (no default-policy data exists for any vendor) and never silently drops an
-  unresolved object (FQDN address, Sangfor's empty object catalog) into a false non-match — both
-  surface as an explicit caveat instead.
+- **Access Path Query / Network Topology**: see the dedicated "Network Topology & Path Analysis"
+  section above — covers both the per-device tool and its fleet-wide multi-hop successor.
 
 ---
 
