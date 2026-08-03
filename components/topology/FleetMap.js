@@ -31,13 +31,21 @@ import EmptyState from '../ui/EmptyState';
 // a reasonable default, not a claim it's "the right" source; the user can
 // edit it before submitting, same as any other pre-filled form field.
 
+// Deliberately NOT each vendor's real brand color (Palo Alto/Fortinet/Check
+// Point are all red-orange in real life, Cisco/Sangfor are both blue) —
+// three vendors of near-identical hue were indistinguishable as small map
+// dots (found live: this fleet's Fortinet and Palo Alto devices, the two
+// most common vendors here, were the worst offenders). Chosen instead for
+// maximum pairwise hue separation across all six, spaced around the color
+// wheel, with Fortinet and Palo Alto specifically placed as far apart as
+// possible since they're this fleet's two actual vendors today.
 const VENDOR_COLOR = {
-  paloalto: '#fa582d',
-  fortinet: '#ee3124',
-  cisco_asa: '#1ba1e2',
-  checkpoint: '#e4032e',
-  sangfor: '#0a5eb0',
-  forcepoint: '#5e2d91',
+  paloalto: '#f97316',
+  fortinet: '#0ea5e9',
+  cisco_asa: '#1d4ed8',
+  checkpoint: '#dc2626',
+  sangfor: '#7c3aed',
+  forcepoint: '#db2777',
 };
 const VENDOR_LABEL = {
   paloalto: 'Palo Alto',

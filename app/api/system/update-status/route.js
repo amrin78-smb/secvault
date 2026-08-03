@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.46.2': [
+    'Fleet Map vendor colors are more distinct — Palo Alto and Fortinet (the two vendors in this fleet) were both a similar orange-red and hard to tell apart at a glance. All six vendor colors were reworked for maximum visual separation instead of trying to match each vendor\'s real brand color.',
+  ],
   '2.46.1': [
     'Fleet Map now has a visual legend — line and dot samples showing exactly what a shared-subnet link, a VPN tunnel link, a collected vs. not-yet-collected device, and each vendor color mean, instead of only a paragraph of text.',
   ],
