@@ -60,7 +60,7 @@ export default function TopologyPage({ searchParams }) {
         subtitle="Multi-hop path simulation across your managed firewall fleet."
         actions={viewToggle(view)}
       />
-      {view === 'map' ? <FleetMap /> : <PathQueryTab />}
+      {view === 'map' ? <FleetMap /> : <PathQueryTab initialSrcIp={searchParams?.srcIp || ''} />}
     </div>
   );
 }

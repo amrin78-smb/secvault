@@ -359,8 +359,8 @@ Neither implements `getVpnSessionSummary`.
    one-shot logs exist specifically to confirm this on next live connect. XML/API transport's rule
    collection has separately worked live on real devices (confirms the XML API path independently of
    the SSH-specific brace-tree bug history).
-9. **Topology collection (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`/`getNatRules()`,
-   SSH transport only, live-verified against HRIS)**: `show interface all`'s logical-interface table
+9. **Topology collection, SSH transport (added 2026-08-02, `getInterfaces()`/`getRoutingTable()`/
+   `getNatRules()`, live-verified against HRIS)**: `show interface all`'s logical-interface table
    is column-padded with 2+ spaces (split on `/\s{2,}/`, not plain whitespace — the "zone" column can
    be entirely empty, collapsing 7 tokens to 6, handled explicitly). `show routing route`'s "flags"
    column can hold MULTIPLE space-separated codes (e.g. `"A S"`, `"A C"`) — parsed by classifying
@@ -371,6 +371,27 @@ Neither implements `getVpnSessionSummary`.
    `source <ip>`/`translate-to "src: ..."` for the outbound direction, one `destination
    <ip>`/`translate-to "dst: ..."` for the return direction) — each parsed as its own independent
    `nat_rules` row; `lib/engines/topology.js` never needs to know they're a matched pair.
+10. **Topology collection, API transport (added 2026-08-03, `getInterfaces()`/`getRoutingTable()`/
+    `getNatRules()`, live-verified against ITC-SLY — the one live PAN-OS API-transport device in
+    this fleet)**: `show interface all`'s CLI-to-XML mapping does NOT follow this file's usual
+    "every token becomes a nested tag" rule — `<show><interface><all/></interface></show>` is
+    REJECTED ("needs to have non NULL value"); the working form is
+    `<show><interface>all</interface></show>` (the final token becomes a VALUE, not a further
+    nested tag). Response is clean structured XML (`<ifnet><entry>` with `name`/`zone`/`ip` fields
+    directly) — no column-position parsing needed at all, unlike the SSH transport. `show routing
+    route` uses the standard nested-tag form and is likewise clean structured `<entry>` XML.
+    **`show running nat-policy`'s XML response is confirmed BYTE-IDENTICAL in format to the SSH
+    transport's plain text** (same brace-delimited blocks inside a single `<member>` text
+    element) — `paloalto/index.js`'s API-transport `getNatRules()` reuses
+    `sshParser.parseNatPolicyOutput()` directly rather than a second parser.
+    **⛔ Real bug found via this live capture, fixed in the SHARED `sshParser.js` (affects BOTH
+    transports)**: a `dynamic-ip-and-port` (PAT/overload) NAT rule's `translate-to` string
+    includes the egress INTERFACE NAME between `"src:"` and the IP
+    (`"src: ethernet1/2 118.174.183.36(*) (dynamic-ip-and-port) ..."`), unlike the `static-ip`
+    shape (`"src: 27.254.123.18 (static-ip) ..."`) this parser was originally verified against —
+    the original regex required the IP immediately after `"src:"` and silently produced ZERO NAT
+    rows for every PAT/overload rule (the single most common real-world NAT type) until fixed to
+    skip any token lazily before matching the first dotted-quad.
 
 ---
 

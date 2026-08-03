@@ -393,15 +393,21 @@ the second reuses the first UNCHANGED as its per-hop evaluator:
    (hand-rolled inline SVG, circular layout — no diagramming library in this codebase), every
    inferred link as a line. Every active device appears as a node EVEN with zero
    `device_interfaces` rows (dashed/muted, `hasInterfaceData:false`) — the map stays honest about
-   fleet coverage gaps instead of silently omitting uncollected devices.
+   fleet coverage gaps instead of silently omitting uncollected devices. **Click-through** (added
+   2026-08-03): a node with `hasInterfaceData:true` is wrapped in a plain SVG `<a>` to
+   `/topology?view=query&srcIp=<ip>` — no client JS, the IP is that device's first interface
+   (sorted by name) whose address parses cleanly, editable before submitting.
 
-**Collection (Phase 1 vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
+**Collection (vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
 adapter methods (`getInterfaces()`/`getRoutingTable()`/`getNatRules()`, see `lib/adapters/interface.js`),
-implemented ONLY by `paloalto`/`fortinet`'s **SSH transport** — the two vendors with a live device in
-this deployment to verify real command output against, per this file's own "verify against live
-responses before writing any parser" rule (Cisco ASA/Check Point/Sangfor/Forcepoint, and both
-vendors' API transport, are not yet wired — add later following the identical adapter-method
-pattern). Fortinet's `getNatRules()` (added 2026-08-02, live-verified against TSR-TL) derives NAT
+implemented by `paloalto` on **both SSH and API transport** (API transport added 2026-08-03,
+live-verified against ITC-SLY — its `getNatRules()` reuses `sshParser.parseNatPolicyOutput()`
+directly since the API's NAT response is byte-identical in format to the SSH transport's plain
+text) and `fortinet`'s **SSH transport only** — Fortinet's API transport and the other 4 vendors
+are not yet wired (no live device to verify real command output against, for any of them, per
+this file's own "verify against live responses before writing any parser" rule — add later
+following the identical adapter-method pattern once a live device exists). Fortinet's
+`getNatRules()` (added 2026-08-02, live-verified against TSR-TL) derives NAT
 from `show firewall policy`/`vip`/`ippool` — FortiOS has no separate ordered NAT rulebase like Palo
 Alto, NAT is a per-policy `set nat enable` flag plus VIP objects referenced from `dstaddr`.
 Destination NAT via a VIP resolves cleanly (VIPs bind to a real physical interface). Source NAT

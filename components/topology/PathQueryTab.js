@@ -77,8 +77,11 @@ function HopCard({ hop }) {
   );
 }
 
-export default function PathQueryTab() {
-  const [srcIp, setSrcIp] = useState('');
+// initialSrcIp: pre-filled Source IP, passed from the Fleet Map's node
+// click-through (?srcIp=... query param, read server-side by
+// app/(dashboard)/topology/page.js) — editable, never auto-submitted.
+export default function PathQueryTab({ initialSrcIp = '' }) {
+  const [srcIp, setSrcIp] = useState(initialSrcIp);
   const [dstIp, setDstIp] = useState('');
   const [protocol, setProtocol] = useState('');
   const [port, setPort] = useState('');

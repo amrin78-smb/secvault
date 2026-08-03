@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.45.0': [
+    'Network Topology now covers Palo Alto devices managed via the API (not just SSH) — routing, interfaces, and NAT all collect the same way regardless of how a Palo Alto firewall is connected.',
+    'Fleet Map is now clickable: click any solid device to jump straight into a Path Query with that device pre-filled as the source, instead of typing its IP by hand.',
+    'Fixed NAT translations being silently missed for the most common real-world NAT setup (dynamic source NAT / PAT) on Palo Alto — found in a live check. Static NAT was already working correctly; this closes the gap for the more common case.',
+  ],
   '2.44.1': [
     'Fixed a console error on the new Fleet Map view — found in a post-deploy check. The connection tooltips (hover text on each line/device) were silently failing to render due to a React quirk, which also made the page do a wasted extra re-render on every load. No visible change other than a cleaner page load.',
   ],

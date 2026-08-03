@@ -1,5 +1,6 @@
 import { pool } from '../../lib/db';
 const { buildFleetTopologyGraph } = require('../../lib/engines/topology');
+const { parseCidrOrIp } = require('../../lib/engines/cidrUtils');
 import Card, { CardBody } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 
@@ -14,8 +15,15 @@ import EmptyState from '../ui/EmptyState';
 // circle, sorted by name for a stable/deterministic render. No physics/
 // force-directed simulation — unnecessary at this fleet's device count and
 // this codebase has no diagramming library to lean on (recharts is
-// charts-only). No click-through interactivity yet (e.g. pre-filling the
-// Path Query form) — a real, not-yet-built enhancement, not hidden.
+// charts-only).
+//
+// Click-through (added 2026-08-03): a node with hasInterfaceData:true is
+// wrapped in a plain SVG <a> to /topology?view=query&srcIp=<ip> — no client
+// JS needed, same "a normal link over client JS when one suffices" instinct
+// as this app's CSV-download <a> tags elsewhere. The pre-filled IP is that
+// device's first interface (sorted by name) whose address parses cleanly —
+// a reasonable default, not a claim it's "the right" source; the user can
+// edit it before submitting, same as any other pre-filled form field.
 
 const VENDOR_COLOR = {
   paloalto: '#fa582d',
@@ -46,7 +54,7 @@ function layoutNodes(nodes) {
 async function getFleetGraph(dbPool) {
   const devicesResult = await dbPool.query('SELECT id, name, vendor FROM devices WHERE active = true');
   const devices = devicesResult.rows;
-  if (devices.length === 0) return { nodes: [], edges: [] };
+  if (devices.length === 0) return { nodes: [], edges: [], interfacesByDevice: new Map() };
 
   const deviceIds = devices.map((d) => d.id);
   const interfacesResult = await dbPool.query(
@@ -60,17 +68,36 @@ async function getFleetGraph(dbPool) {
     interfacesByDevice.get(row.device_id).push(row);
   }
 
-  return buildFleetTopologyGraph(devices, interfacesByDevice);
+  const graph = buildFleetTopologyGraph(devices, interfacesByDevice);
+  return { ...graph, interfacesByDevice };
+}
+
+// First interface (sorted by name, matching the diagram's own node-sort
+// convention) whose ip_address parses as a real IPv4/CIDR — the bare IP
+// (prefix stripped) becomes the pre-filled Path Query source. Returns null
+// if the device has no interfaces or none parse (never guesses).
+function representativeIp(interfaces) {
+  if (!Array.isArray(interfaces) || interfaces.length === 0) return null;
+  const sorted = interfaces.slice().sort((a, b) => a.interface_name.localeCompare(b.interface_name));
+  for (const iface of sorted) {
+    const parsed = parseCidrOrIp(iface.ip_address);
+    if (parsed === null) continue;
+    return iface.ip_address.split('/')[0];
+  }
+  return null;
 }
 
 export default async function FleetMap() {
-  const { nodes, edges } = await getFleetGraph(pool);
+  const { nodes, edges, interfacesByDevice } = await getFleetGraph(pool);
 
   if (nodes.length === 0) {
     return <EmptyState message="No active devices to map yet." />;
   }
 
-  const positioned = layoutNodes(nodes);
+  const positioned = layoutNodes(nodes).map((node) => ({
+    ...node,
+    srcIp: node.hasInterfaceData ? representativeIp(interfacesByDevice.get(node.id)) : null,
+  }));
   const byId = new Map(positioned.map((n) => [n.id, n]));
   const uncollectedCount = positioned.filter((n) => !n.hasInterfaceData).length;
 
@@ -81,7 +108,8 @@ export default async function FleetMap() {
         interfaces. Dashed, muted devices have no interface data collected yet — Cisco ASA/Check Point/Sangfor/
         Forcepoint, or a Palo Alto/Fortinet device not yet collected (Phase 1 covers those two vendors&apos; SSH
         transport only).
-        {uncollectedCount > 0 && ` ${uncollectedCount} of ${positioned.length} devices shown have no interface data yet.`}
+        {uncollectedCount > 0 && ` ${uncollectedCount} of ${positioned.length} devices shown have no interface data yet.`}{' '}
+        Click a solid device to query a path starting there.
       </p>
 
       <Card>
@@ -122,8 +150,11 @@ export default async function FleetMap() {
               {positioned.map((node) => {
                 const color = VENDOR_COLOR[node.vendor] || DEFAULT_VENDOR_COLOR;
                 const labelY = node.y + (node.y >= CENTER ? 22 : -16);
-                return (
-                  <g key={node.id}>
+                const titleText = node.srcIp
+                  ? `${node.name} (${node.vendor}) - click to query a path from ${node.srcIp}`
+                  : `${node.name} (${node.vendor})${node.hasInterfaceData ? '' : ' - no interface data collected'}`;
+                const content = (
+                  <g key={node.srcIp ? undefined : node.id}>
                     <circle
                       cx={node.x}
                       cy={node.y}
@@ -136,18 +167,30 @@ export default async function FleetMap() {
                     >
                       {/* Same single-string-child requirement as the edge
                           <title> above. */}
-                      <title>{`${node.name} (${node.vendor})${node.hasInterfaceData ? '' : ' - no interface data collected'}`}</title>
+                      <title>{titleText}</title>
                     </circle>
                     <text
                       x={node.x}
                       y={labelY}
                       textAnchor="middle"
                       fontSize={11}
-                      fill="var(--text-primary)"
+                      fill={node.srcIp ? 'var(--primary)' : 'var(--text-primary)'}
                     >
                       {node.name}
                     </text>
                   </g>
+                );
+
+                // Click-through: only a device with a resolvable IP becomes
+                // a link (plain SVG <a>, no client JS) -- a device with no
+                // interface data has nothing useful to pre-fill and stays
+                // non-interactive, matching its already-muted visual state.
+                return node.srcIp ? (
+                  <a key={node.id} href={`/topology?view=query&srcIp=${encodeURIComponent(node.srcIp)}`} style={{ cursor: 'pointer' }}>
+                    {content}
+                  </a>
+                ) : (
+                  content
                 );
               })}
             </svg>

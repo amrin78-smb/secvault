@@ -303,9 +303,10 @@ and crossing the adjacency graph — stopping on a `deny`, a dead-end route, the
 (egress subnet not shared with any known device), or the hop cap, each with an explanatory `note`.
 Never silently upgrades a trailing/unresolved path to a confident verdict.
 
-**Phase 1 vendor scope**: `getInterfaces()`/`getRoutingTable()`/`getNatRules()` (optional adapter
-methods, see `lib/adapters/interface.js`) are implemented ONLY by `paloalto`/`fortinet`'s SSH
-transport — API transport and the other 4 vendors are not yet wired. Fortinet's `getNatRules()`
+**Vendor scope**: `getInterfaces()`/`getRoutingTable()`/`getNatRules()` (optional adapter methods,
+see `lib/adapters/interface.js`) are implemented by `paloalto` (BOTH SSH and API transport, as of
+2026-08-03) and `fortinet`'s SSH transport only — Fortinet's API transport and the other 4 vendors
+are not yet wired (no live device to verify against, for any of them). Fortinet's `getNatRules()`
 (added 2026-08-02, live-verified against TSR-TL — see `cliParser.parseFortinetNatRulesOutput()`)
 derives NAT from `show firewall policy`/`vip`/`ippool` rather than a separate rulebase: destination
 NAT resolves cleanly via VIP objects (they bind to a real physical `extintf`); source NAT
@@ -492,7 +493,7 @@ network topology.
 ## lib/adapters/paloalto/index.js
 
 `PaloaltoAdapter, PaloaltoSshAdapter` (re-exported; SSH class defined in `./ssh.js`)
-`PaloaltoAdapter` (class extends FirewallAdapter) — PAN-OS XML API transport (api_key or username/password→keygen). Methods: `_resolveApiKey()` (cached promise per instance), `_getConn()`, `testConnectivity()`, `getVersion()`, `getRules()` (default-vsys xpath, falls back to any-vsys deep search when zero rules found, then hit-count enrichment), `_enrichHitCounts(conn, rules, vsysName)` (additive, never throws), `getConfig()` (redacts raw XML + config tree before parsing), `getObjects()` (reads back stored `config_parsed` via `getLatestConfigParsed`, no new device call), `getSnmpMetrics()` (PAN-COMMON-MIB + HOST-RESOURCES-MIB, always `lowConfidence:true`). [SENSITIVE]
+`PaloaltoAdapter` (class extends FirewallAdapter) — PAN-OS XML API transport (api_key or username/password→keygen). Methods: `_resolveApiKey()` (cached promise per instance), `_getConn()`, `testConnectivity()`, `getVersion()`, `getRules()` (default-vsys xpath, falls back to any-vsys deep search when zero rules found, then hit-count enrichment), `_enrichHitCounts(conn, rules, vsysName)` (additive, never throws), `getConfig()` (redacts raw XML + config tree before parsing), `getObjects()` (reads back stored `config_parsed` via `getLatestConfigParsed`, no new device call), `getSnmpMetrics()` (PAN-COMMON-MIB + HOST-RESOURCES-MIB, always `lowConfidence:true`), `getInterfaces()`/`getRoutingTable()`/`getNatRules()` (added 2026-08-03, live-verified against ITC-SLY, for `lib/engines/topology.js` — `getNatRules()` reuses `sshParser.parseNatPolicyOutput()` directly, see this file's own `sshParser` require comment). [SENSITIVE]
 `averageCpuFromProcessorLoadRows(rows)` -> `number|null` — module-level SNMP helper, averages hrProcessorLoad rows.
 `indexHrStorageColumn(rows)` -> `{rowIndex: value}` — reassembles a walked hrStorage column by row index.
 `computeMemoryPercentFromHrStorage(session, timeoutMs, host)` -> `Promise<{rows, matchedRowIndex, memoryPercent, matchedDescr?}>` — walks 4 hrStorage columns, matches physical-RAM row by descr text.
@@ -513,6 +514,9 @@ network topology.
 `redactSecrets(text, secrets)` -> `string` — scrubs literal/URL-encoded secret forms + `key=`/`password=`/`user=` query params from error strings, anchored on parameter NAME (survives re-encoding). [SENSITIVE]
 `redactKey(text, apiKey)` -> `string` — back-compat single-secret alias of redactSecrets. [SENSITIVE]
 `extractErrorMessage(msg)` -> `string|null` — flattens PAN-OS `<msg>` error node shapes.
+`showInterfacesAll(conn)` -> `Promise<object>` (added 2026-08-03, live-verified) — op `<show><interface>all</interface></show>` — ⛔ NOT the usual nested-tag convention (`<all/>` is rejected; `all` must be the tag's VALUE, not a further nested tag).
+`showRoutingRoute(conn)` -> `Promise<object>` — op `show routing route`, standard nested-tag form; response is clean structured `<entry>` XML (no column-position parsing needed, unlike SSH).
+`showRunningNatPolicy(conn)` -> `Promise<object>` — op `show running nat-policy`; response's `<result><member>` text is byte-identical in format to the SSH transport's plain text — see `parser.js`'s note on why no XML-specific NAT parser exists.
 
 ## lib/adapters/paloalto/parser.js
 
@@ -529,6 +533,9 @@ network topology.
 `memberStrings(field)` -> `string[]` — normalizes `<member>` list fields.
 `mapAction(rawAction)` -> `string|null` — PAN-OS rule action → NormalizedRule action.
 `scalarText(value)` -> `string|null` — extracts scalar text from an XML node.
+`parseInterfacesXml(result)` -> `{name,ipAddress,zone,vdom:null,enabled:true}[]` (added 2026-08-03, live-verified) — reads `result.ifnet.entry` directly (clean structured fields); does NOT cross-reference the separate `<hw>` link-state section for `enabled` (sub-interfaces don't appear there at all) — every entry with a real `<ip>` is treated as enabled, a documented simplification.
+`parseRoutingTableXml(result)` -> `{destinationCidr,nextHopIp,interfaceName,protocol,metric,vdom:null}[]` — reads `result.entry` directly; same flag-based classification as `sshParser.parseRoutingTableOutput()` but no positional-token parsing needed (every field already arrives separated). Host (`H`-flag) routes excluded, same reasoning as the SSH parser.
+(No `parseNatPolicyXml` — the NAT op-command's response is reused via `sshParser.parseNatPolicyOutput()`, see `index.js`'s entry above.)
 
 ## lib/adapters/paloalto/sshParser.js
 
@@ -551,6 +558,9 @@ network topology.
 `tokenizeBraceConfig(text)` -> `Array<{kind, text?}>` — brace-format tokenizer.
 `parseBraceConfig(text)` -> `object` — full recursive-descent parse to a nested object.
 `findSecurityRulesContainers(node, depth)` -> `object[]` — deep search for rulebase/pre-rulebase/post-rulebase security.rules containers.
+`parseInterfacesOutput(text)` -> `{name,ipAddress,zone,vdom:null,enabled:true}[]` (added 2026-08-02, live-verified against HRIS, for `lib/engines/topology.js`) — `show interface all`'s logical-interface table; column-padded with 2+ spaces (split on `/\s{2,}/`, not plain whitespace — the "zone" column can be entirely empty, collapsing 7 tokens to 6, handled explicitly).
+`parseRoutingTableOutput(text)` -> `{destinationCidr,nextHopIp,interfaceName,protocol,metric,vdom:null}[]` — `show routing route`; the "flags" column can hold MULTIPLE space-separated codes (`"A S"`, `"A C"`) — classified positionally (destination/nexthop/metric fixed, then flag-shaped tokens consumed, then the next token is the interface) rather than a fixed column count. Host (`H`) routes excluded.
+`parseNatPolicyOutput(text)` -> `nat_rules`-shaped `{sequenceNumber,enabled,natType,original*Addresses,translated*Addresses}[]` — `show running nat-policy`'s COMPILED policy; a bidirectional static NAT rule appears as TWO separate blocks (outbound `source <ip>`/`translate-to "src: ..."`, return `destination <ip>`/`translate-to "dst: ..."`), each parsed as its own independent row. Also used by the API transport (`api.js`'s `showRunningNatPolicy()` response is byte-identical in format). ⛔ Fixed 2026-08-03 (found live on ITC-SLY): a `dynamic-ip-and-port` (PAT/overload) rule's `translate-to` string has the egress INTERFACE NAME between `"src:"`/`"dst:"` and the IP (`"src: ethernet1/2 118.174.183.36(*) ..."`) — the original regex required the IP immediately after the label and silently produced zero rows for every PAT/overload rule (the most common real-world NAT type) until fixed to skip any token before matching the first dotted-quad.
 
 ## lib/adapters/paloalto/ssh.js
 
