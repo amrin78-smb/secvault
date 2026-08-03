@@ -115,10 +115,23 @@ device_id         UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
 config_raw        TEXT                                     -- REDACTED before storage (secrets stripped)
 config_parsed     JSONB
 collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+is_baseline       BOOLEAN NOT NULL DEFAULT false           -- added 2026-08-03
 ```
-Indexes: `idx_device_configs_device_id`, `idx_device_configs_collected_at`.
+Indexes: `idx_device_configs_device_id`, `idx_device_configs_collected_at`, and
+`idx_device_configs_one_baseline_per_device` — a **partial unique index**
+(`ON device_configs(device_id) WHERE is_baseline`) making "at most one baseline per device" a real
+DB guarantee rather than app logic (same technique as `idx_compliance_report_log_period_success`).
+Setting a baseline must therefore CLEAR the previous one before setting the new one, or the index
+rejects the write.
 One row per collect (history). "Latest" via `getLatestConfigParsed()` (applicability.js), which
 normalizes vendor-specific root shapes (Palo Alto `.tree`, `devices.entry.deviceconfig`) before use.
+`is_baseline` marks an operator-designated known-good snapshot; drift ("latest vs baseline") is a
+genuinely different question from `config_diffs` ("latest vs previous pull"), because a
+consecutive-pull comparison target may itself already be drifted. Drift is computed ON READ from
+this flag, not stored — see `pages.md`'s device changes page.
+⚠️ Baseline flags a `device_configs` row and NOT a `config_backups` row, because only this table
+carries `config_parsed`; `config_backups` stores raw text that would need vendor-specific
+re-parsing to diff.
 
 ### config_diffs
 ```
@@ -270,6 +283,101 @@ hardcoded schema default (`DEFAULT false`, never vendor-derived) until this tabl
 Optional per-adapter (`getNatRules()`) — implemented for both Palo Alto (separate ordered NAT
 rulebase) and Fortinet (added 2026-08-02, derived from per-policy `nat enable` + VIP objects — see
 `lib.md`'s `topology.js` entry for the SD-WAN-interface `natUnresolved` case).
+
+---
+
+### device_licenses
+```
+id           UUID PK DEFAULT gen_random_uuid()
+device_id    UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+feature      TEXT NOT NULL                          -- 'Threat Prevention', 'Premium', 'Standard', ...
+description  TEXT
+serial       TEXT
+issued_at    DATE
+expires_at   DATE                                   -- see tri-state note below
+expires_raw  TEXT                                   -- the vendor's own string, verbatim
+expired      BOOLEAN                                -- the DEVICE's own verdict; NULL = not reported
+authcode     TEXT
+raw          JSONB
+collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_licenses_device_id`, `idx_device_licenses_expires_at`. Added 2026-08-03.
+Latest-snapshot (DELETE+reinsert per device, same lifecycle as `device_interfaces`), 1-to-many —
+a real PA-440 reports ~11 entitlements including the SUPPORT contract ('Premium' = 24x7
+advance-replacement, 'Standard' = 10x5), which is the fleet renewal-planning input.
+⛔ **`expires_at` is TRI-STATE with `expires_raw`**: non-null date = real expiry; NULL +
+`expires_raw='Never'` = genuinely perpetual; NULL + any other raw = the vendor string did not parse
+and expiry is UNKNOWN. Never collapse the last two — `lib/engines/deviceHealth.js`'s
+`licenseStatus()` depends on the distinction, and treating an unparsed expiry as "fine" is exactly
+how a support contract lapses unnoticed. Optional per-adapter (`getLicenses()`), Palo Alto both
+transports only.
+
+### device_ha_status
+```
+id                        UUID PK DEFAULT gen_random_uuid()
+device_id                 UUID NOT NULL UNIQUE — FK -> devices(id) ON DELETE CASCADE
+enabled                   BOOLEAN NOT NULL
+mode                      TEXT                     -- 'Active-Passive'
+group_id                  TEXT
+local_state               TEXT                     -- 'active' | 'passive' | vendor string
+peer_state                TEXT
+peer_mgmt_ip              TEXT                     -- bare IP, mask stripped
+peer_serial               TEXT
+peer_connection_status    TEXT                     -- 'up' | 'down' | ...
+config_sync_state         TEXT                     -- 'synchronized' | ...
+last_nonfunctional_reason TEXT                     -- fault reasons ONLY (see note)
+version_compat_ok         BOOLEAN                  -- tri-state, see note
+version_compat            JSONB                    -- per-component Match/Mismatch map
+raw                       JSONB
+collected_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_ha_status_device_id`. Added 2026-08-03. **UNIQUE(device_id) — exactly one row
+per device, written via UPSERT** (not DELETE+reinsert like its siblings). A standalone device gets
+`enabled=false` stored, so "standalone" is a positively-collected fact rather than being
+indistinguishable from "never collected" — the adapter returns `null` (and nothing is written) only
+when the command could not run at all.
+⛔ `version_compat_ok` is TRI-STATE: `true` = every component the device compared reported Match;
+`false` = at least one Mismatch; `NULL` = the device reported no compatibility block at all. Never
+default NULL to true.
+⛔ `last_nonfunctional_reason` holds only GENUINE fault reasons (live: `'Link down'`). PAN-OS also
+reports `Last suspended state reason: User requested` — a deliberate admin action on an otherwise
+healthy pair — which the parser deliberately keeps OUT of this column (it goes to `raw`) so it can
+never read as a fault. Live fleet: 6 of 11 Palo Altos are Active-Passive pairs.
+
+### device_disk_usage
+```
+id           UUID PK DEFAULT gen_random_uuid()
+device_id    UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+filesystem   TEXT NOT NULL                          -- '/dev/mmcblk0p8'
+mounted_on   TEXT                                   -- '/opt/panlogs'
+size_raw     TEXT                                   -- '22G' — the device's own human string
+used_raw     TEXT
+avail_raw    TEXT
+use_percent  INTEGER                                -- 0-100, NULL when unparseable
+collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_disk_usage_device_id`. Added 2026-08-03. Latest-snapshot, 1-to-many (7-9
+filesystems per device). Sizes are deliberately NOT parsed to bytes: `df -h`'s rounded units would
+make a byte figure falsely precise, while `use_percent` — which is what the UI bands on — is
+already exact. Sourced from the management API/CLI (`show system disk-space`), NOT SNMP, so it
+carries none of `snmp_metric_snapshots`' `lowConfidence` caveat.
+
+### device_content_versions
+```
+id           UUID PK DEFAULT gen_random_uuid()
+device_id    UUID NOT NULL — FK -> devices(id) ON DELETE CASCADE
+component    TEXT NOT NULL   -- 'app'|'av'|'threat'|'wildfire'|'url_filtering'|'device_dictionary'
+version      TEXT
+released_at  TIMESTAMPTZ     -- NULL when the device reports none/unparseable
+raw          JSONB
+collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Indexes: `idx_device_content_versions_device_id`. Added 2026-08-03. **No extra device command is
+issued** — these come from the `show system info` response `getVersion()` already fetches, via
+`getVersion()`'s new `contentVersions` return field. Previously these landed only as opaque keys
+inside `device_configs.config_parsed.system_info` and were never queryable. `url_filtering` has a
+version but no release-date field on PAN-OS; its `released_at` stays NULL rather than being
+inferred from the date-looking version string.
 
 ---
 

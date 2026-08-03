@@ -1031,6 +1031,126 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_report_log_period_success
   ON compliance_report_log(period) WHERE status = 'success';
 CREATE INDEX IF NOT EXISTS idx_compliance_report_log_period ON compliance_report_log(period);
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- Device lifecycle & health (added 2026-08-03)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Four latest-snapshot tables (DELETE + reinsert per device on every successful
+-- pull, same lifecycle as network_objects/device_interfaces/vpn_ipsec_tunnels --
+-- "what is true now", no history). Populated ONLY for adapters implementing the
+-- optional getLicenses()/getHaStatus()/getDiskUsage() methods, and for content
+-- versions, only for adapters whose getVersion() returns contentVersions --
+-- Palo Alto (both transports) as of this add. A device whose adapter lacks these
+-- simply has zero rows, the same "missing capability, not an error" treatment
+-- every other optional adapter method already gets.
+--
+-- Every one is written ONLY after a successful pull, so a failed poll leaves the
+-- last-known-good rows intact rather than blanking a device's licence/HA state.
+
+-- One row per licence/entitlement on the device (a real PA-440 reports ~11:
+-- support contract, threat prevention, URL filtering, GlobalProtect, WildFire...).
+CREATE TABLE IF NOT EXISTS device_licenses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  feature TEXT NOT NULL, -- e.g. 'Threat Prevention', 'Premium', 'Standard'
+  description TEXT,
+  serial TEXT,
+  issued_at DATE,
+  -- ⛔ Tri-state, do not collapse. expires_at non-null = a real parsed date;
+  -- NULL + expires_raw='Never' = a genuinely perpetual licence (Palo Alto
+  -- reports this verbatim for e.g. Virtual Systems); NULL + any other
+  -- expires_raw = the vendor string did not parse and this licence's expiry is
+  -- UNKNOWN. An unknown expiry must never be rendered as "expiring" or as
+  -- "fine" -- see lib/engines/deviceHealth.js's licenseStatus().
+  expires_at DATE,
+  expires_raw TEXT, -- the vendor's own string, kept verbatim
+  expired BOOLEAN, -- the device's OWN verdict, not ours (nullable = not reported)
+  authcode TEXT,
+  raw JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_licenses_device_id ON device_licenses(device_id);
+CREATE INDEX IF NOT EXISTS idx_device_licenses_expires_at ON device_licenses(expires_at);
+
+-- Exactly one row per device (UNIQUE(device_id)) -- a device is either in an HA
+-- pair or it is not. Written for every device the adapter can ask, INCLUDING
+-- standalone ones (enabled=false), so "standalone" is a positively-collected
+-- fact rather than indistinguishable from "never collected".
+CREATE TABLE IF NOT EXISTS device_ha_status (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL UNIQUE REFERENCES devices(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL,
+  mode TEXT, -- e.g. 'Active-Passive'
+  group_id TEXT,
+  local_state TEXT, -- 'active' | 'passive' | ... (vendor string preserved)
+  peer_state TEXT,
+  peer_mgmt_ip TEXT,
+  peer_serial TEXT,
+  peer_connection_status TEXT, -- 'up' | 'down' | ...
+  config_sync_state TEXT, -- e.g. 'synchronized'
+  -- Present when the device reports WHY a member last went non-functional
+  -- (live examples: 'Link down', 'User requested'). Its mere presence is not
+  -- automatically a fault -- 'User requested' is a deliberate admin action.
+  last_nonfunctional_reason TEXT,
+  -- ⛔ Tri-state: true = every component the device compared reported Match;
+  -- false = at least one Mismatch; NULL = the device reported no Version
+  -- Compatibility block at all (standalone, or an older PAN-OS). Never default
+  -- NULL to true -- that would silently claim a pair is version-consistent.
+  version_compat_ok BOOLEAN,
+  version_compat JSONB, -- per-component Match/Mismatch map, as reported
+  raw JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_ha_status_device_id ON device_ha_status(device_id);
+
+-- One row per mounted filesystem (a real PAN-OS box reports 7-9).
+-- Sizes are kept as the device's own human-readable `df -h` strings ('21G',
+-- '5.9G') and NOT parsed to bytes: the unit rounding in df -h output makes a
+-- byte figure falsely precise, and use_percent -- which is what the UI actually
+-- bands on -- is already exact and unambiguous.
+CREATE TABLE IF NOT EXISTS device_disk_usage (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  filesystem TEXT NOT NULL, -- e.g. '/dev/mmcblk0p8'
+  mounted_on TEXT, -- e.g. '/opt/panlogs'
+  size_raw TEXT,
+  used_raw TEXT,
+  avail_raw TEXT,
+  use_percent INTEGER, -- 0-100, NULL when unparseable
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_disk_usage_device_id ON device_disk_usage(device_id);
+
+-- Content/signature versions already present in `show system info` (which
+-- getVersion() ALREADY fetches -- no extra device command is issued for this).
+-- Previously these landed only as opaque keys inside device_configs.config_parsed
+-- .system_info and were never queryable; this extracts them so "signatures older
+-- than N days" is answerable.
+CREATE TABLE IF NOT EXISTS device_content_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  component TEXT NOT NULL, -- 'app'|'av'|'threat'|'wildfire'|'url_filtering'|'device_dictionary'
+  version TEXT,
+  released_at TIMESTAMPTZ, -- NULL when the device reports no/unparseable release date
+  raw JSONB,
+  collected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_content_versions_device_id ON device_content_versions(device_id);
+
+-- Baseline config drift (added 2026-08-03).
+-- An operator-designated known-good config snapshot per device. Drift is then
+-- "latest vs baseline", which is a genuinely different question from
+-- config_diffs' "latest vs previous pull" -- consecutive-pull diffing cannot
+-- detect drift, because the comparison target may itself already be drifted.
+--
+-- This flags a device_configs row (which carries config_parsed) and NOT a
+-- config_backups row (which stores only raw text and would need vendor-specific
+-- re-parsing to diff).
+ALTER TABLE device_configs ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT false;
+-- Partial unique index, not app logic: at most ONE baseline per device is a real
+-- DB guarantee (same technique as idx_compliance_report_log_period_success above).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_configs_one_baseline_per_device
+  ON device_configs(device_id) WHERE is_baseline;
+
 -- Readonly diagnostic roles + per-table grants are NOT created here.
 -- Creating a ROLE requires CREATEROLE/superuser privilege, which secvault_user
 -- (the account this file normally runs as, via lib/migrate.js) does not have —

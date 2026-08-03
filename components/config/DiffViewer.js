@@ -1149,6 +1149,37 @@ function SectionGroup({ section }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// DiffBody — the pure presentational render tree for a classifyDiff() result
+// ({ ruleChanges, sections }). Extracted VERBATIM from DiffViewer's own render
+// so both callers share one implementation:
+//
+//   1. DiffViewer (below) — lazily fetches /api/devices/[id]/diffs/[diffId] on
+//      expand, then renders this with the fetched `classified` payload. Its
+//      props/behaviour are unchanged by this extraction.
+//   2. The device Changes page (a SERVER component) — computes
+//      classifyDiff(diffConfigs(...)) server-side for arbitrary-version and
+//      baseline-drift comparisons and renders this directly. A named export
+//      from a 'use client' module IS importable by a server component; it just
+//      becomes a client boundary, which is exactly what the interactive
+//      accordions/collapse toggles inside this tree need.
+//
+// Deliberately does NOT render the "no entries" empty state — each caller
+// words that differently ("This diff contains no entries." vs. the drift
+// view's positive "No drift — ..."), so that stays with the caller.
+export function DiffBody({ ruleChanges, sections }) {
+  const safeRuleChanges = Array.isArray(ruleChanges) ? ruleChanges : [];
+  const safeSections = Array.isArray(sections) ? sections : [];
+  return (
+    <>
+      <RuleChangesTable ruleChanges={safeRuleChanges} />
+      {safeSections.map((section, i) => (
+        <SectionGroup key={`${section.label}-${i}`} section={section} />
+      ))}
+    </>
+  );
+}
+
 export default function DiffViewer({ deviceId, diffId }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1208,10 +1239,7 @@ export default function DiffViewer({ deviceId, diffId }) {
           {error && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</p>}
           {diff && classified && !loading && !error && (
             <>
-              <RuleChangesTable ruleChanges={ruleChanges} />
-              {sections.map((section, i) => (
-                <SectionGroup key={`${section.label}-${i}`} section={section} />
-              ))}
+              <DiffBody ruleChanges={ruleChanges} sections={sections} />
               {isEmpty && <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>This diff contains no entries.</p>}
             </>
           )}

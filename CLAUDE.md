@@ -442,6 +442,47 @@ section below for why a non-mutating POST is treated like a GET here.
 
 ---
 
+## Device Lifecycle & Health (`/lifecycle`, added 2026-08-03)
+
+Four facts SecVault could not previously answer, all collected from the management API/CLI it
+already talks to. Optional adapter methods `getLicenses()`/`getHaStatus()`/`getDiskUsage()` plus a
+`contentVersions` field on `getVersion()` — **Palo Alto only, both transports**; Fortinet is
+deferred (no licence surface on `get system status`, and no HA-enabled FortiGate exists to verify a
+peer parser against). Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
+`device_content_versions` — all latest-snapshot, all detailed in `.ai-codex/schema.md`.
+
+- **Licences / support expiry** — the fleet renewal-planning view. ⛔ `expires_at` is TRI-STATE
+  with `expires_raw`: a NULL date means *perpetual* when raw is `'Never'` and *unknown* otherwise;
+  never collapse those, because treating an unparsed expiry as "fine" is how a contract lapses.
+- **HA state** — including peer identity, config-sync state, and PAN-OS's own Version Compatibility
+  block. `version_compat_ok` is tri-state (NULL = the device reported no block; never default it to
+  true). A `User requested` suspension is NOT a fault and is deliberately excluded from
+  `last_nonfunctional_reason`.
+- **Disk** — from `show system disk-space`, NOT SNMP, so it carries none of `snmp_metric_snapshots`'
+  `lowConfidence` caveat. Sizes stay as the device's own `df -h` strings; only the percentage is
+  numeric.
+- **Content/signature versions** — extracted from the `show system info` response `getVersion()`
+  already fetches. **No additional device command is issued.**
+
+Derived status (`expiring`/`stale`/`degraded`/...) is computed at READ time by the pure
+`lib/engines/deviceHealth.js`, never stored — the raw facts are what's persisted, and staleness is a
+function of those plus the current time. Wiring these into `/alerts` and outbound notifications is a
+deliberate follow-up, not an oversight.
+
+**Command syntax was verified per-command against live devices and there is NO general rule** —
+licences need the nested form while `show interface all` needs the value form, and each was
+rejected live in the other shape. See `connectors.md` entry 11 before touching any of it.
+
+### Baseline config drift
+
+`device_configs.is_baseline` (partial unique index — one baseline per device is a DB guarantee, so
+setting a new one must CLEAR the old one first) marks an operator-designated known-good snapshot.
+Drift is "latest vs baseline", which is a genuinely different question from `config_diffs`' "latest
+vs previous pull" — a consecutive-pull comparison target may itself already be drifted. Both drift
+and arbitrary version-A-vs-B comparison reuse `configDiff.js`'s already-pure
+`diffConfigs`/`classifyDiff` **unchanged**; only the caller was ever hardwired. Computed on read, no
+new table and no new cron job.
+
 ## Role-Based Access Control
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.

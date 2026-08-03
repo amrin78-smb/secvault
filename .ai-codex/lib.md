@@ -182,6 +182,35 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+## lib/engines/deviceHealth.js
+
+Added 2026-08-03. PURE derived-status layer over the four lifecycle/health tables
+(`device_licenses`/`device_ha_status`/`device_disk_usage`/`device_content_versions`) — no DB
+access, and `now` is always an explicit parameter (never `Date.now()` baked in) so every branch is
+fixture-testable. Same "scoring/banding over data another module collected" role as `riskScore.js`.
+
+Status is computed at READ time, not stored as findings: the raw facts are persisted, and
+"is that expiring/stale/degraded" is a pure function of those facts plus the current time, so
+storing it would only create a second thing that can go stale.
+
+`licenseStatus(row, now, warnDays=60)` -> `{status:'expired'|'expiring'|'ok'|'perpetual'|'unknown', daysRemaining}`
+— the device's own `expired===true` wins over date arithmetic (clock skew, grace periods), but
+`expired===false` is NOT taken as authoritative the other way, since a currently-valid licence can
+still be days from lapsing. 60-day window (vs `ruleAnalysis.js`'s 14 for rules) because a support
+contract needs procurement lead time.
+`worstLicenseStatus(rows, now)` — worst-by-severity, tie-broken by soonest expiry so a summary tile
+points at the most urgent renewal.
+`signatureStatus(row, now, staleDays=7)` / `worstSignatureStatus(...)` -> `stale|ok|unknown` — 7
+days because Palo Alto ships AV/threat content at least daily.
+`haStatus(row)` -> `{status:'standalone'|'healthy'|'degraded'|'unknown', reasons[]}` — `degraded` on
+peer-connection-not-up, config-not-synchronized, `version_compat_ok===false`, a missing peer state,
+or a `last_nonfunctional_reason`. ⚠️ A `User requested` suspension deliberately does NOT degrade a
+pair (the parser already keeps it out of that column).
+`diskStatus(rows)` -> worst `use_percent` banded `critical`(>=90)/`warning`(>=80)/`ok`.
+
+⛔ Every function returns `unknown` rather than a confident value on missing/unparseable data —
+the same tri-state discipline `config_applies` and compliance `pass_when` already enforce.
+
 ## lib/engines/riskScore.js
 
 `computeRiskScore(findings)` -> `{score: number, band: 'low'|'medium'|'high'|'critical', raw: number}` — tallies severity counts from a raw findings array then scores.

@@ -392,6 +392,61 @@ Neither implements `getVpnSessionSummary`.
     the original regex required the IP immediately after `"src:"` and silently produced ZERO NAT
     rows for every PAT/overload rule (the single most common real-world NAT type) until fixed to
     skip any token lazily before matching the first dotted-quad.
+11. **Device lifecycle & health (added 2026-08-03, `getLicenses()`/`getHaStatus()`/`getDiskUsage()`
+    + `getVersion()`'s new `contentVersions`, BOTH transports, all live-verified across 11 real
+    devices before any parser was written)**:
+    - **Command syntax is per-command, with NO general rule** — verified individually, and the
+      "obvious" form fails in both directions. Licences need the NESTED form
+      `<request><license><info></info></license></request>`; the value form
+      `<request><license>info</license></request>` is REJECTED (`code="17" ... is unexpected`) —
+      the exact opposite of `showInterfacesAll()` above, which needs the value form. HA uses
+      `<show><high-availability><state></state></high-availability></show>`, disk uses
+      `<show><system><disk-space></disk-space></system></show>`.
+    - **Licence output formats DIFFER between transports** (the only one of these that does): the
+      API returns structured `<licenses><entry>` XML (`parser.parseLicensesXml()`), the SSH CLI
+      returns repeated `License entry:` text blocks with a literal question mark in `Expired?:`
+      (`sshParser.parseLicenseInfoOutput()`). Dates are human strings in BOTH
+      (`"September 16, 2027"`), and `"Never"` is a real value for perpetual licences.
+    - **Disk returns plain `df -h` text on the API too** (in CDATA), byte-identical to the CLI, so
+      `sshParser.parseDiskSpaceOutput()` serves both transports (same documented reuse as
+      `parseNatPolicyOutput`).
+    - ⛔ **HA does NOT. It has THREE different response shapes and this cost a real bug.** The CLI
+      returns an indented text block; the API returns `<enabled>no</enabled>` plus a near-empty
+      `<group>` for a STANDALONE device; and the API returns a fully STRUCTURED tree
+      (`<group><local-info>/<peer-info>`) for an HA-ENABLED device. The first API sample available
+      was a standalone device, so reusing the text parser for the API "worked" in testing and would
+      have silently stored NOTHING for every real HA pair on that transport — caught only because
+      devices were later switched from SSH to API and the enabled-state was re-verified.
+      **Verify per-device-STATE, not just per-command**: a command that parses correctly against one
+      device can return a structurally different response from another device in a different state.
+      `parser.parseHaStateXml()` now handles the API; `sshParser.parseHaStateOutput()` the CLI.
+    - The API exposes MORE than the CLI text: per-component `*-compat` verdicts including
+      `url-compat`, which has no equivalent in the CLI's Version Compatibility block (live: IDC FW
+      reports `url-compat: Mismatch` — its URL DB is `20260803.20149` vs the peer's
+      `0000.00.00.000`), and it splits the peer's last error into `last-error-state` +
+      `last-error-reason` rather than one prose label, giving a cleaner signal for the
+      suspended-vs-fault distinction. ⚠️ `<DLP>` is NOT a compat verdict despite looking like one —
+      it holds `Match` in `local-info` but a version string in `peer-info`; only keys ending
+      `-compat` are read.
+    - The XML response carries no HA group NUMBER (the CLI prints `Group 33:`), so `group_id` is
+      null on the API transport rather than invented.
+    - ⚠️ **Do NOT read HA state from the group header line.** Live samples show three different
+      suffixes for the same healthy condition — `Group 33: Master`, `Group 48: Active`, and
+      `Group 63: ` (empty). The authoritative value is `Local Information: → State:`. A standalone
+      device returns the literal string `HA not enabled`.
+    - ⚠️ **Two distinct peer-reason labels, deliberately treated differently**:
+      `Last non-functional state reason` (live: `Link down`) is a genuine fault signal and
+      populates `device_ha_status.last_nonfunctional_reason`; `Last suspended state reason: User
+      requested` is a deliberate admin action on an otherwise healthy pair and is kept OUT of that
+      column (retained in `raw`) so it can never read as a fault.
+    - Fleet reality at time of build: 6 of 11 Palo Altos are Active-Passive pairs (IDC FW, SMT,
+      ITC-SK, PAKFood, TUFF(TUTH3), TUM(TUTH1)); the rest standalone. PAN-OS reports its own
+      `Version Compatibility:` Match/Mismatch block, so cross-pair version-mismatch detection is
+      parsing, not computation.
+    - **Fortinet is deliberately NOT implemented** for any of these: `get system status` exposes no
+      licence/support surface, and while `Mode: Standalone` is confirmed on all 5 units there is no
+      HA-ENABLED FortiGate anywhere in this deployment to verify a peer parser against — same
+      discipline that deferred Fortinet API-transport topology.
 
 ---
 

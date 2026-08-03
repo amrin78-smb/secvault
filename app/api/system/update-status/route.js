@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.47.0': [
+    'New: Lifecycle & Health. SecVault now collects licence and support-contract expiry dates from each Palo Alto firewall, so renewals can be planned from your own fleet data instead of a vendor spreadsheet. It immediately found an expired SD-WAN licence on HRIS.',
+    'New: HA visibility. Peer state, peer address, config-sync status and cross-pair version mismatch are now collected for all 6 HA pairs in the fleet — including flagging pairs that recently lost a peer link, which nothing previously surfaced.',
+    'New: disk usage per filesystem, read from the firewall\'s own management interface rather than SNMP — so it works without SNMP configured and carries no accuracy caveat.',
+    'New: antivirus/threat/app signature ages are now extracted and shown, so "signatures are N days old" is answerable at a glance. This uses data already being collected — no extra load on any firewall.',
+    'Config comparison now works between ANY two stored versions, not just the two most recent, and you can mark a known-good configuration as a baseline to see exactly how a device has drifted from it since.',
+  ],
   '2.46.2': [
     'Fleet Map vendor colors are more distinct — Palo Alto and Fortinet (the two vendors in this fleet) were both a similar orange-red and hard to tell apart at a glance. All six vendor colors were reworked for maximum visual separation instead of trying to match each vendor\'s real brand color.',
   ],

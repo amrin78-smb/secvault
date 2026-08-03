@@ -42,6 +42,7 @@ Header (async server)  session — top navy header bar: logo, search, sync pill,
 (c) CredentialForm  deviceId, vendor="forcepoint", mgmtMethod=null — rotate an existing device's credential
 vendorMeta.js — no component; pure data/logic module (VENDOR_META table + credential-shape helpers)
 OverviewCveCard  deviceId — top CVEs needing attention card (Overview tab)
+OverviewHealthCard  deviceId — lifecycle & health card (Overview tab, added 2026-08-03): support/licence expiry, HA state, worst disk %, oldest signature. Own query + `deviceHealth.js` banding. Renders one calm muted line (not an EmptyState) for a vendor with no lifecycle data, e.g. every Fortinet device.
 OverviewConfigChangesCard  deviceId, days=7 — recent config-change summary + Impact badges
 OverviewComplianceCard  deviceId — condensed per-device compliance score card + blended average
 OverviewExposureCard  deviceId — exposure-risk (rule finding × patch-now CVE) correlation card
@@ -86,6 +87,9 @@ ClusterCard  cluster, ruleMap — card rendering one relationship cluster (modul
 ## config/
 
 (c) BackupActions  deviceId — button to create a manual config backup
+(c) ConfigVersionPicker  deviceId, versions, selectedId, param('from'|'to') — added 2026-08-03. `<select>` whose only job is `router.push` preserving the other param, so any two stored `device_configs` snapshots can be compared (not just the last two). Same router.push-only convention as `compliance/DeviceSelect`; no fetch, no local state.
+(c) BaselineButton  deviceId, configId, isBaseline — added 2026-08-03. Marks a config snapshot as the known-good baseline via `PUT /api/devices/[id]/configs/[configId]/baseline`, then `router.refresh()` (same action→refresh pattern as BackupActions). Admin-only.
+DiffBody  ruleChanges, sections — added 2026-08-03. Presentational render tree extracted OUT of DiffViewer so a server-computed diff (arbitrary A-vs-B comparison, and baseline drift) can render identically without a `config_diffs` row to fetch. DiffViewer's own props/behaviour are unchanged and every existing caller still works.
 (c) AcknowledgeButton  deviceId, diffId — acknowledges a config diff, optional note
 (c) ConditionsManager  cveId, initialConditions, devices, canWrite — CRUD + test UI for advisory applicability conditions; list renders each predicate config as compact key=value chips (ConfigChips), not a raw JSON <pre> block
 (c) DiffViewer  deviceId, diffId — expandable rule-change/section view of a config diff. Rule Changes (2.33.0) is a COLLAPSED-by-default accordion (RuleChangeCard) with Expand/Collapse all — one line per rule (name + change badge + ellipsis summary); expanding shows a compact responsive detail grid (RuleDetailGrid, replaced the tall 12-row RuleDetailTable) or a field-change grid (RuleFieldChangeList). Also: per-section groups, flat-object/diff tables, and (2.29.0) per-rule tables for Palo Alto XML/API "Security Rules" entries regrouped by ruleIndex ("Rule #N", or the real @_name on a whole-rule add/remove). Nested object/array values render as a readable key/value tree (ValueTree, 2.34.2 — replaced raw JSON.stringify walls, e.g. application-filter); each section list caps at SECTION_ROW_LIMIT rows with a "Show all (N)" toggle (tames historical 200+-row membership cascades)

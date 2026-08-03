@@ -23,9 +23,11 @@ import OverviewExposureCard from '../../../../components/devices/OverviewExposur
 import OverviewRuleHygieneCard from '../../../../components/devices/OverviewRuleHygieneCard';
 import OverviewConfigChangesCard from '../../../../components/devices/OverviewConfigChangesCard';
 import OverviewComplianceCard from '../../../../components/devices/OverviewComplianceCard';
+import OverviewHealthCard from '../../../../components/devices/OverviewHealthCard';
 import SnmpTrendMini from '../../../../components/snmp/SnmpTrendMini';
 import ZoneClassificationPanel from '../../../../components/devices/ZoneClassificationPanel';
 import { getDeviceZones } from '../../../../lib/engines/zoneClassification';
+import { haStatus } from '../../../../lib/engines/deviceHealth';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,6 +146,26 @@ function sourceRestrictedBadge(value) {
   return <Badge color="muted">Unknown</Badge>;
 }
 
+// Plain module-level functions (never components -- see the ListPills note
+// above), feeding the Device Details HA tile. The verdict itself comes from
+// lib/engines/deviceHealth.js's haStatus(); nothing is re-derived here.
+// 'unknown' (no row collected at all) renders '—', exactly like Build/Serial,
+// and is deliberately NOT flattened into "Standalone" -- enabled=false is a
+// fact the device reported, "never asked" is not.
+function haTileText(row) {
+  const { status } = haStatus(row);
+  if (status === 'unknown') return '—';
+  if (status === 'standalone') return 'Standalone';
+  const parts = [row.mode || 'Enabled'];
+  if (row.local_state) parts.push(row.local_state);
+  const label = parts.join(' · ');
+  return status === 'degraded' ? `${label} (Degraded)` : label;
+}
+
+function haTileColor(row) {
+  return haStatus(row).status === 'degraded' ? 'var(--red)' : 'var(--text-primary)';
+}
+
 function actionBorderColor(action) {
   if (action === 'allow') return 'var(--green)';
   if (action === 'deny' || action === 'drop' || action === 'reject' || action === 'block') return 'var(--red)';
@@ -162,6 +184,25 @@ async function getLatestVersion(dbPool, id) {
      WHERE device_id = $1
      ORDER BY collected_at DESC
      LIMIT 1`,
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
+// HA state for the Device Details tile below. Fetched UNCONDITIONALLY, like
+// getLatestVersion above, because that tile grid renders on the page you land
+// on rather than inside a tab body. At most one row exists per device
+// (device_ha_status.device_id is UNIQUE); null means the device's adapter
+// doesn't collect HA state at all, which the tile shows as '—' -- never as
+// "Standalone", which is a positively-collected fact (enabled=false), not the
+// same thing as never having asked.
+async function getHaStatusRow(dbPool, id) {
+  const result = await dbPool.query(
+    `SELECT enabled, mode, local_state, peer_state, peer_mgmt_ip,
+            peer_connection_status, config_sync_state, last_nonfunctional_reason,
+            version_compat_ok
+     FROM device_ha_status
+     WHERE device_id = $1`,
     [id]
   );
   return result.rows[0] || null;
@@ -317,9 +358,10 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
 
-  const [version, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
+  const [version, haRow, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
     await Promise.all([
       getLatestVersion(pool, device.id),
+      getHaStatusRow(pool, device.id),
       tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
       tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
       // Fetched UNCONDITIONALLY now, not just for tab === 'admins' — the new
@@ -458,6 +500,14 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               </div>
               <div>
                 <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+                  HA
+                </div>
+                <div style={{ color: haTileColor(haRow) }} title={haStatus(haRow).reasons.join(' ') || undefined}>
+                  {haTileText(haRow)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
                   Last Collected
                 </div>
                 <div style={{ color: 'var(--text-primary)' }}>{formatDateTime(device.last_collected_at)}</div>
@@ -545,6 +595,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           <div className="device-overview-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewCveCard deviceId={device.id} />
             <OverviewExposureCard deviceId={device.id} />
+            <OverviewHealthCard deviceId={device.id} />
           </div>
           <div className="device-overview-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
             <OverviewRuleHygieneCard deviceId={device.id} />

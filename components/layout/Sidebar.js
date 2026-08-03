@@ -14,6 +14,7 @@ import {
   IconChevronLeft,
   IconUser,
   IconTopology,
+  IconLifecycle,
 } from '../icons';
 
 // Icon reuse note (Phase 7, Compliance): IconShield is already taken by
@@ -36,6 +37,11 @@ const NAV = [
   // match" call this file already made for Compliance -> IconSearch.
   { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
   { href: '/topology', label: 'Topology', Icon: IconTopology, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
+  // Rose — the one hue not already spoken for by another nav entry. Unlike
+  // Compliance/VPN above, this one DID get its own icon (IconLifecycle): every
+  // remaining glyph in components/icons.js is either already a nav entry or
+  // semantically unrelated, so reuse would have meant a duplicate chip.
+  { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle, color: '#f472b6', bg: 'rgba(244,114,182,0.20)' },
   { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
 ];
 

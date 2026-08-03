@@ -67,6 +67,14 @@ POST /api/devices/[id]/backups [admin] [db] — `createBackup(id, label, pool)` 
 GET /api/devices/[id]/backups/[backupId] [auth] [db] — download raw config text of one backup as `text/plain` attachment.
 DELETE /api/devices/[id]/backups/[backupId] [admin] [db] — delete one backup row.
 
+## /api/devices/[id]/configs/[configId]/baseline
+PUT /api/devices/[id]/configs/[configId]/baseline [admin] [db] — designate one `device_configs`
+snapshot as this device's known-good baseline (body `{baseline:false}` clears instead). Added
+2026-08-03. Clears any existing baseline for the device BEFORE setting the new one, in one
+transaction — required, not cosmetic: `idx_device_configs_one_baseline_per_device` is a partial
+unique index and would otherwise reject the write. Logs `set_config_baseline` to `activity_log`.
+Drift itself is computed on read by the changes page, so there is no GET here.
+
 ## /api/devices/[id]/cve-acknowledgements
 
 POST /api/devices/[id]/cve-acknowledgements [admin] [db] — upsert `cve_assessment_acknowledgements` row (keyed device_id+advisory_id), best-effort `logActivity`.

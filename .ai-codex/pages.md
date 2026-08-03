@@ -56,6 +56,8 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 [server] /topology — TopologyPage — top-level nav entry (added 2026-08-02, between VPN and Settings). `?view=query|map` toggle (same pattern as `/compliance`'s `?view=cards|table`), default `query` renders `<PathQueryTab />` (fleet-wide, no props); `map` (added 2026-08-02) renders `<FleetMap />`, a visual diagram of every active device + inferred link. See `components.md`'s `topology/` entry and `lib.md`'s `topology.js` engine entry.
 
+[server] /lifecycle — LifecyclePage — top-level nav entry (added 2026-08-03, between Topology and Settings). Fleet-wide device lifecycle & health: support/licence expiry sorted soonest-first (the renewal-planning view), HA state across every pair, and signature freshness. Reads `device_licenses`/`device_ha_status`/`device_disk_usage`/`device_content_versions` and bands them via `lib/engines/deviceHealth.js` at render time (status is never stored). Devices with no collected data are listed as "Not collected" rather than omitted — the same fleet-coverage honesty as the Fleet Map. Palo Alto only as of this add; Fortinet devices legitimately show no data.
+
 ## Alerts
 
 [server] /alerts — AlertsPage — fleet-wide chronological event feed merging open `patch_now` CVE assessments + unacknowledged `config_diffs` (⛔ `new_finding`/rule-level findings deliberately removed 2026-07-20 — those live in Rule Analysis's Cleanup/Optimization/Reorder tabs instead). Filters: `type` (patch_now|config_diff), `status` (open|all), `device_id`; paginated 25/page; inline `AlertAckControl` (admin-gated) per row.

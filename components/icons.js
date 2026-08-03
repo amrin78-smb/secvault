@@ -236,3 +236,16 @@ export function IconTopology(p) {
     </svg>
   );
 }
+
+// Shield-with-pulse glyph for the Lifecycle & Health page (sidebar nav + any
+// future use) -- IconShield's outline (already the Vulnerability icon) with a
+// heartbeat trace through it, reading as "is this device still healthy /
+// supported", distinct from Vulnerability's plain shield at 16px.
+export function IconLifecycle(p) {
+  return (
+    <svg {...base(p)}>
+      <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" />
+      <polyline points="7.5 12 10 12 11.5 9.5 13.5 14.5 15 12 16.5 12" />
+    </svg>
+  );
+}
