@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.47.1': [
+    'Fixed a false "HA degraded" reading on SSH-managed high-availability pairs — found in a live post-deploy check. A sub-heading inside the firewall\'s own version-compatibility report was being read as if it were a failed check, so a perfectly healthy pair could be reported as having mismatched software versions. Genuine mismatches are still detected.',
+  ],
   '2.47.0': [
     'New: Lifecycle & Health. SecVault now collects licence and support-contract expiry dates from each Palo Alto firewall, so renewals can be planned from your own fleet data instead of a vendor spreadsheet. It immediately found an expired SD-WAN licence on HRIS.',
     'New: HA visibility. Peer state, peer address, config-sync status and cross-pair version mismatch are now collected for all 6 HA pairs in the fleet — including flagging pairs that recently lost a peer link, which nothing previously surfaced.',
