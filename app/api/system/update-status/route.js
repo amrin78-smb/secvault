@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.46.0': [
+    'Fleet Map now shows VPN tunnel connections, not just shared-network links. Several branch firewalls (mostly Fortinet) reach the rest of the fleet purely over VPN, with no shared subnet for the map to detect — those now show as a dashed line, found by matching each firewall\'s VPN tunnel destination against every other managed firewall\'s known address.',
+    'Only active ("up") VPN tunnels are drawn — a configured-but-down backup tunnel does not show as a live connection.',
+    'This reuses VPN tunnel data SecVault already collects for the per-device VPN tab — no new device connections or polling added.',
+  ],
   '2.45.0': [
     'Network Topology now covers Palo Alto devices managed via the API (not just SSH) — routing, interfaces, and NAT all collect the same way regardless of how a Palo Alto firewall is connected.',
     'Fleet Map is now clickable: click any solid device to jump straight into a Path Query with that device pre-filled as the source, instead of typing its IP by hand.',

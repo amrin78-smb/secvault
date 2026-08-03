@@ -282,11 +282,24 @@ front" convention as `objectResolver.js`).
 ranges overlap (via `cidrUtils.rangeOverlaps`) are adjacent; O(n²) over total fleet interface count
 (accepted, same precedent as `ruleAnalysis.js`'s O(n²) shadow analysis — interface counts are orders
 of magnitude smaller than rule counts).
-`buildFleetTopologyGraph(devices, interfacesByDevice)` -> `{nodes: {id,name,vendor,hasInterfaceData}[], edges: {sourceDeviceId,sourceInterface,targetDeviceId,targetInterface}[]}`
-(added 2026-08-02, for `components/topology/FleetMap.js`'s visual diagram) — reuses `buildAdjacencyGraph()`
-internally, deduping its bidirectional entries into one edge per device PAIR; every active device becomes
-a node EVEN with zero `device_interfaces` rows (`hasInterfaceData:false`), so the map stays honest about
+`buildFleetTopologyGraph(devices, interfacesByDevice, vpnTunnelsByDevice?)` -> `{nodes: {id,name,vendor,hasInterfaceData}[], edges: {sourceDeviceId,sourceInterface,targetDeviceId,targetInterface,type:'subnet'|'vpn',tunnelName?,status?}[]}`
+(added 2026-08-02, for `components/topology/FleetMap.js`'s visual diagram; `vpnTunnelsByDevice` param
+added 2026-08-03) — reuses `buildAdjacencyGraph()` internally for `type:'subnet'` edges, deduping its
+bidirectional entries into one edge per device PAIR (dedupe key qualified by edge type, so a subnet
+edge and a VPN edge for the same pair coexist rather than colliding); every active device becomes a
+node EVEN with zero `device_interfaces` rows (`hasInterfaceData:false`), so the map stays honest about
 fleet coverage gaps instead of silently omitting uncollected devices.
+`buildVpnEdges(deviceList, vpnTunnelsByDevice, ifacesByDevice, seenPairs)` -> `{type:'vpn', ...}[]`
+(added 2026-08-03) — a SECOND, independent adjacency signal: branch firewalls often reach the fleet
+over unnumbered IPsec tunnel interfaces (`ip: 0.0.0.0` — confirmed live on several Fortinet devices),
+invisible to `buildAdjacencyGraph()`'s subnet-overlap check. Cross-references each device's
+`vpn_ipsec_tunnels.peer` (already collected fleet-wide by the pre-existing `getVpnTunnels()` adapter
+capability, no new collection added) against every OTHER device's `device_interfaces.ip_address`
+(stripped of `/prefix`) for an EXACT match — a peer gateway IP must equal a specific address, not
+just fall in a shared range. Skips `status !== 'up'` tunnels (down/unknown isn't live connectivity)
+and unparseable/`'0.0.0.0'` peers (a real, recurring dialup/unassigned-gateway placeholder value).
+**Deliberately visual-only** — NOT wired into `simulateMultiHopPath()`'s adjacency graph; a tunnel's
+peer IP alone doesn't say what's routable through it (would need per-tunnel selector subnets).
 `resolveRoute(routes, destIpUint32)` -> `{nextHopIp:string|null, interfaceName}|null` — longest-prefix-match
 against one device's `device_routes`; `nextHopIp:null` means directly-connected (path ends here,
 successfully) — callers MUST distinguish this from "no route at all" (`null` return).

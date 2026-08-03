@@ -396,7 +396,17 @@ the second reuses the first UNCHANGED as its per-hop evaluator:
    fleet coverage gaps instead of silently omitting uncollected devices. **Click-through** (added
    2026-08-03): a node with `hasInterfaceData:true` is wrapped in a plain SVG `<a>` to
    `/topology?view=query&srcIp=<ip>` — no client JS, the IP is that device's first interface
-   (sorted by name) whose address parses cleanly, editable before submitting.
+   (sorted by name) whose address parses cleanly, editable before submitting. **VPN-tunnel-peer
+   edges** (added 2026-08-03): a SECOND, independent edge type (`type:'vpn'`, dashed) alongside the
+   original shared-subnet edges (`type:'subnet'`, solid) — `buildVpnEdges()` matches each device's
+   already-collected `vpn_ipsec_tunnels.peer` (the `getVpnTunnels()` adapter capability, scheduled
+   independently of the rule-version-pull job — see Feed Sources/Engine Worker) against every OTHER
+   device's own interface IPs. Exists because several Fortinet branches use UNNUMBERED IPsec tunnel
+   interfaces (`ip: 0.0.0.0`, confirmed live) — invisible to the subnet-overlap mechanism even
+   though the devices are genuinely connected. Only `status:'up'` tunnels with a resolvable,
+   non-`0.0.0.0` peer draw an edge. **Visual-only** — deliberately NOT fed into
+   `simulateMultiHopPath()`'s own adjacency graph (Layer 2 above); a peer gateway IP alone doesn't
+   say what's routable through that tunnel.
 
 **Collection (vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
 adapter methods (`getInterfaces()`/`getRoutingTable()`/`getNatRules()`, see `lib/adapters/interface.js`),

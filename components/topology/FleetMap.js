@@ -5,11 +5,17 @@ import Card, { CardBody } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 
 // Fleet-wide visual map — every active device as a node, every inferred
-// device-to-device link (shared subnet, per lib/engines/topology.js's
-// buildAdjacencyGraph()) as a line. Async server component, does its own
-// pool.query — same "server component queries the DB directly" convention
-// as ReachabilityTab.js/ObjectsTab.js on the per-device analysis page. Do
-// not add 'use client'.
+// device-to-device link as a line. TWO independent edge kinds, per
+// lib/engines/topology.js's buildFleetTopologyGraph(): 'subnet' (shared
+// subnet between two devices' collected interfaces, buildAdjacencyGraph())
+// and 'vpn' (a device's IPsec tunnel peer gateway IP matching another
+// device's own interface IP, buildVpnEdges() — added 2026-08-03 after
+// several Fortinet branches showed no lines at all; their site-to-site
+// tunnels use UNNUMBERED interfaces with no subnet to match on, so the VPN
+// peer-IP signal is the only way those real links become visible). Async
+// server component, does its own pool.query — same "server component
+// queries the DB directly" convention as ReachabilityTab.js/ObjectsTab.js
+// on the per-device analysis page. Do not add 'use client'.
 //
 // Hand-rolled inline SVG, circular layout: nodes placed evenly around a
 // circle, sorted by name for a stable/deterministic render. No physics/
@@ -68,7 +74,18 @@ async function getFleetGraph(dbPool) {
     interfacesByDevice.get(row.device_id).push(row);
   }
 
-  const graph = buildFleetTopologyGraph(devices, interfacesByDevice);
+  const tunnelsResult = await dbPool.query(
+    `SELECT device_id, name, peer, status
+     FROM vpn_ipsec_tunnels WHERE device_id = ANY($1::uuid[])`,
+    [deviceIds]
+  );
+  const vpnTunnelsByDevice = new Map();
+  for (const row of tunnelsResult.rows) {
+    if (!vpnTunnelsByDevice.has(row.device_id)) vpnTunnelsByDevice.set(row.device_id, []);
+    vpnTunnelsByDevice.get(row.device_id).push(row);
+  }
+
+  const graph = buildFleetTopologyGraph(devices, interfacesByDevice, vpnTunnelsByDevice);
   return { ...graph, interfacesByDevice };
 }
 
@@ -104,8 +121,11 @@ export default async function FleetMap() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-        Every active device, and every link inferred from a shared subnet between two devices&apos; collected
-        interfaces. Dashed, muted devices have no interface data collected yet — Cisco ASA/Check Point/Sangfor/
+        Every active device, plus two kinds of inferred link: a solid line for a shared subnet between two
+        devices&apos; collected interfaces, and a dashed line for an active IPsec VPN tunnel whose peer gateway IP
+        matches another device&apos;s own interface IP — the only way to see a branch firewall&apos;s site-to-site
+        links when its tunnel interfaces carry no IP of their own. Down/unresolvable tunnels aren&apos;t drawn.
+        Dashed, muted devices have no interface data collected yet — Cisco ASA/Check Point/Sangfor/
         Forcepoint, or a Palo Alto/Fortinet device not yet collected (Phase 1 covers those two vendors&apos; SSH
         transport only).
         {uncollectedCount > 0 && ` ${uncollectedCount} of ${positioned.length} devices shown have no interface data yet.`}{' '}
@@ -126,6 +146,14 @@ export default async function FleetMap() {
                 const a = byId.get(edge.sourceDeviceId);
                 const b = byId.get(edge.targetDeviceId);
                 if (!a || !b) return null;
+                const isVpn = edge.type === 'vpn';
+                // Array order is already subnet-edges-then-vpn-edges (see
+                // buildFleetTopologyGraph()), so VPN lines naturally paint
+                // on top of any subnet line for the same pair — no sort
+                // needed here.
+                const titleText = isVpn
+                  ? `${a.name} VPN: "${edge.tunnelName}" (${edge.status}) <-> ${b.name}`
+                  : `${a.name} (${edge.sourceInterface}) <-> ${b.name} (${edge.targetInterface})`;
                 return (
                   <line
                     key={i}
@@ -133,8 +161,10 @@ export default async function FleetMap() {
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    stroke="var(--border)"
-                    strokeWidth={2}
+                    stroke={isVpn ? 'var(--primary)' : 'var(--border)'}
+                    strokeWidth={isVpn ? 1.5 : 2}
+                    strokeDasharray={isVpn ? '5 3' : undefined}
+                    opacity={isVpn ? 0.75 : 1}
                   >
                     {/* ⛔ react-dom's server renderer special-cases <title>
                         (SVG or HTML) to accept only ONE text-node child --
@@ -142,7 +172,7 @@ export default async function FleetMap() {
                         render empty on the server, then mismatch on
                         hydration (React error #418). Always pass a single
                         pre-concatenated template-literal string here. */}
-                    <title>{`${a.name} (${edge.sourceInterface}) <-> ${b.name} (${edge.targetInterface})`}</title>
+                    <title>{titleText}</title>
                   </line>
                 );
               })}
