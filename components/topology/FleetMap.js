@@ -39,7 +39,44 @@ const VENDOR_COLOR = {
   sangfor: '#0a5eb0',
   forcepoint: '#5e2d91',
 };
+const VENDOR_LABEL = {
+  paloalto: 'Palo Alto',
+  fortinet: 'Fortinet',
+  cisco_asa: 'Cisco ASA',
+  checkpoint: 'Check Point',
+  sangfor: 'Sangfor',
+  forcepoint: 'Forcepoint',
+};
 const DEFAULT_VENDOR_COLOR = '#64748b';
+
+// Small inline SVG swatches for the legend — a line sample for edge types, a
+// dot sample for node vendor/collection-state — so the legend visually
+// matches exactly what's drawn on the map itself, rather than describing it
+// in prose alone.
+function LineSwatch({ color, dashed }) {
+  return (
+    <svg width={22} height={10} aria-hidden="true">
+      <line x1={1} y1={5} x2={21} y2={5} stroke={color} strokeWidth={dashed ? 1.5 : 2} strokeDasharray={dashed ? '5 3' : undefined} opacity={dashed ? 0.75 : 1} />
+    </svg>
+  );
+}
+
+function DotSwatch({ color, muted }) {
+  return (
+    <svg width={14} height={14} aria-hidden="true">
+      <circle cx={7} cy={7} r={6} fill={muted ? 'var(--bg-primary)' : color} stroke={color} strokeWidth={2} strokeDasharray={muted ? '3,3' : undefined} opacity={muted ? 0.6 : 1} />
+    </svg>
+  );
+}
+
+function LegendItem({ swatch, label }) {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      {swatch}
+      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{label}</span>
+    </div>
+  );
+}
 
 const VIEWBOX_SIZE = 640;
 const CENTER = VIEWBOX_SIZE / 2;
@@ -117,20 +154,32 @@ export default async function FleetMap() {
   }));
   const byId = new Map(positioned.map((n) => [n.id, n]));
   const uncollectedCount = positioned.filter((n) => !n.hasInterfaceData).length;
+  const presentVendors = [...new Set(positioned.map((n) => n.vendor))].sort(
+    (a, b) => (VENDOR_LABEL[a] || a).localeCompare(VENDOR_LABEL[b] || b)
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-        Every active device, plus two kinds of inferred link: a solid line for a shared subnet between two
-        devices&apos; collected interfaces, and a dashed line for an active IPsec VPN tunnel whose peer gateway IP
-        matches another device&apos;s own interface IP — the only way to see a branch firewall&apos;s site-to-site
-        links when its tunnel interfaces carry no IP of their own. Down/unresolvable tunnels aren&apos;t drawn.
-        Dashed, muted devices have no interface data collected yet — Cisco ASA/Check Point/Sangfor/
-        Forcepoint, or a Palo Alto/Fortinet device not yet collected (Phase 1 covers those two vendors&apos; SSH
-        transport only).
+        Every active device, plus every inferred link between them — see the legend below for what each line and
+        dot style means.
         {uncollectedCount > 0 && ` ${uncollectedCount} of ${positioned.length} devices shown have no interface data yet.`}{' '}
         Click a solid device to query a path starting there.
       </p>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', padding: '10px 14px', background: 'var(--surface-subtle)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+        <LegendItem swatch={<LineSwatch color="var(--border)" />} label="Shared subnet" />
+        <LegendItem swatch={<LineSwatch color="var(--primary)" dashed />} label="VPN tunnel (active)" />
+        <LegendItem swatch={<DotSwatch color="var(--text-secondary)" />} label="Interface data collected" />
+        <LegendItem swatch={<DotSwatch color="var(--text-secondary)" muted />} label="Not yet collected" />
+        {presentVendors.map((vendor) => (
+          <LegendItem
+            key={vendor}
+            swatch={<DotSwatch color={VENDOR_COLOR[vendor] || DEFAULT_VENDOR_COLOR} />}
+            label={VENDOR_LABEL[vendor] || vendor}
+          />
+        ))}
+      </div>
 
       <Card>
         <CardBody>

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.46.1': [
+    'Fleet Map now has a visual legend — line and dot samples showing exactly what a shared-subnet link, a VPN tunnel link, a collected vs. not-yet-collected device, and each vendor color mean, instead of only a paragraph of text.',
+  ],
   '2.46.0': [
     'Fleet Map now shows VPN tunnel connections, not just shared-network links. Several branch firewalls (mostly Fortinet) reach the rest of the fleet purely over VPN, with no shared subnet for the map to detect — those now show as a dashed line, found by matching each firewall\'s VPN tunnel destination against every other managed firewall\'s known address.',
     'Only active ("up") VPN tunnels are drawn — a configured-but-down backup tunnel does not show as a live connection.',
