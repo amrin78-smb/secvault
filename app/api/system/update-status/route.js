@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.48.0': [
+    'Lifecycle & Health page is far more compact. Licences that expire on the same day for the same firewall are now shown as a single renewal event you can expand, instead of one row each — that alone cut the main table from about 42 rows to a dozen, and it matches how renewals are actually purchased.',
+    'Added a summary row at the top (expired, expiring soon, HA degraded, stale content, not collected) so the headline numbers are visible without scrolling.',
+    'High Availability and Signature Freshness are now collapsed by default, each showing a one-line summary, and devices without collected data are listed on one line rather than one row each.',
+  ],
   '2.47.2': [
     'Fixed a flood of meaningless config-change alerts showing entries like "8 → 8" and "514 → 514". The values had not actually changed — only their internal data type had, as a side effect of the serial-number fix — and the change detector was reporting that as a real edit.',
     'Config change detection now ignores internal type differences entirely, so this whole class of false alarm cannot recur after a future parser or vendor-connector update.',

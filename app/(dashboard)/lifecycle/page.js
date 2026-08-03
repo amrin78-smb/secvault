@@ -5,6 +5,7 @@ import Card, { CardBody } from '../../../components/ui/Card';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
+import StatCard from '../../../components/ui/StatCard';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
 
 export const dynamic = 'force-dynamic';
@@ -155,6 +156,73 @@ async function getLifecycleData() {
   };
 }
 
+
+// Groups licences into RENEWAL EVENTS: one entry per (device, expiry date).
+// A device typically carries several entitlements bought together on one
+// contract — live, TUG has 7 expiring on the same day and SMT another 7 — so
+// listing them individually turned one purchasing decision into seven rows and
+// made the table a long scroll rather than a plan. The group's status is the
+// WORST of its members so nothing urgent hides inside a collapsed group.
+const LICENSE_SEVERITY_RANK = { expired: 4, expiring: 3, unknown: 2, ok: 1, perpetual: 1 };
+
+function groupLicenseRenewals(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    // Key on the parsed date when there is one, else the raw string, so
+    // 'Never' and unparseable values still group per device rather than each
+    // becoming its own singleton row.
+    const dateKey = entry.row.expires_at
+      ? formatDate(entry.row.expires_at)
+      : `raw:${entry.row.expires_raw || 'none'}`;
+    const key = `${entry.row.device_id}|${dateKey}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        key,
+        device: entry.device,
+        expiresAt: entry.row.expires_at,
+        expiresRaw: entry.row.expires_raw,
+        delta: entry.delta,
+        status: entry.status,
+        items: [],
+      };
+      groups.set(key, g);
+    }
+    g.items.push(entry);
+    if ((LICENSE_SEVERITY_RANK[entry.status] || 0) > (LICENSE_SEVERITY_RANK[g.status] || 0)) {
+      g.status = entry.status;
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => {
+    const av = a.expiresAt ? new Date(a.expiresAt).getTime() : Number.POSITIVE_INFINITY;
+    const bv = b.expiresAt ? new Date(b.expiresAt).getTime() : Number.POSITIVE_INFINITY;
+    if (av !== bv) return av - bv;
+    return (a.device?.name || '').localeCompare(b.device?.name || '');
+  });
+}
+
+// One-line label for a renewal group. A single entitlement shows its own name;
+// several show a count that expands, so the detail is one click away rather
+// than permanently occupying six rows.
+function renewalLabel(group) {
+  if (group.items.length === 1) return group.items[0].row.feature || '—';
+  return `${group.items.length} entitlements`;
+}
+
+// Collapsed-section heading style. Native <details>/<summary> — server-rendered,
+// zero client JS, matching this codebase's "a normal element over a client
+// component when one suffices" instinct (same reasoning as the Fleet Map's
+// plain <a> click-through).
+const SECTION_SUMMARY_STYLE = {
+  cursor: 'pointer',
+  fontSize: 'var(--text-lg)',
+  fontWeight: 700,
+  color: 'var(--text-primary)',
+};
+
+const GAP_NOTE_STYLE = { margin: '12px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' };
+const SECTION_NOTE_STYLE = { margin: '8px 0 14px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' };
+
 export default async function LifecyclePage() {
   const { devices, licenses, haRows, content } = await getLifecycleData();
   const now = new Date();
@@ -164,25 +232,21 @@ export default async function LifecyclePage() {
   // Everything that needs a human decision (expired / expiring / unparseable
   // expiry) PLUS every support contract regardless of status — a contract with
   // 18 months left is still the row a renewal budget is planned from.
-  const licenseRows = licenses
+  const licenseEntries = licenses
     .map((row) => ({ row, st: licenseStatus(row, now) }))
-    .filter(({ row, st }) => st.status === 'expired' || st.status === 'expiring' || st.status === 'unknown' || isSupportContract(row))
+    .filter(
+      ({ row, st }) =>
+        st.status === 'expired' || st.status === 'expiring' || st.status === 'unknown' || isSupportContract(row)
+    )
     .map(({ row, st }) => ({
       key: row.id,
       device: deviceById.get(row.device_id),
       row,
       status: st.status,
       delta: dayDelta(row.expires_at, now),
-    }))
-    .sort((a, b) => {
-      // Soonest expiry first; anything with no parsed date (perpetual or
-      // unparseable) sorts last rather than to the top as an epoch-zero date.
-      const av = a.row.expires_at ? new Date(a.row.expires_at).getTime() : Number.POSITIVE_INFINITY;
-      const bv = b.row.expires_at ? new Date(b.row.expires_at).getTime() : Number.POSITIVE_INFINITY;
-      if (av !== bv) return av - bv;
-      return (a.device?.name || '').localeCompare(b.device?.name || '');
-    });
+    }));
 
+  const renewalGroups = groupLicenseRenewals(licenseEntries);
   const licenseDeviceIds = new Set(licenses.map((r) => r.device_id));
   const licenseGapDevices = devices.filter((d) => !licenseDeviceIds.has(d.id));
 
@@ -224,226 +288,323 @@ export default async function LifecyclePage() {
   });
   const sigGapDevices = devices.filter((d) => !sigByDevice.has(d.id));
 
+  // ── Summary tiles ──────────────────────────────────────────────────────
+  // Counted over RENEWAL GROUPS, not individual entitlements, so the headline
+  // number matches the number of rows (and real decisions) below it.
+  const expiredCount = renewalGroups.filter((g) => g.status === 'expired').length;
+  const expiringCount = renewalGroups.filter((g) => g.status === 'expiring').length;
+  const degradedCount = haEntries.filter((e) => e.ha.status === 'degraded').length;
+  const staleSigDevices = sigEntries.filter((e) =>
+    Array.from(e.byComponent.values()).some((c) => c.st.status === 'stale')
+  ).length;
+
+  const haSummary = [
+    `${haEntries.filter((e) => e.ha.status === 'healthy').length} healthy`,
+    `${degradedCount} degraded`,
+    `${haEntries.filter((e) => e.ha.status === 'standalone').length} standalone`,
+    haGapDevices.length > 0 ? `${haGapDevices.length} not collected` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const oldestSig = sigEntries.length > 0 && sigEntries[0].worstAge >= 0 ? sigEntries[0].worstAge : null;
+  const sigSummary = [
+    `${sigEntries.length} device${sigEntries.length === 1 ? '' : 's'}`,
+    staleSigDevices > 0 ? `${staleSigDevices} with stale content` : 'all current',
+    oldestSig !== null ? `oldest ${oldestSig}d` : null,
+    sigGapDevices.length > 0 ? `${sigGapDevices.length} not collected` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Lifecycle & Health"
-        subtitle="Support contracts, HA state, disk and signature freshness across the fleet."
+        title="Lifecycle &amp; Health"
+        subtitle="Support contracts, HA state and signature freshness across the fleet."
       />
 
-      {/* ── Support & Licence Expiry ─────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        <StatCard
+          label="Expired"
+          value={expiredCount}
+          sub="renewal events"
+          color={expiredCount > 0 ? 'var(--red)' : 'var(--text-muted)'}
+        />
+        <StatCard
+          label="Expiring soon"
+          value={expiringCount}
+          sub="within 60 days"
+          color={expiringCount > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
+        />
+        <StatCard
+          label="HA degraded"
+          value={degradedCount}
+          sub={`${haEntries.length} with HA data`}
+          color={degradedCount > 0 ? 'var(--red)' : 'var(--text-muted)'}
+        />
+        <StatCard
+          label="Stale content"
+          value={staleSigDevices}
+          sub="devices"
+          color={staleSigDevices > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
+        />
+        <StatCard
+          label="Not collected"
+          value={licenseGapDevices.length}
+          sub="devices"
+          color="var(--text-muted)"
+        />
+      </div>
+
+      {/* Support &amp; Licence Renewals — expanded by default: the primary use. */}
       <Card>
         <CardBody>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Support &amp; Licence Expiry
+          <div
+            style={{
+              fontSize: 'var(--text-lg)',
+              fontWeight: 700,
+              color: 'var(--text-primary)',
+              marginBottom: 4,
+            }}
+          >
+            Support &amp; Licence Renewals
           </div>
-          <p style={{ margin: '0 0 16px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-            Every expired, expiring or unreadable entitlement, plus every support contract regardless of status.
-            Soonest expiry first.
+          <p style={{ margin: '0 0 14px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+            One row per renewal event — entitlements on the same device sharing an expiry date are grouped, since
+            they renew together. Soonest first. Expand a group to see what it covers.
           </p>
 
-          {licenseRows.length === 0 && licenseGapDevices.length === 0 ? (
+          {renewalGroups.length === 0 && licenseGapDevices.length === 0 ? (
             <EmptyState message="No licence or support-contract data has been collected for any device yet." />
           ) : (
-            <Table>
-              <colgroup>
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '17%' }} />
-                <col style={{ width: '29%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '12%' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Device</th>
-                  <th>Feature</th>
-                  <th>Description</th>
-                  <th>Expires</th>
-                  <th>Status</th>
-                  <th>Days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {licenseRows.map(({ key, device, row, status, delta }) => (
-                  <tr key={key}>
-                    <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
-                    <td title={row.feature || ''}>{row.feature || '—'}</td>
-                    <td title={row.description || ''} style={{ color: 'var(--text-secondary)' }}>
-                      {row.description || '—'}
-                    </td>
-                    <td>{formatDate(row.expires_at) || row.expires_raw || '—'}</td>
-                    <td>{licenseBadge(status)}</td>
-                    <td style={{ color: status === 'expired' ? 'var(--red)' : 'var(--text-secondary)' }}>
-                      {daysText(delta)}
-                    </td>
+            <>
+              <Table>
+                <colgroup>
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '42%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '12%' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Covers</th>
+                    <th>Expires</th>
+                    <th>Status</th>
+                    <th>Days</th>
                   </tr>
-                ))}
-                {licenseGapDevices.map((d) => (
-                  <tr key={`gap-${d.id}`}>
-                    <td title={d.name}>{deviceLink(d.id, d.name)}</td>
-                    <td colSpan={3} style={{ color: 'var(--text-muted)' }}>
-                      Licence data is not collected for {d.vendor} devices yet.
-                    </td>
-                    <td>{notCollectedBadge()}</td>
-                    <td style={{ color: 'var(--text-muted)' }}>—</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* ── High Availability ────────────────────────────────────────── */}
-      <Card>
-        <CardBody>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            High Availability
-          </div>
-          <p style={{ margin: '0 0 16px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-            Degraded pairs first. &ldquo;Standalone&rdquo; is a fact the device reported, not a gap — a device that was
-            never asked shows as &ldquo;Not collected&rdquo;.
-          </p>
-
-          {haEntries.length === 0 && haGapDevices.length === 0 ? (
-            <EmptyState message="No HA state has been collected for any device yet." />
-          ) : (
-            <Table>
-              <colgroup>
-                <col style={{ width: '17%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '14%' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Device</th>
-                  <th>Mode</th>
-                  <th>Local State</th>
-                  <th>Peer State</th>
-                  <th>Peer IP</th>
-                  <th>Config Sync</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {haEntries.map(({ row, ha, device }) => (
-                  <tr key={row.device_id}>
-                    <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
-                    <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
-                    <td>{row.local_state || '—'}</td>
-                    <td>{row.peer_state || '—'}</td>
-                    <td className="mono">{row.peer_mgmt_ip || '—'}</td>
-                    <td>{row.config_sync_state || '—'}</td>
-                    {/* Reasons live in the title attribute (a single string, not
-                        a JSX child) so a degraded pair explains itself on hover
-                        without a seventh column of prose. */}
-                    <td title={ha.reasons.join(' ') || undefined}>{haBadge(ha.status)}</td>
-                  </tr>
-                ))}
-                {haGapDevices.map((d) => (
-                  <tr key={`gap-${d.id}`}>
-                    <td title={d.name}>{deviceLink(d.id, d.name)}</td>
-                    <td colSpan={5} style={{ color: 'var(--text-muted)' }}>
-                      HA state is not collected for {d.vendor} devices yet.
-                    </td>
-                    <td>{notCollectedBadge()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </CardBody>
-      </Card>
-
-      {/* ── Signature Freshness ──────────────────────────────────────── */}
-      <Card>
-        <CardBody>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Signature Freshness
-          </div>
-          <p style={{ margin: '0 0 16px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-            Content versions and their age, oldest fleet-wide first. A component whose device reported no release
-            date shows its version with an unknown age — never a confident &ldquo;current&rdquo;.
-          </p>
-
-          {componentsPresent.length === 0 && sigGapDevices.length === 0 ? (
-            <EmptyState message="No content or signature versions have been collected for any device yet." />
-          ) : componentsPresent.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
-              Content and signature versions are not collected for any device in this fleet yet.
-            </p>
-          ) : (
-            <Table>
-              <colgroup>
-                <col style={{ width: `${Math.max(16, 100 - componentsPresent.length * 14)}%` }} />
-                {componentsPresent.map((c) => (
-                  <col key={c} style={{ width: '14%' }} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Device</th>
-                  {componentsPresent.map((c) => (
-                    <th key={c}>{componentLabel(c)}</th>
+                </thead>
+                <tbody>
+                  {renewalGroups.map((g) => (
+                    <tr key={g.key}>
+                      <td title={g.device?.name || ''}>{g.device ? deviceLink(g.device.id, g.device.name) : '—'}</td>
+                      <td>
+                        {g.items.length === 1 ? (
+                          <span title={g.items[0].row.description || ''}>{renewalLabel(g)}</span>
+                        ) : (
+                          <details>
+                            <summary style={{ cursor: 'pointer' }}>{renewalLabel(g)}</summary>
+                            <ul
+                              style={{
+                                margin: '6px 0 0',
+                                paddingLeft: 18,
+                                color: 'var(--text-secondary)',
+                                fontSize: 'var(--text-sm)',
+                              }}
+                            >
+                              {g.items.map((it) => (
+                                <li key={it.key}>{it.row.feature || '—'}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </td>
+                      <td>{formatDate(g.expiresAt) || g.expiresRaw || '—'}</td>
+                      <td>{licenseBadge(g.status)}</td>
+                      <td style={{ color: g.status === 'expired' ? 'var(--red)' : 'var(--text-secondary)' }}>
+                        {daysText(g.delta)}
+                      </td>
+                    </tr>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sigEntries.map((entry) => (
-                  <tr key={entry.device?.id || entry.worstAge}>
-                    <td title={entry.device?.name || ''}>
-                      {entry.device ? deviceLink(entry.device.id, entry.device.name) : '—'}
-                    </td>
-                    {componentsPresent.map((c) => {
-                      const cell = entry.byComponent.get(c);
-                      if (!cell) {
-                        return (
-                          <td key={c} style={{ color: 'var(--text-muted)' }}>
-                            —
-                          </td>
-                        );
-                      }
-                      const ageLabel =
-                        cell.st.ageDays === null ? 'age unknown'
-                          : cell.st.ageDays === 0 ? 'today'
-                            : `${cell.st.ageDays}d old`;
-                      return (
-                        <td key={c} title={`${cell.row.version || '—'} · ${ageLabel}`}>
-                          <div className="mono" style={{ color: 'var(--text-primary)' }}>
-                            {cell.row.version || '—'}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 'var(--text-xs)',
-                              color: cell.st.status === 'stale' ? 'var(--yellow)' : 'var(--text-muted)',
-                            }}
-                          >
-                            {ageLabel}
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-                {sigGapDevices.map((d) => (
-                  <tr key={`gap-${d.id}`}>
-                    <td title={d.name}>{deviceLink(d.id, d.name)}</td>
-                    <td colSpan={componentsPresent.length} style={{ color: 'var(--text-muted)' }}>
-                      {notCollectedBadge()}
-                      <span style={{ marginLeft: 8 }}>
-                        Content versions are not collected for {d.vendor} devices yet.
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+                </tbody>
+              </Table>
+
+              {/* Coverage gaps stay VISIBLE (this page's honesty rule) but as one
+                  line rather than one identical row per device. */}
+              {licenseGapDevices.length > 0 && (
+                <p style={GAP_NOTE_STYLE}>
+                  {notCollectedBadge()}{' '}
+                  <span style={{ marginLeft: 6 }}>
+                    {`Licence data is not collected for ${licenseGapDevices.length} device${
+                      licenseGapDevices.length === 1 ? '' : 's'
+                    }: ${licenseGapDevices.map((d) => d.name).join(', ')}.`}
+                  </span>
+                </p>
+              )}
+            </>
           )}
+        </CardBody>
+      </Card>
+
+      {/* High Availability — collapsed, with a one-line summary always visible. */}
+      <Card>
+        <CardBody>
+          <details>
+            <summary style={SECTION_SUMMARY_STYLE}>High Availability</summary>
+            <p style={SECTION_NOTE_STYLE}>
+              Degraded pairs first. &ldquo;Standalone&rdquo; is a fact the device reported, not a gap — a device that
+              was never asked shows as &ldquo;Not collected&rdquo;.
+            </p>
+
+            {haEntries.length === 0 && haGapDevices.length === 0 ? (
+              <EmptyState message="No HA state has been collected for any device yet." />
+            ) : (
+              <>
+                <Table>
+                  <colgroup>
+                    <col style={{ width: '18%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '13%' }} />
+                    <col style={{ width: '11%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Device</th>
+                      <th>Mode</th>
+                      <th>Local State</th>
+                      <th>Peer State</th>
+                      <th>Peer IP</th>
+                      <th>Config Sync</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {haEntries.map(({ row, ha, device }) => (
+                      <tr key={row.device_id}>
+                        <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
+                        <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
+                        <td>{row.local_state || '—'}</td>
+                        <td>{row.peer_state || '—'}</td>
+                        <td className="mono">{row.peer_mgmt_ip || '—'}</td>
+                        <td>{row.config_sync_state || '—'}</td>
+                        {/* Reasons live in the title attribute (a single string, not
+                            a JSX child) so a degraded pair explains itself on hover
+                            without a seventh column of prose. */}
+                        <td title={ha.reasons.join(' ') || undefined}>{haBadge(ha.status)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+                {haGapDevices.length > 0 && (
+                  <p style={GAP_NOTE_STYLE}>
+                    {notCollectedBadge()}{' '}
+                    <span style={{ marginLeft: 6 }}>
+                      {`HA state is not collected for ${haGapDevices.length} device${
+                        haGapDevices.length === 1 ? '' : 's'
+                      }: ${haGapDevices.map((d) => d.name).join(', ')}.`}
+                    </span>
+                  </p>
+                )}
+              </>
+            )}
+          </details>
+          <p style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{haSummary}</p>
+        </CardBody>
+      </Card>
+
+      {/* Signature Freshness — collapsed, with a one-line summary always visible. */}
+      <Card>
+        <CardBody>
+          <details>
+            <summary style={SECTION_SUMMARY_STYLE}>Signature Freshness</summary>
+            <p style={SECTION_NOTE_STYLE}>
+              Content versions and their age, oldest fleet-wide first. A component whose device reported no release
+              date shows its version with an unknown age — never a confident &ldquo;current&rdquo;.
+            </p>
+
+            {componentsPresent.length === 0 && sigGapDevices.length === 0 ? (
+              <EmptyState message="No content or signature versions have been collected for any device yet." />
+            ) : componentsPresent.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+                Content and signature versions are not collected for any device in this fleet yet.
+              </p>
+            ) : (
+              <>
+                <Table>
+                  <colgroup>
+                    <col style={{ width: `${Math.max(16, 100 - componentsPresent.length * 14)}%` }} />
+                    {componentsPresent.map((c) => (
+                      <col key={c} style={{ width: '14%' }} />
+                    ))}
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Device</th>
+                      {componentsPresent.map((c) => (
+                        <th key={c}>{componentLabel(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sigEntries.map((entry) => (
+                      <tr key={entry.device?.id || entry.worstAge}>
+                        <td title={entry.device?.name || ''}>
+                          {entry.device ? deviceLink(entry.device.id, entry.device.name) : '—'}
+                        </td>
+                        {componentsPresent.map((c) => {
+                          const cell = entry.byComponent.get(c);
+                          if (!cell) {
+                            return (
+                              <td key={c} style={{ color: 'var(--text-muted)' }}>
+                                —
+                              </td>
+                            );
+                          }
+                          const ageLabel =
+                            cell.st.ageDays === null
+                              ? 'age unknown'
+                              : cell.st.ageDays === 0
+                                ? 'today'
+                                : `${cell.st.ageDays}d old`;
+                          return (
+                            <td key={c} title={`${cell.row.version || '—'} · ${ageLabel}`}>
+                              <div className="mono" style={{ color: 'var(--text-primary)' }}>
+                                {cell.row.version || '—'}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 'var(--text-xs)',
+                                  color: cell.st.status === 'stale' ? 'var(--yellow)' : 'var(--text-muted)',
+                                }}
+                              >
+                                {ageLabel}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+                {sigGapDevices.length > 0 && (
+                  <p style={GAP_NOTE_STYLE}>
+                    {notCollectedBadge()}{' '}
+                    <span style={{ marginLeft: 6 }}>
+                      {`Content versions are not collected for ${sigGapDevices.length} device${
+                        sigGapDevices.length === 1 ? '' : 's'
+                      }: ${sigGapDevices.map((d) => d.name).join(', ')}.`}
+                    </span>
+                  </p>
+                )}
+              </>
+            )}
+          </details>
+          <p style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{sigSummary}</p>
         </CardBody>
       </Card>
     </div>
