@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.47.2': [
+    'Fixed a flood of meaningless config-change alerts showing entries like "8 → 8" and "514 → 514". The values had not actually changed — only their internal data type had, as a side effect of the serial-number fix — and the change detector was reporting that as a real edit.',
+    'Config change detection now ignores internal type differences entirely, so this whole class of false alarm cannot recur after a future parser or vendor-connector update.',
+    'Existing false entries are cleaned up automatically on update: alerts that were purely of this kind are removed, and any that mixed real changes with false ones keep only the real changes.',
+  ],
   '2.47.1': [
     'Fixed a false "HA degraded" reading on SSH-managed high-availability pairs — found in a live post-deploy check. A sub-heading inside the firewall\'s own version-compatibility report was being read as if it were a failed check, so a perfectly healthy pair could be reported as having mismatched software versions. Genuine mismatches are still detected.',
   ],
