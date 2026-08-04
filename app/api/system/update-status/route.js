@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.49.2': [
+    'Fixed Fortinet firewalls with healthy support contracts being left out of the Lifecycle renewal table entirely. Only TUS appeared, because its contracts were expired; TSR-TL, TSR_EKC, TSR_EKM and Vietnam-YCC were silently absent even though their data was collected.',
+    'Fortinet HA state is now collected. All five FortiGates report standalone, which is now recorded as a fact rather than showing "Not collected" — which wrongly implied SecVault had never asked.',
+  ],
   '2.49.1': [
     'Fortinet components the firewall reports as not licensed (OT Threat, IoT Detect, DLP Signatures and similar) no longer appear in the renewal table as "Unknown" with a blank date. There is nothing to renew for them, and labelling them Unknown implied someone needed to investigate.',
     'They are now correctly identified as "Not licensed" wherever they are shown, which is a definite fact the device reported — distinct from an expiry date that genuinely could not be read.',

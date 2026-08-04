@@ -39,8 +39,20 @@ const SUPPORT_TIER_FEATURES = /^(premium|standard|platinum|gold|silver|basic|par
 
 function isSupportContract(row) {
   if (!row) return false;
-  if (typeof row.feature === 'string' && SUPPORT_TIER_FEATURES.test(row.feature.trim())) return true;
-  return typeof row.description === 'string' && /support/i.test(row.description);
+  const feature = typeof row.feature === 'string' ? row.feature.trim() : '';
+  const description = typeof row.description === 'string' ? row.description : '';
+  if (SUPPORT_TIER_FEATURES.test(feature)) return true;
+  // ⛔ Fortinet names the entitlement DIRECTLY rather than by service tier —
+  // 'Support', 'Comprehensive Support', 'Enhanced Support', 'Hardware RMA' —
+  // and its descriptions are contract CODES ('Fortinet SPRT contract'), so
+  // neither the tier regex nor a description /support/ match caught any of
+  // them. Result: every Fortinet whose support contract was still healthy
+  // vanished from the renewal table entirely, and only TUS appeared because
+  // its contracts were expired and matched a different branch. Match the
+  // feature name too.
+  if (/support/i.test(feature)) return true;
+  if (/^hardware\b/i.test(feature)) return true;
+  return /support/i.test(description);
 }
 
 const COMPONENT_LABELS = {
