@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.50.3': [
+    'Device metric poll and VPN session poll are now mutually exclusive — since v2.50.0 the metric poll opens real SSH/REST management sessions, and at the default 15/30-minute intervals both jobs hit the whole fleet at :00 and :30, contending for the same admin sessions.',
+    'Corrected the metric poll\'s summary log, which still described every active device as "SNMP-enabled" and every skip as "no SNMP capability".',
+    'Documented getPerformanceMetrics() and the changed job gating in CLAUDE.md, .env.local.example, lib.md and connectors.md.',
+  ],
   '2.50.2': [
     'IMPORTANT FIX: a single failed licence or disk read could wipe that firewall’s stored licence data and report success, making the Lifecycle page fall back to "not collected". A failure now leaves the previous values untouched and is recorded as an error.',
     'Palo Alto no longer records a confident "0 active sessions" when the firewall did not report a session count.',

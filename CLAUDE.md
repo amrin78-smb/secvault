@@ -527,7 +527,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Config diff + auto backup (Phase 6) | After each config pull | (inside `collectAndStore`) |
 | CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
 | VPN session poll (vendors with `getVpnSessionSummary()`) | 5-59 min | `VPN_POLL_INTERVAL_MINUTES` |
-| SNMP metric poll (vendors with `getSnmpMetrics()`, `snmp_enabled` devices) | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
+| Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
 | Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |

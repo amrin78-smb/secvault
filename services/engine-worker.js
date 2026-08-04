@@ -399,6 +399,13 @@ async function runVpnSessionPollJob() {
     logger.info('Job [vpn-session-poll] rule-version-pull is in progress — deferring this tick.');
     return;
   }
+  // Symmetric counterpart to the guard in runSnmpPollJob(): that job now opens
+  // SSH sessions too, so whichever starts first wins and the other skips a tick
+  // rather than contending for the same device's admin sessions.
+  if (snmpPollInFlight) {
+    logger.info('Job [vpn-session-poll] snmp-poll is in progress — deferring this tick.');
+    return;
+  }
   vpnPollInFlight = true;
   const start = Date.now();
   logger.info('Job [vpn-session-poll] starting.');
@@ -498,17 +505,22 @@ async function runVpnSessionPollJob() {
   }
 }
 
-// SNMP metric snapshot poll — same shape as runVpnSessionPollJob above,
-// gated additionally on the DEVICE's own snmp_enabled flag (not just
-// adapter capability — an operator must opt a device in, since it needs a
-// separately-configured credential and, for Forcepoint, an explicit engine
-// IP). Only devices whose adapter implements the OPTIONAL getSnmpMetrics()
-// are polled; a row is only ever inserted on a successful poll. Deferred
-// (not run) while rule-version-pull is in flight, for the same
-// same-device-concurrent-session reasoning as the VPN poll — though SNMP is
-// a separate UDP protocol from SSH/REST, so this is a lighter precaution
-// than the VPN case, kept for consistency and to avoid three jobs hammering
-// the same device fleet at once.
+// Device metric snapshot poll ("snmp-poll" by name, for job-log continuity) —
+// same shape as runVpnSessionPollJob above. A device is polled if its adapter
+// implements EITHER of two optional capabilities, preferring the first:
+//   1. getPerformanceMetrics() — the management transport (SSH/REST) the device
+//      is already configured for. Needs no extra credential and no per-device
+//      opt-in, so it runs for every ACTIVE device (v2.50.0).
+//   2. getSnmpMetrics() — the original path, additionally gated on the DEVICE's
+//      own snmp_enabled flag, because SNMP needs a separately-configured
+//      community credential and, for Forcepoint, an explicit engine IP.
+// A row is only ever inserted on a successful poll — a failure leaves the
+// previous snapshot standing rather than writing a zero.
+//
+// ⚠️ Since (1) exists this job is NO LONGER a lightweight UDP-only poll: it
+// opens real management sessions, exactly like the VPN poll and the
+// rule-version pull. It therefore defers to BOTH of those rather than treating
+// concurrency as a soft precaution.
 async function runSnmpPollJob() {
   if (snmpPollInFlight) {
     logger.warn('Job [snmp-poll] previous run still in progress — skipping this tick.');
@@ -516,6 +528,16 @@ async function runSnmpPollJob() {
   }
   if (ruleVersionPullInFlight) {
     logger.info('Job [snmp-poll] rule-version-pull is in progress — deferring this tick.');
+    return;
+  }
+  // ⛔ Added 2026-08-04. Until v2.50.0 this job was UDP-only (SNMP), so it never
+  // needed to coordinate with the VPN poll. getPerformanceMetrics() now uses the
+  // SSH/REST management transport, and at the default 15/30-minute intervals the
+  // two jobs coincide at :00 and :30 every hour — both iterating the whole fleet,
+  // with the VPN poll opening two sessions per device. FortiOS caps concurrent
+  // admin sessions, so overlapping runs cause intermittent failures in BOTH jobs.
+  if (vpnPollInFlight) {
+    logger.info('Job [snmp-poll] vpn-session-poll is in progress — deferring this tick.');
     return;
   }
   snmpPollInFlight = true;
@@ -580,7 +602,7 @@ async function runSnmpPollJob() {
 
     const durationMs = Date.now() - start;
     logger.info(
-      `Job [snmp-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no SNMP capability) ${skipped}, ${devices.length} SNMP-enabled device(s) total.`
+      `Job [snmp-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no metrics capability) ${skipped}, ${devices.length} active device(s) considered.`
     );
   } catch (err) {
     const durationMs = Date.now() - start;

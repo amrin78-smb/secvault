@@ -735,6 +735,22 @@ block, skipping blocks with no recognizable action keyword. Config `parsed` →
 All 6 vendors additionally use a SEPARATE `credential_type='snmp'` for `getSnmpMetrics()`, never
 mixed with the management-plane credential.
 
+**Optional `getPerformanceMetrics()`** (added 2026-08-04, v2.50.0) — same return shape as
+`getSnmpMetrics()` (`{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence}`)
+but read over the management transport the device is ALREADY configured for, so it needs no `snmp`
+credential, no `snmp_host`, and no per-device `snmp_enabled` opt-in. Implemented by **paloalto (both
+transports)** via `show system resources` + `show session info`, and **fortinet (SSH only)** via
+`get system performance status`. `services/engine-worker.js`'s `snmp-poll` job PREFERS this method
+and falls back to `getSnmpMetrics()` only for devices without it; rows land in the same
+`snmp_metric_snapshots` table. Not implemented for checkpoint/cisco_asa/forcepoint/sangfor or
+fortinet's REST transport — no live device to verify real command output against, per CLAUDE.md's
+"verify against live responses before writing any parser" rule.
+
+⚠️ Because this opens real management sessions, the `snmp-poll` job is no longer a lightweight UDP
+poll: it is now mutually exclusive with BOTH `vpn-session-poll` and `rule-version-pull` (whichever
+starts first wins, the others skip that tick). FortiOS caps concurrent admin sessions, so
+overlapping fleet-wide runs previously produced intermittent failures in both jobs.
+
 **Optional `getVpnTunnels()`** (IPSec site-to-site tunnel status → `vpn_ipsec_tunnels`, added 2026-07-31,
 a SEPARATE method + command from `getVpnSessionSummary`; engine-worker calls it in its own try/catch so a
 tunnel-pull failure never fails the session poll). Shape `{name, peer, status, ike_version, bytes_in,
