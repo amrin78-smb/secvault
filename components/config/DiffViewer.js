@@ -814,7 +814,7 @@ const CHANGE_TONE = {
 };
 
 // ---------------------------------------------------------------------------
-// RuleSnapshotTable — one whole rule as a ManageEngine-style horizontal table
+// RuleSnapshotTable — whole rule(s) as a ManageEngine-style horizontal table
 // ---------------------------------------------------------------------------
 // A whole rule that was ADDED or REMOVED is the single most important thing in
 // a config diff, and it was the last place still dumping a raw structure dump
@@ -853,45 +853,82 @@ const SNAPSHOT_TONE = {
   modified: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', label: 'Details' },
 };
 
-function RuleSnapshotTable({ rule, changeType }) {
-  const tone = SNAPSHOT_TONE[changeType] || SNAPSHOT_TONE.modified;
-  const notes = RULE_SNAPSHOT_FOOTNOTES.map((f) => ({ label: f.label, value: f.get(rule) })).filter(
-    (n) => typeof n.value === 'string' && n.value.length > 0
-  );
+// Below this the 11 rule columns start compressing into unreadable slivers, so
+// the table keeps its natural width and scrolls inside its own bordered box
+// (which <Table> already provides) rather than squeezing.
+const RULE_TABLE_MIN_WIDTH = 1000;
+
+// `rows`: [{ label, rule, changeType }] — one entry for a whole-rule add/remove,
+// TWO ("Old Details" / "New Details") for a modified rule, so both states read
+// as adjacent rows of ONE table instead of two separate tables the eye has to
+// diff manually.
+//
+// ⛔ `layout="auto"`: this table has no colgroup and no percentage widths, so
+// the default 'fixed' would slice the width into 11 equal columns and truncate
+// every heading. See the Table component's own note.
+function RuleSnapshotTable({ rows }) {
+  const safeRows = Array.isArray(rows) ? rows.filter((r) => r && r.rule) : [];
+  if (safeRows.length === 0) return null;
+
+  // Schedule/comment sit under the table rather than paying two columns of
+  // width — most rules populate neither. Labelled per row only when the rows
+  // disagree, so an unchanged comment isn't printed twice.
+  const notes = [];
+  for (const row of safeRows) {
+    for (const f of RULE_SNAPSHOT_FOOTNOTES) {
+      const value = f.get(row.rule);
+      if (typeof value !== 'string' || value.length === 0) continue;
+      if (notes.some((n) => n.label === f.label && n.value === value)) continue;
+      notes.push({ label: f.label, value, rowLabel: row.label });
+    }
+  }
+  const multiRow = safeRows.length > 1;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <Table>
+      <Table layout="auto" minWidth={RULE_TABLE_MIN_WIDTH}>
         <thead>
           <tr>
-            <th style={HEADER_CELL_STYLE}> </th>
+            {multiRow && <th style={HEADER_CELL_STYLE}> </th>}
             {RULE_SNAPSHOT_COLUMNS.map((c) => (
               <th key={c.label} style={HEADER_CELL_STYLE}>{c.label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          <tr style={{ background: tone.bg }}>
-            <td style={{ fontWeight: 600, color: tone.fg, whiteSpace: 'nowrap' }}>{tone.label}</td>
-            {RULE_SNAPSHOT_COLUMNS.map((c) => {
-              const value = c.render(rule);
-              return (
-                <td
-                  key={c.label}
-                  title={typeof value === 'string' ? value : undefined}
-                  style={{ wordBreak: 'break-word', whiteSpace: c.nowrap ? 'nowrap' : undefined }}
-                >
-                  {value}
-                </td>
-              );
-            })}
-          </tr>
+          {safeRows.map((row, i) => {
+            const tone = SNAPSHOT_TONE[row.changeType] || SNAPSHOT_TONE.modified;
+            return (
+              <tr key={i} style={{ background: tone.bg }}>
+                {multiRow && (
+                  <td style={{ fontWeight: 600, color: tone.fg, whiteSpace: 'nowrap' }}>
+                    {row.label || tone.label}
+                  </td>
+                )}
+                {RULE_SNAPSHOT_COLUMNS.map((c) => {
+                  const value = c.render(row.rule);
+                  return (
+                    <td
+                      key={c.label}
+                      title={typeof value === 'string' ? value : undefined}
+                      style={{ ...WRAP_STYLE, whiteSpace: c.nowrap ? 'nowrap' : 'normal', verticalAlign: 'top' }}
+                    >
+                      {value}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </Table>
       {notes.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', fontSize: 'var(--text-xs)' }}>
-          {notes.map((n) => (
-            <span key={n.label}>
-              <span style={{ color: 'var(--text-muted)' }}>{n.label}: </span>
+          {notes.map((n, i) => (
+            <span key={i}>
+              <span style={{ color: 'var(--text-muted)' }}>
+                {n.label}{multiRow ? ` (${n.rowLabel})` : ''}:{' '}
+              </span>
               <span style={{ color: 'var(--text-primary)' }}>{n.value}</span>
             </span>
           ))}
@@ -1101,7 +1138,17 @@ function RuleChangeCard({ group, expanded, onToggle }) {
       </button>
       {expanded && (
         <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {builtRule && <RuleSnapshotTable rule={builtRule} changeType={wholeRule.changeType} />}
+          {builtRule && (
+            <RuleSnapshotTable
+              rows={[
+                {
+                  label: wholeRule.changeType === 'added' ? 'New Details' : 'Old Details',
+                  rule: builtRule,
+                  changeType: wholeRule.changeType,
+                },
+              ]}
+            />
+          )}
           {/* Whole-rule add/remove that couldn't be parsed into a NormalizedRule
               falls back to the reliable raw-value rendering, same as before. */}
           {wholeRule && !builtRule &&
@@ -1262,17 +1309,12 @@ function IndexedRuleValueCell({ entry }) {
       </span>
     );
   }
-  // added / removed
+  // added / removed. NOTE: a WHOLE-rule entry (ruleField === null) that
+  // normalizes into a real rule never reaches here — IndexedRuleGroup hoists it
+  // out into a full-width RuleSnapshotTable via splitRuleGroupEntries(). What
+  // arrives here is either a per-field value or a whole-rule value that FAILED
+  // to normalize, which keeps the reliable raw rendering below.
   const value = entry.value;
-  // ⛔ A WHOLE-rule add/remove (ruleField === null) carries the full PAN-OS XML
-  // rule object. It is nested (`to: {member: [...]}`), so isFlatObject() rejects
-  // it and it used to fall through to the raw structure dump — the single worst
-  // rendering in the diff view, and the one an operator most needs to read.
-  // Normalize it with the adapter's OWN parser and show a rule table instead.
-  if (entry.ruleField === null) {
-    const rule = tryBuildRuleFromXmlValue(value);
-    if (rule) return <RuleSnapshotTable rule={rule} changeType={entry.changeType} />;
-  }
   if (needsBlockRender(value)) {
     return isFlatObject(value) ? <FlatObjectTable value={value} /> : renderBlockValue(value);
   }
@@ -1294,45 +1336,104 @@ function resolveGroupRuleName(entries) {
   return null;
 }
 
+// Splits a rule group's entries into the whole-rule snapshots (which render as
+// a full-width rule table) and the per-field edits (which don't). A whole-rule
+// 'modified' contributes TWO rows — old and new — so the pair reads as adjacent
+// rows of one table. Any whole-rule entry that fails to normalize into a real
+// rule falls back to the per-field list, keeping the existing raw rendering
+// rather than silently vanishing.
+function splitRuleGroupEntries(entries) {
+  const snapshotRows = [];
+  const fieldEntries = [];
+  for (const e of entries) {
+    if (e.ruleField !== null) { fieldEntries.push(e); continue; }
+    if (e.changeType === 'modified') {
+      const oldRule = tryBuildRuleFromXmlValue(e.old);
+      const newRule = tryBuildRuleFromXmlValue(e.new);
+      if (oldRule && newRule) {
+        snapshotRows.push({ label: 'Old Details', rule: oldRule, changeType: 'removed' });
+        snapshotRows.push({ label: 'New Details', rule: newRule, changeType: 'added' });
+        continue;
+      }
+    } else {
+      const rule = tryBuildRuleFromXmlValue(e.value);
+      if (rule) {
+        snapshotRows.push({
+          label: e.changeType === 'added' ? 'New Details' : 'Old Details',
+          rule,
+          changeType: e.changeType,
+        });
+        continue;
+      }
+    }
+    fieldEntries.push(e);
+  }
+  return { snapshotRows, fieldEntries };
+}
+
+const PILL_ROW_STYLE = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 };
+
+// One per-field edit as a pill pair + its value, replacing the Field | Change |
+// Value table row this used to be. The field name and change type are metadata
+// ABOUT the change, not columns of firewall data — as table columns they stole
+// half the width from the value that actually matters.
+function IndexedFieldChange({ entry }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <span
+          style={{
+            fontSize: 'var(--text-xs)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            color: 'var(--text-muted)',
+          }}
+        >
+          {humanizeRuleField(entry.ruleField)}
+        </span>
+        <RuleChangeBadge changeType={entry.changeType} />
+      </div>
+      <div className="mono" style={WRAP_STYLE}>
+        <IndexedRuleValueCell entry={entry} />
+      </div>
+    </div>
+  );
+}
+
+// ⛔ The rule table is NOT nested inside a Field | Change | Value table any
+// more. Wrapping it in a `VALUE` cell left it roughly half the card's width, so
+// all 11 rule columns truncated to "RULE…", "SRC …", "3BB,…" — the table was
+// technically present and practically unreadable. The change type is now a pill
+// in the group header and the rule table spans the full card, scrolling within
+// its own box if it needs more room than that.
 function IndexedRuleGroup({ index, entries }) {
   const name = resolveGroupRuleName(entries);
   const title = name ? `Rule "${name}"` : `Rule #${index + 1}`;
+  const { snapshotRows, fieldEntries } = splitRuleGroupEntries(entries);
+  const types = [...new Set(entries.map((e) => e.changeType))];
   const count = entries.length;
+
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px' }}>
-      <div style={{ marginBottom: 4 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
+      <div style={PILL_ROW_STYLE}>
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
-        <span style={{ color: 'var(--text-muted)' }}> — {count} change{count === 1 ? '' : 's'}</span>
+        {types.map((t) => (
+          <RuleChangeBadge key={t} changeType={t} />
+        ))}
+        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+          {count} change{count === 1 ? '' : 's'}
+        </span>
       </div>
-      <Table>
-        <colgroup>
-          <col style={{ width: '32%' }} />
-          <col style={{ width: '16%' }} />
-          <col style={{ width: '52%' }} />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Change</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e, i) => (
-            <tr key={i}>
-              <td style={{ fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-word' }}>
-                {humanizeRuleField(e.ruleField)}
-              </td>
-              <td>
-                <RuleChangeBadge changeType={e.changeType} />
-              </td>
-              <td className="mono" style={{ wordBreak: 'break-word' }}>
-                <IndexedRuleValueCell entry={e} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {snapshotRows.length > 0 && <RuleSnapshotTable rows={snapshotRows} />}
+        {fieldEntries.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px 16px' }}>
+            {fieldEntries.map((e, i) => (
+              <IndexedFieldChange key={i} entry={e} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

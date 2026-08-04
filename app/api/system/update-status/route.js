@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.51.2': [
+    'A changed rule now spans the full width of its card instead of being squeezed into a "Value" column — the old Field | Change | Value wrapper table left the 11 rule columns truncated to "RULE…", "SRC …", "3BB,…".',
+    'Field name and change type moved out of table columns and into pills in the group header, where metadata belongs; the columns are now firewall data only.',
+    'A modified rule shows its old and new state as two adjacent rows of ONE table, instead of two separate tables to compare by eye.',
+    'Rule table columns size to their content and the table scrolls within its own box when it needs more room.',
+  ],
   '2.51.1': [
     'Long config values no longer clip out of their table cell — `white-space` inherits, and several ancestors set `nowrap`, so a value cell could not wrap however generous its word-break was.',
     'An enormous embedded value (one live device carries a ~300KB base64 image in its config) now collapses behind a "Show details" toggle instead of laying out a single cell hundreds of thousands of pixels wide.',
