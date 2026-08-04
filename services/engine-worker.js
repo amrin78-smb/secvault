@@ -522,8 +522,15 @@ async function runSnmpPollJob() {
   const start = Date.now();
   logger.info('Job [snmp-poll] starting.');
   try {
+    // ⛔ NOT gated on snmp_enabled any more. Some adapters can report the same
+    // metrics over the management transport they ALREADY use (Fortinet SSH's
+    // `get system performance status`, added 2026-08-04), which needs no SNMP
+    // credential, no snmp_enabled flag, and carries none of the doc-derived-OID
+    // uncertainty that forces lowConfidence on the SNMP path. Those devices
+    // would otherwise never be polled at all. Devices with neither capability
+    // are still skipped below, so this widens the query without widening work.
     const { rows: devices } = await pool.query(
-      'SELECT * FROM devices WHERE active = true AND snmp_enabled = true'
+      'SELECT * FROM devices WHERE active = true'
     );
 
     let polled = 0;
@@ -540,13 +547,19 @@ async function runSnmpPollJob() {
         continue;
       }
 
-      if (typeof adapter.getSnmpMetrics !== 'function') {
+      // Prefer the management-transport source when the adapter has one — it is
+      // strictly better data (no separate credential, no OID guesswork). SNMP
+      // remains the path for every vendor that only implements getSnmpMetrics(),
+      // and is still gated on the device having SNMP switched on.
+      const hasPerf = typeof adapter.getPerformanceMetrics === 'function';
+      const hasSnmp = typeof adapter.getSnmpMetrics === 'function' && device.snmp_enabled;
+      if (!hasPerf && !hasSnmp) {
         skipped += 1;
         continue;
       }
 
       try {
-        const metrics = await adapter.getSnmpMetrics();
+        const metrics = hasPerf ? await adapter.getPerformanceMetrics() : await adapter.getSnmpMetrics();
         await pool.query(
           `INSERT INTO snmp_metric_snapshots (device_id, cpu_percent, memory_percent, session_count, uptime_seconds, raw)
            VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,

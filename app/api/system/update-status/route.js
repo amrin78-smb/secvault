@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.50.0': [
+    'CPU, memory and session metrics now come from the management interface SecVault already uses, instead of SNMP, for both Palo Alto and Fortinet. No SNMP credential or SNMP setup is needed, and the figures are the numbers each device reports about itself rather than estimates from generic OIDs.',
+    'This matters most for Palo Alto, where the SNMP readings were always flagged low-confidence because PAN-OS publishes no reliable single CPU value. Those readings are now trustworthy.',
+    'Palo Alto also reports session-table capacity, so a firewall approaching its session limit is now visible — something SNMP could not express at all.',
+    'Devices that were never SNMP-enabled are now covered too; previously they reported no metrics whatsoever.',
+  ],
   '2.49.2': [
     'Fixed Fortinet firewalls with healthy support contracts being left out of the Lifecycle renewal table entirely. Only TUS appeared, because its contracts were expired; TSR-TL, TSR_EKC, TSR_EKM and Vietnam-YCC were silently absent even though their data was collected.',
     'Fortinet HA state is now collected. All five FortiGates report standalone, which is now recorded as a fact rather than showing "Not collected" — which wrongly implied SecVault had never asked.',
