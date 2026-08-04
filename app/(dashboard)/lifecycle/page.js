@@ -136,7 +136,7 @@ async function getLifecycleData() {
     pool.query(
       `SELECT h.device_id, h.enabled, h.mode, h.local_state, h.peer_state, h.peer_mgmt_ip,
               h.peer_connection_status, h.config_sync_state, h.last_nonfunctional_reason,
-              h.version_compat_ok
+              h.version_compat_ok, h.version_compat, h.raw
        FROM device_ha_status h
        JOIN devices d ON d.id = h.device_id
        WHERE d.active = true`
@@ -221,6 +221,53 @@ const SECTION_SUMMARY_STYLE = {
 };
 
 const GAP_NOTE_STYLE = { margin: '12px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' };
+
+// Human labels for PAN-OS's `<x>-compat` verdict keys.
+const COMPAT_LABELS = {
+  'build-compat': 'Software version',
+  'url-compat': 'URL database',
+  'app-compat': 'Application content',
+  'iot-compat': 'IOT content',
+  'av-compat': 'Antivirus',
+  'threat-compat': 'Threat content',
+  'vpnclient-compat': 'VPN client',
+  'gpclient-compat': 'GlobalProtect client',
+};
+
+function compatLabel(key) {
+  return COMPAT_LABELS[key] || key.replace(/-compat$/, '');
+}
+
+// Builds the per-pair "why is this degraded" evidence. Everything here comes
+// from what the DEVICE reported — the mismatching components with BOTH sides'
+// actual values, plus any licence on this device that plausibly explains a
+// mismatch. Nothing is inferred: a lapsed URL-filtering licence is shown
+// alongside a url-compat mismatch as CONTEXT, and deliberately not asserted as
+// the cause, because SecVault only ever talks to the active member and cannot
+// see the passive peer's own licence state.
+function buildHaEvidence(row, licensesForDevice, now) {
+  const compat = row.version_compat && typeof row.version_compat === 'object' ? row.version_compat : {};
+  const versions = row.raw && typeof row.raw === 'object' && row.raw.versions ? row.raw.versions : {};
+
+  const mismatches = Object.keys(compat)
+    .filter((k) => String(compat[k]).toLowerCase() !== 'match')
+    .map((k) => ({
+      key: k,
+      label: compatLabel(k),
+      verdict: compat[k],
+      local: versions[k] ? versions[k].local : null,
+      peer: versions[k] ? versions[k].peer : null,
+    }));
+
+  // Surface only licences that are actually a problem — an expired/expiring
+  // entitlement is the kind of thing that stops a content feed updating.
+  const relevantLicences = (licensesForDevice || [])
+    .map((l) => ({ row: l, st: licenseStatus(l, now) }))
+    .filter(({ st }) => st.status === 'expired' || st.status === 'expiring')
+    .sort((a, b) => (a.st.status === 'expired' ? -1 : 1));
+
+  return { mismatches, relevantLicences };
+}
 const SECTION_NOTE_STYLE = { margin: '8px 0 14px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' };
 
 export default async function LifecyclePage() {
@@ -251,6 +298,14 @@ export default async function LifecyclePage() {
   const licenseGapDevices = devices.filter((d) => !licenseDeviceIds.has(d.id));
 
   // ── Section 2: High Availability ───────────────────────────────────────
+  // Licences indexed per device so a degraded pair can show any expired /
+  // expiring entitlement alongside its version mismatch.
+  const licensesByDevice = new Map();
+  for (const l of licenses) {
+    if (!licensesByDevice.has(l.device_id)) licensesByDevice.set(l.device_id, []);
+    licensesByDevice.get(l.device_id).push(l);
+  }
+
   const haEntries = haRows
     .map((row) => ({ row, ha: haStatus(row), device: deviceById.get(row.device_id) }))
     .sort((a, b) => {
@@ -484,20 +539,71 @@ export default async function LifecyclePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {haEntries.map(({ row, ha, device }) => (
-                      <tr key={row.device_id}>
-                        <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
-                        <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
-                        <td>{row.local_state || '—'}</td>
-                        <td>{row.peer_state || '—'}</td>
-                        <td className="mono">{row.peer_mgmt_ip || '—'}</td>
-                        <td>{row.config_sync_state || '—'}</td>
-                        {/* Reasons live in the title attribute (a single string, not
-                            a JSX child) so a degraded pair explains itself on hover
-                            without a seventh column of prose. */}
-                        <td title={ha.reasons.join(' ') || undefined}>{haBadge(ha.status)}</td>
-                      </tr>
-                    ))}
+                    {haEntries.map(({ row, ha, device }) => {
+                      const evidence = buildHaEvidence(row, licensesByDevice.get(row.device_id), now);
+                      const showWhy =
+                        ha.status === 'degraded' &&
+                        (ha.reasons.length > 0 || evidence.mismatches.length > 0 || evidence.relevantLicences.length > 0);
+                      return (
+                        <tr key={row.device_id}>
+                          <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
+                          <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
+                          <td>{row.local_state || '—'}</td>
+                          <td>{row.peer_state || '—'}</td>
+                          <td className="mono">{row.peer_mgmt_ip || '—'}</td>
+                          <td>{row.config_sync_state || '—'}</td>
+                          <td>
+                            {haBadge(ha.status)}
+                            {/* "Degraded" on its own is not actionable. This expands to
+                                the DEVICE-reported evidence: which components disagree
+                                and both sides' actual values, plus any expired/expiring
+                                licence on this member as context. */}
+                            {showWhy && (
+                              <details style={{ marginTop: 6 }}>
+                                <summary
+                                  style={{ cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--primary)' }}
+                                >
+                                  Why?
+                                </summary>
+                                <div style={{ marginTop: 6, fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                                  {ha.reasons.length > 0 && (
+                                    <ul style={{ margin: '0 0 6px', paddingLeft: 16 }}>
+                                      {ha.reasons.map((r) => (
+                                        <li key={r}>{r}</li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                  {evidence.mismatches.map((m) => (
+                                    <div key={m.key} style={{ marginBottom: 3 }}>
+                                      <span style={{ color: 'var(--text-primary)' }}>{m.label}</span>{' '}
+                                      <span className="mono">{m.local || '—'}</span>
+                                      <span style={{ color: 'var(--text-muted)' }}> (this) vs </span>
+                                      <span className="mono">{m.peer || '—'}</span>
+                                      <span style={{ color: 'var(--text-muted)' }}> (peer)</span>
+                                    </div>
+                                  ))}
+                                  {evidence.relevantLicences.length > 0 && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <span style={{ color: 'var(--text-muted)' }}>
+                                        Licences on this member that may be related:
+                                      </span>
+                                      <ul style={{ margin: '3px 0 0', paddingLeft: 16 }}>
+                                        {evidence.relevantLicences.map(({ row: l, st }) => (
+                                          <li key={l.id}>
+                                            {l.feature} — {st.status === 'expired' ? 'expired' : 'expiring'}{' '}
+                                            {formatDate(l.expires_at) || l.expires_raw || ''}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </Table>
                 {haGapDevices.length > 0 && (

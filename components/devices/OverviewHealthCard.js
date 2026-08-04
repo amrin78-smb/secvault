@@ -179,6 +179,13 @@ export default async function OverviewHealthCard({ deviceId }) {
       : content.length === 0 ? 'Not collected'
         : 'No release dates reported';
 
+  // These four tiles carry TEXT values ('Degraded', 'Expires in 17d') rather
+  // than the short numerals .stat-value was designed for (--text-2xl with -1px
+  // letter-spacing). At the default size and a 140px min column they wrapped
+  // and ran into the tile edges, so the `compact` variant (--text-lg value,
+  // smaller sub) plus a wider min column is the correct fit here — the same
+  // reason the main Dashboard's denser grid uses it.
+
   return (
     <Card>
       <CardBody>
@@ -196,11 +203,11 @@ export default async function OverviewHealthCard({ deviceId }) {
             Lifecycle data is not collected for this vendor yet.
           </p>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16 }}>
-            <StatCard label="Support / Licences" value={licenseValue} sub={licenseSub} color={licenseColor} />
-            <StatCard label="HA" value={haValue} sub={haSub} color={haColor} />
-            <StatCard label="Disk" value={diskValue} sub={diskSub} color={diskColor} />
-            <StatCard label="Signatures" value={sigValue} sub={sigSub} color={sigColor} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <StatCard compact label="Support / Licences" value={licenseValue} sub={licenseSub} color={licenseColor} />
+            <StatCard compact label="HA" value={haValue} sub={haSub} color={haColor} />
+            <StatCard compact label="Disk" value={diskValue} sub={diskSub} color={diskColor} />
+            <StatCard compact label="Signatures" value={sigValue} sub={sigSub} color={sigColor} />
           </div>
         )}
       </CardBody>
