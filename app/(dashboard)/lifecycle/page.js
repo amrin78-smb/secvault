@@ -52,6 +52,11 @@ function isSupportContract(row) {
   // feature name too.
   if (/support/i.test(feature)) return true;
   if (/^hardware\b/i.test(feature)) return true;
+  // 'Firmware & General Updates' (Fortinet FMWR) is a renewable entitlement
+  // bought alongside SPRT/HDWR/ENHN/COMP, but matches none of the tests above —
+  // so a HEALTHY one silently vanished from the renewal table while its
+  // siblings showed, which is the same defect this function was just fixed for.
+  if (/^firmware\b/i.test(feature)) return true;
   return /support/i.test(description);
 }
 
@@ -207,6 +212,14 @@ function groupLicenseRenewals(entries) {
     }
   }
   return Array.from(groups.values()).sort((a, b) => {
+    // ⛔ Severity BEFORE date. A row whose expiry string did not parse, or whose
+    // 'expired' verdict came from the device rather than a date, has no
+    // timestamp to sort on and previously sank below healthy contracts 18
+    // months out — burying exactly the rows that need attention, while the
+    // summary tile still counted them as expired.
+    const ar = LICENSE_SEVERITY_RANK[a.status] || 0;
+    const br = LICENSE_SEVERITY_RANK[b.status] || 0;
+    if (ar !== br) return br - ar;
     const av = a.expiresAt ? new Date(a.expiresAt).getTime() : Number.POSITIVE_INFINITY;
     const bv = b.expiresAt ? new Date(b.expiresAt).getTime() : Number.POSITIVE_INFINITY;
     if (av !== bv) return av - bv;
@@ -277,7 +290,9 @@ function buildHaEvidence(row, licensesForDevice, now) {
   const relevantLicences = (licensesForDevice || [])
     .map((l) => ({ row: l, st: licenseStatus(l, now) }))
     .filter(({ st }) => st.status === 'expired' || st.status === 'expiring')
-    .sort((a, b) => (a.st.status === 'expired' ? -1 : 1));
+    // Antisymmetric comparator: the previous form returned -1 for BOTH
+    // cmp(a,b) and cmp(b,a) when both were expired, which is an invalid sort.
+    .sort((a, b) => (a.st.status === 'expired' ? 0 : 1) - (b.st.status === 'expired' ? 0 : 1));
 
   return { mismatches, relevantLicences };
 }
@@ -377,9 +392,21 @@ export default async function LifecyclePage() {
     .join(' · ');
 
   const oldestSig = sigEntries.length > 0 && sigEntries[0].worstAge >= 0 ? sigEntries[0].worstAge : null;
+  // ⛔ TRI-STATE: a component whose device reported no release date resolves to
+  // 'unknown', NOT 'stale'. Saying "all current" whenever the stale count is
+  // zero therefore asserted freshness for devices whose age is simply unknown —
+  // contradicting this very section's own note, and worse, the summary is what
+  // is visible while the section is collapsed. Count unknowns explicitly.
+  const unknownSigDevices = sigEntries.filter(
+    (e) =>
+      Array.from(e.byComponent.values()).some((c) => c.st.status === 'unknown') &&
+      !Array.from(e.byComponent.values()).some((c) => c.st.status === 'stale')
+  ).length;
   const sigSummary = [
     `${sigEntries.length} device${sigEntries.length === 1 ? '' : 's'}`,
-    staleSigDevices > 0 ? `${staleSigDevices} with stale content` : 'all current',
+    staleSigDevices > 0 ? `${staleSigDevices} with stale content` : null,
+    unknownSigDevices > 0 ? `${unknownSigDevices} with unknown age` : null,
+    staleSigDevices === 0 && unknownSigDevices === 0 && sigEntries.length > 0 ? 'all current' : null,
     oldestSig !== null ? `oldest ${oldestSig}d` : null,
     sigGapDevices.length > 0 ? `${sigGapDevices.length} not collected` : null,
   ]
@@ -601,13 +628,29 @@ export default async function LifecyclePage() {
                                       ))}
                                     </ul>
                                   )}
+                                  {/* Only the XML/API transport reports both sides' actual
+                                      version strings; the SSH form prints just the
+                                      Match/Mismatch verdict. Without this fallback an
+                                      SSH-managed pair rendered a useless "— (this) vs —
+                                      (peer)" while the verdict it DID have went unshown. */}
                                   {evidence.mismatches.map((m) => (
                                     <div key={m.key} style={{ marginBottom: 4 }}>
                                       <span style={{ color: 'var(--text-primary)' }}>{m.label}: </span>
-                                      <span className="mono">{m.local || '—'}</span>
-                                      <span style={{ color: 'var(--text-muted)' }}> (this) vs </span>
-                                      <span className="mono">{m.peer || '—'}</span>
-                                      <span style={{ color: 'var(--text-muted)' }}> (peer)</span>
+                                      {m.local || m.peer ? (
+                                        <>
+                                          <span className="mono">{m.local || '—'}</span>
+                                          <span style={{ color: 'var(--text-muted)' }}> (this) vs </span>
+                                          <span className="mono">{m.peer || '—'}</span>
+                                          <span style={{ color: 'var(--text-muted)' }}> (peer)</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="mono">{m.verdict}</span>
+                                          <span style={{ color: 'var(--text-muted)' }}>
+                                            {' '}— this device reports the verdict only, not each side&apos;s version
+                                          </span>
+                                        </>
+                                      )}
                                     </div>
                                   ))}
                                 </div>

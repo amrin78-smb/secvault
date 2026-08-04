@@ -124,6 +124,13 @@ export default async function OverviewHealthCard({ deviceId }) {
   } else if (worstLicense.status === 'ok' || worstLicense.status === 'perpetual') {
     licenseValue = 'OK';
     licenseColor = 'var(--text-muted)';
+  } else if (worstLicense.status === 'not_licensed') {
+    // The device DEFINITIVELY reported these components as unlicensed
+    // ('Contract Expiry Date: n/a'). Falling through to 'Unknown' here implied
+    // missing information and invited an investigation with nothing to find —
+    // the same distinction licenseStatus() exists to preserve.
+    licenseValue = 'None';
+    licenseColor = 'var(--text-muted)';
   }
   if (worstLicense.row) {
     const when = expiryText(worstLicense.row);

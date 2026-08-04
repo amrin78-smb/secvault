@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.50.1': [
+    'IMPORTANT FIX: config-change records for security-sensitive edits (VPN pre-shared keys, SNMP communities, admin password hashes) were being deleted on every update. Because those values are masked in storage, both sides read as identical and a cleanup routine added yesterday mistook them for a non-change. Existing records are no longer at risk, though any deleted between yesterday and now cannot be recovered.',
+    'Fortinet firmware-update contracts now appear in the renewal table. They were still being dropped while the other Fortinet contracts showed.',
+    'Signature freshness no longer reports "all current" when a component age is actually unknown, and the renewal table now sorts expired items first even when their date could not be read.',
+    'Clearing a config baseline now only clears the version you were looking at, so two administrators working at once cannot silently undo each other.',
+    'Devices reporting components as not licensed show "None" rather than "Unknown", and HA version-mismatch detail no longer shows empty dashes on SSH-managed pairs.',
+  ],
   '2.50.0': [
     'CPU, memory and session metrics now come from the management interface SecVault already uses, instead of SNMP, for both Palo Alto and Fortinet. No SNMP credential or SNMP setup is needed, and the figures are the numbers each device reports about itself rather than estimates from generic OIDs.',
     'This matters most for Palo Alto, where the SNMP readings were always flagged low-confidence because PAN-OS publishes no reliable single CPU value. Those readings are now trustworthy.',

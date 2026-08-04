@@ -52,6 +52,36 @@ export async function PUT(request, { params }) {
     try {
       await client.query('BEGIN');
 
+      if (!setBaseline) {
+        // ⛔ Compare-and-clear. Previously the clear ran unconditionally on
+        // device_id and IGNORED configId, so a stale page could wipe a baseline
+        // it wasn't looking at: admin B sets version Y, admin A's page still
+        // shows Z as baseline, A clicks "Clear baseline" and Y is silently
+        // cleared. Scope the clear to the version the caller actually saw, and
+        // 404 when it is not the current baseline so the UI can refresh.
+        const { rows } = await client.query(
+          `UPDATE device_configs SET is_baseline = false
+           WHERE id = $1 AND device_id = $2 AND is_baseline
+           RETURNING id`,
+          [configId, id]
+        );
+        if (rows.length === 0) {
+          await client.query('ROLLBACK');
+          return Response.json(
+            { error: 'That config version is not the current baseline — refresh and try again.' },
+            { status: 409 }
+          );
+        }
+        await client.query('COMMIT');
+        await logActivity(pool, {
+          actor,
+          action: 'set_config_baseline',
+          deviceId: id,
+          detail: `Config baseline cleared (version ${configId})`,
+        });
+        return Response.json({ ok: true, baseline: null });
+      }
+
       await client.query(
         'UPDATE device_configs SET is_baseline = false WHERE device_id = $1 AND is_baseline',
         [id]
