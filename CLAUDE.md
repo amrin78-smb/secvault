@@ -446,9 +446,13 @@ section below for why a non-mutating POST is treated like a GET here.
 
 Four facts SecVault could not previously answer, all collected from the management API/CLI it
 already talks to. Optional adapter methods `getLicenses()`/`getHaStatus()`/`getDiskUsage()` plus a
-`contentVersions` field on `getVersion()` — **Palo Alto only, both transports**; Fortinet is
-deferred (no licence surface on `get system status`, and no HA-enabled FortiGate exists to verify a
-peer parser against). Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
+`contentVersions` field on `getVersion()`. **Palo Alto: all four, both transports. Fortinet
+(added 2026-08-04): licences + content versions over SSH** — via `diagnose autoupdate versions`,
+`diagnose test update info` (its **System contracts** block is the only CLI source of the
+SPRT/HDWR/ENHN/COMP support entitlements) and `get system fortiguard`. ⛔ An earlier note here said
+Fortinet had no licence surface; that was wrong, and came from probing only `get system status` —
+one command returning nothing does not prove a vendor lacks the data. Fortinet HA/disk remain
+deferred (no HA-enabled FortiGate to verify a peer parser against). Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
 `device_content_versions` — all latest-snapshot, all detailed in `.ai-codex/schema.md`.
 
 - **Licences / support expiry** — the fleet renewal-planning view. ⛔ `expires_at` is TRI-STATE

@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.49.0': [
+    'Fortinet licence and support-contract expiry is now collected. All five FortiGates previously showed "not collected" on the Lifecycle page; they now report hardware RMA, support, comprehensive and firmware contract dates alongside every FortiGuard subscription.',
+    'Fortinet signature freshness (antivirus, threat and application definitions) is collected from the same output, closing the second Fortinet gap on that page.',
+    'This corrects an earlier assessment that Fortinet exposed no licence data over SSH. It does — three commands carry it; the original check only looked at one.',
+  ],
   '2.48.2': [
     'Fixed the HA "Why?" explanation being cut off at the right edge of the page. It was rendering inside the narrow Status column; it now gets its own full-width row beneath each degraded pair, so version values and licence names are fully readable.',
   ],

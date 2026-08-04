@@ -443,9 +443,28 @@ Neither implements `getVpnSessionSummary`.
       ITC-SK, PAKFood, TUFF(TUTH3), TUM(TUTH1)); the rest standalone. PAN-OS reports its own
       `Version Compatibility:` Match/Mismatch block, so cross-pair version-mismatch detection is
       parsing, not computation.
-    - **Fortinet is deliberately NOT implemented** for any of these: `get system status` exposes no
-      licence/support surface, and while `Mode: Standalone` is confirmed on all 5 units there is no
-      HA-ENABLED FortiGate anywhere in this deployment to verify a peer parser against — same
+    - ⛔ **Fortinet licences ARE implemented (2026-08-04). An earlier version of this note claimed
+      Fortinet had no licence surface — that was WRONG**, and the mistake is worth recording: the
+      conclusion came from probing only `get system status`, which genuinely has no licence lines.
+      One command returning nothing does NOT establish that a vendor lacks the data. Three other
+      commands carry it, all live-verified on TSR-TL/TSR_EKC before any parser was written:
+      - `diagnose autoupdate versions` — Fortinet's OWN documented CLI licence command. Per-component
+        FortiGuard UPDATE contracts (`Contract Expiry Date:`) plus signature versions and last-update
+        timestamps, so content freshness comes from the same output.
+      - `diagnose test update info` — the **System contracts** block (`SPRT`/`HDWR`/`ENHN`/`COMP`/
+        `FMWR`), i.e. the SUPPORT and HARDWARE entitlements. Available nowhere else on the CLI, and
+        the actual renewal-planning data. Its second group of DATABASE codes (APDB/AVDB/ETDB/...) is
+        deliberately skipped — `diagnose autoupdate versions` already reports those same contracts
+        against readable component names, so emitting both double-counts 30+ rows per device.
+      - `get system fortiguard` — query-based services (webfilter, antispam, outbreak prevention)
+        that are not downloaded databases and therefore never appear in autoupdate's list.
+      ⚠️ `Contract Expiry Date: n/a` means **NOT LICENSED** — a distinct state from unknown; the raw
+      string is preserved so `deviceHealth` can tell them apart, exactly like Palo Alto's `Never`.
+      ⚠️ Dates are `Tue Jul 24 2029`, sometimes carrying a time (`Mon May 6 16:00:00 2024`) — a
+      different shape from Palo Alto's `September 16, 2027`, so `parseFortiDate()` is its own parser.
+      FortiOS reports no expired yes/no verdict, so `expired` stays null and the date decides.
+    - **Fortinet HA remains deferred**: `Mode: Standalone` is confirmed on all 5 units, but no
+      HA-ENABLED FortiGate exists in this deployment to verify a peer parser against — same
       discipline that deferred Fortinet API-transport topology.
 
 ---
