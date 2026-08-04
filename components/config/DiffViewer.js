@@ -230,13 +230,22 @@ function unionKeys(items) {
 }
 
 const HEADER_CELL_STYLE = { whiteSpace: 'nowrap' };
-const FIELD_CELL_STYLE = { fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-word' };
-const VALUE_CELL_STYLE = { wordBreak: 'break-word', verticalAlign: 'top' };
 
-// A table wide enough to need horizontal room scrolls INSIDE its own box
-// rather than pushing the page sideways (design-system rule, and the fix for
-// the earlier right-edge clipping report).
-const SCROLL_BOX_STYLE = { overflowX: 'auto', maxWidth: '100%' };
+// ⛔ `white-space` INHERITS. Several ancestors in this page's tree set
+// `nowrap` (see app/globals.css), and a nowrap cell cannot wrap no matter how
+// generous `word-break` is — a long value then lays out as one enormous line
+// that is clipped by the cell and unreachable, since the row is not itself a
+// scroll container. Every value cell therefore RESETS white-space explicitly
+// rather than relying on the default. `overflowWrap: anywhere` additionally
+// breaks unbroken tokens (base64, certificate bodies, long object names) that
+// have no space to wrap at.
+const WRAP_STYLE = { whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word' };
+const FIELD_CELL_STYLE = { fontWeight: 600, color: 'var(--text-primary)', ...WRAP_STYLE };
+const VALUE_CELL_STYLE = { ...WRAP_STYLE, verticalAlign: 'top' };
+
+// The shared <Table> component ALREADY wraps itself in an overflow-x:auto
+// bordered box, so a wide table scrolls within its card without any extra
+// wrapper here.
 
 function ObjectArrayTable({ items, depth }) {
   const keys = unionKeys(items);
@@ -250,32 +259,30 @@ function ObjectArrayTable({ items, depth }) {
     );
   }
   return (
-    <div style={SCROLL_BOX_STYLE}>
-      <Table>
-        <thead>
-          <tr>
+    <Table>
+      <thead>
+        <tr>
+          {keys.map((k) => (
+            <th key={k} style={HEADER_CELL_STYLE}>{titleCaseField(k)}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item, i) => (
+          <tr key={i}>
             {keys.map((k) => (
-              <th key={k} style={HEADER_CELL_STYLE}>{titleCaseField(k)}</th>
+              <td key={k} style={VALUE_CELL_STYLE}>
+                {Object.prototype.hasOwnProperty.call(item, k) ? (
+                  <ValueTable value={item[k]} depth={depth + 1} />
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>{KEY_NOT_PRESENT_PLACEHOLDER}</span>
+                )}
+              </td>
             ))}
           </tr>
-        </thead>
-        <tbody>
-          {items.map((item, i) => (
-            <tr key={i}>
-              {keys.map((k) => (
-                <td key={k} style={VALUE_CELL_STYLE}>
-                  {Object.prototype.hasOwnProperty.call(item, k) ? (
-                    <ValueTable value={item[k]} depth={depth + 1} />
-                  ) : (
-                    <span style={{ color: 'var(--text-muted)' }}>{KEY_NOT_PRESENT_PLACEHOLDER}</span>
-                  )}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
@@ -302,28 +309,31 @@ function ValueTable({ value, depth = 0 }) {
     const keys = Object.keys(v);
     if (keys.length === 0) return <span style={{ color: 'var(--text-muted)' }}>{EMPTY_ARRAY_PLACEHOLDER}</span>;
     return (
-      <div style={SCROLL_BOX_STYLE}>
-        <Table>
-          <colgroup>
-            <col style={{ width: '30%' }} />
-            <col style={{ width: '70%' }} />
-          </colgroup>
-          <tbody>
-            {keys.map((k) => (
-              <tr key={k}>
-                <td style={FIELD_CELL_STYLE}>{titleCaseField(k)}</td>
-                <td style={VALUE_CELL_STYLE}>
-                  <ValueTable value={v[k]} depth={depth + 1} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </div>
+      <Table>
+        <colgroup>
+          <col style={{ width: '30%' }} />
+          <col style={{ width: '70%' }} />
+        </colgroup>
+        <tbody>
+          {keys.map((k) => (
+            <tr key={k}>
+              <td style={FIELD_CELL_STYLE}>{titleCaseField(k)}</td>
+              <td style={VALUE_CELL_STYLE}>
+                <ValueTable value={v[k]} depth={depth + 1} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
     );
   }
 
-  return <span style={{ wordBreak: 'break-word' }}>{formatValue(v)}</span>;
+  // ⛔ A config value can be enormous — a real case on a live device is a
+  // 300KB base64 image embedded in the config. Rendering that inline made one
+  // table cell hundreds of thousands of pixels wide. Route it through the same
+  // collapse treatment a large string already gets elsewhere in this file.
+  if (isLargeString(v)) return <CollapsibleString value={v} />;
+  return <span style={WRAP_STYLE}>{formatValue(v)}</span>;
 }
 
 // Renders an object/array value as a ValueTable (see above). Large values (per
@@ -850,35 +860,33 @@ function RuleSnapshotTable({ rule, changeType }) {
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={SCROLL_BOX_STYLE}>
-        <Table>
-          <thead>
-            <tr>
-              <th style={HEADER_CELL_STYLE}> </th>
-              {RULE_SNAPSHOT_COLUMNS.map((c) => (
-                <th key={c.label} style={HEADER_CELL_STYLE}>{c.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            <tr style={{ background: tone.bg }}>
-              <td style={{ fontWeight: 600, color: tone.fg, whiteSpace: 'nowrap' }}>{tone.label}</td>
-              {RULE_SNAPSHOT_COLUMNS.map((c) => {
-                const value = c.render(rule);
-                return (
-                  <td
-                    key={c.label}
-                    title={typeof value === 'string' ? value : undefined}
-                    style={{ wordBreak: 'break-word', whiteSpace: c.nowrap ? 'nowrap' : undefined }}
-                  >
-                    {value}
-                  </td>
-                );
-              })}
-            </tr>
-          </tbody>
-        </Table>
-      </div>
+      <Table>
+        <thead>
+          <tr>
+            <th style={HEADER_CELL_STYLE}> </th>
+            {RULE_SNAPSHOT_COLUMNS.map((c) => (
+              <th key={c.label} style={HEADER_CELL_STYLE}>{c.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ background: tone.bg }}>
+            <td style={{ fontWeight: 600, color: tone.fg, whiteSpace: 'nowrap' }}>{tone.label}</td>
+            {RULE_SNAPSHOT_COLUMNS.map((c) => {
+              const value = c.render(rule);
+              return (
+                <td
+                  key={c.label}
+                  title={typeof value === 'string' ? value : undefined}
+                  style={{ wordBreak: 'break-word', whiteSpace: c.nowrap ? 'nowrap' : undefined }}
+                >
+                  {value}
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </Table>
       {notes.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', fontSize: 'var(--text-xs)' }}>
           {notes.map((n) => (

@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.51.1': [
+    'Long config values no longer clip out of their table cell — `white-space` inherits, and several ancestors set `nowrap`, so a value cell could not wrap however generous its word-break was.',
+    'An enormous embedded value (one live device carries a ~300KB base64 image in its config) now collapses behind a "Show details" toggle instead of laying out a single cell hundreds of thousands of pixels wide.',
+  ],
   '2.51.0': [
     'A whole rule added to or removed from the config now renders as a proper rule table (name, zones, source, destination, service, application, action, log, status) instead of the raw structure dump it used to expand into.',
     'Every nested value in a config diff now renders as a table — a list of records becomes one table with a column per field, rather than a stack of indented key/value trees.',
