@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.51.0': [
+    'A whole rule added to or removed from the config now renders as a proper rule table (name, zones, source, destination, service, application, action, log, status) instead of the raw structure dump it used to expand into.',
+    'Every nested value in a config diff now renders as a table — a list of records becomes one table with a column per field, rather than a stack of indented key/value trees.',
+    'PAN-OS list wrappers are unwrapped, so zones read "DMZ1, DMZ3" instead of nesting under a pointless "member" level.',
+    'Field labels no longer leak the XML parser\'s "@_" attribute prefix ("@ Name" is now "Name"), and known acronyms render correctly (UUID, IP, VSYS).',
+    'Wide rule tables scroll inside their own card instead of clipping at the right edge of the page.',
+  ],
   '2.50.3': [
     'Device metric poll and VPN session poll are now mutually exclusive — since v2.50.0 the metric poll opens real SSH/REST management sessions, and at the default 15/30-minute intervals both jobs hit the whole fleet at :00 and :30, contending for the same admin sessions.',
     'Corrected the metric poll\'s summary log, which still described every active device as "SNMP-enabled" and every skip as "no SNMP capability".',

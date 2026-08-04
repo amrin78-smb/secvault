@@ -5,6 +5,7 @@ import LoadingSpinner from '../ui/LoadingSpinner';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import { ruleFromBraceEntry } from '../../lib/adapters/paloalto/sshParser';
+import { parseRuleEntry } from '../../lib/adapters/paloalto/parser';
 
 // Renders one grouped section of a config diff (Added / Removed / Modified).
 // Defined at module top level (never nested inside DiffViewer — CLAUDE.md rule).
@@ -164,10 +165,171 @@ function ValueTree({ value }) {
   return <span style={{ wordBreak: 'break-word' }}>{formatValue(value)}</span>;
 }
 
-// Renders an object/array value as a readable ValueTree (see above). Large
-// values (per LARGE_VALUE_THRESHOLD) collapse behind a toggle so a big subtree
-// doesn't dominate the row list. Top-level function per CLAUDE.md — never nest
-// a component definition inside another component's function body.
+// ---------------------------------------------------------------------------
+// ValueTable — the nested-structure renderer (supersedes ValueTree above)
+// ---------------------------------------------------------------------------
+// ValueTree's indented key/value tree was already an improvement on raw JSON,
+// but it still READS as a serialized structure: an operator scanning a config
+// subtree ("shared", a certificate entry, a local-user record) gets a wall of
+// `key:` lines with no column alignment and no visual separation between one
+// record and the next. This renders the same data as real tables:
+//
+//   * object                  -> two-column Field | Value table, value cell recurses
+//   * array of objects        -> ONE table, columns = union of the objects' keys
+//                                (the biggest readability win — N records read as
+//                                N rows rather than N stacked sub-trees)
+//   * array of primitives     -> comma-joined text
+//   * primitive               -> text
+//
+// ValueTree is KEPT, not deleted: it remains the fallback past MAX_TABLE_DEPTH,
+// where nesting tables inside table cells starts costing more horizontal room
+// than it buys in clarity.
+const MAX_TABLE_DEPTH = 4;
+
+// Widest array-of-objects that renders as a columnar table. Past this the
+// column union gets unwieldy and it falls back to per-item tables.
+const MAX_OBJECT_TABLE_COLUMNS = 8;
+
+// PAN-OS XML wraps every list in a `<member>` element, so a set of zones
+// reaches the diff tree as `{ member: ['DMZ1', 'DMZ3'] }`. That wrapper is the
+// vendor's XML grammar, not information — rendering it produced a pointless
+// extra nesting level ("To: member: DMZ1, DMZ3"). Unwrap a single-key
+// `member` object to its contents. Deliberately ONLY when `member` is the
+// sole key, so a record that happens to also carry other fields is never
+// silently reduced to one of them.
+function unwrapMember(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0] === 'member') return value.member;
+  return value;
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// True when every element is a plain object — the shape that earns a columnar
+// table. An array mixing objects and primitives does not (a primitive has no
+// column to sit under).
+function isObjectArray(value) {
+  return Array.isArray(value) && value.length > 0 && value.every(isPlainObject);
+}
+
+// Column set for an object array: the union of every element's keys, in
+// first-seen order so the first record's field order leads (vendors emit
+// their most identifying field first — `@_name`, `id`, `feature`).
+function unionKeys(items) {
+  const seen = [];
+  const set = new Set();
+  for (const item of items) {
+    for (const k of Object.keys(item)) {
+      if (!set.has(k)) { set.add(k); seen.push(k); }
+    }
+  }
+  return seen;
+}
+
+const HEADER_CELL_STYLE = { whiteSpace: 'nowrap' };
+const FIELD_CELL_STYLE = { fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-word' };
+const VALUE_CELL_STYLE = { wordBreak: 'break-word', verticalAlign: 'top' };
+
+// A table wide enough to need horizontal room scrolls INSIDE its own box
+// rather than pushing the page sideways (design-system rule, and the fix for
+// the earlier right-edge clipping report).
+const SCROLL_BOX_STYLE = { overflowX: 'auto', maxWidth: '100%' };
+
+function ObjectArrayTable({ items, depth }) {
+  const keys = unionKeys(items);
+  if (keys.length > MAX_OBJECT_TABLE_COLUMNS) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {items.map((item, i) => (
+          <ValueTable key={i} value={item} depth={depth + 1} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={SCROLL_BOX_STYLE}>
+      <Table>
+        <thead>
+          <tr>
+            {keys.map((k) => (
+              <th key={k} style={HEADER_CELL_STYLE}>{titleCaseField(k)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i}>
+              {keys.map((k) => (
+                <td key={k} style={VALUE_CELL_STYLE}>
+                  {Object.prototype.hasOwnProperty.call(item, k) ? (
+                    <ValueTable value={item[k]} depth={depth + 1} />
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>{KEY_NOT_PRESENT_PLACEHOLDER}</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
+  );
+}
+
+function ValueTable({ value, depth = 0 }) {
+  const v = unwrapMember(value);
+
+  if (depth >= MAX_TABLE_DEPTH) return <ValueTree value={v} />;
+
+  if (Array.isArray(v)) {
+    if (v.length === 0) return <span style={{ color: 'var(--text-muted)' }}>{EMPTY_ARRAY_PLACEHOLDER}</span>;
+    if (v.every(isTreePrimitive)) return <span style={{ wordBreak: 'break-word' }}>{joinTreePrimitives(v)}</span>;
+    if (isObjectArray(v)) return <ObjectArrayTable items={v} depth={depth} />;
+    // Mixed array — each element on its own, one under the next.
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {v.map((item, i) => (
+          <ValueTable key={i} value={item} depth={depth + 1} />
+        ))}
+      </div>
+    );
+  }
+
+  if (isPlainObject(v)) {
+    const keys = Object.keys(v);
+    if (keys.length === 0) return <span style={{ color: 'var(--text-muted)' }}>{EMPTY_ARRAY_PLACEHOLDER}</span>;
+    return (
+      <div style={SCROLL_BOX_STYLE}>
+        <Table>
+          <colgroup>
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '70%' }} />
+          </colgroup>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k}>
+                <td style={FIELD_CELL_STYLE}>{titleCaseField(k)}</td>
+                <td style={VALUE_CELL_STYLE}>
+                  <ValueTable value={v[k]} depth={depth + 1} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+    );
+  }
+
+  return <span style={{ wordBreak: 'break-word' }}>{formatValue(v)}</span>;
+}
+
+// Renders an object/array value as a ValueTable (see above). Large values (per
+// LARGE_VALUE_THRESHOLD) collapse behind a toggle so a big subtree doesn't
+// dominate the row list. Top-level function per CLAUDE.md — never nest a
+// component definition inside another component's function body.
 function CollapsibleValue({ value }) {
   const [expanded, setExpanded] = useState(false);
   const isLarge = JSON.stringify(value).length > LARGE_VALUE_THRESHOLD;
@@ -175,7 +337,7 @@ function CollapsibleValue({ value }) {
   if (!isLarge) {
     return (
       <div style={TREE_BOX_STYLE}>
-        <ValueTree value={value} />
+        <ValueTable value={value} />
       </div>
     );
   }
@@ -188,7 +350,7 @@ function CollapsibleValue({ value }) {
       </button>
       {expanded && (
         <div style={TREE_BOX_STYLE}>
-          <ValueTree value={value} />
+          <ValueTable value={value} />
         </div>
       )}
     </span>
@@ -229,7 +391,7 @@ function renderBlockValue(value) {
 
 // ---------------------------------------------------------------------------
 // Generic "flat object" Field|Value table — the non-rule counterpart to
-// RuleDetailGrid further down this file. Address/service objects, zones,
+// RuleSnapshotTable further down this file. Address/service objects, zones,
 // VPN records, admin accounts, NAT/PBF rules etc. have no per-domain
 // normalizer (unlike PAN-OS security rules, which reuse ruleFromBraceEntry())
 // — they're just whatever flat-ish raw dict the vendor's config tree happens
@@ -268,7 +430,7 @@ function isFlatObject(value) {
 
 // Small per-file mechanical field-label transform — matches this file's
 // existing convention of duplicating a two-line helper locally rather than
-// reaching into another module (see joinArray/actionBorderColor's comment
+// reaching into another module (see joinArray's own comment
 // further down, and configDiff.js's own per-adapter SECRET_KEY_PATTERN
 // duplication). Deliberately NOT the same casing as configDiff.js's
 // humanizeFieldForSentence() (that one lowercases for mid-sentence use) —
@@ -276,12 +438,46 @@ function isFlatObject(value) {
 // page's own columns ("Src Zone", "Dst Zone") read. A straightforward
 // mechanical split-and-capitalize; a slightly awkward label (e.g.
 // "Accprofile" for a field with no separator) beats a guessed-nicer one.
+// Acronyms a mechanical capitalize would mangle into "Uuid"/"Ip"/"Vsys". Only
+// entries that are unambiguous as a WHOLE word — deliberately not "id" (a
+// field genuinely named "id" reads fine as "Id", and "ID" would also rewrite
+// the "id" inside nothing else since matching is per-word). Display-only.
+const FIELD_ACRONYMS = {
+  ip: 'IP',
+  uuid: 'UUID',
+  url: 'URL',
+  dns: 'DNS',
+  ntp: 'NTP',
+  ha: 'HA',
+  vpn: 'VPN',
+  ssl: 'SSL',
+  ssh: 'SSH',
+  snmp: 'SNMP',
+  nat: 'NAT',
+  vsys: 'VSYS',
+  vdom: 'VDOM',
+  cpu: 'CPU',
+  mtu: 'MTU',
+  tcp: 'TCP',
+  udp: 'UDP',
+  ike: 'IKE',
+  psk: 'PSK',
+};
+
+// fast-xml-parser is configured with `attributeNamePrefix: '@_'`, so a PAN-OS
+// XML attribute reaches the diff tree as `@_name`/`@_uuid`. Rendering that
+// verbatim produced labels like "@ Name" — the prefix is a parser artifact,
+// not part of the device's own vocabulary, so strip it before labelling.
+function stripAttrPrefix(field) {
+  return String(field).replace(/^@_/, '');
+}
+
 function titleCaseField(field) {
-  return String(field)
+  return stripAttrPrefix(field)
     .replace(/[-_]+/g, ' ')
     .split(' ')
     .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => FIELD_ACRONYMS[word.toLowerCase()] || word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 }
 
@@ -292,7 +488,7 @@ function titleCaseField(field) {
 const EMPTY_ARRAY_PLACEHOLDER = '(empty)';
 
 // Joins an array of primitives for one table cell. Deliberately NOT
-// RuleDetailGrid's joinArray() below (which is tied to that grid's own
+// the rule tables' joinArray() below (which is tied to their own
 // '—'-for-empty convention) — kept separate per this file's small-local-
 // duplication convention, and because the two tables' empty-value
 // conventions don't need to match each other.
@@ -587,41 +783,17 @@ function RuleChangeBadge({ changeType }) {
 // point-in-time historical diff has no stable sequence number and no live
 // hit count.
 //
-// `joinArray`/`actionBorderColor` are DELIBERATELY duplicated here rather
+// `joinArray` is DELIBERATELY duplicated here rather
 // than imported from the Rules page — that page is a server component page
 // module, not a shared lib export, and this codebase's own established
 // convention is small per-file duplication over reaching into a page file
 // (e.g. SECRET_KEY_PATTERN is duplicated per-adapter rather than
-// centralized). Keep these two in sync with the Rules page's copies if the
+// centralized). Keep this in sync with the Rules page's copy if the
 // value-formatting conventions ever change there.
 function joinArray(value) {
   if (!Array.isArray(value) || value.length === 0) return '—';
   return value.join(', ');
 }
-
-function actionBorderColor(action) {
-  if (action === 'allow') return 'var(--green)';
-  if (action === 'deny' || action === 'drop' || action === 'reject' || action === 'block') return 'var(--red)';
-  return 'var(--border)';
-}
-
-// One row per NormalizedRule field. Order matches the Rules page's column
-// order (skipping `#` and `Hits`, which don't apply to a single historical
-// rule snapshot).
-const RULE_DETAIL_FIELDS = [
-  { label: 'Name', render: (r) => r.rule_name || '—' },
-  { label: 'Enabled', render: (r) => (r.enabled ? 'Yes' : 'No') },
-  { label: 'Action', render: (r) => r.action || '—' },
-  { label: 'Src Zone', render: (r) => joinArray(r.src_zones) },
-  { label: 'Dst Zone', render: (r) => joinArray(r.dst_zones) },
-  { label: 'Src Address', render: (r) => joinArray(r.src_addresses) },
-  { label: 'Dst Address', render: (r) => joinArray(r.dst_addresses) },
-  { label: 'Services', render: (r) => joinArray(r.services) },
-  { label: 'Comment', render: (r) => r.comment || '—' },
-  { label: 'Applications', render: (r) => joinArray(r.applications) },
-  { label: 'Schedule', render: (r) => r.schedule || '—' },
-  { label: 'Log', render: (r) => (r.log_enabled ? 'Yes' : 'No') },
-];
 
 // Per-change-type accent (left border + status square), reused by the rule
 // accordion below. Maps to the same green/red/yellow the Badge tones use.
@@ -631,51 +803,92 @@ const CHANGE_TONE = {
   modified: 'var(--yellow)',
 };
 
-// Compact single-rule detail — the fields flow into a RESPONSIVE grid
-// (auto-fit, ~3-4 columns on a wide diff) instead of the old 12-row vertical
-// "Field | Value" table, which was the single biggest space hog in this view
-// (a real user complaint: every added rule dumped a full-height stacked table,
-// always expanded). Each cell is a small label-over-value block that wraps
-// cleanly, so a long Applications list flows within its own cell rather than
-// clipping off-screen. `Name` is dropped here — it's already the accordion
-// card's title. Left border keeps the action color cue.
-function RuleDetailGrid({ rule }) {
-  const accent = actionBorderColor(rule.action);
+// ---------------------------------------------------------------------------
+// RuleSnapshotTable — one whole rule as a ManageEngine-style horizontal table
+// ---------------------------------------------------------------------------
+// A whole rule that was ADDED or REMOVED is the single most important thing in
+// a config diff, and it was the last place still dumping a raw structure dump
+// (`{15 keys}` expanding into `to: member: DMZ1…`, `@_uuid: …`). It now renders
+// as the same shape a firewall operator already reads everywhere else: one
+// header row of rule attributes, one row of values, tinted green for added and
+// red for removed.
+//
+// Horizontal (not the vertical Field|Value stack) because that is how a rule is
+// read in every firewall UI — left to right, one line per rule. The table lives
+// in its own `overflow-x: auto` box, so a wide rule scrolls WITHIN the card
+// instead of clipping at the right page edge.
+const RULE_SNAPSHOT_COLUMNS = [
+  { label: 'Rule Name', render: (r) => r.rule_name || '—', nowrap: true },
+  { label: 'Src Zone', render: (r) => joinArray(r.src_zones) },
+  { label: 'Dst Zone', render: (r) => joinArray(r.dst_zones) },
+  { label: 'Source', render: (r) => joinArray(r.src_addresses) },
+  { label: 'Destination', render: (r) => joinArray(r.dst_addresses) },
+  { label: 'Service', render: (r) => joinArray(r.services) },
+  { label: 'Application', render: (r) => joinArray(r.applications) },
+  { label: 'Action', render: (r) => r.action || '—', nowrap: true },
+  { label: 'Log', render: (r) => (r.log_enabled ? 'Enabled' : 'Disabled'), nowrap: true },
+  { label: 'Status', render: (r) => (r.enabled ? 'Enabled' : 'Disabled'), nowrap: true },
+];
+
+// Shown under the table only when populated — a rule with no schedule and no
+// description shouldn't pay two columns of width for two em-dashes.
+const RULE_SNAPSHOT_FOOTNOTES = [
+  { label: 'Schedule', get: (r) => r.schedule },
+  { label: 'Comment', get: (r) => r.comment },
+];
+
+const SNAPSHOT_TONE = {
+  added: { bg: 'var(--tint-success)', fg: 'var(--tint-success-fg)', label: 'New Details' },
+  removed: { bg: 'var(--tint-danger)', fg: 'var(--tint-danger-fg)', label: 'Old Details' },
+  modified: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', label: 'Details' },
+};
+
+function RuleSnapshotTable({ rule, changeType }) {
+  const tone = SNAPSHOT_TONE[changeType] || SNAPSHOT_TONE.modified;
+  const notes = RULE_SNAPSHOT_FOOTNOTES.map((f) => ({ label: f.label, value: f.get(rule) })).filter(
+    (n) => typeof n.value === 'string' && n.value.length > 0
+  );
   return (
-    <div
-      style={{
-        borderLeft: `3px solid ${accent}`,
-        paddingLeft: 10,
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-        gap: '10px 16px',
-      }}
-    >
-      {RULE_DETAIL_FIELDS.filter((f) => f.label !== 'Name').map(({ label, render }) => {
-        const value = render(rule);
-        return (
-          <div key={label} style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 'var(--text-xs)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                color: 'var(--text-muted)',
-                marginBottom: 2,
-              }}
-            >
-              {label}
-            </div>
-            <div
-              className="mono"
-              style={{ color: 'var(--text-primary)', wordBreak: 'break-word' }}
-              title={typeof value === 'string' ? value : undefined}
-            >
-              {value}
-            </div>
-          </div>
-        );
-      })}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={SCROLL_BOX_STYLE}>
+        <Table>
+          <thead>
+            <tr>
+              <th style={HEADER_CELL_STYLE}> </th>
+              {RULE_SNAPSHOT_COLUMNS.map((c) => (
+                <th key={c.label} style={HEADER_CELL_STYLE}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ background: tone.bg }}>
+              <td style={{ fontWeight: 600, color: tone.fg, whiteSpace: 'nowrap' }}>{tone.label}</td>
+              {RULE_SNAPSHOT_COLUMNS.map((c) => {
+                const value = c.render(rule);
+                return (
+                  <td
+                    key={c.label}
+                    title={typeof value === 'string' ? value : undefined}
+                    style={{ wordBreak: 'break-word', whiteSpace: c.nowrap ? 'nowrap' : undefined }}
+                  >
+                    {value}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </Table>
+      </div>
+      {notes.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', fontSize: 'var(--text-xs)' }}>
+          {notes.map((n) => (
+            <span key={n.label}>
+              <span style={{ color: 'var(--text-muted)' }}>{n.label}: </span>
+              <span style={{ color: 'var(--text-primary)' }}>{n.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -719,6 +932,25 @@ function tryBuildRuleFromChange(change) {
   }
 }
 
+// XML/API-transport counterpart to tryBuildRuleFromChange() above. Where that
+// one normalizes an SSH brace-tree rule dict, this one normalizes the PAN-OS
+// XML rule object (`{'@_name': ..., to: {member: [...]}, action: 'allow', ...}`)
+// that reaches an indexed rulebase diff entry, reusing the adapter's own
+// parseRuleEntry() rather than re-deriving the field mapping here. Same
+// defensive discipline: any doubt returns null and the caller keeps the
+// existing raw rendering. The `0` index is a placeholder — parseRuleEntry uses
+// it only for `sequence_number`, which a point-in-time diff snapshot has no
+// meaningful value for and RuleSnapshotTable does not display.
+function tryBuildRuleFromXmlValue(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    const rule = parseRuleEntry(value, 0);
+    return looksLikeRealRule(rule) ? rule : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
 // Compact value renderer for ONE field-level rule change — inline "old → new"
 // for small primitives (colored red/green), stacked for objects/large strings.
 function RuleFieldValue({ change }) {
@@ -745,7 +977,7 @@ function RuleFieldValue({ change }) {
 
 // Field-level changes (a rule that had individual fields edited, not wholly
 // added/removed) rendered as a responsive label-over-value grid — same compact
-// shape as RuleDetailGrid, one cell per changed field, so N field edits take a
+// label-over-value shape, one cell per changed field, so N field edits take a
 // few rows, not N stacked table rows.
 function RuleFieldChangeList({ changes }) {
   return (
@@ -861,7 +1093,7 @@ function RuleChangeCard({ group, expanded, onToggle }) {
       </button>
       {expanded && (
         <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {builtRule && <RuleDetailGrid rule={builtRule} />}
+          {builtRule && <RuleSnapshotTable rule={builtRule} changeType={wholeRule.changeType} />}
           {/* Whole-rule add/remove that couldn't be parsed into a NormalizedRule
               falls back to the reliable raw-value rendering, same as before. */}
           {wholeRule && !builtRule &&
@@ -1024,6 +1256,15 @@ function IndexedRuleValueCell({ entry }) {
   }
   // added / removed
   const value = entry.value;
+  // ⛔ A WHOLE-rule add/remove (ruleField === null) carries the full PAN-OS XML
+  // rule object. It is nested (`to: {member: [...]}`), so isFlatObject() rejects
+  // it and it used to fall through to the raw structure dump — the single worst
+  // rendering in the diff view, and the one an operator most needs to read.
+  // Normalize it with the adapter's OWN parser and show a rule table instead.
+  if (entry.ruleField === null) {
+    const rule = tryBuildRuleFromXmlValue(value);
+    if (rule) return <RuleSnapshotTable rule={rule} changeType={entry.changeType} />;
+  }
   if (needsBlockRender(value)) {
     return isFlatObject(value) ? <FlatObjectTable value={value} /> : renderBlockValue(value);
   }
