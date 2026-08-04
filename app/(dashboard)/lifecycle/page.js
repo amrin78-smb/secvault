@@ -100,6 +100,7 @@ function licenseBadge(status) {
   if (status === 'expiring') return <Badge color="warning">Expiring</Badge>;
   if (status === 'perpetual') return <Badge color="info">Perpetual</Badge>;
   if (status === 'ok') return <Badge color="success">OK</Badge>;
+  if (status === 'not_licensed') return <Badge color="muted">Not licensed</Badge>;
   return <Badge color="muted">Unknown</Badge>;
 }
 
@@ -163,7 +164,7 @@ async function getLifecycleData() {
 // listing them individually turned one purchasing decision into seven rows and
 // made the table a long scroll rather than a plan. The group's status is the
 // WORST of its members so nothing urgent hides inside a collapsed group.
-const LICENSE_SEVERITY_RANK = { expired: 4, expiring: 3, unknown: 2, ok: 1, perpetual: 1 };
+const LICENSE_SEVERITY_RANK = { expired: 4, expiring: 3, unknown: 2, ok: 1, perpetual: 1, not_licensed: 0 };
 
 function groupLicenseRenewals(entries) {
   const groups = new Map();
@@ -283,7 +284,8 @@ export default async function LifecyclePage() {
     .map((row) => ({ row, st: licenseStatus(row, now) }))
     .filter(
       ({ row, st }) =>
-        st.status === 'expired' || st.status === 'expiring' || st.status === 'unknown' || isSupportContract(row)
+        st.status !== 'not_licensed' &&
+        (st.status === 'expired' || st.status === 'expiring' || st.status === 'unknown' || isSupportContract(row))
     )
     .map(({ row, st }) => ({
       key: row.id,

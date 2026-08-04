@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.49.1': [
+    'Fortinet components the firewall reports as not licensed (OT Threat, IoT Detect, DLP Signatures and similar) no longer appear in the renewal table as "Unknown" with a blank date. There is nothing to renew for them, and labelling them Unknown implied someone needed to investigate.',
+    'They are now correctly identified as "Not licensed" wherever they are shown, which is a definite fact the device reported — distinct from an expiry date that genuinely could not be read.',
+  ],
   '2.49.0': [
     'Fortinet licence and support-contract expiry is now collected. All five FortiGates previously showed "not collected" on the Lifecycle page; they now report hardware RMA, support, comprehensive and firmware contract dates alongside every FortiGuard subscription.',
     'Fortinet signature freshness (antivirus, threat and application definitions) is collected from the same output, closing the second Fortinet gap on that page.',
