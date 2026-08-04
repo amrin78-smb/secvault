@@ -258,8 +258,12 @@ function ObjectArrayTable({ items, depth }) {
       </div>
     );
   }
+  // Same reasoning as RuleSnapshotTable: no colgroup, no percentage widths, so
+  // the default 'fixed' would cut the width into N equal columns and truncate
+  // every heading. minWidth scales with the column count so a wide record
+  // scrolls at its natural size instead of compressing.
   return (
-    <Table>
+    <Table layout="auto" minWidth={Math.min(keys.length * 130, 1400)}>
       <thead>
         <tr>
           {keys.map((k) => (

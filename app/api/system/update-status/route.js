@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.51.3': [
+    'Multi-column record tables (device admins, widgets, and similar config lists) size their columns to content too, so headings like "Username Modifier" no longer truncate.',
+  ],
   '2.51.2': [
     'A changed rule now spans the full width of its card instead of being squeezed into a "Value" column — the old Field | Change | Value wrapper table left the 11 rule columns truncated to "RULE…", "SRC …", "3BB,…".',
     'Field name and change type moved out of table columns and into pills in the group header, where metadata belongs; the columns are now firewall data only.',
