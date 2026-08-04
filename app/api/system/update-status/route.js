@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.50.2': [
+    'IMPORTANT FIX: a single failed licence or disk read could wipe that firewall’s stored licence data and report success, making the Lifecycle page fall back to "not collected". A failure now leaves the previous values untouched and is recorded as an error.',
+    'Palo Alto no longer records a confident "0 active sessions" when the firewall did not report a session count.',
+    'Fortinet no longer records an empty metrics reading as a successful poll when the command was rejected by the account’s permissions.',
+  ],
   '2.50.1': [
     'IMPORTANT FIX: config-change records for security-sensitive edits (VPN pre-shared keys, SNMP communities, admin password hashes) were being deleted on every update. Because those values are masked in storage, both sides read as identical and a cleanup routine added yesterday mistook them for a non-change. Existing records are no longer at risk, though any deleted between yesterday and now cannot be recovered.',
     'Fortinet firmware-update contracts now appear in the renewal table. They were still being dropped while the other Fortinet contracts showed.',
