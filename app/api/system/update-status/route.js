@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.48.2': [
+    'Fixed the HA "Why?" explanation being cut off at the right edge of the page. It was rendering inside the narrow Status column; it now gets its own full-width row beneath each degraded pair, so version values and licence names are fully readable.',
+  ],
   '2.48.1': [
     'A degraded HA pair now explains itself. Expanding "Why?" on the Lifecycle page shows exactly which components disagree and BOTH members actual values — for example "URL database 20260803.20149 (this) vs 0000.00.00.000 (peer)" — instead of only saying versions do not match.',
     'Any expired or expiring licence on that firewall is listed alongside, as context for why a content feed may have stopped updating. It is shown as related information, not asserted as the cause, since SecVault only talks to the active member and cannot see the passive peer licences.',

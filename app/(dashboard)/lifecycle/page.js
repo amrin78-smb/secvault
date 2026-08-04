@@ -544,7 +544,7 @@ export default async function LifecyclePage() {
                       const showWhy =
                         ha.status === 'degraded' &&
                         (ha.reasons.length > 0 || evidence.mismatches.length > 0 || evidence.relevantLicences.length > 0);
-                      return (
+                      const dataRow = (
                         <tr key={row.device_id}>
                           <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
                           <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
@@ -552,57 +552,72 @@ export default async function LifecyclePage() {
                           <td>{row.peer_state || '—'}</td>
                           <td className="mono">{row.peer_mgmt_ip || '—'}</td>
                           <td>{row.config_sync_state || '—'}</td>
-                          <td>
-                            {haBadge(ha.status)}
-                            {/* "Degraded" on its own is not actionable. This expands to
-                                the DEVICE-reported evidence: which components disagree
-                                and both sides' actual values, plus any expired/expiring
-                                licence on this member as context. */}
-                            {showWhy && (
-                              <details style={{ marginTop: 6 }}>
-                                <summary
-                                  style={{ cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--primary)' }}
-                                >
-                                  Why?
-                                </summary>
-                                <div style={{ marginTop: 6, fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                          <td>{haBadge(ha.status)}</td>
+                        </tr>
+                      );
+                      // The evidence gets its OWN full-width row rather than living
+                      // inside the ~11% Status column, where version strings and
+                      // licence names were clipped at the table's right edge.
+                      // <details> cannot span two <tr>s, so the disclosure itself
+                      // moves down here with them.
+                      const whyRow = showWhy ? (
+                        <tr key={`${row.device_id}-why`}>
+                          <td colSpan={7} style={{ paddingTop: 0 }}>
+                            <details>
+                              <summary
+                                style={{ cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--primary)' }}
+                              >
+                                Why is {device?.name || 'this pair'} degraded?
+                              </summary>
+                              <div
+                                style={{
+                                  marginTop: 8,
+                                  fontSize: 'var(--text-sm)',
+                                  color: 'var(--text-secondary)',
+                                  display: 'flex',
+                                  flexWrap: 'wrap',
+                                  gap: 24,
+                                }}
+                              >
+                                <div style={{ minWidth: 280, flex: '1 1 320px' }}>
                                   {ha.reasons.length > 0 && (
-                                    <ul style={{ margin: '0 0 6px', paddingLeft: 16 }}>
+                                    <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
                                       {ha.reasons.map((r) => (
                                         <li key={r}>{r}</li>
                                       ))}
                                     </ul>
                                   )}
                                   {evidence.mismatches.map((m) => (
-                                    <div key={m.key} style={{ marginBottom: 3 }}>
-                                      <span style={{ color: 'var(--text-primary)' }}>{m.label}</span>{' '}
+                                    <div key={m.key} style={{ marginBottom: 4 }}>
+                                      <span style={{ color: 'var(--text-primary)' }}>{m.label}: </span>
                                       <span className="mono">{m.local || '—'}</span>
                                       <span style={{ color: 'var(--text-muted)' }}> (this) vs </span>
                                       <span className="mono">{m.peer || '—'}</span>
                                       <span style={{ color: 'var(--text-muted)' }}> (peer)</span>
                                     </div>
                                   ))}
-                                  {evidence.relevantLicences.length > 0 && (
-                                    <div style={{ marginTop: 6 }}>
-                                      <span style={{ color: 'var(--text-muted)' }}>
-                                        Licences on this member that may be related:
-                                      </span>
-                                      <ul style={{ margin: '3px 0 0', paddingLeft: 16 }}>
-                                        {evidence.relevantLicences.map(({ row: l, st }) => (
-                                          <li key={l.id}>
-                                            {l.feature} — {st.status === 'expired' ? 'expired' : 'expiring'}{' '}
-                                            {formatDate(l.expires_at) || l.expires_raw || ''}
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    </div>
-                                  )}
                                 </div>
-                              </details>
-                            )}
+                                {evidence.relevantLicences.length > 0 && (
+                                  <div style={{ minWidth: 260, flex: '1 1 300px' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>
+                                      Licences on this member that may be related:
+                                    </span>
+                                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                      {evidence.relevantLicences.map(({ row: l, st }) => (
+                                        <li key={l.id}>
+                                          {l.feature} — {st.status === 'expired' ? 'expired' : 'expiring'}{' '}
+                                          {formatDate(l.expires_at) || l.expires_raw || ''}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            </details>
                           </td>
                         </tr>
-                      );
+                      ) : null;
+                      return [dataRow, whyRow];
                     })}
                   </tbody>
                 </Table>
