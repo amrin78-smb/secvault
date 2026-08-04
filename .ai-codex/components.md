@@ -18,7 +18,7 @@ EmptyState  message — dashed-border placeholder box
 LoadingSpinner  size, className — spinning loader indicator
 PageHeader  title, subtitle, actions — page title/subtitle/actions row
 StatusDot  status, className — colored status indicator dot
-Table  children, className, layout='fixed', minWidth — bordered table wrapper (its own overflow-x:auto box, so callers never need to add one). `layout='auto'` (2.51.2) is ONLY for a table with no colgroup and no percentage widths, where 'fixed' would slice width into N equal columns and truncate every heading — pair it with  so the table keeps its natural width and scrolls. ⛔ Never use 'auto' on a table with colgroup/percentage widths; CLAUDE.md requires 'fixed' there
+Table  children, className, layout='fixed', minWidth — bordered table wrapper (its own overflow-x:auto box, so callers never need to add one). `layout='auto'` (2.51.2) is ONLY for a table with no colgroup and no percentage widths, where 'fixed' would slice width into N equal columns and truncate every heading — pair it with `minWidth` so the table keeps its natural width and scrolls. ⛔ Never use 'auto' on a table with colgroup/percentage widths; CLAUDE.md requires 'fixed' there
 IconChip  icon, color, bg — small colored icon badge
 (c) Modal  open, onClose, title, children, maxWidth=420 — focus-trapped dialog overlay; panel is viewport-height-capped + scrolls internally (never clips a tall form's submit button); maxWidth widens the panel for dense content (Edit Device passes 680)
 StatCard  label, value, sub, color, className, compact, icon, iconColor, iconBg — colored-border stat tile
