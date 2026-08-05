@@ -23,6 +23,7 @@ export default function StatCard({
   icon,
   iconColor,
   iconBg,
+  delta,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
@@ -43,6 +44,11 @@ export default function StatCard({
       </div>
       <div className={labelClass}>{label}</div>
       {sub && <div className={subClass}>{sub}</div>}
+      {/* Optional day-over-day change, rendered by DeltaBadge. Undefined by
+          default, so every pre-existing call site is pixel-identical. ⛔ The
+          CALLER decides the colour, because "up" is good for a compliance
+          score and bad for a critical-alert count — see DeltaBadge. */}
+      {delta && <div style={{ marginTop: 4 }}>{delta}</div>}
     </div>
   );
 }

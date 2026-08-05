@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.53.0': [
+    'New fleet Security Score — a real 0-100 composite of vulnerability posture (40%), rule hygiene (30%) and compliance (30%), each reusing the engine that already measures it. Shows its own breakdown so the number can be decomposed, and reads "—" rather than 0 when nothing is measurable.',
+    'Dashboard re-laid out into a denser widget grid, with a six-tile headline row and a Quick Actions card.',
+    'Stat tiles now show a real day-over-day change. Direction of "good" is per-metric: more devices online is green, more urgent CVEs is red.',
+    'The nightly snapshot now records device/rule/alert counts and the Security Score, so deltas accumulate from today onward; tiles show no delta at all where yesterday is unknown, never a misleading zero.',
+  ],
   '2.52.0': [
     'New Settings -> General -> Appearance panel with a Rounded/Square corner switch, so the whole UI can be flipped between soft and hard edges instantly and flipped back with one click.',
     'Every rounded surface now resolves its radius through a token (--radius / --radius-sm / --radius-pill); ~32 places previously hardcoded their own value and would have ignored the switch.',

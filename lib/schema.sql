@@ -661,6 +661,25 @@ CREATE TABLE IF NOT EXISTS fleet_dashboard_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_fds_snapshot_date ON fleet_dashboard_snapshots(snapshot_date);
 
+-- Headline-tile history, added 2026-08-05 (v2.53.0) so the dashboard's stat
+-- cards can show a real "vs yesterday" delta instead of a decorative arrow.
+-- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY — every already
+-- deployed server keeps the old column set unless these ALTERs run (CLAUDE.md,
+-- Database rules). All nullable with NO default: a snapshot taken before this
+-- shipped genuinely does not know these values, and a 0 default would render
+-- as a confident "0 devices yesterday" and produce a garbage delta. The UI
+-- shows no delta at all when the prior day's value is NULL.
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS device_count INTEGER;
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS devices_online INTEGER;
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS rules_total INTEGER;
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS rules_enabled INTEGER;
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS patch_now_count INTEGER;
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS high_risk_count INTEGER;
+-- Fleet Security Score (lib/engines/securityScore.js). Nullable because the
+-- score itself is nullable when nothing is measurable — never 0.
+ALTER TABLE fleet_dashboard_snapshots ADD COLUMN IF NOT EXISTS security_score INTEGER;
+
+
 -- VPN active-session count snapshots (added 2026-07-19). A coarse,
 -- polling-based substitute for real VPN usage telemetry (the "how many
 -- concurrent VPN users over time" question genuinely needs syslog ingestion
