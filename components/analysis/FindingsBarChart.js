@@ -109,7 +109,7 @@ export default function FindingsBarChart({ counts }) {
                 contentStyle={{
                   background: 'var(--bg-card)',
                   border: '1px solid var(--border)',
-                  borderRadius: 6,
+                  borderRadius: 'var(--radius-sm)',
                   fontSize: 12,
                 }}
                 labelStyle={{ color: 'var(--text-primary)' }}

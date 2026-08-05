@@ -50,7 +50,7 @@ function RiskTooltip({ active, payload }) {
       style={{
         background: 'var(--bg-card)',
         border: '1px solid var(--border)',
-        borderRadius: 6,
+        borderRadius: 'var(--radius-sm)',
         padding: '6px 10px',
         fontSize: 12,
       }}

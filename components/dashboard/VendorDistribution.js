@@ -52,7 +52,7 @@ export default async function VendorDistribution() {
               style={{
                 width: '100%',
                 height: 6,
-                borderRadius: 3,
+                borderRadius: 'var(--radius-pill)',
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border)',
                 overflow: 'hidden',
@@ -63,7 +63,7 @@ export default async function VendorDistribution() {
                   width: `${pct}%`,
                   height: '100%',
                   background: 'var(--primary)',
-                  borderRadius: 3,
+                  borderRadius: 'var(--radius-pill)',
                 }}
               />
             </div>

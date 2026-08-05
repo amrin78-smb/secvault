@@ -67,7 +67,7 @@ export default async function Header({ session }) {
             gap: 7,
             padding: '5px 12px',
             background: syncStatus.ok ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.15)',
-            borderRadius: 20,
+            borderRadius: 'var(--radius-pill)',
             border: `1px solid ${syncStatus.ok ? 'rgba(22,163,74,0.3)' : 'rgba(220,38,38,0.3)'}`,
           }}
           title="Feed sync status (NVD + KEV)"

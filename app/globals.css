@@ -33,6 +33,12 @@
   --shadow-lg:      0 10px 40px rgba(0,0,0,0.12);
   --radius:         8px;
   --radius-sm:      6px;
+  /* Fully-rounded surfaces (badges, progress tracks). A separate token from
+     --radius so the square switch can flatten it too — a squared page full of
+     pill badges reads as unfinished. Only TRUE circles (status dots, avatars,
+     which use 50% directly) sit outside the switch; squaring those looks like
+     a rendering bug rather than a style. */
+  --radius-pill:    999px;
   --sidebar-width:  240px;
   --sidebar-width-collapsed: 64px;
   --header-height:  72px;
@@ -72,6 +78,25 @@
   --tint-purple:  #f5f3ff;  --tint-purple-fg:  #6d28d9;
   --tint-teal:    #ecfeff;  --tint-teal-fg:    #0e7490;
   --tint-orange:  #ffedd5;  --tint-orange-fg:  #c2410c;
+}
+
+/* ── Square corners (opt-in) ────────────────────────────
+   Toggled from Settings -> Appearance; lib/corners.js stores the choice and
+   stamps data-corners="square" on <html> (a no-flash inline script in
+   app/layout.js applies it before first paint, same contract as data-theme).
+
+   This overrides ONLY the three radius tokens, which is why it works at all:
+   every rounded surface in the app resolves its radius through one of them.
+   A component that hardcodes a numeric border-radius opts itself out
+   SILENTLY - it stays rounded while everything around it squares off, which
+   reads as a bug rather than a style. Always use the token.
+
+   True circles (status dots, avatars) use 50% directly and are deliberately
+   NOT covered - squaring those looks broken, not hard-edged. */
+:root[data-corners="square"] {
+  --radius:         0;
+  --radius-sm:      0;
+  --radius-pill:    0;
 }
 
 /* Dark theme — brand colors (--primary, --navy*, --accent-teal) and status
@@ -156,7 +181,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   display: inline-flex;
   align-items: center;
   padding: 3px 9px;
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -355,7 +380,7 @@ tbody tr:hover td { background: var(--bg-primary); }
    .sv-nav-chip), just always-colored (not hover/active-gated) since it
    sits on a light card background instead of the dark sidebar. */
 .widget-icon-chip {
-  width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: var(--chip-bg); color: var(--chip-color);
 }
@@ -536,7 +561,7 @@ select.input {
   background: linear-gradient(90deg, var(--border-light) 25%, var(--border) 37%, var(--border-light) 63%);
   background-size: 480px 100%;
   animation: shimmer 1.3s ease-in-out infinite;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 /* ── Segmented control ─────────────────────────────────────── */
@@ -593,13 +618,13 @@ select.input {
   color: var(--text-muted);
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   line-height: 1.5;
 }
 
 /* ── Inline progress bar ───────────────────────────────────── */
-.util-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; min-width: 60px; }
-.util-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.util-track { flex: 1; height: 6px; background: var(--border); border-radius: var(--radius-pill); overflow: hidden; min-width: 60px; }
+.util-fill { height: 100%; border-radius: var(--radius-pill); transition: width 0.4s ease; }
 
 /* ────────────────────────────────────────────────────────────
    App shell — header + collapsible sidebar + scrolling content.
@@ -638,7 +663,7 @@ select.input {
   display: flex; align-items: center; justify-content: center;
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
   color: rgba(255,255,255,0.7);
   position: relative;
@@ -681,7 +706,7 @@ select.input {
   gap: 12px;
   margin: 1px 10px;
   padding: 11px 20px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   color: rgba(255,255,255,0.5);
   font-size: var(--text-md);
   font-weight: 500;
@@ -693,7 +718,7 @@ select.input {
 .sv-sidebar.collapsed .sv-nav a { padding: 11px; justify-content: center; margin: 1px 8px; }
 .sv-sidebar.collapsed .sv-nav a span:not(.sv-nav-chip) { display: none; }
 .sv-nav-chip {
-  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.45);
   transition: all .15s;
@@ -712,7 +737,7 @@ select.input {
 .sv-collapse-btn {
   display: flex; align-items: center; gap: 10px; justify-content: flex-start;
   margin: 4px 10px; padding: 10px 20px; width: calc(100% - 20px);
-  background: transparent; border: none; border-radius: 10px; cursor: pointer;
+  background: transparent; border: none; border-radius: var(--radius); cursor: pointer;
   color: rgba(255,255,255,0.4); font-size: var(--text-sm); font-weight: 500;
   transition: background 0.15s, color 0.15s;
 }

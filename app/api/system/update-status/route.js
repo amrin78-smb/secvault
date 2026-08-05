@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.52.0': [
+    'New Settings -> General -> Appearance panel with a Rounded/Square corner switch, so the whole UI can be flipped between soft and hard edges instantly and flipped back with one click.',
+    'Every rounded surface now resolves its radius through a token (--radius / --radius-sm / --radius-pill); ~32 places previously hardcoded their own value and would have ignored the switch.',
+    'Status dots and avatars stay circular in either mode — squaring those reads as a rendering bug rather than a style.',
+    'The choice is stored per browser and applied before first paint, so there is no flash of the wrong corner style on load (same mechanism as dark mode).',
+  ],
   '2.51.3': [
     'Multi-column record tables (device admins, widgets, and similar config lists) size their columns to content too, so headings like "Username Modifier" no longer truncate.',
   ],

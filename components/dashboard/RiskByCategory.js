@@ -104,7 +104,7 @@ export default async function RiskByCategory() {
                   <div
                     style={{
                       height: 6,
-                      borderRadius: 3,
+                      borderRadius: 'var(--radius-pill)',
                       background: 'var(--bg-primary)',
                       border: '1px solid var(--border)',
                       overflow: 'hidden',
@@ -115,7 +115,7 @@ export default async function RiskByCategory() {
                         height: '100%',
                         width: `${widthPct}%`,
                         background: CATEGORY_COLOR[category] || 'var(--text-muted)',
-                        borderRadius: 3,
+                        borderRadius: 'var(--radius-pill)',
                       }}
                     />
                   </div>

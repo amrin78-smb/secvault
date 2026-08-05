@@ -140,6 +140,7 @@ ZoneClassificationBanner  standards, deviceId — notice that zone classificatio
 
 (c) UpdatePanel  no props — software update status check/trigger + progress overlay
 (c) UsersPanel  no props — RBAC user management CRUD table
+AppearancePanel  no props — Settings -> General. Per-browser presentation prefs (Corners rounded/square via lib/corners.js, Theme light/dark via lib/theme.js) as segmented controls. Reads current values in an EFFECT, not at render: the source of truth is the <html> attribute stamped by app/layout.js's no-flash scripts, which doesn't exist during SSR, so reading at render would hydration-mismatch. Not admin-gated (touches no DB). Added 2026-08-05, v2.52.0.
 (c) CredentialProfilesPanel  no props — reusable credential-bundle CRUD table
 (c) NotificationsPanel  no props — outbound alert channel (Slack/Teams/email/webhook) CRUD table + test-send, added 2026-08-01. 4th alert type `compliance_report` (added 2026-08-02) gated to `channel_type==='email'` only via its own `EMAIL_ONLY_ALERT_TYPES` set — the checkbox is hidden entirely for Slack/Teams/generic-webhook channels, not just unchecked.
 

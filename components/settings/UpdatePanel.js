@@ -300,7 +300,7 @@ export default function UpdatePanel() {
               padding: '5px 12px',
               background: 'var(--tint-success)',
               border: '1px solid var(--green)',
-              borderRadius: 20,
+              borderRadius: 'var(--radius-pill)',
             }}
           >
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)' }} />

@@ -107,6 +107,11 @@ export default function RuleHygieneDonut({ categories = [], total = 0, size = 14
                 style={{
                   width: 10,
                   height: 10,
+                  // The ONE deliberate exemption from the radius tokens (see
+                  // the square-corners block in app/globals.css): --radius-sm
+                  // is 6px, which on a 10px swatch renders as a circle and
+                  // would change the rounded look. At 2px on 10px this reads
+                  // as square already, so the corner switch has nothing to do.
                   borderRadius: 2,
                   background: resolveColor(c.color),
                   flexShrink: 0,

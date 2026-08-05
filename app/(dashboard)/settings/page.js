@@ -8,6 +8,7 @@ import UpdatePanel from '../../../components/settings/UpdatePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
+import AppearancePanel from '../../../components/settings/AppearancePanel';
 import pkg from '../../../package.json';
 
 const TABS = [
@@ -188,6 +189,8 @@ export default function SettingsPage() {
             maxWidth: 1200,
           }}
         >
+          <AppearancePanel />
+
           <Card>
             <CardHeader>
               <CardTitle>Feed Sync</CardTitle>

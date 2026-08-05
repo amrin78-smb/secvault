@@ -1,5 +1,6 @@
 import './globals.css';
 import { THEME_INIT_SCRIPT } from '../lib/theme';
+import { CORNERS_INIT_SCRIPT } from '../lib/corners';
 
 export const metadata = {
   title: 'SecVault',
@@ -14,6 +15,9 @@ export default function RootLayout({ children }) {
             flash of the wrong theme. Reads localStorage directly — cannot be
             an import, must run synchronously in <head>. See lib/theme.js. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Same no-flash contract as the theme script above, for the rounded/
+            square corner switch. See lib/corners.js. */}
+        <script dangerouslySetInnerHTML={{ __html: CORNERS_INIT_SCRIPT }} />
       </head>
       <body>{children}</body>
     </html>

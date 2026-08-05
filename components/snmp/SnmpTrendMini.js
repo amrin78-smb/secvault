@@ -37,7 +37,7 @@ function UsageTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0].payload;
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 11 }}>
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 11 }}>
       <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
         CPU {point.cpu_percent ?? '—'}% · Memory {point.memory_percent ?? '—'}%
       </div>
@@ -50,7 +50,7 @@ function SessionTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0].payload;
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 11 }}>
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 11 }}>
       <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{point.session_count ?? '—'} sessions</div>
       <div style={{ color: 'var(--text-muted)' }}>{formatFullTimestamp(point.sampled_at)}</div>
     </div>

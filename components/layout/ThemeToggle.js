@@ -32,7 +32,7 @@ export default function ThemeToggle() {
         justifyContent: 'center',
         width: 38,
         height: 38,
-        borderRadius: 8,
+        borderRadius: 'var(--radius)',
         background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.12)',
         color: 'rgba(255,255,255,0.85)',

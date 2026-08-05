@@ -560,6 +560,12 @@ network topology.
 `showRoutingRoute(conn)` -> `Promise<object>` — op `show routing route`, standard nested-tag form; response is clean structured `<entry>` XML (no column-position parsing needed, unlike SSH).
 `showRunningNatPolicy(conn)` -> `Promise<object>` — op `show running nat-policy`; response's `<result><member>` text is byte-identical in format to the SSH transport's plain text — see `parser.js`'s note on why no XML-specific NAT parser exists.
 
+## lib/corners.js
+
+Client-only corner-style switch (rounded/square), added 2026-08-05 (v2.52.0). A structural MIRROR of `lib/theme.js` — same localStorage key shape, same `data-*` attribute on `<html>`, same `secvault:*` CustomEvent, same no-flash inline script in `app/layout.js`. Exports `CORNERS_KEY`, `getCorners()`, `applyCorners(corners)`, `toggleCorners()`, `CORNERS_INIT_SCRIPT`. Stores `'rounded'|'square'`; square stamps `data-corners="square"`, rounded REMOVES the attribute (rounded is `:root`'s default, not a second branch).
+
+⛔ Works ONLY because every rounded surface resolves through `var(--radius)` / `var(--radius-sm)` / `var(--radius-pill)` — `:root[data-corners="square"]` in `app/globals.css` overrides just those three. A component hardcoding a numeric `borderRadius` opts itself out SILENTLY (stays rounded while its neighbours square off). ~32 such strays were tokenized in v2.52.0; the ONE deliberate exemption is `RuleHygieneDonut`'s 10px legend swatch at 2px, where `--radius-sm`'s 6px would render as a circle. True circles (status dots, avatars) use `50%` directly and are intentionally outside the switch. No DB, no `settings` table, not admin-gated — a per-browser preference.
+
 ## lib/adapters/paloalto/parser.js
 
 `parseSystemInfo(systemInfoResult)` -> `{version_string, version_tuple, build, model, serial, hostname}` — parses `show system info` XML result (hostname on XML/API transport is doc-derived, not yet live-verified — unlike SSH's flat-text field, which IS confirmed).

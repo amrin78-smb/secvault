@@ -100,7 +100,7 @@ export default function HeaderSearch() {
           gap: 8,
           background: 'rgba(255,255,255,0.08)',
           border: '1px solid rgba(255,255,255,0.12)',
-          borderRadius: 8,
+          borderRadius: 'var(--radius)',
           padding: '7px 10px',
         }}
       >
@@ -139,7 +139,7 @@ export default function HeaderSearch() {
             right: 0,
             background: 'var(--bg-card)',
             border: '1px solid var(--border)',
-            borderRadius: 6,
+            borderRadius: 'var(--radius-sm)',
             boxShadow: 'var(--shadow-md)',
             overflow: 'hidden',
             zIndex: 999,
