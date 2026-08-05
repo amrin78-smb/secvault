@@ -16,6 +16,8 @@ import RecentActivityFeed from '../../components/dashboard/RecentActivityFeed';
 import ConfigChangesWidget from '../../components/dashboard/ConfigChangesWidget';
 import HeadlineStats from '../../components/dashboard/HeadlineStats';
 import QuickActions from '../../components/dashboard/QuickActions';
+import FleetSystemHealth from '../../components/dashboard/FleetSystemHealth';
+import VulnerabilityTrends from '../../components/dashboard/VulnerabilityTrends';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,6 +90,8 @@ export default async function DashboardPage() {
         <DeviceStatusSummary />
         <RecentCriticalAlerts />
         <ConfigChangesWidget />
+        <VulnerabilityTrends />
+        <FleetSystemHealth />
         <QuickActions />
       </div>
 

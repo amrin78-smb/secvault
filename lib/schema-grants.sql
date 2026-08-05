@@ -63,6 +63,7 @@ GRANT SELECT ON TABLE audit_checks TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE audit_findings TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_risk_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE fleet_dashboard_snapshots TO claude_readonly, nocvault_readonly;
+GRANT SELECT ON TABLE device_connectivity_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE activity_log TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_session_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_active_sessions TO claude_readonly, nocvault_readonly;

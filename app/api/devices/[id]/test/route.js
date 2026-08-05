@@ -1,4 +1,5 @@
 import { pool } from '../../../../../lib/db';
+import { recordConnectivity } from '../../../../../lib/engines/connectivityHistory';
 import { getAdapter } from '../../../../../lib/adapters';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
@@ -39,9 +40,18 @@ export async function POST(request, { params }) {
       'UPDATE devices SET last_connectivity_ok = $1, last_connectivity_checked_at = now(), updated_at = now() WHERE id = $2',
       [result.ok === true, id]
     );
+    // Append to the reachability log as well — the UPDATE above overwrites the
+    // single current value and keeps no history. Never throws (see the engine).
+    await recordConnectivity(pool, id, {
+      reachable: result.ok === true,
+      latencyMs: result.latency_ms,
+      source: 'test',
+      message: result.ok === true ? null : result.message,
+    });
 
     return Response.json(result);
   } catch (err) {
+    await recordConnectivity(pool, id, { reachable: false, source: 'test', message: err.message });
     return Response.json({ error: err.message }, { status: 500 });
   }
 }

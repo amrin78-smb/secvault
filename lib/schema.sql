@@ -661,6 +661,35 @@ CREATE TABLE IF NOT EXISTS fleet_dashboard_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_fds_snapshot_date ON fleet_dashboard_snapshots(snapshot_date);
 
+-- Fleet reachability history (added 2026-08-05, v2.54.0). Until now the only
+-- reachability signal was devices.last_connectivity_ok -- a SINGLE current
+-- value overwritten in place, and written ONLY by the manual "Test
+-- connectivity" button, so it could be weeks stale and had no history at all.
+--
+-- ⛔ No new device load: nothing here opens a connection of its own. Rows are
+-- written from work that ALREADY talks to the device and therefore already
+-- knows whether it answered -- the manual test, the scheduled collect, and the
+-- device metric poll. `source` records which, because their cadences differ
+-- wildly (metrics every SNMP_POLL_INTERVAL_MINUTES, collect every
+-- CONFIG_PULL_INTERVAL_HOURS, test only when a human clicks) and a chart that
+-- mixed them without saying so would imply uniform sampling that does not
+-- exist.
+--
+-- Retention: the existing daily [snapshot-retention] job trims this with the
+-- same SNMP_VPN_RETENTION_DAYS window as the other snapshot tables.
+CREATE TABLE IF NOT EXISTS device_connectivity_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  reachable BOOLEAN NOT NULL,
+  latency_ms INTEGER, -- NULL when the caller has no timing (collect/metrics paths)
+  source TEXT NOT NULL, -- 'test' | 'collect' | 'metrics'
+  message TEXT, -- failure detail, NULL on success
+  checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dch_device_time ON device_connectivity_history(device_id, checked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dch_checked_at ON device_connectivity_history(checked_at);
+
 -- Headline-tile history, added 2026-08-05 (v2.53.0) so the dashboard's stat
 -- cards can show a real "vs yesterday" delta instead of a decorative arrow.
 -- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY — every already

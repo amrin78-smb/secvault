@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.54.0': [
+    'New Fleet System Health card — reachability, CPU, memory, disk, HA pairs and last backup. Every row states its own coverage ("6 of 16 devices reporting") so a fleet number computed from a subset can never be mistaken for the whole fleet.',
+    'New Vulnerability Trends chart from the daily snapshots, labelled with the window the data ACTUALLY covers rather than a fixed "30d" the history cannot yet support.',
+    'New device_connectivity_history table: reachability is now logged over time instead of a single value overwritten in place and only ever written by the manual test button.',
+    'No new device load for that history — rows are written from work that already talks to the device (manual test, scheduled collect, metric poll), and each row records which, since their cadences differ.',
+  ],
   '2.53.0': [
     'New fleet Security Score — a real 0-100 composite of vulnerability posture (40%), rule hygiene (30%) and compliance (30%), each reusing the engine that already measures it. Shows its own breakdown so the number can be decomposed, and reads "—" rather than 0 when nothing is measurable.',
     'Dashboard re-laid out into a denser widget grid, with a six-tile headline row and a Quick Actions card.',

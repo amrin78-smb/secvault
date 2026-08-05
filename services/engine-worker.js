@@ -62,6 +62,7 @@ const { storeVpnSessions } = require('../lib/engines/vpnSessions');
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
+const { recordConnectivity } = require('../lib/engines/connectivityHistory');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -595,8 +596,14 @@ async function runSnmpPollJob() {
           ]
         );
         polled += 1;
+        // A successful metric read PROVES the device answered — record it as a
+        // reachability sample. Free: no extra connection, the session already
+        // happened. This is the fleet's densest heartbeat (every
+        // SNMP_POLL_INTERVAL_MINUTES) for the vendors that implement it.
+        await recordConnectivity(pool, device.id, { reachable: true, source: 'metrics' });
       } catch (err) {
         logger.warn(`Job [snmp-poll] failed for device ${device.id} (${device.name || 'unnamed'}): ${err.message}`);
+        await recordConnectivity(pool, device.id, { reachable: false, source: 'metrics', message: err.message });
       }
     }
 
@@ -649,6 +656,7 @@ async function runSnapshotRetentionJob() {
   logger.info(`Job [snapshot-retention] starting (retention: ${retentionDays}d).`);
   let vpnDeleted = 0;
   let snmpDeleted = 0;
+  let connDeleted = 0;
   try {
     const vpnResult = await pool.query(
       `DELETE FROM vpn_session_snapshots WHERE sampled_at < now() - ($1 || ' days')::interval`,
@@ -667,9 +675,20 @@ async function runSnapshotRetentionJob() {
   } catch (err) {
     logger.error(`Job [snapshot-retention] snmp_metric_snapshots cleanup failed: ${err.stack || err.message}`);
   }
+  try {
+    // device_connectivity_history (v2.54.0) — same window as the two above,
+    // and its own try/catch so one table's failure never skips the others.
+    const connResult = await pool.query(
+      `DELETE FROM device_connectivity_history WHERE checked_at < now() - ($1 || ' days')::interval`,
+      [retentionDays]
+    );
+    connDeleted = connResult.rowCount || 0;
+  } catch (err) {
+    logger.error(`Job [snapshot-retention] device_connectivity_history cleanup failed: ${err.stack || err.message}`);
+  }
   const durationMs = Date.now() - start;
   logger.info(
-    `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s).`
+    `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s), ${connDeleted} device_connectivity_history row(s).`
   );
 }
 
