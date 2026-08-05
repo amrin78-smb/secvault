@@ -575,6 +575,8 @@ Indexes: `idx_drh_device_id`, `idx_drh_recorded_at`. Snapshotted from inside
 `runAnalysisForDevice()` (covers both scheduled collect and manual "Run Analysis").
 
 ### fleet_dashboard_snapshots
+`device_connectivity_history` — append-only fleet reachability log (added 2026-08-05, v2.54.0): device_id, reachable, latency_ms, source ('test'|'collect'|'metrics'), message, checked_at. ⛔ Replaces nothing — `devices.last_connectivity_ok` remains, but it is a SINGLE value overwritten in place and written only by the manual test button, so it carries no history. ⛔ No new device load: rows come only from work that already contacted the device. Retention via the daily [snapshot-retention] job (SNMP_VPN_RETENTION_DAYS). Readonly grants present. Written by `lib/engines/connectivityHistory.js`.
+`fleet_dashboard_snapshots` gained headline columns in v2.53.0 (device_count, devices_online, rules_total, rules_enabled, patch_now_count, high_risk_count, security_score) — all NULLABLE with NO default, added via ALTER TABLE ... ADD COLUMN IF NOT EXISTS; a 0 default would render as a confident "0 devices yesterday" delta.
 ```
 id                          UUID PK DEFAULT gen_random_uuid()
 snapshot_date               DATE NOT NULL UNIQUE

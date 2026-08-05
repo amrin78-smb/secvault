@@ -96,6 +96,10 @@ DiffBody  ruleChanges, sections — added 2026-08-03. Presentational render tree
 
 ## dashboard/
 
+HeadlineStats  no props — dashboard's six-tile headline row (Devices / Security Score / Critical Alerts / High Risks / Total Rules / Compliance Score) off `fleetHeadline.js`. Includes DeltaBadge: ⛔ direction-of-good is PER METRIC (more devices online = green, more patch_now CVEs = red), and NO delta renders when the prior day's value is null — a 0 would read as "unchanged" rather than "unknown". Added 2026-08-05, v2.53.0.
+QuickActions  no props — dashboard shortcut list. ⛔ Every entry points at a route that EXISTS; the mockup's "Export Data" is deliberately absent (no fleet-wide equivalent) rather than wired to something approximate. Added v2.53.0.
+FleetSystemHealth  no props — fleet roll-up of reachability/CPU/memory/disk/HA/last-backup. ⛔ EVERY row states its own coverage ("11 of 16 devices reporting") because these come from OPTIONAL adapter capabilities (disk + HA are Palo Alto only today) — a fleet number computed from a subset, shown without saying so, invites exactly the wrong conclusion. Added 2026-08-05, v2.54.0.
+VulnerabilityTrends  no props (server) + (c) VulnerabilityTrendChart  points — CVE severity over time from `fleet_dashboard_snapshots`. ⛔ Labels the window the data ACTUALLY covers ("18d of history · 14 snapshots"), reporting span and sample count SEPARATELY since they diverge when a daily snapshot is missed; missing days are omitted, never plotted as 0 (that would draw a fictional dip). Handles the 0-point and 1-point cases in words. Added v2.54.0.
 (c) AutoRefresh  intervalMs — periodically calls router.refresh() to soft-refresh dashboard data
 ComplianceScoreWidget  no props — fleet compliance score gauge + per-standard breakdown
 ConfigChangesWidget  days — fleet-wide config-change summary over a trailing window

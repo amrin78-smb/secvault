@@ -560,6 +560,22 @@ network topology.
 `showRoutingRoute(conn)` -> `Promise<object>` — op `show routing route`, standard nested-tag form; response is clean structured `<entry>` XML (no column-position parsing needed, unlike SSH).
 `showRunningNatPolicy(conn)` -> `Promise<object>` — op `show running nat-policy`; response's `<result><member>` text is byte-identical in format to the SSH transport's plain text — see `parser.js`'s note on why no XML-specific NAT parser exists.
 
+## lib/engines/securityScore.js
+
+Pure, no-DB fleet Security Score (added 2026-08-05, v2.53.0). `computeSecurityScore({activeDevices, devicesWithPatchNow, devicesWithScheduled, deviceRiskScores, fleetCompliancePct})` -> `{score, components[], measuredWeight}`; also `securityScoreBand(score)` (excellent/good/fair/poor), `vulnerabilitySubscore`, `hygieneSubscore`, `complianceSubscore`, `WEIGHTS`, `SCHEDULED_EXPOSURE_FACTOR`.
+
+0-100 **higher is better**, weights vulnerability 40 / hygiene 30 / compliance 30. ⛔ POLARITY: riskScore.js is 0-100 higher-is-WORSE and feeds this; the inversion happens ONLY in `hygieneSubscore` and must not be "simplified" away — getting it backwards throws nothing and renders a plausible number that is exactly wrong. ⛔ An unmeasurable component is dropped from the DENOMINATOR (like compliance's `na`), never scored 0; all-null -> `null`, rendered "—". `monitor`-band CVEs contribute nothing by design.
+
+## lib/engines/fleetHeadline.js
+
+The six dashboard headline numbers + Security Score, in ONE definition (added 2026-08-05, v2.53.0). `getFleetHeadline(pool)`, `getPreviousHeadline(pool)`, `getDeviceRiskScores(pool)`, `getCveExposure(pool)`. ⛔ Exists because BOTH the dashboard and the nightly snapshot job need these; separate implementations would make tomorrow's delta compare two different metrics. ⛔ `getDeviceRiskScores` maps `computeRiskScoreFromCounts(r).score` — that function returns `{score, band, raw}`, and passing the object through silently made the whole hygiene component "not measurable" (real bug, v2.53.0). `getPreviousHeadline` may return per-field nulls (rows predate the columns) — callers must render NO delta, never 0.
+
+## lib/engines/connectivityHistory.js
+
+Append-only fleet reachability log over `device_connectivity_history` (added 2026-08-05, v2.54.0). `recordConnectivity(pool, deviceId, {reachable, latencyMs, source, message})`, `getFleetConnectivityTrend(pool, hours, bucketMinutes)`, `getFleetConnectivityNow(pool)`.
+
+⛔ `recordConnectivity` NEVER THROWS — every caller is doing something more important (test/collect/metric poll) and must not fail because a log insert did. ⛔ Adds NO device load: written only from work that already talked to the device. `source` ('test'|'collect'|'metrics') is recorded because those cadences differ wildly. Trend omits empty buckets rather than emitting 0 — a gap in sampling is not an outage. `getFleetConnectivityNow` distinguishes `neverChecked` from `unreachable`.
+
 ## lib/corners.js
 
 Client-only corner-style switch (rounded/square), added 2026-08-05 (v2.52.0). A structural MIRROR of `lib/theme.js` — same localStorage key shape, same `data-*` attribute on `<html>`, same `secvault:*` CustomEvent, same no-flash inline script in `app/layout.js`. Exports `CORNERS_KEY`, `getCorners()`, `applyCorners(corners)`, `toggleCorners()`, `CORNERS_INIT_SCRIPT`. Stores `'rounded'|'square'`; square stamps `data-corners="square"`, rounded REMOVES the attribute (rounded is `:root`'s default, not a second branch).
