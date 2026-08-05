@@ -735,6 +735,8 @@ block, skipping blocks with no recognizable action keyword. Config `parsed` →
 All 6 vendors additionally use a SEPARATE `credential_type='snmp'` for `getSnmpMetrics()`, never
 mixed with the management-plane credential.
 
+**Palo Alto SSH `show session info` — LIVE-VERIFIED 2026-08-05** (v2.55.0, against TUG, the only remaining `mgmt_method='ssh'` PAN-OS device; the other 10 moved to API). Session count had been returned as `null` on this transport because the text output had never been captured and this codebase does not write parsers against guessed formats. Confirmed shape is `Label:<whitespace>Value`; `parseSessionInfoOutput` reads **`Number of allocated sessions`** as the active count. ⛔ NOT the sum of the per-protocol "active X sessions" lines — on the live capture TCP+UDP+ICMP = 6052 vs allocated 6058, because those lines omit several session classes, so summing under-reports. Also captures `Number of sessions supported` and `Session table utilization` into `raw`. Best-effort: it shares the CPU/memory session but a failure there never fails the whole metric read.
+
 **Optional `getPerformanceMetrics()`** (added 2026-08-04, v2.50.0) — same return shape as
 `getSnmpMetrics()` (`{cpuPercent, memoryPercent, sessionCount, uptimeSeconds, raw, lowConfidence}`)
 but read over the management transport the device is ALREADY configured for, so it needs no `snmp`

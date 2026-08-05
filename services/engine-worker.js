@@ -582,10 +582,33 @@ async function runSnmpPollJob() {
       }
 
       try {
-        const metrics = hasPerf ? await adapter.getPerformanceMetrics() : await adapter.getSnmpMetrics();
+        // ⛔ FALLBACK. getPerformanceMetrics() goes over the management
+        // transport, which can fail for reasons SNMP would not (a busy CLI, an
+        // admin-session cap, a config-mode lock). Before v2.55.0 that failure
+        // ended the device's poll outright even when SNMP was configured and
+        // would have answered — the better source silently made the fleet LESS
+        // observable than before it existed. Try it first, fall back to SNMP
+        // only if the device is actually opted in to SNMP.
+        let metrics = null;
+        let usedSource = null;
+        if (hasPerf) {
+          try {
+            metrics = await adapter.getPerformanceMetrics();
+            usedSource = 'metrics';
+          } catch (perfErr) {
+            if (!hasSnmp) throw perfErr;
+            logger.warn(
+              `Job [snmp-poll] getPerformanceMetrics failed for ${device.name || device.id} (${perfErr.message}) — falling back to SNMP.`
+            );
+          }
+        }
+        if (metrics === null) {
+          metrics = await adapter.getSnmpMetrics();
+          usedSource = 'snmp';
+        }
         await pool.query(
-          `INSERT INTO snmp_metric_snapshots (device_id, cpu_percent, memory_percent, session_count, uptime_seconds, raw)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+          `INSERT INTO snmp_metric_snapshots (device_id, cpu_percent, memory_percent, session_count, uptime_seconds, raw, source, low_confidence)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
           [
             device.id,
             metrics.cpuPercent ?? null,
@@ -593,6 +616,10 @@ async function runSnmpPollJob() {
             metrics.sessionCount ?? null,
             metrics.uptimeSeconds ?? null,
             JSON.stringify(metrics.raw || null),
+            usedSource,
+            // The adapter states this per reading; only default when it says
+            // nothing, and default to the CAUTIOUS value (true) for SNMP.
+            typeof metrics.lowConfidence === 'boolean' ? metrics.lowConfidence : usedSource === 'snmp',
           ]
         );
         polled += 1;
@@ -690,6 +717,27 @@ async function runSnapshotRetentionJob() {
   logger.info(
     `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s), ${connDeleted} device_connectivity_history row(s).`
   );
+}
+
+// Startup catch-up for the daily snapshot — see the call site's comment.
+// Deliberately checks for TODAY's row rather than backfilling history: the
+// counts it stores are all "as of now" values (current CVE bands, current
+// compliance state), so a missed day cannot be reconstructed after the fact.
+// Inventing one from today's numbers would fabricate history.
+async function runDashboardSnapshotIfMissing() {
+  try {
+    const { rows } = await pool.query(
+      'SELECT 1 FROM fleet_dashboard_snapshots WHERE snapshot_date = CURRENT_DATE LIMIT 1'
+    );
+    if (rows.length > 0) {
+      logger.info('Startup [dashboard-snapshot] catch-up: today already recorded — skipping.');
+      return;
+    }
+    logger.info("Startup [dashboard-snapshot] catch-up: today's snapshot missing — taking it now.");
+    await runDashboardSnapshotJob();
+  } catch (err) {
+    logger.error(`Startup [dashboard-snapshot] catch-up check failed: ${err.stack || err.message}`);
+  }
 }
 
 // Outbound alerting poll — checks for new patch_now CVEs / critical
@@ -838,6 +886,17 @@ async function scheduleJobs() {
 
   // Fixed daily time (00:10 UTC) rather than a configurable interval — see
   // runDashboardSnapshotJob()'s own comment for why.
+  // ⛔ Catch-up. This job fires ONLY on the 00:10 UTC tick, so any restart or
+  // outage spanning that minute loses that day permanently — the trend chart
+  // showed 18 days of span but only 14 snapshots, i.e. 4 silently missing
+  // days. Snapshots are the sole source of every day-over-day delta, so a lost
+  // day is a lost comparison. On startup, take today's snapshot if it is not
+  // already recorded; the upsert is keyed on snapshot_date, so this is
+  // idempotent and a same-day restart just refreshes the row.
+  runDashboardSnapshotIfMissing().catch((err) =>
+    logger.error(`Startup [dashboard-snapshot] catch-up failed: ${err.stack || err.message}`)
+  );
+
   logger.info('Scheduling [dashboard-snapshot] with cron "10 0 * * *" (daily).');
   const dashboardSnapshotTask = cron.schedule('10 0 * * *', () => {
     if (shuttingDown) return;

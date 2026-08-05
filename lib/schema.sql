@@ -690,6 +690,20 @@ CREATE TABLE IF NOT EXISTS device_connectivity_history (
 CREATE INDEX IF NOT EXISTS idx_dch_device_time ON device_connectivity_history(device_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dch_checked_at ON device_connectivity_history(checked_at);
 
+-- Provenance for each metric sample (added 2026-08-05, v2.55.0). Until now the
+-- UI decided whether a reading was low-confidence from a HARDCODED vendor list
+-- (LOW_CONFIDENCE_VENDORS in the SNMP page), which was wrong the moment a
+-- vendor gained a better source: Palo Alto's getPerformanceMetrics() reads the
+-- management transport and is NOT low-confidence, but the vendor was on the
+-- list, so every reading was captioned as unreliable regardless of where it
+-- came from. The adapter already returns both facts per sample -- store them.
+-- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY.
+-- Nullable, no default: a row written before this shipped genuinely does not
+-- know its own provenance, and defaulting to either value would assert
+-- something untrue about historical samples.
+ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS source TEXT; -- 'metrics' (mgmt transport) | 'snmp'
+ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS low_confidence BOOLEAN;
+
 -- Headline-tile history, added 2026-08-05 (v2.53.0) so the dashboard's stat
 -- cards can show a real "vs yesterday" delta instead of a decorative arrow.
 -- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY — every already

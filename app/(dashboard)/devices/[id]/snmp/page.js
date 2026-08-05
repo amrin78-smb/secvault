@@ -20,7 +20,23 @@ export const dynamic = 'force-dynamic';
 // queries the DB directly; the API route exists for CSV export and the
 // client-side config form's own PUT).
 
-const LOW_CONFIDENCE_VENDORS = new Set(['paloalto', 'forcepoint', 'sangfor']);
+// ⛔ The vendor hardcode that used to live here (paloalto/forcepoint/sangfor)
+// was wrong from the moment a vendor gained a better data source. Palo Alto's
+// getPerformanceMetrics() reads the management transport and is explicitly NOT
+// low-confidence, but 'paloalto' was on the list, so every reading was
+// captioned as unreliable no matter where it came from. Confidence is a
+// property of the SAMPLE, not the vendor — the adapter states it per reading
+// and v2.55.0 persists it (snmp_metric_snapshots.source / .low_confidence).
+// Older rows have NULL for both; those fall back to the cautious reading.
+function latestSampleConfidence(latest) {
+  if (!latest) return { lowConfidence: false, source: null, known: false };
+  if (typeof latest.low_confidence === 'boolean') {
+    return { lowConfidence: latest.low_confidence, source: latest.source || null, known: true };
+  }
+  // Pre-v2.55.0 sample: provenance genuinely unknown. Say so rather than
+  // guess — an unqualified number is the thing this caption exists to prevent.
+  return { lowConfidence: true, source: null, known: false };
+}
 
 function formatDateTime(value) {
   if (!value) return 'Never';
@@ -60,7 +76,7 @@ async function hasSnmpCredential(dbPool, id) {
 
 async function getSnmpHistory(dbPool, deviceId) {
   const result = await dbPool.query(
-    `SELECT cpu_percent, memory_percent, session_count, uptime_seconds, sampled_at
+    `SELECT cpu_percent, memory_percent, session_count, uptime_seconds, sampled_at, source, low_confidence
      FROM snmp_metric_snapshots
      WHERE device_id = $1
      ORDER BY sampled_at ASC`,
@@ -112,7 +128,8 @@ export default async function DeviceSnmpPage({ params }) {
   ]);
 
   const latest = history.length > 0 ? history[history.length - 1] : null;
-  const lowConfidence = LOW_CONFIDENCE_VENDORS.has(device.vendor);
+  const confidence = latestSampleConfidence(latest);
+  const lowConfidence = confidence.lowConfidence;
   const snmpDetected = configRow ? detectSnmpConfig(device.vendor, configRow.config_parsed) : null;
   const snmpDetectedLooksConfigured = snmpDetected ? looksConfigured(snmpDetected) : false;
 
@@ -129,8 +146,19 @@ export default async function DeviceSnmpPage({ params }) {
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Badge color="info">{device.vendor}</Badge>
-            {device.snmp_enabled ? <Badge color="success">Polling Enabled</Badge> : <Badge color="muted">Disabled</Badge>}
-            {lowConfidence && <Badge color="warning">Low confidence — doc-derived OIDs, unverified for this vendor</Badge>}
+            {device.snmp_enabled ? <Badge color="success">SNMP Enabled</Badge> : <Badge color="muted">SNMP Disabled</Badge>}
+            {/* Source of the LATEST sample. A device can be polled over the
+                management transport with SNMP switched off entirely, so the
+                badge above no longer implies whether metrics are arriving. */}
+            {confidence.source === 'metrics' && <Badge color="success">Management transport</Badge>}
+            {confidence.source === 'snmp' && <Badge color="info">SNMP</Badge>}
+            {lowConfidence && (
+              <Badge color="warning">
+                {confidence.known
+                  ? 'Low confidence — generic MIB, no vendor-specific source'
+                  : 'Confidence unknown — sample predates provenance tracking'}
+              </Badge>
+            )}
           </span>
         }
         actions={
@@ -160,8 +188,8 @@ export default async function DeviceSnmpPage({ params }) {
         <EmptyState
           message={
             device.snmp_enabled
-              ? 'No SNMP metrics polled yet — the engine worker polls on its own interval (SNMP_POLL_INTERVAL_MINUTES).'
-              : 'No SNMP metrics polled yet. Enable SNMP polling below and add a credential to start collecting.'
+              ? 'No metrics polled yet — the engine worker polls on its own interval (SNMP_POLL_INTERVAL_MINUTES).'
+              : 'No metrics polled yet. Devices whose adapter can read metrics over the management transport are polled automatically; otherwise enable SNMP below and add a credential.'
           }
         />
       )}

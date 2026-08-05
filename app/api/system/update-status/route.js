@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.55.0': [
+    'The device metric poll now falls back to SNMP when the management-transport read fails, instead of losing the device for that cycle — the better data source had been making the fleet less observable, not more.',
+    'Each metric sample now records where it came from and whether it is low-confidence. The SNMP page reads that per sample instead of a hardcoded vendor list that captioned every Palo Alto reading as unreliable even when it came from the management transport.',
+    'Palo Alto SSH devices report session counts again, from a live-captured "show session info" — it had been left null because the output format had never been seen.',
+    'The daily snapshot now catches up at startup if the day has not been recorded, closing the gap that silently lost 4 of the last 18 days.',
+  ],
   '2.54.0': [
     'New Fleet System Health card — reachability, CPU, memory, disk, HA pairs and last backup. Every row states its own coverage ("6 of 16 devices reporting") so a fleet number computed from a subset can never be mistaken for the whole fleet.',
     'New Vulnerability Trends chart from the daily snapshots, labelled with the window the data ACTUALLY covers rather than a fixed "30d" the history cannot yet support.',
