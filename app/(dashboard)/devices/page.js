@@ -231,16 +231,16 @@ export default async function DevicesPage({ searchParams }) {
               9% of the width rendering em-dashes. It stays searchable and
               filterable -- only the column is gone. */}
           <colgroup>
-            <col style={{ width: '17%' }} /> {/* Device   */}
+            <col style={{ width: '16%' }} /> {/* Device   */}
             <col style={{ width: '9%' }} />  {/* Vendor   */}
             <col style={{ width: '11%' }} /> {/* Score    */}
-            <col style={{ width: '12%' }} /> {/* Version  */}
+            <col style={{ width: '11%' }} /> {/* Version  */}
             <col style={{ width: '7%' }} />  {/* Rules    */}
             <col style={{ width: '10%' }} /> {/* CVEs     */}
             <col style={{ width: '11%' }} /> {/* Support  */}
             <col style={{ width: '8%' }} />  {/* HA       */}
-            <col style={{ width: '11%' }} /> {/* Collected*/}
-            <col style={{ width: '4%' }} />  {/* Actions  */}
+            <col style={{ width: '10%' }} /> {/* Collected*/}
+            <col style={{ width: '7%' }} />  {/* Actions  */}
           </colgroup>
           <thead>
             <tr>
