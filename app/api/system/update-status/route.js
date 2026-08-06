@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.56.0': [
+    'Devices page reworked: six fleet tiles, a filter bar (search, vendor, risk level, status, support, site) and a posture-led column set.',
+    'Each device now has its own Security Score, composed exactly like the fleet score. The score is the number and the rule-analysis risk band is its colour — two opposite-polarity figures side by side would invite one being read as the other.',
+    'New Support column from collected licence data, separating a lapsed licence from an upcoming expiry from a date that could not be parsed, since those call for different actions.',
+    'No "Unsupported OS / EOL" tile: SecVault collects no vendor OS end-of-life dates, so that figure cannot be produced.',
+  ],
   '2.55.0': [
     'The device metric poll now falls back to SNMP when the management-transport read fails, instead of losing the device for that cycle — the better data source had been making the fleet less observable, not more.',
     'Each metric sample now records where it came from and whether it is low-confidence. The SNMP page reads that per sample instead of a hardcoded vendor list that captioned every Palo Alto reading as unreliable even when it came from the management transport.',
