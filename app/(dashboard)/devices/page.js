@@ -231,7 +231,7 @@ export default async function DevicesPage({ searchParams }) {
             <col style={{ width: '14%' }} />
             <col style={{ width: '8%' }} />
             <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
+            <col style={{ width: '10%' }} />
             <col style={{ width: '9%' }} />
             <col style={{ width: '6%' }} />
             <col style={{ width: '9%' }} />
@@ -245,8 +245,8 @@ export default async function DevicesPage({ searchParams }) {
               <th>Device</th>
               <th>Vendor</th>
               <th>Site</th>
-              <th title="Composite of vulnerability posture, rule hygiene and compliance. Colour shows the rule-analysis risk band.">
-                Security Score
+              <th title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Colour shows the rule-analysis risk band.">
+                Score
               </th>
               <th>Version</th>
               <th>Rules</th>
@@ -255,7 +255,7 @@ export default async function DevicesPage({ searchParams }) {
                 Support
               </th>
               <th>HA</th>
-              <th>Last Collected</th>
+              <th>Collected</th>
               <th>Actions</th>
             </tr>
           </thead>

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.56.1': [
+    'Shortened two Devices table headings that were truncating at the default column widths; the full meaning stays in the column tooltip.',
+  ],
   '2.56.0': [
     'Devices page reworked: six fleet tiles, a filter bar (search, vendor, risk level, status, support, site) and a posture-led column set.',
     'Each device now has its own Security Score, composed exactly like the fleet score. The score is the number and the rule-analysis risk band is its colour — two opposite-polarity figures side by side would invite one being read as the other.',
