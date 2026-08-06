@@ -1,6 +1,6 @@
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import { getFleetConnectivityNow } from '../../lib/engines/connectivityHistory';
+import { getFleetConnectivityNow, getFleetConnectivityTrend } from '../../lib/engines/connectivityHistory';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +76,40 @@ function relativeAge(ts) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// 24h reachability sparkline. Hand-rolled spans, not a chart library: this is
+// six values in a table row, and FleetSystemHealth is a server component.
+//
+// ⛔ Renders ONLY the buckets that exist. getFleetConnectivityTrend deliberately
+// omits buckets with no observation, and a missing sample is not an outage —
+// drawing it as a zero-height bar would invent one. Gaps simply narrow the
+// sparkline, and the caption states how many samples it represents.
+function ReachabilitySparkline({ points, total }) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  return (
+    <span
+      style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 18, marginTop: 2 }}
+      title={`${points.length} samples in the last 24h`}
+    >
+      {points.map((p, i) => {
+        const pct = total > 0 ? Math.max(0, Math.min(1, p.reachable / total)) : 0;
+        const allUp = p.reachable >= p.checked && p.checked > 0;
+        return (
+          <span
+            key={i}
+            style={{
+              flex: 1,
+              minWidth: 2,
+              height: `${Math.max(8, pct * 100)}%`,
+              background: allUp ? 'var(--green)' : 'var(--red)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
 function toneFor(pct) {
   if (pct === null || pct === undefined) return 'var(--text-muted)';
   if (pct >= 90) return 'var(--red)';
@@ -103,12 +137,13 @@ function HealthRow({ label, value, pct, coverage, tone }) {
 }
 
 export default async function FleetSystemHealth() {
-  const [metrics, disk, ha, backup, conn] = await Promise.all([
+  const [metrics, disk, ha, backup, conn, trend] = await Promise.all([
     getLatestMetrics(pool),
     getDiskSummary(pool),
     getHaSummary(pool),
     getLastBackup(pool),
     getFleetConnectivityNow(pool),
+    getFleetConnectivityTrend(pool, 24, 60),
   ]);
 
   const cpuAvg = metrics.cpu_devices > 0 ? metrics.cpu_avg : null;
@@ -122,17 +157,22 @@ export default async function FleetSystemHealth() {
       </CardHeader>
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <HealthRow
-            label="Reachability"
-            value={`${conn.reachable} / ${total}`}
-            pct={total > 0 ? (conn.reachable / total) * 100 : null}
-            tone={conn.unreachable > 0 ? 'var(--red)' : 'var(--green)'}
-            coverage={
-              conn.neverChecked > 0
-                ? `${conn.unreachable} unreachable · ${conn.neverChecked} never checked`
-                : `${conn.unreachable} unreachable`
-            }
-          />
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <HealthRow
+              label="Reachability"
+              value={`${conn.reachable} / ${total}`}
+              pct={total > 0 ? (conn.reachable / total) * 100 : null}
+              tone={conn.unreachable > 0 ? 'var(--red)' : 'var(--green)'}
+              coverage={
+                conn.neverChecked > 0
+                  ? `${conn.unreachable} unreachable · ${conn.neverChecked} never checked`
+                  : trend.length >= 2
+                    ? `${conn.unreachable} unreachable · ${trend.length} samples in 24h`
+                    : `${conn.unreachable} unreachable`
+              }
+            />
+            <ReachabilitySparkline points={trend} total={total} />
+          </div>
           <HealthRow
             label="CPU (avg)"
             value={cpuAvg === null ? 'No data' : `${cpuAvg}%`}

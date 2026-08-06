@@ -113,11 +113,30 @@ function matchesFilters(row, f) {
 // keeps it that way even if a later change starts rendering it as
 // <SortLink/>. Takes the previously-closed-over `sortKey` explicitly instead
 // of relying on closure.
-function sortLink(activeSortKey, key, label) {
+// ⛔ Every internal link on this page must PRESERVE the active filters. Before
+// this, sorting, cancelling a delete, or opening the delete confirm all built
+// `/devices?sort=X` from scratch, silently discarding whatever the operator had
+// filtered to — the table would quietly repopulate with the whole fleet and
+// look like the filter had failed. Builds from the CURRENT params, applying
+// only the given overrides (a null value deletes that key).
+function buildDevicesHref(searchParams, overrides = {}) {
+  const next = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams || {})) {
+    if (typeof v === 'string' && v !== '') next.set(k, v);
+  }
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === null || v === undefined || v === '') next.delete(k);
+    else next.set(k, v);
+  }
+  const qs = next.toString();
+  return qs ? `/devices?${qs}` : '/devices';
+}
+
+function sortLink(activeSortKey, key, label, searchParams) {
   const active = activeSortKey === key;
   return (
     <Link
-      href={`/devices?sort=${key}`}
+      href={buildDevicesHref(searchParams, { sort: key, confirmDelete: null })}
       style={{
         fontWeight: active ? 600 : 400,
         color: active ? 'var(--primary)' : 'var(--text-secondary)',
@@ -205,11 +224,11 @@ export default async function DevicesPage({ searchParams }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-base)', flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--text-muted)' }}>Sort by:</span>
-        {sortLink(sortKey, 'name', 'Name')}
-        {sortLink(sortKey, 'score', 'Security Score')}
-        {sortLink(sortKey, 'cve_count', 'CVE Count')}
-        {sortLink(sortKey, 'rules', 'Rules')}
-        {sortLink(sortKey, 'last_collected', 'Last Collected')}
+        {sortLink(sortKey, 'name', 'Name', searchParams)}
+        {sortLink(sortKey, 'score', 'Security Score', searchParams)}
+        {sortLink(sortKey, 'cve_count', 'CVE Count', searchParams)}
+        {sortLink(sortKey, 'rules', 'Rules', searchParams)}
+        {sortLink(sortKey, 'last_collected', 'Last Collected', searchParams)}
       </div>
 
       {devices.length === 0 ? (
@@ -313,7 +332,11 @@ export default async function DevicesPage({ searchParams }) {
                 </td>
                 <td>{formatDateTime(d.last_collected_at)}</td>
                 <td>
-                  <DeviceRowActions deviceId={d.id} sortKey={sortKey} canWrite={canWrite} />
+                  <DeviceRowActions
+                    deviceId={d.id}
+                    baseHref={buildDevicesHref(searchParams, { confirmDelete: null })}
+                    canWrite={canWrite}
+                  />
                 </td>
               </tr>
             ))}
@@ -337,7 +360,7 @@ export default async function DevicesPage({ searchParams }) {
                   </Button>
                 </form>
                 <Link
-                  href={`/devices?sort=${sortKey}`}
+                  href={buildDevicesHref(searchParams, { confirmDelete: null })}
                   style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', textDecoration: 'underline' }}
                 >
                   Cancel

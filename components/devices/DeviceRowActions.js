@@ -17,7 +17,11 @@ import RowActionsMenu from '../ui/RowActionsMenu';
 // session), Collect/Test/Delete only when canWrite -- same permission
 // shape this component already had, just centralized instead of split
 // between here and the page.
-export default function DeviceRowActions({ deviceId, sortKey, canWrite }) {
+// `baseHref` is the page's CURRENT url with filters intact (see
+// buildDevicesHref). It replaced a bare `sortKey`, which rebuilt
+// `/devices?sort=X` from scratch and silently dropped every active filter when
+// the delete confirm opened.
+export default function DeviceRowActions({ deviceId, baseHref = '/devices', canWrite }) {
   const router = useRouter();
   const [running, setRunning] = useState(null); // 'collect' | 'test' | null
   const [error, setError] = useState(null);
@@ -63,7 +67,7 @@ export default function DeviceRowActions({ deviceId, sortKey, canWrite }) {
       {
         type: 'link',
         label: 'Delete',
-        href: `/devices?sort=${sortKey}&confirmDelete=${deviceId}`,
+        href: `${baseHref}${baseHref.includes('?') ? '&' : '?'}confirmDelete=${deviceId}`,
         danger: true,
       }
     );

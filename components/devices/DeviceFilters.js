@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 // Devices-page filter bar. Client component only because it needs live input;
@@ -60,9 +61,26 @@ function Select({ label, param, value, options, onChange }) {
   );
 }
 
+// Typing pushed a navigation on EVERY keystroke, so "TSR-TL" was six full
+// server round trips over the whole fleet query. Debounced: the URL updates
+// once the operator stops typing.
+const SEARCH_DEBOUNCE_MS = 350;
+
 export default function DeviceFilters({ vendors, sites, activeCount, totalCount }) {
   const router = useRouter();
   const params = useSearchParams();
+  const urlQ = params.get('q') || '';
+  // Controlled input so the box never fights the debounced URL update.
+  const [q, setQ] = useState(urlQ);
+  const timer = useRef(null);
+
+  // Re-sync when the URL changes from somewhere else (Clear filters, back
+  // button) WITHOUT clobbering what is being typed right now.
+  useEffect(() => {
+    if (timer.current === null) setQ(urlQ);
+  }, [urlQ]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   function setParam(key, value) {
     const next = new URLSearchParams(params.toString());
@@ -93,8 +111,16 @@ export default function DeviceFilters({ vendors, sites, activeCount, totalCount 
             className="input"
             type="search"
             placeholder="Name, IP address or site…"
-            defaultValue={params.get('q') || ''}
-            onChange={(e) => setParam('q', e.target.value.trim())}
+            value={q}
+            onChange={(e) => {
+              const value = e.target.value;
+              setQ(value);
+              if (timer.current) clearTimeout(timer.current);
+              timer.current = setTimeout(() => {
+                timer.current = null;
+                setParam('q', value.trim());
+              }, SEARCH_DEBOUNCE_MS);
+            }}
           />
         </div>
         <Select label="Vendor" param="vendor" value={params.get('vendor') || ''} options={vendorOptions} onChange={setParam} />
@@ -110,7 +136,11 @@ export default function DeviceFilters({ vendors, sites, activeCount, totalCount 
           </span>
           <button
             type="button"
-            onClick={() => router.push('/devices')}
+            onClick={() => {
+              if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+              setQ('');
+              router.push('/devices');
+            }}
             style={{
               background: 'none',
               border: 'none',
