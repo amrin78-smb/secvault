@@ -222,29 +222,30 @@ export default async function DevicesPage({ searchParams }) {
         />
       ) : (
         <Table>
-          {/* 11 columns. The mockup had 13; Address and Monitor-band CVEs were
+          {/* 10 columns. The mockup had 13; Address and Monitor-band CVEs were
               dropped rather than shipped clipped -- this table already sits in
               Table's overflow-x box, but a column an operator cannot read
               without scrolling is not a column they will use. Address stays one
-              click away on the device page. */}
+              click away on the device page. Site was dropped too (v2.56.2):
+              exactly one of 16 devices has a value, so the column was spending
+              9% of the width rendering em-dashes. It stays searchable and
+              filterable -- only the column is gone. */}
           <colgroup>
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '6%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '7%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '10%' }} />
+            <col style={{ width: '17%' }} /> {/* Device   */}
+            <col style={{ width: '9%' }} />  {/* Vendor   */}
+            <col style={{ width: '11%' }} /> {/* Score    */}
+            <col style={{ width: '12%' }} /> {/* Version  */}
+            <col style={{ width: '7%' }} />  {/* Rules    */}
+            <col style={{ width: '10%' }} /> {/* CVEs     */}
+            <col style={{ width: '11%' }} /> {/* Support  */}
+            <col style={{ width: '8%' }} />  {/* HA       */}
+            <col style={{ width: '11%' }} /> {/* Collected*/}
+            <col style={{ width: '4%' }} />  {/* Actions  */}
           </colgroup>
           <thead>
             <tr>
               <th>Device</th>
               <th>Vendor</th>
-              <th>Site</th>
               <th title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Colour shows the rule-analysis risk band.">
                 Score
               </th>
@@ -277,7 +278,6 @@ export default async function DevicesPage({ searchParams }) {
                 <td>
                   <Badge color="info">{d.vendor}</Badge>
                 </td>
-                <td style={{ color: d.site ? 'var(--text-primary)' : 'var(--text-muted)' }}>{d.site || '—'}</td>
                 <td>
                   <SecurityScoreCell
                     score={d.securityScore}

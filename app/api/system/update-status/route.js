@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.56.2': [
+    'Dropped the Site column from the Devices table and redistributed its width across the remaining columns. Site is still searchable and filterable.',
+  ],
   '2.56.1': [
     'Shortened two Devices table headings that were truncating at the default column widths; the full meaning stays in the column tooltip.',
   ],
