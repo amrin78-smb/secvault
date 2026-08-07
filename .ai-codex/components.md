@@ -36,6 +36,10 @@ Header (async server)  session — top navy header bar: logo, search, sync pill,
 
 ## devices/
 
+DeviceInventoryTiles  tiles — six fleet tiles above the Devices table (added 2026-08-06, v2.56.0). Figures count the rows actually rendered below, so tiles and table can never disagree. ⛔ Deliberately NO "Unsupported OS / EOL" tile: SecVault collects no vendor OS end-of-life dates and no feed supplies them. Support-CONTRACT expiry replaces it, and expired vs expiring are never merged (different actions).
+(c) DeviceFilters  vendors, sites, activeCount, totalCount — Devices filter bar (search/vendor/risk/status/support/site). Writes to the URL; the server component re-renders from it (same router.push-only convention as ConfigVersionPicker). Dropdowns build from the FULL row set, not the filtered one, or picking a value would remove every other option. Search is DEBOUNCED at 350ms with a controlled input (v2.57.0 — it previously pushed a navigation per keystroke).
+DevicePostureCells  — presentational cells for the Devices table: `SecurityScoreCell`, `SupportCell`, `HaCell`, `CveCell`. ⛔ ONE NUMBER, ONE MEANING: the security score is the only FIGURE and the rule-analysis risk band is carried as its COLOUR + label. Both are ~0-100 and move in OPPOSITE directions, so showing them as two numbers side by side invites one being read as the other. Null score renders "—", never 0. `HaCell` blank ≠ "Standalone" (vendor doesn't report HA vs. genuinely standalone).
+
 (c) DeviceActions  deviceId — Collect Now / Test Connectivity buttons with pending state
 (c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-23, was 4 separate stacked links)
 (c) DeviceForm  onSubmit, mode, initialDevice — Add/Edit Device form; responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH. Credential inputs (secret/user/pass/saved-profile/save-as-profile/SMC test row) render in CREATE mode ONLY — edit mode is metadata-only, rotation lives in CredentialForm on the Manage tab (dedup, credential-only PUT never touches mgmt_method)

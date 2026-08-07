@@ -211,6 +211,16 @@ pair (the parser already keeps it out of that column).
 ⛔ Every function returns `unknown` rather than a confident value on missing/unparseable data —
 the same tri-state discipline `config_applies` and compliance `pass_when` already enforce.
 
+## lib/engines/deviceInventory.js
+
+Everything behind the Devices page in one place (added 2026-08-06, v2.56.0). `getDeviceInventory(pool, {sort})` -> `{rows, tiles, sortKey}`; also `decorate(row)`, `computeTiles(rows)`, `SORT_OPTIONS`.
+
+One query gathers real columns/aggregates; posture is derived in JS so it reuses `riskScore.js` and `securityScore.js` rather than re-implementing them in SQL. The per-device security score uses the SAME composition as the fleet score (for one device, "devices with patch_now" is 0 or 1), so a row and the dashboard tile can never disagree. A device with no analysis rows passes `[]` for hygiene so it reports "not measurable" rather than a confident 100 it hasn't earned.
+
+⛔ CVSS lives on `advisories`, NOT on `device_cve_assessments` (the assessment stores SecVault's judgement, the advisory the published severity) — the join is required.
+⛔ Support expiry is NOT `MIN(expires_at)`: that returns the OLDEST licence, which on a real device lapsed years ago (HRIS's earliest is 2021-12-24), and as a "supported until" figure reads as the current date. Split into `expired_count` / `soonest_future_expiry` / `unknown_expiry_count` — three states, three different actions. A perpetual licence (NULL date + raw 'Never') is correctly none of them.
+⛔ `SORT_OPTIONS` is a plain KEY SET, not ORDER BY fragments. Sorting happens in JS (score/risk are derived); the query has no ORDER BY. It briefly held fragments naming `security_sort`/`risk_sort`, columns that never existed — fixed v2.57.0. The raw `?sort=` param is only ever a lookup key, never interpolated into SQL.
+
 ## lib/engines/riskScore.js
 
 `computeRiskScore(findings)` -> `{score: number, band: 'low'|'medium'|'high'|'critical', raw: number}` — tallies severity counts from a raw findings array then scores.

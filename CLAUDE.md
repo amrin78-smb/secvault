@@ -327,6 +327,23 @@ Asset criticality modifier (apply after base band):
 
 **Any change to this decision tree must be documented here before the code is changed.**
 
+### Fleet & per-device Security Score (`lib/engines/securityScore.js`, v2.53.0)
+
+0-100, **higher is better**, weighted: vulnerability 40 / rule hygiene 30 / compliance 30. Each
+component reuses the engine that already measures it. Used by the dashboard headline tile, the
+nightly snapshot (`fleet_dashboard_snapshots.security_score`) and per-device on `/devices`.
+
+⛔ **POLARITY.** `riskScore.js` is 0-100 higher-is-WORSE and feeds this. The inversion happens in
+exactly ONE place (`hygieneSubscore`) and must not be "simplified" away — getting it backwards
+throws nothing and renders a plausible number that says the fleet is healthiest exactly when it is
+worst.
+
+⛔ An unmeasurable component is **dropped from the denominator**, never scored 0 (same rule as
+compliance's `na`) — otherwise a fresh install reports a data gap as a security problem. All three
+unmeasurable → `null`, rendered "—". `monitor`-band CVEs contribute nothing by design.
+
+**Any change to these weights or to the polarity must be documented here before the code changes.**
+
 ### Applicability Tri-State Default
 
 See Critical Rules above for the core "never collapse `unknown` to `no`" rule. Specifics not covered
