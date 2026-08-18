@@ -887,3 +887,70 @@ body[data-readonly="true"] .btn-danger {
     margin: 14mm 12mm;
   }
 }
+
+
+/* ── Interaction polish (v2.58.0) ──────────────────────────────────
+   Adopted from a 2026 web-app design review, filtered to what serves a DENSE
+   OPERATIONAL CONSOLE. Deliberately NOT adopted: mesh gradients (they signpost
+   AI features this app doesn't have), glassmorphism (translucency over dense
+   tables destroys the text/background contrast this app depends on), oversized
+   display type (pushes fleet data below the fold), and "adaptive UI that hides
+   unnecessary controls" (a security console must be predictable and auditable —
+   controls that appear and disappear are how an operator misses an action).
+
+   ⛔ SUITE-SAFE. Every value below derives from EXISTING tokens. No token value
+   is changed, so this stays byte-compatible with NetVault/LogVault/DDIVault/
+   SpanVault — a sibling app can adopt this block verbatim or ignore it. */
+
+/* ⛔ ACCESSIBILITY DEFECT, fixed here. Before this, only .input and .select had
+   any focus styling: every button, link, row-action menu and segmented control
+   was completely invisible to keyboard navigation. :focus-visible (not :focus)
+   so a mouse click never paints a ring — only real keyboard traversal does. */
+:where(a, button, [role="button"], [tabindex]:not([tabindex="-1"]), summary):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Inputs already ring on :focus; align them to the same offset language so a
+   keyboard user sees one consistent affordance across every control type. */
+.input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* NOTE on elevation: nothing needed here. The floating surfaces already set
+   their own — Modal uses --shadow-lg inline, UserMenu and NotificationBell use
+   --shadow-md, and .card carries --shadow-sm. A first cut of this block styled
+   .modal-panel/.dropdown-panel/.popover-panel; none of those classes exist in
+   this codebase, so it was four lines of CSS matching nothing. Elevation was
+   already consistent; only the HOVER response below was missing. */
+
+/* Rows and tiles acknowledge the pointer. Restrained on purpose: a colour
+   shift and, on cards only, 1px of lift. No glow, no scale, no bounce. */
+tbody tr td { transition: background 0.12s ease; }
+.card { transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+.card:hover { box-shadow: var(--shadow-md); }
+
+/* ⛔ REDUCED MOTION. This app ships 5 keyframe animations and ~17 transitions
+   and honoured this preference NOWHERE — for a user with vestibular sensitivity
+   that is not a stylistic detail. Everything collapses to near-instant rather
+   than 0s: a true 0 can skip transitionend handlers some libraries rely on.
+   Kept LAST so it overrides every rule above. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Movement specifically, not just its duration — a hover that JUMPS a card
+     1px is exactly the motion this preference is asking us to drop. */
+  .kpi-card:hover,
+  .kpi-card-compact:hover {
+    transform: none !important;
+  }
+}
