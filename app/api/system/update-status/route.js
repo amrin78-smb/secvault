@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.65.0': [
+    'Added an automated test suite covering the five scoring and cleanup engines -- 194 tests, no new dependencies.',
+    'Writing them found four real defects, all fixed here: a compliance percentage of blank or false scored the fleet 0%; an unreadable vulnerability count silently became good news; a risk lookup with no matching row crashed instead of scoring clean.',
+    'Most important: asking the config cleanup for a dry run using the word true, as any config file or environment variable must, ran it for real. It now honours that request.',
+    'If the cleanup ever fails part-way, the log now reports how many rows it had already removed instead of claiming it deleted nothing.',
+  ],
   '2.64.1': [
     'Compliance checks that no firewall configuration could ever answer no longer count against your score.',
     'These are manual-verification items -- things like "is an IPS profile on every internet-facing rule", which is a per-rule fact SecVault cannot read from a config snapshot.',

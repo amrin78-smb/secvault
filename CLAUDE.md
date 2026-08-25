@@ -566,8 +566,14 @@ near-identical snapshots.
    years ago must still show its last known config; "retention deleted the only copy" is strictly
    worse than a large database.
 3. A minimum COUNT per device survives regardless of age (`MIN_KEEP_CONFIGS`=10 /
-   `MIN_KEEP_BACKUPS`=5) — **constants, not env vars**, because they are safety floors, not tuning
-   knobs, and are clamped to >= 1 so protection 2 holds even if a caller passes 0.
+   `MIN_KEEP_BACKUPS`=5) — **not env vars**, because they are safety floors, not tuning knobs.
+   Precisely: they are the DEFAULTS for an in-process caller option, clamped to >= 1, and
+   `services/engine-worker.js` passes only the two day counts, so nothing configurable can reach
+   them. An in-process caller *can* lower this one to 1 — at which point protection 2 (never the
+   newest row) is what still holds, which is why the clamp floor is 1 and not 0.
+   ⚠️ This is the structurally weakest of the four: unlike 1, 2 and 4 it rests on a single clause
+   inside the DELETE rather than being doubled within that statement. It degrades gracefully
+   (losing it falls back to protection 2), but do not add a third caller to it casually.
 4. `config_backups` rows whose `label` is not `'auto'` (`'manual'`/`'pre-change'`) are NEVER
    deleted — operator intent outranks a size budget.
 
@@ -857,6 +863,39 @@ none of these carry Critical-Rules-level footguns.
 
 ---
 
+## Testing (`tests/`, added 2026-08-25)
+
+`npm test` — Node 20's **built-in** test runner (`node --test tests/`). Read `tests/README.md`
+before adding any.
+
+⛔ **`package.json` has NO `devDependencies`, and that is deliberate — keep it that way.** The
+production server installs with `npm ci` in `Update-SecVault.ps1`, so every devDependency would
+ship to a firewall-management box for no runtime benefit. `node:test` + `node:assert/strict` are
+already in the runtime this app requires, so there is no config file to drift and no transform
+between the source and what actually runs in production. Do not add Jest or Vitest without a
+concrete reason that outweighs this.
+
+Scope is **the pure engines only** — `ruleAnalysis`, `configAuditor`, `securityScore`,
+`riskScore`, `configRetention`. They take data in and return data out, which is exactly what is
+cheap to pin and what has actually broken. There is NO route/component/browser test harness, and
+nothing here talks to a database: an engine that takes a `pool` gets a STUB that returns canned
+rows and records the SQL it was handed. Live verification against the real fleet is still a
+separate, required step for anything touching a device — these tests replace neither that nor the
+"verify against live responses before writing any parser" rule.
+
+**What a test here is FOR.** Nearly every bug these cover is one class: a failed read recorded as
+an affirmative value (`hit_count` defaulting to 0, `getRules()` returning `[]`, an unanswerable
+compliance check scored as a `warning`). So a new test must include the **"we could not measure
+this"** case, not just the pass and fail cases. That is the one that regresses silently, because
+the wrong answer is a plausible number rather than a crash.
+
+These also make CLAUDE.md's own "document before you change it" rules enforceable rather than
+advisory: the security-score weights, the risk-score polarity, and retention's four delete
+protections are each pinned by a test, so weakening one fails a build instead of silently
+shipping.
+
+---
+
 ## Claude Code Workflow
 
 ### Starting a Session
@@ -876,6 +915,7 @@ none of these carry Critical-Rules-level footguns.
 ### Before Committing
 ```bash
 node --check lib/**/*.js services/**/*.js app/api/**/*.js
+npm test                                                  # must be zero failures
 npm run build                                             # must be zero errors
 # If schema.sql changed: verify all new tables have per-table grants for readonly users
 # If new env vars added: add to .env.local.example

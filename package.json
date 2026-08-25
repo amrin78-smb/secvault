@@ -1,12 +1,13 @@
 {
   "name": "secvault",
-  "version": "2.64.1",
+  "version": "2.65.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",
     "build": "next build",
     "start": "next start -p 3010",
-    "migrate": "node lib/migrate.js"
+    "migrate": "node lib/migrate.js",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
