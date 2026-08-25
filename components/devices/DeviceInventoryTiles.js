@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconClock,
   IconTrendingUp,
+  IconRefresh,
 } from '../icons';
 
 // Fleet tiles above the Devices table. Every figure counts the rows actually
@@ -92,6 +93,26 @@ export default function DeviceInventoryTiles({ tiles }) {
         icon={IconClock}
         iconColor="#fbbf24"
         iconBg="rgba(251,191,36,0.20)"
+      />
+      {/* ⛔ Counts failing/degraded collectors. This is the tile that would
+          have surfaced TSR_EKC — unreachable since 2026-08-06, every poll
+          failing, visible only in engine.log. "Not observed" is reported
+          separately: never having been polled is not the same as passing. */}
+      <StatCard
+        compact
+        label="Collector Health"
+        value={tiles.pollDegraded}
+        sub={
+          tiles.pollDegraded > 0
+            ? 'Devices failing their polls'
+            : tiles.pollUnknown > 0
+              ? `${tiles.pollUnknown} not yet observed`
+              : 'All devices polling'
+        }
+        color={tiles.pollDegraded > 0 ? 'var(--red)' : tiles.pollUnknown > 0 ? 'var(--yellow)' : 'var(--green)'}
+        icon={IconRefresh}
+        iconColor="#f87171"
+        iconBg="rgba(248,113,113,0.22)"
       />
       <StatCard
         compact

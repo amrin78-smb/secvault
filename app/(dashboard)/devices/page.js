@@ -8,14 +8,13 @@ import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import Button from '../../../components/ui/Button';
-import StatusDot from '../../../components/ui/StatusDot';
 import EmptyState from '../../../components/ui/EmptyState';
 import Modal from '../../../components/ui/Modal';
 import PageHeader from '../../../components/ui/PageHeader';
 import DeviceRowActions from '../../../components/devices/DeviceRowActions';
 import DeviceInventoryTiles from '../../../components/devices/DeviceInventoryTiles';
 import DeviceFilters from '../../../components/devices/DeviceFilters';
-import { SecurityScoreCell, SupportCell, HaCell, CveCell } from '../../../components/devices/DevicePostureCells';
+import { SecurityScoreCell, SupportCell, HaCell, CveCell, PollHealthDot, PollHealthNote } from '../../../components/devices/DevicePostureCells';
 import { getDeviceInventory, computeTiles } from '../../../lib/engines/deviceInventory';
 
 export const dynamic = 'force-dynamic';
@@ -283,15 +282,19 @@ export default async function DevicesPage({ searchParams }) {
             {devices.map((d) => (
               <tr key={d.id}>
                 <td>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <StatusDot
-                      status={
-                        d.last_connectivity_ok === true ? 'green' : d.last_connectivity_ok === false ? 'red' : 'grey'
-                      }
-                    />
-                    <Link href={`/devices/${d.id}`} className="link-quiet">
-                      {d.name}
-                    </Link>
+                  {/* ⛔ The dot is driven by POLL HEALTH, not by
+                      devices.last_connectivity_ok — that column is written only by
+                      the manual "Test connectivity" button, so it could be weeks
+                      stale and showed TSR_EKC green while every poll had failed
+                      for 19 days. */}
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <PollHealthDot band={d.pollBand} health={d.pollHealth} />
+                      <Link href={`/devices/${d.id}`} className="link-quiet">
+                        {d.name}
+                      </Link>
+                    </span>
+                    <PollHealthNote band={d.pollBand} health={d.pollHealth} />
                   </span>
                 </td>
                 <td>

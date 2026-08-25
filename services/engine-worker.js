@@ -346,8 +346,20 @@ async function runRuleVersionPullJob() {
         const collectResult = await collectForDevice(device);
         if (collectResult) {
           if (collectResult.configChanged) anyConfigChanged = true;
-          logger.info(
-            `Job [rule-version-pull] collected device ${device.id} (${device.name || 'unnamed'}) OK — ` +
+          // ⛔ "OK" was logged even when NOTHING was collected. TSR_EKC has been
+          // fully unreachable since 2026-08-06 and every cycle still logged
+          // "collected device ... OK — rules: n/a". A run that produced no rules
+          // AND no config is a FAILURE and now says so, at WARN.
+          const collectedSomething =
+            collectResult.rulesCount != null || collectResult.configCollected === true;
+          const level = collectedSomething ? 'info' : 'warn';
+          await recordConnectivity(pool, device.id, {
+            reachable: collectedSomething,
+            source: 'collect',
+            message: collectedSomething ? null : (collectResult.errors || []).join('; ') || 'nothing collected',
+          });
+          logger[level](
+            `Job [rule-version-pull] device ${device.id} (${device.name || 'unnamed'}) ${collectedSomething ? 'collected OK' : 'COLLECTED NOTHING'} — ` +
               `rules: ${collectResult.rulesCount ?? 'n/a'}, findings: ${collectResult.analysisFindings ?? 'n/a'}, ` +
               `configChanged: ${collectResult.configChanged}` +
               (collectResult.errors.length ? `, partial errors: ${collectResult.errors.join('; ')}` : '')
@@ -439,6 +451,7 @@ async function runVpnSessionPollJob() {
            VALUES ($1, $2, $3::jsonb)`,
           [device.id, summary.active_session_count, JSON.stringify(summary.raw || null)]
         );
+        await recordConnectivity(pool, device.id, { reachable: true, source: 'vpn' });
         // Per-user active-session DETAIL (additive, 2026-07-31). Only when the
         // adapter provided it (vendors not yet emitting `sessions` are simply
         // skipped) — and only on THIS successful poll, so a failed pull never
@@ -491,6 +504,11 @@ async function runVpnSessionPollJob() {
         logger.warn(
           `Job [vpn-session-poll] failed for device ${device.id} (${device.name || 'unnamed'}, vendor=${device.vendor}, mgmt_method=${device.mgmt_method}): ${err.stack || err.message}`
         );
+        // ⛔ Added 2026-08-25. Until now ONLY the metric poll wrote connectivity
+        // history, so a device whose metric poll succeeded but whose VPN poll
+        // failed read as 100% healthy. TUG was exactly that: 166/166 on metrics
+        // while ~23% of its VPN polls timed out waiting for an SSH prompt.
+        await recordConnectivity(pool, device.id, { reachable: false, source: 'vpn', message: err.message });
       }
     }
 

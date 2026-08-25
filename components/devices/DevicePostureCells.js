@@ -1,4 +1,5 @@
 import Badge from '../ui/Badge';
+import StatusDot from '../ui/StatusDot';
 
 // Presentational cells shared by the Devices table. Server components (no
 // interactivity), defined at module top level per CLAUDE.md.
@@ -133,6 +134,60 @@ export function CveCell({ patchNow, scheduled }) {
     <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
       {patchNow > 0 && <Badge color="danger">{patchNow} now</Badge>}
       {scheduled > 0 && <Badge color="warning">{scheduled}</Badge>}
+    </span>
+  );
+}
+
+// Collector health for one device. ⛔ Replaces the StatusDot that used to be
+// driven by devices.last_connectivity_ok — a single value written ONLY by the
+// manual "Test connectivity" button, so it could be weeks stale and showed
+// TSR_EKC as fine while every one of its polls had failed for 19 days.
+//
+// ⛔ Per-source, never blended. TUG is 166/166 on metrics and badly degraded on
+// its VPN poll; one averaged number would hide precisely the broken collector.
+const POLL_TONE = {
+  healthy: { color: 'green', label: 'Healthy' },
+  flaky: { color: 'green', label: 'Mostly healthy' },
+  degraded: { color: 'yellow', label: 'Degraded' },
+  failing: { color: 'red', label: 'Failing' },
+  unknown: { color: 'grey', label: 'Not observed' },
+};
+
+export function PollHealthDot({ band, health }) {
+  const tone = POLL_TONE[band] || POLL_TONE.unknown;
+  const detail = health && health.sources
+    ? Object.entries(health.sources)
+        .map(([k, v]) => `${k}: ${v.ok}/${v.total}`)
+        .join(' · ')
+    : 'no polls recorded in the last 3 days';
+  const err = health && health.lastError ? ` — last error: ${health.lastError}` : '';
+  return (
+    <span
+      title={`Polling ${tone.label} — ${detail}${err}`}
+      style={{ display: 'inline-flex', alignItems: 'center' }}
+    >
+      <StatusDot status={tone.color} />
+    </span>
+  );
+}
+
+// Shown under the device name only when there IS something to say, so a
+// healthy fleet stays visually quiet.
+export function PollHealthNote({ band, health }) {
+  if (band === 'healthy' || band === 'flaky') return null;
+  const tone = POLL_TONE[band] || POLL_TONE.unknown;
+  const pct =
+    health && health.worstRate !== null && health.worstRate !== undefined
+      ? ` ${Math.round(health.worstRate * 100)}% of polls succeeding`
+      : '';
+  return (
+    <span
+      style={{
+        fontSize: 'var(--text-xs)',
+        color: band === 'failing' ? 'var(--red)' : band === 'degraded' ? 'var(--yellow)' : 'var(--text-muted)',
+      }}
+    >
+      {tone.label}{pct}
     </span>
   );
 }
