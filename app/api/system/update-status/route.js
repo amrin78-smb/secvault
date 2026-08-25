@@ -7,6 +7,59 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.62.1': [
+    "Palo Alto firewalls managed by Panorama now collect their rules again. Those rules are pushed centrally rather than stored on the firewall, and the code that read the pushed policy had never worked over this connection type.",
+    "One device had been reporting zero rules since it was switched to the API connection on 3 August.",
+  ],
+  '2.62.0': [
+    "Signing in no longer reveals whether a username exists. A wrong password for a real account took four times longer to reject than an unknown one, which is enough to identify valid accounts before a password-guessing attempt.",
+    "The unused image endpoint is no longer reachable without signing in.",
+    "Added the standard browser security headers, which were not being sent at all, and stopped advertising the framework version on every response.",
+    "The exact version number is no longer printed on the sign-in page. It is still shown under Settings once signed in.",
+  ],
+  '2.61.2': [
+    "Patched the sign-in library against a critical advisory, plus two smaller dependency fixes.",
+    "No critical issues remain. The rest need a major framework upgrade and are scheduled separately.",
+  ],
+  '2.61.1': [
+    "The SANS column on the compliance comparison table was rendering zero pixels wide, so that standard’s score was invisible for every device.",
+    "Headline numbers on several pages were drawn in the border colour and were effectively unreadable in both light and dark themes.",
+    "Fixed a fault on the CVE detail and network-objects pages that made the browser throw away the server-rendered page and rebuild it.",
+    "Printed compliance reports no longer cut off check details and remediation guidance mid-sentence.",
+    "The search box now shows a keyboard focus outline, and clipped Version and Collected cells show their full value on hover.",
+  ],
+  '2.61.0': [
+    "A device that collected nothing is no longer recorded as freshly collected. One firewall had been unreachable for 18 days while every page reported it as current.",
+    "A brief timeout no longer wipes a device’s interfaces, routes or NAT rules, and a rejected command no longer wipes its licences, disk usage or signature versions.",
+    "An alert whose every notification channel failed is no longer recorded as delivered, so it is retried rather than silently lost.",
+    "Fixed vulnerability version ranges built from a wildcard, which produced an impossible range that could never match any device.",
+    "Added two database indexes that remove the largest source of disk activity during collection.",
+  ],
+  '2.60.0': [
+    "Devices that are failing to poll are now visible on the Devices page instead of only in the engine log.",
+    "The status dot reflects real polling health rather than the last time someone pressed Test Connectivity, which could be weeks stale.",
+    "The VPN poll and the configuration collection now record their outcomes too, so a device whose metric poll succeeds but whose other collectors fail no longer reads as healthy.",
+    "A collection run that gathered nothing is now recorded as a failure rather than a success.",
+  ],
+  '2.59.0': [
+    "Fixed false configuration-change alerts. A failed read of a device’s system information was being stored as though the device had removed its model, serial number, hostname and MAC address, then added them back the next day.",
+    "When system information cannot be read, the previous values are kept and the failure is reported instead.",
+    "Fortinet configurations now record model, serial, version and hostname, which they never captured before.",
+  ],
+  '2.58.0': [
+    "Keyboard focus is now visible on every interactive element. Previously only text boxes and dropdowns showed a focus outline.",
+    "The app now honours the operating system’s reduced-motion setting, which it had been ignoring.",
+    "Table rows and cards respond to the pointer with a restrained highlight.",
+  ],
+  '2.57.0': [
+    "Sorting, cancelling a delete, or opening a delete confirmation no longer clears the filters you had applied on the Devices page.",
+    "The Devices search box waits for you to stop typing instead of reloading on every keystroke.",
+    "A stalled session-count read on a Palo Alto no longer discards that device’s CPU and memory readings.",
+    "Fleet System Health gained a 24-hour reachability sparkline.",
+  ],
+  '2.56.3': [
+    "Widened the Actions column on the Devices table so its heading stops being cut off.",
+  ],
   '2.56.2': [
     'Dropped the Site column from the Devices table and redistributed its width across the remaining columns. Site is still searchable and filterable.',
   ],
