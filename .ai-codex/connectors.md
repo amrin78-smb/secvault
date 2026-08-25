@@ -788,3 +788,16 @@ against the current code. Two precision notes worth flagging for future readers:
   "bugs investigated and found NOT to be bugs" aside, easy to miss — this file surfaces it as a
   first-class quirk under Fortinet quirk #2 since it's exactly the kind of behavior a future change
   could accidentally "fix" into a regression.
+
+**Fortinet system_info in the parsed config** (added 2026-08-25, v2.59.0). Until
+now `parseFullConfiguration()` took only the config text, so EVERY Fortinet
+snapshot stored no `system_info` at all — 149/149 on TUS, 96/96 on TSR-TL, 95/95
+on Vietnam-YCC, 94/94 on TSR_EKM, 74/74 on TSR_EKC — even though `getVersion()`
+was already fetching model/serial/version/hostname from `get system status` on the
+same pull. `getConfig()` now passes that (cached per adapter instance, so no extra
+command) and the parser merges it under `system_info`.
+
+⛔ The key is OMITTED when the status read fails, never written as `{}` — an empty
+object is exactly what produced Palo Alto's false "12 removed / 12 added" change
+alerts (see gotchas.md). Expect ONE genuine `added` diff per Fortinet device on the
+first pull after upgrade: the data really did appear, so it is a real change, not noise.

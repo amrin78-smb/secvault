@@ -466,3 +466,32 @@ password travels as a literal query parameter, inherent to PAN-OS's own auth flo
 `redactSecrets()`/`scrubUrlSecretParams()` in `lib/adapters/paloalto/api.js` strips this from any
 error string by parameter NAME (survives re-encoding), and the keygen response body is never echoed
 into any error at all.
+
+## A failed read persisted as an affirmative empty (system-info read failure)
+
+Added 2026-08-25, v2.59.0. Both Palo Alto transports fetch `show system info`
+BEST-EFFORT when building a config snapshot: on failure they log and pass `null`,
+and their `parseConfig()` turns that into `system_info: {}` plus null
+`hostname`/`model`/`sw_version`. `configDiff` then correctly reported ~12
+REMOVALS against the previous populated snapshot, and ~12 ADDITIONS when the next
+read succeeded — false config-change alerts on a security product.
+
+Confirmed on TUG: `config_raw` was byte-identical (151063 bytes) on both the
+"removed" and "added" day. The device changed nothing; only the READ alternated.
+
+⛔ Fixed in ONE place — `preserveSystemInfoOnReadFailure()` in
+`lib/adapters/index.js`, not per-adapter — so it covers both PA transports and any
+future adapter merging a best-effort `system_info`. On an empty/absent value it
+carries the PREVIOUS snapshot forward and pushes a `result.errors` note, the same
+"previous values kept" discipline as `getLicenses`/`getDiskUsage`. A POPULATED
+system_info is never touched, so a genuine model/serial/version change still diffs.
+
+⛔ When writing an adapter: OMIT a key you could not read. Never write `{}` — an
+empty object is an assertion that the device reported nothing, which is a
+different claim from "we failed to ask".
+
+Historical rows are repaired by `cleanupSystemInfoReadFailureDiffs()` (run from
+`migrate.js`). Deliberately narrow after the type-coercion cleanup precedent:
+a modified entry qualifies ONLY when exactly one side is blank — both sides
+populated is a real change and survives. Live dry-run before shipping: 3 rows
+deleted, 0 updated, 106 of 109 untouched.
