@@ -315,21 +315,39 @@ Neither implements `getVpnSessionSummary`.
    finds ≥1, this fallback is never attempted, even if that container turns out empty (that's an
    honest `[]`, not a failure). **This SSH-transport version IS live-verified** (33/33 rules
    confirmed against a real captured device output).
-   — **XML/API transport equivalent added 2026-07-23, NOT YET LIVE-VERIFIED.**
-   `index.js:getRules()` tries `api.getEffectiveSecurityPolicy()` (`type=op&cmd=<show><running>
-   <security-policy/></running></show>`, same proven CLI-to-XML translation convention as every
-   other op command in `api.js`) at the identical trigger point — after BOTH the default-vsys AND
-   any-vsys config-get xpaths have already found zero rules. Parsed by `parser.js:
-   parseEffectiveSecurityPolicy()`, which deep-walks for any `@_name`+`action`-bearing entry
-   (shape-agnostic, same discipline as `parseRulesDeep`) rather than assuming one guessed XML
-   wrapper — the RESPONSE SHAPE itself is doc-derived, unlike the SSH version's confirmed-live
-   format. Field extraction tries the SSH transport's own confirmed-live combined
-   `"application/service"` field first, falls back to separate `application`/`service` fields.
-   Returns `null` (not `[]`) when nothing rule-like is found, so `getRules()` falls through to its
-   existing (separately documented, known-limitation) behavior rather than reporting a false empty
-   success. **Do not treat this as verified** — check `[PaloAlto Debug] effective security-policy
-   raw response` against a real Panorama-managed API-transport device before trusting its output;
-   see CLAUDE.md's "Palo Alto SSH — RESOLVED" → "XML/API transport fallback" subsection.
+   — **XML/API transport equivalent — LIVE-VERIFIED 2026-08-25, and the original guess was
+   WRONG.** The 2026-07-23 version assumed `show running security-policy` returns structured XML
+   over the API. It does not. PAKFood (PAN-OS 11.1.13-h5, the fleet's only Panorama-managed
+   firewall) returns the CLI's plain brace text wrapped in a single `<member>` element, so
+   `parser.parseEffectiveSecurityPolicy()` — which deep-walks for `@_name`+`action` entries —
+   matched nothing and returned `null` on every device. The fallback ran on every pull and could
+   never succeed; on the API transport it was dead code. Because `collectAndStore` DELETEs before
+   reinserting, PAKFood's 33 real rules (collected fine on the SSH transport until 2026-08-03)
+   were WIPED by the first API-transport pull.
+
+   `index.js:getRules()` now tries three tiers at that same trigger point (after BOTH the
+   default-vsys and any-vsys config-get xpaths return zero rules), best-data-first, and names the
+   winning tier in its `engine.log` line:
+   1. **`api.showPushedSharedPolicy()`** — `<show><config><pushed-shared-policy/></config></show>`,
+      clean structured XML that `parser.parseRulesDeep()` extracts UNMODIFIED. **33 rules live**,
+      with real OBJECT NAMES (`VLAN4-10.248.4.0_24`) and complete application lists. Preferred.
+   2. **the `<member>` CLI text** through `sshParser.parseEffectiveSecurityPolicy()`, the SSH
+      transport's ALREADY live-verified text parser. **35 rules live.** Same "the API returns the
+      CLI text verbatim" precedent `getNatRules()` already relies on.
+   3. the original doc-derived XML shape, kept only in case a future PAN-OS returns it. Never
+      observed working on any real device.
+
+   Tiers 1 and 2 disagree on COUNT (33 vs 35) because they are different questions — tier 2's
+   merged effective policy includes rules tier 1's pushed-policy view does not. Tier 1 wins on
+   data quality, which is why it is first. The SSH transport's documented limitations (no
+   disabled-rule visibility, no real logging state, no hit counts, no NAT) apply to tiers 2 and 3;
+   tier 1 carries real object names but still no hit counts.
+
+   ⛔ The durable lesson, and it is CLAUDE.md's own rule: "verify all field names against live
+   responses before writing any parser — documentation lies." The 2026-07-23 parser was written
+   shape-agnostically *specifically* to survive a wrong guess, and that discipline did work — it
+   failed closed to `null` instead of inventing rules. But no amount of defensive parsing can make
+   a guessed format correct, and the real format was not among the shapes considered plausible.
 5. **XML API's default xpath is single-vsys only** (`vsys1`, hardcoded as `DEFAULT_VSYS`). Zero
    rules from that xpath is ambiguous — could be genuinely empty OR a multi-vsys device whose rules
    live under vsys2/vsys3. `index.js:getRules()` only tries the predicate-free any-vsys fallback

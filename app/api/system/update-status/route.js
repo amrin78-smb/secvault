@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.62.2': [
+    'Verified live against PAKFood that the Panorama rule fix works: 33 rules collected, with real object names.',
+    'The collector log now names WHICH of the three Panorama sources answered, instead of leaving you to guess.',
+    'Corrected four places in the codebase index that still called the API rule path "not yet live-verified" - it is now verified, and the original guess was wrong.',
+    'Removed a false note claiming SecVault has no live Palo Alto to test against; there are eleven.',
+  ],
   '2.62.1': [
     "Palo Alto firewalls managed by Panorama now collect their rules again. Those rules are pushed centrally rather than stored on the firewall, and the code that read the pushed policy had never worked over this connection type.",
     "One device had been reporting zero rules since it was switched to the API connection on 3 August.",

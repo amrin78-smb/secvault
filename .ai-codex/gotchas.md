@@ -125,11 +125,14 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - Palo Alto: a fully Panorama-managed device can have ZERO rulebase content in its LOCAL config
   tree at all (every rule is Panorama-pushed) — `getRules()` falls back to the effective/merged
   security policy in that case, on BOTH transports. Known permanent gaps in that fallback: no
-  disabled-rule visibility, no real logging state, no hit counts, no NAT. **The SSH transport's
-  version is live-verified (33/33 rules confirmed); the XML/API transport's version (added
-  2026-07-23) is NOT yet live-verified** — its request construction is proven, but the response
-  shape is doc-derived. Don't assume the API-transport fallback is trustworthy until checked
-  against a real device's `[PaloAlto Debug] effective security-policy raw response` log line.
+  disabled-rule visibility, no real logging state, no hit counts, no NAT. Both
+  transports are now live-verified. ⛔ The XML/API transport's original (2026-07-23) version was
+  live-verified on 2026-08-25 to be **WRONG**: `show running security-policy` returns the CLI's
+  brace text wrapped in one `<member>` element, not structured XML, so that fallback returned
+  `null` on every device and was dead code — and because `collectAndStore` DELETEs before
+  reinserting, PAKFood's 33 real rules were wiped. It now tries `pushed-shared-policy` (structured
+  XML, best data) first, then the `<member>` text through the SSH transport's proven text parser.
+  See `connectors.md` item 4 for the full three-tier order and the live counts.
 - Sangfor has no live device, no documentation trail — every field mapping is doc-derived and
   explicitly marked low-confidence; `getObjects()` deliberately returns an empty stub rather than
   guess at unverified block syntax.
