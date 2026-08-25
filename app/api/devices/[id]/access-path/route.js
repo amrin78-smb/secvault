@@ -77,6 +77,15 @@ export async function POST(request, { params }) {
 
     return NextResponse.json({ ...result, note });
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Access path query failed' }, { status: 400 });
+    // ⛔ This catch guards BOTH the DB loads above and the pure computation, so
+    // a Postgres outage used to return 400 — telling the UI and any monitor
+    // that the operator's srcIp/dstIp was invalid when in fact the backend was
+    // down. Distinguish them: only a validation error is the caller's fault.
+    const isValidation = err && err.name === 'ValidationError';
+    const looksLikeInput = isValidation || /invalid|must be|malformed|not a valid/i.test(err?.message || '');
+    return NextResponse.json(
+      { error: err.message },
+      { status: looksLikeInput ? 400 : 500 }
+    );
   }
 }

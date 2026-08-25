@@ -27,7 +27,7 @@ export async function POST(request) {
     return forbiddenResponse();
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
   const role = VALID_ROLES.has(body?.role) ? body.role : VIEWER_ROLE;
@@ -45,12 +45,26 @@ export async function POST(request) {
   }
 
   const hash = await bcrypt.hash(password, 10);
-  const result = await pool.query(
-    `INSERT INTO users (username, password_hash, role)
-     VALUES ($1, $2, $3)
-     RETURNING id, username, role, created_at, updated_at`,
-    [username, hash, role]
-  );
+  // ⛔ The duplicate-username SELECT above is a check-then-insert RACE. Two
+  // admins creating the same username concurrently both pass that check; the
+  // loser then violates the UNIQUE constraint and used to surface a raw
+  // Postgres constraint-violation message as an opaque 500. Translate 23505
+  // into the same clean 409 the pre-check returns — and the same one
+  // POST /api/credential-profiles already returns for this exact shape.
+  let result;
+  try {
+    result = await pool.query(
+      `INSERT INTO users (username, password_hash, role)
+       VALUES ($1, $2, $3)
+       RETURNING id, username, role, created_at, updated_at`,
+      [username, hash, role]
+    );
+  } catch (err) {
+    if (err && err.code === '23505') {
+      return NextResponse.json({ error: 'A user with that username already exists' }, { status: 409 });
+    }
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 
   return NextResponse.json({ user: result.rows[0] }, { status: 201 });
 }

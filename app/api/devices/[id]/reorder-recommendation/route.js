@@ -64,44 +64,52 @@ function buildCsv(recommendedOrder, changedRuleIdSet) {
 // finding in this dashboard (see CLAUDE.md's Rule Analysis Dashboard
 // section — no adapter has ever gained a write-back-to-device capability).
 export async function GET(request, { params }) {
-  const deviceId = params.id;
+  // ⛔ Was the ONLY route in app/api with no error handling at all: a DB
+  // outage or a throw from computeRecommendedOrder returned an opaque 500
+  // with no message for the ReorderTab to show. Matches the shape every
+  // sibling analysis route already uses.
+  try {
+    const deviceId = params.id;
 
-  if (!isValidUuid(deviceId)) {
-    return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
-  }
+    if (!isValidUuid(deviceId)) {
+      return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+    }
 
-  const { searchParams } = new URL(request.url);
-  const format = searchParams.get('format');
+    const { searchParams } = new URL(request.url);
+    const format = searchParams.get('format');
 
-  const [rules, findings] = await Promise.all([
-    getDeviceRules(pool, deviceId),
-    getReorderFindings(pool, deviceId),
-  ]);
+    const [rules, findings] = await Promise.all([
+      getDeviceRules(pool, deviceId),
+      getReorderFindings(pool, deviceId),
+    ]);
 
-  const {
-    recommendedOrder,
-    changedRuleIds,
-    unresolvedRuleIds,
-    resolvedFindingCount,
-    unresolvedFindingCount,
-  } = computeRecommendedOrder(rules, findings);
+    const {
+      recommendedOrder,
+      changedRuleIds,
+      unresolvedRuleIds,
+      resolvedFindingCount,
+      unresolvedFindingCount,
+    } = computeRecommendedOrder(rules, findings);
 
-  if (format === 'csv') {
-    const csv = buildCsv(recommendedOrder, new Set(changedRuleIds));
-    return new Response(csv, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/csv',
-        'Content-Disposition': 'attachment; filename="reorder-recommendation.csv"',
-      },
+    if (format === 'csv') {
+      const csv = buildCsv(recommendedOrder, new Set(changedRuleIds));
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': 'attachment; filename="reorder-recommendation.csv"',
+        },
+      });
+    }
+
+    return NextResponse.json({
+      recommendedOrder,
+      changedRuleIds,
+      unresolvedRuleIds,
+      resolvedFindingCount,
+      unresolvedFindingCount,
     });
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    recommendedOrder,
-    changedRuleIds,
-    unresolvedRuleIds,
-    resolvedFindingCount,
-    unresolvedFindingCount,
-  });
 }

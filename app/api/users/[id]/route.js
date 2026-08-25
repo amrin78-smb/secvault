@@ -36,7 +36,7 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: 'Invalid user id' }, { status: 400 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const nextRole = body?.role;
   const nextPassword = typeof body?.password === 'string' ? body.password : null;
 
@@ -45,23 +45,38 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
+  // ⛔ VALIDATE EVERYTHING BEFORE THE FIRST WRITE.
+  //
+  // This used to apply the role change and only THEN check the password
+  // length, so `{role:'viewer', password:'short'}` COMMITTED the demotion and
+  // then returned 400. The UI reported failure while the account had already
+  // been demoted; the admin retried and never learned the role had changed.
+  // Same discipline app/api/settings/route.js already documents for its own
+  // mixed password/setting request.
   if (nextRole !== undefined) {
     if (!VALID_ROLES.has(nextRole)) {
       return NextResponse.json({ error: `role must be one of: ${[...VALID_ROLES].join(', ')}` }, { status: 400 });
     }
-    if (nextRole !== ADMIN_ROLE && (await wouldRemoveLastAdmin(pool, params.id, { targetRole: nextRole }))) {
+  }
+  if (nextPassword !== null && nextPassword.length < 8) {
+    return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+  }
+  // Last-admin check is a DB read, so it stays with the other validations but
+  // must run after the cheap ones.
+  if (nextRole !== undefined && nextRole !== ADMIN_ROLE) {
+    if (await wouldRemoveLastAdmin(pool, params.id, { targetRole: nextRole })) {
       return NextResponse.json(
         { error: 'Cannot change role — this is the last remaining admin account' },
         { status: 400 }
       );
     }
-    await pool.query('UPDATE users SET role = $1, updated_at = now() WHERE id = $2', [nextRole, params.id]);
   }
 
+  // Every check has passed; the writes below cannot be rejected halfway.
+  if (nextRole !== undefined) {
+    await pool.query('UPDATE users SET role = $1, updated_at = now() WHERE id = $2', [nextRole, params.id]);
+  }
   if (nextPassword !== null) {
-    if (nextPassword.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
-    }
     const hash = await bcrypt.hash(nextPassword, 10);
     await pool.query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, params.id]);
   }

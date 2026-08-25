@@ -23,7 +23,7 @@ export async function GET() {
 }
 
 export async function PUT(request) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
 
   const {
     feed_poll_interval_hours: feedPollIntervalHours,
@@ -44,6 +44,20 @@ export async function PUT(request) {
   if (feedPollIntervalHours !== undefined && feedPollIntervalHours !== null) {
     if (!isAdmin(session)) {
       return forbiddenResponse();
+    }
+    // ⛔ VALIDATE. Confirmed live: settings.feed_poll_interval_hours holds an
+    // EMPTY STRING in production, because a blank form field arrives as '' —
+    // which is neither undefined nor null, so it passed this guard and was
+    // stored via String(''). The engine worker then warns
+    // 'value "" is not a valid integer between 1 and 24 — falling back to 6'
+    // on EVERY startup, and the configured interval silently does nothing.
+    // Reject it here rather than persist a value the reader must reject.
+    const parsed = Number.parseInt(feedPollIntervalHours, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 24) {
+      return NextResponse.json(
+        { error: 'feed_poll_interval_hours must be a whole number between 1 and 24' },
+        { status: 400 }
+      );
     }
   }
 
@@ -102,7 +116,7 @@ export async function PUT(request) {
       `INSERT INTO settings (key, value, updated_at)
        VALUES ('feed_poll_interval_hours', $1, now())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
-      [String(feedPollIntervalHours)]
+      [String(Number.parseInt(feedPollIntervalHours, 10))]
     );
   }
 
