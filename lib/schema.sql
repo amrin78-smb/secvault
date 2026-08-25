@@ -349,6 +349,17 @@ CREATE TABLE IF NOT EXISTS rule_analysis_results (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rar_device_id ON rule_analysis_results(device_id);
+-- ⛔ FK CHILD-COLUMN INDEX. Postgres must verify no child row references a
+-- parent being deleted, and firewall_rules / network_objects are BOTH fully
+-- DELETE+reinserted on every collection run. Without an index on the child
+-- column that verification is a full sequential scan of the child table PER
+-- DELETED PARENT ROW. Measured live before adding these:
+--   object_analysis_results.object_id : 1,069,719 seq scans, 5,565,449,294 tuples read
+--   rule_analysis_results.rule_id     :   213,079 seq scans,   352,483,997 tuples read
+-- from tables of only 5,749 and 2,198 rows. It was the dominant I/O source in
+-- the database and grows with object count, so a larger fleet degrades sharply.
+-- The existing device_id indexes do NOT help: the FK check is on object_id/rule_id.
+CREATE INDEX IF NOT EXISTS idx_rar_rule_id ON rule_analysis_results(rule_id);
 CREATE INDEX IF NOT EXISTS idx_rar_finding_type ON rule_analysis_results(finding_type);
 CREATE INDEX IF NOT EXISTS idx_rar_severity ON rule_analysis_results(severity);
 
@@ -466,6 +477,7 @@ CREATE TABLE IF NOT EXISTS object_analysis_results (
 );
 
 CREATE INDEX IF NOT EXISTS idx_oar_device_id ON object_analysis_results(device_id);
+CREATE INDEX IF NOT EXISTS idx_oar_object_id ON object_analysis_results(object_id);
 CREATE INDEX IF NOT EXISTS idx_oar_finding_type ON object_analysis_results(finding_type);
 
 -- Operator acknowledge/dismiss tracking for Phase 5 rule-hygiene findings
