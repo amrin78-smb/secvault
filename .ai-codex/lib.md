@@ -182,6 +182,14 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+## lib/engines/configRetention.js
+
+`runConfigRetention(pool, options)` -> `Promise<{dryRun, durationMs, deviceConfigs, configBackups}>` — daily retention over `device_configs` + `config_backups`. ⛔ NEVER THROWS (per-table errors land in `summary.<table>.error`), idempotent, and structurally incapable of deleting a baseline, a device's newest row, its `MIN_KEEP_*` most recent rows, or a non-`'auto'` backup — every one of those tests is written TWICE, once in the classify query and once in the DELETE. `options`: `{configRetentionDays, backupRetentionDays, minKeepConfigs, minKeepBackups, maxRowsPerRun, dryRun}`; `dryRun:true` runs only the classification and reports `wouldDelete`. Per-run row cap (5000/table, oldest-first) so a first run on a huge table drains over several runs rather than one giant transaction, reported as `capped:true` so the log never understates.
+`formatRetentionSummary(summary)` -> `string[]` — pure; the engine.log lines, which state what was KEPT and by which protection alongside what was deleted.
+Exports `DEFAULT_CONFIG_RETENTION_DAYS` (60) / `DEFAULT_BACKUP_RETENTION_DAYS` (365) / `MIN_KEEP_CONFIGS` (10) / `MIN_KEEP_BACKUPS` (5) / `DEFAULT_MAX_ROWS_PER_RUN` / `AUTO_BACKUP_LABEL` — `services/engine-worker.js` imports the defaults as its env-parsing fallbacks rather than hardcoding a second copy, so worker/`.env.local.example`/CLAUDE.md cannot drift.
+
+Verified against live production data 2026-08-25 (1,730 rows / 449 MB / 16 devices): at the default 60d the job is a provable no-op (nothing on this fleet is older than 41 days); at 30d it would free 150 MB and at 14d 351 MB, and in ALL THREE the delete set contained zero baselines, zero newest-per-device rows, and left every device at or above the min-keep floor.
+
 ## lib/engines/deviceHealth.js
 
 Added 2026-08-03. PURE derived-status layer over the four lifecycle/health tables

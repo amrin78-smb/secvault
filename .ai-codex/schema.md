@@ -149,6 +149,13 @@ Secret redaction (`SECRET_PATH_PATTERN`/`deepRedactSecrets()`) + volatile-noise 
 (`MEANINGFUL_SUBTREE_FIELDS_BY_VENDOR`) applied in `configDiff.js`, both at write time AND via a
 retroactive migrate-time cleanup (`cleanupVolatileConfigDiffs`).
 
+**Retention (added 2026-08-25)**: daily `[config-retention]` engine job, `CONFIG_RETENTION_DAYS`
+(default 60). At 449 MB of a 529 MB DB this was 85% of the database and had no retention of any
+kind. ⛔ NEVER deleted at any age: `is_baseline` rows, the newest row per device, and the 10 most
+recent per device (`MIN_KEEP_CONFIGS`, a constant not an env var). No other table references these
+rows by id — `config_diffs` stores its own JSONB payload and no config id — so a retention delete
+can never orphan a diff. See `lib/engines/configRetention.js`.
+
 ### config_backups
 ```
 id                UUID PK DEFAULT gen_random_uuid()
@@ -158,6 +165,12 @@ label             TEXT NOT NULL DEFAULT 'auto'              -- 'auto' | 'manual'
 backed_up_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 ```
 Indexes: `idx_config_backups_device_id`. 'auto' backups only written when a diff is detected.
+**Retention (added 2026-08-25)**: same daily `[config-retention]` job but its OWN, much longer
+window — `CONFIG_BACKUP_RETENTION_DAYS` (default 365) — because a row here is only written when a
+diff was actually detected, so each is a distinct moment of real change at ~1.5% of
+`device_configs`' volume. ⛔ Only `label='auto'` rows are ever deleted; `'manual'`/`'pre-change'`
+(operator-created) are kept forever, as is the newest row per device and the 5 most recent per
+device (`MIN_KEEP_BACKUPS`).
 **Redacted → not restore-to-device capable, diff/audit/reference only.**
 
 ---

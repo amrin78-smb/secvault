@@ -521,6 +521,45 @@ and arbitrary version-A-vs-B comparison reuse `configDiff.js`'s already-pure
 `diffConfigs`/`classifyDiff` **unchanged**; only the caller was ever hardwired. Computed on read, no
 new table and no new cron job.
 
+### Config-snapshot retention (`lib/engines/configRetention.js`, added 2026-08-25)
+
+`device_configs` stores one full snapshot per device per pull whether or not anything changed —
+measured at 449 MB of a 529 MB database (85%), ~9.5 MB/day, ~3.4 GB/year, with no retention of any
+kind. The daily `[config-retention]` engine job bounds it. Safe to run because the CHANGE record
+does not live here: `config_diffs` is append-only with its own stored JSONB payload and **no
+reference to any `device_configs` row** (verified empirically — the only FK on/into
+`device_configs`/`config_backups` is their own `device_id -> devices(id)`), and `config_backups`
+holds a full copy at each *detected* change. Retention only removes the long tail of
+near-identical snapshots.
+
+⛔ **Four protections, none optional, each expressed TWICE (classify query + DELETE predicate):**
+1. `is_baseline = true` is NEVER deleted at any age — it is the drift comparison target, and a
+   silently-lost baseline reads as "no drift", the most dangerous wrong answer available here.
+2. The NEWEST row per device is NEVER deleted at any age. A device that stopped being collected two
+   years ago must still show its last known config; "retention deleted the only copy" is strictly
+   worse than a large database.
+3. A minimum COUNT per device survives regardless of age (`MIN_KEEP_CONFIGS`=10 /
+   `MIN_KEEP_BACKUPS`=5) — **constants, not env vars**, because they are safety floors, not tuning
+   knobs, and are clamped to >= 1 so protection 2 holds even if a caller passes 0.
+4. `config_backups` rows whose `label` is not `'auto'` (`'manual'`/`'pre-change'`) are NEVER
+   deleted — operator intent outranks a size budget.
+
+`CONFIG_BACKUP_RETENTION_DAYS` (365) is deliberately far longer than `CONFIG_RETENTION_DAYS` (60):
+every `config_backups` row is a distinct moment of real change at ~1.5% of the volume. Do not
+"simplify" the two windows into one. `runConfigRetention()` NEVER THROWS (per-table errors are
+returned in its summary) and is idempotent. Its log line reports what was KEPT and by which
+protection alongside what was deleted, so an operator can tell retention from data loss.
+
+Note a `DELETE` only frees space for REUSE (which bounds growth — the actual goal); it does not
+shrink the file on disk. A one-time `VACUUM FULL`/`pg_repack` is needed to return space to the OS
+and is deliberately NOT in the job (ACCESS EXCLUSIVE lock).
+
+⛔ **The root cause is upstream and is NOT fixed by this job**: only 106 real changes produced
+1,730 snapshots, 508 of which are byte-identical to their immediate predecessor (~161 MB of pure
+duplicates). Deduping belongs in `collectAndStore` at WRITE time, not in a retention job — a
+stored row is also evidence that a collection succeeded at time T, so skipping the write changes
+that meaning and needs its own decision.
+
 ## Role-Based Access Control
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
@@ -564,6 +603,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
 | Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
+| Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 UTC | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 | Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
 
@@ -687,6 +727,8 @@ NVD_API_KEY=                               # Optional — increases NVD rate lim
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
+CONFIG_RETENTION_DAYS=60                   # device_configs snapshot retention
+CONFIG_BACKUP_RETENTION_DAYS=365           # config_backups ('auto' label only)
 NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
 
 # Log retention

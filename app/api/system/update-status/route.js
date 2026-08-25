@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.64.0': [
+    'Config snapshots are now cleaned up automatically. They had grown to 85% of the database (449 MB) with no retention at all, adding about 3.4 GB a year.',
+    'Nothing you would miss is ever removed: a baseline is kept forever, so is the newest snapshot for every device, so are the 10 most recent, and so is any backup you created yourself.',
+    'Your change history is untouched -- it lives in a separate table the cleanup never reads.',
+    'At the default 60-day window this first release deletes nothing on your fleet, by design. Set CONFIG_RETENTION_DAYS=30 to reclaim about 150 MB now.',
+    'Palo Alto rule hit counts on Panorama-managed firewalls are collected too, when the firewall confirms it has a single virtual system.',
+  ],
   '2.63.0': [
     'Fixed rule hit counts on every Palo Alto: the command SecVault sent was malformed and the firewall had been rejecting it since day one.',
     'Because a failed read was recorded as "zero hits", all 1,278 unused-rule findings in the fleet were fabricated from missing data. Only genuinely unused rules are reported now.',
