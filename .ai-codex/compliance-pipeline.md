@@ -29,7 +29,8 @@ writing: `config_key_exists` (12), `feature_enabled` (8), `rule_scan` (8),
 `not_evaluable_from_config` (7), `config_value_matches` (5), `ruleset_property` (3),
 `admin_access_from_zone` (2), `config_value_equals` (2). `not_evaluable_from_config` checks are
 deliberate honest degradation (structural gaps the adapter can't collect, not "not yet wired up" —
-see the file's header comment for which is which).
+see the file's header comment for which is which). Since 2026-08-25 they resolve `na`, NOT
+`warning`, so they no longer count against the compliance score — see stage 3 below.
 
 ### 2. LOAD — per-device inputs, one query each, shared across every check
 
@@ -54,11 +55,24 @@ run:
 `evaluatePredicate()`, the SAME evaluator `advisory_conditions` uses. This is the tri-state → four-
 state polarity problem CLAUDE.md documents: `evaluatePredicate()` only knows `yes`/`no`/`unknown`,
 with no concept of "good." Each check's `predicate_config.pass_when` (`'yes'|'no'`) supplies the
-polarity: `statusFromResult()` (line 41) maps `unknown → warning`, `result === passWhen → pass`,
+polarity: `statusFromResult()` maps `unknown → warning`, `result === passWhen → pass`,
 else `fail`. **`pass_when` missing or not exactly `'yes'`/`'no'` → `warning`, never a silent default
-polarity** (lines 71-76) — a curated-data bug, not a device problem. No usable config at all →
-`na` for every config-predicate check on that device (checked once, outside this function, at line
-526).
+polarity** — a curated-data bug, not a device problem. No usable config at all →
+`na` for every config-predicate check on that device (checked once, outside this function).
+
+⛔ **`predicate_type: 'not_evaluable_from_config'` → `na`, short-circuited at the TOP of
+`evaluateCheck()` (changed 2026-08-25).** It previously fell through to `evaluatePredicate()`'s
+`default: return 'unknown'` and became a `warning`, which put it in the score denominator. Wrong
+bucket: a `warning` is a fact about the DEVICE (we asked a real question of a collected config and
+the answer was indeterminate), whereas these checks are unanswerable BY CONSTRUCTION — nothing an
+operator changes on the firewall makes them answerable, because the fact is inherently per-rule or
+needs telemetry a config snapshot never holds. That is a fact about SECVAULT, and scoring a device
+down for it is the same error as `hit_count`'s old `NOT NULL DEFAULT 0`. Measured live across the
+16-device fleet: 43 of 61 warnings were this; fleet score 46% → 51%, every device up 3-7 points,
+with no check changing between pass and fail. Handled BEFORE the `pass_when` guard on purpose —
+these carry a placeholder `pass_when` that is never consulted. The finding is still WRITTEN and
+still displayed with its `reason`: `na` removes it from the score, never from the operator's
+manual-verification list.
 
 **(b) `rule_scan` checks** (`evaluateRuleScanCheck`, line 119) — "does ANY rule on this device carry
 one of these Phase 5 `finding_type`s," reusing `ruleAnalysis.js`'s already-decided findings rather

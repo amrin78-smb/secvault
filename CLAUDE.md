@@ -394,6 +394,33 @@ A third predicate type, `ruleset_property` (**3 checks**, not 2 — see complian
 
 `scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
 
+### ⛔ `warning` vs `na` — whose limitation is it? (changed 2026-08-25)
+
+Both mean "not a pass and not a fail", but they answer different questions and only one belongs
+in the score's denominator:
+
+- **`warning` = a fact about THIS DEVICE.** We collected a config and asked a real question of it,
+  and the answer came back indeterminate. That uncertainty is genuinely the device's (or the
+  curated check definition's), so it counts against the score. Sources: a predicate resolving
+  `unknown` against a config we DID collect, and an invalid/missing `pass_when`.
+- **`na` = a fact about SECVAULT.** The question cannot be asked of this device at all — nothing
+  the operator could change on the firewall would make it answerable. It is dropped from the
+  denominator. Sources: no usable config at all, `ruleset_property` with no ruleset collected,
+  and — since 2026-08-25 — **`predicate_type: 'not_evaluable_from_config'`**.
+
+`not_evaluable_from_config` used to land on `evaluatePredicate()`'s `default: return 'unknown'`
+and so became a `warning`. That was the wrong bucket. These checks are declared unanswerable BY
+CONSTRUCTION — either the fact is inherently per-rule and the predicate engine only supports one
+fixed dot-path (`fortinet-ips-internet-facing-policies`), or it needs telemetry a static config
+snapshot never contains (`fortinet-unused-interfaces-shutdown`). Scoring a device down for a
+question SecVault cannot pose is the same error as `hit_count`'s old `DEFAULT 0`: **our inability
+to measure, recorded as a negative fact about the device.** Measured live on the 16-device fleet:
+43 of 61 warnings were this, and moving them to `na` took the fleet from 46% to 51%, every device
+up 3-7 points. No check changed status from pass to fail or vice versa — only the denominator.
+
+The findings are still WRITTEN and still shown, with their `reason` — `na` suppresses them from
+the score, never from the operator, who still needs to know these are manual-verification items.
+
 ---
 
 ## Network Topology & Path Analysis (`/topology`, added 2026-08-02)

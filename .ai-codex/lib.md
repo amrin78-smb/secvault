@@ -60,7 +60,7 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 
 ## lib/auditChecksSeed.js
 
-`CHECKS` -> `object[]` — curated array of compliance check definitions (`checkId, name, description, standards, vendor, severity, predicateConfig, remediationGuidance`); predicate types include `config_key_exists`/`config_value_equals`/`config_value_matches`/`feature_enabled`/`admin_access_from_zone`/`not_evaluable_from_config`/`rule_scan`/`ruleset_property`. Current count (45) matches CLAUDE.md's Compliance Engine section — recount via `grep -c "checkId:"` if this file changes. Full mechanics: `.ai-codex/compliance-pipeline.md`.
+`CHECKS` -> `object[]` — curated array of compliance check definitions (`checkId, name, description, standards, vendor, severity, predicateConfig, remediationGuidance`); predicate types include `config_key_exists`/`config_value_equals`/`config_value_matches`/`feature_enabled`/`admin_access_from_zone`/`not_evaluable_from_config`/`rule_scan`/`ruleset_property`. ⛔ `not_evaluable_from_config` resolves `na` (excluded from the score denominator), NOT `warning`, since 2026-08-25 — `configAuditor.evaluateCheck()` short-circuits it before the `pass_when` guard. Current count (45) matches CLAUDE.md's Compliance Engine section — recount via `grep -c "checkId:"` if this file changes. Full mechanics: `.ai-codex/compliance-pipeline.md`.
 `seedAuditChecks(pool)` -> `Promise<{count: number}>` — idempotent `INSERT ... ON CONFLICT (check_id) DO UPDATE` seed/refresh of `audit_checks` from `CHECKS`.
 
 ## lib/credentialProfiles.js
@@ -263,7 +263,7 @@ One query gathers real columns/aggregates; posture is derived in JS so it reuses
 ## lib/engines/configAuditor.js
 
 `runComplianceAuditForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads device+config+applicable `audit_checks`+rule findings+zone roles, evaluates every check (config-predicate / rule_scan / ruleset_property), DELETE+reinsert `audit_findings` in one transaction.
-`evaluateCheck(check, configParsed)` -> `{status: 'pass'|'fail'|'warning', detail: string}` — evaluates a config-predicate check via `applicability.evaluatePredicate` + `pass_when` polarity.
+`evaluateCheck(check, configParsed)` -> `{status: 'pass'|'fail'|'warning'|'na', detail: string}` — evaluates a config-predicate check via `applicability.evaluatePredicate` + `pass_when` polarity. ⛔ Short-circuits `predicate_type: 'not_evaluable_from_config'` to `na` FIRST, before the `pass_when` guard (those checks carry a placeholder `pass_when` that is never consulted). `na` is excluded from the score denominator; the finding is still written and shown with its `reason`.
 `evaluateRuleScanCheck(check, ruleFindingsByType)` -> `{status: 'pass'|'fail'|'warning', detail, matchedRuleIds: string[]}` — checks whether any rule carries one of the check's target Phase-5 finding types.
 `evaluateRulesetPropertyCheck(check, rules, zoneRoleMap?, ruleFindingsByType?)` -> `{status: 'pass'|'fail'|'warning'|'na', detail, matchedRuleIds?}` — evaluates `has_explicit_deny_all`/`blocks_icmp`/`no_external_to_internal_access` against a device's live rule set.
 `statusFromResult(result, passWhen)` -> `'pass'|'fail'|'warning'` — maps a tri-state predicate result + polarity to a compliance status.

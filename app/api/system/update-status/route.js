@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.64.1': [
+    'Compliance checks that no firewall configuration could ever answer no longer count against your score.',
+    'These are manual-verification items -- things like "is an IPS profile on every internet-facing rule", which is a per-rule fact SecVault cannot read from a config snapshot.',
+    'They were being scored as warnings, so SecVault was marking your devices down for its own blind spots. 43 of the 61 warnings across the fleet were this.',
+    'Fleet compliance moves from 46% to 51%, every device up 3-7 points. No check changed from pass to fail or fail to pass -- only what counts toward the total.',
+    'The checks are still listed, with the reason they cannot be automated, so you can still verify them by hand.',
+  ],
   '2.64.0': [
     'Config snapshots are now cleaned up automatically. They had grown to 85% of the database (449 MB) with no retention at all, adding about 3.4 GB a year.',
     'Nothing you would miss is ever removed: a baseline is kept forever, so is the newest snapshot for every device, so are the 10 most recent, and so is any backup you created yourself.',
