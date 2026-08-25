@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import Button from '../../../components/ui/Button';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
-import pkg from '../../../package.json';
 
 // Large watermark version of Header.js's SecVaultLogo shield path -- reused
 // (not reinvented) so the login page's brand panel is recognizably the same
@@ -228,8 +227,14 @@ export default function LoginPage() {
           </form>
         </div>
 
+        {/* ⛔ No version number here. This page is PRE-AUTH, and the exact
+            version maps an unauthenticated visitor straight onto the precise
+            advisory set for this build — measured live, the login HTML read
+            "SecVault v2.61.2". The product name is fine; the version is not.
+            It is still shown to signed-in users under Settings -> About, which
+            is where support actually needs it. */}
         <div style={{ marginTop: 40, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          SecVault v{pkg.version}
+          SecVault
         </div>
       </div>
     </div>
