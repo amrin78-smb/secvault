@@ -197,7 +197,17 @@ export default async function ObjectsTab({ deviceId }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <style>{COLLAPSE_CSS}</style>
+      {/* ⛔ dangerouslySetInnerHTML, not a JSX child.
+                    <style> is a RAW TEXT element, but React SSR HTML-escapes a string
+                    child — so the `>` child combinator shipped to the browser as `&gt;`
+                    while the RSC flight payload carried the real `>`. The server HTML
+                    therefore contained INVALID CSS (measured: 3 of 6 rules parsed, so
+                    the <summary> kept its default disclosure triangle and body colour),
+                    and React saw the text mismatch and threw: 9x #425 then #418 then
+                    #423 on every load, discarding the server render and re-rendering the
+                    whole route on the client. dangerouslySetInnerHTML injects the CSS
+                    verbatim, which is what a raw-text element needs. */}
+          <style dangerouslySetInnerHTML={{ __html: COLLAPSE_CSS }} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
         <StatCard label="Total Objects" value={objects.length} color="var(--text-muted)" />
         <StatCard label="Unused" value={unused.length} color="var(--yellow)" />

@@ -110,14 +110,22 @@ export default function ComplianceMatrix({ devices }) {
 
   return (
     <Table>
+      {/* ⛔ DERIVED from STANDARDS, never hardcoded. This colgroup listed SEVEN
+          columns while the header renders three fixed ones plus one per
+          standard — so when SANS was added as a fifth standard the table had
+          EIGHT columns and the last one got ZERO width. Under the mandatory
+          tableLayout:'fixed' that meant every device's SANS score was present
+          in the DOM and painted nothing: measured th width 0.078px against a
+          scrollWidth of 65. An entire compliance standard was invisible.
+          Generating the widths from the same array the headers use makes that
+          drift impossible the next time a standard is added. */}
       <colgroup>
         <col style={{ width: '22%' }} />
         <col style={{ width: '10%' }} />
         <col style={{ width: '12%' }} />
-        <col style={{ width: '14%' }} />
-        <col style={{ width: '14%' }} />
-        <col style={{ width: '14%' }} />
-        <col style={{ width: '14%' }} />
+        {STANDARDS.map((s) => (
+          <col key={s.key} style={{ width: `${(56 / STANDARDS.length).toFixed(2)}%` }} />
+        ))}
       </colgroup>
       <thead>
         <tr>

@@ -307,7 +307,7 @@ export default async function DevicesPage({ searchParams }) {
                     components={d.securityComponents}
                   />
                 </td>
-                <td>{d.version_string || '—'}</td>
+                <td title={d.version_string || undefined}>{d.version_string || '—'}</td>
                 <td>
                   {d.rule_count > 0 ? (
                     <span title={`${d.enabled_rule_count} enabled`}>{d.rule_count.toLocaleString()}</span>
@@ -333,7 +333,7 @@ export default async function DevicesPage({ searchParams }) {
                     peerStatus={d.ha_peer_status}
                   />
                 </td>
-                <td>{formatDateTime(d.last_collected_at)}</td>
+                <td title={formatDateTime(d.last_collected_at)}>{formatDateTime(d.last_collected_at)}</td>
                 <td>
                   <DeviceRowActions
                     deviceId={d.id}

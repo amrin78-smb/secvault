@@ -17,6 +17,13 @@ export default function StatCard({
   label,
   value,
   sub,
+  // ⛔ The accent border and the VALUE TEXT are different jobs and must not
+  // share a default. This was one `color` prop applied to BOTH, defaulting to
+  // --border — so any call site that omitted it rendered its headline number
+  // in the border token. Measured live: "24" on /vulnerability at 1.39:1
+  // contrast in dark and 1.23:1 in light (28px/800 weight needs 3.0), i.e.
+  // effectively invisible. Same on /devices/<id>/analysis?tab=summary for
+  // "Total Rules", "Inactive Rules" and "Total Findings".
   color = 'var(--border)',
   className = '',
   compact = false,
@@ -29,6 +36,7 @@ export default function StatCard({
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
+  const valueColor = color === 'var(--border)' ? 'var(--text-primary)' : color;
   return (
     <div
       className={`${cardClass} ${className}`}
@@ -39,7 +47,11 @@ export default function StatCard({
           <IconChip icon={icon} color={iconColor} bg={iconBg} />
         </div>
       )}
-      <div className={valueClass} style={{ color }}>
+      {/* The value falls back to readable body text, NOT to the border accent.
+          An explicit `color` from the caller still styles both, which is what
+          every deliberate call site (red for Patch Now, green for a good score)
+          relies on. */}
+      <div className={valueClass} style={{ color: valueColor }}>
         {value}
       </div>
       <div className={labelClass}>{label}</div>

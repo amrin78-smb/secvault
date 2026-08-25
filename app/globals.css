@@ -914,6 +914,18 @@ body[data-readonly="true"] .btn-danger {
 
 /* Inputs already ring on :focus; align them to the same offset language so a
    keyboard user sees one consistent affordance across every control type. */
+/* ⛔ The header search input sets an INLINE `outline: none` and carries no
+   .input/.select class, so it fell through every rule above — and it is the
+   FIRST Tab stop on every page. Measured: 1 of 15 focus stops had no indicator,
+   always stop #0. It sits on the navy bar, so the ring is white rather than
+   --primary (which would be near-invisible on navy). !important is required to
+   beat the element's own inline style. */
+input[type='search']:focus-visible,
+.sv-topbar input:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.9) !important;
+  outline-offset: 2px;
+}
+
 .input:focus-visible,
 .select:focus-visible {
   outline: 2px solid var(--primary);
@@ -953,4 +965,32 @@ tbody tr td { transition: background 0.12s ease; }
   .kpi-card-compact:hover {
     transform: none !important;
   }
+}
+
+/* ── PRINT: cells must WRAP, never ellipsis ─────────────────────────
+   ⛔ The global `td { max-width:220px; white-space:nowrap; overflow:hidden;
+   text-overflow:ellipsis }` is right for a scannable screen table and
+   catastrophic on paper: a printed page has no hover, so an ellipsis is
+   permanent data loss. Measured on /compliance/<id>/print: 179 of 335
+   cells clipped, worst 1,857px of remediation guidance cut off. Under
+   print media every cell wraps to full height instead. */
+@media print {
+  td, th {
+    max-width: none !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    word-break: break-word;
+  }
+}
+
+/* The print REPORT route is also read on screen before printing, so it
+   opts out of the ellipsis treatment there too. */
+.print-report td,
+.print-report th {
+  max-width: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
 }
