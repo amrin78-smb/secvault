@@ -224,7 +224,16 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
   nat_enabled BOOLEAN NOT NULL DEFAULT false,
   comment TEXT,
   tags JSONB,
-  hit_count BIGINT NOT NULL DEFAULT 0,
+  -- ⛔ TRI-STATE, and the third state is load-bearing: a real count, 0 meaning
+  -- the device genuinely reported zero hits, or NULL meaning NOT MEASURED.
+  -- This was NOT NULL DEFAULT 0 until 2026-08-25, which made every vendor and
+  -- transport that cannot read hit counts -- and, as it turned out, every Palo
+  -- Alto, whose hit-count command had been silently rejected by PAN-OS since
+  -- the day it was written -- assert "this rule has had zero hits". That is a
+  -- failed read stored as an affirmative fact, and ruleAnalysis.js dutifully
+  -- turned it into a fabricated `unused` finding. NULL is the honest answer
+  -- and callers must render it as "--", never coerce it to 0.
+  hit_count BIGINT,
   last_hit_at TIMESTAMPTZ,
   bytes_transferred BIGINT NOT NULL DEFAULT 0,
   collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -236,6 +245,12 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
     -- just via ALTER TABLE below) for fresh installs -- see the companion ALTER for upgrades.
 );
 ALTER TABLE firewall_rules ADD COLUMN IF NOT EXISTS vdom TEXT;
+-- hit_count became tri-state on 2026-08-25 (real count / 0 = genuinely zero /
+-- NULL = not measured). Both statements are no-ops once applied, so this is
+-- safe to re-run; without them an already-deployed server keeps NOT NULL
+-- DEFAULT 0 and every unmeasured rule silently keeps claiming zero hits.
+ALTER TABLE firewall_rules ALTER COLUMN hit_count DROP NOT NULL;
+ALTER TABLE firewall_rules ALTER COLUMN hit_count DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_id ON firewall_rules(device_id);
 CREATE INDEX IF NOT EXISTS idx_firewall_rules_device_seq ON firewall_rules(device_id, sequence_number);

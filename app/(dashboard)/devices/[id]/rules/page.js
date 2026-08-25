@@ -10,7 +10,10 @@ const PAGE_SIZE = 50;
 
 const SORT_OPTIONS = {
   sequence: 'sequence_number ASC NULLS LAST',
-  hits: 'hit_count DESC',
+  // NULLS LAST is required, not cosmetic: Postgres sorts NULLs FIRST in a
+  // DESC ordering, so without it every UNMEASURED rule would head the
+  // "most hits" list ahead of the genuinely busiest rules.
+  hits: 'hit_count DESC NULLS LAST',
 };
 
 function actionBorderColor(action) {
@@ -259,7 +262,8 @@ export default async function DeviceRulesPage({ params, searchParams }) {
                 <td title={joinArray(r.applications)}>{joinArray(r.applications)}</td>
                 <td title={r.schedule || ''}>{r.schedule || '—'}</td>
                 <td>{r.log_enabled ? 'Yes' : 'No'}</td>
-                <td>{r.hit_count ?? 0}</td>
+                {/* ⛔ null = not measured, NOT zero hits. See lib/schema.sql. */}
+                <td>{r.hit_count === null || r.hit_count === undefined ? '—' : r.hit_count}</td>
               </tr>
             ))}
           </tbody>

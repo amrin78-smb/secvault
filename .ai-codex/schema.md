@@ -185,7 +185,7 @@ log_enabled       BOOLEAN NOT NULL DEFAULT true
 nat_enabled       BOOLEAN NOT NULL DEFAULT false
 comment           TEXT
 tags              JSONB
-hit_count         BIGINT NOT NULL DEFAULT 0
+hit_count         BIGINT                                     -- TRI-STATE since 2026-08-25: a real count / 0 = device genuinely reported zero / NULL = NOT MEASURED. Was NOT NULL DEFAULT 0, which made every vendor+transport that cannot read hit counts assert "zero hits" and made ruleAnalysis fabricate `unused` findings. Render NULL as "--", never coerce to 0. Sort with NULLS LAST.
 last_hit_at       TIMESTAMPTZ                                -- NEVER populated by any adapter (dead column, ruleAnalysis.js's `unused` check simplified past it 2026-07-19)
 bytes_transferred BIGINT NOT NULL DEFAULT 0
 collected_at      TIMESTAMPTZ NOT NULL DEFAULT now()

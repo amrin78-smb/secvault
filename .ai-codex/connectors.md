@@ -184,12 +184,13 @@ already-redacted input (documented in its own header).
    `rulesCount: 0`"). SSH's `cliParser.policiesFromConfigText()` returns `null` (not `[]`) when no
    policy block is found — `null` vs `[]` is load-bearing there too, and `ssh.js` converts `null`
    into a thrown Error.
-4. **Hit counts: REAL on REST, always ZERO on SSH.** REST fetches real per-policy hit counts via
+4. **Hit counts: REAL on REST, UNMEASURED (NULL) on SSH.** REST fetches real per-policy hit counts via
    `GET /api/v2/monitor/firewall/policy`, fetched per-VDOM (policy IDs are only unique within a
    VDOM). SSH passes `[]` as stats — `diagnose firewall iprope show ...` (the CLI equivalent) is
    "an undocumented, firmware-specific debug format," deliberately not attempted. Every
-   SSH-collected rule has `hit_count: 0`, which Phase 5 reads as `unused` — an SSH-collected
-   FortiGate will flag every rule unused. Use REST if unused-rule findings matter.
+   SSH-collected rule has `hit_count: null` (UNMEASURED). Until 2026-08-25 it was `0`, which Phase 5
+   read as `unused`, so an SSH-collected FortiGate flagged EVERY rule unused; `ruleAnalysis.js` now
+   requires a measured zero. Use REST if you need real unused-rule findings for this device.
 5. **Redaction**: `cliParser.js:redactConfig(text)` — stateful line-scanner tracking `config`/`end`
    block-path context (for context-sensitive secrets, e.g. SNMP community only under `config system
    snmp community`) plus multi-line quoted-value (PEM key) handling; fails closed on parse error
@@ -354,8 +355,11 @@ Neither implements `getVpnSessionSummary`.
    (`api.getSecurityRulesAnyVsys()` → `parser.parseRulesDeep()`) when the primary path returns
    zero — never regresses the working single-vsys case.
 6. **Hit-count enrichment (both transports) is ADDITIVE and can never affect the returned ruleset**
-   — wrapped separately, never throws past its own boundary, defaults every rule to `hit_count: 0`
-   on any failure. SSH specifically gates on `containersFound === 1` before even attempting vsys-name
+   — wrapped separately, never throws past its own boundary, leaves every rule at `hit_count: null`
+   (UNMEASURED) on any failure. ⛔ It defaulted to `0` until 2026-08-25, and the API-transport
+   command was itself malformed (missing `<vsys>` wrapper, rejected by PAN-OS on every call), so
+   every Palo Alto rule reported zero hits forever and Phase 5 called them all `unused`. Fixed and
+   live-verified against all 10 API devices. SSH specifically gates on `containersFound === 1` before even attempting vsys-name
    resolution (a 2026-07-18 fix — the vsys-name walker was less shape-tolerant than the container
    search and could silently misattribute one vsys's hit counts to another vsys's identically-named
    rule on a genuinely multi-vsys device). Both transports skip enrichment entirely (not
@@ -720,7 +724,7 @@ block, skipping blocks with no recognizable action keyword. Config `parsed` →
    (`true`/`false`/`null`), from a single regex `/^\s*(?:ssl[\s-]?vpn)\s+(enable|disable)/im`.
    `null` is explicitly documented as the EXPECTED, COMMON case ("undetected"), not a failure
    signal — treat it as such in any UI/engine code that reads this field.
-5. **`hit_count` is a static literal `0` for every rule, unconditionally** — no attempt at
+5. **`hit_count` is a static literal `null` (UNMEASURED) for every rule, unconditionally** — no attempt at
    hit-count extraction exists anywhere in the parser (unlike Fortinet-SSH, where the limitation is
    at least documented as "the CLI command format is undocumented"; here there's simply no code
    path for it at all).

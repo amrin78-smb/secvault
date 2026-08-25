@@ -100,6 +100,22 @@ and compliance checks. **`unknown` must never silently default to `no`** — tha
 downgrade a KEV-listed CVE from `patch_now` to `monitor`. Widen an uncertain bound, never narrow it
 (same instinct governs CPE wildcard ranges and compliance's `pass_when` — see below).
 
+### ⛔ A failed read is NOT a measurement — the most-repeated bug in this codebase
+Every instance of this class builds clean, passes every static check, and produces a confident,
+plausible, WRONG number in production. It has now been found in `getRules()` returning `[]`,
+`getConfig()` on a read failure, the Panorama rule fallback, and `hit_count`. The rule:
+**when a read fails or a vendor cannot supply a value, store NULL/unknown — never the zero,
+empty array, or `false` that looks like a real answer.** Tolerating the failure is correct;
+recording it as a fact is not.
+
+`firewall_rules.hit_count` is the canonical example and is **TRI-STATE**: a real count, `0`
+meaning the device genuinely reported zero, or **NULL meaning NOT MEASURED**. It was
+`NOT NULL DEFAULT 0` until 2026-08-25, so every vendor/transport that cannot read hit counts —
+Fortinet SSH, Sangfor, Palo Alto SSH, and, because of a PAN-OS command that was being rejected
+outright, **every Palo Alto** — asserted "zero hits", and `ruleAnalysis.js` turned that into a
+fabricated `unused` finding. `unused` now requires a MEASURED zero. Never coerce NULL to 0 in a
+query, a renderer, or an engine; sort with `NULLS LAST`.
+
 ### Adapter contract
 - **`getRules()` must THROW on a retrieval failure — never return `[]`.** `collectAndStore` DELETEs
   a device's `firewall_rules` before reinserting; an empty array from a *failed* pull silently wipes
@@ -279,7 +295,8 @@ Each adapter logs its raw response (`[<Vendor> Debug]` in `engine.log`) on first
 connections are a verification step, not a smoke test. Full verification history and confirmed
 field mappings: `.ai-codex/connectors.md` — check there before assuming a field name.
 
-**Known limitations (by design, not bugs)** — hit counts, gateway resolution, Panorama fallback,
+**Known limitations (by design, not bugs)** — hit-count COVERAGE (which vendors/transports can
+read them at all; the tri-state rule above governs how a gap is recorded), gateway resolution, Panorama fallback,
 VDOM-aware analysis status: all detailed in `gotchas.md`'s Vendor adapters / Rule analysis sections.
 
 ---

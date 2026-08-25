@@ -63,6 +63,12 @@ const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
+const {
+  runConfigRetention,
+  formatRetentionSummary,
+  DEFAULT_CONFIG_RETENTION_DAYS,
+  DEFAULT_BACKUP_RETENTION_DAYS,
+} = require('../lib/engines/configRetention');
 
 // ---------------------------------------------------------------------------
 // Logging (winston) — C:\Apps\SecVault\logs\engine.log, fallback to ./logs
@@ -257,6 +263,46 @@ function getSnapshotRetentionDays() {
   if (process.env.SNMP_VPN_RETENTION_DAYS) {
     logger.warn(
       `SNMP_VPN_RETENTION_DAYS value "${process.env.SNMP_VPN_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
+// Retention for device_configs/config_backups (added 2026-08-25). Same
+// day-granularity housekeeping shape as getSnapshotRetentionDays() above, but
+// TWO windows because the two tables hold different things: device_configs is
+// one full snapshot per device per pull whether or not anything changed (447 MB
+// of a 529 MB database when this shipped), while config_backups only gains a
+// row when a diff was actually detected — each of its rows is a real moment of
+// change, ~1.5% of the volume, and deserves a far longer window.
+//
+// Fallbacks are imported from lib/engines/configRetention.js rather than
+// re-declared here (unlike the older helpers above, which predate having a
+// module to import from) so this file, .env.local.example and CLAUDE.md's env
+// list cannot drift apart on the default.
+function getConfigRetentionDays() {
+  const fallback = DEFAULT_CONFIG_RETENTION_DAYS;
+  const raw = parseInt(process.env.CONFIG_RETENTION_DAYS, 10);
+  if (Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (process.env.CONFIG_RETENTION_DAYS) {
+    logger.warn(
+      `CONFIG_RETENTION_DAYS value "${process.env.CONFIG_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
+function getConfigBackupRetentionDays() {
+  const fallback = DEFAULT_BACKUP_RETENTION_DAYS;
+  const raw = parseInt(process.env.CONFIG_BACKUP_RETENTION_DAYS, 10);
+  if (Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (process.env.CONFIG_BACKUP_RETENTION_DAYS) {
+    logger.warn(
+      `CONFIG_BACKUP_RETENTION_DAYS value "${process.env.CONFIG_BACKUP_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
     );
   }
   return fallback;
@@ -737,6 +783,38 @@ async function runSnapshotRetentionJob() {
   );
 }
 
+// Config retention — device_configs/config_backups, the two config-snapshot
+// tables (added 2026-08-25; device_configs was 84% of the whole database and
+// had no retention of any kind). Same "housekeeping, not freshness" shape as
+// snapshot-retention above: query-only work that never opens a device session,
+// so it cannot contend with rule-version-pull/vpn-session-poll/snmp-poll.
+//
+// runConfigRetention() never throws and reports per-table errors inside its
+// summary; the extra try/catch here is the same belt-and-braces every other
+// job body carries. Its log line deliberately states what was KEPT and why
+// (baselines, newest-per-device, min-keep, within-window) alongside what was
+// deleted, so an operator reading engine.log can tell retention from data loss.
+async function runConfigRetentionJob() {
+  const start = Date.now();
+  const configRetentionDays = getConfigRetentionDays();
+  const backupRetentionDays = getConfigBackupRetentionDays();
+  logger.info(
+    `Job [config-retention] starting (device_configs: ${configRetentionDays}d, config_backups: ${backupRetentionDays}d, 'auto' label only).`
+  );
+  try {
+    const summary = await runConfigRetention(pool, { configRetentionDays, backupRetentionDays });
+    const durationMs = Date.now() - start;
+    logger.info(`Job [config-retention] finished in ${durationMs}ms.`);
+    for (const line of formatRetentionSummary(summary)) {
+      if (line.includes('FAILED')) logger.error(`Job [config-retention] ${line}`);
+      else logger.info(`Job [config-retention] ${line}`);
+    }
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [config-retention] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // Startup catch-up for the daily snapshot — see the call site's comment.
 // Deliberately checks for TODAY's row rather than backfilling history: the
 // counts it stores are all "as of now" values (current CVE bands, current
@@ -931,6 +1009,18 @@ async function scheduleJobs() {
     runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
   });
 
+  // 00:45 UTC — same daily housekeeping band as the two jobs above, offset
+  // again so no two tick on the same second. Deliberately AFTER
+  // rule-version-pull's usual window rather than before it: retention's
+  // per-device minimum-keep is computed from what is currently stored, so
+  // running it once the day's fresh snapshot already exists is the ordering
+  // that keeps the most useful rows.
+  logger.info('Scheduling [config-retention] with cron "45 0 * * *" (daily).');
+  const configRetentionTask = cron.schedule('45 0 * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runConfigRetentionJob, 'config-retention');
+  });
+
   const notificationsPollIntervalMinutes = getNotificationsPollIntervalMinutes();
   const notificationsCronExpr = buildMinutelyCron(notificationsPollIntervalMinutes);
   logger.info(
@@ -959,6 +1049,7 @@ async function scheduleJobs() {
     snmpTask,
     dashboardSnapshotTask,
     snapshotRetentionTask,
+    configRetentionTask,
     notificationsTask,
     complianceReportTask,
   ];
@@ -984,6 +1075,11 @@ async function main() {
   // it rarely ran in practice, leaving vpn_session_snapshots/
   // snmp_metric_snapshots to grow unbounded — the exact gap it exists to close.
   await runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
+  // Same reasoning as snapshot-retention's startup run directly above: this
+  // service restarts on every deploy, so a job that only ever fired on its
+  // 00:45 cron tick would rarely run in practice. Idempotent by construction —
+  // a second run immediately after the first deletes nothing.
+  await runTrackedJob(runConfigRetentionJob, 'config-retention');
   await runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
   // Safe no-op mid-month — dispatchMonthlyReport()'s own per-period
   // idempotency check (compliance_report_log) skips instantly once a

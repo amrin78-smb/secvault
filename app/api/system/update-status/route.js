@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.63.0': [
+    'Fixed rule hit counts on every Palo Alto: the command SecVault sent was malformed and the firewall had been rejecting it since day one.',
+    'Because a failed read was recorded as "zero hits", all 1,278 unused-rule findings in the fleet were fabricated from missing data. Only genuinely unused rules are reported now.',
+    'Hit count is now three-valued: a real number, zero, or blank meaning this device cannot report it. Blank shows as a dash instead of pretending to be zero.',
+    'Fortinet-over-SSH, Sangfor and Palo-Alto-over-SSH rules no longer produce unused findings at all, since those transports cannot measure hits.',
+    'Sorting rules by hits no longer puts unmeasured rules above the busiest ones.',
+  ],
   '2.62.2': [
     'Verified live against PAKFood that the Panorama rule fix works: 33 rules collected, with real object names.',
     'The collector log now names WHICH of the three Panorama sources answered, instead of leaving you to guess.',

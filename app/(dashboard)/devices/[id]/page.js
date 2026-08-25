@@ -651,7 +651,8 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                     <ListPills value={r.services} />
                   </td>
                   <td>{r.log_enabled ? 'Yes' : 'No'}</td>
-                  <td>{r.hit_count ?? 0}</td>
+                  {/* ⛔ null = not measured, NOT zero hits. See lib/schema.sql. */}
+                  <td>{r.hit_count === null || r.hit_count === undefined ? '—' : r.hit_count}</td>
                 </tr>
               ))}
               {rules.length === 0 && (

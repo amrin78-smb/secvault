@@ -136,9 +136,21 @@ about to touch something listed here, go read the full CLAUDE.md section before 
 - Sangfor has no live device, no documentation trail — every field mapping is doc-derived and
   explicitly marked low-confidence; `getObjects()` deliberately returns an empty stub rather than
   guess at unverified block syntax.
-- Fortinet/Sangfor over SSH report `hit_count: 0` on every rule (by design, not a bug) — Phase 5
-  flags every rule `unused` as a result. Use Fortinet's REST method instead if unused-rule findings
-  need to be trustworthy.
+- **`hit_count` is TRI-STATE: a real count, `0` = the device genuinely reported zero, `NULL` = NOT
+  MEASURED.** Fortinet/Sangfor over SSH, and Palo Alto's SSH transport, report NULL on every rule
+  (by design). Until 2026-08-25 they reported `0` and the column was `NOT NULL DEFAULT 0`, so
+  Phase 5 flagged every one of those rules `unused` -- findings fabricated entirely from missing
+  data. `ruleAnalysis.js` now emits `unused` only for a MEASURED zero. Never coerce NULL to 0 in a
+  query, a renderer, or an engine; sort with `NULLS LAST` (Postgres puts NULLs first in DESC).
+- ⛔ **Palo Alto hit counts were broken on every device until 2026-08-25**, and the shape of the
+  bug is worth remembering: `buildRuleHitCountCmd()` omitted the `<vsys>` wrapper, so PAN-OS
+  rejected the command outright ("show -> rule-hit-count -> vsys-name unexpected here"). The
+  enrichment's catch swallowed it -- correctly, since a hit count is additive -- and every rule
+  kept the default 0. A total failure to read was therefore stored as an affirmative measurement.
+  Tolerating a failure is right; recording it as a fact is not. With the wrapper corrected the
+  response matches 100% of stored rules on all 10 API-transport devices (1,503 rules, 1,094 with a
+  nonzero count); the 2 extra entries per device are PAN-OS's implicit intrazone/interzone
+  defaults, which are not part of the config rulebase.
 
 ## CVE pipeline (see cve-pipeline.md for the full flow)
 - NVD wildcard CPE queries need `virtualMatchString`, never `cpeName` — `cpeName` 404s on wildcard
