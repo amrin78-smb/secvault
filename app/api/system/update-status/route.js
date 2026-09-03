@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.66.0': [
+    'The dashboard now has tabs: Overview, Security, Rules, Compliance and Fleet Health. Twelve widgets in one grid had become a wall.',
+    'The headline numbers and the feed-sync status stay on screen whichever tab you are on, so fleet posture is never a tab away.',
+    'Each tab is its own web address, so you can bookmark one or paste it into a ticket, and the 60-second refresh keeps you where you were.',
+    'Two new widgets: compliance score broken down per standard, and fleet licence and support expiry.',
+    'Pages also load lighter -- a refresh now runs only the visible tab, not all twelve widgets.',
+  ],
   '2.65.0': [
     'Added an automated test suite covering the five scoring and cleanup engines -- 194 tests, no new dependencies.',
     'Writing them found four real defects, all fixed here: a compliance percentage of blank or false scored the fleet 0%; an unreadable vulnerability count silently became good news; a risk lookup with no matching row crashed instead of scoring clean.',

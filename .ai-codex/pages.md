@@ -16,7 +16,15 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 ## Dashboard
 
-[server] / — DashboardPage — fleet KPI row (devices/patch-now/scheduled/monitor) + CVE severity summary + widget grid (RulesetOverview, ComplianceScoreWidget, RiskByCategory, VendorDistribution, TopRiskyDevices, DeviceStatusSummary, RecentCriticalAlerts, ConfigChangesWidget) + RecentActivityFeed + last-feed-sync footer. `AutoRefresh` polls every 60s.
+[server] / — DashboardPage — **TABBED since v2.66.0** (`?tab=overview|security|rules|compliance|fleet`, default `overview`). Twelve widgets in one grid had become a wall. `HeadlineStats` and the last-feed-sync footer sit OUTSIDE the tabs so fleet posture and feed freshness are never a tab away; everything else is per-tab. `AutoRefresh` polls every 60s.
+  - Tab list + URL whitelist live in `lib/dashboardTabs.js` (pure CJS, unit-tested) — NOT inline here. Adding a tab = one array entry + one case in `page.js`.
+  - `overview` = CVE Severity, ComplianceScoreWidget, RulesetOverview, TopRiskyDevices, RecentCriticalAlerts, QuickActions.
+  - `security` = CVE Severity, VulnerabilityTrends, TopRiskyDevices, RecentCriticalAlerts, RiskByCategory.
+  - `rules` = RulesetOverview, RiskByCategory, TopRiskyDevices.
+  - `compliance` = ComplianceScoreWidget, ComplianceStandardsBreakdown.
+  - `fleet` = DeviceStatusSummary, VendorDistribution, FleetSystemHealth, LicenceExpiryWidget, ConfigChangesWidget, + full-width RecentActivityFeed.
+  - ⛔ Only the ACTIVE tab renders, so each 60s refresh now runs one tab's queries instead of all twelve widgets'. A widget appearing on two tabs is deliberate (Overview answers "what needs attention now" across domains; the specialised tab answers depth), not duplication to factor out.
+  - ⛔ No Live Traffic tab: it needs the Phase 8 syslog collector (`services/collector.js`), which does not exist. See `lib/dashboardTabs.js` for the one-line addition and `tests/dashboardTabs.test.js` for the test that must be deleted alongside it.
 
 ## Devices
 

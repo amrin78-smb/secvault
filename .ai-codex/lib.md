@@ -182,6 +182,13 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+## lib/dashboardTabs.js
+
+`DASHBOARD_TABS` -> `{key,label,description}[]` — the dashboard's tab model, the single source for the tab bar, the `?tab=` whitelist and the default. ⛔ `key` is a URL value and therefore a public contract: add and deprecate, never rename in place.
+`resolveDashboardTab(raw)` -> `string` — ALWAYS returns a key present in `DASHBOARD_TABS`, never the caller's input and never undefined. Handles the array Next.js produces for a repeated param (`?tab=a&tab=b`) by taking the first entry, and trims/lowercases a hand-typed value. A `?tab=` is user-supplied input, and a blank dashboard is indistinguishable from an outage.
+`dashboardTabByKey(key)` -> tab | `null`.
+Pure, dependency-free CommonJS (no DB, no React) so the Server Component imports it and `tests/dashboardTabs.test.js` unit-tests it. Live Traffic is deliberately absent until the Phase 8 syslog collector exists — the file documents the one-line addition.
+
 ## lib/engines/configRetention.js
 
 `runConfigRetention(pool, options)` -> `Promise<{dryRun, durationMs, deviceConfigs, configBackups}>` — daily retention over `device_configs` + `config_backups`. ⛔ NEVER THROWS (per-table errors land in `summary.<table>.error`), idempotent, and structurally incapable of deleting a baseline, a device's newest row, its `MIN_KEEP_*` most recent rows, or a non-`'auto'` backup — every one of those tests is written TWICE, once in the classify query and once in the DELETE. `options`: `{configRetentionDays, backupRetentionDays, minKeepConfigs, minKeepBackups, maxRowsPerRun, dryRun}`; `dryRun:true` runs only the classification and reports `wouldDelete`. Per-run row cap (5000/table, oldest-first) so a first run on a huge table drains over several runs rather than one giant transaction, reported as `capped:true` so the log never understates.

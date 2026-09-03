@@ -12,6 +12,7 @@ components sharing a `base()` helper, each taking props `p` (no domain-specific 
 ## ui/
 
 Badge  color, children, className — colored status pill
+TabBar  tabs (`[{href,label,key?}]`), activeHref, ariaLabel — shared underline tab bar for server-driven `?tab=`/`?view=` navigation. Added v2.66.0, extracted from the inline `tabLink()` helper that had been copy-pasted into `/vulnerability`, `/compliance`, `/topology` and the 13-tab `/devices/[id]/analysis`, each with its own drifted padding. ⛔ Server component with real `<Link>`s, deliberately NOT `useState` — a URL survives `AutoRefresh`'s 60s `router.refresh()`, an F5 and a shared link; client tab state does not. Sets `aria-current="page"`. New tabbed pages should use this; the four pre-existing pages were left alone rather than refactored in the same change.
 Button  variant, className, children, ...props — styled button wrapper
 Card (+CardHeader, CardTitle, CardBody)  children, className, style — card container + sub-parts
 EmptyState  message — dashed-border placeholder box
@@ -100,6 +101,8 @@ DiffBody  ruleChanges, sections — added 2026-08-03. Presentational render tree
 
 ## dashboard/
 
+ComplianceStandardsBreakdown  no props — fleet compliance score PER STANDARD (the "which framework are we weakest against" view a single fleet average cannot answer). Imports `STANDARDS` from `compliance/ComplianceMatrix` rather than redeclaring it (a local copy is how the matrix once got 7 `<col>` for 8 columns). ⛔ `na` excluded from the denominator and `null` rendered "—", never 0 — a 0 would report "never audited" as "you fail every control". Added v2.66.0.
+LicenceExpiryWidget  no props — fleet licence/support expiry condensed to lapsed / expiring-within-90d / unreadable. ⛔ Verdicts come from `deviceHealth.licenseStatus()`, never a local date comparison, so this and `/lifecycle` can never disagree; `perpetual` and `not_licensed` are counted as renewal items NOWHERE. Counts DEVICES in the headline and licence ROWS as the sub-label (one Palo Alto reports 8-10 licences, so "37 expired" would read as a catastrophe). States its own coverage ("read from 11 of 16 devices"); zero coverage says so rather than showing an all-clear. Added v2.66.0.
 HeadlineStats  no props — dashboard's six-tile headline row (Devices / Security Score / Critical Alerts / High Risks / Total Rules / Compliance Score) off `fleetHeadline.js`. Includes DeltaBadge: ⛔ direction-of-good is PER METRIC (more devices online = green, more patch_now CVEs = red), and NO delta renders when the prior day's value is null — a 0 would read as "unchanged" rather than "unknown". Added 2026-08-05, v2.53.0.
 QuickActions  no props — dashboard shortcut list. ⛔ Every entry points at a route that EXISTS; the mockup's "Export Data" is deliberately absent (no fleet-wide equivalent) rather than wired to something approximate. Added v2.53.0.
 FleetSystemHealth  no props — fleet roll-up of reachability/CPU/memory/disk/HA/last-backup. ⛔ EVERY row states its own coverage ("11 of 16 devices reporting") because these come from OPTIONAL adapter capabilities (disk + HA are Palo Alto only today) — a fleet number computed from a subset, shown without saying so, invites exactly the wrong conclusion. Added 2026-08-05, v2.54.0.
