@@ -82,8 +82,15 @@ describe('logSearch: results are capped and the cap is honest', () => {
   });
 
   it('asks for limit + 1 so "more exist" is detectable without a COUNT', () => {
+    // ⛔ Never a COUNT: measured 43 SECONDS for an exact count of a ONE-HOUR
+    // window (1,657,462 rows). The +1 probe is the only affordable way to know
+    // a next page exists.
     const b = buildSearchQuery({ limit: 50 }, NOW);
-    assert.equal(b.params[b.params.length - 1], 51);
+    const limitParam = b.params[b.params.length - 2];
+    const offsetParam = b.params[b.params.length - 1];
+    assert.equal(limitParam, 51);
+    assert.equal(offsetParam, 0, 'page 1 starts at offset 0');
+    assert.doesNotMatch(b.sql, /\bcount\s*\(/i, 'this query must never count');
   });
 
   it('⛔ reports truncation and does NOT return the probe row', async () => {
@@ -112,7 +119,7 @@ describe('logSearch: malformed filters are rejected, never silently dropped', ()
     const where = b.sql.slice(b.sql.indexOf('WHERE'), b.sql.indexOf('ORDER BY'));
     assert.doesNotMatch(where, /src_ip/, 'no predicate may be emitted for a rejected value');
     assert.equal(b.applied.srcIp, undefined);
-    assert.equal(b.params.length, 3, 'only the two window bounds and the limit');
+    assert.equal(b.params.length, 4, 'only the two window bounds, the limit and the offset');
   });
 
   it('rejects an out-of-range port and a malformed device id', () => {
@@ -180,5 +187,55 @@ describe('logSearch: the row shape keeps its caveats', () => {
     // "0 results" from a failed query reads as "that traffic never happened".
     const pool = { query: async () => { throw new Error('relation does not exist'); } };
     await assert.rejects(() => searchEvents(pool, {}, NOW), /relation does not exist/);
+  });
+});
+
+describe('⛔ log search pages without ever counting', () => {
+  // An exact COUNT over even a one-hour window was measured at 43 SECONDS on
+  // the live fleet (1,657,462 rows). Paging here therefore has no total, and
+  // the UI renders "Page 3" rather than a "of 47" nobody verified.
+  const { clampPage, MAX_PAGE } = require('../lib/syslog/logSearch');
+
+  it('turns a page number into a bounded OFFSET', () => {
+    for (const [page, limit, wantOffset] of [
+      [1, 100, 0], [2, 100, 100], [3, 50, 100], [undefined, 100, 0],
+    ]) {
+      const b = buildSearchQuery({ page, limit }, NOW);
+      assert.equal(b.offset, wantOffset, `page=${page} limit=${limit}`);
+    }
+  });
+
+  it('⛔ caps how deep OFFSET can go', () => {
+    // A hand-edited ?page=999999 must not become a multi-million-row OFFSET
+    // scan against the table the collector is writing to at ~1,500 rows/sec.
+    assert.equal(clampPage('999999'), MAX_PAGE);
+    assert.equal(buildSearchQuery({ page: '999999', limit: 500 }, NOW).offset, (MAX_PAGE - 1) * 500);
+  });
+
+  it('treats junk page values as page 1 rather than an empty view', () => {
+    for (const bad of ['abc', '-2', '0', '', null, undefined, ['3', '9']]) {
+      const want = Array.isArray(bad) ? 3 : 1;
+      assert.equal(clampPage(bad), want, JSON.stringify(bad));
+    }
+  });
+
+  it('emits LIMIT and OFFSET as bound parameters, never inline', () => {
+    const b = buildSearchQuery({ page: 4, limit: 25 }, NOW);
+    assert.match(b.sql, /LIMIT \$\d+ OFFSET \$\d+/);
+    assert.doesNotMatch(b.sql, /OFFSET 75/);
+  });
+
+  it('reports hasMore from the probe row and does not return it', async () => {
+    const pool = { query: async () => ({ rows: Array.from({ length: 11 }, (_, i) => ({ id: i, message: 'x' })) }) };
+    const r = await searchEvents(pool, { limit: 10, page: 2 }, NOW);
+    assert.equal(r.hasMore, true);
+    assert.equal(r.rows.length, 10);
+    assert.equal(r.page, 2);
+  });
+
+  it('reports hasMore false on the last page', async () => {
+    const pool = { query: async () => ({ rows: [{ id: 1, message: 'x' }] }) };
+    const r = await searchEvents(pool, { limit: 10 }, NOW);
+    assert.equal(r.hasMore, false);
   });
 });

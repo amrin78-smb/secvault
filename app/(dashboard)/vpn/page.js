@@ -8,6 +8,8 @@ import Pagination from '../../../components/ui/Pagination';
 import { resolvePage, pageWindow, DEFAULT_PAGE_SIZE } from '../../../lib/pagination';
 import { summarizeVpnConfig } from '../../../lib/engines/vpnSummary';
 import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
+import TabBar from '../../../components/ui/TabBar';
+import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs } from '../../../lib/vpnTabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -125,11 +127,23 @@ function statusBadge(summary) {
 
 export default async function VpnFleetPage({ searchParams }) {
   const sp = searchParams || {};
-  const total = await countActiveDevices(pool);
+  const tab = resolveFleetVpnTab(sp.vtab);
+  const { tabs, activeHref } = buildVpnTabHrefs(
+    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage']
+  );
+
+  // ⛔ Only the ACTIVE tab queries. The log-activity view costs ~7s on a
+  // COLD cache, and it is always cold: a 26 GB/day ingest evicts those rows
+  // from a 4 GB buffer pool long before anyone next opens this page. Running
+  // it unconditionally made every visit pay that, even to read the config
+  // table. Same reasoning as the dashboard rendering only its active tab.
+  const showStatus = tab === 'status';
+
+  const total = showStatus ? await countActiveDevices(pool) : 0;
   // pageWindow clamps a past-the-end `?page=` to the LAST page rather than
   // rendering an empty table, which would read as "there are no devices".
   const win = pageWindow(resolvePage(sp.page), PAGE_SIZE, total);
-  const devices = await getFleetVpnStatus(pool, win.limit, win.offset);
+  const devices = showStatus ? await getFleetVpnStatus(pool, win.limit, win.offset) : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -143,13 +157,17 @@ export default async function VpnFleetPage({ searchParams }) {
         }
       />
 
-      {/* Log-observed activity sits ABOVE the config table: it is the only
-          one of the three views that reflects what actually happened. It pages
-          on its OWN param (`?evPage=`) so the two lists on this page never move
-          together — see components/ui/Pagination's paramName note. */}
-      <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
+      <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="VPN views" />
 
-      {total === 0 ? (
+      {tab === 'activity' && (
+        /* Log-observed activity: the only VPN view that reflects what
+           actually happened, and the only one covering Palo Alto. It pages on
+           its OWN param (`?evPage=`) so it cannot move in step with the
+           config table -- see components/ui/Pagination's paramName note. */
+        <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
+      )}
+
+      {showStatus && (total === 0 ? (
         <EmptyState message="No active devices." />
       ) : (
         <>
@@ -205,7 +223,7 @@ export default async function VpnFleetPage({ searchParams }) {
             label="active devices"
           />
         </>
-      )}
+      ))}
     </div>
   );
 }

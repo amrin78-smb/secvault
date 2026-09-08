@@ -45,16 +45,27 @@ const btn = (enabled) => ({
  * independent. The default keeps every single-list caller unchanged.
  */
 export default function Pagination({
-  basePath, searchParams, page, pageSize, total, label, pages, paramName,
+  basePath, searchParams, page, pageSize, total, label, pages, paramName, hasMore,
 }) {
   const param = paramName || 'page';
+
+  // ⛔ UNKNOWN-TOTAL MODE. Some sets cannot be counted at all: log search runs
+  // over ~86M rows/day and an exact COUNT of a ONE-HOUR window was measured at
+  // 43 SECONDS. Those callers pass `hasMore` (from fetching limit+1) instead of
+  // a total, and this renders "Page 3" with a working Next — never "Page 3 of
+  // 4", which would be a claim about how much exists that nobody verified.
+  const unknownTotal = (total === null || total === undefined) && hasMore !== undefined;
+
   const totalPages = pages || calcTotalPages(total, pageSize);
-  const cur = Math.min(Math.max(Number(page) || 1, 1), totalPages);
+  const cur = unknownTotal
+    ? Math.max(Number(page) || 1, 1)
+    : Math.min(Math.max(Number(page) || 1, 1), totalPages);
   const range = describeRange(cur, pageSize, total);
 
   // A single page of results needs no controls, but the count is still worth
   // showing — it is the difference between "3 findings" and "3 shown".
-  const showControls = totalPages > 1;
+  const showControls = unknownTotal ? (cur > 1 || hasMore) : totalPages > 1;
+  const canNext = unknownTotal ? Boolean(hasMore) : cur < totalPages;
 
   return (
     <div
@@ -100,9 +111,9 @@ export default function Pagination({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            Page {cur.toLocaleString()} of {totalPages.toLocaleString()}
+            Page {cur.toLocaleString()}{unknownTotal ? null : ` of ${totalPages.toLocaleString()}`}
           </span>
-          {cur < totalPages ? (
+          {canNext ? (
             <Link href={buildPageHref(basePath, searchParams, { [param]: cur + 1 })} style={btn(true)}>
               Next →
             </Link>

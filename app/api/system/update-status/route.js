@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.78.1': [
+    'Log Search now pages through results instead of dumping one long list.',
+    'It shows the page number without claiming a total, because counting matching log lines is genuinely too slow to do - an exact count of a single hour takes 43 seconds here. Saying Page 3 is honest; saying Page 3 of 47 would not be.',
+    'The VPN pages are now tabbed. The fleet page splits into Fleet Status and Log Activity; a device VPN page splits into Overview, Active Users and IPsec Tunnels.',
+    'Tabs also fixed the slow load you noticed: only the tab you open runs its queries. The VPN log view takes about seven seconds on a cold cache, and every visit was paying that even just to read the tunnel list.',
+  ],
   '2.78.0': [
     'Long lists across the app now page instead of scrolling forever: alerts, recent activity, licence renewals, the five rule-analysis tabs, config changes and backups, compliance checks, VPN users, VPN events and IPsec tunnels.',
     'Every list states what it is not showing - "51-100 of 1,522" - so the rows on screen can never be mistaken for the whole set.',

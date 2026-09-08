@@ -2,6 +2,7 @@ import Link from 'next/link';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
 
 // Results for a raw log search. Server component — the rows arrive already
 // queried by the page.
@@ -58,7 +59,7 @@ function Cell({ children, mono, muted, nowrap }) {
   );
 }
 
-export default function LogResults({ result, deviceNames }) {
+export default function LogResults({ result, deviceNames, searchParams }) {
   if (!result) return null;
 
   if (result.error) {
@@ -111,8 +112,8 @@ export default function LogResults({ result, deviceNames }) {
               fontSize: 'var(--text-sm)',
             }}
           >
-            Showing the {result.limit} most recent matches — <strong>there are more</strong>.
-            Narrow the time window or add a filter to see the rest.
+            More matches exist beyond this page. Use <strong>Next</strong> below to page
+            through them, or narrow the window to make the set smaller.
           </div>
         ) : null}
 
@@ -271,6 +272,22 @@ export default function LogResults({ result, deviceNames }) {
             </table>
           </div>
         )}
+
+        {/* ⛔ hasMore, not total. An exact COUNT over even a one-hour window was
+            measured at 43 seconds on this fleet, so this set is genuinely
+            uncountable and the control says "Page 3" rather than inventing a
+            "of 47" that nobody verified. */}
+        {rows.length > 0 ? (
+          <Pagination
+            basePath="/logs"
+            searchParams={searchParams}
+            page={result.page}
+            pageSize={result.limit}
+            total={null}
+            hasMore={result.hasMore}
+            label="events"
+          />
+        ) : null}
       </CardBody>
     </Card>
   );

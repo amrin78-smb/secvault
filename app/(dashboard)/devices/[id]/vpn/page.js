@@ -5,6 +5,8 @@ import Badge from '../../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import VpnSessionTrendChart from '../../../../../components/vpn/VpnSessionTrendChart';
+import TabBar from '../../../../../components/ui/TabBar';
+import { DEVICE_VPN_TABS, resolveDeviceVpnTab, buildVpnTabHrefs } from '../../../../../lib/vpnTabs';
 import ActiveVpnUsersTable from '../../../../../components/vpn/ActiveVpnUsersTable';
 import IpsecTunnelsTable from '../../../../../components/vpn/IpsecTunnelsTable';
 import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
@@ -118,11 +120,27 @@ export default async function DeviceVpnPage({ params, searchParams }) {
     return notFound();
   }
 
+  const tab = resolveDeviceVpnTab(sp.vtab);
+  const { tabs, activeHref } = buildVpnTabHrefs(
+    `/devices/${device.id}/vpn`, DEVICE_VPN_TABS, sp, tab, ['page', 'tunnelPage', 'vpnq']
+  );
+
+  // ⛔ Only the ACTIVE tab queries. getVpnSessions() and getStoredVpnTunnels()
+  // both reach the DEVICE over its management API/SSH, and getVpnSessionHistory
+  // reads the full snapshot series -- running all of them to render any one of
+  // them made every visit pay for all three. Same reasoning as the dashboard
+  // rendering only its active tab.
+  const isOverview = tab === 'overview';
+  const isUsers = tab === 'users';
+  const isTunnels = tab === 'tunnels';
+
   const [configRow, sessionHistory, activeSessions, ipsecTunnels] = await Promise.all([
+    // The config summary heads every tab (it is the page's subject), so it is
+    // always fetched -- it is one indexed row, not a device round-trip.
     getLatestConfigParsed(pool, device.id),
-    getVpnSessionHistory(pool, device.id),
-    getVpnSessions(device.id, pool),
-    getStoredVpnTunnels(device.id, pool),
+    isOverview ? getVpnSessionHistory(pool, device.id) : Promise.resolve([]),
+    isUsers ? getVpnSessions(device.id, pool) : Promise.resolve([]),
+    isTunnels ? getStoredVpnTunnels(device.id, pool) : Promise.resolve([]),
   ]);
 
   const summary = summarizeVpnConfig(device.vendor, configRow ? configRow.config_parsed : null);
@@ -144,13 +162,19 @@ export default async function DeviceVpnPage({ params, searchParams }) {
           </span>
         }
         actions={
-          sessionHistory.length > 0 && (
+          // ⛔ Only offered on the tab that actually loaded the history. On the
+          // other tabs sessionHistory is deliberately empty because it was not
+          // fetched, and an export button there would look like "no data to
+          // export" rather than "not loaded on this tab".
+          isOverview && sessionHistory.length > 0 && (
             <a href={`/api/devices/${device.id}/vpn?format=csv`} className="btn btn-secondary">
               Export Session History CSV
             </a>
           )
         }
       />
+
+      <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="VPN sections" />
 
       {!summary.supported ? (
         <EmptyState message={`VPN config collection is not yet implemented for "${device.vendor}" devices.`} />
@@ -212,26 +236,30 @@ export default async function DeviceVpnPage({ params, searchParams }) {
         </Card>
       )}
 
-      <ActiveVpnUsersTable
-        sessions={activeSessions}
-        basePath={`/devices/${device.id}/vpn`}
-        searchParams={sp}
-        page={usersPage}
-        query={usersQuery}
-      />
+      {isUsers && (
+        <ActiveVpnUsersTable
+          sessions={activeSessions}
+          basePath={`/devices/${device.id}/vpn`}
+          searchParams={sp}
+          page={usersPage}
+          query={usersQuery}
+        />
+      )}
 
-      <IpsecTunnelsTable
-        tunnels={ipsecTunnels}
-        basePath={`/devices/${device.id}/vpn`}
-        searchParams={sp}
-        page={resolvePage(sp.tunnelPage)}
-      />
+      {isTunnels && (
+        <IpsecTunnelsTable
+          tunnels={ipsecTunnels}
+          basePath={`/devices/${device.id}/vpn`}
+          searchParams={sp}
+          page={resolvePage(sp.tunnelPage)}
+        />
+      )}
 
-      {sessionHistory.length > 0 ? (
+      {isOverview && (sessionHistory.length > 0 ? (
         <VpnSessionTrendChart points={sessionHistory} />
       ) : (
         <EmptyState message="No VPN session-count polling data yet. Session polling covers Fortinet, Palo Alto (GlobalProtect), and Cisco ASA — see CLAUDE.md's VPN Session Polling notes." />
-      )}
+      ))}
     </div>
   );
 }

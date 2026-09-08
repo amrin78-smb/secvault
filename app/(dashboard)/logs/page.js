@@ -28,7 +28,7 @@ export default async function LogsPage({ searchParams }) {
     'from', 'to', 'limit', 'deviceId', 'vendor', 'action', 'logClass', 'logSubtype',
     'protocol', 'application', 'ruleName', 'srcUser', 'srcCountry', 'dstCountry',
     'threatName', 'urlCategory', 'urlHostname', 'sourceIp', 'srcIp', 'dstIp',
-    'srcPort', 'dstPort', 'q',
+    'srcPort', 'dstPort', 'q', 'page',
   ]) {
     const v = first(sp[k]);
     if (v !== undefined && v !== null && String(v) !== '') params[k] = String(v);
@@ -79,7 +79,7 @@ export default async function LogsPage({ searchParams }) {
       />
       <LogSearchForm params={params} devices={devices} options={options} />
       {hasQuery ? (
-        <LogResults result={result} deviceNames={deviceNames} />
+        <LogResults result={result} deviceNames={deviceNames} searchParams={params} />
       ) : (
         <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)', padding: '4px 2px' }}>
           Choose a filter and search. With nothing set, the window defaults to the last hour.
