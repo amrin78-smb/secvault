@@ -19,8 +19,11 @@ export const dynamic = 'force-dynamic';
 //
 //   Reached      allowed traffic from a public source was seen arriving.
 //   Not seen     we WERE watching and saw none. The path is still open.
-//   Unmeasured   no syslog coverage. NOT the same as "not seen", and the two
-//                must never be rendered alike or merged into one column.
+//   Unmeasured   we could not pose the question at all -- no syslog from the
+//                device, no inbound traffic we can match against its own
+//                addresses, or a service that resolved to no port range. NOT
+//                the same as "not seen", and the two must never be rendered
+//                alike or merged into one column.
 //
 // A quiet path is NOT filtered out, dimmed to invisibility, or sorted to
 // oblivion: an unused open door is still open, and treating quiet as closed is
@@ -149,7 +152,7 @@ export default async function ExposurePage() {
             {kpi(
               String(totals.unmeasured),
               'unmeasured',
-              'no syslog coverage — not "clean"',
+              'cannot be measured — NOT "clean"',
               totals.unmeasured > 0 ? 'warn' : null
             )}
             {kpi(String(totals.publicIps), 'public addresses', 'on device interfaces')}
@@ -160,13 +163,32 @@ export default async function ExposurePage() {
               <CardBody>
                 {/* ⛔ Stated up front rather than buried in a tooltip. A reader
                     who does not know these paths are unmeasured will read the
-                    "reached" count as the whole story. */}
+                    "reached" count as the whole story.
+                    ⛔ Two DISTINCT gaps, deliberately not merged: a device we
+                    cannot hear at all, and one we can hear but whose own
+                    addresses we cannot match traffic against. The second used
+                    to be reported as "watched, saw nothing". */}
                 <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-                  <strong>{totals.unmeasured}</strong> of these paths are on{' '}
-                  <strong>{totals.devicesWithoutSyslog}</strong> device(s) sending no syslog in the
-                  window, so SecVault cannot say whether they were reached. They are shown as{' '}
-                  <em>Unmeasured</em>, never as unused — absence of an observation is not evidence
-                  of absence.
+                  <strong>{totals.unmeasured}</strong> of these paths cannot be measured, so
+                  SecVault does not say whether they were reached.
+                  {totals.devicesWithoutSyslog > 0 ? (
+                    <>
+                      {' '}
+                      <strong>{totals.devicesWithoutSyslog}</strong> device(s) sent no syslog at all
+                      in the window.
+                    </>
+                  ) : null}
+                  {totals.devicesWithoutInboundCoverage > 0 ? (
+                    <>
+                      {' '}
+                      <strong>{totals.devicesWithoutInboundCoverage}</strong> device(s) are sending
+                      syslog, but none of it is addressed to an interface or NAT address SecVault
+                      has collected — so there is nothing to match against. Collecting interfaces
+                      for those devices is what turns these into real measurements.
+                    </>
+                  ) : null}{' '}
+                  They are shown as <em>Unmeasured</em>, never as unused — absence of an
+                  observation is not evidence of absence.
                 </div>
               </CardBody>
             </Card>
@@ -252,6 +274,20 @@ export default async function ExposurePage() {
                               {p.vdom ? ` · ${p.vdom}` : ''}
                               {p.logEnabled ? '' : ' · logging off'}
                             </div>
+                            {/* ⛔ A path we could not direction-check is still
+                                listed — under-reporting exposure is the worse
+                                error — but it must not look confirmed. */}
+                            {p.directionVerified === false ? (
+                              <div
+                                style={{
+                                  fontSize: 'var(--text-xs)',
+                                  color: 'var(--yellow)',
+                                  marginTop: 4,
+                                }}
+                              >
+                                direction unverified
+                              </div>
+                            ) : null}
                           </td>
                           <td style={{ ...CELL, whiteSpace: 'nowrap' }}>
                             {observationBadge(p.observation)}
@@ -305,7 +341,8 @@ export default async function ExposurePage() {
                   {rows.slice(0, 8).map((p, i) => (
                     <div key={`why-${i}`}>
                       <div style={{ ...MONO, fontWeight: 600, marginBottom: 4 }}>
-                        {p.deviceName} · {p.publicIp} · {p.service.label}{' '}
+                        {p.deviceName} · {p.publicIp} · {p.service.label} ·{' '}
+                        {p.ruleName || '(unnamed rule)'}{' '}
                         <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
                           ({p.severity}, {p.score})
                         </span>

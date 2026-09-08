@@ -34,6 +34,13 @@ function loadEnvLocal() {
         (value.startsWith("'") && value.endsWith("'"))
       ) {
         value = value.slice(1, -1);
+      } else {
+        // ⛔ Strip an UNQUOTED trailing comment — see the identical guard in
+        // services/collector.js. An inline '# ...' after a value was being read
+        // AS the value, which is truthy, so the setting's own default never
+        // engaged. Both loaders need this or the trap simply moves.
+        const hash = value.indexOf('#');
+        if (hash !== -1) value = value.slice(0, hash).trim();
       }
       if (process.env[key] === undefined) {
         process.env[key] = value;

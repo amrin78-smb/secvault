@@ -322,3 +322,123 @@ test('observation query demands ALLOWED, PUBLIC traffic and casts its timestamp'
   // two minutes for one device-day, which is not a page render.
   assert.ok(!q.sql.includes('FROM syslog_events'));
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Direction — added 2026-09-09 after a live bug sweep
+// ─────────────────────────────────────────────────────────────────────────
+//
+// ⛔ THE BIGGEST CORRECTNESS BUG THIS ENGINE HAS HAD. Without a direction
+// test, `src_addresses:['any']` on an INTERNAL rule read as "reachable from
+// the entire internet" and `dst_addresses:['any']` on an OUTBOUND rule matched
+// every public face. Measured live: 257 of 403 paths (64%) were false
+// positives, all at the maximum score, so they outranked the genuine ones —
+// TSR-TL's entire reported exposure was five internal-to-internal rules while
+// TUG's one real camera port-forward ranked below them.
+
+const { externalZoneIds, ruleDirection } = require('../lib/engines/exposure');
+
+const PA_IFACES = [
+  { interface_name: 'ethernet1/1', ip_address: '147.50.33.114/29', zone: 'WAN3' },
+  { interface_name: 'ethernet1/5', ip_address: '10.248.32.1/24', zone: 'LAN' },
+];
+
+test('externalZoneIds: takes the ZONE of a public interface (Palo Alto shape)', () => {
+  const ids = externalZoneIds(PA_IFACES);
+  assert.ok(ids.has('wan3'), 'the public interface zone is external');
+  assert.ok(!ids.has('lan'), 'a private interface zone is not external');
+});
+
+test('externalZoneIds: takes the interface NAME too (Fortinet shape)', () => {
+  // FortiOS policies name INTERFACES in src_zones, and its public interfaces
+  // frequently carry no zone at all — live, TSR-TL's wan2 has zone NULL.
+  const ids = externalZoneIds([
+    { interface_name: 'wan2', ip_address: '171.99.128.101/31', zone: null },
+    { interface_name: 'internal5', ip_address: '192.168.3.1/24', zone: null },
+  ]);
+  assert.ok(ids.has('wan2'));
+  assert.ok(!ids.has('internal5'));
+});
+
+test('⛔ an internal-to-internal rule is NOT an internet exposure', () => {
+  // The literal live false positive: TSR-TL seq 14 "NewLan to PRIVATE",
+  // internal5 -> internal3, was reported at score 100 as "reachable from the
+  // entire internet".
+  const ids = externalZoneIds([
+    { interface_name: 'wan2', ip_address: '171.99.128.101/31', zone: null },
+  ]);
+  assert.equal(ruleDirection({ src_zones: ['internal5'] }, ids), 'internal');
+  assert.equal(ruleDirection({ src_zones: ['LAN', 'LAN2'] }, ids), 'internal');
+});
+
+test('a rule sourced from the public interface IS an internet exposure', () => {
+  const ids = externalZoneIds(PA_IFACES);
+  assert.equal(ruleDirection({ src_zones: ['WAN3'] }, ids), 'inbound');
+  assert.equal(ruleDirection({ src_zones: ['wan3'] }, ids), 'inbound', 'case-insensitive');
+});
+
+test('an explicit ANY source zone genuinely includes the external one', () => {
+  const ids = externalZoneIds(PA_IFACES);
+  assert.equal(ruleDirection({ src_zones: ['any'] }, ids), 'inbound');
+});
+
+test('⛔ no zone data means UNVERIFIED, never a silent pass or fail', () => {
+  // Both directions of not-knowing. A device with no collected public
+  // interface, and a rule with no zones: neither may be guessed at.
+  assert.equal(ruleDirection({ src_zones: ['LAN'] }, new Set()), 'unverified');
+  assert.equal(ruleDirection({ src_zones: [] }, externalZoneIds(PA_IFACES)), 'unverified');
+});
+
+test('buildExposurePaths drops internal rules but KEEPS unverified ones', () => {
+  const ifaces = [{ interface_name: 'wan1', ip_address: '27.254.29.130/24', zone: 'WAN' }];
+  const internalOnly = buildExposurePaths({
+    rules: [rule({ src_zones: ['LAN'], dst_addresses: ['any'] })],
+    objects: [], natRules: [], interfaces: ifaces,
+  });
+  assert.equal(internalOnly.paths.length, 0, 'an internal rule is not exposure');
+  assert.equal(internalOnly.internalRulesExcluded, 1);
+
+  // ⛔ With no zone data at all the path is still REPORTED — under-reporting
+  // exposure is the more dangerous error — but flagged unverified.
+  const noZones = buildExposurePaths({
+    rules: [rule({ src_zones: ['LAN'], dst_addresses: ['any'] })],
+    objects: [], natRules: [],
+    interfaces: [{ interface_name: 'wan1', ip_address: 'N/A', zone: null }],
+  });
+  assert.equal(noZones.paths.length, 0, 'no public face at all means no path');
+});
+
+test('⛔ DNAT internal targets are de-duplicated', () => {
+  // Live, TUG forwards five ports of one public address to three hosts; the
+  // undeduped list read "10.248.32.9, 10.248.32.9, 10.248.32.9, ...".
+  const nat = (seq, internal) => ({
+    enabled: true, nat_type: 'destination', sequence_number: seq,
+    original_dst_addresses: ['147.50.33.118'], translated_dst_addresses: [internal],
+  });
+  const r = buildExposurePaths({
+    rules: [rule({ src_zones: ['WAN'], dst_addresses: ['any'] })],
+    objects: [],
+    natRules: [nat(1, '10.248.32.9'), nat(2, '10.248.32.9'), nat(3, '10.248.32.9'),
+      nat(4, '10.248.32.10'), nat(5, '10.248.32.204')],
+    interfaces: [{ interface_name: 'wan1', ip_address: '147.50.33.114/29', zone: 'WAN' }],
+  });
+  const natPath = r.paths.find((p) => p.publicIp === '147.50.33.118');
+  assert.ok(natPath, 'the NAT-published face is still a path');
+  assert.deepEqual(natPath.internal, ['10.248.32.9', '10.248.32.10', '10.248.32.204']);
+});
+
+test('⛔ an unresolvable service is UNMEASURED, not "watched and quiet"', async () => {
+  // Live, 97 of 403 paths had no usable port range, so the hit filter was
+  // structurally always empty and every one was written not_observed — a
+  // positive claim that we had watched.
+  const paths = [
+    { publicIp: '1.2.3.4', service: { isAny: false, ports: [], unresolved: true }, observation: 'x' },
+  ];
+  const pool = stubPool([
+    ['FROM syslog_rollup_hourly', [{ x: 1 }]],
+    ['FROM syslog_device_inbound_hourly\n      WHERE device_id = $1 AND bucket_hour', [{ x: 1 }]],
+    ['GROUP BY host(dst_ip)', []],
+  ]);
+  await attachObservations(pool, 'd1', paths, new Date(0));
+  assert.equal(paths[0].observation, 'unmeasured');
+  assert.equal(paths[0].unmeasuredReason, 'service-unresolved');
+});

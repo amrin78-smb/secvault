@@ -195,12 +195,45 @@ describe('vendorParsers: Palo Alto positional CSV', () => {
     const threat = PAN_TRAFFIC.replace(',TRAFFIC,end,', ',THREAT,url,');
     const e = parsePaloAlto(threat);
     assert.equal(e.logType, 'THREAT');
-    assert.equal(e.srcPort, null);
+    // ⛔ CORRECTED AGAIN 2026-09-09: srcPort was asserted null here, and that
+    // was wrong for the same reason `action` was. The divergence point is
+    // index 30, not index 22 — 22/24/25/29 (session, ports, protocol) are in
+    // the SHARED prefix and were verified populated across 2,988 real threat
+    // rows of every subtype. Suppressing them left every PAN threat row with a
+    // null dst_port (~900k/day), which is exactly the field CLAUDE.md's
+    // log_hit definition needs.
+    assert.equal(e.srcPort, 49308, 'index 24 is in the shared prefix');
+    assert.equal(e.dstPort, 443, 'index 25 is in the shared prefix');
+    assert.equal(e.protocol, 'udp', 'index 29 is in the shared prefix');
+    assert.equal(e.sessionId, '514964', 'index 22 is in the shared prefix');
+    // From index 31 the layouts genuinely diverge and these must stay null.
     assert.equal(e.bytesSent, null, 'index 32 is the threat NAME on this row, not bytes');
     assert.equal(e.bytesReceived, null);
     // The common prefix is still safe to read.
     assert.equal(e.srcIp, '10.248.5.55');
     assert.equal(e.ruleName, 'Local-to-Internet-ANY-Review');
+  });
+
+  it('⛔ does not read TRAFFIC/THREAT columns from an unrelated log type', () => {
+    // The bug this pins: PAN_COMMON is NOT common. From index 7 the layout is
+    // per log TYPE, and only TRAFFIC and THREAT were ever verified. Reading it
+    // unconditionally filled GLOBALPROTECT rows with real-looking values from
+    // the wrong columns — this exact line was captured live and its fabricated
+    // values (srcIp="vsys1", application="SM-A066B-…", srcZone="0.0.0.0") were
+    // already in the database.
+    const gp =
+      '1,2026/09/08 23:58:21,023001020713,GLOBALPROTECT,0,2817,2026/09/08 23:58:21,' +
+      'vsys1,gateway-hip-check,host-info,,,eng_itc_adisakc,TH,SM-A066B-ab0e5428a11570bc,' +
+      '49.230.93.232,0.0.0.0,10.10.30.91,0.0.0.0,ab0e5428a11570bc';
+    const e = parsePaloAlto(gp);
+    assert.equal(e.logType, 'GLOBALPROTECT');
+    assert.equal(e.logClass, 'vpn', 'the row is still classified, just not mis-parsed');
+    for (const field of [
+      'srcIp', 'dstIp', 'application', 'srcZone', 'dstZone',
+      'srcUser', 'ruleName', 'vdom', 'srcInterface', 'dstInterface',
+    ]) {
+      assert.equal(e[field], null, `${field} must be null on an unverified log type`);
+    }
   });
 
   it('handles a quoted field containing a comma', () => {

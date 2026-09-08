@@ -49,6 +49,18 @@ function loadEnvLocal() {
       if ((value.startsWith('"') && value.endsWith('"')) ||
           (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
+      } else {
+        // ⛔ Strip an UNQUOTED trailing comment. .env.local.example documents
+        // most settings on their own line, but one used an inline '# ...' and
+        // the whole comment was read AS the value: SYSLOG_ARCHIVE_DIR became
+        // '# blank = <install dir>\\archive', which is truthy, so the sane
+        // default never engaged and every archive write failed with ENOENT --
+        // silently, every 2 seconds, while ~89% of raw lines exist NOWHERE
+        // else because SYSLOG_RAW_MESSAGE=security drops them from the DB.
+        // Fixing only the one line would leave the trap armed for the next
+        // setting someone documents inline.
+        const hash = value.indexOf('#');
+        if (hash !== -1) value = value.slice(0, hash).trim();
       }
       if (!(key in process.env)) process.env[key] = value;
     }
@@ -145,6 +157,7 @@ let received = 0;
 let flushing = false;
 let shuttingDown = false;
 let deviceByIp = new Map();   // source_ip -> device_id, refreshed periodically
+let spoolCorrupt = 0;     // spool records skipped for an unreadable timestamp
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] [collector] ${msg}`);
@@ -202,6 +215,9 @@ function ensureSpoolDir() {
 // Written as .tmp then renamed to .ready, so a crash mid-write can never leave
 // a half-line that the replay would treat as a real event. rename() is atomic.
 function writeSpool(records) {
+  // Self-heal a spool directory that vanished after startup (a removed or
+  // remounted volume); without this every subsequent flush fails identically.
+  ensureSpoolDir();
   const stamp = `${Date.now()}_${process.pid}_${Math.floor(Math.random() * 1e6)}`;
   const tmp = path.join(SPOOL_DIR, `${stamp}.tmp`);
   const ready = path.join(SPOOL_DIR, `${stamp}.ready`);
@@ -227,7 +243,17 @@ function readSpool(file) {
     try {
       const o = JSON.parse(line);
       const t = new Date(o.t);
-      out.push({ line: o.l, sourceIp: o.s, receivedAt: Number.isNaN(t.getTime()) ? new Date() : t });
+      // ⛔ Do NOT substitute `new Date()`. received_at is the partition key and
+      // is documented as "when WE observed it"; stamping a replayed record
+      // with the restart time silently moves it into the wrong daily partition
+      // and misdates every "last N hours" query. A record whose own timestamp
+      // is unreadable is skipped and counted, not invented -- the same rule as
+      // never defaulting a missing timestamp to now at parse time.
+      if (Number.isNaN(t.getTime())) {
+        spoolCorrupt++;
+        continue;
+      }
+      out.push({ line: o.l, sourceIp: o.s, receivedAt: t });
     } catch (_e) {
       // A single unparseable spool line is skipped, not allowed to poison the
       // whole file — the rest of the batch is still real evidence.
@@ -288,7 +314,26 @@ async function replayBacklog() {
 }
 
 // --- flush cycle -----------------------------------------------------------
+// ⛔ Returns the IN-FLIGHT promise rather than undefined when a flush is
+// already running. shutdown() awaits flush() to drain memory before exit; with
+// a bare `return` that await resolved instantly while a flush was mid-insert,
+// and everything accepted since that flush started was discarded at exit.
+// Update-SecVault.ps1 stops this service on every deploy, so that was the
+// normal path, not an exceptional one.
+let flushInFlight = null;
+
 async function flush() {
+  if (flushing) return flushInFlight;
+  const p = doFlush();
+  flushInFlight = p;
+  try {
+    return await p;
+  } finally {
+    flushInFlight = null;
+  }
+}
+
+async function doFlush() {
   if (flushing) return;
   flushing = true;
   const started = Date.now();
@@ -299,11 +344,22 @@ async function flush() {
   dropped = 0;
   received = 0;
 
+  // ⛔ Set only once the batch is safely on disk. Until then a failure must put
+  // the events BACK, because at this point they exist nowhere else: `buffer`
+  // was already emptied above, so an exception here would drop them silently
+  // -- the exact opposite of this file's durability contract, and invisible to
+  // every DB-side health signal.
+  let spooled = false;
+
   try {
     if (batch.length > 0) {
       const file = writeSpool(batch);           // durable first
+      spooled = true;
       const r = await processSpoolFile(file);   // then the DB
-      const backlog = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).length;
+      // Retry anything a previous cycle could not insert. Bounded per cycle so
+      // a large backlog cannot starve live ingest.
+      await drainBacklog(file);
+      const backlog = countReadyFiles();
       await recordStats({
         received: receivedThisCycle,
         parsed: r.parsed,
@@ -330,12 +386,124 @@ async function flush() {
         archiveGz = 0;
       }
     } else if (droppedThisCycle > 0) {
+      // ⛔ Still persist it. `dropped` is the one number an operator cannot
+      // reconstruct from anywhere else, and a stdout line is not a record.
       log(`WARN dropped ${droppedThisCycle} datagram(s) with an empty batch`);
+      await recordStats({
+        received: receivedThisCycle,
+        parsed: 0,
+        stored: 0,
+        dropped: droppedThisCycle,
+        unknownVendor: 0,
+        unknownSource: 0,
+        backlog: countReadyFiles(),
+        ms: Date.now() - started,
+      });
     }
   } catch (err) {
     log(`ERROR flush failed: ${err.stack || err.message}`);
+
+    // ⛔ The spool write is the durability boundary. If we never crossed it,
+    // these events are ONLY in `batch` and dropping them here is silent data
+    // loss on every subsequent cycle too (a full or missing spool volume fails
+    // identically every time). Put them back; if the buffer has since filled,
+    // count the remainder as dropped so the loss is REPORTED, never hidden.
+    if (!spooled && batch.length > 0) {
+      const room = Math.max(0, MAX_BUFFER - buffer.length);
+      const keep = Math.min(room, batch.length);
+      if (keep > 0) buffer = batch.slice(batch.length - keep).concat(buffer);
+      const lost = batch.length - keep;
+      if (lost > 0) {
+        dropped += lost;
+        log(`ERROR spool failed and buffer is full - ${lost} event(s) counted as dropped`);
+      } else {
+        log(`WARN spool failed - ${keep} event(s) returned to the buffer for retry`);
+      }
+    }
+
+    // Counters must survive the failure, or the ingest-health view shows a gap
+    // where it should show a problem.
+    try {
+      await recordStats({
+        received: receivedThisCycle,
+        parsed: 0,
+        stored: 0,
+        dropped: droppedThisCycle,
+        unknownVendor: 0,
+        unknownSource: 0,
+        backlog: countReadyFiles(),
+        ms: Date.now() - started,
+      });
+    } catch (_e) {
+      // recordStats already swallows its own errors; this guards the
+      // countReadyFiles() call on a broken spool volume.
+    }
   } finally {
     flushing = false;
+  }
+}
+
+// Cheap and failure-tolerant: a broken spool directory must not turn a flush
+// error into a second, masking error.
+function countReadyFiles() {
+  try {
+    return fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).length;
+  } catch (_e) {
+    return 0;
+  }
+}
+
+// How many stranded spool files to retry per flush cycle, and how many times
+// to retry one before quarantining it.
+const BACKLOG_DRAIN_PER_CYCLE = 5;
+const MAX_SPOOL_ATTEMPTS = 5;
+const spoolAttempts = new Map();   // filename -> attempts
+
+/**
+ * Retry spool files that a previous cycle could not insert.
+ *
+ * ⛔ WHY THIS EXISTS: processSpoolFile() deliberately KEEPS a file whose insert
+ * failed, but nothing ever picked it back up -- it was only ever called on a
+ * freshly written file, or once at startup. So a database outage stranded every
+ * file it produced until someone restarted the service: at ~2,000 events per
+ * 2s flush, a one-hour outage leaves ~1,800 files holding ~3.6M events that are
+ * invisible in SQL while ingest happily continues. "Kept for retry" with no
+ * retry is just a slower kind of loss.
+ *
+ * Bounded per cycle so draining a large backlog cannot starve live ingest.
+ */
+async function drainBacklog(currentFile) {
+  let files;
+  try {
+    files = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).sort();
+  } catch (_e) {
+    return;
+  }
+  const current = currentFile ? path.basename(currentFile) : null;
+  let done = 0;
+  for (const name of files) {
+    if (done >= BACKLOG_DRAIN_PER_CYCLE) break;
+    if (name === current) continue;
+    const full = path.join(SPOOL_DIR, name);
+    const attempts = (spoolAttempts.get(name) || 0) + 1;
+    spoolAttempts.set(name, attempts);
+    try {
+      const r = await processSpoolFile(full);
+      if (!fs.existsSync(full)) {
+        spoolAttempts.delete(name);
+        log(`drained spool ${name}: stored ${r.stored}`);
+      } else if (attempts >= MAX_SPOOL_ATTEMPTS) {
+        // ⛔ Quarantine, never delete. A file we cannot insert is still
+        // evidence; renaming keeps it for inspection and stops it blocking
+        // the queue forever, and the rename is LOUD.
+        fs.renameSync(full, full.replace(/\.ready$/, '.failed'));
+        spoolAttempts.delete(name);
+        log(`ERROR spool ${name} failed ${attempts}x - quarantined as .failed (NOT deleted)`);
+      }
+    } catch (err) {
+      log(`ERROR draining spool ${name}: ${err.message}`);
+    }
+    done++;
   }
 }
 
@@ -397,6 +565,12 @@ let rollupRunning = false;
 async function rollupCycle(wide) {
   if (rollupRunning) { log('rollup skipped - previous sweep still running'); return; }
   rollupRunning = true;
+  // ⛔ This function is invoked from bare setInterval callbacks whose promises
+  // nobody awaits, so a throw here becomes an unhandled rejection — which under
+  // Node's default --unhandled-rejections=throw TERMINATES the collector.
+  // Every sibling timer in this file (flush, maintenance, refreshDeviceMap)
+  // already has its own catch; this one did not, and ingest is the last thing
+  // that should die for a rollup bug.
   try {
     const r = await runRollupMaintenance(pool, {
       wide,
@@ -404,17 +578,28 @@ async function rollupCycle(wide) {
       lookbackHours: ROLLUP_LOOKBACK_HOURS,
     });
     if (r.ok) {
+      // ⛔ Report EVERY rollup, derived from the result object rather than a
+      // hand-written list. The old line named five of nine, so inboundRows,
+      // countryRows, userRows and urlCatRows were invisible: a rollup that
+      // silently returns zero rows (an empty address set, a column that stops
+      // parsing) would commit, log "success", and flatline unnoticed. Deriving
+      // the list means a tenth rollup cannot be added without appearing here.
+      const counts = Object.keys(r)
+        .filter((k) => k.endsWith('Rows'))
+        .map((k) => `${r[k]} ${k.slice(0, -4)}`)
+        .join(' + ');
       log(
         `rollup ${r.tier} (${r.hours}h` +
         (r.sliceIndex === null || r.sliceIndex === undefined
           ? ''
           : `, slice ${r.sliceIndex}/${r.sliceHours}h`) +
-        `): ${r.hourlyRows} hourly + ${r.ruleRows} rule + ` +
-        `${r.talkerRows} host + ${r.appRows} app + ${r.blockedRows} blocked-dst row(s) in ${r.ms}ms`
+        `): ${counts} row(s) in ${r.ms}ms`
       );
     } else {
       log(`ERROR rollup ${r.tier} failed after ${r.ms}ms: ${r.error}`);
     }
+  } catch (err) {
+    log(`ERROR rollup threw: ${err.stack || err.message}`);
   } finally {
     rollupRunning = false;
   }
@@ -437,10 +622,29 @@ function startUdp(port) {
   return sock;
 }
 
+// A syslog line far longer than this is a framing failure, not a log line.
+// Bounding it matters because `partial` is per-connection and otherwise grows
+// without limit.
+const MAX_TCP_LINE = 65536;
+const TCP_IDLE_MS = 300000;
+
 function startTcp(port) {
   const server = net.createServer((socket) => {
-    const peer = socket.remoteAddress ? socket.remoteAddress.replace(/^::ffff:/, '') : 'unknown';
+    // ⛔ No 'unknown' sentinel. source_ip is INET NOT NULL, so a sentinel
+    // coerces to NULL and fails the INSERT for the entire 500-row chunk it
+    // lands in -- which then strands the spool file. remoteAddress is
+    // genuinely undefined for a socket the peer destroyed before this handler
+    // ran, which is routine on a public listener. Refuse the connection
+    // instead of manufacturing an address we cannot store.
+    if (!socket.remoteAddress) {
+      socket.destroy();
+      return;
+    }
+    const peer = socket.remoteAddress.replace(/^::ffff:/, '');
     let partial = '';
+
+    socket.setTimeout(TCP_IDLE_MS, () => socket.destroy());
+
     socket.on('data', (chunk) => {
       partial += chunk.toString('utf8');
       const lines = partial.split('\n');
@@ -448,12 +652,22 @@ function startTcp(port) {
       for (const line of lines) {
         if (line.trim().length > 0) accept(line, peer);
       }
+      // A sender that never emits a newline would otherwise grow this string
+      // until the process dies. Emit what we have, count it, and reset.
+      if (partial.length > MAX_TCP_LINE) {
+        log(`WARN tcp/${port} ${peer}: line exceeded ${MAX_TCP_LINE} bytes - truncating`);
+        accept(partial.slice(0, MAX_TCP_LINE), peer);
+        partial = '';
+      }
     });
     socket.on('error', () => {});
     socket.on('close', () => {
-      if (partial.trim().length > 0) accept(partial, peer);
+      if (partial.trim().length > 0) accept(partial.slice(0, MAX_TCP_LINE), peer);
+      partial = '';
     });
   });
+  // Bounded so a connection flood cannot exhaust file descriptors.
+  server.maxConnections = 2048;
   server.on('error', (err) => log(`ERROR tcp/${port}: ${err.message}`));
   server.listen(port, () => log(`listening tcp/${port}`));
   return server;
@@ -491,12 +705,20 @@ async function main() {
   await maintenance();
   await refreshDeviceMap();
   log(`device map: ${deviceByIp.size} source address(es) resolvable`);
-  await replayBacklog();
-
   for (const p of UDP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_UDP_PORT entry '${p}'`);
   for (const p of TCP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_TCP_PORT entry '${p}'`);
+  // ⛔ BIND FIRST, replay second. replayBacklog() used to run to completion
+  // before any socket existed, so a large backlog left the collector DEAF for
+  // its whole duration — and datagrams sent to an unbound UDP port are
+  // discarded by the OS with no counter anywhere, the one failure mode you
+  // cannot see from inside the process. A one-hour DB outage can strand ~1,800
+  // spool files; replaying those serially is minutes of silence. The replay is
+  // now started after the listeners are up and shares the flush cycle's
+  // `flushing` mutex, so the two cannot collide.
   const udpSockets = UDP_PORTS.ports.map((p) => startUdp(p));
   const tcpServers = TCP_PORTS.ports.map((p) => startTcp(p));
+
+  replayBacklog().catch((err) => log(`ERROR replaying backlog: ${err.stack || err.message}`));
 
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const mapTimer = setInterval(() => { refreshDeviceMap(); }, 5 * 60 * 1000);
@@ -519,6 +741,10 @@ async function main() {
     for (const s of udpSockets) { try { s.close(); } catch (_e) {} }
     for (const s of tcpServers) { try { s.close(); } catch (_e) {} }
     // Drain what is in memory so a restart does not lose the current window.
+    // Two calls on purpose: the first awaits any in-flight flush (which does
+    // NOT touch the current buffer), the second spools whatever arrived while
+    // that one was running.
+    await flush();
     await flush();
     try { await pool.end(); } catch (_e) {}
     log('stopped cleanly.');

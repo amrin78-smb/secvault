@@ -82,12 +82,36 @@ describe('detail rollups: each excludes rows it cannot describe', () => {
     // This is what bounds the table. Storing every destination would make it
     // the largest table in the database — measured 15,546 distinct
     // destinations in ten minutes, an unbounded internet long tail.
-    assert.match(BLOCKED_INSERT, /action IN \('deny','drop','reset-both','block'\)/);
+    // ⛔ The deny vocabulary now comes from the SHARED set (lib/syslog/
+    // actions.js) rather than a literal. There were four divergent lists and
+    // the narrowest drove every dashboard number: measured live, the old
+    // 4-verb literal missed 6.8% of blocks fleet-wide and 24% on URL-category
+    // rows, because `block-url` — the only URL-filtering block verb PAN-OS
+    // emits — was absent. `block` itself never appears on this fleet at all.
+    assert.match(BLOCKED_INSERT, /lower\(action\) IN \(/);
+    assert.ok(BLOCKED_INSERT.includes("'block-url'"), 'block-url must be counted as a block');
+    assert.ok(BLOCKED_INSERT.includes("'deny'") && BLOCKED_INSERT.includes("'drop'"));
     assert.match(BLOCKED_INSERT, /(WHERE|AND) dst_ip IS NOT NULL/);
   });
 
   it('the host rollup counts denies alongside events', () => {
-    assert.match(TALKER_INSERT, /count\(\*\) FILTER \(WHERE action IN/);
+    assert.match(TALKER_INSERT, /count\(\*\) FILTER \(WHERE lower\(action\) IN \(/);
+    assert.ok(TALKER_INSERT.includes("'block-url'"));
+  });
+
+  it('⛔ every rollup uses the SAME deny vocabulary', () => {
+    // Four divergent copies is how this went wrong. Pin that they agree.
+    const { DENIED_SQL } = require('../lib/syslog/actions');
+    for (const [name, sql] of [
+      ['BLOCKED_INSERT', BLOCKED_INSERT],
+      ['TALKER_INSERT', TALKER_INSERT],
+    ]) {
+      assert.ok(sql.includes(DENIED_SQL), `${name} must use the shared deny list`);
+    }
+    // And that the list is a directly substitutable SQL fragment — a bare
+    // comma list produced `IN 'deny','drop'`, a syntax error that would abort
+    // the whole nine-rollup sweep transaction.
+    assert.ok(DENIED_SQL.startsWith('(') && DENIED_SQL.endsWith(')'));
   });
 });
 

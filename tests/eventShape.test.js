@@ -250,3 +250,40 @@ describe('⛔ a dropped raw line stores NULL, never an empty string', () => {
     assert.ok(typeof row[i] === 'string' && row[i].length > 0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// INET coercion — added 2026-09-09 after a live bug sweep
+// ─────────────────────────────────────────────────────────────────────────
+
+const { toInetOrNull } = require('../lib/syslog/eventStore');
+
+it('⛔ a MAC address is NOT an IPv6 address', () => {
+  // The old guard was /^[0-9a-fA-F:]+$/, which a MAC and a bare clock fragment
+  // both satisfy. PostgreSQL rejects them — verified live:
+  //   SELECT '00:11:22:33:44:55'::inet;  -- ERROR: invalid input syntax
+  // and because rows insert in chunks, ONE such value aborted its whole
+  // 500-row chunk and then stranded the spool file permanently. Both shapes
+  // are exactly what a positional mis-parse produces.
+  for (const v of ['00:11:22:33:44:55', '12:34:56', 'ffffff:1', 'a:::b', '1:2:3:4:5:6:7:8:9']) {
+    assert.equal(toInetOrNull(v), null, v);
+  }
+});
+
+it('a zone index is rejected — valid to the kernel, invalid to INET', () => {
+  assert.equal(toInetOrNull('fe80::1%eth0'), null);
+});
+
+it('real addresses still pass through unchanged', () => {
+  for (const v of [
+    '192.168.1.1', '::1', 'fe80::1', '2001:db8::8a2e:370:7334',
+    '::ffff:192.0.2.1', '1:2:3:4:5:6:7:8',
+  ]) {
+    assert.equal(toInetOrNull(v), v, v);
+  }
+});
+
+it('malformed IPv4 is null rather than a coerced guess', () => {
+  for (const v of ['999.1.1.1', '1.2.3', 'not-an-ip', 'N/A', '', null, undefined]) {
+    assert.equal(toInetOrNull(v), null, String(v));
+  }
+});
