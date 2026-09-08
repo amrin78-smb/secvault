@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.70.0': [
+    'Traffic volume figures are now only shown where they can honestly be added up.',
+    'Fortinet re-reports a long-running session with a running total, so adding those log lines counts the same traffic over and over. Left uncorrected this showed one firewall sending 50 terabytes in two hours.',
+    'Palo Alto reports each session once when it closes, so those figures are sound and are what the volume number reflects.',
+    'Fortinet traffic is still fully counted as events; only its byte totals are shown as unavailable, with the reason stated on the widget.',
+  ],
   '2.69.2': [
     'The installer now sets up the log collector automatically. Until now it had to be registered by hand, so a fresh install would have come up with no log collection at all.',
     'It also opens the firewall for the syslog ports. Without that the collector starts, looks perfectly healthy, and quietly receives nothing.',

@@ -184,6 +184,7 @@ function toEvent(raw) {
     bytesSent: payload ? payload.bytesSent : null,
     bytesReceived: payload ? payload.bytesReceived : null,
     logClass: payload ? payload.logClass : null,
+    bytesSummable: payload ? payload.bytesSummable === true : false,
     message: frame.message || raw.line,
   };
 }

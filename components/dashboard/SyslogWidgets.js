@@ -58,6 +58,11 @@ export async function TrafficVolumeWidget() {
   const total = rows.reduce((n, r) => n + r.events, 0);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
   const denied = rows.reduce((n, r) => n + (r.denied || 0), 0);
+  // null when NO row had a summable byte count -- unmeasurable, not zero.
+  const byteRows = rows.filter((r) => r.bytesSent !== null || r.bytesReceived !== null);
+  const volumeGb = byteRows.length === 0
+    ? null
+    : (byteRows.reduce((n, r) => n + (r.bytesSent || 0) + (r.bytesReceived || 0), 0) / 1e9).toFixed(1);
 
   return (
     <Card>
@@ -72,6 +77,11 @@ export async function TrafficVolumeWidget() {
           <Empty>No log data collected in the last 24 hours.</Empty>
         ) : (
           <>
+            {/* ⛔ Volume is shown only where byte counters can honestly be
+                summed. FortiOS re-logs a session with a running cumulative
+                counter, so adding its rows counts the same bytes repeatedly
+                (measured: 87.6 Gbps implied). Those contribute NULL, and the
+                caption says whose traffic this actually covers. */}
             <div style={{ display: 'flex', gap: 18, alignItems: 'baseline', marginBottom: 10 }}>
               <div>
                 <div style={{ fontSize: 22, fontWeight: 700 }}><Num value={total} /></div>
@@ -82,6 +92,12 @@ export async function TrafficVolumeWidget() {
                   <Num value={denied} />
                 </div>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>denied / dropped</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>
+                  {volumeGb === null ? <span style={{ color: 'var(--text-muted)' }}>—</span> : volumeGb + ' GB'}
+                </div>
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>volume (measurable)</div>
               </div>
             </div>
             {/* Hand-rolled bars — this codebase has no charting library beyond
@@ -101,7 +117,9 @@ export async function TrafficVolumeWidget() {
               ))}
             </div>
             <div style={{ marginTop: 6, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-              {rows.length} hour{rows.length === 1 ? '' : 's'} of history
+              {rows.length} hour{rows.length === 1 ? '' : 's'} of history. Volume covers Palo Alto
+              session-close records only — FortiOS reports running cumulative counters
+              that cannot be summed, so its traffic is counted but not measured in bytes.
             </div>
           </>
         )}

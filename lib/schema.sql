@@ -1438,3 +1438,29 @@ CREATE TABLE IF NOT EXISTS syslog_rule_hits_hourly (
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_hour ON syslog_rule_hits_hourly (bucket_hour DESC);
 CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_device ON syslog_rule_hits_hourly (device_id, bucket_hour DESC);
+
+-- ⛔ bytes_summable (2026-09-08): is this row's byte count safe to SUM?
+--
+-- Discovered while building the traffic widgets, before any of them shipped.
+-- Naively summing bytes_sent gave TSR_EKM 50,565 GB in two hours -- 55 Gbps,
+-- impossible. Two different causes:
+--
+--   FortiOS logs a long-lived session REPEATEDLY with a CUMULATIVE counter.
+--   The same SMB session (TSR-To-IDC -> internal5) appeared as 671.3, 672.2,
+--   673.0, 673.8 and 674.6 GB in consecutive events. Summing counts the same
+--   bytes over and over: 87.6 Gbps implied across the fleet.
+--
+--   FortiOS event/vpn rows carry the IPsec tunnel's LIFETIME totals -- a
+--   single event reported 3.7 TB. Those are already log_class='vpn', so
+--   restricting to traffic excludes them, but the same trap applies.
+--
+--   PAN-OS logs a session ONCE at close (subtype 'end') with its final
+--   totals. Those are non-overlapping: 578,836 sessions -> 84.4 GB -> 0.75
+--   Gbps implied, which is plausible for this fleet.
+--
+-- So bytes are summable for PAN-OS session-close rows and NOT for FortiOS.
+-- The flag is computed at ingest from what the parser already knows, and the
+-- rollups aggregate bytes only where it is true. A device whose bytes cannot
+-- be summed reports NULL -- "unmeasurable" -- never a confident wrong total.
+-- Same tri-state rule as hit_count, applied to traffic volume.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS bytes_summable BOOLEAN NOT NULL DEFAULT false;

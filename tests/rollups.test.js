@@ -182,3 +182,21 @@ describe('rollups: runRollupMaintenance tiers', () => {
     assert.ok(wide.from < recent.from, 'the wide tier must actually reach back further');
   });
 });
+
+describe('rollups: byte aggregation is restricted to summable rows', () => {
+  it('⛔ sums bytes only WHERE bytes_summable, in both rollups', () => {
+    // Without this FILTER the rollup adds FortiOS cumulative session counters
+    // together and reports ~87 Gbps of fleet traffic that does not exist.
+    assert.match(HOURLY_INSERT, /sum\(bytes_sent\) FILTER \(WHERE bytes_summable\)/);
+    assert.match(HOURLY_INSERT, /sum\(bytes_received\) FILTER \(WHERE bytes_summable\)/);
+    assert.match(RULE_INSERT, /sum\(bytes_sent\) FILTER \(WHERE bytes_summable\)/);
+    assert.match(RULE_INSERT, /sum\(bytes_received\) FILTER \(WHERE bytes_summable\)/);
+  });
+
+  it('still yields NULL rather than 0 when nothing in the bucket is summable', () => {
+    // FILTER over no matching rows returns NULL, which is the honest answer:
+    // a Fortinet-only hour has UNMEASURABLE volume, not zero volume.
+    assert.doesNotMatch(HOURLY_INSERT, /coalesce\s*\(\s*sum\(bytes_sent\)/i);
+    assert.doesNotMatch(RULE_INSERT, /coalesce\s*\(\s*sum\(bytes_sent\)/i);
+  });
+});

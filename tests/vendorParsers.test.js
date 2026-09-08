@@ -252,3 +252,38 @@ describe('vendorParsers: log_class is computed once at ingest', () => {
     assert.equal(parsePaloAlto(PAN_TRAFFIC).logClass, 'traffic');
   });
 });
+
+describe('vendorParsers: bytes_summable — which byte counters can be added up', () => {
+  // ⛔ Naively summing bytes gave one device 50,565 GB in two hours (55 Gbps).
+  // Measured cause: FortiOS re-logs a long-lived session with a RUNNING
+  // cumulative counter — the same SMB session appeared as 671.3, 672.2, 673.0,
+  // 673.8 and 674.6 GB in consecutive events. PAN-OS logs a session once at
+  // close. So one vendor's bytes are summable and the other's are not.
+
+  it('marks a Palo Alto session-CLOSE row as summable', () => {
+    const e = parsePaloAlto(PAN_TRAFFIC); // subtype 'end'
+    assert.equal(e.bytesSummable, true);
+    assert.equal(e.bytesSent, 6700);
+  });
+
+  it('⛔ marks a Palo Alto session-START row as NOT summable', () => {
+    // A start row reports bytes so far and would double-count against the end
+    // row for the same session.
+    const start = PAN_TRAFFIC.replace(',TRAFFIC,end,', ',TRAFFIC,start,');
+    assert.equal(parsePaloAlto(start).bytesSummable, false);
+  });
+
+  it('⛔ marks every Fortinet row as NOT summable', () => {
+    // The per-event value is still stored and is meaningful on its own; it
+    // just cannot be aggregated across events.
+    const e = parseFortinet(FORTI_ACCEPT);
+    assert.equal(e.bytesSummable, false);
+    assert.equal(e.bytesSent, 1200, 'the value is still captured, just not summable');
+    assert.equal(parseFortinet(FORTI_DENY).bytesSummable, false);
+  });
+
+  it('does not mark a non-traffic Palo Alto row summable', () => {
+    const threat = PAN_TRAFFIC.replace(',TRAFFIC,end,', ',THREAT,url,');
+    assert.equal(parsePaloAlto(threat).bytesSummable, false);
+  });
+});
