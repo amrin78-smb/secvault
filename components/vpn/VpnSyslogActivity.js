@@ -7,7 +7,7 @@ import IconChip from '../ui/IconChip';
 import Pagination from '../ui/Pagination';
 import { IconActivity } from '../icons';
 import { resolvePage, pageWindow } from '../../lib/pagination';
-import { getVpnActivityByDevice } from '../../lib/syslog/trafficStats';
+import { getVpnActivityByDeviceRollup } from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,6 +106,17 @@ function fmtTime(value, tzAssumed) {
 // lib/syslog/archive.js's fileNameFor() — UTC day, the same key as the
 // partition. Locally duplicated per this codebase's small-helper-per-file
 // convention (LogResults.js carries the identical three lines).
+// The rollup buckets by HOUR. ⛔ Rendered as a range ("14:00–15:00 UTC")
+// rather than a point in time, so nobody reads it as an exact last-seen.
+function fmtHour(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const h = d.getUTCHours();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:00–${pad((h + 1) % 24)}:00 UTC`;
+}
+
 function archiveFileFor(value) {
   if (!value) return 'the daily archive';
   const d = value instanceof Date ? value : new Date(value);
@@ -176,12 +187,82 @@ function dash(title) {
   );
 }
 
-function statTile(value, label, sub) {
+// ── Presentation primitives ──────────────────────────────────────────────
+// All plain objects / functions at module top level. Everything is built from
+// app/globals.css custom properties so it inherits the suite's light and dark
+// palettes; ⛔ no hardcoded hex on any tinted surface, or dark mode breaks.
+
+// A bordered grid of cells sharing 1px gaps, so the KPI row reads as one
+// instrument rather than four loose numbers.
+const KPI_GRID = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+  gap: 1,
+  background: 'var(--border)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius)',
+  overflow: 'hidden',
+  marginBottom: 20,
+};
+
+const SECTION_LABEL = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: 'var(--text-muted)',
+  marginBottom: 8,
+};
+
+// tone: null | "warn" | "bad" — semantic only, never decorative.
+function kpiCell(value, label, sub, tone) {
+  const valueColor =
+    tone === 'bad' ? 'var(--red)' : tone === 'warn' ? 'var(--yellow)' : 'var(--text-primary)';
   return (
-    <div>
-      <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{label}</div>
-      {sub ? <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{sub}</div> : null}
+    <div
+      key={label}
+      style={{ background: 'var(--bg-card)', padding: '14px 16px' }}
+    >
+      <div
+        style={{
+          fontSize: 26,
+          fontWeight: 700,
+          lineHeight: 1.1,
+          letterSpacing: '-0.02em',
+          fontVariantNumeric: 'tabular-nums',
+          color: valueColor,
+        }}
+      >
+        {value}
+      </div>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 4 }}>
+        {label}
+      </div>
+      {sub ? (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+          {sub}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// A proportional bar behind each source. The eye should rank the sources
+// before it reads a single number — a column of right-aligned figures makes
+// the reader do that work themselves.
+function sourceBar(pct, unmanaged) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginTop: 5 }}
+    >
+      <div
+        style={{
+          width: Math.max(1.5, Math.min(100, pct)) + '%',
+          height: '100%',
+          background: unmanaged ? 'var(--yellow)' : 'var(--accent-teal)',
+        }}
+      />
     </div>
   );
 }
@@ -193,8 +274,13 @@ function statTile(value, label, sub) {
 export default async function VpnSyslogActivity({ searchParams, page }) {
   const sp = searchParams || {};
 
+  // ⛔ The per-source breakdown comes from the ROLLUP, not the raw table.
+  // Scanning every VPN row in the window is 34,777 rows spread across a
+  // 26 GB partition: milliseconds warm, SECONDS cold -- and it is always
+  // cold, because the ingest evicts those pages long before anyone opens
+  // this tab. The rollup answers the same question from 273 rows.
   const [byDevice, coverage] = await Promise.all([
-    getVpnActivityByDevice(pool, WINDOW_HOURS),
+    getVpnActivityByDeviceRollup(pool, WINDOW_HOURS),
     getVpnUserCoverage(pool, WINDOW_HOURS),
   ]);
 
@@ -211,6 +297,14 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
 
   const unmanaged = byDevice.filter((r) => !r.deviceName).length;
   const shownDevices = byDevice.slice(0, DEVICE_ROWS);
+  // Bars are scaled to the BUSIEST source, so the list ranks at a glance.
+  const maxSourceEvents = byDevice.reduce((m, r) => Math.max(m, r.events), 0);
+
+  // ⛔ Scoped to THIS PAGE of events, and the KPI caption says so. Counting
+  // failures across the whole 24h window would mean a second full scan of the
+  // raw table — the exact cost this rewrite removed — and quietly labelling a
+  // page-scoped figure as a 24h one would be worse than not showing it.
+  const failureCount = recent.filter((e) => actionTone(e.action) === 'danger').length;
 
   // Deep link into the forensic view, pre-filtered to the same class and the
   // same window this card summarises — so "show me the rest" lands on the same
@@ -242,18 +336,20 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
           </div>
         ) : (
           <>
-            <div
-              style={{
-                display: 'flex',
-                gap: 28,
-                alignItems: 'baseline',
-                flexWrap: 'wrap',
-                marginBottom: 14,
-              }}
-            >
-              {statTile(total.toLocaleString(), 'VPN events')}
-              {statTile(byDevice.length, 'reporting sources')}
-              {statTile(
+            {/* KPI strip. A bordered grid rather than three numbers floating
+                in a row: at a glance an operator should see the shape of the
+                24 hours, and unlabelled digits side by side do not give it. */}
+            <div style={KPI_GRID}>
+              {kpiCell(total.toLocaleString(), 'VPN events', WINDOW_HOURS + 'h window')}
+              {kpiCell(
+                String(byDevice.length),
+                'reporting sources',
+                unmanaged > 0
+                  ? unmanaged + ' not in inventory'
+                  : 'all in inventory',
+                unmanaged > 0 ? 'warn' : null
+              )}
+              {kpiCell(
                 // ⛔ Em-dash, not 0. "No firewall told us a username" and "zero
                 // people used the VPN" are different facts and must not look
                 // the same on screen.
@@ -263,45 +359,77 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                   ? 'no events to measure'
                   : coverage.users === 0
                     ? 'no event carried a username'
-                    : 'named on ' + userCoveragePct + '% of events'
+                    : 'identified on ' + userCoveragePct + '% of events'
+              )}
+              {kpiCell(
+                failureCount > 0 ? failureCount.toLocaleString() : String(0),
+                'failed / denied',
+                'on this page of events',
+                failureCount > 0 ? 'bad' : null
               )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+            <div style={SECTION_LABEL}>Reporting sources</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 18 }}>
               {shownDevices.map((r, i) => (
                 <div
-                  key={(r.deviceId || 'unmanaged') + '-' + i}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    fontSize: 'var(--text-base)',
-                  }}
+                  key={(r.deviceId || r.sourceIp || 'unmanaged') + '-' + i}
+                  style={{ padding: '7px 0' }}
                 >
-                  <span>
-                    {r.deviceName ? (
-                      <Link href={`/devices/${r.deviceId}/vpn`} style={{ color: 'var(--text-primary)' }}>
-                        {r.deviceName}
-                      </Link>
-                    ) : (
-                      <>
-                        <span style={{ color: 'var(--text-secondary)' }}>unmanaged source</span>{' '}
-                        <Badge color="warning">not in inventory</Badge>
-                      </>
-                    )}
-                    {r.vendor ? (
-                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}> · {r.vendor}</span>
-                    ) : null}
-                    {/* last_seen was already being queried and thrown away.
-                        "Which of these stopped talking six hours ago" is a
-                        question a flat 24h count cannot answer. */}
-                    {r.lastSeen ? (
-                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
-                        {' '}· last {fmtTime(r.lastSeen) || '—'} UTC
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      gap: 12,
+                    }}
+                  >
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.deviceName ? (
+                        <Link
+                          href={`/devices/${r.deviceId}/vpn`}
+                          style={{ color: 'var(--text-primary)', fontWeight: 600 }}
+                        >
+                          {r.deviceName}
+                        </Link>
+                      ) : (
+                        <>
+                          <span
+                            style={{
+                              color: 'var(--text-primary)',
+                              fontWeight: 600,
+                              fontFamily: 'ui-monospace, Consolas, monospace',
+                            }}
+                          >
+                            {stripMask(r.sourceIp) || 'unknown source'}
+                          </span>{' '}
+                          {/* ⛔ A firewall sending us VPN logs that is not in
+                              the inventory is a FINDING, not noise. */}
+                          <Badge color="warning">not in inventory</Badge>
+                        </>
+                      )}
+                      <span
+                        style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginLeft: 8 }}
+                      >
+                        {r.vendor || 'unidentified vendor'}
+                        {/* ⛔ Hour granularity, and labelled as such. The rollup
+                            buckets by hour; presenting it as a precise time
+                            would be a precision we do not have. */}
+                        {r.lastActiveHour ? ' · active ' + fmtHour(r.lastActiveHour) : ''}
                       </span>
-                    ) : null}
-                  </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.events.toLocaleString()}</span>
+                    </span>
+                    <span
+                      style={{
+                        fontVariantNumeric: 'tabular-nums',
+                        fontWeight: 600,
+                        color: 'var(--text-primary)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {r.events.toLocaleString()}
+                    </span>
+                  </div>
+                  {sourceBar(maxSourceEvents > 0 ? (r.events / maxSourceEvents) * 100 : 0, !r.deviceName)}
                 </div>
               ))}
               {byDevice.length > shownDevices.length ? (

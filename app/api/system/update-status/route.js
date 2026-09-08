@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.79.1': [
+    'The VPN Log Activity tab is much faster. Its summary figures now come from pre-aggregated hourly data instead of scanning every VPN log line in the last day.',
+    'That scan was reading roughly 35,000 records spread across a 26 GB table, which took seconds every time because those records are never still in memory by the time someone opens the page.',
+    'The tab has also been redesigned: headline figures now sit in a proper panel, reporting firewalls are ranked with bars so the busiest stands out at a glance, and a firewall sending VPN logs that is not in your inventory is highlighted rather than listed like the rest.',
+    'One honest trade-off: last-activity is now shown as an hour range rather than an exact time, because the pre-aggregated data is hourly. It is labelled as an hour so it cannot be mistaken for a precise timestamp.',
+  ],
   '2.79.0': [
     'Important fix: threat reports were showing the web category instead of the actual threat name, so real phishing, malware and cryptomining detections were all displayed as any.',
     'Palo Alto puts the signature name and the web category in adjacent fields, and SecVault was reading the wrong one. Your firewalls have been detecting and blocking these all along - only the reporting was wrong.',
