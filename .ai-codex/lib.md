@@ -1141,3 +1141,54 @@ neither the allow nor block list stays NULL, and consumers test `IS TRUE`, never
 unknown vendor verb can never escalate a CVE. The regex guard runs BEFORE the `::inet` cast: the
 `'N/A'` sentinel would otherwise abort the sweep transaction and take the other eight rollups down
 with it.
+
+## `lib/syslog/actions.js` (added 2026-09-09)
+
+THE single source of truth for "was this traffic allowed or blocked", as firewalls actually spell it.
+
+Exports: `ALLOWED_ACTIONS`, `DENIED_ACTIONS` (Sets), `classifyAction()` (→ `allowed|blocked|unknown`),
+`sqlList()`, `ALLOWED_SQL`, `DENIED_SQL` (parenthesised, directly substitutable SQL fragments).
+
+⛔ WHY IT EXISTS: there were FOUR divergent deny lists — `rollups.js` (4 verbs), `eventShape.js`
+(7), `threatStats.js` (5, exported and imported by nothing), `logHit.js` (13) — and the NARROWEST
+drove every dashboard number. Measured live, that under-counted blocks by 6.8% fleet-wide and 24%
+on URL-category rows, because `block-url` (the only URL-filtering block verb PAN-OS emits) was
+missing; `block` itself never appears on this fleet at all. `syslog_blocked_dst_hourly` DROPPED
+those rows entirely (a WHERE, not a FILTER), so they were unrecoverable from the rollup.
+
+⛔ THREE-STATE. A verb in neither set is `unknown` and must never be folded into either. Fortinet's
+`close`/`client-rst`/`server-rst` are session-END verbs — the session existed, so the service was
+reached — while Palo Alto's `reset-both` resembles them and is a BLOCK.
+
+⛔ `sqlList()` returns the PARENTHESES too. A bare comma list produced `lower(action) IN 'deny',...`
+— a syntax error that would abort the whole nine-rollup sweep transaction.
+
+Consumers: `rollups.js` (all rollups), `trafficStats.js`, `threatStats.js`, `eventShape.js`.
+`logHit.js`/`exposureQuery.js` keep their own literal list DELIBERATELY — they read the rollup's
+pre-classified `allowed`/`public_source` booleans instead, and must test `IS TRUE`, never `= true`,
+so the rollup's NULL-for-unclassifiable can never escalate a CVE.
+
+## `lib/engines/exposure.js` — direction gating (added 2026-09-09)
+
+`externalZoneIds(interfaces)` / `ruleDirection(rule, externalIds)` → `inbound|internal|unverified`.
+
+⛔ THE BIGGEST CORRECTNESS BUG THIS ENGINE HAS HAD. Without a direction test,
+`src_addresses:['any']` on an INTERNAL rule read as "reachable from the entire internet" and
+`dst_addresses:['any']` on an OUTBOUND rule matched every public face. Live: 257 of 403 paths (64%)
+were false positives, ALL at maximum score, so they outranked the genuine ones. Fixing it took the
+fleet 403 → 149 paths; TSR-TL 5 → 0 (all internal5→internal3), and TUG's real camera port-forward
+became the top finding instead of ranking below fabrications.
+
+Both vendor shapes appear in `src_zones`: Palo Alto puts the interface's ZONE there (WAN1, Untrust),
+Fortinet puts the interface NAME (wan2) — and Fortinet's public interfaces frequently carry no zone
+at all. `externalZoneIds` therefore collects BOTH from any interface with a public IP.
+
+⛔ `unverified` (no zone data) still REPORTS the path, flagged `directionVerified:false`, because
+under-reporting exposure is the more dangerous error. It just may not claim to be confirmed.
+
+## `tests/moduleLoad.test.js` (added 2026-09-09)
+
+Requires every module under `lib/` and `services/` (79). Exists because a syntax error shipped in
+`trafficStats.js` and three gates missed it: `node --check` was chained after a script that exited
+non-zero so it never ran, no test imported the file, and `npm run build` does not evaluate
+server-only modules. A LOAD test, not a behaviour test — do not let it discourage real tests.
