@@ -1313,7 +1313,14 @@ CREATE TABLE IF NOT EXISTS syslog_events (
 
 CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_syslog_events_source_time ON syslog_events (source_ip, received_at DESC);
-CREATE INDEX IF NOT EXISTS idx_syslog_events_rule ON syslog_events (device_id, rule_id, received_at DESC);
+-- ⛔ NO per-rule index on the RAW table, deliberately. It was created on
+-- 2026-09-08 and dropped the same day after measurement: 60 MB per 2.5M rows
+-- with ZERO index scans, i.e. ~8.7 GB/day of pure write amplification at the
+-- observed 1,400 events/sec. Per-rule questions are answered by
+-- syslog_rule_hits_daily, which exists precisely so the raw table does not
+-- have to carry that index. Re-adding it needs a measured read pattern that
+-- the rollup genuinely cannot serve.
+DROP INDEX IF EXISTS idx_syslog_events_rule;
 
 -- Low-cardinality permanent aggregate: roughly (devices x actions x severities)
 -- rows per hour, so a few hundred a day rather than tens of millions.

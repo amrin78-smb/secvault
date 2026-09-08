@@ -65,6 +65,7 @@ const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
+const { runRollupMaintenance } = require('../lib/syslog/rollups');
 
 // --- configuration ---------------------------------------------------------
 function intEnv(name, def, min, max) {
@@ -93,6 +94,13 @@ const FLUSH_MS      = intEnv('SYSLOG_FLUSH_MS', 2000, 250, 60000);
 const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 200000, 1000, 5000000);
 const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 7, 1, 3650);
 const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..', 'spool');
+
+// Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
+// LogVault's single 24h-every-5-minutes window: at ~1,400 events/sec that
+// design would re-aggregate ~93M rows 288 times a day.
+const ROLLUP_RECENT_HOURS   = intEnv('SYSLOG_ROLLUP_RECENT_HOURS', 3, 1, 48);
+const ROLLUP_LOOKBACK_HOURS = intEnv('SYSLOG_ROLLUP_LOOKBACK_HOURS', 24, 2, 168);
+const ROLLUP_INTERVAL_MIN   = intEnv('SYSLOG_ROLLUP_INTERVAL_MINUTES', 5, 1, 60);
 
 // --- state -----------------------------------------------------------------
 let buffer = [];
@@ -320,6 +328,32 @@ async function maintenance() {
   }
 }
 
+// --- rollups ---------------------------------------------------------------
+let rollupRunning = false;
+
+// `wide` sweeps further back to pick up events that landed LATE. Skipping it
+// would leave those buckets permanently under-counted with no error anywhere
+// -- see lib/syslog/rollups.js's header for the LogVault incident this
+// prevents. Never overlap two sweeps: they would fight over the same buckets.
+async function rollupCycle(wide) {
+  if (rollupRunning) { log('rollup skipped - previous sweep still running'); return; }
+  rollupRunning = true;
+  try {
+    const r = await runRollupMaintenance(pool, {
+      wide,
+      recentHours: ROLLUP_RECENT_HOURS,
+      lookbackHours: ROLLUP_LOOKBACK_HOURS,
+    });
+    if (r.ok) {
+      log(`rollup ${r.tier} (${r.hours}h): ${r.hourlyRows} hourly + ${r.ruleRows} rule row(s) in ${r.ms}ms`);
+    } else {
+      log(`ERROR rollup ${r.tier} failed after ${r.ms}ms: ${r.error}`);
+    }
+  } finally {
+    rollupRunning = false;
+  }
+}
+
 // --- listeners -------------------------------------------------------------
 function startUdp(port) {
   const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -364,6 +398,7 @@ async function main() {
   log('SecVault-Collector starting.');
   log(`spool dir : ${SPOOL_DIR}`);
   log(`retention : ${RETENTION_DAYS} day(s) of raw events`);
+  log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
 
   ensureSpoolDir();
   await pool.query('SELECT 1');
@@ -382,6 +417,11 @@ async function main() {
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const mapTimer = setInterval(() => { refreshDeviceMap(); }, 5 * 60 * 1000);
   const maintTimer = setInterval(() => { maintenance(); }, 60 * 60 * 1000);
+  const rollupTimer = setInterval(() => { rollupCycle(false); }, ROLLUP_INTERVAL_MIN * 60 * 1000);
+  const rollupWideTimer = setInterval(() => { rollupCycle(true); }, 60 * 60 * 1000);
+  // Seed the rollups immediately so a restart does not leave a visible gap
+  // until the first timer fires.
+  rollupCycle(true);
 
   async function shutdown(signal) {
     if (shuttingDown) return;
@@ -390,6 +430,8 @@ async function main() {
     clearInterval(flushTimer);
     clearInterval(mapTimer);
     clearInterval(maintTimer);
+    clearInterval(rollupTimer);
+    clearInterval(rollupWideTimer);
     for (const s of udpSockets) { try { s.close(); } catch (_e) {} }
     for (const s of tcpServers) { try { s.close(); } catch (_e) {} }
     // Drain what is in memory so a restart does not lose the current window.

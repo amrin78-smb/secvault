@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.68.0': [
+    'Log data is now summarised in the background, so future dashboards read small pre-built summaries instead of scanning millions of raw events.',
+    'Two summaries are kept indefinitely: traffic per device per hour, and how often each firewall rule was actually used per day.',
+    'Summaries are rebuilt from the raw logs rather than counted up as events arrive, so a restart or a retry can never double-count.',
+    'A wider hourly pass catches logs that arrive late, for example while the collector is restarting during an update.',
+    'Removed an index that was costing roughly 8.7 GB of write activity a day and had never once been used.',
+  ],
   '2.67.1': [
     'The log collector now listens on both port 514 and port 1514, matching what Firewall Analyzer did.',
     'Listening on 514 alone meant almost nothing arrived, because most of your firewalls were configured to send to 1514 and had never been changed.',
