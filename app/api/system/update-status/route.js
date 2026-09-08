@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.80.0': [
+    'New Applicability worklist under Vulnerability. It shows, for every advisory affecting your fleet, whether anyone has recorded WHY it applies — sorted so known-exploited and uncurated advisories come first.',
+    'This matters because an advisory with no recorded applicability is treated as "unknown" and filed as Scheduled. On this fleet that put 152 of 155 findings in one band, which is a list rather than a priority order.',
+    'Each advisory now shows the published facts needed to make that call — description, affected products, weakness, vendor fix and CISA exploitation status — on the same page as the editor.',
+    'Firewall logs now feed the CVE priority tree. If traffic from the internet actually reaches a vulnerable service on a device, that advisory is promoted to Patch Now.',
+    'Reaching a service is judged strictly: the port must be recorded as exposed, the traffic must arrive at the device’s own address from a public source, and it must have been allowed. Devices sending no logs are reported as unmeasured rather than clean.',
+  ],
   '2.79.2': [
     'Removes the last slow query on the VPN Log Activity tab. Counting named VPN users was taking nearly 18 seconds on first load; it now answers from pre-aggregated data in milliseconds.',
     'The whole tab now reads from summarised hourly data apart from the list of recent events itself, which is small and indexed.',

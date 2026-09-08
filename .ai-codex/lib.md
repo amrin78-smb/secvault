@@ -1044,3 +1044,53 @@ Client-only corner-style switch (rounded/square), added 2026-08-05 (v2.52.0). A 
 2. CLAUDE.md's "Schema Migration" section describes `lib/migrate.js` as running `schema.sql`, but doesn't centralize the now-5 additional best-effort backfill/cleanup passes `main()` runs (each is individually documented elsewhere in CLAUDE.md, just not summarized in one place).
 3. ~~`lib/auditChecksSeed.js` count vs CLAUDE.md~~ — resolved 2026-07-30: both now state 45, confirmed by direct tally. `ruleset_property` was found to have drifted separately (CLAUDE.md said "two checks," code has three — `no_external_to_internal_access` was undocumented); corrected in CLAUDE.md and detailed in `.ai-codex/compliance-pipeline.md`.
 4. Two undocumented same-day (2026-07-23) additions with no CLAUDE.md entry yet: Fortinet's `hostname` field extraction (mirrors the already-documented `serial` fix pattern) and Palo Alto XML/API's `hostname` extraction (explicitly marked doc-derived/unverified in-code). `backfillPaloAltoVersionRanges()` IS documented (added same session, see CLAUDE.md's NVD CPE Matching section) — not a gap, listed here only for completeness.
+
+## `lib/engines/logHit.js` (added 2026-09-08)
+
+Produces `device_cve_assessments.log_hit` — decision rule 2 of the CVE priority tree, which had
+never had a producer, so the column was `false` fleet-wide because nothing ever looked.
+
+Exports: `classifyAction()`, `getCuratedPorts()`, `getDeviceInterfaceIps()`,
+`runLogHitCorrelation(pool, {lookbackDays, now})`, `ALLOWED_ACTIONS`, `BLOCKED_ACTIONS`.
+
+Fires `log_hit = true` only when ALL hold: the advisory has a curated `port_exposed` condition;
+traffic arrived at one of the DEVICE'S OWN `device_interfaces` addresses on that port; the source
+was PUBLIC (outside RFC1918/loopback/link-local/CGNAT); and the action was in `ALLOWED_ACTIONS`.
+
+⛔ `ALLOWED_ACTIONS` includes `close`/`client-rst`/`server-rst`, which are Fortinet SESSION-END
+actions — the session existed, so the service was reached. Live proof: FortiGate SSL-VPN on 10443
+is reached from public sources and logged `close`/`client-rst`, NEVER `allow`. Matching only
+`allow` would miss the most exposed service on the fleet. Palo Alto's `reset-both` looks like
+the same family but is a BLOCK.
+
+⛔ An action in neither list is `unknown` and never fires. Rule 2 outranks CVSS 9.0, so an
+unrecognised vendor verb must not be able to manufacture a `patch_now`.
+
+⛔ Two SKIP paths write nothing at all, rather than writing `false`: a device with no syslog
+coverage in the window, and a device with no collected interface addresses (without which
+traffic TO the device is indistinguishable from traffic THROUGH it). Both are UNMEASURED, and
+`false` there would be the failed-read-as-a-fact bug again.
+
+⛔ Ports are ORed (any curated port reached ⇒ reached), unlike `applicability.js` which ANDs its
+conditions — different question: "does it apply" vs "was it reached".
+
+Never throws; per-device errors are collected into the returned summary. Re-runs
+`updatePrioritiesForDevice()` for every device whose value changed. Zero curated conditions ⇒
+returns immediately without touching `syslog_events`.
+
+## `lib/engines/advisoryCuration.js` (added 2026-09-08)
+
+Read-only curation surface for `advisory_conditions`, which was EMPTY fleet-wide — leaving every
+advisory at `config_applies = unknown`, decision rule 5, and 152 of 155 assessments in a single
+`scheduled` band.
+
+Exports: `extractCveRecord(rawData)`, `getCurationWorklist(pool)`, `summarizeWorklist(items)`.
+
+⛔ EXTRACTS ONLY, never infers. It surfaces what the vendor and CISA already published
+(description, affected products, CWEs, references, solution, CISA ADP SSVC exploitation/
+automatable) so a human can judge. Deriving a predicate from advisory prose is the
+"documentation lies" trap. Worked example: CVE-2026-24858 is KEV + CVSS 9.4 and names
+FortiAnalyzer/FortiManager/FortiWeb — this fleet runs FortiGate.
+
+⛔ `cvssScore` and `pct` are `null`, never `0` — "no published score" and "0% curated" must not
+look like a real zero. Worklist covers only advisories with at least one assessment.

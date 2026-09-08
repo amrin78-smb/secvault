@@ -344,6 +344,40 @@ Asset criticality modifier (apply after base band):
 
 **Any change to this decision tree must be documented here before the code is changed.**
 
+#### What `log_hit` MEANS (defined 2026-09-08, before the producer was written)
+
+The tree above was always correct; `log_hit` simply had no producer, so it was `false`
+everywhere. Defining it is a tree-behaviour change even though no branch moved — rule 2 sits
+**above CVSS 9.0**, immediately after KEV, so whatever sets it claims a confidence equal to
+"known exploited in the wild".
+
+⛔ **`log_hit` = the VULNERABLE SERVICE WAS REACHED on this device.** All of:
+1. the advisory has at least one curated `port_exposed` condition naming a port; **and**
+2. firewall logs show traffic ARRIVING at one of that device's own interface addresses on
+   that port, from a source outside the fleet; **and**
+3. that traffic was **ALLOWED**. A blocked probe is not a reached service.
+
+⛔ **REJECTED definition: "a threat signature fired against this device."** It is available
+today and it is wrong here. It is not CVE-specific, so it would escalate EVERY advisory on
+that device; measured on this fleet, threat events land on nearly every device, which would
+move ~all 155 assessments to `patch_now`. A queue where everything is urgent has no
+prioritisation left, which is strictly worse than `log_hit` staying honestly false. That data
+is still worth surfacing — as device-level attack CONTEXT beside the CVEs, never as a band
+modifier.
+
+⛔ **`false` here means "not observed", NOT "not exploitable".** It is the safe direction
+because rule 2 only ever escalates on `true`, but no UI may render a `false` as "this is not
+reachable". Absence of an observation is not evidence of absence — the same rule as
+`hit_count`.
+
+⛔ **It requires curated conditions, and that is deliberate.** With `advisory_conditions`
+empty (as it was on this fleet) `log_hit` can never fire, and that is the correct behaviour:
+without a curated port there is nothing to look for, and guessing one from advisory prose is
+the "documentation lies" trap. See `/vulnerability/advisories` for the curation worklist.
+
+Computed by `lib/engines/logHit.js` in the ENGINE, never on page load: it reads raw
+`syslog_events` over a bounded lookback and that is a background cost, not an interactive one.
+
 ### Fleet & per-device Security Score (`lib/engines/securityScore.js`, v2.53.0)
 
 0-100, **higher is better**, weighted: vulnerability 40 / rule hygiene 30 / compliance 30. Each
@@ -608,9 +642,36 @@ Palo Alto SSH). Log evidence supplies both. **Neither is something a general log
 do, because it does not know the rulebase, the CVE exposure or the compliance posture.** The
 log storage itself is not the point; the fusion is.
 
-**Retention decision (drives the schema):** raw searchable events ~7 days (~130 GB), rolled up
-into per-rule / per-device / per-hour aggregates kept indefinitely. Anything older than the raw
-window is answered from aggregates. Time-partitioned tables, dropped by partition.
+**Retention decision (drives the schema), REVISED 2026-09-08 with live measurements:** raw
+searchable events **30 days**, rolled up into per-rule / per-device / per-hour aggregates kept
+indefinitely. Anything older than the raw window is answered from aggregates. Time-partitioned
+tables, dropped by partition.
+
+30 days was reachable only after the row itself got smaller. Measured on the live fleet, in
+the same partition, either side of the `SYSLOG_RAW_MESSAGE=security` deploy:
+
+| | before | after |
+|---|---|---|
+| rows keeping `message` | 100% | 11% |
+| heap bytes/row | ~1,000 | **~340** |
+| index bytes/row | ~75 | ~75 |
+
+⛔ **A partition average mixes both eras and is NOT the steady-state figure.** The
+`syslog_events_20260908` partition reads ~941 heap bytes/row, which is neither the old nor the
+new number — it holds pre-change and post-change rows. Sizing off it over-states the footprint
+by ~2.7x. Measure a window that starts after the deploy, or read the per-hour breakdown.
+
+Projection at the observed rate (~74M events/day, from an afternoon-to-night curve peaking at
+5.3M/hour): **~31 GB/day, ~920 GB for the 30-day window**, plus the compressed archive at
+~8.4 GB/day. ⛔ This is an EXTRAPOLATION FROM A PARTIAL DAY — the collector had not yet run a
+full 24h when it was taken. Re-measure over a complete day before treating it as capacity fact.
+
+⛔ **This only fits because PostgreSQL lives on `E:`.** The data directory is
+`E:PostgreSQLdata` (2 TB volume, 1,629 GB free at time of writing) and the archive is
+`E:SecVaultArchive`. `C:` has ~159 GB free and could not hold even a third of the raw window.
+A future rebuild that accepts the PostgreSQL installer default (`C:Program FilesPostgreSQLdata`)
+silently gets a fifth of the capacity this retention assumes, and fills the SYSTEM volume doing
+it. Check the data directory before changing `SYSLOG_RETENTION_DAYS` upward.
 
 ### Landed so far — the pure parsers only
 
@@ -653,643 +714,14 @@ rather than blanking it, so a DB blip cannot orphan every event.
 
 | table | lifetime | why |
 |---|---|---|
-| `syslog_events` | ~7 days, DAILY PARTITIONS | raw forensics |
+| `syslog_events` | ~30 days, DAILY PARTITIONS | raw forensics |
 | `syslog_rollup_hourly` | permanent | low-cardinality traffic/severity counts |
 | `syslog_rule_hits_hourly` | permanent | per-rule usage evidence (Phase 8b input) |
 | `syslog_ingest_stats` | permanent | received/parsed/stored/**dropped** per flush |
 
 ⛔ **Raw events are aged out by DROPPING A PARTITION, never by DELETE.** At ~93M rows/day a
 DELETE would generate more WAL and vacuum work than the ingest itself and would not return the
-space. `dropOldPartitions()` only ever drops names matching `^syslog_events_\d{8}# CLAUDE.md — SecVault
-
-> **Read this file completely before making any change to this codebase.**
-> Update this file whenever a significant architectural decision is made.
-
----
-
-## Codebase Index — READ FIRST
-
-Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
-- `.ai-codex/routes.md`         — API routes
-- `.ai-codex/pages.md`          — page tree
-- `.ai-codex/lib.md`            — library exports
-- `.ai-codex/schema.md`         — schema + debt + privilege notes
-- `.ai-codex/connectors.md`     — vendor integrations and their quirks
-- `.ai-codex/cve-pipeline.md`   — CVE source -> assessment flow
-- `.ai-codex/components.md`     — component index
-- `.ai-codex/gotchas.md`        — footguns and redaction rules
-- `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
-
-### Maintaining the index — MANDATORY
-
-A stale index is worse than none — it sends sessions confidently to the wrong place, and on a
-security product, potentially to the wrong redaction assumption. Any commit that changes the shape
-of the codebase MUST update the matching index file in the SAME commit — check this at the same
-point as the version bump, don't defer it:
-
-route → routes.md · page → pages.md · lib export → lib.md · schema/migration → schema.md · vendor
-connector auth/parsing/quirks → connectors.md · CVE source/matching/clearing logic → cve-pipeline.md
-· compliance check/predicate logic → compliance-pipeline.md · component added/removed/props changed
-→ components.md · new footgun or redaction field → gotchas.md
-
-This file (CLAUDE.md) is the durable-rules/architecture document. It is NOT a changelog — do not
-add dated incident narrative here; put durable lessons in the matching `.ai-codex/*.md` file instead.
-Trimmed twice on 2026-07-30 (once from ~5,800 lines, again to move detail already duplicated in
-`.ai-codex/` out of here) — full history in git log if needed.
-
----
-
-## What SecVault Is
-
-Standalone on-premises **firewall security and management platform**.
-**SEPARATE PRODUCT** from the NocVault suite — own auth, own DB, own services, own server.
-Not a module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependency on any of them.
-
-- **Port:** 3010 (Next.js frontend + API routes)
-- **Install path:** `C:\Apps\SecVault\`
-- **Repo:** `amrin78-smb/secvault` (private)
-- **DB:** `secvault` (PostgreSQL 16, user: `secvault_user`)
-- **Dev path (office):** `D:\Users\rahamr00\Documents\NocVault\SecVault\`
-- **Deploy:** `git push` → `& "C:\Apps\SecVault\installer\Update-SecVault.ps1"`
-
----
-
-## ⛔ Critical Rules — Never Violate
-
-These rules exist because violations build clean, pass all static checks, then silently break in production.
-
-### React
-- **NEVER define a React component inside another React component.** Causes full remount on every keystroke, losing input focus. Define all components at module top level.
-- **`tableLayout: 'fixed'` is required** when using percentage column widths. Without it, table columns collapse unpredictably on overflow.
-
-### Services
-- **NEVER use PowerShell service cmdlets** (`Start-Service`, `Stop-Service`, `Get-Service`). They silently disconnect WinRM sessions and hang terminals. **Always use `sc.exe`:**
-  ```powershell
-  sc.exe stop SecVault-App
-  sc.exe start SecVault-App
-  ```
-- **NEVER use `npm install`** in any script. Always use `npm ci` (respects lockfile, deterministic).
-
-### Database
-- **NEVER remove `pool` from any function that accesses the DB or calls credStore.** Removing it breaks DB connections and credential decryption silently — builds clean, fails at runtime.
-- **ALWAYS use parameterized queries.** No string interpolation in SQL. Ever.
-- **ALWAYS cast timestamp parameters explicitly:**
-  ```javascript
-  pool.query('SELECT * FROM t WHERE created_at > $1::timestamptz', [date])
-  ```
-  Without `::timestamptz`, PostgreSQL returns "could not determine data type of parameter $N".
-- **Use `CREATE TABLE IF NOT EXISTS`** in every schema.sql statement — safe to re-run on update.
-  **This guards table creation only, never column changes** — adding a column to an existing table
-  needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` right after it, or every
-  already-deployed server silently keeps the old shape and the first query selecting that column
-  crashes with "column ... does not exist" — the `CREATE TABLE` body still *looks* correct in the
-  diff, which is what makes this easy to repeat.
-- **UUIDs as primary keys** (`gen_random_uuid()`), not SERIAL.
-
-### Security
-- **NEVER store credentials in plaintext.** All external credentials (SMC API keys, SSH passwords) go through `lib/credStore.js` → `device_credentials` table.
-- **NEVER hardcode credentials in source files.** Use `.env.local` (gitignored). Commit `.env.local.example` only.
-- **Per-table `GRANT SELECT` for readonly users** — never `GRANT SELECT ON ALL TABLES`. The `device_credentials` table must never be readable by `claude_readonly` or `nocvault_readonly`. Grant per table, explicitly.
-- **NEVER commit `.env.local`.** The `.gitignore` must list it.
-- **Stored configs are REDACTED — load-bearing, not optional hygiene.** Any adapter returning a raw
-  text config (`cisco_asa`, `sangfor`, `checkpoint`) MUST redact secrets before `getConfig()` returns
-  — those readonly roles can read `device_configs`/`config_backups` even though they're barred from
-  `device_credentials` (full mechanism under CVE Engine Architecture below).
-
-### Tri-state values — never collapse `unknown` to `no`
-`config_applies`/predicate evaluation is tri-state (`yes`/`no`/`unknown`) for both CVE applicability
-and compliance checks. **`unknown` must never silently default to `no`** — that would silently
-downgrade a KEV-listed CVE from `patch_now` to `monitor`. Widen an uncertain bound, never narrow it
-(same instinct governs CPE wildcard ranges and compliance's `pass_when` — see below).
-
-### ⛔ A failed read is NOT a measurement — the most-repeated bug in this codebase
-Every instance of this class builds clean, passes every static check, and produces a confident,
-plausible, WRONG number in production. It has now been found in `getRules()` returning `[]`,
-`getConfig()` on a read failure, the Panorama rule fallback, and `hit_count`. The rule:
-**when a read fails or a vendor cannot supply a value, store NULL/unknown — never the zero,
-empty array, or `false` that looks like a real answer.** Tolerating the failure is correct;
-recording it as a fact is not.
-
-`firewall_rules.hit_count` is the canonical example and is **TRI-STATE**: a real count, `0`
-meaning the device genuinely reported zero, or **NULL meaning NOT MEASURED**. It was
-`NOT NULL DEFAULT 0` until 2026-08-25, so every vendor/transport that cannot read hit counts —
-Fortinet SSH, Sangfor, Palo Alto SSH, and, because of a PAN-OS command that was being rejected
-outright, **every Palo Alto** — asserted "zero hits", and `ruleAnalysis.js` turned that into a
-fabricated `unused` finding. `unused` now requires a MEASURED zero. Never coerce NULL to 0 in a
-query, a renderer, or an engine; sort with `NULLS LAST`.
-
-### Adapter contract
-- **`getRules()` must THROW on a retrieval failure — never return `[]`.** `collectAndStore` DELETEs
-  a device's `firewall_rules` before reinserting; an empty array from a *failed* pull silently wipes
-  the real ruleset. `[]` means "this device genuinely has no rules," nothing else.
-- **`zone_classifications` is per-device**, `(device_id, zone_name)` unique — it was originally built
-  as a single global table, found unusable in practice, and rebuilt per-device the same day. Don't
-  reintroduce a global shape.
-
-### PowerShell (PS5 compatibility — Windows Server uses PS5 not PS7)
-- `try/catch` cannot pipe directly in PS5 — assign to a variable first, then pipe: `$out = git pull; $out | Write-Host` (not `try { git pull | Write-Host } catch {}`)
-- No `-Parallel` on `ForEach-Object`, no `-TimeoutSeconds` on `Test-Connection` (both PS7-only)
-- `$PID` is a reserved variable — use `$procPid` instead
-- Write multi-line PS scripts to temp `.ps1` files; never use `-Command` with newlines
-
-### External API Integrations
-- **Verify all field names against live responses before writing any parser — documentation lies.**
-  Vendor APIs return different fields than documented, especially on older firmware. Log raw
-  responses on first integration test; never assume CPE strings/endpoints/field names from docs alone.
-
-### Pre-Commit Checklist
-`node --check` + `npm run build` before every commit — full checklist under Claude Code Workflow's "Before Committing" at the end of this file.
-
----
-
-## Architecture
-
-### Services (3 NSSM Windows Services)
-
-| Service | Command | Port | Purpose |
-|---|---|---|---|
-| `SecVault-App` | `next start -p 3010` | 3010 (public) | Next.js frontend + API routes |
-| `SecVault-Engine` | `node services/engine-worker.js` | None | Scheduled jobs (feeds, CVE match, config pull) |
-| `SecVault-Collector` | `node services/collector.js` | 514 UDP/TCP | Syslog listener (Phase 8a — BUILT 2026-09-08) |
-
-### Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend + API | Next.js 14.2.35, React 18.3, App Router (`app/` directory — NOT `pages/`) |
-| Auth | next-auth 4.24.7, standalone (no suite SSO dependency) |
-| Database | PostgreSQL 16, `pg` module (pool pattern) |
-| Runtime | Node.js v20 |
-| CSS | Plain CSS custom properties + suite utility classes (`app/globals.css`) — NO framework. See "Design System" below. |
-| Icons | Hand-rolled inline SVG (`components/icons.js`) — no icon library |
-| Charts | `recharts` |
-| Credentials | `lib/credStore.js` (AES-256-GCM, per-record IV) |
-| Logging | `winston` → `C:\Apps\SecVault\logs\` |
-| Scheduling | `node-cron` in engine-worker.js |
-| Services | NSSM (Windows service manager) |
-
-### File structure
-
-Don't rely on a hand-drawn tree here — it drifts. For the current, exhaustive,
-machine-checked file/route/component inventory use `.ai-codex/pages.md`,
-`.ai-codex/routes.md`, and `.ai-codex/components.md`. Top-level orientation:
-`app/(auth)/login`, `app/(dashboard)/{alerts,analysis,compliance,devices,settings,
-vpn,vulnerability}`, `app/api/{...}` (one route folder per resource — see routes.md).
-`lib/adapters/<vendor>/` holds one adapter folder per Tier-1 vendor; `lib/engines/`
-holds the shared analysis/CVE/compliance engines; `services/engine-worker.js` is
-the scheduled-job runner; `installer/` holds the three PS1 scripts.
-
----
-
-## Database
-
-### Connection Pool (`lib/db.js`)
-
-Singleton pattern (`lib/db.js` exports one `pool` built from `DATABASE_URL`) — one pool per
-process, passed as parameter to all functions, never instantiated per-request.
-
-**NEVER instantiate a new `Pool` inside a request handler or per-query function.**
-**NEVER omit `pool` from any function signature that needs DB access** — silent runtime failures.
-
-### Schema Migration
-
-- `lib/schema.sql` uses `CREATE TABLE IF NOT EXISTS` on every table — safe to re-run. `lib/migrate.js` runs it via the `pg` client, connected as `secvault_user`.
-- `lib/schema-grants.sql` (readonly role creation + per-table grants) is a **separate file**, run under the `postgres` superuser — **not** run by `migrate.js`, which only has DB-level (not CREATEROLE/superuser) privileges. Both installer scripts apply it automatically, idempotently, every run — Update reads the superuser password back out of the deployed `.env.local`'s `PG_ADMIN_PASSWORD`.
-- Never use `DROP TABLE` in schema.sql — destructive and irreversible in production.
-
-### Primary Keys
-
-All tables use `UUID` PKs with `gen_random_uuid()`, not `SERIAL`.
-
-```sql
-id UUID PRIMARY KEY DEFAULT gen_random_uuid()
-```
-
-### Key Tables
-
-Full table list with purpose/phase is in `.ai-codex/schema.md` — keep that current, don't duplicate
-here. Notable groupings: `devices`/`device_versions`/`device_credentials`/`device_configs`/
-`firewall_rules` (inventory), `advisories`/`advisory_conditions`/`device_cve_assessments` (CVE),
-`audit_checks`/`audit_findings` (compliance), `rule_analysis_results`/`finding_acknowledgements`/
-`device_risk_history` (rule analysis), `config_diffs`/`config_backups` (change tracking),
-`activity_log` (operator audit trail), `credential_profiles` (reusable creds, excluded from readonly
-grants same as `device_credentials`), `notification_channels`/`notification_dispatch_log` (outbound
-alerting — Slack/Teams/email/webhook, see Outbound Alerting section below; `notification_channels`
-excluded from readonly grants same as `credential_profiles`).
-
-### Readonly Access for Diagnostics
-
-Two readonly users exist for Claude Code to query the live DB directly: `claude_readonly` and `nocvault_readonly` (same password, `ClaudeRead@2026!`).
-
-**These users must NEVER have access to `device_credentials`.** Grant per-table explicitly, in `lib/schema-grants.sql` — **NOT** in `lib/schema.sql`: `GRANT SELECT ON TABLE new_table_name TO claude_readonly;` (and identically to `nocvault_readonly`), never a blanket `ON ALL TABLES`.
-**Second exception: `settings`, granted via a `settings_readonly` VIEW, never the base table** — it stores the local admin's bcrypt hash under `key='admin_password_hash'`; a blanket table grant let readonly roles read it via raw SQL even though the app's `HIDDEN_KEYS` filter hid it from HTTP. Any future secret-bearing row added to `settings` needs the same treatment. `users` gets the identical treatment (`users_readonly` view, excludes `password_hash`).
-
----
-
-## credStore — Credential Encryption
-
-All external credentials (SMC API keys, SSH passwords) encrypted before DB storage.
-`lib/credStore.js`, AES-256-GCM (node `crypto`, random 12-byte IV per record), key from
-`CREDENTIAL_KEY` env var (32-byte hex, generated at install — **not** derived from
-`NEXTAUTH_SECRET`, SecVault is standalone). Ciphertext+authTag stored as one `enc:tag` hex string in
-`encrypted_data`, IV stored separately in `iv` — both columns on `device_credentials`.
-
-Callers use `getCredential(deviceId, credentialType, pool)` / `setCredential(deviceId, credentialType, plaintext, pool)` — both require `pool`. **`setCredential` is a single atomic `INSERT ... ON CONFLICT (device_id, credential_type) DO UPDATE`, not DELETE+INSERT** — DELETE+INSERT was atomic per-request but not against two concurrent calls for the same key, which could leave two rows behind. Relies on a `UNIQUE(device_id, credential_type)` constraint. `getCredential` still reads via `ORDER BY created_at DESC LIMIT 1` for defense in depth.
-
-Key generated at install time into `.env.local`'s `CREDENTIAL_KEY` via `RNGCryptoServiceProvider.GetBytes(32)` in `Install-SecVault.ps1`.
-
----
-
-## Authentication
-
-NextAuth 4.24.7, JWT strategy, two providers:
-1. **Local admin** — username + bcrypt hash, now stored per-user in the `users` table (see RBAC).
-2. **LDAP/AD** — optional, `LDAP_URL` + `LDAP_BASE_DN` in `.env.local`.
-
-`NEXTAUTH_SECRET` generated at install, separate from any suite secret. If `NETVAULT_URL` is set,
-SecVault can optionally federate SSO to NetVault — default disabled, do not implement suite SSO as
-a default code path.
-
-`middleware.js`: protects all `/(dashboard)` routes (redirect to `/login`), allows `/login` +
-`/api/auth/*` unauthenticated, API routes return `401` (not redirect) when unauthenticated.
-
----
-
-## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch
-
-Six vendors implemented. The slug is load-bearing: it must match across `devices.vendor`,
-`VENDOR_PARSERS` (`lib/engines/versionComparator.js`), `ADAPTERS` (`lib/adapters/index.js`),
-`VENDOR_CPES` (`lib/feeds/nvd.js`), and `VENDOR_META` (`components/devices/vendorMeta.js`). Never
-invent a new spelling.
-
-**A vendor can support more than one access method.** `devices.mgmt_method` is chosen by the
-operator in the Add Device form — dispatch is `(vendor, mgmt_method) → adapter class`.
-
-| slug | mgmt_method | Access | Connection fields | credential_type |
-|---|---|---|---|---|
-| `forcepoint` | `smc` | SMC REST :8082 | `smc_host`+`smc_port` | `smc_api` (raw API key string, not JSON) |
-| `fortinet` | `api` / `ssh` | REST / SSH | `mgmt_ip`+`mgmt_port` | `rest_api` / `ssh` |
-| `paloalto` | `api` / `ssh` | XML API (keygen) / SSH | `mgmt_ip`+`mgmt_port` | `rest_api` / `ssh` |
-| `checkpoint` | `api` | Mgmt API (mgmt server, **not** gateway) | `mgmt_ip`+`mgmt_port` | `rest_api` |
-| `cisco_asa` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` (+`enable_password`?) |
-| `sangfor` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` |
-
-Forcepoint is SMC-only **by design** — never SSH to Forcepoint engines (see the SMC section below).
-Credential plaintext is built by `buildCredentialPlaintext()` (vendorMeta.js) and read by
-`parseApiCredential()`/`parseJsonCredential()`. `parseApiCredential` also accepts a bare non-JSON
-string as an api-key — deliberate backward compatibility, don't remove it.
-
-#### Two registries, deliberately duplicated — keep them in step
-
-`components/devices/vendorMeta.js` is an ES module (client components import it); `lib/adapters/index.js` is CommonJS (`engine-worker.js` `require()`s it under plain node, which can't load ESM) — so these two must be updated together: `VENDOR_META[slug].accessMethods` ↔ `ADAPTERS[slug]`'s inner keys, `defaultAccessMethod` ↔ `DEFAULT_METHOD[slug]`. Drift here is a silent runtime bug.
-
-#### Dispatch rules
-- **Adapters implement ONLY the FirewallAdapter interface** (testConnectivity/getVersion/getRules/getConfig) — the shared persistence pipeline lives ONCE in `lib/adapters/index.js` (`collectAndStore`), never copied into a vendor folder. New vendor = adapter folder + `ADAPTERS`/`DEFAULT_METHOD` + `VENDOR_PARSERS` + `VENDOR_CPES` + `VENDOR_META` entries.
-- **`getRules()` must THROW, never return `[]`, on a retrieval failure** (see Critical Rules above).
-- **Check Point: never pick a policy package positionally** (`packages[0]` was a real, fixed bug) and **Fortinet: collect every VDOM or fail** (a partial VDOM failure must throw, not return the rest) — both detailed in `gotchas.md`'s Vendor adapters section.
-- SSH vendors share `lib/adapters/sshClient.js` (legacy algorithm compat for old ASA images) — don't open raw ssh2 connections in adapters. `mgmt_port` is nullable, each adapter applies its own default (443 API / 22 SSH / 8082 SMC).
-- `advisories.cve_id` is UNIQUE with a single `vendor` — a CVE affecting two vendors stays with
-  whichever ingested it first.
-
-### Live validation status
-
-Each adapter logs its raw response (`[<Vendor> Debug]` in `engine.log`) on first live use — live
-connections are a verification step, not a smoke test. Full verification history and confirmed
-field mappings: `.ai-codex/connectors.md` — check there before assuming a field name.
-
-**Known limitations (by design, not bugs)** — hit-count COVERAGE (which vendors/transports can
-read them at all; the tri-state rule above governs how a gap is recorded), gateway resolution, Panorama fallback,
-VDOM-aware analysis status: all detailed in `gotchas.md`'s Vendor adapters / Rule analysis sections.
-
----
-
-## Forcepoint SMC Integration — Condensed
-
-**NEVER SSH directly to Forcepoint engines** — always the SMC REST API on `:8082` (one exception: SNMP, which hits `devices.snmp_host` directly since SMC doesn't proxy per-engine metrics). **Self-signed SSL polarity** is per-device (`devices.allow_self_signed_ssl` column, not the env var — that only seeds the Add Device form default): `rejectUnauthorized: allowSelfSignedSsl === false`, used identically by every vendor adapter — get this backwards and every self-signed endpoint starts failing TLS. SMC responses use HATEOAS `href` links — never construct URLs from element IDs. **CVE data is NVD-only** (Forcepoint has no PSIRT/RSS) — use `virtualMatchString`, never `cpeName` (404s on wildcard CPEs), and query both pre-7.1 (`next_generation_firewall`) and 7.1+ (`flexedge_secure_sd-wan`) CPEs, dedupe by `cve_id`. Full endpoint list and field-mapping history: `.ai-codex/connectors.md` / `cve-pipeline.md`.
-
----
-
-## CVE Engine Architecture
-
-Full pipeline detail (matching, dashboard, cleanup/reorder tabs, config-diff classification) is in
-`.ai-codex/cve-pipeline.md` and `.ai-codex/lib.md` — this section keeps only what must not drift
-without updating this file first.
-
-### Version Schemes (per vendor — `lib/engines/versionComparator.js`)
-
-| Vendor slug | Example | Tuple |
-|---|---|---|
-| `forcepoint` | `6.10.21` | `[6, 10, 21]` (7.1+ = FlexEdge rebrand, same scheme) |
-| `fortinet` | `v7.4.3,build2573` | `[7, 4, 3, 0]` (leading `v` and `,build…` stripped) |
-| `paloalto` | `11.1.2-h3` | `[11, 1, 2, 3]` (hotfix = 4th segment) |
-| `cisco_asa` | `9.18(4)15` | `[9, 18, 4, 15]` (interim = 4th segment) |
-| `checkpoint` | `R81.20 Take 41` | `[81, 20, 41, 0]` (R stripped, Take = 3rd segment) |
-| `sangfor` | `8.0.85` | `[8, 0, 85]` (plain dot-split) |
-
-### Priority Decision Tree (strict order — do not reorder)
-
-```
-1. kev_listed=true + version_affected=true + config_applies!='no'  → patch_now
-2. log_hit=true + version_affected=true + config_applies!='no'     → patch_now
-3. cvss>=9.0 + version_affected=true + config_applies='yes'        → patch_now
-4a. cvss>=7.0 + version_affected=true + config_applies='yes'
-    + is_fixed_recommended=true                                     → scheduled
-4b. cvss>=7.0 + version_affected=true + config_applies='yes'
-    + is_fixed_recommended=false                                    → monitor (wait for stable)
-5. version_affected=true + config_applies='unknown'                → scheduled (conservative)
-6. all others                                                       → monitor
-
-Asset criticality modifier (apply after base band):
-  device.asset_criticality='critical' → bump one band up
-  monitor → scheduled | scheduled → patch_now
-```
-
-**Any change to this decision tree must be documented here before the code is changed.**
-
-### Fleet & per-device Security Score (`lib/engines/securityScore.js`, v2.53.0)
-
-0-100, **higher is better**, weighted: vulnerability 40 / rule hygiene 30 / compliance 30. Each
-component reuses the engine that already measures it. Used by the dashboard headline tile, the
-nightly snapshot (`fleet_dashboard_snapshots.security_score`) and per-device on `/devices`.
-
-⛔ **POLARITY.** `riskScore.js` is 0-100 higher-is-WORSE and feeds this. The inversion happens in
-exactly ONE place (`hygieneSubscore`) and must not be "simplified" away — getting it backwards
-throws nothing and renders a plausible number that says the fleet is healthiest exactly when it is
-worst.
-
-⛔ An unmeasurable component is **dropped from the denominator**, never scored 0 (same rule as
-compliance's `na`) — otherwise a fresh install reports a data gap as a security problem. All three
-unmeasurable → `null`, rendered "—". `monitor`-band CVEs contribute nothing by design.
-
-**Any change to these weights or to the polarity must be documented here before the code changes.**
-
-### Applicability Tri-State Default
-
-See Critical Rules above for the core "never collapse `unknown` to `no`" rule. Specifics not covered
-there: no `advisory_conditions` row for an advisory → `config_applies = 'unknown'`. "No usable
-config" (`hasUsableConfig()`) also means an EMPTY object, not just null/non-object/array — a real
-reachable failure (an adapter meeting an unexpected live shape can return `{}`), not a hypothetical
-one.
-
-Predicate types: `config_key_exists` / `config_value_equals` / `config_value_matches` (path missing → `'no'`), `feature_enabled`, `port_exposed` / `admin_access_from_zone` (not found → `'unknown'`). Conditions for an advisory are ANDed: any `'no'` → `'no'`; else any `'unknown'` → `'unknown'`; else `'yes'`. `evaluatePredicate()` never throws — internal errors resolve to `'unknown'`. A third predicate type, `ruleset_property`, exists only in the Compliance Engine. Conditions are DATA (new CVE conditions are new DB rows via `/advisories/[cveId]/conditions`), not code.
-
-### ⛔ Stored configs are REDACTED — do not "fix" this
-
-See Critical Rules above for the requirement; full per-vendor redacted-field list, the universal
-keyword pattern (and its per-file duplication convention), and the database-level exclusions are in
-`.ai-codex/gotchas.md`'s Redaction rules section — read that before touching any adapter's config
-retrieval or `configDiff.js`.
-
-Rule analysis (10 finding types), the risk-scoring dashboard, cleanup/optimization/reorder tabs, risk trend history, and config-diff classification/redaction internals are documented in `.ai-codex/cve-pipeline.md` / `lib.md` / `gotchas.md` — read those before touching `lib/engines/ruleAnalysis.js`, `riskScore.js`, or `configDiff.js`.
-
----
-
-## Compliance Engine (Phase 7 — `/compliance`)
-
-Full stage-by-stage mechanics (seed library, all three predicate-evaluation shapes, write/trigger/
-score flow) live in `.ai-codex/compliance-pipeline.md` — this section keeps only what must not
-drift without updating this file first.
-
-Reuses `applicability.js`'s predicate evaluator (`evaluatePredicate`/`hasUsableConfig`) — compliance checks and CVE-applicability conditions both "evaluate a predicate against `device_configs.config_parsed`," for different purposes. `evaluatePredicate()` only returns `yes`/`no`/`unknown` — a compliance check needs a fourth state (`pass`/`fail`/`warning`/`na`), and different checks need **opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `yes`=PASS; `admin_access_from_zone` on the WAN zone wants `yes`=FAIL). Resolved via each check's `pass_when: 'yes'|'no'`: predicate `unknown` → `warning`; result `=== pass_when` → `pass`, else `fail`; no usable config at all → `na`; **`pass_when` missing or not exactly `yes`/`no`** → `warning`, never a silent default polarity (a curated-data bug, not a device problem).
-
-A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **45 checks** — recount via `grep -c "checkId:"` if you touch that file, it has drifted before.
-
-`scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
-
-### ⛔ `warning` vs `na` — whose limitation is it? (changed 2026-08-25)
-
-Both mean "not a pass and not a fail", but they answer different questions and only one belongs
-in the score's denominator:
-
-- **`warning` = a fact about THIS DEVICE.** We collected a config and asked a real question of it,
-  and the answer came back indeterminate. That uncertainty is genuinely the device's (or the
-  curated check definition's), so it counts against the score. Sources: a predicate resolving
-  `unknown` against a config we DID collect, and an invalid/missing `pass_when`.
-- **`na` = a fact about SECVAULT.** The question cannot be asked of this device at all — nothing
-  the operator could change on the firewall would make it answerable. It is dropped from the
-  denominator. Sources: no usable config at all, `ruleset_property` with no ruleset collected,
-  and — since 2026-08-25 — **`predicate_type: 'not_evaluable_from_config'`**.
-
-`not_evaluable_from_config` used to land on `evaluatePredicate()`'s `default: return 'unknown'`
-and so became a `warning`. That was the wrong bucket. These checks are declared unanswerable BY
-CONSTRUCTION — either the fact is inherently per-rule and the predicate engine only supports one
-fixed dot-path (`fortinet-ips-internet-facing-policies`), or it needs telemetry a static config
-snapshot never contains (`fortinet-unused-interfaces-shutdown`). Scoring a device down for a
-question SecVault cannot pose is the same error as `hit_count`'s old `DEFAULT 0`: **our inability
-to measure, recorded as a negative fact about the device.** Measured live on the 16-device fleet:
-43 of 61 warnings were this, and moving them to `na` took the fleet from 46% to 51%, every device
-up 3-7 points. No check changed status from pass to fail or vice versa — only the denominator.
-
-The findings are still WRITTEN and still shown, with their `reason` — `na` suppresses them from
-the score, never from the operator, who still needs to know these are manual-verification items.
-
----
-
-## Network Topology & Path Analysis (`/topology`, added 2026-08-02)
-
-Two layers, built in this order — read `lib/engines/objectResolver.js` before `lib/engines/topology.js`,
-the second reuses the first UNCHANGED as its per-hop evaluator:
-
-1. **Per-device Access Path Query** (`/devices/[id]/analysis?tab=access-path`, shipped first) —
-   `lib/engines/objectResolver.js`'s `queryAccessPath()` resolves a device's `firewall_rules`
-   address/service fields (almost always OBJECT NAMES) down to real IP ranges/ports via
-   `network_objects`, recursively expanding group membership, and walks enabled rules in
-   `sequence_number` order. Tri-state throughout (`'match'|'no-match'|'unresolved'`) — an
-   unresolved object (FQDN address, unmatched name) is never coerced to a non-match. The first rule
-   not definitively excluded decides, including one whose match involved an unresolved object
-   (flagged `hasCaveat:true`, not skipped past). No rule decides → `verdict:'unspecified'`, **never
-   `'deny'`** — no default/implicit-policy data exists anywhere in this codebase, for any vendor.
-   Single-device, config-only — has no idea what any other firewall does.
-
-2. **Fleet-wide multi-hop Path Query** (`/topology?view=query`, the default view) —
-   `lib/engines/topology.js` adds ONE orchestration layer on top: infers which devices are adjacent
-   (two DIFFERENT devices' interfaces whose `device_interfaces.ip_address` ranges overlap share a
-   link), applies NAT translation between hops, and crosses devices via longest-prefix-match routing
-   against `device_routes`. At each hop it calls `objectResolver.queryAccessPath()` unmodified — this
-   file never re-implements or duplicates rule evaluation, only decides which device is next. Stops
-   on a `deny`, a dead-end route, the fleet boundary (egress subnet not shared with any known
-   device), or a defensive 25-hop cap (guards a routing loop between misconfigured devices) — each
-   case returns an explanatory `note`, never silently upgrading an unresolved/trailing path to a
-   confident verdict.
-3. **Fleet Map** (`/topology?view=map`, added 2026-08-02) — `buildFleetTopologyGraph()` (same file)
-   dedupes that same adjacency computation into one visual diagram: every active device as a node
-   (hand-rolled inline SVG, circular layout — no diagramming library in this codebase), every
-   inferred link as a line. Every active device appears as a node EVEN with zero
-   `device_interfaces` rows (dashed/muted, `hasInterfaceData:false`) — the map stays honest about
-   fleet coverage gaps instead of silently omitting uncollected devices. **Click-through** (added
-   2026-08-03): a node with `hasInterfaceData:true` is wrapped in a plain SVG `<a>` to
-   `/topology?view=query&srcIp=<ip>` — no client JS, the IP is that device's first interface
-   (sorted by name) whose address parses cleanly, editable before submitting. **VPN-tunnel-peer
-   edges** (added 2026-08-03): a SECOND, independent edge type (`type:'vpn'`, dashed) alongside the
-   original shared-subnet edges (`type:'subnet'`, solid) — `buildVpnEdges()` matches each device's
-   already-collected `vpn_ipsec_tunnels.peer` (the `getVpnTunnels()` adapter capability, scheduled
-   independently of the rule-version-pull job — see Feed Sources/Engine Worker) against every OTHER
-   device's own interface IPs. Exists because several Fortinet branches use UNNUMBERED IPsec tunnel
-   interfaces (`ip: 0.0.0.0`, confirmed live) — invisible to the subnet-overlap mechanism even
-   though the devices are genuinely connected. Only `status:'up'` tunnels with a resolvable,
-   non-`0.0.0.0` peer draw an edge. **Visual-only** — deliberately NOT fed into
-   `simulateMultiHopPath()`'s own adjacency graph (Layer 2 above); a peer gateway IP alone doesn't
-   say what's routable through that tunnel.
-
-**Collection (vendor scope — deliberately incomplete, not a bug)**: three new OPTIONAL
-adapter methods (`getInterfaces()`/`getRoutingTable()`/`getNatRules()`, see `lib/adapters/interface.js`),
-implemented by `paloalto` on **both SSH and API transport** (API transport added 2026-08-03,
-live-verified against ITC-SLY — its `getNatRules()` reuses `sshParser.parseNatPolicyOutput()`
-directly since the API's NAT response is byte-identical in format to the SSH transport's plain
-text) and `fortinet`'s **SSH transport only** — Fortinet's API transport and the other 4 vendors
-are not yet wired (no live device to verify real command output against, for any of them, per
-this file's own "verify against live responses before writing any parser" rule — add later
-following the identical adapter-method pattern once a live device exists). Fortinet's
-`getNatRules()` (added 2026-08-02, live-verified against TSR-TL) derives NAT
-from `show firewall policy`/`vip`/`ippool` — FortiOS has no separate ordered NAT rulebase like Palo
-Alto, NAT is a per-policy `set nat enable` flag plus VIP objects referenced from `dstaddr`.
-Destination NAT via a VIP resolves cleanly (VIPs bind to a real physical interface). Source NAT
-resolves to the egress interface's own IP only when the policy's `dstintf` names a real interface —
-**every policy on the live device uses an SD-WAN virtual interface (`"virtual-wan-link"`) instead**,
-which has no IP of its own, so that case reports the translation as unresolved rather than guessing
-which physical WAN link the traffic actually egresses through. A device pair not covered by either
-vendor's collection simply won't chain together in the adjacency graph — the query still returns a
-result, just possibly ending earlier ("path continues beyond SecVault's managed fleet") than the real
-network actually does. Collection runs inline inside the existing `rule-version-pull` job
-(`CONFIG_PULL_INTERVAL_HOURS`, no new cron job, no new env var) — routing/interface data is
-structural, slow-changing, not live session state.
-
-Three new live-snapshot tables (`device_interfaces`/`device_routes`/`nat_rules`, DELETE+reinsert per
-pull, same lifecycle as `network_objects`) — `nat_rules`' `original_*`/`translated_*` columns use the
-EXACT SAME shape as `firewall_rules.src_addresses` (JSONB array of literal IPs or object names),
-deliberately, so `objectResolver.js`'s address resolver works unchanged against NAT rows too.
-
-**Not admin-gated** (`POST /api/devices/[id]/access-path`, `POST /api/topology/path-query`) — both
-are pure read-only computations over already-collected data with no persistence. See the RBAC
-section below for why a non-mutating POST is treated like a GET here.
-
----
-
-## Device Lifecycle & Health (`/lifecycle`, added 2026-08-03)
-
-Four facts SecVault could not previously answer, all collected from the management API/CLI it
-already talks to. Optional adapter methods `getLicenses()`/`getHaStatus()`/`getDiskUsage()` plus a
-`contentVersions` field on `getVersion()`. **Palo Alto: all four, both transports. Fortinet
-(added 2026-08-04): licences + content versions over SSH** — via `diagnose autoupdate versions`,
-`diagnose test update info` (its **System contracts** block is the only CLI source of the
-SPRT/HDWR/ENHN/COMP support entitlements) and `get system fortiguard`. ⛔ An earlier note here said
-Fortinet had no licence surface; that was wrong, and came from probing only `get system status` —
-one command returning nothing does not prove a vendor lacks the data. Fortinet HA/disk remain
-deferred (no HA-enabled FortiGate to verify a peer parser against). Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
-`device_content_versions` — all latest-snapshot, all detailed in `.ai-codex/schema.md`.
-
-- **Licences / support expiry** — the fleet renewal-planning view. ⛔ `expires_at` is TRI-STATE
-  with `expires_raw`: a NULL date means *perpetual* when raw is `'Never'` and *unknown* otherwise;
-  never collapse those, because treating an unparsed expiry as "fine" is how a contract lapses.
-- **HA state** — including peer identity, config-sync state, and PAN-OS's own Version Compatibility
-  block. `version_compat_ok` is tri-state (NULL = the device reported no block; never default it to
-  true). A `User requested` suspension is NOT a fault and is deliberately excluded from
-  `last_nonfunctional_reason`.
-- **Disk** — from `show system disk-space`, NOT SNMP, so it carries none of `snmp_metric_snapshots`'
-  `lowConfidence` caveat. Sizes stay as the device's own `df -h` strings; only the percentage is
-  numeric.
-- **Content/signature versions** — extracted from the `show system info` response `getVersion()`
-  already fetches. **No additional device command is issued.**
-
-Derived status (`expiring`/`stale`/`degraded`/...) is computed at READ time by the pure
-`lib/engines/deviceHealth.js`, never stored — the raw facts are what's persisted, and staleness is a
-function of those plus the current time. Wiring these into `/alerts` and outbound notifications is a
-deliberate follow-up, not an oversight.
-
-**Command syntax was verified per-command against live devices and there is NO general rule** —
-licences need the nested form while `show interface all` needs the value form, and each was
-rejected live in the other shape. See `connectors.md` entry 11 before touching any of it.
-
-### Baseline config drift
-
-`device_configs.is_baseline` (partial unique index — one baseline per device is a DB guarantee, so
-setting a new one must CLEAR the old one first) marks an operator-designated known-good snapshot.
-Drift is "latest vs baseline", which is a genuinely different question from `config_diffs`' "latest
-vs previous pull" — a consecutive-pull comparison target may itself already be drifted. Both drift
-and arbitrary version-A-vs-B comparison reuse `configDiff.js`'s already-pure
-`diffConfigs`/`classifyDiff` **unchanged**; only the caller was ever hardwired. Computed on read, no
-new table and no new cron job.
-
-### Config-snapshot retention (`lib/engines/configRetention.js`, added 2026-08-25)
-
-`device_configs` stores one full snapshot per device per pull whether or not anything changed —
-measured at 449 MB of a 529 MB database (85%), ~9.5 MB/day, ~3.4 GB/year, with no retention of any
-kind. The daily `[config-retention]` engine job bounds it. Safe to run because the CHANGE record
-does not live here: `config_diffs` is append-only with its own stored JSONB payload and **no
-reference to any `device_configs` row** (verified empirically — the only FK on/into
-`device_configs`/`config_backups` is their own `device_id -> devices(id)`), and `config_backups`
-holds a full copy at each *detected* change. Retention only removes the long tail of
-near-identical snapshots.
-
-⛔ **Four protections, none optional, each expressed TWICE (classify query + DELETE predicate):**
-1. `is_baseline = true` is NEVER deleted at any age — it is the drift comparison target, and a
-   silently-lost baseline reads as "no drift", the most dangerous wrong answer available here.
-2. The NEWEST row per device is NEVER deleted at any age. A device that stopped being collected two
-   years ago must still show its last known config; "retention deleted the only copy" is strictly
-   worse than a large database.
-3. A minimum COUNT per device survives regardless of age (`MIN_KEEP_CONFIGS`=10 /
-   `MIN_KEEP_BACKUPS`=5) — **not env vars**, because they are safety floors, not tuning knobs.
-   Precisely: they are the DEFAULTS for an in-process caller option, clamped to >= 1, and
-   `services/engine-worker.js` passes only the two day counts, so nothing configurable can reach
-   them. An in-process caller *can* lower this one to 1 — at which point protection 2 (never the
-   newest row) is what still holds, which is why the clamp floor is 1 and not 0.
-   ⚠️ This is the structurally weakest of the four: unlike 1, 2 and 4 it rests on a single clause
-   inside the DELETE rather than being doubled within that statement. It degrades gracefully
-   (losing it falls back to protection 2), but do not add a third caller to it casually.
-4. `config_backups` rows whose `label` is not `'auto'` (`'manual'`/`'pre-change'`) are NEVER
-   deleted — operator intent outranks a size budget.
-
-`CONFIG_BACKUP_RETENTION_DAYS` (365) is deliberately far longer than `CONFIG_RETENTION_DAYS` (60):
-every `config_backups` row is a distinct moment of real change at ~1.5% of the volume. Do not
-"simplify" the two windows into one. `runConfigRetention()` NEVER THROWS (per-table errors are
-returned in its summary) and is idempotent. Its log line reports what was KEPT and by which
-protection alongside what was deleted, so an operator can tell retention from data loss.
-
-Note a `DELETE` only frees space for REUSE (which bounds growth — the actual goal); it does not
-shrink the file on disk. A one-time `VACUUM FULL`/`pg_repack` is needed to return space to the OS
-and is deliberately NOT in the job (ACCESS EXCLUSIVE lock).
-
-⛔ **The root cause is upstream and is NOT fixed by this job**: only 106 real changes produced
-1,730 snapshots, 508 of which are byte-identical to their immediate predecessor (~161 MB of pure
-duplicates). Deduping belongs in `collectAndStore` at WRITE time, not in a retention job — a
-stored row is also evidence that a collection succeeded at time T, so skipping the write changes
-that meaning and needs its own decision.
-
-## Phase 8 — Syslog Ingestion (IN PROGRESS, started 2026-09-08)
-
-Replaces ManageEngine Firewall Analyzer, which was removed after a failed service-pack
-upgrade left it unrecoverable. FWA had been the fleet's syslog collector on the SAME host as
-SecVault (192.168.7.69), taking **~1,083 datagrams/sec sustained (~93M events/day)** from 27
-devices. Its 335 GB raw-log archive was preserved out of the install tree before uninstall.
-
-Two reasons this belongs in SecVault rather than being left to LogVault, which also ingests
-syslog: (1) CLAUDE.md's CVE priority tree already has `log_hit=true` as decision rule 2, and
-that input has never had a data source; (2) `firewall_rules.hit_count` is NULL — genuinely
-unmeasurable — for every vendor/transport whose API cannot report hits (Fortinet SSH, Sangfor,
-Palo Alto SSH). Log evidence supplies both. **Neither is something a general log analyser can
-do, because it does not know the rulebase, the CVE exposure or the compliance posture.** The
-log storage itself is not the point; the fusion is.
-
-**Retention decision (drives the schema):** raw searchable events ~7 days (~130 GB), rolled up
-into per-rule / per-device / per-hour aggregates kept indefinitely. Anything older than the raw
-window is answered from aggregates. Time-partitioned tables, dropped by partition.
-
-### Landed so far — the pure parsers only
-
-`lib/syslog/syslogParser.js` (RFC 3164/5424 frames) and `lib/syslog/vendorParsers.js` (Fortinet
-key=value, Palo Alto positional CSV). Both pure, both unit-tested, neither wired to anything yet.
-
-⛔ **Every vendor field mapping was read off REAL CAPTURED LOGS** from the preserved archive, not
-from documentation, per this file's own "documentation lies" rule. The captured lines are the
-test fixtures.
-
-⛔ **At 93M events/day a wrong DEFAULT is not a rounding error, it is a fabricated dataset.**
-Every parser field is nullable and stays null when the log did not carry it — no defaulting a
-missing timestamp to "now", an unknown vendor to "generic", or an absent severity to info. This
-is the same Critical Rule as `hit_count`; syslog is simply where it is easiest to get wrong and
-hardest to notice.
-
-.
+space. `dropOldPartitions()` only ever drops names matching `^syslog_events_\d{8}$`.
 
 ⛔ The rollups use **`UNIQUE NULLS NOT DISTINCT`** (PostgreSQL 15+) so their grouping keys can
 stay honestly nullable. Without it NULLs compare unequal and every flush inserts a duplicate
@@ -1300,7 +732,7 @@ like `'unknown'`, is precisely the fabricated-value pattern this file bans.
 
 Rule-hit correlation to `firewall_rules` (Phase 8b — the parsers already capture Fortinet's
 `policyid`/`poluuid` and Palo Alto's rule name, so this is a join, not new collection),
-`log_hit` wiring into the CVE priority tree, the rollup population job, and any UI. The
+the rollup population job, and any UI. The
 dashboard's Live Traffic tab stays absent until there is something real to show — see
 `lib/dashboardTabs.js`.
 
@@ -1365,6 +797,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
 | Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 UTC | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
+| `log_hit` correlation (`log-hit`) | Hourly, fixed `20 * * * *` | `LOG_HIT_LOOKBACK_DAYS` |
 | Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
 
 ### Reliability Rules (learned from LogVault collector)
@@ -1494,11 +927,16 @@ CONFIG_BACKUP_RETENTION_DAYS=365           # config_backups ('auto' label only)
 NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
 
 # Syslog ingestion (Phase 8 — SecVault-Collector)
-SYSLOG_UDP_PORT=514
-SYSLOG_TCP_PORT=514
+SYSLOG_UDP_PORT=514,1514                   # comma-separated; FWA held 514 during migration
+SYSLOG_TCP_PORT=514,1514
 SYSLOG_FLUSH_MS=2000                       # spool+insert cycle
 SYSLOG_MAX_BUFFER=200000                   # in-memory datagrams; overflow is COUNTED, not hidden
-SYSLOG_RETENTION_DAYS=7                    # raw events; enforced by DROPPING partitions
+SYSLOG_RETENTION_DAYS=30                   # raw events; enforced by DROPPING partitions
+SYSLOG_RAW_MESSAGE=security                # all|security|none -- which events keep the raw text.
+                                           # `security` is what makes 30 days fit: it drops the
+                                           # raw line for ordinary allowed traffic (~89% of rows)
+                                           # and KEEPS it for threat/vpn/utm/denied. Junk value
+                                           # falls back to `security`, never to `all`.
 SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the DB insert;
                                            # blank = <install dir>\spool. Installer sets it.
 SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)
@@ -1508,6 +946,7 @@ SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ~500 GB at 8.4 GB/day measured
 SYSLOG_ROLLUP_RECENT_HOURS=1               # frequent narrow re-aggregation (+1h; was 3, overran the cycle)
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep, SLICED 6h/pass; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5
+LOG_HIT_LOOKBACK_DAYS=7                    # [log-hit] window; SHORTER than retention on purpose
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90

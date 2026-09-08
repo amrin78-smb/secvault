@@ -63,6 +63,7 @@ const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
+const { runLogHitCorrelation } = require('../lib/engines/logHit');
 const {
   runConfigRetention,
   formatRetentionSummary,
@@ -280,6 +281,26 @@ function getSnapshotRetentionDays() {
 // re-declared here (unlike the older helpers above, which predate having a
 // module to import from) so this file, .env.local.example and CLAUDE.md's env
 // list cannot drift apart on the default.
+// How far back [log-hit] looks for traffic reaching a curated exposed port.
+//
+// Deliberately SHORTER than SYSLOG_RETENTION_DAYS: the question is "is this
+// service being reached now", and a 30-day window would keep a band elevated
+// for a month after an exposure was actually closed. Clamped in the engine to
+// 90 days regardless of what is set here.
+function getLogHitLookbackDays() {
+  const fallback = 7;
+  const raw = parseInt(process.env.LOG_HIT_LOOKBACK_DAYS, 10);
+  if (Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (process.env.LOG_HIT_LOOKBACK_DAYS) {
+    logger.warn(
+      `LOG_HIT_LOOKBACK_DAYS value "${process.env.LOG_HIT_LOOKBACK_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
 function getConfigRetentionDays() {
   const fallback = DEFAULT_CONFIG_RETENTION_DAYS;
   const raw = parseInt(process.env.CONFIG_RETENTION_DAYS, 10);
@@ -815,6 +836,51 @@ async function runConfigRetentionJob() {
   }
 }
 
+// Produces `log_hit`, decision rule 2 of the CVE priority tree.
+//
+// Runs in the ENGINE and never on page load: it reads raw `syslog_events`
+// over a bounded lookback, which is a background cost, not an interactive
+// one. Hourly rather than per-poll because "was this service reached in the
+// last week" does not change minute to minute, and each pass re-derives the
+// priority band for any device whose value moved.
+//
+// With `advisory_conditions` empty this returns immediately without touching
+// syslog at all — see runLogHitCorrelation.
+async function runLogHitJob() {
+  const start = Date.now();
+  const lookbackDays = getLogHitLookbackDays();
+  logger.info(`Job [log-hit] starting (lookback ${lookbackDays}d).`);
+  try {
+    const s = await runLogHitCorrelation(pool, { lookbackDays });
+    const durationMs = Date.now() - start;
+    if (s.curatedAdvisories === 0) {
+      // ⛔ Say WHY nothing happened. A silent zero here reads as "nothing is
+      // reachable", when it actually means nobody has curated a port yet.
+      logger.info(
+        `Job [log-hit] finished in ${durationMs}ms: no advisory has a curated port_exposed ` +
+          `condition, so log_hit cannot be evaluated. Curate at /vulnerability/advisories.`
+      );
+    } else {
+      logger.info(
+        `Job [log-hit] finished in ${durationMs}ms: ${s.curatedAdvisories} curated advisories, ` +
+          `${s.devicesConsidered} devices, set true=${s.setTrue} false=${s.setFalse}, ` +
+          `reprioritized ${s.reprioritized}; skipped ${s.devicesSkippedNoCoverage} for no syslog ` +
+          `coverage and ${s.devicesSkippedNoInterfaces} for no collected interfaces (UNMEASURED, not clean).`
+      );
+      for (const h of s.hits) {
+        logger.warn(
+          `Job [log-hit] REACHED device=${h.deviceId} advisory=${h.advisoryId} port=${h.port} ` +
+            `events=${h.events} distinct_public_sources=${h.sources} last=${h.lastSeen}`
+        );
+      }
+    }
+    for (const e of s.errors) logger.error(`Job [log-hit] error: ${JSON.stringify(e)}`);
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [log-hit] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // Startup catch-up for the daily snapshot — see the call site's comment.
 // Deliberately checks for TODAY's row rather than backfilling history: the
 // counts it stores are all "as of now" values (current CVE bands, current
@@ -1036,6 +1102,12 @@ async function scheduleJobs() {
   // this isn't a configurable interval; dispatchMonthlyReport()'s own
   // per-period idempotency check makes the immediate startup run in main()
   // below a safe no-op mid-month.
+  logger.info('Scheduling [log-hit] with cron "20 * * * *" (hourly).');
+  const logHitTask = cron.schedule('20 * * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runLogHitJob, 'log-hit');
+  });
+
   logger.info('Scheduling [compliance-report] with cron "0 6 1 * *" (monthly).');
   const complianceReportTask = cron.schedule('0 6 1 * *', () => {
     if (shuttingDown) return;
@@ -1043,6 +1115,7 @@ async function scheduleJobs() {
   });
 
   scheduledTasks = [
+    logHitTask,
     feedTask,
     configTask,
     vpnTask,
