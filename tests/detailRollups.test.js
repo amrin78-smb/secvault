@@ -71,7 +71,7 @@ describe('detail rollups: each excludes rows it cannot describe', () => {
   it('the host rollup requires a real source address', () => {
     // A traffic log with no src_ip is still a real event, but grouping it
     // would create a NULL-host row that ranks like a real host.
-    assert.match(TALKER_INSERT, /AND src_ip IS NOT NULL/);
+    assert.match(TALKER_INSERT, /(WHERE|AND) src_ip IS NOT NULL/);
   });
 
   it('the application rollup requires an application OR a protocol', () => {
@@ -83,7 +83,7 @@ describe('detail rollups: each excludes rows it cannot describe', () => {
     // the largest table in the database — measured 15,546 distinct
     // destinations in ten minutes, an unbounded internet long tail.
     assert.match(BLOCKED_INSERT, /action IN \('deny','drop','reset-both','block'\)/);
-    assert.match(BLOCKED_INSERT, /AND dst_ip IS NOT NULL/);
+    assert.match(BLOCKED_INSERT, /(WHERE|AND) dst_ip IS NOT NULL/);
   });
 
   it('the host rollup counts denies alongside events', () => {
@@ -112,14 +112,24 @@ describe('detail rollups: rebuilt in the same window as the permanent ones', () 
     }
   });
 
-  it('every detail rollup is given the SAME window as the permanent ones', async () => {
-    // A detail rollup rebuilt over a different range than the DELETE that
-    // preceded it is exactly the bug that took down syslog_rule_hits_daily.
+  it('⛔ every detail rollup reads the SAME materialized window', async () => {
+    // A rollup rebuilt over a different range than the DELETE that preceded
+    // it is exactly the bug that took down syslog_rule_hits_daily. Since
+    // 2026-09-08 that is structurally impossible: the window is scanned once
+    // into a temp table and no INSERT mentions received_at at all.
     const pool = stubPool();
     await recomputeWindow(pool, FROM, TO);
-    const withParams = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.ok(withParams.length >= 10, 'five DELETEs and five INSERTs');
-    for (const c of withParams) {
+    const sqls = pool.calls.map((c) => c.sql);
+    assert.ok(sqls.some((s) => s.startsWith('CREATE TEMP TABLE rollup_src')));
+    for (const sql of [TALKER_INSERT, APP_INSERT, BLOCKED_INSERT]) {
+      assert.match(sql, /FROM rollup_src/);
+      assert.doesNotMatch(sql, /FROM syslog_events/);
+      assert.doesNotMatch(sql, /received_at/);
+    }
+    // The DELETEs still take the bounds, and they must all agree.
+    const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
+    assert.equal(windowed.length, 6, 'one temp-table scan + five DELETEs');
+    for (const c of windowed) {
       assert.equal(c.params[0].getTime(), FROM.getTime());
       assert.equal(c.params[1].getTime(), TO.getTime());
     }

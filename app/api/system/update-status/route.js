@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.71.1': [
+    'Log summarisation now reads each batch of logs once instead of five times, cutting the disk work behind the traffic dashboards by roughly 80%.',
+    'Measured on the live server: the five-minute summarisation pass was reading about 9 GB from disk five times over, on the same drive receiving 1,500 log lines a second.',
+    'All five summaries are now also rebuilt together as one unit, so the traffic, rule, host, application and blocked-destination views can never disagree with each other about the same hour.',
+  ],
   '2.71.0': [
     'New traffic analysis widgets on the dashboard Traffic tab: Top Hosts, Top Applications, Protocols, Top Blocked Destinations, and a Traffic & Security table covering every device.',
     'Top Hosts ranks the machines inside your network by the traffic your firewalls reported, and each host links straight into the path query so you can trace it across the fleet.',

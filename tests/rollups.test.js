@@ -16,6 +16,7 @@ const {
   sweepWindow,
   recomputeWindow,
   runRollupMaintenance,
+  WINDOW_TEMP,
   HOURLY_INSERT,
   RULE_INSERT,
 } = require('../lib/syslog/rollups');
@@ -85,6 +86,30 @@ describe('rollups: the SQL aggregates honestly', () => {
     assert.doesNotMatch(RULE_INSERT, /coalesce\s*\(\s*sum\(bytes_sent\)\s*,\s*0\s*\)/i);
   });
 
+  it('⛔ every INSERT reads the materialized window, never syslog_events', () => {
+    for (const sql of [HOURLY_INSERT, RULE_INSERT]) {
+      assert.match(sql, /FROM rollup_src/);
+      assert.doesNotMatch(sql, /FROM syslog_events/);
+      assert.doesNotMatch(sql, /received_at >=/, 'the window lives in WINDOW_TEMP alone');
+    }
+    assert.match(WINDOW_TEMP, /received_at >= \$1 AND received_at < \$2/);
+  });
+
+  it('⛔ the materialized window excludes the raw message column', () => {
+    // `message` is ~90% of a row by bytes and no rollup reads it. Copying it
+    // into the temp table would give back most of the I/O this saves.
+    assert.doesNotMatch(WINDOW_TEMP, /\bmessage\b/);
+    // But everything the five rollups DO group by must be carried across.
+    for (const col of [
+      'bucket_hour', 'source_ip', 'device_id', 'vendor', 'action', 'severity',
+      'log_class', 'rule_id', 'rule_uuid', 'rule_name', 'src_ip', 'dst_ip',
+      'dst_port', 'protocol', 'application', 'bytes_sent', 'bytes_received',
+      'bytes_summable',
+    ]) {
+      assert.ok(WINDOW_TEMP.includes(col), `WINDOW_TEMP must carry ${col}`);
+    }
+  });
+
   it('only rolls up rows that actually identify a rule', () => {
     // A NULL-rule bucket would read like a real rule in the hit-count view.
     assert.match(RULE_INSERT, /rule_id IS NOT NULL OR rule_uuid IS NOT NULL OR rule_name IS NOT NULL/);
@@ -130,7 +155,57 @@ describe('rollups: recomputeWindow never throws and is DELETE-then-INSERT', () =
     assert.ok(sqls.includes('COMMIT'));
   });
 
-  it('rebuilds BOTH rollups from the same window', async () => {
+  it('⛔ scans the window ONCE into a temp table, before any rollup runs', async () => {
+    // Five rollups re-scanning syslog_events was five parallel seq scans of a
+    // 9.9 GB partition per sweep (measured 2026-09-08). Every INSERT must now
+    // read the materialized window instead.
+    const pool = stubPool();
+    await recomputeWindow(pool, new Date('2026-09-08T10:00:00Z'), new Date('2026-09-08T14:00:00Z'));
+    const sqls = pool.calls.map((c) => c.sql);
+    const temp = sqls.findIndex((s) => s.startsWith('CREATE TEMP TABLE rollup_src'));
+    assert.ok(temp >= 0, 'the window must be materialized');
+    const inserts = sqls
+      .map((s, i) => [s, i])
+      .filter(([s]) => s.startsWith('INSERT INTO syslog_'));
+    assert.equal(inserts.length, 5, 'all five rollups');
+    for (const [s, i] of inserts) {
+      assert.ok(i > temp, 'every rollup must run AFTER the scan');
+      assert.match(s, /FROM rollup_src/, 'no rollup may re-scan syslog_events');
+      assert.doesNotMatch(s, /FROM syslog_events/);
+    }
+  });
+
+  it('⛔ drops the temp table ON COMMIT, never by an explicit DROP', async () => {
+    // The client returns to a POOL. A temp table outliving the transaction
+    // would leak onto a pooled connection and the next sweep would fail with
+    // "relation already exists"; ON COMMIT DROP also survives a ROLLBACK.
+    assert.match(WINDOW_TEMP, /ON COMMIT DROP/);
+    const pool = stubPool();
+    await recomputeWindow(pool, new Date(), new Date());
+    assert.ok(
+      !pool.calls.some((c) => c.sql.startsWith('DROP TABLE')),
+      'an explicit DROP would not run on the failure path'
+    );
+  });
+
+  it('⛔ the window appears in exactly ONE statement', async () => {
+    // A DELETE range disagreeing with its INSERT range is the bug that broke
+    // syslog_rule_hits_daily. Only the temp-table scan may carry the bounds;
+    // the DELETEs share them by parameter, and the INSERTs cannot diverge
+    // because they no longer reference received_at at all.
+    const from = new Date('2026-09-08T10:00:00Z');
+    const to = new Date('2026-09-08T14:00:00Z');
+    const pool = stubPool();
+    await recomputeWindow(pool, from, to);
+    const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
+    assert.equal(windowed.length, 6, 'one temp-table scan + five DELETEs');
+    for (const c of windowed) {
+      assert.equal(c.params[0].getTime(), from.getTime());
+      assert.equal(c.params[1].getTime(), to.getTime());
+    }
+  });
+
+  it('rebuilds BOTH permanent rollups from the same window', async () => {
     const pool = stubPool();
     await recomputeWindow(pool, new Date('2026-09-08T10:00:00Z'), new Date('2026-09-08T14:00:00Z'));
     const sqls = pool.calls.map((c) => c.sql).join('\n');
