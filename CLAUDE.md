@@ -351,11 +351,31 @@ everywhere. Defining it is a tree-behaviour change even though no branch moved �
 **above CVSS 9.0**, immediately after KEV, so whatever sets it claims a confidence equal to
 "known exploited in the wild".
 
-⛔ **`log_hit` = the VULNERABLE SERVICE WAS REACHED on this device.** All of:
+⛔ **`log_hit` = the VULNERABLE SERVICE WAS REACHED on this device, FROM THE INTERNET.** All of:
 1. the advisory has at least one curated `port_exposed` condition naming a port; **and**
-2. firewall logs show traffic ARRIVING at one of that device's own interface addresses on
-   that port, from a source outside the fleet; **and**
-3. that traffic was **ALLOWED**. A blocked probe is not a reached service.
+2. firewall logs show traffic ARRIVING at one of that device's own `device_interfaces`
+   addresses on that port; **and**
+3. the source was PUBLIC — outside RFC1918/loopback/link-local/CGNAT. An admin on the LAN
+   reaching a management port is real reachability but a much weaker claim, and admitting it
+   would fire rule 2 on every device with a curated management port; **and**
+4. the traffic was **ALLOWED**. A blocked probe is not a reached service.
+
+Ports within one advisory are **ORed** — reaching one exposed port of several is still reaching
+the service. This deliberately differs from `applicability.js`, which ANDs its conditions,
+because the questions differ: "does this advisory apply" vs "was it reached".
+
+⛔ **"Allowed" is not the same as `action = allow`.** Verified on live logs: Fortinet records a
+session that was established and then ended as `close`/`client-rst`/`server-rst`, and FortiGate
+SSL-VPN on 10443 is reached from public sources logged `close`, NEVER `allow` — matching only
+`allow` would miss the most exposed service on the fleet. Palo Alto's `reset-both` belongs to
+the same visual family but is a BLOCK (its IPS resetting both ends). ⛔ An action string in
+neither list is **unknown and never fires** — an unrecognised vendor verb must not be able to
+manufacture a `patch_now`.
+
+⛔ **Two cases write NOTHING rather than `false`:** a device with no syslog coverage in the
+window, and a device with no collected `device_interfaces` rows (without which traffic TO the
+device cannot be told from traffic THROUGH it). Both are UNMEASURED; writing `false` there is
+the failed-read-as-a-fact bug again.
 
 ⛔ **REJECTED definition: "a threat signature fired against this device."** It is available
 today and it is wrong here. It is not CVE-specific, so it would escalate EVERY advisory on
