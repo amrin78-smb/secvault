@@ -39,10 +39,13 @@ const NAV = [
   // match" call this file already made for Compliance -> IconSearch.
   { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
   { href: '/topology', label: 'Topology', Icon: IconTopology, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
-  // Amber + IconAlertTriangle: this is the only entry whose subject is an
-  // outward-facing RISK rather than an inventory or a report, and it should
-  // read that way at a glance.
-  { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle, color: '#fb923c', bg: 'rgba(251,146,60,0.20)' },
+  // Lime + IconAlertTriangle. This was amber (#fb923c) on first commit, which
+  // is byte-identical to Alerts one row up — and the chip colour is the ONLY
+  // wayfinding cue when the sidebar is collapsed and labels drop to a title
+  // attribute, so two identical chips two rows apart is exactly where that cue
+  // stops working. Every entry here keeps a hue no other entry uses; that
+  // invariant is asserted twice below and was broken the moment it was added.
+  { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle, color: '#a3e635', bg: 'rgba(163,230,53,0.20)' },
   // Cyan — the last hue not already spoken for by another entry. IconDocument
   // was the one remaining glyph both unused here and semantically right: a log
   // IS a record. Same "reuse what exists" call made for Compliance and VPN.
