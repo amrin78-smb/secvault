@@ -21,6 +21,8 @@ const {
   parsePaloAlto,
   parseKeyValue,
   splitCsv,
+  classifyPaloAlto,
+  classifyFortinet,
 } = require('../lib/syslog/vendorParsers');
 
 // --- real captured payloads (syslog frame already stripped) -----------------
@@ -216,5 +218,37 @@ describe('vendorParsers: zones are read only where the vendor actually sends the
     assert.equal(e.dstInterface, 'wan1');
     assert.equal(e.srcZone, null, 'must not pass an interface name off as a zone');
     assert.equal(e.dstZone, null);
+  });
+});
+
+describe('vendorParsers: log_class is computed once at ingest', () => {
+  it('maps Palo Alto log types to normalized classes', () => {
+    assert.equal(classifyPaloAlto('TRAFFIC'), 'traffic');
+    assert.equal(classifyPaloAlto('THREAT'), 'threat');
+    assert.equal(classifyPaloAlto('GLOBALPROTECT'), 'vpn');
+    assert.equal(classifyPaloAlto('SYSTEM'), 'system');
+  });
+
+  it('⛔ maps FortiOS VPN on the SUBTYPE, not the type', () => {
+    // FortiOS files VPN under type="event" subtype="vpn". Classifying on type
+    // alone would bucket it as generic 'event' and the VPN view would show
+    // nothing at all, with no error to notice.
+    assert.equal(classifyFortinet('event', 'vpn'), 'vpn');
+    assert.equal(classifyFortinet('event', 'system'), 'event');
+    assert.equal(classifyFortinet('traffic', 'forward'), 'traffic');
+    assert.equal(classifyFortinet('utm', 'virus'), 'utm');
+  });
+
+  it('returns null for an unrecognised kind rather than an "other" bucket', () => {
+    // An unclassified event is a GAP IN THIS MAPPING and should look like one.
+    for (const v of [undefined, null, '', 'WHAT', 42, {}]) {
+      assert.equal(classifyPaloAlto(v), null, `paloalto ${JSON.stringify(v)}`);
+      assert.equal(classifyFortinet(v, v), null, `fortinet ${JSON.stringify(v)}`);
+    }
+  });
+
+  it('attaches logClass to the parsed event for both vendors', () => {
+    assert.equal(parseFortinet(FORTI_ACCEPT).logClass, 'traffic');
+    assert.equal(parsePaloAlto(PAN_TRAFFIC).logClass, 'traffic');
   });
 });

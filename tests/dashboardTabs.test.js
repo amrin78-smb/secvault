@@ -49,15 +49,12 @@ describe('dashboardTabs: the tab list itself', () => {
     }
   });
 
-  it('does NOT ship a live-traffic tab yet', () => {
-    // Deliberately absent until services/collector.js (Phase 8) exists. A tab
-    // that renders "no data" for a capability the product does not have reads
-    // as a broken feature rather than a roadmap. Delete this test in the same
-    // commit that adds the tab — that is the point of it.
-    assert.ok(
-      !KEYS.some((k) => /traffic|syslog|log/.test(k)),
-      'add the tab and remove this test together, once the syslog collector ships'
-    );
+  it('ships the Traffic tab now that the collector exists', () => {
+    // This replaces an assertion that the tab was ABSENT, which was correct
+    // while there was nothing real to show. services/collector.js shipped on
+    // 2026-09-08, so the tab was added and that test retired in the same
+    // commit -- exactly as its own comment required.
+    assert.ok(KEYS.includes('traffic'), 'the collector is live, so the tab must exist');
   });
 });
 
@@ -69,8 +66,14 @@ describe('dashboardTabs: resolving a ?tab= value never yields a blank page', () 
   });
 
   it('falls back to the default for an unknown key', () => {
+    // NOTE: 'traffic' used to be the example here, back when it was the tab
+    // that deliberately did not exist. It is a real tab now, so using it would
+    // assert the opposite of the truth — the suite caught that when the tab
+    // was added. Examples of "unknown" must be things that are actually
+    // unknown, not things that are merely unbuilt today.
     assert.equal(resolveDashboardTab('nope'), DEFAULT_DASHBOARD_TAB);
-    assert.equal(resolveDashboardTab('traffic'), DEFAULT_DASHBOARD_TAB);
+    assert.equal(resolveDashboardTab('livetraffic'), DEFAULT_DASHBOARD_TAB);
+    assert.equal(resolveDashboardTab('bandwidth'), DEFAULT_DASHBOARD_TAB);
   });
 
   it('falls back for a missing or non-string value', () => {

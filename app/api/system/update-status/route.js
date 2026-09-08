@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.69.0': [
+    'New Traffic tab on the dashboard: log volume over 24 hours, busiest log sources, session outcomes, threat and UTM events, busiest firewall rules, and collector health.',
+    'The VPN page now shows what actually happened, taken from the firewall logs. Previously it could only show what VPN was configured, plus live session counts for Fortinet.',
+    'Sources sending logs that are not in your device inventory are flagged rather than hidden, because an unmanaged firewall logging to you is worth knowing about.',
+    'Every widget reads pre-built summaries, so the dashboard stays fast as the log volume grows.',
+  ],
   '2.68.0': [
     'Log data is now summarised in the background, so future dashboards read small pre-built summaries instead of scanning millions of raw events.',
     'Two summaries are kept indefinitely: traffic per device per hour, and how often each firewall rule was actually used per day.',

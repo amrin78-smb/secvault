@@ -1388,3 +1388,33 @@ CREATE TABLE IF NOT EXISTS syslog_ingest_stats (
   batch_ms       INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_ingest_stats_time ON syslog_ingest_stats (recorded_at DESC);
+
+-- ⛔ log_class: the event's kind, computed ONCE at ingest instead of being
+-- re-derived by every query. Added 2026-09-08 after measuring the alternative:
+-- the VPN and threat dashboards were matching `message LIKE '%subtype="vpn"%'`
+-- against the raw table, which cost 2.5s at 4M rows and would have been ~400s
+-- at the 7-day steady state of ~650M. This is the same fix LogVault applied to
+-- its `srcip` column for the same reason.
+-- Values seen live: traffic, threat, vpn, utm, system, event. NULL = the vendor
+-- payload did not identify a kind; never guessed.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS log_class TEXT;
+
+-- PARTIAL index: 'traffic' is ~97% of all events and is never selected BY
+-- class (the traffic widgets read the rollup), so indexing it would be pure
+-- write cost for no read. Everything interesting is in the long tail.
+CREATE INDEX IF NOT EXISTS idx_syslog_events_class
+  ON syslog_events (log_class, received_at DESC)
+  WHERE log_class IS NOT NULL AND log_class <> 'traffic';
+
+-- log_class also joins the hourly rollup, so threat/VPN COUNTS come from the
+-- aggregate and only per-event DETAIL touches the raw table.
+ALTER TABLE syslog_rollup_hourly ADD COLUMN IF NOT EXISTS log_class TEXT;
+
+-- The unique key must include the new grouping column or two different classes
+-- in the same hour would collide onto one row and the second would be lost.
+-- Drop-and-recreate is safe: the rollup is derived data, rebuilt from raw by
+-- the next sweep.
+ALTER TABLE syslog_rollup_hourly DROP CONSTRAINT IF EXISTS uq_syslog_rollup_hourly;
+ALTER TABLE syslog_rollup_hourly
+  ADD CONSTRAINT uq_syslog_rollup_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, source_ip, device_id, vendor, action, severity, log_class);

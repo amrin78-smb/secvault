@@ -183,6 +183,7 @@ function toEvent(raw) {
     ruleName: payload ? payload.ruleName : null,
     bytesSent: payload ? payload.bytesSent : null,
     bytesReceived: payload ? payload.bytesReceived : null,
+    logClass: payload ? payload.logClass : null,
     message: frame.message || raw.line,
   };
 }

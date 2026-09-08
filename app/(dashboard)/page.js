@@ -22,6 +22,14 @@ import QuickActions from '../../components/dashboard/QuickActions';
 import FleetSystemHealth from '../../components/dashboard/FleetSystemHealth';
 import LicenceExpiryWidget from '../../components/dashboard/LicenceExpiryWidget';
 import VulnerabilityTrends from '../../components/dashboard/VulnerabilityTrends';
+import {
+  TrafficVolumeWidget,
+  TopTalkersWidget,
+  ActionBreakdownWidget,
+  TopRulesWidget,
+  ThreatActivityWidget,
+  IngestHealthWidget,
+} from '../../components/dashboard/SyslogWidgets';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,9 +64,9 @@ export const dynamic = 'force-dynamic';
 // ── ADDING A WIDGET ──
 // Render it in the relevant case below. ── ADDING A TAB ── add an entry to
 // DASHBOARD_TABS in lib/dashboardTabs.js and a case here; the tab bar, the URL
-// whitelist and the default all derive from that array. See that file for the
-// Live Traffic tab that is deliberately absent until the Phase 8 syslog
-// collector exists.
+// whitelist and the default all derive from that array. The Traffic tab was
+// added on 2026-09-08 once services/collector.js was live and ingesting; its
+// widgets read the ROLLUP tables, never raw syslog_events.
 
 async function getLastFeedSync(dbPool) {
   const result = await dbPool.query('SELECT * FROM feed_sync_log ORDER BY started_at DESC LIMIT 1');
@@ -179,6 +187,17 @@ export default async function DashboardPage({ searchParams }) {
         <div className="dashboard-widget-grid">
           <ComplianceScoreWidget />
           <ComplianceStandardsBreakdown />
+        </div>
+      )}
+
+      {tab === 'traffic' && (
+        <div className="dashboard-widget-grid">
+          <TrafficVolumeWidget />
+          <TopTalkersWidget />
+          <ActionBreakdownWidget />
+          <ThreatActivityWidget />
+          <TopRulesWidget />
+          <IngestHealthWidget />
         </div>
       )}
 

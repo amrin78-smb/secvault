@@ -5,17 +5,27 @@ import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import { summarizeVpnConfig } from '../../../lib/engines/vpnSummary';
+import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
 
 export const dynamic = 'force-dynamic';
 
-// Fleet-wide VPN exposure view — "which devices have VPN configured/enabled
-// at a glance", config-derived (device_configs.config_parsed), NOT log/
-// session-report data (see lib/engines/vpnSummary.js's own header comment
-// for the full per-vendor breakdown, and CLAUDE.md's Phase 8 notes for why
-// real usage/session-history data needs syslog ingestion this app doesn't
-// have yet). Server component queries the DB directly, same convention as
-// every other fleet-wide page in this app (compliance/page.js, alerts/
-// page.js).
+// Fleet-wide VPN exposure view. ⛔ THREE DIFFERENT VPN ANSWERS live on this
+// page and must not be conflated:
+//
+//   1. CONFIG-derived (the table below, vpnSummary.js) — "is VPN configured
+//      and enabled here", from device_configs.config_parsed.
+//   2. SESSION counts (vpn_session_snapshots) — "how many are connected right
+//      now", Fortinet API only.
+//   3. LOG activity (VpnSyslogActivity, added 2026-09-08) — "what actually
+//      happened", from syslog. This is the only one that covers Palo Alto.
+//
+// This comment previously said real usage data "needs syslog ingestion this
+// app doesn't have yet". That stopped being true when services/collector.js
+// shipped, and a stale caveat is worse than none: it would send the next
+// reader looking for data that is now sitting right above the table.
+//
+// Server component queries the DB directly, same convention as every other
+// fleet-wide page in this app (compliance/page.js, alerts/page.js).
 
 // One row per active device: latest config_parsed (for the VPN summary) +
 // latest vpn_session_snapshots.active_session_count (if this device's
@@ -95,6 +105,10 @@ export default async function VpnFleetPage() {
           </a>
         }
       />
+
+      {/* Log-observed activity sits ABOVE the config table: it is the only
+          one of the three views that reflects what actually happened. */}
+      <VpnSyslogActivity />
 
       {devices.length === 0 ? (
         <EmptyState message="No active devices." />
