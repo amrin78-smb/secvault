@@ -220,6 +220,11 @@ DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own lo
 
 GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
 
+## /api/logs/search
+
+GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
+Deliberately NOT admin-gated — read-only, persists nothing, same reasoning as `access-path`/`path-query`. ⛔ A query error returns **500**, never an empty `rows` array: "0 results" from a failed query reads as "that traffic never happened". Added 2026-09-08.
+
 ## /api/topology/path-query
 
 POST /api/topology/path-query [auth] [db] — `{srcIp, dstIp, protocol?, port?}` -> `simulateMultiHopPath()` (`lib/engines/topology.js`), fleet-wide (no `[id]` param — loads every active device's rules/objects/interfaces/routes/nat_rules). Deliberately NOT admin-gated, same reasoning as `access-path`. Added 2026-08-02.

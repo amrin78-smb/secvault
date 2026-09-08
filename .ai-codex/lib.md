@@ -396,6 +396,16 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ Fortinet's `threatName` accepts only `attack` or `virus`, never `eventtype` — on an app-ctrl row `eventtype` reads "signature", which names nothing and would top every Top Threats report.
 `threatSeverityRank(raw)` -> `0-5 | null` — maps PAN-OS (`informational`..`critical`) and FortiOS (`debug`..`emergency`) onto ONE ordered scale so a severity chart does not split a level across two vendor words. ⛔ Returns null for an unrecognized word, never a default level: a threat filed under a guessed severity silently changes where it sorts in a prioritized list.
 
+## lib/syslog/logSearch.js
+
+`buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `resolveWindow` · `clampLimit`.
+⛔ **The ONLY place that reads `syslog_events` directly** instead of a rollup — an aggregate has thrown away the individual event, which is exactly what an investigation needs. In exchange it is disciplined about it:
+⛔ **A time window is MANDATORY and BOUNDED** (`MAX_WINDOW_DAYS`=8, default last hour). `resolveWindow()` never returns an unbounded or inverted range whatever it is handed. At ~133 GB/day an open-ended search is not a slow query, it is an outage for the ~1,500 rows/sec ingest on the same disk. A clamped range sets `clamped:true` and the UI says so.
+⛔ **Truncation is REPORTED**, never silent: the query asks for `limit + 1`, drops the probe row, and returns `truncated`. "Here are 100 of many" and "here are the only 100" are different answers and only one is true.
+⛔ **A malformed filter is REJECTED and surfaced** in `rejected`, never silently ignored — dropping `srcIp=10.1.1` would return every host's traffic and read as a confident answer about that one host.
+⛔ **Every value is a bind parameter and every column name comes from the `FILTERS` whitelist.** This is the only query in the codebase assembled from user-supplied input, on a security product; `tests/logSearch.test.js` carries the injection guard. LIKE metacharacters are escaped so a literal `%` cannot silently widen a search to everything.
+A bare address filters by equality, a CIDR by containment (`<<=`).
+
 ## lib/syslog/eventShape.js
 
 `buildEvent(raw, frame, payload, deviceId)` -> the event object `eventStore.flattenRow()` consumes. Pure — no DB, no sockets, no clock. Never throws.

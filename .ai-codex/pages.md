@@ -60,6 +60,13 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 [server] /vpn — VpnFleetPage — fleet table of VPN status per active device (`summarizeVpnConfig()`, config-derived from latest `device_configs.config_parsed`) + latest polled active-session count/timestamp (Fortinet-only capability) + CSV export.
 [server] /devices/[id]/vpn — DeviceVpnPage — one device's VPN config summary card (SSL-VPN/remote-access: source interface/port/idle-timeout/min-TLS, enabled/disabled/unknown badge, low-confidence badge for doc-derived vendors) + `VpnSessionTrendChart` (session-count history) + CSV export.
 
+## Log Search
+
+`/logs` — `app/(dashboard)/logs/page.js`, the forensic view. Server-rendered from the URL query string (no client JS, no `useState`), so a search is linkable, pasteable into a ticket and survives a refresh — same server-driven convention as the dashboard `?tab=` and `/topology?view=`. Components: `logs/LogSearchForm` (plain GET `<form>`), `logs/LogResults`.
+Filter dropdowns are populated from what the fleet ACTUALLY sends (`getFilterOptions`), so an action or log class no device produces never appears as a choice that silently returns nothing.
+⛔ Landing on `/logs` with no parameters shows the FORM, not an arbitrary slice of the last hour presented as a result.
+Closed the largest gap in the 2026-09-08 Firewall Analyzer decommission review: before it, "what did this address do at 03:00 last Tuesday" had no answer anywhere in SecVault. Added 2026-09-08.
+
 ## Topology
 
 [server] /topology — TopologyPage — top-level nav entry (added 2026-08-02, between VPN and Settings). `?view=query|map` toggle (same pattern as `/compliance`'s `?view=cards|table`), default `query` renders `<PathQueryTab />` (fleet-wide, no props); `map` (added 2026-08-02) renders `<FleetMap />`, a visual diagram of every active device + inferred link. See `components.md`'s `topology/` entry and `lib.md`'s `topology.js` engine entry.

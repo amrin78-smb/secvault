@@ -15,6 +15,7 @@ import {
   IconUser,
   IconTopology,
   IconLifecycle,
+  IconDocument,
 } from '../icons';
 
 // Icon reuse note (Phase 7, Compliance): IconShield is already taken by
@@ -37,6 +38,10 @@ const NAV = [
   // match" call this file already made for Compliance -> IconSearch.
   { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
   { href: '/topology', label: 'Topology', Icon: IconTopology, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
+  // Cyan — the last hue not already spoken for by another entry. IconDocument
+  // was the one remaining glyph both unused here and semantically right: a log
+  // IS a record. Same "reuse what exists" call made for Compliance and VPN.
+  { href: '/logs', label: 'Log Search', Icon: IconDocument, color: '#22d3ee', bg: 'rgba(34,211,238,0.20)' },
   // Rose — the one hue not already spoken for by another nav entry. Unlike
   // Compliance/VPN above, this one DID get its own icon (IconLifecycle): every
   // remaining glyph in components/icons.js is either already a nav entry or

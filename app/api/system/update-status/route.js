@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.73.0': [
+    'New Log Search page: search raw firewall logs by time, device, address, port, user, rule, country, application, threat or website - the investigation tool Firewall Analyzer was used for.',
+    'Searches are shareable. The whole query lives in the address bar, so you can paste a search into a ticket and a colleague sees exactly what you saw.',
+    'Results always say what they are not showing: if more matches exist beyond the limit, or the date range was shortened to what is still kept, the page says so rather than presenting a partial answer as a complete one.',
+    'A filter it cannot understand is reported back to you instead of being quietly ignored, so a mistyped address can never look like an all-clear.',
+    'Firewall placeholder values such as N/A are now treated as no answer rather than being counted, so they cannot appear as a busy user or a common threat.',
+  ],
   '2.72.1': [
     'Fixes the previous release: the eight new log fields were being read from the firewall and written to the database, but were dropped in between, so every one of them stored blank.',
     'The step that was missing has been moved into its own module and is now covered by a test that walks a real firewall log line all the way to the database and fails if any field goes missing.',

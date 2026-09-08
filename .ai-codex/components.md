@@ -129,6 +129,13 @@ RulesetOverview  no props — fleet-wide rule totals + finding-type stat tiles (
 TopRiskyDevices  limit — top active devices by latest rule-analysis risk score
 VendorDistribution  no props — active-device count by vendor, bar list
 
+## logs/
+
+LogSearchForm  params, devices, options — a plain GET `<form>` posting to `/logs`. No client JS: the URL is the query. Fields cover time window, device, log class, action, source/destination address (bare or CIDR), port, user, rule, country, application, threat, website and raw-text contains.
+LogResults  result, deviceNames — the results table plus the raw line behind a `<details>` toggle, since the raw message is the evidence and exists even for events nothing could parse.
+⛔ The truncation, clamped-window and rejected-filter notices are NOT decoration. Presenting the first 100 of 4,000,000 matches as the whole answer is how an investigator concludes "that host made three connections" and is wrong. An error renders as an error, never as "no results".
+⛔ A timestamp whose device gave no timezone renders with a trailing `~` (`tzAssumed`) — investigations turn on timestamps, so the caveat travels with the value.
+
 ## snmp/
 
 (c) SnmpMetricsCharts  points — full CPU/Memory + Sessions trend line charts (device SNMP page)
