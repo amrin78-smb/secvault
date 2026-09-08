@@ -281,3 +281,77 @@ describe('rollups: byte aggregation is restricted to summable rows', () => {
     assert.doesNotMatch(RULE_INSERT, /coalesce\s*\(\s*sum\(bytes_sent\)/i);
   });
 });
+
+describe('rollups: the WIDE sweep is sliced, not shrunk', () => {
+  // Measured live: a single-pass 24h wide sweep grew 155s -> 248s -> 327s as
+  // the partition filled and began overrunning the 5-minute cycle. Slicing
+  // bounds each pass; ⛔ SHRINKING the lookback instead would silently and
+  // permanently under-count every bucket that gets a late event, which is the
+  // exact LogVault bug this file's header exists to prevent.
+  const { wideSliceIndex, wideSliceWindow } = require('../lib/syslog/rollups');
+
+  it('bounds every wide pass to one slice plus an hour of overlap', () => {
+    for (let i = 0; i < 12; i++) {
+      const now = new Date(Date.UTC(2026, 8, 8, i, 37, 0));
+      const { from, to } = wideSliceWindow(now, 24, 6);
+      // The overlap is the SLICE COUNT (4 here), absorbing the one-hour-per-pass
+      // drift. A one-hour overlap left the oldest hours covered by no slice.
+      assert.equal((to - from) / 3600000, 10, '6h slice + 4h overlap over a 24h lookback');
+    }
+  });
+
+  it('⛔ covers the WHOLE lookback across a full rotation — nothing is skipped', () => {
+    // The property that makes slicing safe. If any hour of the lookback were
+    // missed by every slice, its bucket would never be rebuilt and any late
+    // event landing in it would be lost forever with no error anywhere.
+    const covered = new Set();
+    const base = Date.UTC(2026, 8, 8, 12, 0, 0);
+    const slices = Math.ceil(24 / 6);
+    for (let i = 0; i < slices; i++) {
+      const now = new Date(base + i * 3600000);
+      const { from, to } = wideSliceWindow(now, 24, 6);
+      for (let t = from.getTime(); t < to.getTime(); t += 3600000) covered.add(t);
+    }
+    // Every hour from 24h before the first pass up to that pass must be covered.
+    for (let h = 1; h <= 24; h++) {
+      const hour = base - h * 3600000;
+      assert.ok(covered.has(hour), `hour -${h} was skipped by every slice`);
+    }
+  });
+
+  it('rotates rather than rebuilding the same slice every pass', () => {
+    const seen = new Set();
+    for (let i = 0; i < 4; i++) {
+      seen.add(wideSliceIndex(new Date(Date.UTC(2026, 8, 8, 12 + i)), 24, 6));
+    }
+    assert.equal(seen.size, 4, 'four consecutive passes must walk four slices');
+  });
+
+  it('slices overlap, so no bucket falls between two of them', () => {
+    const a = wideSliceWindow(new Date(Date.UTC(2026, 8, 8, 12)), 24, 6);
+    const b = wideSliceWindow(new Date(Date.UTC(2026, 8, 8, 13)), 24, 6);
+    // b is the next slice back; its `to` must be at or after a's `from`.
+    assert.ok(b.to >= a.from, 'adjacent slices must touch or overlap');
+  });
+
+  it('degrades to a single slice when the lookback is smaller than one', () => {
+    const { from, to, sliceIndex } = wideSliceWindow(new Date(Date.UTC(2026, 8, 8, 12)), 3, 6);
+    assert.equal(sliceIndex, 0);
+    assert.ok(to > from);
+  });
+
+  it('the recent tier is NOT sliced — it must always cover the newest hours', async () => {
+    const pool = stubPool();
+    const recent = await runRollupMaintenance(pool, { now: NOW, wide: false, recentHours: 3 });
+    assert.equal(recent.sliceIndex, null, 'slicing the live tier would stall the dashboards');
+    assert.equal(recent.tier, 'recent');
+  });
+
+  it('a wide pass reports which slice it rebuilt', async () => {
+    const pool = stubPool();
+    const wide = await runRollupMaintenance(pool, { now: NOW, wide: true, lookbackHours: 24 });
+    assert.equal(wide.tier, 'wide');
+    assert.equal(typeof wide.sliceIndex, 'number');
+    assert.equal(wide.sliceHours, 6);
+  });
+});

@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.74.1': [
+    'Log summarisation no longer falls behind as the day fills up. The hourly catch-up pass now rebuilds a portion of the day at a time instead of the whole day at once.',
+    'Measured on the live server, that pass had grown from under 3 minutes to over 5 and had started skipping cycles.',
+    'Full coverage is unchanged: every hour is still rebuilt regularly, so a log arriving late is still counted. Only how much work each pass does has changed.',
+  ],
   '2.74.0': [
     'The Security tab now shows what is actually being attempted against the fleet - top attackers, most targeted hosts, top threats and a severity breakdown - alongside the CVE exposure it already showed.',
     'New on the Traffic tab: destination countries, top users and web/application categories. None of this needed a geo-location database or an Active Directory connection: the firewalls were already reporting all of it.',

@@ -334,7 +334,11 @@ async function rollupCycle(wide) {
     });
     if (r.ok) {
       log(
-        `rollup ${r.tier} (${r.hours}h): ${r.hourlyRows} hourly + ${r.ruleRows} rule + ` +
+        `rollup ${r.tier} (${r.hours}h` +
+        (r.sliceIndex === null || r.sliceIndex === undefined
+          ? ''
+          : `, slice ${r.sliceIndex}/${r.sliceHours}h`) +
+        `): ${r.hourlyRows} hourly + ${r.ruleRows} rule + ` +
         `${r.talkerRows} host + ${r.appRows} app + ${r.blockedRows} blocked-dst row(s) in ${r.ms}ms`
       );
     } else {
