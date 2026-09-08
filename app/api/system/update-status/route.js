@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.67.1': [
+    'The log collector now listens on both port 514 and port 1514, matching what Firewall Analyzer did.',
+    'Listening on 514 alone meant almost nothing arrived, because most of your firewalls were configured to send to 1514 and had never been changed.',
+    'Nothing reported an error: a message sent to a port nobody is listening on is discarded silently by the operating system.',
+    'Both ports are configurable, and a typo in one no longer stops the collector listening on the others.',
+  ],
   '2.67.0': [
     'SecVault now collects firewall logs itself, taking over from Firewall Analyzer. The collector listens on the standard syslog ports and stores what your firewalls send.',
     'Logs are written to disk before the database and only removed once safely stored, so a restart replays anything in flight rather than losing it.',

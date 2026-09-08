@@ -64,6 +64,7 @@ const { pool } = require('../lib/db');
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const store = require('../lib/syslog/eventStore');
+const { parsePortList } = require('../lib/syslog/collectorConfig');
 
 // --- configuration ---------------------------------------------------------
 function intEnv(name, def, min, max) {
@@ -82,8 +83,12 @@ function intEnv(name, def, min, max) {
   return t;
 }
 
-const UDP_PORT      = intEnv('SYSLOG_UDP_PORT', 514, 1, 65535);
-const TCP_PORT      = intEnv('SYSLOG_TCP_PORT', 514, 1, 65535);
+// A LIST, not a single port. Firewall Analyzer listened on 514 AND 1514 and
+// most of this fleet was configured to 1514; binding only 514 left the
+// collector receiving ~7.5/sec where FWA had seen ~1,373/sec, with no error
+// anywhere -- the OS discards datagrams sent to an unbound UDP port silently.
+const UDP_PORTS = parsePortList(process.env.SYSLOG_UDP_PORT, [514, 1514]);
+const TCP_PORTS = parsePortList(process.env.SYSLOG_TCP_PORT, [514, 1514]);
 const FLUSH_MS      = intEnv('SYSLOG_FLUSH_MS', 2000, 250, 60000);
 const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 200000, 1000, 5000000);
 const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 7, 1, 3650);
@@ -316,7 +321,7 @@ async function maintenance() {
 }
 
 // --- listeners -------------------------------------------------------------
-function startUdp() {
+function startUdp(port) {
   const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
   sock.on('message', (msg, rinfo) => {
     // Firewalls can pack several lines into one datagram.
@@ -325,12 +330,14 @@ function startUdp() {
       if (line.trim().length > 0) accept(line, rinfo.address);
     }
   });
-  sock.on('error', (err) => log(`ERROR udp: ${err.message}`));
-  sock.bind(UDP_PORT, () => log(`listening udp/${UDP_PORT}`));
+  // !! A bind failure on ONE port must not take the others down. Report it
+  // loudly and keep the rest listening.
+  sock.on('error', (err) => log(`ERROR udp/${port}: ${err.message}`));
+  sock.bind(port, () => log(`listening udp/${port}`));
   return sock;
 }
 
-function startTcp() {
+function startTcp(port) {
   const server = net.createServer((socket) => {
     const peer = socket.remoteAddress ? socket.remoteAddress.replace(/^::ffff:/, '') : 'unknown';
     let partial = '';
@@ -347,8 +354,8 @@ function startTcp() {
       if (partial.trim().length > 0) accept(partial, peer);
     });
   });
-  server.on('error', (err) => log(`ERROR tcp: ${err.message}`));
-  server.listen(TCP_PORT, () => log(`listening tcp/${TCP_PORT}`));
+  server.on('error', (err) => log(`ERROR tcp/${port}: ${err.message}`));
+  server.listen(port, () => log(`listening tcp/${port}`));
   return server;
 }
 
@@ -367,8 +374,10 @@ async function main() {
   log(`device map: ${deviceByIp.size} source address(es) resolvable`);
   await replayBacklog();
 
-  const udp = startUdp();
-  const tcp = startTcp();
+  for (const p of UDP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_UDP_PORT entry '${p}'`);
+  for (const p of TCP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_TCP_PORT entry '${p}'`);
+  const udpSockets = UDP_PORTS.ports.map((p) => startUdp(p));
+  const tcpServers = TCP_PORTS.ports.map((p) => startTcp(p));
 
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const mapTimer = setInterval(() => { refreshDeviceMap(); }, 5 * 60 * 1000);
@@ -381,8 +390,8 @@ async function main() {
     clearInterval(flushTimer);
     clearInterval(mapTimer);
     clearInterval(maintTimer);
-    try { udp.close(); } catch (_e) {}
-    try { tcp.close(); } catch (_e) {}
+    for (const s of udpSockets) { try { s.close(); } catch (_e) {} }
+    for (const s of tcpServers) { try { s.close(); } catch (_e) {} }
     // Drain what is in memory so a restart does not lose the current window.
     await flush();
     try { await pool.end(); } catch (_e) {}
