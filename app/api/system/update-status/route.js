@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.74.2': [
+    'The frequent log-summarisation pass now covers a shorter recent window, so it comfortably finishes within its five-minute cycle instead of nearly overrunning it.',
+    'Nothing is dropped: every hour is still rebuilt by the slower catch-up pass, so a log arriving late is still counted.',
+  ],
   '2.74.1': [
     'Log summarisation no longer falls behind as the day fills up. The hourly catch-up pass now rebuilds a portion of the day at a time instead of the whole day at once.',
     'Measured on the live server, that pass had grown from under 3 minutes to over 5 and had started skipping cycles.',

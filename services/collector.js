@@ -105,7 +105,15 @@ const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..',
 // Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
 // LogVault's single 24h-every-5-minutes window: at ~1,400 events/sec that
 // design would re-aggregate ~93M rows 288 times a day.
-const ROLLUP_RECENT_HOURS   = intEnv('SYSLOG_ROLLUP_RECENT_HOURS', 3, 1, 48);
+// ⛔ 1, not 3. sweepWindow() adds an hour, so this is already a 2-hour pass
+// every SYSLOG_ROLLUP_INTERVAL_MINUTES. At 3 it was a 4-hour pass taking
+// 233-262s against a 300s cycle on the live fleet -- about to overrun it.
+//
+// This is NOT the same trade-off as shrinking the wide lookback, which would
+// lose late events permanently. The RECENT tier's only job is keeping the
+// newest buckets fresh for the dashboards; every hour is still rebuilt by the
+// sliced wide sweep, so nothing is dropped by narrowing this one.
+const ROLLUP_RECENT_HOURS   = intEnv('SYSLOG_ROLLUP_RECENT_HOURS', 1, 1, 48);
 const ROLLUP_LOOKBACK_HOURS = intEnv('SYSLOG_ROLLUP_LOOKBACK_HOURS', 24, 2, 168);
 const ROLLUP_INTERVAL_MIN   = intEnv('SYSLOG_ROLLUP_INTERVAL_MINUTES', 5, 1, 60);
 
