@@ -390,12 +390,32 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 Fortinet: space-separated key=value; `eventtime` is a NANOSECOND epoch (19 digits) paired with `tz`, preferred over the date/time pair. Carries `policyid` AND `poluuid` — the rule linkage that will let log evidence produce real hit counts for the SSH transport, which cannot report them via the API at all.
 Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS carries no rule id/uuid in the log at all. ⛔ Positions differ per log TYPE — only the common prefix plus TRAFFIC-verified indices are read; a THREAT row leaves the traffic-only fields null rather than borrowing the wrong column.
 
+## lib/syslog/rollups.js
+
+`floorHour(date)` / `addHours` / `sweepWindow(now, hours)` -> `{from, to}` — UTC hour buckets. `to` is the start of the NEXT hour so the in-progress hour is included and corrected on every later sweep; `from` reaches back one hour further than requested so the earliest bucket is rebuilt WHOLE.
+`recomputeWindow(pool, from, to)` -> `{ok, hourlyRows, ruleRows, talkerRows, appRows, blockedRows, ms, error}` — rebuilds all FIVE rollups over one window, each in its own transaction. ⛔ **DELETE-then-INSERT, never increment-on-insert**: that makes every cycle idempotent and self-healing, so a missed cycle, a restart, a double-run or a retry can never double-count. Never throws — the caller is a timer inside the collector.
+`runRollupMaintenance(pool, {wide, recentHours, lookbackHours, now})` — one tiered cycle. ⛔ The WIDE sweep is not optional: `received_at` is stamped at parse time and never rewritten, so an event that lands late belongs to a bucket already out of the recent window. Without the wider periodic sweep that bucket is never revisited and the rollup under-counts PERMANENTLY, with no error anywhere (LogVault shipped exactly that bug with a 2-hour window).
+`backfillRange(pool, from, to, onProgress)` — manual recovery for a gap longer than the wide window; one day at a time so a multi-week backfill is never a single enormous transaction.
+`trimDetailRollups(pool, retentionDays)` -> `{days, deleted, error}` — bounded retention for the three DETAIL rollups only. ⛔ Junk/zero/negative input falls back to 30 rather than deleting the whole table; the day count is a BOUND PARAMETER; and the error is RETURNED rather than swallowed, because a silently un-trimmed high-cardinality table is how a disk fills up with every health signal still green.
+`HOURLY_INSERT` / `RULE_INSERT` / `TALKER_INSERT` / `APP_INSERT` / `BLOCKED_INSERT` exported for `tests/rollups.test.js` + `tests/detailRollups.test.js` to assert against.
+⛔ Every byte aggregate is `sum(...) FILTER (WHERE bytes_summable)` and is never COALESCEd to 0 — see `vendorParsers.bytesSummable`.
+
+## lib/syslog/trafficStats.js
+
+⛔ **Every query here reads a ROLLUP, never `syslog_events`** — that is the entire reason the rollups exist. Two documented exceptions: VPN per-event DETAIL (bounded by `log_class` + a recent window, and carrying per-event fields an aggregate would destroy) and ingest health (`syslog_ingest_stats` is already one small row per flush).
+⛔ **"No data" is NULL, never 0** — a fleet not yet collected from renders "—". A dashboard showing 0 events/sec when the collector is DOWN looks identical to a quiet network.
+Permanent-rollup readers: `getTrafficTimeline(pool, hours)`, `getTopTalkers(pool, hours, limit)`, `getActionBreakdown`, `getTopRules(pool, days, limit)`, `getIngestHealth(pool, minutes)`, `getVpnActivity`, `getVpnActivityByDevice`, `getThreatActivity`, `getClassTimeline(pool, logClass, hours)`.
+Detail-rollup readers (Phase 8b): `getTopHosts(pool, hours, limit)`, `getTopApplications(pool, hours, limit)` -> `{applications, unclassified}`, `getProtocolBreakdown(pool, hours)`, `getTopBlockedDestinations(pool, hours, limit)`, `getDeviceTrafficStats(pool, hours)`.
+⛔ `getTopTalkers` and `getTopHosts` answer DIFFERENT questions and must not be conflated: the first ranks the FIREWALLS sending us syslog (`source_ip` of the datagram), the second ranks the HOSTS inside the traffic those firewalls described (`src_ip` parsed from the payload). One returns ~16 rows, the other thousands.
+⛔ `getTopApplications` returns rows with no application as a separate `unclassified` COUNT rather than a synthetic `(unknown)` row — that row would usually rank #1 and bury the real answer behind a label that means nothing.
+⛔ `getDeviceTrafficStats` lists every ACTIVE device including ones that sent NOTHING (`events:0`, `lastSeen:null`). A firewall that has silently stopped logging is the most valuable row in that table; a query returning only devices present in the rollup would hide exactly it.
+
 ## lib/dashboardTabs.js
 
 `DASHBOARD_TABS` -> `{key,label,description}[]` — the dashboard's tab model, the single source for the tab bar, the `?tab=` whitelist and the default. ⛔ `key` is a URL value and therefore a public contract: add and deprecate, never rename in place.
 `resolveDashboardTab(raw)` -> `string` — ALWAYS returns a key present in `DASHBOARD_TABS`, never the caller's input and never undefined. Handles the array Next.js produces for a repeated param (`?tab=a&tab=b`) by taking the first entry, and trims/lowercases a hand-typed value. A `?tab=` is user-supplied input, and a blank dashboard is indistinguishable from an outage.
 `dashboardTabByKey(key)` -> tab | `null`.
-Pure, dependency-free CommonJS (no DB, no React) so the Server Component imports it and `tests/dashboardTabs.test.js` unit-tests it. Live Traffic is deliberately absent until the Phase 8 syslog collector exists — the file documents the one-line addition.
+Pure, dependency-free CommonJS (no DB, no React) so the Server Component imports it and `tests/dashboardTabs.test.js` unit-tests it. The **Traffic** tab was deliberately absent until there was something real behind it; `services/collector.js` shipped 2026-09-08 and it was added the same day.
 
 ## lib/engines/configRetention.js
 

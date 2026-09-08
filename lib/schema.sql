@@ -1464,3 +1464,71 @@ CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_device ON syslog_rule_hits_hourl
 -- be summed reports NULL -- "unmeasurable" -- never a confident wrong total.
 -- Same tri-state rule as hit_count, applied to traffic volume.
 ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS bytes_summable BOOLEAN NOT NULL DEFAULT false;
+
+-- ===========================================================================
+-- Phase 8b — detail rollups for the traffic dashboards (added 2026-09-08)
+-- ===========================================================================
+-- Three NARROW tables rather than extra dimensions on syslog_rollup_hourly.
+-- LogVault's schema carries the same warning and the same shape: crossing a
+-- high-cardinality key (a host, an application) with the full severity/action/
+-- vendor dimension set explodes row counts for no benefit, because these
+-- widgets only ever need a total per key.
+--
+-- ⛔ These have their OWN, SHORTER retention (SYSLOG_DETAIL_RETENTION_DAYS,
+-- default 30) unlike syslog_rollup_hourly and syslog_rule_hits_hourly, which
+-- are permanent. Measured cardinality over 10 minutes on this fleet: 5,717
+-- distinct source hosts, 15,546 destinations, 986 applications. Sources and
+-- applications are bounded by the size of the estate; DESTINATIONS are not --
+-- they are mostly internet addresses with an unbounded long tail, which is why
+-- only BLOCKED destinations are stored (see the third table).
+--
+-- ⛔ Byte columns are populated only from rows where bytes_summable is true.
+-- NULL means "this device's counters cannot be summed", never zero traffic.
+
+-- Per-source-host hourly totals. Bounded by the number of hosts in the estate.
+CREATE TABLE IF NOT EXISTS syslog_talker_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  src_ip         INET NOT NULL,
+  event_count    BIGINT NOT NULL DEFAULT 0,
+  denied_count   BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  CONSTRAINT uq_syslog_talker_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, src_ip)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_talker_hour ON syslog_talker_hourly (bucket_hour DESC);
+
+-- Per-application/protocol hourly totals. This is the closest equivalent to
+-- Firewall Analyzer's protocol-group traffic chart.
+CREATE TABLE IF NOT EXISTS syslog_app_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  application    TEXT,
+  protocol       TEXT,
+  event_count    BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  CONSTRAINT uq_syslog_app_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, application, protocol)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_app_hour ON syslog_app_hourly (bucket_hour DESC);
+
+-- BLOCKED destinations only. ⛔ Deliberately not "all destinations": the full
+-- set is unbounded internet addresses, whereas what was DENIED is both bounded
+-- and the question actually worth asking. Storing everything would have made
+-- this the largest table in the database to answer a question nobody asks.
+CREATE TABLE IF NOT EXISTS syslog_blocked_dst_hourly (
+  id           BIGSERIAL PRIMARY KEY,
+  bucket_hour  TIMESTAMPTZ NOT NULL,
+  device_id    UUID REFERENCES devices(id) ON DELETE CASCADE,
+  dst_ip       INET NOT NULL,
+  dst_port     INTEGER,
+  protocol     TEXT,
+  event_count  BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT uq_syslog_blocked_dst_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, dst_ip, dst_port, protocol)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_blocked_dst_hour ON syslog_blocked_dst_hourly (bucket_hour DESC);

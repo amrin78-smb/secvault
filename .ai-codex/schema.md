@@ -187,6 +187,25 @@ was caught within a minute of going live) or wiped a day the INSERT only partly 
 flush inserts a duplicate "unknown vendor" row instead of incrementing one, and the usual
 workaround (sentinel strings) is the fabricated-value pattern this codebase bans.
 
+### syslog_talker_hourly / syslog_app_hourly / syslog_blocked_dst_hourly   (Phase 8b, 30-day)
+The three DETAIL rollups behind the Traffic tab's ranking widgets: hourly totals per SOURCE HOST,
+per APPLICATION+PROTOCOL, and per BLOCKED DESTINATION (`bucket_hour, device_id, <key>` -> events,
+summable bytes; the talker table also carries `denied_count`).
+⛔ **Narrow on purpose.** These are NOT extra dimensions on `syslog_rollup_hourly`: crossing a
+high-cardinality key with the full severity/action/vendor dimension set explodes row counts for no
+benefit, since the widgets only ever need a total per key. LogVault's schema carries the same
+warning for the same reason.
+⛔ **Own, SHORTER retention** (`SYSLOG_DETAIL_RETENTION_DAYS`, default 30) unlike the two permanent
+rollups above — enforced by `rollups.js`'s `trimDetailRollups()`, which DELETEs (correct here: tens
+of thousands of rows a day, not ~93M; only the raw partitioned table must never be DELETEd from).
+⛔ **`syslog_blocked_dst_hourly` stores ONLY denied traffic**, and no widget may be relabelled to
+imply otherwise. Measured cardinality over ten minutes on this fleet: 5,717 distinct source hosts,
+986 applications, **15,546 destinations** — sources and applications are bounded by the size of the
+estate, destinations are an unbounded internet long tail. Storing every destination would have made
+it the largest table in the database to answer a question nobody asks.
+⛔ Byte columns are populated only from rows where `bytes_summable` — NULL means "these counters
+cannot be summed", never zero traffic. All three use `UNIQUE NULLS NOT DISTINCT`, same as above.
+
 ### syslog_ingest_stats   (Phase 8, permanent)
 One row per flush: received / parsed / stored / **dropped** / unknown_vendor / unknown_source /
 spool_backlog / batch_ms. ⛔ `dropped` is the number that matters — a collector silently losing

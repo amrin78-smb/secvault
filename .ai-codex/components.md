@@ -107,6 +107,16 @@ HeadlineStats  no props — dashboard's six-tile headline row (Devices / Securit
 QuickActions  no props — dashboard shortcut list. ⛔ Every entry points at a route that EXISTS; the mockup's "Export Data" is deliberately absent (no fleet-wide equivalent) rather than wired to something approximate. Added v2.53.0.
 FleetSystemHealth  no props — fleet roll-up of reachability/CPU/memory/disk/HA/last-backup. ⛔ EVERY row states its own coverage ("11 of 16 devices reporting") because these come from OPTIONAL adapter capabilities (disk + HA are Palo Alto only today) — a fleet number computed from a subset, shown without saying so, invites exactly the wrong conclusion. Added 2026-08-05, v2.54.0.
 VulnerabilityTrends  no props (server) + (c) VulnerabilityTrendChart  points — CVE severity over time from `fleet_dashboard_snapshots`. ⛔ Labels the window the data ACTUALLY covers ("18d of history · 14 snapshots"), reporting span and sample count SEPARATELY since they diverge when a daily snapshot is missed; missing days are omitted, never plotted as 0 (that would draw a fictional dip). Handles the 0-point and 1-point cases in words. Added v2.54.0.
+### Syslog + traffic widgets (Phase 8/8b, dashboard `?tab=traffic`)
+⛔ **Every widget in both files reads a ROLLUP, never `syslog_events`.** At ~1,400 events/sec the raw table gains ~120M rows/day; a widget scanning it on each 60-second refresh is the exact failure LogVault measured before it pre-aggregated.
+⛔ **"No data" renders as an em-dash, never 0** — a collector that is DOWN and a network that is QUIET must not look the same on screen.
+
+SyslogWidgets.js (no props on any): TrafficVolumeWidget (24h event/deny/volume + hand-rolled 24-bucket bar strip), TopTalkersWidget (the FIREWALLS sending us syslog; ⛔ a sender that is not a managed device is badged `unmanaged` — a finding, not noise), ActionBreakdownWidget, ThreatActivityWidget, TopRulesWidget, IngestHealthWidget.
+TrafficWidgets.js (Phase 8b, no props on any): TopHostsWidget, TopApplicationsWidget, ProtocolBreakdownWidget, BlockedDestinationsWidget, DeviceTrafficTable. Split from SyslogWidgets on purpose — everything here reads one of the three DETAIL rollups, which have a BOUNDED retention, so the file boundary makes it harder to add a widget that quietly asks a 90-day question of a 30-day table.
+⛔ TopHostsWidget ("Top Hosts by Traffic") vs TopTalkersWidget ("Top Log Sources") answer DIFFERENT questions and can legitimately sit on one screen showing unrelated numbers; the titles are written to make that obvious. Each host links into `/topology?view=query&srcIp=`.
+⛔ Byte columns are ranked by EVENTS and show bytes as a secondary NULLABLE fact. Sorting unmeasured rows as zero would push the vendors that do not report byte counts to the bottom of a "top talkers by volume" list, reading as "these hosts are quiet" when the truth is "we cannot tell".
+⛔ DeviceTrafficTable lists every ACTIVE device including silent ones, badged `not logging` rather than shown as a row of zeros.
+
 (c) AutoRefresh  intervalMs — periodically calls router.refresh() to soft-refresh dashboard data
 ComplianceScoreWidget  no props — fleet compliance score gauge + per-standard breakdown
 ConfigChangesWidget  days — fleet-wide config-change summary over a trailing window

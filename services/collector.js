@@ -65,7 +65,7 @@ const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
-const { runRollupMaintenance } = require('../lib/syslog/rollups');
+const { runRollupMaintenance, trimDetailRollups } = require('../lib/syslog/rollups');
 
 // --- configuration ---------------------------------------------------------
 function intEnv(name, def, min, max) {
@@ -93,6 +93,12 @@ const TCP_PORTS = parsePortList(process.env.SYSLOG_TCP_PORT, [514, 1514]);
 const FLUSH_MS      = intEnv('SYSLOG_FLUSH_MS', 2000, 250, 60000);
 const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 200000, 1000, 5000000);
 const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 7, 1, 3650);
+// The DETAIL rollups (per-host / per-application / blocked-destination) are
+// keyed on high-cardinality values, so unlike the two PERMANENT rollups they
+// are bounded by time. Deliberately LONGER than the raw retention: the whole
+// point of a rollup is to still answer "who was the top talker last month"
+// after the raw events behind it have been dropped.
+const DETAIL_RETENTION_DAYS = intEnv('SYSLOG_DETAIL_RETENTION_DAYS', 30, 1, 3650);
 const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..', 'spool');
 
 // Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
@@ -325,6 +331,16 @@ async function maintenance() {
     await store.ensurePartitions(pool, new Date());
     const dropped2 = await store.dropOldPartitions(pool, RETENTION_DAYS, new Date());
     if (dropped2.length > 0) log(`retention: dropped partition(s) ${dropped2.join(', ')}`);
+
+    const trimmed = await trimDetailRollups(pool, DETAIL_RETENTION_DAYS);
+    const trimTotal = Object.values(trimmed.deleted).reduce((a, b) => a + b, 0);
+    if (trimTotal > 0) {
+      log(`retention: trimmed ${trimTotal} detail rollup row(s) older than ${trimmed.days}d`);
+    }
+    // trimDetailRollups never throws, so without this the failure would be
+    // SILENT -- and an un-trimmed high-cardinality table is exactly how a
+    // disk fills up with every health signal still reporting green.
+    if (trimmed.error) log(`WARN detail rollup trim: ${trimmed.error}`);
   } catch (err) {
     log(`ERROR maintenance failed: ${err.stack || err.message}`);
   }
@@ -347,7 +363,10 @@ async function rollupCycle(wide) {
       lookbackHours: ROLLUP_LOOKBACK_HOURS,
     });
     if (r.ok) {
-      log(`rollup ${r.tier} (${r.hours}h): ${r.hourlyRows} hourly + ${r.ruleRows} rule row(s) in ${r.ms}ms`);
+      log(
+        `rollup ${r.tier} (${r.hours}h): ${r.hourlyRows} hourly + ${r.ruleRows} rule + ` +
+        `${r.talkerRows} host + ${r.appRows} app + ${r.blockedRows} blocked-dst row(s) in ${r.ms}ms`
+      );
     } else {
       log(`ERROR rollup ${r.tier} failed after ${r.ms}ms: ${r.error}`);
     }
@@ -399,7 +418,10 @@ function startTcp(port) {
 async function main() {
   log('SecVault-Collector starting.');
   log(`spool dir : ${SPOOL_DIR}`);
-  log(`retention : ${RETENTION_DAYS} day(s) of raw events`);
+  log(
+    `retention : ${RETENTION_DAYS} day(s) of raw events, ` +
+    `${DETAIL_RETENTION_DAYS} day(s) of detail rollups`
+  );
   log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
 
   ensureSpoolDir();

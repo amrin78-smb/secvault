@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.71.0': [
+    'New traffic analysis widgets on the dashboard Traffic tab: Top Hosts, Top Applications, Protocols, Top Blocked Destinations, and a Traffic & Security table covering every device.',
+    'Top Hosts ranks the machines inside your network by the traffic your firewalls reported, and each host links straight into the path query so you can trace it across the fleet.',
+    'The per-device table lists every active firewall, including any that have sent no logs at all in the window - a firewall that has quietly stopped logging is now visible rather than simply absent.',
+    'These views are built from new pre-aggregated tables, so they stay fast at full log volume. They keep 30 days of history by default, configurable, while the existing traffic and rule-hit summaries are still kept indefinitely.',
+    'Where a vendor cannot report byte counts that can be added up, the volume column shows a dash rather than a zero, so an unmeasured host is never mistaken for a quiet one.',
+  ],
   '2.70.0': [
     'Traffic volume figures are now only shown where they can honestly be added up.',
     'Fortinet re-reports a long-running session with a running total, so adding those log lines counts the same traffic over and over. Left uncorrected this showed one firewall sending 50 terabytes in two hours.',

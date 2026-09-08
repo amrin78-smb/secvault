@@ -1501,6 +1501,7 @@ SYSLOG_MAX_BUFFER=200000                   # in-memory datagrams; overflow is CO
 SYSLOG_RETENTION_DAYS=7                    # raw events; enforced by DROPPING partitions
 SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the DB insert;
                                            # blank = <install dir>\spool. Installer sets it.
+SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)
 SYSLOG_ROLLUP_RECENT_HOURS=3               # frequent narrow re-aggregation
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5

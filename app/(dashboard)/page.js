@@ -30,6 +30,13 @@ import {
   ThreatActivityWidget,
   IngestHealthWidget,
 } from '../../components/dashboard/SyslogWidgets';
+import {
+  TopHostsWidget,
+  TopApplicationsWidget,
+  ProtocolBreakdownWidget,
+  BlockedDestinationsWidget,
+  DeviceTrafficTable,
+} from '../../components/dashboard/TrafficWidgets';
 
 export const dynamic = 'force-dynamic';
 
@@ -191,14 +198,28 @@ export default async function DashboardPage({ searchParams }) {
       )}
 
       {tab === 'traffic' && (
-        <div className="dashboard-widget-grid">
-          <TrafficVolumeWidget />
-          <TopTalkersWidget />
-          <ActionBreakdownWidget />
-          <ThreatActivityWidget />
-          <TopRulesWidget />
-          <IngestHealthWidget />
-        </div>
+        <>
+          <div className="dashboard-widget-grid">
+            <TrafficVolumeWidget />
+            <TopHostsWidget />
+            <TopApplicationsWidget />
+            <ActionBreakdownWidget />
+            <BlockedDestinationsWidget />
+            <ProtocolBreakdownWidget />
+            <ThreatActivityWidget />
+            <TopRulesWidget />
+            {/* Which firewalls are talking to us -- a different question from
+                TopHostsWidget above, which ranks hosts inside their traffic. */}
+            <TopTalkersWidget />
+            <IngestHealthWidget />
+          </div>
+          {/* Full width, outside the grid: seven numeric columns across every
+              active device do not fit a widget cell without truncating the one
+              column that matters. */}
+          <div style={{ marginTop: 16 }}>
+            <DeviceTrafficTable />
+          </div>
+        </>
       )}
 
       {tab === 'fleet' && (
