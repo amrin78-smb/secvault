@@ -185,7 +185,7 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 ## lib/syslog/eventStore.js
 
 `buildPartitionSql(date)` / `partitionNameFor(date)` — daily partition DDL, **UTC** so a boundary is the same instant everywhere and does not move under DST. Range is `[day, day+1)`; an off-by-one here leaves a whole day of events with nowhere to land.
-`buildInsertSql(rowCount)` / `flattenRow(event)` / `chunk(arr, size)` — multi-row parameterized INSERT. ⛔ 25 columns x `MAX_ROWS_PER_INSERT` (500) = 12,500 binds, kept well under PostgreSQL's 65535-parameter cap; a test asserts this, because exceeding it fails under load rather than in review.
+`buildInsertSql(rowCount)` / `flattenRow(event)` / `chunk(arr, size)` — multi-row parameterized INSERT. ⛔ 35 columns x `MAX_ROWS_PER_INSERT` (500) = 17,500 binds, kept well under PostgreSQL's 65535-parameter cap; a test asserts this, because exceeding it fails under load rather than in review. `COLUMNS.length` and `flattenRow()`'s array length must stay equal — they are positional, and a mismatch shifts every value one column left.
 `ensurePartitions(pool, now)` — creates yesterday/today/tomorrow. Yesterday matters: an event can arrive just after a UTC midnight rollover and without the partition the INSERT fails outright.
 `dropOldPartitions(pool, retentionDays, now)` — ⛔ DROPs partitions, never DELETEs rows, and only ever names matching `^syslog_events_\d{8}# lib/ — Library Export Index
 
@@ -388,7 +388,13 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `parseVendorPayload(message)` -> normalized event | `null`. `parseFortinet` / `parsePaloAlto` / `parseKeyValue` / `splitCsv` exported for reuse and testing.
 ⛔ **Every field position/name here was read off REAL CAPTURED LOGS** from this fleet's preserved FWA archive (2026-09-08), never from vendor docs — CLAUDE.md's "documentation lies" rule. The captured lines are the fixtures in `tests/vendorParsers.test.js`, so the evidence sits next to the code.
 Fortinet: space-separated key=value; `eventtime` is a NANOSECOND epoch (19 digits) paired with `tz`, preferred over the date/time pair. Carries `policyid` AND `poluuid` — the rule linkage that will let log evidence produce real hit counts for the SSH transport, which cannot report them via the API at all.
-Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS carries no rule id/uuid in the log at all. ⛔ Positions differ per log TYPE — only the common prefix plus TRAFFIC-verified indices are read; a THREAT row leaves the traffic-only fields null rather than borrowing the wrong column.
+Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS carries no rule id/uuid in the log at all. ⛔ Positions differ per log TYPE — `PAN_COMMON` + `PAN_TRAFFIC` + `PAN_THREAT` are three separate maps and each row is read only through the map for ITS type; a THREAT row leaves traffic-only fields null rather than borrowing the wrong column.
+
+**Fields added 2026-09-08** — `logSubtype`, `srcUser`, `srcCountry`, `dstCountry`, `urlCategory`, `urlHostname`, `threatName`, `threatSeverity`. Every one was ALREADY arriving in logs both vendors send and was being discarded; none needs a new device command, a GeoIP database or an AD integration. This is what makes geographic, per-user, URL and attack reporting possible without new collection.
+⛔ **PAN-OS puts COUNTRY at different indices per log type**: TRAFFIC 41/42, THREAT 38/39. Crossing the maps returns a real, plausible, WRONG value — traffic index 39 is a sequence number and would render as a country name. Pinned by `tests/vendorFields.test.js` using real captured lines from both types.
+⛔ FortiOS reports `srccountry="Reserved"` for RFC1918 addresses. That is the device's own answer and is kept verbatim — not rewritten to null (which would discard a real answer) nor to "Private" (which would invent a word the device never said).
+⛔ Fortinet's `threatName` accepts only `attack` or `virus`, never `eventtype` — on an app-ctrl row `eventtype` reads "signature", which names nothing and would top every Top Threats report.
+`threatSeverityRank(raw)` -> `0-5 | null` — maps PAN-OS (`informational`..`critical`) and FortiOS (`debug`..`emergency`) onto ONE ordered scale so a severity chart does not split a level across two vendor words. ⛔ Returns null for an unrecognized word, never a default level: a threat filed under a guessed severity silently changes where it sorts in a prioritized list.
 
 ## lib/syslog/rollups.js
 

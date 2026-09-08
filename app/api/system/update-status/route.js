@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.72.0': [
+    'Firewall logs now capture eight fields your firewalls were already sending and SecVault was discarding: country, user, URL category, website, threat name, threat severity and log subtype.',
+    'This means country-level and per-user reporting need no extra database and no Active Directory integration - both Palo Alto and Fortinet already put this in every log line.',
+    'Palo Alto reports country in a different position depending on whether the line is a traffic or a threat record, so each record type is read with its own field map, verified against real captured logs.',
+    'Fortinet reports Reserved as the country for internal addresses. That is the answer the firewall itself gave, and it is shown as-is rather than rewritten.',
+    'These fields fill in from now on. Logs already stored keep them blank rather than being backfilled with a guess.',
+  ],
   '2.71.1': [
     'Log summarisation now reads each batch of logs once instead of five times, cutting the disk work behind the traffic dashboards by roughly 80%.',
     'Measured on the live server: the five-minute summarisation pass was reading about 9 GB from disk five times over, on the same drive receiving 1,500 log lines a second.',

@@ -174,6 +174,8 @@ rule_id, rule_uuid, rule_name TEXT    -- as the DEVICE reported it, NOT yet reso
 bytes_sent, bytes_received BIGINT
 message        TEXT NOT NULL          -- the raw line, always kept even when nothing else parsed
 ```
+**Columns added 2026-09-08**: `log_subtype`, `src_user`, `src_country`, `dst_country`, `url_category`, `url_hostname`, `threat_name`, `threat_severity` — all nullable, all extracted from logs both vendors were already sending. ⛔ Each needed its own `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`: the `CREATE TABLE IF NOT EXISTS` guards the TABLE only, so a deployed server would otherwise keep the old shape while the diff still looked correct. ⛔ They populate GOING FORWARD ONLY — rows stored before the deploy keep NULL and must not be backfilled with a guess; the raw `message` is still there for anyone who wants to re-derive them deliberately.
+
 PARTITIONED BY RANGE (received_at), one partition per UTC day, ~7 days retained.
 ⛔ Aged out by **DROPPING the partition**, never DELETE — at ~93M rows/day a DELETE costs more WAL
 and vacuum than the ingest and does not reclaim space. See `lib/syslog/eventStore.js`.

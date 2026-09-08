@@ -1311,6 +1311,29 @@ CREATE TABLE IF NOT EXISTS syslog_events (
   PRIMARY KEY (received_at, id)
 ) PARTITION BY RANGE (received_at);
 
+-- Fields both vendors were ALREADY sending and SecVault was throwing away
+-- (added 2026-09-08). ⛔ Each needs its own ALTER: the CREATE TABLE above
+-- guards the TABLE, never a column, so a deployed server keeps the old shape
+-- and the first query selecting one of these crashes with "column does not
+-- exist" while the CREATE TABLE body still looks correct in the diff.
+--
+-- ⛔ These populate GOING FORWARD ONLY. Rows already stored keep NULL, and
+-- that must not be backfilled with a guess -- the raw message is still there
+-- for anyone who wants to re-derive it deliberately.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS log_subtype TEXT;
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS src_user TEXT;
+-- Country as the DEVICE reported it. FortiOS says "Reserved" for RFC1918;
+-- that is a real answer and is kept verbatim, not rewritten.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS src_country TEXT;
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS dst_country TEXT;
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS url_category TEXT;
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS url_hostname TEXT;
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_name TEXT;
+-- The vendor's own severity word, unnormalized. PAN-OS and FortiOS use
+-- different vocabularies; threatSeverityRank() in vendorParsers.js maps both
+-- onto one scale at READ time and returns null for anything unrecognized.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_severity TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_syslog_events_source_time ON syslog_events (source_ip, received_at DESC);
 -- ⛔ NO per-rule index on the RAW table, deliberately. It was created on
