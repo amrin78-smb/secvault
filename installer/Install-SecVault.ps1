@@ -68,6 +68,19 @@ param(
 
     [int]$AppPort = 3010,
 
+    # Durable spool for the syslog collector. Written and fsync-ed BEFORE
+    # each DB insert and replayed on restart, so it must be on a volume that
+    # exists and has room. Defaults under the install root; point it at a
+    # data volume on busy fleets (this one runs ~1,400 events/sec).
+    [string]$SpoolDir = 'C:\Apps\SecVault\spool',
+
+    # Syslog listener ports. A LIST, because ManageEngine Firewall Analyzer
+    # -- which SecVault replaced on the reference deployment -- listened on
+    # BOTH, and most firewalls in that fleet were configured to 1514. A
+    # collector bound only to 514 receives almost nothing and reports itself
+    # perfectly healthy while doing so.
+    [string]$SyslogPorts = '514,1514',
+
     [string]$NetVaultUrl = ''
 )
 
@@ -767,6 +780,9 @@ $envContent = $envContent -replace '(?m)^NEXTAUTH_URL=.*$', "NEXTAUTH_URL=$nextA
 $envContent = $envContent -replace '(?m)^NEXTAUTH_SECRET=.*$', "NEXTAUTH_SECRET=$nextAuthSecret"
 $envContent = $envContent -replace '(?m)^CREDENTIAL_KEY=.*$', "CREDENTIAL_KEY=$credKey"
 $envContent = $envContent -replace '(?m)^PG_ADMIN_PASSWORD=.*$', "PG_ADMIN_PASSWORD=$PgAdminPassword"
+$envContent = $envContent -replace '(?m)^SYSLOG_SPOOL_DIR=.*$', "SYSLOG_SPOOL_DIR=$SpoolDir"
+$envContent = $envContent -replace '(?m)^SYSLOG_UDP_PORT=.*$', "SYSLOG_UDP_PORT=$SyslogPorts"
+$envContent = $envContent -replace '(?m)^SYSLOG_TCP_PORT=.*$', "SYSLOG_TCP_PORT=$SyslogPorts"
 
 if ($NetVaultUrl) {
     $envContent = $envContent -replace '(?m)^NETVAULT_URL=.*$', "NETVAULT_URL=$NetVaultUrl"
@@ -913,17 +929,77 @@ $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-Engine AppRestartDelay 3000 2>&1 }
 $out | Write-Host
 
+Invoke-Native { & $NssmExe stop SecVault-Collector confirm 2>&1 } | Out-Null
+Invoke-Native { & $NssmExe remove SecVault-Collector confirm 2>&1 } | Out-Null
+
+$out = Invoke-Native { & $NssmExe install SecVault-Collector node 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppParameters "services\collector.js" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppDirectory "C:\Apps\SecVault" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppEnvironmentExtra "NODE_ENV=production" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector DisplayName "SecVault - Collector (syslog listener)" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector Start SERVICE_AUTO_START 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector DependOnService $PgSvcName 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppStdout "$LogDir\collector-stdout.log" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppStderr "$LogDir\collector-stderr.log" 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppRotateFiles 1 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppRotateBytes 10485760 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppRotateOnline 1 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppRestartDelay 3000 2>&1 }
+$out | Write-Host
+# Give the collector time to DRAIN on stop. Its shutdown handler flushes the
+# in-memory buffer to the spool and then to the DB. A hard kill is still SAFE
+# -- the spool is fsync-ed before the insert and replayed on restart -- but a
+# clean drain avoids a duplicate replay on every service restart.
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppStopMethodConsole 15000 2>&1 }
+$out | Write-Host
+$out = Invoke-Native { & $NssmExe set SecVault-Collector AppStopMethodWindow 5000 2>&1 }
+$out | Write-Host
+
 Write-Step 'NSSM services registered.'
 
 # -----------------------------------------------------------------------
 # 16. Firewall rule
 # -----------------------------------------------------------------------
+Write-Step 'Creating the syslog spool directory...'
+# Must exist before the collector starts; it writes here BEFORE the database.
+if (-not (Test-Path $SpoolDir)) {
+    New-Item -ItemType Directory -Path $SpoolDir -Force | Out-Null
+}
+Write-Step "Spool directory ready at $SpoolDir"
+
 Write-Step 'Configuring firewall...'
 $ruleName = "SecVault Port $AppPort"
 if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $AppPort -Action Allow | Out-Null
 }
 Write-Step "Firewall rule added for port $AppPort"
+
+# Inbound syslog. Without these the collector binds successfully, reports
+# itself healthy, and receives nothing -- Windows drops the datagrams before
+# they ever reach the socket, with no error anywhere to notice.
+foreach ($sp in ($SyslogPorts -split ',')) {
+    $p = $sp.Trim()
+    if ($p -notmatch '^\d+$') { continue }
+    foreach ($proto in @('UDP', 'TCP')) {
+        $sysRule = "SecVault Syslog $proto/$p"
+        if (-not (Get-NetFirewallRule -DisplayName $sysRule -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $sysRule -Direction Inbound -Protocol $proto -LocalPort $p -Action Allow | Out-Null
+            Write-Step "Firewall rule added for syslog $proto/$p"
+        }
+    }
+}
 
 # -----------------------------------------------------------------------
 # 17. Start services (sc.exe only -- never Start-Service)
@@ -934,6 +1010,9 @@ $out = sc.exe start SecVault-App
 $out | Write-Host
 
 $out = sc.exe start SecVault-Engine
+$out | Write-Host
+
+$out = sc.exe start SecVault-Collector
 $out | Write-Host
 
 # -----------------------------------------------------------------------
@@ -948,13 +1027,14 @@ $out | Write-Host
 Write-Step 'Verifying services stayed running...'
 $appRunning = Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15
 $engineRunning = Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Running' -TimeoutSeconds 15
+$collectorRunning = Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15
 
 # -----------------------------------------------------------------------
 # 19. Success banner
 # -----------------------------------------------------------------------
 Write-Host ''
 Write-Host '=================================================='
-if ($appRunning -and $engineRunning) {
+if ($appRunning -and $engineRunning -and $collectorRunning) {
     Write-Host ' SecVault installed successfully.'
     Write-Host " URL: http://$($ServerIp):$($AppPort)"
     Write-Host ' Default login: admin / changeme (change immediately via Settings)'
@@ -965,6 +1045,9 @@ if ($appRunning -and $engineRunning) {
     }
     if (-not $engineRunning) {
         Write-Host " SecVault-Engine is NOT running -- check $LogDir\engine-stderr.log for the actual startup error." -ForegroundColor Yellow
+    }
+    if (-not $collectorRunning) {
+        Write-Host " SecVault-Collector is NOT running -- check $LogDir\collector-stderr.log. The most common causes are another process already holding a syslog port, or $SpoolDir not being writable." -ForegroundColor Yellow
     }
     Write-Host " Everything else (dependencies, database, build) completed successfully -- this is a runtime startup issue, not an install issue." -ForegroundColor Yellow
 }

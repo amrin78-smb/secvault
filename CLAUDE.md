@@ -1304,10 +1304,19 @@ Rule-hit correlation to `firewall_rules` (Phase 8b — the parsers already captu
 dashboard's Live Traffic tab stays absent until there is something real to show — see
 `lib/dashboardTabs.js`.
 
-⛔ **The installer does not yet register `SecVault-Collector`.** `Install-SecVault.ps1` creates
-only App and Engine, and `Update-SecVault.ps1` stops/starts only those two. The service was
-registered by hand on the live host; a fresh install would come up WITHOUT a collector. Wiring
-both scripts is the next commit.
+Both installer scripts now handle `SecVault-Collector`: `Install-SecVault.ps1` registers it
+(NSSM, auto-start, depends on PostgreSQL), creates the spool directory from its `-SpoolDir`
+parameter, and opens inbound firewall rules for every port in `-SyslogPorts`.
+`Update-SecVault.ps1` stops it with the others and restarts it after the build.
+
+⛔ **Inbound firewall rules are not optional.** Without them the collector binds, reports itself
+healthy, and receives nothing — Windows drops the datagrams before they reach the socket, with
+no error anywhere. Same failure shape as binding the wrong port: every health signal green, and
+the system deaf.
+
+⛔ **`-SpoolDir` must not default to a data volume that may not exist.** The env example briefly
+hardcoded `E:\SecVaultSpool`, which is right for the reference deployment and wrong for any
+machine without an E: drive. It now defaults under the install root and the installer creates it.
 
 ---
 
@@ -1386,12 +1395,14 @@ section.
 # installer/Update-SecVault.ps1
 1. sc.exe stop SecVault-App
 2. sc.exe stop SecVault-Engine
+2b. sc.exe stop SecVault-Collector
 3. git pull origin main
 4. npm ci
 5. node lib/migrate.js          ← schema migration BEFORE start
 5b. lib/schema-grants.sql       ← readonly grants, best-effort (never fails the update)
 6. npm run build
 7. sc.exe start SecVault-Engine
+7b. sc.exe start SecVault-Collector   ← before the App: while it is down, UDP syslog is LOST
 8. sc.exe start SecVault-App
 ```
 
@@ -1488,7 +1499,11 @@ SYSLOG_TCP_PORT=514
 SYSLOG_FLUSH_MS=2000                       # spool+insert cycle
 SYSLOG_MAX_BUFFER=200000                   # in-memory datagrams; overflow is COUNTED, not hidden
 SYSLOG_RETENTION_DAYS=7                    # raw events; enforced by DROPPING partitions
-SYSLOG_SPOOL_DIR=E:SecVaultSpool          # durable spool, fsync'd before the DB insert
+SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the DB insert;
+                                           # blank = <install dir>\spool. Installer sets it.
+SYSLOG_ROLLUP_RECENT_HOURS=3               # frequent narrow re-aggregation
+SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep; catches late-arriving events
+SYSLOG_ROLLUP_INTERVAL_MINUTES=5
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90

@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.69.2': [
+    'The installer now sets up the log collector automatically. Until now it had to be registered by hand, so a fresh install would have come up with no log collection at all.',
+    'It also opens the firewall for the syslog ports. Without that the collector starts, looks perfectly healthy, and quietly receives nothing.',
+    'Updates now stop and restart the collector along with the other services, and bring it back before the web app so log collection resumes as early as possible.',
+  ],
   '2.69.1': [
     'Fixed the per-rule usage summary, which was failing to rebuild within a minute of going live.',
     'It grouped by day while the rebuild works in hours, so the last part-day was never cleared and collided with itself on every retry.',

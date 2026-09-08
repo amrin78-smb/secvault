@@ -7,12 +7,14 @@
     reorder without testing:
       1. sc.exe stop SecVault-App
       2. sc.exe stop SecVault-Engine
+      2b. sc.exe stop SecVault-Collector
       3. git pull origin main
       4. npm ci
       5. node lib\migrate.js       (schema migration BEFORE services restart)
       5b. lib\schema-grants.sql    (readonly diagnostic grants -- best-effort)
       6. npm run build
       7. sc.exe start SecVault-Engine
+      7b. sc.exe start SecVault-Collector
       8. sc.exe start SecVault-App
 
     Written for PowerShell 5.1  -  see CLAUDE.md "PowerShell (PS5 compatibility)".
@@ -401,6 +403,26 @@ Invoke-Step 'sc.exe stop SecVault-Engine' {
 }
 
 # -----------------------------------------------------------------------
+# 2b. Stop SecVault-Collector
+#
+# Stopped with the others so `git pull` and `npm ci` never rewrite files out
+# from under a running node process.
+#
+# A hard kill here is SAFE by design: the collector fsyncs each batch to its
+# spool BEFORE inserting and only deletes the spool file once the insert
+# succeeds, so anything in flight is replayed on the next start. The wait is
+# to let it DRAIN cleanly, which merely avoids a duplicate replay.
+# -----------------------------------------------------------------------
+Invoke-Step 'sc.exe stop SecVault-Collector' {
+    $out = sc.exe stop SecVault-Collector
+    $out | Write-Host
+    Add-Content -Path $LogFile -Value ($out -join "`n")
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Stopped' -TimeoutSeconds 30)) {
+        Write-Log '  [WARN] SecVault-Collector did not reach Stopped state within 30s -- proceeding anyway (its spool makes an abrupt stop safe).'
+    }
+}
+
+# -----------------------------------------------------------------------
 # 3. git pull origin main
 # -----------------------------------------------------------------------
 Invoke-Step 'git pull origin main' {
@@ -557,6 +579,36 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
     if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Running' -TimeoutSeconds 15)) {
         Write-Log '  [WARN] SecVault-Engine did not reach Running state within 15s -- check logs\engine-stderr.log.'
     }
+}
+
+# -----------------------------------------------------------------------
+# 7b. Start SecVault-Collector
+#
+# Gated on the migration the same way SecVault-App is: the collector INSERTs
+# into syslog_events on its very first flush, so starting it against a failed
+# schema migration would just produce a stream of insert errors. It does not
+# depend on `npm run build` (no Next.js involvement), but it is gated on it
+# anyway rather than being the one service that comes up after a failed
+# update -- a half-started system is harder to reason about than a stopped
+# one.
+#
+# Started BEFORE SecVault-App so log ingestion resumes at the earliest
+# possible moment: while the collector is down, firewalls are still sending
+# and those datagrams are lost -- UDP has no retry.
+# -----------------------------------------------------------------------
+$collectorStartSkipped = $false
+if ($buildSucceeded -and $migrateSucceeded) {
+    Invoke-Step 'sc.exe start SecVault-Collector' {
+        $out = sc.exe start SecVault-Collector
+        $out | Write-Host
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+        if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15)) {
+            Write-Log '  [WARN] SecVault-Collector did not reach Running state within 15s -- check logs\collector-stderr.log.'
+        }
+    }
+} else {
+    $collectorStartSkipped = $true
+    Write-Log '  [SKIP] SecVault-Collector not started -- migration or build failed.'
 }
 
 # -----------------------------------------------------------------------
