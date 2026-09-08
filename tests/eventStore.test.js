@@ -138,13 +138,23 @@ describe('eventStore: flattenRow', () => {
     }
   });
 
-  it('⛔ never emits a NULL message, which is NOT NULL in the schema', () => {
-    // A line we could not parse at all still has to be stored; a null here
-    // would abort the batch and lose the whole flush.
-    for (const m of [null, undefined, '']) {
+  it('⛔ a NULL message SURVIVES as NULL, never as an empty string', () => {
+    // CHANGED 2026-09-08 with the compressed archive. `message` used to be NOT
+    // NULL, so this coerced null to '' to keep the batch insertable. It is
+    // nullable now and the null carries meaning: the raw line is in the
+    // archive, not the database.
+    //
+    // ⛔ Coercing it back to '' would recreate an empty-string SENTINEL —
+    // invisible to `message IS NULL`, and indistinguishable from a genuinely
+    // empty log line. That is the fabricated-value pattern this codebase bans.
+    for (const m of [null, undefined]) {
       const row = flattenRow(Object.assign({}, base, { message: m }));
-      assert.equal(row[COLUMNS.indexOf('message')], '');
+      assert.equal(row[COLUMNS.indexOf('message')], null);
     }
+    // A line that really was empty stays an empty string — a different fact.
+    assert.equal(
+      flattenRow(Object.assign({}, base, { message: '' }))[COLUMNS.indexOf('message')], ''
+    );
   });
 
   it('coerces tz_assumed to a real boolean', () => {

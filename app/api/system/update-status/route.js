@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.76.1': [
+    'Where a log line is held in the archive rather than the database, the database now records that properly as empty rather than storing a blank string.',
+    'This matters for searching: a blank string would have been impossible to tell apart from a log line that genuinely arrived empty.',
+  ],
   '2.76.0': [
     'Log Search is now actually installed. In the previous release its files were being excluded from the code repository by an over-broad ignore rule, so the feature never reached the server at all.',
     'Raw log retention increased from 7 days to 30 days.',

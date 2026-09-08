@@ -226,3 +226,27 @@ describe('⛔ raw-line retention: keeps it exactly where investigations look', (
     assert.ok(buildEvent(raw, frame, payload, null, 'all').message);
   });
 });
+
+describe('⛔ a dropped raw line stores NULL, never an empty string', () => {
+  // An empty-string sentinel would be invisible to `message IS NULL` and
+  // indistinguishable from a genuinely empty log line — the same fabricated
+  // value this codebase bans everywhere else. flattenRow coerced null to ''
+  // while the column was NOT NULL; the column is nullable now.
+  it('passes a dropped message through as null', () => {
+    const raw = { line: FORTI_LINE, sourceIp: '10.0.0.1', receivedAt: RECEIVED };
+    const frame = parseSyslogLine(raw.line, raw.receivedAt);
+    const e = buildEvent(raw, frame, parseVendorPayload(frame.message), null, 'none');
+    const row = flattenRow(e);
+    const i = COLUMNS.indexOf('message');
+    assert.equal(row[i], null, 'must be SQL NULL, not an empty string');
+  });
+
+  it('still stores a kept message as its real text', () => {
+    const raw = { line: FORTI_LINE, sourceIp: '10.0.0.1', receivedAt: RECEIVED };
+    const frame = parseSyslogLine(raw.line, raw.receivedAt);
+    const e = buildEvent(raw, frame, parseVendorPayload(frame.message), null, 'all');
+    const row = flattenRow(e);
+    const i = COLUMNS.indexOf('message');
+    assert.ok(typeof row[i] === 'string' && row[i].length > 0);
+  });
+});
