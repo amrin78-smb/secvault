@@ -134,6 +134,31 @@ silently on JSX corruption, which is worse than failing consistently: it looks l
 check. A JSX-aware alternative is `next/dist/build/swc`'s `parse(src, {filename, syntax:
 'ecmascript', jsx: true, isModule: true})`, which does catch it.
 
+## PAN-OS positional indices differ per SUBTYPE, not just per TYPE (2026-09-08)
+
+⛔ CLAUDE.md warns that PAN-OS CSV positions differ per log TYPE. They also differ in MEANING per
+THREAT SUBTYPE, and that cost real signal for a day.
+
+`PAN_THREAT.threatName` was mapped to index **33**, which is the CATEGORY. The signature name is
+index **32**. The map had been "verified" against a URL-FILTERING row, where index 32 is a bare
+`(9999)` placeholder and 33 (`block-Deny Web-O365`) looked like a plausible name — both readings
+fit that one subtype. On a real IPS row they do not: index 32 held
+`Phishing:bailliede.ru(109010001)` and `ISF SNMP Authentication Attempt(96504)` while 33 held
+`any`.
+
+**The cost:** every phishing, malware and cryptomining detection on the fleet was stored as its URL
+category, so Top Threats showed `any` where it should have named the malware. Nothing errored.
+
+⛔ Two follow-on rules from the same investigation:
+- A bare `(9999)` names nothing and must resolve to NULL, or it becomes the most common "threat
+  name" on the fleet.
+- Index 30 is the ACTION on threat rows too, not only traffic rows. It was gated on `isTraffic`,
+  leaving every threat row with `action = null` — so the dashboards could not distinguish a threat
+  that was BLOCKED (`drop`) from one merely OBSERVED (`alert`).
+
+**Lesson:** one captured sample of one subtype cannot validate a positional map. Both a
+url-filtering row AND a real IPS row are now fixtures in `tests/vendorFields.test.js`.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

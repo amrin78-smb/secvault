@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.79.0': [
+    'Important fix: threat reports were showing the web category instead of the actual threat name, so real phishing, malware and cryptomining detections were all displayed as any.',
+    'Palo Alto puts the signature name and the web category in adjacent fields, and SecVault was reading the wrong one. Your firewalls have been detecting and blocking these all along - only the reporting was wrong.',
+    'Threat records now also show whether the threat was blocked or merely observed. That was previously missing entirely, so it was impossible to tell from the dashboard whether anything had actually been stopped.',
+    'Both fixes take effect for logs arriving from now on. Records already stored keep what they had, and are not rewritten with a guess.',
+  ],
   '2.78.1': [
     'Log Search now pages through results instead of dumping one long list.',
     'It shows the page number without claiming a total, because counting matching log lines is genuinely too slow to do - an exact count of a single hour takes 43 seconds here. Saying Page 3 is honest; saying Page 3 of 47 would not be.',

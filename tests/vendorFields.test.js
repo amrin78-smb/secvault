@@ -90,9 +90,16 @@ describe('PAN-OS: country comes from the map for THIS log type', () => {
 });
 
 describe('PAN-OS: threat, URL and user fields', () => {
-  it('extracts the threat name and the vendor severity word', () => {
+  it('extracts the vendor severity word and the category from a url row', () => {
+    // ⛔ CORRECTED 2026-09-08: this originally asserted threatName ===
+    // 'block-Deny Web-O365'. That is the CATEGORY (index 33), not the name.
+    // On this url-filtering row index 32 is a bare "(9999)" — an id with no
+    // signature behind it — so the honest threat name is NULL, and the
+    // category is kept in its own field. See the PAN_THREAT block in
+    // vendorParsers.js for how the original mistake was made.
     const e = parseVendorPayload(PAN_THREAT);
-    assert.equal(e.threatName, 'block-Deny Web-O365');
+    assert.equal(e.threatName, null);
+    assert.equal(e.urlCategory, 'block-Deny Web-O365');
     assert.equal(e.threatSeverity, 'informational');
     assert.equal(e.logSubtype, 'url');
   });
@@ -174,5 +181,81 @@ describe('threatSeverityRank: one scale across two vendor vocabularies', () => {
     for (const bad of ['', 'urgent', 'sev1', null, undefined, 3, {}]) {
       assert.equal(threatSeverityRank(bad), null, JSON.stringify(bad));
     }
+  });
+});
+
+describe('⛔ PAN threat rows: the signature name, not the category', () => {
+  // The map originally read `threatName` from index 33 — the CATEGORY — and
+  // was "verified" against a URL-FILTERING row, where index 32 is a bare
+  // "(9999)" placeholder so both readings looked plausible. On a real IPS row
+  // they are not: index 32 carries the signature, index 33 carries "any".
+  //
+  // The cost was that every phishing, malware and cryptomining detection on
+  // the fleet was stored as its URL category, so Top Threats named none of
+  // them. CLAUDE.md warns PAN positions differ per log TYPE; these fixtures
+  // pin that they differ in MEANING per SUBTYPE too, which one sample of one
+  // subtype cannot reveal.
+
+  // Real captured spyware row (SMT-FW-MAIN) — a blocked phishing DNS lookup.
+  const SPYWARE =
+    '1,2026/09/08 17:18:02,023001021706,THREAT,spyware,2817,2026/09/08 17:18:02,' +
+    '172.24.0.26,8.8.8.8,119.110.198.100,8.8.8.8,Vlan0,,,dns-base,vsys1,LAN,WAN,' +
+    'ethernet1/2,ethernet1/1,Forward to Panorama,2026/09/08 17:18:03,187553,1,' +
+    '34259,53,43891,53,0x407000,udp,drop,"bailliede.ru",' +
+    'Phishing:bailliede.ru(109010001),any,low,client-to-server,' +
+    '7648486543962866192,0x8000000000000000,172.16.0.0-172.31.255.255,United States';
+
+  // Real captured vulnerability row (TUF-FW-ACTIVE) — an IPS alert, not blocked.
+  const VULN =
+    '1,2026/09/08 17:14:42,023001020727,THREAT,vulnerability,2817,2026/09/08 17:14:42,' +
+    '172.40.202.78,172.32.22.215,101.109.194.246,172.32.22.215,LocalPeplink-AllowTOT,,,' +
+    'snmpv1-get-request,vsys1,LAN,Local Internet,ae1,ethernet1/4,Panorama,' +
+    '2026/09/08 17:24:58,102787,1,49665,161,58469,161,0x80426000,udp,alert,,' +
+    'ISF SNMP Authentication Attempt(96504),any,informational,client-to-server,' +
+    '7648554868319390078,0x0,United States,United States';
+
+  it('reads the real signature name from index 32', () => {
+    assert.equal(parseVendorPayload(SPYWARE).threatName, 'Phishing:bailliede.ru(109010001)');
+    assert.equal(parseVendorPayload(VULN).threatName, 'ISF SNMP Authentication Attempt(96504)');
+  });
+
+  it('⛔ does NOT store the category as the threat name', () => {
+    // Both rows carry "any" at index 33. If that ever comes back as the threat
+    // name, the bug has returned.
+    for (const line of [SPYWARE, VULN]) {
+      assert.notEqual(parseVendorPayload(line).threatName, 'any');
+    }
+  });
+
+  it('keeps the category, in its own field', () => {
+    assert.equal(parseVendorPayload(SPYWARE).urlCategory, 'any');
+    assert.equal(parseVendorPayload(VULN).urlCategory, 'any');
+  });
+
+  it('⛔ captures the action, which says whether the threat was STOPPED', () => {
+    // "drop" and "alert" are a security distinction, not a detail: one was
+    // blocked, one was only observed. This was null on every threat row while
+    // the action index was gated on isTraffic.
+    assert.equal(parseVendorPayload(SPYWARE).action, 'drop');
+    assert.equal(parseVendorPayload(VULN).action, 'alert');
+  });
+
+  it('keeps severity and the offending host alongside', () => {
+    const s = parseVendorPayload(SPYWARE);
+    assert.equal(s.threatSeverity, 'low');
+    assert.equal(s.urlHostname, 'bailliede.ru');
+    assert.equal(parseVendorPayload(VULN).threatSeverity, 'informational');
+  });
+
+  it('⛔ a bare "(9999)" URL-filtering id names nothing, so it is null', () => {
+    // PAN writes a naked id with no signature behind it on url rows. Left as-is
+    // it would be the single most common "threat name" on the fleet.
+    const URL_ROW = PAN_THREAT.replace(
+      'block-url,"www.bing.com/",(9999),block-Deny Web-O365',
+      'block-url,"www.bing.com/",(9999),block-Deny Web-O365'
+    );
+    const e = parseVendorPayload(URL_ROW);
+    assert.equal(e.threatName, null, 'a bare (id) must not become a threat name');
+    assert.equal(e.urlCategory, 'block-Deny Web-O365', 'its category is still kept');
   });
 });

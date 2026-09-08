@@ -181,14 +181,23 @@ describe('vendorParsers: Palo Alto positional CSV', () => {
   });
 
   it('does not read TRAFFIC-only columns from a non-TRAFFIC row', () => {
-    // A THREAT row does not share TRAFFIC's layout past the common prefix.
-    // Reading index 30 anyway would report some unrelated column as the action.
+    // A THREAT row does not share TRAFFIC's layout past index 30.
+    //
+    // ⛔ CORRECTED 2026-09-08: this originally asserted `action` must be null
+    // on a threat row too. That was wrong, and it was wrong in the expensive
+    // direction — verified against captured rows, index 30 IS the action on
+    // threat rows ("drop" on a blocked phishing lookup, "alert" on an IPS
+    // detection). Suppressing it left every threat row unable to say whether
+    // anything had actually been STOPPED.
+    //
+    // The columns below genuinely are traffic-only and must stay null: index
+    // 31+ is bytes on a traffic row and URL/threat-name on a threat row.
     const threat = PAN_TRAFFIC.replace(',TRAFFIC,end,', ',THREAT,url,');
     const e = parsePaloAlto(threat);
     assert.equal(e.logType, 'THREAT');
-    assert.equal(e.action, null, 'must not borrow the TRAFFIC action position');
     assert.equal(e.srcPort, null);
-    assert.equal(e.bytesSent, null);
+    assert.equal(e.bytesSent, null, 'index 32 is the threat NAME on this row, not bytes');
+    assert.equal(e.bytesReceived, null);
     // The common prefix is still safe to read.
     assert.equal(e.srcIp, '10.248.5.55');
     assert.equal(e.ruleName, 'Local-to-Internet-ANY-Review');
