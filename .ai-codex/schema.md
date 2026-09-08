@@ -156,6 +156,42 @@ recent per device (`MIN_KEEP_CONFIGS`, a constant not an env var). No other tabl
 rows by id — `config_diffs` stores its own JSONB payload and no config id — so a retention delete
 can never orphan a diff. See `lib/engines/configRetention.js`.
 
+### syslog_events   (Phase 8, added 2026-09-08)
+```
+id             BIGSERIAL              -- PK is (received_at, id): the partition key must be in it
+received_at    TIMESTAMPTZ NOT NULL   -- when WE saw it; always known, so it is the PARTITION KEY
+event_at       TIMESTAMPTZ            -- the DEVICE's time. NULLABLE: RFC 3164 has no year/timezone,
+                                      -- and an unresolvable one stays NULL rather than defaulting to
+                                      -- received_at, which would fake a precise fact
+tz_assumed     BOOLEAN NOT NULL       -- event_at came from a format with no offset
+source_ip      INET NOT NULL
+device_id      UUID -> devices(id)    -- NULL = sender not matched to a device; still stored
+vendor         TEXT                   -- NULL = not confidently identified; there is NO 'generic' bucket
+facility/severity SMALLINT            -- NULL when the frame carried no PRI
+hostname, program, action, protocol, application, src_zone, dst_zone TEXT
+src_ip, dst_ip INET   src_port, dst_port INTEGER
+rule_id, rule_uuid, rule_name TEXT    -- as the DEVICE reported it, NOT yet resolved to firewall_rules
+bytes_sent, bytes_received BIGINT
+message        TEXT NOT NULL          -- the raw line, always kept even when nothing else parsed
+```
+PARTITIONED BY RANGE (received_at), one partition per UTC day, ~7 days retained.
+⛔ Aged out by **DROPPING the partition**, never DELETE — at ~93M rows/day a DELETE costs more WAL
+and vacuum than the ingest and does not reclaim space. See `lib/syslog/eventStore.js`.
+
+### syslog_rollup_hourly / syslog_rule_hits_daily   (Phase 8, permanent)
+Hourly device/vendor/action/severity counts, and DAILY per-rule usage (daily on purpose: "has this
+rule seen traffic" needs no hour resolution, and daily keeps it at ~3.5k rows/day for this fleet
+instead of 24x that). `syslog_rule_hits_daily` is the Phase 8b input that will give real hit counts
+to the vendors/transports whose APIs cannot report them.
+⛔ Both use `UNIQUE NULLS NOT DISTINCT` (PG15+) so grouping keys stay nullable — without it every
+flush inserts a duplicate "unknown vendor" row instead of incrementing one, and the usual
+workaround (sentinel strings) is the fabricated-value pattern this codebase bans.
+
+### syslog_ingest_stats   (Phase 8, permanent)
+One row per flush: received / parsed / stored / **dropped** / unknown_vendor / unknown_source /
+spool_backlog / batch_ms. ⛔ `dropped` is the number that matters — a collector silently losing
+datagrams under load looks exactly like a quiet network.
+
 ### config_backups
 ```
 id                UUID PK DEFAULT gen_random_uuid()

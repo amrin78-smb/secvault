@@ -1245,3 +1245,139 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_device_configs_one_baseline_per_device
 -- (the account this file normally runs as, via lib/migrate.js) does not have —
 -- see lib/schema-grants.sql, which is applied separately with elevated
 -- privileges and is allowed to fail without aborting table creation.
+
+-- ===========================================================================
+-- Phase 8 — Syslog ingestion (added 2026-09-08)
+-- ===========================================================================
+-- Replaces ManageEngine Firewall Analyzer, which took ~1,083 datagrams/sec
+-- (~93M events/day) from 27 devices on this same host.
+--
+-- Retention model (see CLAUDE.md's Phase 8 section):
+--   syslog_events            RAW, ~7 days, DAILY PARTITIONS, dropped by partition
+--   syslog_rollup_hourly     permanent, low-cardinality traffic/severity counts
+--   syslog_rule_hits_daily   permanent, per-rule usage evidence
+--
+-- ⛔ Raw events are dropped by DROPPING A PARTITION, never by DELETE. A DELETE
+-- of ~93M rows/day would generate more WAL and vacuum work than the ingest
+-- itself and would never reclaim space in practice.
+
+CREATE TABLE IF NOT EXISTS syslog_events (
+  id            BIGSERIAL,
+  -- When WE observed it. Always known, so this is the partition key: an event
+  -- whose own timestamp is missing or garbage must still land somewhere.
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- ⛔ The DEVICE's timestamp, and NULLABLE on purpose. RFC 3164 carries no
+  -- year and no timezone; when it cannot be resolved confidently this stays
+  -- NULL rather than being defaulted to received_at, which would silently turn
+  -- "we could not tell when this happened" into a precise-looking fact.
+  event_at      TIMESTAMPTZ,
+  -- True when event_at was derived from a format with no timezone, so the
+  -- collector's local zone was assumed. Consumers can surface the caveat.
+  tz_assumed    BOOLEAN NOT NULL DEFAULT false,
+  source_ip     INET NOT NULL,
+  -- NULL = the sender was not matched to a row in devices. Never invent one.
+  device_id     UUID REFERENCES devices(id) ON DELETE SET NULL,
+  -- NULL = vendor not confidently identified. There is deliberately no
+  -- 'generic' bucket: a guessed vendor mis-parses every field after it.
+  vendor        TEXT,
+  facility      SMALLINT,
+  severity      SMALLINT,
+  hostname      TEXT,
+  program       TEXT,
+  -- Normalized traffic fields. All nullable: a SYSTEM or THREAT log carries
+  -- none of them, and a null here means "not present in this event".
+  action        TEXT,
+  src_ip        INET,
+  dst_ip        INET,
+  src_port      INTEGER,
+  dst_port      INTEGER,
+  protocol      TEXT,
+  application   TEXT,
+  src_zone      TEXT,
+  dst_zone      TEXT,
+  -- Rule identity as the DEVICE reported it, not yet resolved to
+  -- firewall_rules. Fortinet sends policyid + poluuid; Palo Alto sends only a
+  -- name. Resolution to firewall_rules is Phase 8b and deliberately not done
+  -- at ingest time -- correlating 93M events/day inline would couple ingest
+  -- throughput to the rule table.
+  rule_id       TEXT,
+  rule_uuid     TEXT,
+  rule_name     TEXT,
+  bytes_sent    BIGINT,
+  bytes_received BIGINT,
+  -- The raw line, always kept even when nothing above could be parsed.
+  -- Losing a log line is worse than storing one we did not understand.
+  message       TEXT NOT NULL,
+  PRIMARY KEY (received_at, id)
+) PARTITION BY RANGE (received_at);
+
+CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_events_source_time ON syslog_events (source_ip, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_events_rule ON syslog_events (device_id, rule_id, received_at DESC);
+
+-- Low-cardinality permanent aggregate: roughly (devices x actions x severities)
+-- rows per hour, so a few hundred a day rather than tens of millions.
+-- ⛔ UNIQUE NULLS NOT DISTINCT (PostgreSQL 15+) is what lets the grouping keys
+-- stay honestly NULLABLE. Without it, NULLs would compare unequal and every
+-- flush would insert a duplicate "unknown vendor" row instead of incrementing
+-- one; the alternative -- sentinel strings like 'unknown' -- is exactly the
+-- fabricated-value pattern this codebase bans.
+CREATE TABLE IF NOT EXISTS syslog_rollup_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  source_ip      INET NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE SET NULL,
+  vendor         TEXT,
+  action         TEXT,
+  severity       SMALLINT,
+  event_count    BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_syslog_rollup_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, source_ip, device_id, vendor, action, severity)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_rollup_hourly_time ON syslog_rollup_hourly (bucket_hour DESC);
+
+-- Per-rule usage evidence, DAILY (not hourly) on purpose: "has this rule seen
+-- traffic" does not need hour resolution, and daily keeps this at roughly
+-- (rules x actions) rows/day -- ~3.5k for this fleet -- instead of 24x that.
+-- This is the table that will let Phase 8b give real hit counts to the
+-- vendors/transports whose APIs cannot report them at all.
+CREATE TABLE IF NOT EXISTS syslog_rule_hits_daily (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_day     DATE NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  source_ip      INET NOT NULL,
+  vendor         TEXT,
+  rule_id        TEXT,
+  rule_uuid      TEXT,
+  rule_name      TEXT,
+  action         TEXT,
+  hit_count      BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  first_seen_at  TIMESTAMPTZ,
+  last_seen_at   TIMESTAMPTZ,
+  CONSTRAINT uq_syslog_rule_hits_daily UNIQUE NULLS NOT DISTINCT
+    (bucket_day, device_id, source_ip, vendor, rule_id, rule_uuid, rule_name, action)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_day ON syslog_rule_hits_daily (bucket_day DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_device ON syslog_rule_hits_daily (device_id, bucket_day DESC);
+
+-- Per-run ingest health. ⛔ `dropped` is the number the operator actually needs:
+-- a collector that silently loses datagrams under load looks identical to a
+-- quiet network. It is recorded per flush, never inferred.
+CREATE TABLE IF NOT EXISTS syslog_ingest_stats (
+  id             BIGSERIAL PRIMARY KEY,
+  recorded_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  received       BIGINT NOT NULL DEFAULT 0,
+  parsed         BIGINT NOT NULL DEFAULT 0,
+  stored         BIGINT NOT NULL DEFAULT 0,
+  dropped        BIGINT NOT NULL DEFAULT 0,
+  unknown_vendor BIGINT NOT NULL DEFAULT 0,
+  unknown_source BIGINT NOT NULL DEFAULT 0,
+  spool_backlog  INTEGER NOT NULL DEFAULT 0,
+  batch_ms       INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_ingest_stats_time ON syslog_ingest_stats (recorded_at DESC);

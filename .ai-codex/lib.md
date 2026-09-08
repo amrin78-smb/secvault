@@ -182,6 +182,199 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+## lib/syslog/eventStore.js
+
+`buildPartitionSql(date)` / `partitionNameFor(date)` — daily partition DDL, **UTC** so a boundary is the same instant everywhere and does not move under DST. Range is `[day, day+1)`; an off-by-one here leaves a whole day of events with nowhere to land.
+`buildInsertSql(rowCount)` / `flattenRow(event)` / `chunk(arr, size)` — multi-row parameterized INSERT. ⛔ 25 columns x `MAX_ROWS_PER_INSERT` (500) = 12,500 binds, kept well under PostgreSQL's 65535-parameter cap; a test asserts this, because exceeding it fails under load rather than in review.
+`ensurePartitions(pool, now)` — creates yesterday/today/tomorrow. Yesterday matters: an event can arrive just after a UTC midnight rollover and without the partition the INSERT fails outright.
+`dropOldPartitions(pool, retentionDays, now)` — ⛔ DROPs partitions, never DELETEs rows, and only ever names matching `^syslog_events_\d{8}# lib/ — Library Export Index
+
+Every export from `lib/`, grouped by file. `[SENSITIVE]` = touches credentials, encryption,
+device auth, or config/secret storage — treat any change to these with extra care.
+
+Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/feeds/**`.
+
+---
+
+## lib/db.js
+
+`pool` -> `pg.Pool` — singleton PostgreSQL connection pool (`connectionString: DATABASE_URL`); has an `error` listener registered to prevent unhandled-rejection crashes on idle-client errors.
+
+## lib/activityLog.js
+
+`logActivity(pool, {actor, action, deviceId, detail})` -> `Promise<void>` — inserts one `activity_log` audit row; NEVER throws (catches and console.warns on failure).
+
+## lib/apiUtils.js
+
+`isValidUuid(value)` -> `boolean` — regex-checks a string looks like a UUID (8-4-4-4-12 hex), used to guard path params before hitting a UUID-typed SQL column.
+
+## lib/theme.js
+(ES module, `'use client'` — exports via `export`, not `module.exports`; only top-level `lib/*.js` file that isn't CommonJS)
+
+`THEME_KEY` -> `string` — `'secvault-theme'`, the localStorage key.
+`getTheme()` -> `'light'|'dark'` — reads current `data-theme` attribute off `<html>`.
+`applyTheme(theme)` -> `void` — sets/removes `data-theme="dark"` on `<html>`, persists to localStorage, dispatches `secvault:theme` CustomEvent.
+`toggleTheme()` -> `'light'|'dark'` — flips current theme via `applyTheme`, returns the new value.
+`THEME_INIT_SCRIPT` -> `string` — inline `<script>` body (no-flash theme pre-paint init), injected into `app/layout.js`'s `<head>`.
+
+## lib/credStore.js
+[SENSITIVE] — entire file (AES-256-GCM credential encryption)
+
+`encrypt(plaintext)` -> `{encrypted: string, iv: string}` — AES-256-GCM encrypt; `encrypted` = `hex(ciphertext):hex(authTag)`, `iv` = hex. Key from `CREDENTIAL_KEY` env (32-byte hex). [SENSITIVE]
+`decrypt(encrypted, iv)` -> `string` (plaintext) — inverse of `encrypt`. [SENSITIVE]
+`getCredential(deviceId, credentialType, pool)` -> `Promise<string|null>` — fetches+decrypts latest `device_credentials` row for `(deviceId, credentialType)`. Requires `pool`. [SENSITIVE]
+`setCredential(deviceId, credentialType, plaintext, pool)` -> `Promise<void>` — encrypts + `INSERT ... ON CONFLICT (device_id, credential_type) DO UPDATE` (atomic upsert, relies on `UNIQUE(device_id, credential_type)`). Requires `pool`. [SENSITIVE]
+
+## lib/feedStatus.js
+
+`getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
+`getSyncPillStatus(pool)` -> `Promise<{ok: boolean, label: string, lastSyncs: object[]}>` — condensed header-pill status across `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`; `label` is `'NO SYNC YET'|'FEEDS OK'|'FEED ERROR'`.
+
+## lib/rbac.js
+[SENSITIVE] — entire file (auth/authorization guard)
+
+`ADMIN_ROLE` -> `string` — `'admin'`. [SENSITIVE]
+`VIEWER_ROLE` -> `string` — `'viewer'`. [SENSITIVE]
+`isAdmin(session)` -> `boolean` — true iff `session.user.role === 'admin'`. [SENSITIVE]
+`forbiddenResponse()` -> `Response` — standard 403 JSON `{error: 'Forbidden — admin role required'}`. [SENSITIVE]
+
+## lib/updateCheck.js
+
+`findGitRoot(start)` -> `string` — walks up from `start` looking for `.git` (max 6 levels).
+`localCommitHash(repoRoot)` -> `string|null` — `git rev-parse HEAD` short SHA (7 chars) for the local checkout; null on failure.
+`remoteCommitHash(repoRoot)` -> `Promise<string|null>` — `git ls-remote origin main` short SHA via git transport (not GitHub REST API); uses SSH deploy-key override. [SENSITIVE] (touches deploy SSH key path resolution)
+`remoteVersion(repoRoot)` -> `Promise<string>` — reads `package.json` version from `FETCH_HEAD` after `git fetch`; falls back to local `pkg.version` on failure.
+`pkg` -> `object` — the loaded root `package.json`.
+(internal, not exported: SSH command string is built with forward slashes only — git's bundled MSYS2 shell mangles backslashes in `core.sshCommand`. Resolves the deploy key path: `C:\ProgramData\SecVault\ssh\secvault_deploy` then repo-relative fallback.) [SENSITIVE]
+
+## lib/auditChecksSeed.js
+
+`CHECKS` -> `object[]` — curated array of compliance check definitions (`checkId, name, description, standards, vendor, severity, predicateConfig, remediationGuidance`); predicate types include `config_key_exists`/`config_value_equals`/`config_value_matches`/`feature_enabled`/`admin_access_from_zone`/`not_evaluable_from_config`/`rule_scan`/`ruleset_property`. ⛔ `not_evaluable_from_config` resolves `na` (excluded from the score denominator), NOT `warning`, since 2026-08-25 — `configAuditor.evaluateCheck()` short-circuits it before the `pass_when` guard. Current count (45) matches CLAUDE.md's Compliance Engine section — recount via `grep -c "checkId:"` if this file changes. Full mechanics: `.ai-codex/compliance-pipeline.md`.
+`seedAuditChecks(pool)` -> `Promise<{count: number}>` — idempotent `INSERT ... ON CONFLICT (check_id) DO UPDATE` seed/refresh of `audit_checks` from `CHECKS`.
+
+## lib/credentialProfiles.js
+[SENSITIVE] — entire file (reusable credential bundles: device auth, SSH, API keys, SNMP creds)
+
+`deriveDisplayUsername(plaintext)` -> `string|null` — best-effort extracts a non-secret `username` field from a JSON-shaped credential plaintext, for display only; never throws. [SENSITIVE]
+`buildProfilePlaintext(credentialType, {authMode, secret, username, password, enablePassword, snmpVersion, authProtocol, authPassword, privProtocol, privPassword})` -> `string|null` — builds the stored plaintext JSON/raw-string shape per `credentialType` (`smc_api|rest_api|ssh|snmp`); returns null if fields insufficient. [SENSITIVE]
+`listProfiles(pool)` -> `Promise<object[]>` — metadata-only rows (`id, name, credential_type, username, created_at, updated_at`) — safe for HTTP response.
+`getProfileMeta(id, pool)` -> `Promise<object|null>` — metadata-only single profile row.
+`getProfilePlaintext(id, pool)` -> `Promise<{credentialType: string, plaintext: string}|null>` — decrypts profile secret; SERVER-SIDE USE ONLY, must never leave the process. [SENSITIVE]
+`createProfile({name, credentialType, plaintext}, pool)` -> `Promise<object>` — encrypts + inserts a new profile, returns metadata row. [SENSITIVE]
+`updateProfile(id, {name, plaintext}, pool)` -> `Promise<object|null>` — rename and/or rotate-secret (either omittable); `credential_type` immutable. [SENSITIVE]
+`deleteProfile(id, pool)` -> `Promise<void>` — deletes a credential profile row.
+
+## lib/notificationChannels.js
+[SENSITIVE] — entire file (outbound notification channels: webhook URLs, SMTP passwords). Added 2026-08-01, mirrors lib/credentialProfiles.js's shape exactly.
+
+`NOTIFICATION_CHANNEL_TYPES` -> `string[]` — `['slack_webhook','teams_webhook','email','generic_webhook']`.
+`ALERT_TYPES` -> `string[]` — `['patch_now_cve','compliance_critical','config_diff','compliance_report']` (4th value added 2026-08-02, email-only — see `components/settings/NotificationsPanel.js`'s `EMAIL_ONLY_ALERT_TYPES` gate and `lib/engines/complianceReport.js`).
+`buildChannelPlaintext(channelType, {webhookUrl, smtpPassword})` -> `string|null` — the three webhook types store the raw URL as the whole secret; `email` stores the SMTP password only (host/port/from/to live in the non-secret `config` JSONB). [SENSITIVE]
+`listChannels(pool)` -> `Promise<object[]>` — metadata-only rows, safe for HTTP response.
+`getChannelMeta(id, pool)` -> `Promise<object|null>` — metadata-only single channel row.
+`getChannelPlaintext(id, pool)` -> `Promise<{id, name, channelType, alertTypes, config, plaintext}|null>` — decrypts one channel; SERVER-SIDE USE ONLY (the test-send route). [SENSITIVE]
+`listEnabledChannelsWithSecrets(pool)` -> `Promise<object[]>` — decrypts every ENABLED channel in one query; used by lib/engines/notificationDispatch.js's poll job. SERVER-SIDE USE ONLY. [SENSITIVE]
+`createChannel({name, channelType, alertTypes, config, plaintext}, pool)` -> `Promise<object>` — encrypts + inserts, returns metadata row. [SENSITIVE]
+`updateChannel(id, {name, enabled, alertTypes, config, plaintext}, pool)` -> `Promise<object|null>` — partial update (each field omittable); `channel_type` immutable. [SENSITIVE]
+`deleteChannel(id, pool)` -> `Promise<void>`.
+`recordChannelSuccess(id, pool)` / `recordChannelError(id, message, pool)` -> `Promise<void>` — updates `last_success_at`/`last_error`/`last_error_at`, called by lib/notify.js's callers after every dispatch attempt.
+
+## lib/notify.js
+Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an already-decrypted channel object.
+
+`dispatchNotification(channel, message)` -> `Promise<void>` — single entry point, routes to the per-`channel_type` sender ({alertType, title, summary, url, deviceName, attachments?} message shape); throws on failure. `NOTIFY_TIMEOUT_MS = 8000` (shorter than every other outbound timeout in this codebase — fire-and-forget inside a poll loop over N channels x M items). Teams payload (Adaptive Card via a `message` envelope, the current Power Automate Workflows webhook shape) logs its raw response once on first live send (`loggedFirstTeamsResponse`) — live-verification risk, not a settled spec, same `loggedFirst*` convention as the vendor adapters. `email` uses `nodemailer` (new dependency, 2026-08-01 — none existed in this codebase before); `message.attachments` (added 2026-08-02, nodemailer-native `[{filename, content: Buffer, contentType}]`) passes straight through to `sendMail()` — used by `lib/engines/complianceReport.js` for the PDF report, ignored by every webhook sender.
+
+## lib/snmpClient.js
+[SENSITIVE] — entire file (SNMP session/credential handling)
+
+`createSession(credential, host, port, timeoutMs)` -> `net-snmp.Session` — builds a v1/v2c or v3 SNMP session from a parsed credential (see `lib/adapters/snmpCredential.js`). Throws if no credential/host. [SENSITIVE]
+`getMetrics(session, oidMap, timeoutMs, host)` -> `Promise<Object<string,string|null>>` — GETs a flat map of named scalar OIDs; per-OID error resolves to `null`, not a thrown error; wrapped in an outer hard-timeout race.
+`walkSubtree(session, baseOid, timeoutMs, host)` -> `Promise<Array<{oid:string,value:*}>>` — SNMP WALK a subtree (table-indexed metrics); per-row errors skipped.
+`closeSession(session)` -> `void` — best-effort session close.
+`DEFAULT_TIMEOUT_MS` -> `number` — `8000`.
+
+## lib/migrate.js
+
+`runSchema(pool)` -> `Promise<void>` — executes `lib/schema.sql` verbatim against the DB.
+`seedUsers(pool)` -> `Promise<{migrated: boolean, seeded: boolean, username?: string}>` — guarded on `users` table being empty: migrates legacy `settings.admin_username/admin_password_hash` into `users`, or seeds default `admin/changeme`. [SENSITIVE] (touches password hash migration)
+`main()` -> `Promise<void>` (not exported, run via `require.main === module`) — orchestrates: runSchema → seedUsers → seedAuditChecks (NOT best-effort, throws loud) → backfillVulnerabilityCategories (best-effort) → cleanupVolatileConfigDiffs (best-effort) → regenerateOversizedChangeSummaries (best-effort) → migrateZoneClassificationsToPerDevice (best-effort) → backfillPaloAltoVersionRanges (best-effort) → backfillNvdNativeVersionRanges (best-effort, added 2026-07-31, the other five vendors).
+(internal, not exported: `loadEnvLocal()`; `migrateZoneClassificationsToPerDevice(pool)` -> `Promise<{discardedGlobalRows: number}>` — migrates `zone_classifications` from global to per-device schema shape, adds `device_id` column/constraint/index — the index creation lives HERE not in schema.sql, see schema.md's "Known schema debt".)
+
+---
+
+## lib/engines/prioritization.js
+
+`computePriority(assessment, device, cvssScore)` -> `'patch_now'|'scheduled'|'monitor'` — pure priority-band decision tree (KEV → log_hit → CVSS≥9 → CVSS≥7 → unknown-applicability → default), then asset-criticality bump-one-band modifier. Order is fixed per CLAUDE.md, do not reorder.
+`updatePrioritiesForDevice(deviceId, pool)` -> `Promise<void>` — recomputes+persists `priority_band` for every `device_cve_assessments` row of a device.
+
+## lib/engines/versionMatcher.js
+
+`matchDeviceToAdvisories(device, deviceVersionTuple, advisories, recommendedReleases, applicability=null)` -> `object[]` (pure) — matches one device against pre-filtered advisories, computing `version_affected`, `config_applies` (tri-state via applicability engine), `kev_listed`, `fixed_in`, `is_fixed_recommended`. Only emits rows where `version_affected===true`.
+`runMatchForAllDevices(pool)` -> `Promise<{assessed: number, matched_cves: number, errors: object[]}>` — full engine run over all active devices; per-device `pg_advisory_xact_lock` guards concurrent DELETE+UPSERT+prioritization against 3 independent call sites. **This is where `device_cve_assessments` gets cleared/rewritten** — see cve-pipeline.md stage on assessment clearing.
+
+## lib/engines/adminAccountSummary.js
+
+`summarizeAdminAccounts(vendor, configParsed)` -> `{supported: boolean, accounts: {username, privilege, twoFactorEnabled, sourceRestricted}[], totalCount: number, superuserCount: number, error?: boolean}` — vendor-dispatched (fortinet/paloalto/cisco_asa) interpretation of already-collected config for "who can log in"; never throws, degrades to `error:true` on parse failure. [SENSITIVE] (reads admin account identity/privilege from device config, though not passwords)
+
+## lib/engines/applicability.js
+
+`evaluatePredicate(predicateType, predicateConfig, configParsed)` -> `'yes'|'no'|'unknown'` (pure, never throws) — evaluates one CVE-applicability predicate (`config_key_exists|config_value_equals|config_value_matches|feature_enabled|port_exposed|admin_access_from_zone`) against parsed config.
+`computeConfigApplies(conditions, configParsed)` -> `'yes'|'no'|'unknown'` — AND-combines a list of predicate conditions; empty/no-usable-config always → `'unknown'`, never `'no'`.
+`evaluateConditionsDetailed(conditions, configParsed)` -> `{config_applies, per_condition: {id, condition_description, predicate_type, result}[]}` — per-condition breakdown for the admin "test predicate" UI.
+`getLatestConfigParsed(deviceId, pool)` -> `Promise<object|null>` — latest `device_configs.config_parsed`, normalized via `normalizeConfigParsedRoot` (fixes Palo Alto SSH `.tree` wrapper / XML `devices.entry.deviceconfig` nesting).
+`loadConditionsByAdvisory(pool, vendor)` -> `Promise<Map<string, object[]>>` — all `advisory_conditions` for a vendor, grouped by `advisory_id`.
+`getConfigAppliesForDevice(deviceId, advisoryId, pool)` -> `Promise<'yes'|'no'|'unknown'>` — single device×advisory applicability lookup.
+`hasUsableConfig(configParsed)` -> `boolean` — true only for a non-empty interrogatable object (guards `{}`/null/array).
+`normalizeConfigParsedRoot(configParsed)` -> `object` — hoists Palo Alto SSH `.tree` / XML `deviceconfig` to top level; no-op for other vendors.
+
+## lib/engines/cidrUtils.js
+
+`parseCidrOrIp(str)` -> `{network: number, prefixLen: number}|null` — parses IPv4 literal/CIDR into masked network + prefix; `null` for anything non-IPv4-shaped (IPv6, object names, "any").
+`cidrContains(outerStr, innerStr)` -> `boolean|null` — true if outer CIDR range contains inner; `null` if either isn't parseable (never coerced to `false`).
+`cidrEquals(aStr, bStr)` -> `boolean|null` — true if both denote the same masked range; `null` if either isn't parseable.
+`parseIpRange(str)` -> `{start,end}|null` (added 2026-08-02, for `objectResolver.js`) — parses a literal `"start-end"` IPv4 range (both sides bare `/32`s); `null` for anything else.
+`rangeContains(outer, inner)` / `rangeOverlaps(a, b)` -> `boolean` — numeric `{start,end}` containment/overlap, uniform across CIDR and range shapes.
+`cidrToRange(cidr)` -> `{start,end}` — widens a parsed CIDR to a `{start,end}` range. ⛔ `/32` needs a special case (`0xffffffff >>> 32` is a no-op in JS, same mod-32 footgun `maskForPrefixLen()` already guards for `/0` — get this backwards and every single-host CIDR silently widens to the whole address space).
+
+## lib/engines/configDiff.js
+
+`diffConfigs(oldParsed, newParsed, vendor?)` -> `{added, removed, modified}` (pure) — deep recursive diff of two parsed config trees; applies vendor-specific volatile-path filtering + defense-in-depth secret redaction; caps at 500 entries. Arrays are aligned by VALUE not position: all-primitive arrays via LCS (`diffPrimitiveArrayLCS`), all-object arrays sharing a unique `@_name`/`name` key via identity alignment (`diffObjectArrayByIdentity`, added 2026-07-31 — kills the Palo Alto XML/API rulebase shift cascade); everything else falls back to positional. Forward-only, no backfill for existing rows.
+`summarizeDiff(diff)` -> `string` — human one-liner (`"N added, M removed — e.g. path1, path2"`), with sanitized/truncated example paths.
+`isEmptyDiff(diff)` -> `boolean` — true if added/removed/modified are all empty.
+`detectAndStoreDiff(deviceId, pool, vendor?)` -> `Promise<{changed: boolean, diffId: string|null, summary: string|null}>` — diffs the 2 latest `device_configs` snapshots and inserts a `config_diffs` row if changed.
+`createBackup(deviceId, label, pool)` -> `Promise<{backupId: string|null}>` — copies latest `config_raw` into `config_backups` (`label` ∈ auto/manual/pre-change).
+`filterDiffForCurrentRules(diff, vendor)` -> `object` — re-applies current volatile-path filter + secret redaction to an already-computed diff object; also DECOMPOSES a whole registered-volatile-subtree-root entry (`content-preview`/`system_info` captured as one object) back through `diffValue` so the current per-leaf allowlist applies (drops content-preview entirely, keeps only system_info's allowlisted fields) — added 2026-07-31 to clean historical whole-block noise rows the leaf-only filter missed. [SENSITIVE] (secret-redaction pass over stored config diffs)
+`cleanupVolatileConfigDiffs(pool)` -> `Promise<{checked, deleted, updated}>` — retroactive migration: deletes/updates existing `config_diffs` rows per current noise/secret rules. [SENSITIVE]
+`classifyDiff(diff)` -> `{ruleChanges: object[], sections: object[]}` — presentation-layer grouping of a diff into a rule-change table + labeled sections; pure, read-time only. Section entries also carry `friendlyDescription` and (added 2026-07-31) `ruleIndex`/`ruleField` — the positional index + in-rule field of a Palo Alto XML/API `...rulebase.<sec|nat|pbf>.rules.entry[N].<field>` path (both `null` for any other shape), so `DiffViewer.js` can regroup the flat per-field rows of the (renamed) "Security Rules" section into one table per rule. `extractIndexedRuleEntry(path)` is the pure `{index, field}` extractor. The label `Security Rules` (was `Rules (detail unavailable for this device)` pre-2.29.0) is a stable classification key — `components/devices/OverviewConfigChangesCard.js`'s `HIGH_IMPACT_LABELS` keys off it, change both together.
+`regenerateOversizedChangeSummaries(pool)` -> `Promise<{checked, updated}>` — backfill: re-derives `change_summary` for any oversized (>500 char) stored row.
+`collapsePrimitiveArrayShifts(diff)` -> `diff` (pure) — collapses a primitive-array positional-shift cascade (a set-like membership list where the OLD positional diff reported a 1-element insert/remove as N "modified" + a mis-named tail add/remove) back to the true added/removed via LCS reconstruction of the changed region. Gated: ≥3 primitive modified entries at one array path + contiguous indices. Uses `lcsPrimitiveDiff`.
+`collapseHistoricalArrayShiftCascades(pool)` -> `Promise<{checked, updated}>` — migration applying the above to every stored `config_diffs` row + re-deriving `change_summary`; idempotent, best-effort. Wired into migrate.js. Fixes the historical "246 modified" membership-list rows (new diffs never produce them — their array branch already uses LCS).
+
+## lib/engines/vpnSessions.js
+
+`storeVpnSessions(deviceId, sessions, pool)` -> `Promise<{count}>` — DELETE+reinsert (one transaction) the LIVE per-user active-session set into `vpn_active_sessions`. Engine-worker calls it only after a SUCCESSFUL poll (a failed pull never wipes; an empty array clears — nobody connected). Session objects: `{username, tunnel_type, source_ip, assigned_ip, login_time, duration_seconds, bytes_in, bytes_out, client, gateway, raw}` (any field nullable). Added 2026-07-31.
+`getVpnSessions(deviceId, pool)` -> `Promise<object[]>` — current active-session rows for the per-device VPN page.
+
+## lib/engines/vpnTunnels.js
+
+`storeVpnTunnels(deviceId, tunnels, pool)` / `getVpnTunnels(deviceId, pool)` — same live-snapshot DELETE+reinsert + read pattern as vpnSessions.js, for `vpn_ipsec_tunnels`. Tunnel shape: `{name, peer, status, ike_version, bytes_in, bytes_out, raw}`. Fed by the adapters' optional `getVpnTunnels()` (PAN-OS `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco `show vpn-sessiondb l2l`), stored by the engine-worker VPN poll in its own try/catch (a tunnel-pull failure never fails the session poll). Added 2026-07-31.
+
+## lib/engines/dashboardSnapshot.js
+
+`computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
+`computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>, byStandardCounts: Record<string, {pass,fail,warning}>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable. `byStandardCounts` (added 2026-08-02, additive — `computeAndStoreDashboardSnapshot` below ignores it) is the raw counts behind each percentage, for `lib/engines/complianceReport.js`'s fleet summary section.
+`computeAndStoreDashboardSnapshot(pool)` -> `Promise<{cve, compliance}>` — computes + `UPSERT`s today's `fleet_dashboard_snapshots` row (idempotent per calendar day).
+
+## lib/engines/objectUsage.js
+
+`analyzeObjectUsage(objects, rules)` -> `{object_id, finding_type: 'unused'|'duplicate', detail, related_object_ids}[]` (pure) — namespace-partitioned (address vs service) unused/duplicate object detection with transitive group-membership closure.
+`storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
+`runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
+
+. A partition name is an identifier and cannot be a bind parameter, so it is generated then re-validated before interpolation.
+`insertEvents(pool, events)` -> `{stored, failedChunks}` — one bad chunk does not sink the flush, and the caller keeps the spool file whenever `failedChunks > 0` so nothing is silently discarded.
+`toInetOrNull` / `toPortOrNull` / `toIntOrNull` / `toTextOrNull` — ⛔ all return NULL rather than a substitute. An INET column rejects malformed input and would abort the WHOLE batch, so a firewall logging a hostname where an IP belongs must yield NULL, never `0.0.0.0`.
+
 ## lib/syslog/syslogParser.js
 
 `parseSyslogLine(line, receivedAt)` -> normalized frame — RFC 3164 (BSD) + RFC 5424. Pure, never throws, and REQUIRES `receivedAt` because RFC 3164 year resolution is meaningless without a reference time. Every field is nullable and stays null when the frame does not carry it. Returns `format` (`rfc3164|rfc5424|pri-only|raw|unknown`) and `parseComplete`.

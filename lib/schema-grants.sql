@@ -96,3 +96,16 @@ GRANT SELECT ON users_readonly TO claude_readonly, nocvault_readonly;
 -- Exception: notification_channels — same encrypted_data/iv shape as
 -- credential_profiles (webhook URL / SMTP password), NEVER grant to these
 -- users. notification_dispatch_log holds no secrets and is granted above.
+
+-- Phase 8 syslog tables (added 2026-09-08). Firewall log CONTENT can be
+-- sensitive (internal addressing, usernames in some log types), but it holds
+-- no stored credentials, so the standard readonly diagnostic grant applies --
+-- same treatment as firewall_rules and device_configs.
+GRANT SELECT ON TABLE syslog_events TO claude_readonly;
+GRANT SELECT ON TABLE syslog_events TO nocvault_readonly;
+GRANT SELECT ON TABLE syslog_rollup_hourly TO claude_readonly;
+GRANT SELECT ON TABLE syslog_rollup_hourly TO nocvault_readonly;
+GRANT SELECT ON TABLE syslog_rule_hits_daily TO claude_readonly;
+GRANT SELECT ON TABLE syslog_rule_hits_daily TO nocvault_readonly;
+GRANT SELECT ON TABLE syslog_ingest_stats TO claude_readonly;
+GRANT SELECT ON TABLE syslog_ingest_stats TO nocvault_readonly;

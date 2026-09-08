@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.67.0': [
+    'SecVault now collects firewall logs itself, taking over from Firewall Analyzer. The collector listens on the standard syslog ports and stores what your firewalls send.',
+    'Logs are written to disk before the database and only removed once safely stored, so a restart replays anything in flight rather than losing it.',
+    'If the collector ever cannot keep up it records exactly how many messages it dropped, instead of quietly losing them.',
+    'Full detail is kept for 7 days for investigations; per-device and per-rule summaries are kept indefinitely.',
+    'No new screens yet. The next step is using this to show which firewall rules are genuinely unused.',
+  ],
   '2.66.1': [
     'Groundwork for SecVault collecting firewall logs directly, replacing Firewall Analyzer. Nothing changes for you yet -- no new screens and no new data.',
     'This release adds the two log readers and their tests: one for the standard syslog envelope, one for Fortinet and Palo Alto message formats.',
