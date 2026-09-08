@@ -129,21 +129,32 @@ test('fires when a curated port is reached from a public source', async () => {
   assert.equal(wrote.params[0], true);
 });
 
-test('the reach query restricts to the public-source ranges', async () => {
+test('the reach query demands an ALLOWED, PUBLIC-sourced observation', async () => {
   const pool = makePool(baseHandlers());
   await runLogHitCorrelation(pool);
   const q = pool.calls.find((c) => c.sql.includes('GROUP BY dst_port'));
-  // If this filter is ever dropped, internal admin traffic to a management
-  // port would escalate every curated advisory on the device.
-  for (const cidr of ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10']) {
-    assert.ok(q.sql.includes(cidr), 'missing ' + cidr);
-  }
+
+  // The public/allowed determination now happens once at rollup time (see
+  // rollups.js INBOUND_INSERT and its own test below); what this engine must
+  // still do is DEMAND both flags. Dropping either would let internal admin
+  // traffic, or a blocked probe, escalate every curated advisory on the device.
+  assert.ok(/allowed\s+IS TRUE/.test(q.sql), 'must require allowed IS TRUE');
+  assert.ok(/public_source\s+IS TRUE/.test(q.sql), 'must require public_source IS TRUE');
+
+  // ⛔ `IS TRUE`, never `= true`: the rollup stores NULL for an action it
+  // could not classify, and NULL must not escalate anything.
+  assert.ok(!/allowed\s*=\s*true/.test(q.sql), 'must not use = true');
+
+  // ⛔ Must not have quietly reverted to scanning raw events.
+  assert.ok(!q.sql.includes('FROM syslog_events'), 'must read the rollup, not raw events');
 });
 
 test('timestamp parameters are cast explicitly', async () => {
   const pool = makePool(baseHandlers());
   await runLogHitCorrelation(pool);
-  for (const c of pool.calls.filter((x) => x.sql.includes('received_at >='))) {
+  const timeQueries = pool.calls.filter((x) => x.sql.includes('bucket_hour >='));
+  assert.ok(timeQueries.length > 0, 'expected at least one time-bounded query');
+  for (const c of timeQueries) {
     assert.ok(c.sql.includes('::timestamptz'), 'uncast timestamp param');
   }
 });

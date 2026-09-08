@@ -27,7 +27,9 @@ const NOW = new Date('2026-09-08T14:37:12.500Z');
 // number is the point: a rollup added to the schema but not wired into the
 // sweep is a table that stays permanently empty while every log line says the
 // sweep succeeded. Bump this deliberately when adding one.
-const ROLLUP_COUNT = 8;
+// 8 -> 9 on 2026-09-08: syslog_device_inbound_hourly, the Internet Exposure /
+// log_hit input (lib/syslog/rollups.js INBOUND_INSERT).
+const ROLLUP_COUNT = 9;
 
 describe('rollups: bucket boundaries are UTC hours', () => {
   it('floors to the start of the UTC hour', () => {

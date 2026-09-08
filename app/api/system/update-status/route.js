@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.81.0': [
+    'New Internet Exposure page. It lists what is reachable from the internet on every firewall: the public address, the service, the internal host behind any destination NAT, and the rule that permits it.',
+    'Each path says whether traffic was actually observed arriving from a public source, so you can tell a live exposure from an open but unused one.',
+    'Paths on devices that are not sending logs are labelled Unmeasured rather than unused — SecVault will not report a gap in its own visibility as a clean result.',
+    'Every severity score is explained in plain language, with the reasons listed under the table.',
+    'Exposure and CVE reachability now read pre-aggregated hourly data, so both answer in milliseconds instead of minutes.',
+  ],
   '2.80.0': [
     'New Applicability worklist under Vulnerability. It shows, for every advisory affecting your fleet, whether anyone has recorded WHY it applies — sorted so known-exploited and uncurated advisories come first.',
     'This matters because an advisory with no recorded applicability is treated as "unknown" and filed as Scheduled. On this fleet that put 152 of 155 findings in one band, which is a list rather than a priority order.',

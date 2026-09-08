@@ -1097,17 +1097,21 @@ async function scheduleJobs() {
     runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
   });
 
-  // Fixed monthly time (06:00 UTC on the 1st) — same "housekeeping, not
-  // freshness" reasoning as dashboard-snapshot/snapshot-retention for why
-  // this isn't a configurable interval; dispatchMonthlyReport()'s own
-  // per-period idempotency check makes the immediate startup run in main()
-  // below a safe no-op mid-month.
+  // Hourly at :20. "Was this service reached in the last week" does not
+  // change minute to minute, and the job re-derives priority bands for any
+  // device whose value moved, so a tighter cadence would buy nothing and
+  // rewrite bands repeatedly. :20 keeps it off the top-of-hour crowd.
   logger.info('Scheduling [log-hit] with cron "20 * * * *" (hourly).');
   const logHitTask = cron.schedule('20 * * * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runLogHitJob, 'log-hit');
   });
 
+  // Fixed monthly time (06:00 UTC on the 1st) — same "housekeeping, not
+  // freshness" reasoning as dashboard-snapshot/snapshot-retention for why
+  // this isn't a configurable interval; dispatchMonthlyReport()'s own
+  // per-period idempotency check makes the immediate startup run in main()
+  // below a safe no-op mid-month.
   logger.info('Scheduling [compliance-report] with cron "0 6 1 * *" (monthly).');
   const complianceReportTask = cron.schedule('0 6 1 * *', () => {
     if (shuttingDown) return;
@@ -1154,6 +1158,13 @@ async function main() {
   // a second run immediately after the first deletes nothing.
   await runTrackedJob(runConfigRetentionJob, 'config-retention');
   await runTrackedJob(runNotificationDispatchJob, 'notification-dispatch');
+
+  // Cron registration happens only after every startup job above finishes,
+  // so the first scheduled [log-hit] tick can land more than an hour after a
+  // deploy. Running it once here makes the wiring verifiable immediately.
+  // Cheap by construction: with no curated port_exposed condition it returns
+  // without touching syslog at all.
+  await runTrackedJob(runLogHitJob, 'log-hit');
   // Safe no-op mid-month — dispatchMonthlyReport()'s own per-period
   // idempotency check (compliance_report_log) skips instantly once a
   // 'success' row already exists this period, same as every other job's

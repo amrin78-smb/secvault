@@ -1094,3 +1094,50 @@ FortiAnalyzer/FortiManager/FortiWeb — this fleet runs FortiGate.
 
 ⛔ `cvssScore` and `pct` are `null`, never `0` — "no published score" and "0% curated" must not
 look like a real zero. Worklist covers only advisories with at least one assessment.
+
+## `lib/engines/exposure.js` + `lib/engines/exposureQuery.js` (added 2026-09-08)
+
+Internet Exposure & Attack Surface — the roadmap's #1 differentiator, scoped honestly.
+
+Split deliberately: `exposure.js` is PURE (path construction + scoring, unit-testable with no DB),
+`exposureQuery.js` loads rows and attaches observed-traffic evidence. Reuses `objectResolver.js`
+UNCHANGED as its address/service resolver (`buildObjectMap` was exported for this) — the same
+pattern topology.js follows.
+
+Reconstructs `Internet -> public IP:port -> [DNAT] -> internal host:port`, permitted by rule N.
+
+⛔ SCOPE STOPS AT THE INTERNAL HOST ADDRESS. The roadmap's graph continues into applications,
+identities and data stores; SecVault has no asset or identity inventory, so drawing that would
+invent the most security-critical half. The UI says "the device itself" or names the NAT target,
+never more.
+
+⛔ THREE-STATE `observation`, and it is the point of the feature:
+`observed` (allowed traffic from a PUBLIC source arrived) / `not_observed` (we had syslog coverage
+and saw none — a real measurement) / `unmeasured` (no coverage — NOT safe). `unmeasured` and
+`not_observed` must never render alike, and an unobserved path is NEVER filtered out or scored
+down: an unused open door is still open.
+
+⛔ Severity is EXPLAINABLE — every point carries a reason string, surfaced under the table.
+Observation only ever ADDS; `unmeasured` moves the score in neither direction, so a logging gap
+cannot masquerade as risk.
+
+Vendor reality handled: a rule frequently names the INTERNAL address (Fortinet VIPs), so paths
+match the rule against both the public face and the NAT target — matching only the public side
+misses the entire published service. Only `nat_type='destination'` counts; source NAT is outbound.
+IPv4 only, explicitly. `device_interfaces.ip_address` carries the literal sentinel `'N/A'` on live
+rows and is filtered before any inet cast.
+
+## `syslog_device_inbound_hourly` (rollup, added 2026-09-08)
+
+⛔ EXISTS FOR ONE REASON: the same question against raw `syslog_events` took OVER TWO MINUTES for
+ONE device over ONE day (measured live). The `(device_id, received_at)` index cannot help a
+`dst_ip` predicate, so it scans the whole device-day. BOTH `exposureQuery.js` and `logHit.js` read
+this rollup and neither may revert to raw events — pinned by tests in both files.
+
+Bounded by a join to the device's OWN interface addresses plus destination-NAT published addresses
+(~300 rows fleet-wide); rolling up every destination would be unbounded internet addressing.
+`allowed` and `public_source` are nullable booleans classified ONCE at rollup time — an action in
+neither the allow nor block list stays NULL, and consumers test `IS TRUE`, never `= true`, so an
+unknown vendor verb can never escalate a CVE. The regex guard runs BEFORE the `::inet` cast: the
+`'N/A'` sentinel would otherwise abort the sweep transaction and take the other eight rollups down
+with it.

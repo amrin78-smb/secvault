@@ -128,7 +128,7 @@ describe('detail rollups: rebuilt in the same window as the permanent ones', () 
     }
     // The DELETEs still take the bounds, and they must all agree.
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.equal(windowed.length, 9, 'one temp-table scan + one DELETE per rollup');
+    assert.equal(windowed.length, 10, 'one temp-table scan + one DELETE per rollup');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), FROM.getTime());
       assert.equal(c.params[1].getTime(), TO.getTime());
@@ -177,7 +177,8 @@ describe('detail rollups: retention', () => {
     // table that grows forever while the log still reports success.
     assert.deepEqual(Object.keys(out.deleted).sort(), [
       'syslog_app_hourly', 'syslog_blocked_dst_hourly', 'syslog_country_hourly',
-      'syslog_talker_hourly', 'syslog_urlcat_hourly', 'syslog_user_hourly',
+      'syslog_device_inbound_hourly', 'syslog_talker_hourly', 'syslog_urlcat_hourly',
+      'syslog_user_hourly',
     ]);
     for (const c of pool.calls) {
       assert.match(c.sql, /^DELETE FROM syslog_/);
@@ -227,4 +228,77 @@ describe('detail rollups: retention', () => {
     const out = await trimDetailRollups(null, 30);
     assert.match(out.error, /no pool/);
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// syslog_device_inbound_hourly — the Internet Exposure / log_hit input
+// ─────────────────────────────────────────────────────────────────────────
+//
+// This rollup exists because the same question against raw syslog_events took
+// OVER TWO MINUTES for one device-day (measured 2026-09-08). Both
+// lib/engines/exposureQuery.js and lib/engines/logHit.js depend on it, and
+// both delegate their "was the source public / was the traffic allowed"
+// decision to it. That makes the classification below load-bearing for a CVE
+// priority band, so it is pinned here rather than only in the engines.
+
+const { INBOUND_INSERT } = require('../lib/syslog/rollups');
+
+it('inbound rollup: guards the inet cast BEFORE casting', () => {
+  // ⛔ device_interfaces.ip_address is TEXT and carries the literal 'N/A' on
+  // live rows. Casting that raises "invalid input syntax for type inet",
+  // which would abort the sweep TRANSACTION and take the other seven rollups
+  // down with it. The regex must be applied before the cast.
+  const guardPos = INBOUND_INSERT.indexOf('~ ');
+  const castPos = INBOUND_INSERT.indexOf("split_part(ip_address, '/', 1)::inet");
+  assert.ok(guardPos > -1, 'no regex guard present');
+  assert.ok(castPos > -1, 'no inet cast present');
+  assert.ok(
+    /split_part\(ip_address, '\/', 1\) ~ /.test(INBOUND_INSERT),
+    'the cast must be guarded by a dotted-quad regex on the same expression'
+  );
+});
+
+it('inbound rollup: bounded to the devices own published addresses', () => {
+  // ⛔ Without the devip join this aggregates every destination on the
+  // internet — unbounded cardinality, the same trap syslog_blocked_dst_hourly
+  // avoids by only storing blocked destinations.
+  assert.ok(INBOUND_INSERT.includes('devip'), 'must join the bounded address set');
+  assert.ok(
+    /\) devip ON devip\.device_id = s\.device_id AND devip\.ip = s\.dst_ip/.test(INBOUND_INSERT),
+    'must join on BOTH device and address — device alone would store all traffic'
+  );
+  assert.ok(INBOUND_INSERT.includes('nat_rules'), 'must include NAT-published addresses');
+  assert.ok(
+    /lower\(n\.nat_type\) = 'destination'/.test(INBOUND_INSERT),
+    'only destination NAT publishes an inbound address'
+  );
+});
+
+it('inbound rollup: classifies actions three ways, never two', () => {
+  // The allowed list must contain Fortinet's session-END actions: a session
+  // that existed and closed WAS reached. FortiGate SSL-VPN on 10443 is logged
+  // `close`, never `allow`.
+  for (const a of ['allow', 'accept', 'close', 'client-rst', 'server-rst']) {
+    assert.ok(INBOUND_INSERT.includes(`'${a}'`), 'allowed action missing: ' + a);
+  }
+  // Palo Alto's reset-both is a BLOCK despite resembling the above.
+  assert.ok(INBOUND_INSERT.includes("'reset-both'"), 'reset-both must be classified as blocked');
+  // ⛔ The third state. An action in neither list must land on NULL, never be
+  // folded into allowed — NULL is what keeps an unknown vendor verb from
+  // escalating a CVE to patch_now.
+  assert.ok(/ELSE NULL/.test(INBOUND_INSERT), 'unknown actions must resolve to NULL');
+});
+
+it('inbound rollup: public-source determination covers every private range', () => {
+  // This is where the exposure engines' "from the internet" guarantee actually
+  // lives now. If a range is dropped here, internal traffic starts counting as
+  // an internet-sourced hit in BOTH engines at once.
+  for (const cidr of [
+    '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
+    '127.0.0.0/8', '169.254.0.0/16', '100.64.0.0/10',
+  ]) {
+    assert.ok(INBOUND_INSERT.includes(cidr), 'missing private range: ' + cidr);
+  }
+  // A NULL source must stay NULL rather than counting as public.
+  assert.ok(/s\.src_ip IS NULL THEN NULL/.test(INBOUND_INSERT));
 });

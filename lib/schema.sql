@@ -1569,6 +1569,48 @@ CREATE TABLE IF NOT EXISTS syslog_blocked_dst_hourly (
 CREATE INDEX IF NOT EXISTS idx_syslog_blocked_dst_hour ON syslog_blocked_dst_hourly (bucket_hour DESC);
 
 -- ===========================================================================
+-- Internet Exposure — traffic addressed TO a device's own published addresses
+-- ===========================================================================
+-- Answers "was this exposed service actually reached", for lib/engines/
+-- exposureQuery.js and lib/engines/logHit.js.
+--
+-- ⛔ THIS TABLE EXISTS FOR ONE REASON: the equivalent question asked against
+-- raw syslog_events takes OVER TWO MINUTES for a single device over a single
+-- day (measured 2026-09-08). The (device_id, received_at) index cannot help a
+-- dst_ip predicate, so the scan reads the whole device-day. Both callers are
+-- unusable without this.
+--
+-- ⛔ Cardinality is bounded ON PURPOSE by the WHERE clause in rollups.js:
+-- only destinations that are one of the device's OWN interface addresses or a
+-- destination-NAT published address (~300 rows fleet-wide) are aggregated.
+-- Rolling up every destination would be unbounded internet addressing --
+-- the same reasoning as syslog_blocked_dst_hourly above.
+--
+-- `allowed` and `public_source` are separate booleans rather than a filter so
+-- a blocked probe and an internal admin session stay VISIBLE and countable,
+-- distinct from a genuine internet-sourced session. Collapsing them would
+-- throw away the distinction the exposure severity depends on.
+CREATE TABLE IF NOT EXISTS syslog_device_inbound_hourly (
+  id               BIGSERIAL PRIMARY KEY,
+  bucket_hour      TIMESTAMPTZ NOT NULL,
+  device_id        UUID REFERENCES devices(id) ON DELETE CASCADE,
+  dst_ip           INET NOT NULL,
+  dst_port         INTEGER,
+  protocol         TEXT,
+  allowed          BOOLEAN,
+  public_source    BOOLEAN,
+  event_count      BIGINT NOT NULL DEFAULT 0,
+  distinct_sources INTEGER NOT NULL DEFAULT 0,
+  last_seen_at     TIMESTAMPTZ,
+  CONSTRAINT uq_syslog_device_inbound_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, dst_ip, dst_port, protocol, allowed, public_source)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_device_inbound_hour
+  ON syslog_device_inbound_hourly (bucket_hour DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_device_inbound_dev
+  ON syslog_device_inbound_hourly (device_id, bucket_hour DESC);
+
+-- ===========================================================================
 -- Phase 8b — country / user / URL-category rollups (added 2026-09-08)
 -- ===========================================================================
 -- Same NARROW shape and same 30-day retention as the three above
