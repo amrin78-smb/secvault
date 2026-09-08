@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.75.0': [
+    'Raw firewall logs are now also written to compressed daily archive files, the same way Firewall Analyzer stored them.',
+    'This is why Firewall Analyzer held roughly a year in about a terabyte while the database needs that much for a week: it compressed the text about 13 times over. Measured on your own logs, ours compresses about 11 times.',
+    'The archive keeps 60 days by default, which is roughly 500 GB, and the files open with ordinary tools such as gunzip or zgrep.',
+    'Archiving can never interrupt log collection. If the archive disk fills or is unavailable it is reported as a warning and collection carries on, because the database remains the primary store.',
+    'Nothing is removed from the database in this release. The archive has to prove itself first.',
+  ],
   '2.74.2': [
     'The frequent log-summarisation pass now covers a shorter recent window, so it comfortably finishes within its five-minute cycle instead of nearly overrunning it.',
     'Nothing is dropped: every hour is still rebuilt by the slower catch-up pass, so a log arriving late is still counted.',

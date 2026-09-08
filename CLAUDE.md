@@ -1502,6 +1502,9 @@ SYSLOG_RETENTION_DAYS=7                    # raw events; enforced by DROPPING pa
 SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the DB insert;
                                            # blank = <install dir>\spool. Installer sets it.
 SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)
+SYSLOG_ARCHIVE_ENABLED=true                # compressed raw-log archive (FWA storage model)
+SYSLOG_ARCHIVE_DIR=                        # blank = <install dir>archive
+SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ~500 GB at 8.4 GB/day measured
 SYSLOG_ROLLUP_RECENT_HOURS=1               # frequent narrow re-aggregation (+1h; was 3, overran the cycle)
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep, SLICED 6h/pass; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5

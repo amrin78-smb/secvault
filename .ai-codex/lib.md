@@ -413,6 +413,14 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ **Every value is a bind parameter and every column name comes from the `FILTERS` whitelist.** This is the only query in the codebase assembled from user-supplied input, on a security product; `tests/logSearch.test.js` carries the injection guard. LIKE metacharacters are escaped so a literal `%` cannot silently widen a search to everything.
 A bare address filters by equality, a CIDR by containment (`<<=`).
 
+## lib/syslog/archive.js
+
+`appendBatch(dir, lines, now)` -> `{ok, bytesRaw, bytesCompressed, file, error}` · `pruneArchive(dir, retentionDays, now)` · `archiveStats(dir)` · `fileNameFor` / `dayKey` / `ARCHIVE_FILE_RE`.
+⛔ **Why a file and not a column.** Measured 2026-09-08: PostgreSQL stores `message` at 752 bytes against 748 bytes of text -- NO compression, because TOAST only compresses once a tuple exceeds ~2 KB and these rows are ~1 KB. And it could never match a file anyway: the 10.8x measured on this live stream (13.3x in FWA own archives) comes from compressing ACROSS lines, where a row can only compress against itself (2-3x). The gap is architectural, so the fix is.
+⛔ **Concatenated gzip members, one per flush.** Chosen for CRASH SAFETY over ratio: a single long-lived stream compresses marginally better and is unreadable end-to-end if the process dies mid-write -- the one failure that matters for an archive, because you find it months later. Per-flush members mean a crash damages at most the final member. gzip defines a stream as a sequence of members, so the day file stays readable by `gunzip`/`zcat`/`zgrep`.
+⛔ **Never throws.** A full or unmounted archive volume degrades to a logged warning; the database is the primary store and ingest must survive it. Archiving happens BEFORE the DB insert while the spool file is still on disk, so a crash costs a replay (at worst a duplicated member), never a lost line.
+⛔ `pruneArchive` only ever deletes names matching `ARCHIVE_FILE_RE`, and falls back to the documented default on junk retention input rather than computing a cutoff that wipes everything.
+
 ## lib/syslog/eventShape.js
 
 `buildEvent(raw, frame, payload, deviceId)` -> the event object `eventStore.flattenRow()` consumes. Pure — no DB, no sockets, no clock. Never throws.

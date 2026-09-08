@@ -64,6 +64,7 @@ const { pool } = require('../lib/db');
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const { buildEvent } = require('../lib/syslog/eventShape');
+const archive = require('../lib/syslog/archive');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
 const { runRollupMaintenance, trimDetailRollups } = require('../lib/syslog/rollups');
@@ -100,6 +101,16 @@ const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 7, 1, 3650);
 // point of a rollup is to still answer "who was the top talker last month"
 // after the raw events behind it have been dropped.
 const DETAIL_RETENTION_DAYS = intEnv('SYSLOG_DETAIL_RETENTION_DAYS', 30, 1, 3650);
+
+// Compressed raw-log archive -- the storage model Firewall Analyzer used.
+// Measured on this fleet: the raw text compresses 10.8x, so the 90 GB/day of
+// `message` the database stores UNCOMPRESSED becomes ~8.4 GB/day here.
+// ⛔ Default ON. An archive nobody enabled is not an archive.
+const ARCHIVE_ENABLED = String(process.env.SYSLOG_ARCHIVE_ENABLED || 'true').toLowerCase() !== 'false';
+const ARCHIVE_DIR = process.env.SYSLOG_ARCHIVE_DIR || path.join(__dirname, '..', 'archive');
+const ARCHIVE_RETENTION_DAYS = intEnv('SYSLOG_ARCHIVE_RETENTION_DAYS', 60, 1, 3650);
+// Log the archive ratio roughly every GB of raw text, not every flush.
+const ARCHIVE_LOG_EVERY_BYTES = 1e9;
 const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..', 'spool');
 
 // Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
@@ -219,6 +230,22 @@ async function processSpoolFile(file) {
   const records = readSpool(file);
   if (records.length === 0) { fs.unlinkSync(file); return { stored: 0, parsed: 0 }; }
 
+  // ⛔ Archive BEFORE the insert, and never let it block the insert. The
+  // spool file is still on disk at this point, so a crash here costs a
+  // replay (and at worst a duplicated archive member), never a lost line.
+  // ⛔ An archive failure is a WARNING, not an abort: the database is the
+  // primary store and ingest must survive a full disk on the archive volume.
+  if (ARCHIVE_ENABLED) {
+    const a = archive.appendBatch(ARCHIVE_DIR, records.map((r) => r.line), new Date());
+    if (!a.ok) {
+      archiveFailures += 1;
+      log(`WARN archive append failed (${archiveFailures} so far): ${a.error}`);
+    } else {
+      archiveRaw += a.bytesRaw;
+      archiveGz += a.bytesCompressed;
+    }
+  }
+
   const events = records.map(toEvent);
   const { stored, failedChunks } = await store.insertEvents(pool, events);
 
@@ -280,6 +307,18 @@ async function flush() {
       if (droppedThisCycle > 0) {
         log(`WARN dropped ${droppedThisCycle} datagram(s) - buffer hit ${MAX_BUFFER}`);
       }
+      // Report the archive's REAL ratio periodically rather than trusting the
+      // measured 10.8x forever — it moves with the traffic mix, and this is the
+      // number the retention sizing depends on.
+      if (ARCHIVE_ENABLED && archiveRaw > ARCHIVE_LOG_EVERY_BYTES) {
+        log(
+          `archive   : ${(archiveRaw / 1e9).toFixed(2)} GB raw -> ` +
+          `${(archiveGz / 1e9).toFixed(3)} GB stored (${(archiveRaw / archiveGz).toFixed(1)}x)` +
+          (archiveFailures > 0 ? `, ${archiveFailures} failure(s)` : '')
+        );
+        archiveRaw = 0;
+        archiveGz = 0;
+      }
     } else if (droppedThisCycle > 0) {
       log(`WARN dropped ${droppedThisCycle} datagram(s) with an empty batch`);
     }
@@ -319,12 +358,26 @@ async function maintenance() {
     // SILENT -- and an un-trimmed high-cardinality table is exactly how a
     // disk fills up with every health signal still reporting green.
     if (trimmed.error) log(`WARN detail rollup trim: ${trimmed.error}`);
+
+    if (ARCHIVE_ENABLED) {
+      const pruned = archive.pruneArchive(ARCHIVE_DIR, ARCHIVE_RETENTION_DAYS, new Date());
+      if (pruned.removed.length > 0) {
+        log(`archive: removed ${pruned.removed.length} file(s) older than ${ARCHIVE_RETENTION_DAYS}d`);
+      }
+      if (pruned.error) log(`WARN archive prune: ${pruned.error}`);
+    }
   } catch (err) {
     log(`ERROR maintenance failed: ${err.stack || err.message}`);
   }
 }
 
 // --- rollups ---------------------------------------------------------------
+// Archive counters, reported in the flush log so the ratio is visible rather
+// than assumed. Reset each time they are logged.
+let archiveRaw = 0;
+let archiveGz = 0;
+let archiveFailures = 0;
+
 let rollupRunning = false;
 
 // `wide` sweeps further back to pick up events that landed LATE. Skipping it
@@ -404,6 +457,16 @@ async function main() {
     `retention : ${RETENTION_DAYS} day(s) of raw events, ` +
     `${DETAIL_RETENTION_DAYS} day(s) of detail rollups`
   );
+  if (ARCHIVE_ENABLED) {
+    const st = archive.archiveStats(ARCHIVE_DIR);
+    log(
+      `archive   : ${ARCHIVE_DIR} (${ARCHIVE_RETENTION_DAYS}d) - ` +
+      `${st.files} file(s), ${(st.bytes / 1e9).toFixed(1)} GB` +
+      (st.oldest ? ` covering ${st.oldest}..${st.newest}` : '')
+    );
+  } else {
+    log('archive   : DISABLED');
+  }
   log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
 
   ensureSpoolDir();
