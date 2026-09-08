@@ -396,6 +396,13 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ Fortinet's `threatName` accepts only `attack` or `virus`, never `eventtype` — on an app-ctrl row `eventtype` reads "signature", which names nothing and would top every Top Threats report.
 `threatSeverityRank(raw)` -> `0-5 | null` — maps PAN-OS (`informational`..`critical`) and FortiOS (`debug`..`emergency`) onto ONE ordered scale so a severity chart does not split a level across two vendor words. ⛔ Returns null for an unrecognized word, never a default level: a threat filed under a guessed severity silently changes where it sorts in a prioritized list.
 
+## lib/syslog/threatStats.js
+
+`getTopAttackers` / `getTopTargets` / `getTopThreats` / `getThreatsBySeverity` / `getThreatTimeline` / `getDeviceThreatSummary` — the Security-tab reports, i.e. Firewall Analyzer's Attack, Virus and Security report families.
+⛔ **These read `syslog_events` DIRECTLY while every traffic widget reads a rollup**, and that split is deliberate: threat events are 1.31% of the stream (~70k/hour measured) and are covered by the PARTIAL `idx_syslog_events_class`, so a raw read is cheap AND keeps the per-event attacker/target/signature detail an aggregate destroys. "Which host attacked which host" is the question being asked.
+⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
+⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
+
 ## lib/syslog/logSearch.js
 
 `buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `resolveWindow` · `clampLimit`.
@@ -431,6 +438,7 @@ A bare address filters by equality, a CIDR by containment (`<<=`).
 ⛔ **Every query here reads a ROLLUP, never `syslog_events`** — that is the entire reason the rollups exist. Two documented exceptions: VPN per-event DETAIL (bounded by `log_class` + a recent window, and carrying per-event fields an aggregate would destroy) and ingest health (`syslog_ingest_stats` is already one small row per flush).
 ⛔ **"No data" is NULL, never 0** — a fleet not yet collected from renders "—". A dashboard showing 0 events/sec when the collector is DOWN looks identical to a quiet network.
 Permanent-rollup readers: `getTrafficTimeline(pool, hours)`, `getTopTalkers(pool, hours, limit)`, `getActionBreakdown`, `getTopRules(pool, days, limit)`, `getIngestHealth(pool, minutes)`, `getVpnActivity`, `getVpnActivityByDevice`, `getThreatActivity`, `getClassTimeline(pool, logClass, hours)`.
+Country/user/URL readers (Phase 8b): `getTopCountries(pool, hours, limit)` -> `{countries, internal, unreported}` (⛔ internal + unreported are RETURNED, not dropped — excluded silently the percentages would total 100% of a smaller number while presenting as 100% of traffic), `getTopUsers(...)` -> `{users, attributed, totalEvents, coveragePct}` (⛔ coverage is stated; identity is resolved on only a fraction of events), `getTopUrlCategories(...)`, `isInternalCountry(v)`.
 Detail-rollup readers (Phase 8b): `getTopHosts(pool, hours, limit)`, `getTopApplications(pool, hours, limit)` -> `{applications, unclassified}`, `getProtocolBreakdown(pool, hours)`, `getTopBlockedDestinations(pool, hours, limit)`, `getDeviceTrafficStats(pool, hours)`.
 ⛔ `getTopTalkers` and `getTopHosts` answer DIFFERENT questions and must not be conflated: the first ranks the FIREWALLS sending us syslog (`source_ip` of the datagram), the second ranks the HOSTS inside the traffic those firewalls described (`src_ip` parsed from the payload). One returns ~16 rows, the other thousands.
 ⛔ `getTopApplications` returns rows with no application as a separate `unclassified` COUNT rather than a synthetic `(unknown)` row — that row would usually rank #1 and bury the real answer behind a label that means nothing.

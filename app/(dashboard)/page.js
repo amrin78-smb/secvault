@@ -37,6 +37,18 @@ import {
   BlockedDestinationsWidget,
   DeviceTrafficTable,
 } from '../../components/dashboard/TrafficWidgets';
+import {
+  TopAttackersWidget,
+  TopTargetsWidget,
+  TopThreatsWidget,
+  ThreatSeverityWidget,
+  DeviceThreatTable,
+} from '../../components/dashboard/SecurityLogWidgets';
+import {
+  TopCountriesWidget,
+  TopUsersWidget,
+  UrlCategoriesWidget,
+} from '../../components/dashboard/GeoUserWidgets';
 
 export const dynamic = 'force-dynamic';
 
@@ -173,13 +185,26 @@ export default async function DashboardPage({ searchParams }) {
       )}
 
       {tab === 'security' && (
-        <div className="dashboard-widget-grid">
-          <CveSeverityCard />
-          <VulnerabilityTrends />
-          <TopRiskyCard />
-          <RecentCriticalAlerts />
-          <RiskByCategory />
-        </div>
+        <>
+          {/* Two halves that belong together and never used to meet: what we
+              are EXPOSED to (CVE posture, from configuration and version data)
+              and what is actually being ATTEMPTED against us (threat events,
+              from log evidence). Firewall Analyzer only ever had the second. */}
+          <div className="dashboard-widget-grid">
+            <CveSeverityCard />
+            <VulnerabilityTrends />
+            <TopRiskyCard />
+            <RecentCriticalAlerts />
+            <RiskByCategory />
+            <ThreatSeverityWidget />
+            <TopAttackersWidget />
+            <TopTargetsWidget />
+            <TopThreatsWidget />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <DeviceThreatTable />
+          </div>
+        </>
       )}
 
       {tab === 'rules' && (
@@ -211,6 +236,9 @@ export default async function DashboardPage({ searchParams }) {
             {/* Which firewalls are talking to us -- a different question from
                 TopHostsWidget above, which ranks hosts inside their traffic. */}
             <TopTalkersWidget />
+            <TopCountriesWidget />
+            <TopUsersWidget />
+            <UrlCategoriesWidget />
             <IngestHealthWidget />
           </div>
           {/* Full width, outside the grid: seven numeric columns across every

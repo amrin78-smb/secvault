@@ -1555,3 +1555,76 @@ CREATE TABLE IF NOT EXISTS syslog_blocked_dst_hourly (
     (bucket_hour, device_id, dst_ip, dst_port, protocol)
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_blocked_dst_hour ON syslog_blocked_dst_hourly (bucket_hour DESC);
+
+-- ===========================================================================
+-- Phase 8b — country / user / URL-category rollups (added 2026-09-08)
+-- ===========================================================================
+-- Same NARROW shape and same 30-day retention as the three above
+-- (SYSLOG_DETAIL_RETENTION_DAYS, trimmed by rollups.js's trimDetailRollups).
+--
+-- ⛔ These three exist as rollups, while the ATTACK/THREAT reports read
+-- syslog_events directly, and that split is deliberate: threat events are 1.31%
+-- of the stream (~70k/hour, measured) and are covered by the partial
+-- idx_syslog_events_class index, so a raw read is cheap AND keeps the
+-- per-event attacker/target detail an aggregate would destroy. Country, user
+-- and URL category span the other 98% and would be a full scan every time.
+--
+-- Cardinality is bounded and small: ~200 countries, a few thousand users, ~100
+-- URL categories. None of them needs the guard syslog_blocked_dst_hourly needed.
+
+-- ⛔ Countries are stored EXACTLY as the device reported them, which includes
+-- FortiOS's "Reserved" and PAN-OS's literal "192.168.0.0-192.168.255.255" for
+-- private space. Those are real answers about internal traffic, not missing
+-- ones; the read layer groups them under "Internal" for display and never
+-- rewrites what is stored.
+CREATE TABLE IF NOT EXISTS syslog_country_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  dst_country    TEXT,
+  event_count    BIGINT NOT NULL DEFAULT 0,
+  denied_count   BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  CONSTRAINT uq_syslog_country_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, dst_country)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_country_hour ON syslog_country_hourly (bucket_hour DESC);
+
+-- Per-user traffic. Populated only where the firewall actually resolves an
+-- identity (PAN-OS User-ID, FortiOS authenticated sessions) — measured at a
+-- small fraction of events, which is a coverage fact the widget states rather
+-- than hiding.
+CREATE TABLE IF NOT EXISTS syslog_user_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  src_user       TEXT NOT NULL,
+  event_count    BIGINT NOT NULL DEFAULT 0,
+  denied_count   BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  CONSTRAINT uq_syslog_user_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, src_user)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_user_hour ON syslog_user_hourly (bucket_hour DESC);
+
+-- URL / application category as the firewall classified it.
+CREATE TABLE IF NOT EXISTS syslog_urlcat_hourly (
+  id           BIGSERIAL PRIMARY KEY,
+  bucket_hour  TIMESTAMPTZ NOT NULL,
+  device_id    UUID REFERENCES devices(id) ON DELETE CASCADE,
+  url_category TEXT NOT NULL,
+  event_count  BIGINT NOT NULL DEFAULT 0,
+  denied_count BIGINT NOT NULL DEFAULT 0,
+  CONSTRAINT uq_syslog_urlcat_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, url_category)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_urlcat_hour ON syslog_urlcat_hourly (bucket_hour DESC);
+
+-- Threat reporting reads syslog_events through this index. threat_name is the
+-- grouping key for "Top Threats"; the partial class index already narrows to
+-- the 1.3% of rows that are not traffic.
+CREATE INDEX IF NOT EXISTS idx_syslog_events_threat
+  ON syslog_events (threat_name, received_at DESC)
+  WHERE threat_name IS NOT NULL;

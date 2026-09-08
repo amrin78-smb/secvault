@@ -60,6 +60,11 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 [server] /vpn — VpnFleetPage — fleet table of VPN status per active device (`summarizeVpnConfig()`, config-derived from latest `device_configs.config_parsed`) + latest polled active-session count/timestamp (Fortinet-only capability) + CSV export.
 [server] /devices/[id]/vpn — DeviceVpnPage — one device's VPN config summary card (SSL-VPN/remote-access: source interface/port/idle-timeout/min-TLS, enabled/disabled/unknown badge, low-confidence badge for doc-derived vendors) + `VpnSessionTrendChart` (session-count history) + CSV export.
 
+## Dashboard tabs (Phase 8b additions)
+
+The **Security** tab now carries both halves of the same question, which never used to meet: what the fleet is EXPOSED to (CVE posture, from configuration and version data) and what is actually being ATTEMPTED against it (threat events, from log evidence). Firewall Analyzer only ever had the second.
+The **Traffic** tab gained geography, users and web/application categories.
+
 ## Log Search
 
 `/logs` — `app/(dashboard)/logs/page.js`, the forensic view. Server-rendered from the URL query string (no client JS, no `useState`), so a search is linkable, pasteable into a ticket and survives a refresh — same server-driven convention as the dashboard `?tab=` and `/topology?view=`. Components: `logs/LogSearchForm` (plain GET `<form>`), `logs/LogResults`.

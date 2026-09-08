@@ -23,6 +23,12 @@ const {
 
 const NOW = new Date('2026-09-08T14:37:12.500Z');
 
+// How many rollup tables recomputeWindow() rebuilds. Asserting the exact
+// number is the point: a rollup added to the schema but not wired into the
+// sweep is a table that stays permanently empty while every log line says the
+// sweep succeeded. Bump this deliberately when adding one.
+const ROLLUP_COUNT = 8;
+
 describe('rollups: bucket boundaries are UTC hours', () => {
   it('floors to the start of the UTC hour', () => {
     assert.equal(floorHour(NOW).toISOString(), '2026-09-08T14:00:00.000Z');
@@ -167,7 +173,7 @@ describe('rollups: recomputeWindow never throws and is DELETE-then-INSERT', () =
     const inserts = sqls
       .map((s, i) => [s, i])
       .filter(([s]) => s.startsWith('INSERT INTO syslog_'));
-    assert.equal(inserts.length, 5, 'all five rollups');
+    assert.equal(inserts.length, ROLLUP_COUNT, 'every rollup');
     for (const [s, i] of inserts) {
       assert.ok(i > temp, 'every rollup must run AFTER the scan');
       assert.match(s, /FROM rollup_src/, 'no rollup may re-scan syslog_events');
@@ -198,7 +204,7 @@ describe('rollups: recomputeWindow never throws and is DELETE-then-INSERT', () =
     const pool = stubPool();
     await recomputeWindow(pool, from, to);
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.equal(windowed.length, 6, 'one temp-table scan + five DELETEs');
+    assert.equal(windowed.length, ROLLUP_COUNT + 1, 'one temp-table scan + one DELETE each');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), from.getTime());
       assert.equal(c.params[1].getTime(), to.getTime());

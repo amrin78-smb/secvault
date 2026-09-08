@@ -129,6 +129,13 @@ RulesetOverview  no props — fleet-wide rule totals + finding-type stat tiles (
 TopRiskyDevices  limit — top active devices by latest rule-analysis risk score
 VendorDistribution  no props — active-device count by vendor, bar list
 
+SecurityLogWidgets.js (no props): TopAttackersWidget, TopTargetsWidget, TopThreatsWidget, ThreatSeverityWidget, DeviceThreatTable — the Firewall Analyzer attack/virus/security report families, from log evidence. Every row links into `/logs` pre-filtered to that host, threat or class, so a chart is one click from the raw evidence behind it.
+⛔ These read `syslog_events` directly while the traffic widgets read rollups — see `lib/syslog/threatStats.js` for why that is correct rather than an oversight.
+⛔ ThreatSeverityWidget shows the VENDOR WORDS that merged onto each level, so a merged level is visibly a merge; unrecognized and absent severities are counted separately in words, never folded into a level.
+⛔ DeviceThreatTable renders a dash, not a zero, and says in words that it cannot distinguish a quiet device from one not forwarding IPS/antivirus logs.
+
+GeoUserWidgets.js (no props): TopCountriesWidget, TopUsersWidget, UrlCategoriesWidget. ⛔ No GeoIP database anywhere — country is the firewall's own answer. TopCountriesWidget states the internal and unreported totals it excluded; TopUsersWidget states its coverage percentage, because a top-users chart that does not invites the reader to assume the listed users are the only ones active.
+
 ## logs/
 
 LogSearchForm  params, devices, options — a plain GET `<form>` posting to `/logs`. No client JS: the URL is the query. Fields cover time window, device, log class, action, source/destination address (bare or CIDR), port, user, rule, country, application, threat, website and raw-text contains.

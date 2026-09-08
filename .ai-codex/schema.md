@@ -208,6 +208,12 @@ it the largest table in the database to answer a question nobody asks.
 ⛔ Byte columns are populated only from rows where `bytes_summable` — NULL means "these counters
 cannot be summed", never zero traffic. All three use `UNIQUE NULLS NOT DISTINCT`, same as above.
 
+### syslog_country_hourly / syslog_user_hourly / syslog_urlcat_hourly   (Phase 8b, 30-day)
+Hourly totals per DESTINATION COUNTRY, per USER, and per URL/APPLICATION CATEGORY. Same narrow shape and same `SYSLOG_DETAIL_RETENTION_DAYS` retention as the three detail rollups above. Cardinality is small and bounded (~200 countries, a few thousand users, ~100 categories).
+⛔ **Country needs NO GeoIP database** — both Palo Alto and FortiOS put it in every traffic log; SecVault simply was not reading it until 2026-09-08.
+⛔ Countries are stored EXACTLY as the device said, which includes FortiOS `"Reserved"` and PAN-OS literal ranges (`"192.168.0.0-192.168.255.255"`) for private space. Those are real answers meaning "stayed internal", not missing ones. `isInternalCountry()` groups them for DISPLAY only; nothing rewrites the stored value.
+⛔ `syslog_user_hourly` stores only rows that NAME a user — an unattributed session is the normal case here, so a NULL-user bucket would dwarf every real user and say nothing. `getTopUsers()` returns its own `coveragePct` instead.
+
 ### syslog_ingest_stats   (Phase 8, permanent)
 One row per flush: received / parsed / stored / **dropped** / unknown_vendor / unknown_source /
 spool_backlog / batch_ms. ⛔ `dropped` is the number that matters — a collector silently losing

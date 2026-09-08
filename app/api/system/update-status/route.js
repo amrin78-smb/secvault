@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.74.0': [
+    'The Security tab now shows what is actually being attempted against the fleet - top attackers, most targeted hosts, top threats and a severity breakdown - alongside the CVE exposure it already showed.',
+    'New on the Traffic tab: destination countries, top users and web/application categories. None of this needed a geo-location database or an Active Directory connection: the firewalls were already reporting all of it.',
+    'Every chart row links straight into Log Search filtered to that host, threat or category, so a number is always one click from the raw evidence behind it.',
+    'Charts state what they leave out. Countries excludes internal traffic and says how much; top users says what share of traffic it could attribute to a person.',
+    'Palo Alto and Fortinet grade threats using different words. These are merged onto one scale and the widget shows which vendor words were combined, rather than quietly relabelling them.',
+  ],
   '2.73.0': [
     'New Log Search page: search raw firewall logs by time, device, address, port, user, rule, country, application, threat or website - the investigation tool Firewall Analyzer was used for.',
     'Searches are shareable. The whole query lives in the address bar, so you can paste a search into a ticket and a colleague sees exactly what you saw.',

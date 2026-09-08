@@ -128,7 +128,7 @@ describe('detail rollups: rebuilt in the same window as the permanent ones', () 
     }
     // The DELETEs still take the bounds, and they must all agree.
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.equal(windowed.length, 6, 'one temp-table scan + five DELETEs');
+    assert.equal(windowed.length, 9, 'one temp-table scan + one DELETE per rollup');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), FROM.getTime());
       assert.equal(c.params[1].getTime(), TO.getTime());
@@ -169,12 +169,15 @@ describe('detail rollups: retention', () => {
     };
   }
 
-  it('trims all three tables by bucket_hour', async () => {
+  it('trims every detail rollup by bucket_hour', async () => {
     const pool = trimPool();
     const out = await trimDetailRollups(pool, 30);
     assert.equal(out.days, 30);
+    // ⛔ Every DETAIL rollup must be trimmed. One missing from this list is a
+    // table that grows forever while the log still reports success.
     assert.deepEqual(Object.keys(out.deleted).sort(), [
-      'syslog_app_hourly', 'syslog_blocked_dst_hourly', 'syslog_talker_hourly',
+      'syslog_app_hourly', 'syslog_blocked_dst_hourly', 'syslog_country_hourly',
+      'syslog_talker_hourly', 'syslog_urlcat_hourly', 'syslog_user_hourly',
     ]);
     for (const c of pool.calls) {
       assert.match(c.sql, /^DELETE FROM syslog_/);
