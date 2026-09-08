@@ -396,6 +396,13 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ Fortinet's `threatName` accepts only `attack` or `virus`, never `eventtype` — on an app-ctrl row `eventtype` reads "signature", which names nothing and would top every Top Threats report.
 `threatSeverityRank(raw)` -> `0-5 | null` — maps PAN-OS (`informational`..`critical`) and FortiOS (`debug`..`emergency`) onto ONE ordered scale so a severity chart does not split a level across two vendor words. ⛔ Returns null for an unrecognized word, never a default level: a threat filed under a guessed severity silently changes where it sorts in a prioritized list.
 
+## lib/syslog/eventShape.js
+
+`buildEvent(raw, frame, payload, deviceId)` -> the event object `eventStore.flattenRow()` consumes. Pure — no DB, no sockets, no clock. Never throws.
+⛔ **This is the middle of a THREE-hop field path**: `vendorParsers` -> `buildEvent` -> `eventStore` COLUMNS/flattenRow. Miss any hop and the field does not error, it stores NULL — which reads exactly like "the device never sent it". On 2026-09-08 the parser and the store were both updated for eight new fields and this hop was not; 360,025 events were written with every new column silently null.
+⛔ It was extracted from `services/collector.js` for exactly that reason: that file starts listeners on require and cannot be unit-tested, so the hop had no test. `tests/eventShape.test.js` now walks a REAL captured log line end to end and fails if any column the store persists is unreachable from the parser, with an explicit excused-columns list so a new column must be either wired or consciously excused.
+⛔ `bytesSummable` resolves to `false`, never null — the column is NOT NULL, and "we could not tell" must mean "do not sum it".
+
 ## lib/syslog/rollups.js
 
 `floorHour(date)` / `addHours` / `sweepWindow(now, hours)` -> `{from, to}` — UTC hour buckets. `to` is the start of the NEXT hour so the in-progress hour is included and corrected on every later sweep; `from` reaches back one hour further than requested so the earliest bucket is rebuilt WHOLE.

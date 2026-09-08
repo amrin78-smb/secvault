@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.72.1': [
+    'Fixes the previous release: the eight new log fields were being read from the firewall and written to the database, but were dropped in between, so every one of them stored blank.',
+    'The step that was missing has been moved into its own module and is now covered by a test that walks a real firewall log line all the way to the database and fails if any field goes missing.',
+    'No data was lost - the raw log lines were always stored intact, so nothing needs re-collecting.',
+  ],
   '2.72.0': [
     'Firewall logs now capture eight fields your firewalls were already sending and SecVault was discarding: country, user, URL category, website, threat name, threat severity and log subtype.',
     'This means country-level and per-user reporting need no extra database and no Active Directory integration - both Palo Alto and Fortinet already put this in every log line.',

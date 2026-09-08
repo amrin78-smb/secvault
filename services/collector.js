@@ -63,6 +63,7 @@ loadEnvLocal();
 const { pool } = require('../lib/db');
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
+const { buildEvent } = require('../lib/syslog/eventShape');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
 const { runRollupMaintenance, trimDetailRollups } = require('../lib/syslog/rollups');
@@ -152,47 +153,16 @@ function accept(line, sourceIp) {
   buffer.push({ line, sourceIp, receivedAt: new Date() });
 }
 
+// ⛔ The parsed-line -> stored-event mapping lives in lib/syslog/eventShape.js,
+// NOT here. It used to be inline, and because this file starts listeners on
+// require it could not be unit-tested -- so when eight new fields were added
+// on 2026-09-08 the parser and the store were both updated and this hop was
+// not. 360,025 events were stored with every new column silently NULL, which
+// is indistinguishable from "the devices never sent it". Keep it importable.
 function toEvent(raw) {
   const frame = parseSyslogLine(raw.line, raw.receivedAt);
   const payload = parseVendorPayload(frame.message);
-
-  // The vendor payload's own timestamp is preferred when it has one, because
-  // it is unambiguous (Fortinet's nanosecond eventtime, PAN's generated time);
-  // the frame timestamp is the fallback. Either may legitimately be null.
-  const eventAt = (payload && payload.eventAt) || frame.eventAt || null;
-  const tzAssumed = payload && payload.eventAt
-    ? Boolean(payload.tzAssumed)
-    : Boolean(frame.tzAssumed);
-
-  return {
-    receivedAt: raw.receivedAt,
-    eventAt,
-    tzAssumed,
-    sourceIp: raw.sourceIp,
-    deviceId: deviceByIp.get(raw.sourceIp) || null,
-    vendor: payload ? payload.vendor : null,
-    facility: frame.facility,
-    severity: frame.severity,
-    hostname: (payload && payload.deviceName) || frame.hostname,
-    program: frame.program,
-    action: payload ? payload.action : null,
-    srcIp: payload ? payload.srcIp : null,
-    dstIp: payload ? payload.dstIp : null,
-    srcPort: payload ? payload.srcPort : null,
-    dstPort: payload ? payload.dstPort : null,
-    protocol: payload ? payload.protocol : null,
-    application: payload ? payload.application : null,
-    srcZone: payload ? payload.srcZone : null,
-    dstZone: payload ? payload.dstZone : null,
-    ruleId: payload ? payload.ruleId : null,
-    ruleUuid: payload ? payload.ruleUuid : null,
-    ruleName: payload ? payload.ruleName : null,
-    bytesSent: payload ? payload.bytesSent : null,
-    bytesReceived: payload ? payload.bytesReceived : null,
-    logClass: payload ? payload.logClass : null,
-    bytesSummable: payload ? payload.bytesSummable === true : false,
-    message: frame.message || raw.line,
-  };
+  return buildEvent(raw, frame, payload, deviceByIp.get(raw.sourceIp) || null);
 }
 
 // --- spool -----------------------------------------------------------------
