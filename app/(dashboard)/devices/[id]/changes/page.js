@@ -15,8 +15,24 @@ import AcknowledgeButton from '../../../../../components/config/AcknowledgeButto
 import BackupActions from '../../../../../components/config/BackupActions';
 import ConfigVersionPicker from '../../../../../components/config/ConfigVersionPicker';
 import BaselineButton from '../../../../../components/config/BaselineButton';
+import Pagination from '../../../../../components/ui/Pagination';
+import { resolvePage, pageWindow, DEFAULT_PAGE_SIZE } from '../../../../../lib/pagination';
 
 export const dynamic = 'force-dynamic';
+
+// This page is a SERVER component, so both of its long lists page through the
+// URL (lib/pagination.js's convention) — `?page=` for Configuration Changes,
+// `?bpage=` for Config Backups (components/ui/Pagination's `paramName` prop).
+// Two params, not one: a shared `page=` would move both lists at once, so
+// clicking "next" on the backups table would silently repaginate the change
+// list above it.
+//
+// Ten changes per page, not DEFAULT_PAGE_SIZE: every row here carries its own
+// <DiffViewer>, which fetches a whole stored diff payload from
+// /api/devices/[id]/diffs/[diffId] the moment it is expanded. A page of 50 is
+// 50 potential fetches of the single largest JSONB column in this schema.
+const DIFFS_PAGE_SIZE = 10;
+const BACKUPS_PAGE_SIZE = DEFAULT_PAGE_SIZE;
 
 const BACKUP_LABEL_COLORS = {
   manual: 'info',
@@ -137,32 +153,80 @@ function isEmptyClassified(classified) {
   return ruleChanges.length === 0 && sections.length === 0;
 }
 
-async function getDiffs(dbPool, deviceId) {
-  // Cap matches the fleet-wide LIMIT 500 in the Alerts page's fetchConfigDiffs()
-  // (app/(dashboard)/alerts) -- that page links each config-diff alert to
-  // /devices/[id]/changes#diff-[id]. Since a single device can account for at
-  // most that many rows of the fleet-wide 500, this cap must stay >= 500 or
-  // an alert for an older diff produces a dead #diff-<id> anchor here.
+// ⛔ ORDERING: `detected_at DESC, id DESC`, not `detected_at DESC` alone. Two
+// diffs detected in the same collection run can share a timestamp, and an
+// unstable sort under LIMIT/OFFSET silently shows one row twice and skips
+// another — a change that quietly vanishes between page 1 and page 2 is
+// exactly the kind of wrong answer this page exists to prevent. The same
+// composite order is what getDiffPagePosition() below counts against.
+//
+// This replaced a flat `LIMIT 500`. That cap existed so an Alerts-page link to
+// /devices/[id]/changes#diff-[id] would always find its anchor; pagination
+// makes EVERY diff reachable (no cap at all), but only the current page's
+// anchors exist in the DOM. `?diff=<id>` (resolved below) is the durable way
+// to land on a specific change — see the note rendered above the list.
+async function getDiffs(dbPool, deviceId, limit, offset) {
   const result = await dbPool.query(
     `SELECT id, change_summary, detected_at, acknowledged_at, acknowledged_by, acknowledged_note
      FROM config_diffs
      WHERE device_id = $1
-     ORDER BY detected_at DESC
-     LIMIT 500`,
-    [deviceId]
+     ORDER BY detected_at DESC, id DESC
+     LIMIT $2 OFFSET $3`,
+    [deviceId, limit, offset]
   );
   return result.rows;
 }
 
-async function getBackups(dbPool, deviceId) {
+async function countDiffs(dbPool, deviceId) {
+  const result = await dbPool.query(
+    'SELECT COUNT(*)::int AS n FROM config_diffs WHERE device_id = $1',
+    [deviceId]
+  );
+  return result.rows[0] ? result.rows[0].n : 0;
+}
+
+// Which page holds one specific diff, for `?diff=<id>` deep links.
+//
+// `found` is returned separately from `ahead` on purpose: an aggregate over an
+// empty set returns 0, so a diff that does not exist (deleted device history,
+// a hand-edited link) would otherwise be indistinguishable from the very first
+// row and silently land the reader on page 1 as though the link had worked.
+// Returns null when the id resolves to nothing, and the caller ignores it.
+async function getDiffPagePosition(dbPool, deviceId, diffId, pageSize) {
+  const result = await dbPool.query(
+    `WITH target AS (
+       SELECT detected_at, id FROM config_diffs WHERE id = $2::uuid AND device_id = $1
+     )
+     SELECT
+       (SELECT COUNT(*) FROM config_diffs c, target t
+         WHERE c.device_id = $1 AND (c.detected_at, c.id) > (t.detected_at, t.id))::int AS ahead,
+       (SELECT COUNT(*) FROM target)::int AS found`,
+    [deviceId, diffId]
+  );
+  const row = result.rows[0];
+  if (!row || !row.found) return null;
+  return Math.floor(row.ahead / pageSize) + 1;
+}
+
+async function getBackups(dbPool, deviceId, limit, offset) {
+  // Composite order for the same stability reason as getDiffs() above.
   const result = await dbPool.query(
     `SELECT id, label, backed_up_at, octet_length(config_raw) AS size_bytes
      FROM config_backups
      WHERE device_id = $1
-     ORDER BY backed_up_at DESC`,
-    [deviceId]
+     ORDER BY backed_up_at DESC, id DESC
+     LIMIT $2 OFFSET $3`,
+    [deviceId, limit, offset]
   );
   return result.rows;
+}
+
+async function countBackups(dbPool, deviceId) {
+  const result = await dbPool.query(
+    'SELECT COUNT(*)::int AS n FROM config_backups WHERE device_id = $1',
+    [deviceId]
+  );
+  return result.rows[0] ? result.rows[0].n : 0;
 }
 
 export default async function DeviceChangesPage({ params, searchParams }) {
@@ -186,11 +250,33 @@ export default async function DeviceChangesPage({ params, searchParams }) {
     );
   }
 
-  const [diffs, backups, versions, baselineRow] = await Promise.all([
-    getDiffs(pool, device.id),
-    getBackups(pool, device.id),
+  const [diffTotal, backupTotal, versions, baselineRow] = await Promise.all([
+    countDiffs(pool, device.id),
+    countBackups(pool, device.id),
     getConfigVersions(pool, device.id),
     getBaselineConfig(pool, device.id),
+  ]);
+
+  // ---- Pagination for the two long lists ----------------------------------
+  // `?diff=<id>` lands on the page holding that specific change, so a link to
+  // an older diff stays reachable now that the list is paged. An EXPLICIT
+  // `?page=` always wins over it — that is what the reader last clicked, and
+  // silently yanking them back to the anchor's page on every Next click would
+  // trap them. An unresolvable id is ignored (see getDiffPagePosition).
+  const requestedDiff =
+    typeof searchParams?.diff === 'string' && isValidUuid(searchParams.diff) ? searchParams.diff : null;
+  const hasExplicitPage = searchParams?.page !== undefined && searchParams?.page !== '';
+  const anchorPage =
+    !hasExplicitPage && requestedDiff
+      ? await getDiffPagePosition(pool, device.id, requestedDiff, DIFFS_PAGE_SIZE)
+      : null;
+
+  const diffWindow = pageWindow(anchorPage || resolvePage(searchParams?.page), DIFFS_PAGE_SIZE, diffTotal);
+  const backupWindow = pageWindow(resolvePage(searchParams?.bpage), BACKUPS_PAGE_SIZE, backupTotal);
+
+  const [diffs, backups] = await Promise.all([
+    getDiffs(pool, device.id, diffWindow.limit, diffWindow.offset),
+    getBackups(pool, device.id, backupWindow.limit, backupWindow.offset),
   ]);
 
   // ---- Compare Versions: resolve ?from=/?to= -------------------------------
@@ -363,10 +449,22 @@ export default async function DeviceChangesPage({ params, searchParams }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2 style={SECTION_HEADING_STYLE}>Configuration Changes</h2>
 
-        {diffs.length === 0 ? (
+        {diffTotal === 0 ? (
           <EmptyState message="No configuration changes detected yet" />
         ) : (
-          <ul style={{ display: 'flex', flexDirection: 'column', gap: 12, listStyle: 'none' }}>
+          <>
+            {/* Only the changes ON THIS PAGE have a #diff-<id> anchor in the
+                DOM, so a bare hash link to an older change would scroll
+                nowhere and read as "that change is gone". Say so, and point at
+                the parameter that does resolve it. */}
+            {diffWindow.totalPages > 1 && (
+              <p style={{ ...MUTED_LINE_STYLE, fontSize: 'var(--text-xs)', margin: 0 }}>
+                Older changes are on later pages. A link to one specific change
+                (<span className="mono">?diff=&lt;id&gt;</span>) opens the page that change is on; a bare
+                <span className="mono"> #diff-&lt;id&gt;</span> anchor only resolves within the page shown.
+              </p>
+            )}
+            <ul style={{ display: 'flex', flexDirection: 'column', gap: 12, listStyle: 'none' }}>
             {diffs.map((d) => (
               <li key={d.id} id={`diff-${d.id}`} className="card" style={{ padding: 16 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
@@ -402,7 +500,16 @@ export default async function DeviceChangesPage({ params, searchParams }) {
                 </div>
               </li>
             ))}
-          </ul>
+            </ul>
+            <Pagination
+              basePath={`/devices/${device.id}/changes`}
+              searchParams={searchParams}
+              page={diffWindow.page}
+              pageSize={diffWindow.pageSize}
+              total={diffTotal}
+              label="changes"
+            />
+          </>
         )}
       </div>
 
@@ -411,9 +518,10 @@ export default async function DeviceChangesPage({ params, searchParams }) {
 
         {canWrite && <BackupActions deviceId={device.id} />}
 
-        {backups.length === 0 ? (
+        {backupTotal === 0 ? (
           <EmptyState message="No config backups yet" />
         ) : (
+          <>
           <Table>
             <colgroup>
               <col style={{ width: '20%' }} />
@@ -449,6 +557,16 @@ export default async function DeviceChangesPage({ params, searchParams }) {
               ))}
             </tbody>
           </Table>
+          <Pagination
+            basePath={`/devices/${device.id}/changes`}
+            searchParams={searchParams}
+            page={backupWindow.page}
+            pageSize={backupWindow.pageSize}
+            total={backupTotal}
+            label="backups"
+            paramName="bpage"
+          />
+          </>
         )}
       </div>
     </div>

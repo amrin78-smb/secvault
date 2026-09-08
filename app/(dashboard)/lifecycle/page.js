@@ -6,6 +6,8 @@ import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import StatCard from '../../../components/ui/StatCard';
+import Pagination from '../../../components/ui/Pagination';
+import { paginateArray } from '../../../lib/pagination';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +29,20 @@ export const dynamic = 'force-dynamic';
 // muted "Not collected" row, the same honesty rule the Fleet Map already
 // follows by drawing devices that have zero device_interfaces rows. Silently
 // dropping them would make a 5-device blind spot look like a clean fleet.
+//
+// ── PAGINATION (added because this page had none) ────────────────────────
+// Only the RENEWALS table is genuinely unbounded: its row count is
+// (devices × distinct expiry dates), which grows with every contract bought
+// and every entitlement added, so it gets `?page=` and the shared
+// <Pagination>. The HA and Signature tables are structurally ONE ROW PER
+// DEVICE — they cannot outgrow the fleet — so they get an honest count line
+// instead of controls, which is also what keeps the URL unambiguous: the
+// shared control writes a single `page` param, so three independently paged
+// sections on one URL is not something it can express. If the fleet ever
+// grows large enough that one-row-per-device is itself a long scroll, those
+// two sections need their own page params and their own control, not a
+// third caller of `page`.
+const RENEWAL_PAGE_SIZE = 25;
 
 // ── Support-contract detection.
 // Palo Alto reports support entitlements as a licence whose FEATURE is the
@@ -248,6 +264,18 @@ const SECTION_SUMMARY_STYLE = {
 
 const GAP_NOTE_STYLE = { margin: '12px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' };
 
+// Footer for a table that is deliberately NOT paginated. Matches the shared
+// <Pagination>'s own footer treatment (top rule + muted small text) so a
+// counted-but-uncontrolled table and a paged one read as the same component.
+const COUNT_NOTE_STYLE = {
+  margin: 0,
+  marginTop: 12,
+  paddingTop: 12,
+  borderTop: '1px solid var(--border)',
+  fontSize: 'var(--text-sm)',
+  color: 'var(--text-muted)',
+};
+
 // Human labels for PAN-OS's `<x>-compat` verdict keys.
 const COMPAT_LABELS = {
   'build-compat': 'Software version',
@@ -298,7 +326,7 @@ function buildHaEvidence(row, licensesForDevice, now) {
 }
 const SECTION_NOTE_STYLE = { margin: '8px 0 14px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' };
 
-export default async function LifecyclePage() {
+export default async function LifecyclePage({ searchParams }) {
   const { devices, licenses, haRows, content } = await getLifecycleData();
   const now = new Date();
   const deviceById = new Map(devices.map((d) => [d.id, d]));
@@ -323,6 +351,15 @@ export default async function LifecyclePage() {
     }));
 
   const renewalGroups = groupLicenseRenewals(licenseEntries);
+  // paginateArray (not SQL LIMIT/OFFSET) because a renewal EVENT does not
+  // exist as a row anywhere: it is produced by grouping entitlements per
+  // (device, expiry) and then sorting by a severity rank computed in
+  // deviceHealth.js. There is nothing for Postgres to window.
+  //
+  // ⛔ Every count below — the summary tiles, the gap note — stays computed
+  // over the FULL renewalGroups array. A tile that counted only the current
+  // page would report "3 expired" on page 2 of a fleet with 40.
+  const renewalPage = paginateArray(renewalGroups, searchParams?.page, RENEWAL_PAGE_SIZE);
   const licenseDeviceIds = new Set(licenses.map((r) => r.device_id));
   const licenseGapDevices = devices.filter((d) => !licenseDeviceIds.has(d.id));
 
@@ -493,7 +530,7 @@ export default async function LifecyclePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {renewalGroups.map((g) => (
+                  {renewalPage.rows.map((g) => (
                     <tr key={g.key}>
                       <td title={g.device?.name || ''}>{g.device ? deviceLink(g.device.id, g.device.name) : '—'}</td>
                       <td>
@@ -526,6 +563,15 @@ export default async function LifecyclePage() {
                   ))}
                 </tbody>
               </Table>
+
+              <Pagination
+                basePath="/lifecycle"
+                searchParams={searchParams}
+                page={renewalPage.page}
+                pageSize={renewalPage.pageSize}
+                total={renewalPage.total}
+                label="renewal events"
+              />
 
               {/* Coverage gaps stay VISIBLE (this page's honesty rule) but as one
                   line rather than one identical row per device. */}
@@ -678,6 +724,13 @@ export default async function LifecyclePage() {
                     })}
                   </tbody>
                 </Table>
+                {/* No page controls here: this table is one row per device, so
+                    it cannot outgrow the fleet. The count is still stated, so
+                    "all shown" is a claim the reader can check rather than an
+                    assumption. */}
+                <p style={COUNT_NOTE_STYLE}>
+                  {`${haEntries.length} device${haEntries.length === 1 ? '' : 's'} with HA data — all shown.`}
+                </p>
                 {haGapDevices.length > 0 && (
                   <p style={GAP_NOTE_STYLE}>
                     {notCollectedBadge()}{' '}
@@ -769,6 +822,10 @@ export default async function LifecyclePage() {
                     ))}
                   </tbody>
                 </Table>
+                {/* Same reasoning as the HA table above — one row per device. */}
+                <p style={COUNT_NOTE_STYLE}>
+                  {`${sigEntries.length} device${sigEntries.length === 1 ? '' : 's'} with content versions — all shown.`}
+                </p>
                 {sigGapDevices.length > 0 && (
                   <p style={GAP_NOTE_STYLE}>
                     {notCollectedBadge()}{' '}

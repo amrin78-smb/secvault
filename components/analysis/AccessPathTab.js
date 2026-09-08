@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import Card, { CardBody } from '../ui/Card';
+import { paginateArray, describeRange } from '../../lib/pagination';
 
 // Per-device "Access Path Query" tab — type a source/destination IP
 // (optional protocol/port) and see which of this device's own rules would
@@ -18,6 +19,21 @@ import Card, { CardBody } from '../ui/Card';
 // Deliberately single-device, config-only — same scope limit
 // reachabilityMatrix.js's header comment already states: no cross-device
 // topology data exists anywhere in this codebase.
+
+// ── PAGINATION HERE IS STATE-BASED, NOT URL-BASED — deliberately ──────────
+// Every other paginated list in this app keeps its page in the query string
+// (see lib/pagination.js's header and RiskyRulesTab.js). This one cannot: the
+// walk is the response to a POST held in local state, and there is no URL that
+// reproduces it. The shared <Pagination> control emits next/link <Link>s, so
+// clicking one would navigate the route, remount this client component and
+// DISCARD the very result being paged through — an unbounded list would at
+// least still be readable. So the page number is useState, while the slicing
+// and the "51–100 of 1,522" wording still come from lib/pagination.js, keeping
+// the honesty and the format identical to every other list in the app.
+//
+// A device can carry 1,500+ rules and every one of them that partially matched
+// lands in this list, which is what made it worth bounding at all.
+const WALK_PAGE_SIZE = 25;
 
 const VERDICT_BADGE_COLOR = { allow: 'success', deny: 'danger', unspecified: 'muted' };
 const VERDICT_LABEL = { allow: 'Allow', deny: 'Deny', unspecified: 'Unspecified' };
@@ -95,6 +111,68 @@ function WalkRow({ entry }) {
   );
 }
 
+// Prev/Next for the walk list. Module top level, per CLAUDE.md's
+// never-define-a-component-inside-a-component rule — nesting it would remount
+// the whole subtree (and blow away the form's input focus) on every keystroke
+// in the query form above.
+const walkPagerBtn = (enabled) => ({
+  padding: '4px 10px',
+  fontSize: 'var(--text-xs)',
+  fontWeight: 600,
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-card)',
+  color: enabled ? 'var(--text-primary)' : 'var(--text-muted)',
+  opacity: enabled ? 1 : 0.45,
+  cursor: enabled ? 'pointer' : 'default',
+  whiteSpace: 'nowrap',
+});
+
+function WalkPager({ page, pageSize, total, pages, onPage }) {
+  // ⛔ The range label is shown even on a single page. "1–8 of 8" and a bare
+  // list of 8 rows read the same on screen, but only the first one tells the
+  // operator nothing was withheld.
+  const range = describeRange(page, pageSize, total);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 8,
+      }}
+    >
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{range} earlier rules</span>
+      {pages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" style={walkPagerBtn(page > 1)} disabled={page <= 1} onClick={() => onPage(page - 1)}>
+            ← Prev
+          </button>
+          <span
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            Page {page.toLocaleString()} of {pages.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            style={walkPagerBtn(page < pages)}
+            disabled={page >= pages}
+            onClick={() => onPage(page + 1)}
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AccessPathTab({ deviceId }) {
   const [srcIp, setSrcIp] = useState('');
   const [dstIp, setDstIp] = useState('');
@@ -104,6 +182,7 @@ export default function AccessPathTab({ deviceId }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [showWalk, setShowWalk] = useState(false);
+  const [walkPage, setWalkPage] = useState(1);
 
   async function handleQuery(e) {
     e.preventDefault();
@@ -116,6 +195,11 @@ export default function AccessPathTab({ deviceId }) {
     setError(null);
     setResult(null);
     setShowWalk(false);
+    // A new query is a new walk — carrying page 4 over from the previous
+    // query's result would show a slice of something the operator did not ask
+    // for. (paginateArray() would clamp it to a valid page, so it would look
+    // perfectly plausible, which is exactly why it must be reset explicitly.)
+    setWalkPage(1);
     try {
       const res = await fetch(`/api/devices/${deviceId}/access-path`, {
         method: 'POST',
@@ -141,6 +225,12 @@ export default function AccessPathTab({ deviceId }) {
 
   const precedingWalk = result ? result.walk.filter((w) => !w.decided) : [];
   const decidedWalk = result ? result.walk.find((w) => w.decided) : null;
+
+  // pagedWalk.page (not walkPage) is the value rendered and used to compute
+  // Prev/Next targets: paginateArray clamps a past-the-end page to the LAST
+  // page, so a stale state value self-corrects instead of showing an empty
+  // list that would read as "no earlier rules matched".
+  const pagedWalk = paginateArray(precedingWalk, walkPage, WALK_PAGE_SIZE);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -265,11 +355,20 @@ export default function AccessPathTab({ deviceId }) {
                   that partially matched but were excluded
                 </button>
                 {showWalk && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-                    {precedingWalk.map((entry) => (
-                      <WalkRow key={entry.rule.id} entry={entry} />
-                    ))}
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                      {pagedWalk.rows.map((entry) => (
+                        <WalkRow key={entry.rule.id} entry={entry} />
+                      ))}
+                    </div>
+                    <WalkPager
+                      page={pagedWalk.page}
+                      pageSize={pagedWalk.pageSize}
+                      total={pagedWalk.total}
+                      pages={pagedWalk.totalPages}
+                      onPage={setWalkPage}
+                    />
+                  </>
                 )}
               </div>
             )}

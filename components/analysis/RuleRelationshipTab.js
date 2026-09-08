@@ -1,6 +1,8 @@
 import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
+import { resolvePage, paginateArray } from '../../lib/pagination';
 import SeverityBadge from './SeverityBadge';
 import FindingTypeBadge from './FindingTypeBadge';
 import { clusterRelationshipFindings } from '../../lib/engines/ruleRelationships';
@@ -36,6 +38,13 @@ import { clusterRelationshipFindings } from '../../lib/engines/ruleRelationships
 // or cache a resolved name anywhere, only render it once per request.
 
 const RELATIONSHIP_FINDING_TYPES = ['shadow', 'redundant', 'correlation', 'generalization', 'reorder_candidate'];
+
+// Clusters per page. Deliberately SMALLER than lib/pagination.js's
+// DEFAULT_PAGE_SIZE (50): a row in a table is one line, but a cluster here is
+// a whole Card whose height grows with its edge count — a hub rule shadowing
+// twenty others is one "row" and most of a screen. 50 of those would just
+// reproduce the endless scroll this pagination exists to end.
+const CLUSTERS_PER_PAGE = 20;
 
 async function getRelationshipFindings(dbPool, deviceId) {
   const result = await dbPool.query(
@@ -207,7 +216,9 @@ function ClusterCard({ cluster, ruleMap }) {
   );
 }
 
-export default async function RuleRelationshipTab({ deviceId }) {
+// Paginated on the shared `page` query param — see RiskyRulesTab.js's
+// "PAGINATION: why the plain `page` param" block for the full reasoning.
+export default async function RuleRelationshipTab({ deviceId, searchParams }) {
   const [findings, deviceRules] = await Promise.all([
     getRelationshipFindings(pool, deviceId),
     getDeviceRules(pool, deviceId),
@@ -222,6 +233,19 @@ export default async function RuleRelationshipTab({ deviceId }) {
   const ruleMap = new Map(deviceRules.map((r) => [r.id, r]));
   const clusters = clusterRelationshipFindings(findings);
 
+  // ⛔ Clustering runs over the FULL finding set before the page window is
+  // applied, and must keep doing so. Union-find over rule_id <->
+  // affected_rule_ids is a whole-graph operation: clustering one page's worth
+  // of findings would split a genuinely connected hub into several smaller
+  // "clusters" purely because of where the page boundary fell — an invented
+  // structural claim about the ruleset, not a display artefact. Only the
+  // already-computed cluster list is windowed.
+  //
+  // ruleMap likewise stays built from the full device snapshot: an edge on a
+  // visible card can name a rule whose other findings live on another page.
+  const paged = paginateArray(clusters, resolvePage(searchParams?.page), CLUSTERS_PER_PAGE);
+  const pageParams = { ...(searchParams || {}), tab: 'relationships' };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
@@ -229,9 +253,26 @@ export default async function RuleRelationshipTab({ deviceId }) {
         {findings.length} shadow/redundant/correlation/generalization/reorder finding
         {findings.length === 1 ? '' : 's'}, worst severity and largest cluster first.
       </p>
-      {clusters.map((cluster, i) => (
-        <ClusterCard key={cluster.ruleIds[0] || i} cluster={cluster} ruleMap={ruleMap} />
+      {paged.rows.map((cluster, i) => (
+        // ⛔ The key must stay unique across the WHOLE list, not just this
+        // page: `i` is the page-local index, so it is offset back to the
+        // absolute position. Two different pages otherwise hand React the
+        // same fallback key for different clusters.
+        <ClusterCard
+          key={cluster.ruleIds[0] || `cluster-${(paged.page - 1) * paged.pageSize + i}`}
+          cluster={cluster}
+          ruleMap={ruleMap}
+        />
       ))}
+
+      <Pagination
+        basePath={`/devices/${deviceId}/analysis`}
+        searchParams={pageParams}
+        page={paged.page}
+        pageSize={paged.pageSize}
+        total={paged.total}
+        label="clusters"
+      />
     </div>
   );
 }

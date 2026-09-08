@@ -35,10 +35,19 @@ const btn = (enabled) => ({
  * @param {number|null} total     row count, or null when genuinely unknown
  * @param {string}  [label]       what is being counted, e.g. "rules"
  * @param {number}  [pages]       optional explicit total pages (when total is null)
+ * @param {string}  [paramName]   query param to drive, default "page"
+ *
+ * ⛔ `paramName` exists because ONE URL can carry several independently paged
+ * lists — /lifecycle has three, the analysis Objects tab has two. With a
+ * hardcoded `page` they would all move together, which is worse than no
+ * controls at all: clicking "next" on one table silently repaginates another
+ * the reader is not looking at. Give each list its own param and they stay
+ * independent. The default keeps every single-list caller unchanged.
  */
 export default function Pagination({
-  basePath, searchParams, page, pageSize, total, label, pages,
+  basePath, searchParams, page, pageSize, total, label, pages, paramName,
 }) {
+  const param = paramName || 'page';
   const totalPages = pages || calcTotalPages(total, pageSize);
   const cur = Math.min(Math.max(Number(page) || 1, 1), totalPages);
   const range = describeRange(cur, pageSize, total);
@@ -77,7 +86,7 @@ export default function Pagination({
       {showControls ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {cur > 1 ? (
-            <Link href={buildPageHref(basePath, searchParams, { page: cur === 2 ? null : cur - 1 })} style={btn(true)}>
+            <Link href={buildPageHref(basePath, searchParams, { [param]: cur === 2 ? null : cur - 1 })} style={btn(true)}>
               ← Prev
             </Link>
           ) : (
@@ -94,7 +103,7 @@ export default function Pagination({
             Page {cur.toLocaleString()} of {totalPages.toLocaleString()}
           </span>
           {cur < totalPages ? (
-            <Link href={buildPageHref(basePath, searchParams, { page: cur + 1 })} style={btn(true)}>
+            <Link href={buildPageHref(basePath, searchParams, { [param]: cur + 1 })} style={btn(true)}>
               Next →
             </Link>
           ) : (

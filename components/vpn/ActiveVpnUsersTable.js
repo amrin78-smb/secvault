@@ -1,19 +1,40 @@
-'use client';
-
-import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
+import { paginateArray, buildPageHref } from '../../lib/pagination';
 
 // Live per-user active VPN session table (ManageEngine "Active VPN Users"
 // equivalent), fed by vpn_active_sessions (see lib/engines/vpnSessions.js) —
 // the per-user detail the management-plane commands already return, NOT syslog.
-// A busy remote-access firewall can have hundreds of concurrent users, so this
-// is a client component with a search box + pagination rather than one endless
-// scroll. The page (a server component) queries the rows and passes them in as
-// a plain-object prop.
+//
+// ⛔ SERVER component (it was a client component until 2026-09-08, and the
+// change is the point). A busy remote-access firewall carries hundreds of
+// concurrent users, so this needs both a filter and paging — but both used to
+// live in useState, which meant every AutoRefresh/router.refresh() silently
+// threw the operator back to page 1 of an unfiltered list, mid-read. Both now
+// live in the URL (`?vpnq=` and `?page=`), the same server-driven convention as
+// /logs' search form and TabBar's `?view=`: refresh-proof, linkable into a
+// ticket, and no client JS at all. The search box is a plain GET <form> whose
+// only job is to rewrite the query string.
+//
+// This table keeps the plain `?page=` param as the page's principal list;
+// IpsecTunnelsTable below it uses `?tunnelPage=` so the two never move
+// together (see components/ui/Pagination's `paramName` note).
+//
+// Paging is paginateArray() rather than SQL LIMIT/OFFSET because these rows are
+// not a table read — getVpnSessions() returns an already-assembled snapshot for
+// one device, and the free-text filter is applied over the whole set before the
+// window is taken (filtering only the visible page would silently search 25 of
+// 300 users and report "no match" for someone who is connected).
 
+// Deliberately 25, not lib/pagination's DEFAULT_PAGE_SIZE of 50: this is a
+// dense eight-column table and 25 was the size the original client-side pager
+// used, so the change of mechanism does not also change what a page looks like.
 const PAGE_SIZE = 25;
+
+const SEARCH_FIELDS = ['username', 'source_ip', 'assigned_ip', 'client', 'tunnel_type', 'gateway'];
 
 function formatDuration(seconds) {
   if (seconds == null) return '—';
@@ -41,6 +62,9 @@ function formatBytes(n) {
   return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
+// ⛔ Tri-state: a vendor that does not report per-session byte counters gets a
+// dash, never "0 B" — "we did not measure" must not render as "this user moved
+// no data".
 function dataCell(bytesIn, bytesOut) {
   const din = formatBytes(bytesIn);
   const dout = formatBytes(bytesOut);
@@ -48,40 +72,25 @@ function dataCell(bytesIn, bytesOut) {
   return `↓ ${din || '—'} / ↑ ${dout || '—'}`;
 }
 
-const SEARCH_FIELDS = ['username', 'source_ip', 'assigned_ip', 'client', 'tunnel_type', 'gateway'];
+function matches(row, q) {
+  return SEARCH_FIELDS.some(
+    (f) => typeof row[f] === 'string' && row[f].toLowerCase().includes(q)
+  );
+}
 
-const PAGER_BTN = {
-  fontSize: 'var(--text-sm)',
-  padding: '4px 10px',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg-card)',
-  color: 'var(--text-primary)',
-  cursor: 'pointer',
-};
-
-export default function ActiveVpnUsersTable({ sessions }) {
+/**
+ * @param {object[]} sessions      every active session for this device
+ * @param {string}   basePath      the page's own path, e.g. `/devices/<id>/vpn`
+ * @param {object}   searchParams  the page's searchParams (preserved on paging links)
+ * @param {number}   page          1-based page from `?page=`
+ * @param {string}   query         free-text filter from `?vpnq=`
+ */
+export default function ActiveVpnUsersTable({ sessions, basePath, searchParams, page, query }) {
   const all = Array.isArray(sessions) ? sessions : [];
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(0);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((r) =>
-      SEARCH_FIELDS.some((f) => typeof r[f] === 'string' && r[f].toLowerCase().includes(q))
-    );
-  }, [all, query]);
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const start = currentPage * PAGE_SIZE;
-  const visible = filtered.slice(start, start + PAGE_SIZE);
-
-  function onSearch(e) {
-    setQuery(e.target.value);
-    setPage(0);
-  }
+  const sp = searchParams || {};
+  const q = String(query || '').trim().toLowerCase();
+  const filtered = q ? all.filter((r) => matches(r, q)) : all;
+  const win = paginateArray(filtered, page, PAGE_SIZE);
 
   return (
     <div>
@@ -99,15 +108,32 @@ export default function ActiveVpnUsersTable({ sessions }) {
           Active VPN Users ({all.length})
         </div>
         {all.length > 0 && (
-          <input
-            type="text"
-            value={query}
-            onChange={onSearch}
-            placeholder="Search user, IP, client…"
-            className="input"
-            style={{ width: 'auto', minWidth: 220, maxWidth: '100%' }}
-            aria-label="Search active VPN users"
-          />
+          // Plain GET form: no client JS, the URL is the query. It deliberately
+          // carries no `page` field, so a new search always lands on page 1
+          // instead of page 7 of a set that no longer has seven pages.
+          <form
+            method="get"
+            action={basePath}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+          >
+            <input
+              type="text"
+              name="vpnq"
+              defaultValue={query || ''}
+              placeholder="Search user, IP, client…"
+              className="input"
+              style={{ width: 'auto', minWidth: 220, maxWidth: '100%' }}
+              aria-label="Search active VPN users"
+            />
+            <button type="submit" className="btn btn-secondary">
+              Search
+            </button>
+            {q ? (
+              <Link href={buildPageHref(basePath, sp, { vpnq: null, page: null })} className="btn btn-secondary">
+                Clear
+              </Link>
+            ) : null}
+          </form>
         )}
       </div>
 
@@ -117,6 +143,16 @@ export default function ActiveVpnUsersTable({ sessions }) {
         <EmptyState message={`No active users match "${query}".`} />
       ) : (
         <>
+          {/* ⛔ Says so when a filter is hiding rows. "3 users" and "3 of 412
+              users matching your search" are different answers to "who is
+              connected right now". */}
+          {q ? (
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 6 }}>
+              Filtered to {filtered.length.toLocaleString()} of {all.length.toLocaleString()} connected
+              users matching “{query}”.
+            </div>
+          ) : null}
+
           <Table>
             <colgroup>
               <col style={{ width: '16%' }} />
@@ -141,8 +177,8 @@ export default function ActiveVpnUsersTable({ sessions }) {
               </tr>
             </thead>
             <tbody>
-              {visible.map((r, i) => (
-                <tr key={start + i}>
+              {win.rows.map((r, i) => (
+                <tr key={`${win.page}-${i}`}>
                   <td className="mono" title={r.username || ''} style={{ wordBreak: 'break-word' }}>
                     {r.username || '—'}
                   </td>
@@ -164,44 +200,17 @@ export default function ActiveVpnUsersTable({ sessions }) {
             </tbody>
           </Table>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              flexWrap: 'wrap',
-              marginTop: 8,
-            }}
-          >
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-              Showing {start + 1}–{start + visible.length} of {filtered.length}
-              {filtered.length !== all.length ? ` (filtered from ${all.length})` : ''}
-            </span>
-            {pageCount > 1 && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={currentPage === 0}
-                  style={{ ...PAGER_BTN, opacity: currentPage === 0 ? 0.5 : 1 }}
-                >
-                  ← Prev
-                </button>
-                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-                  Page {currentPage + 1} / {pageCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-                  disabled={currentPage >= pageCount - 1}
-                  style={{ ...PAGER_BTN, opacity: currentPage >= pageCount - 1 ? 0.5 : 1 }}
-                >
-                  Next →
-                </button>
-              </span>
-            )}
-          </div>
+          {/* Total is the FILTERED count, which is what the rows on screen are
+              drawn from; the unfiltered total is stated in the notice above so
+              neither number stands alone pretending to be the other. */}
+          <Pagination
+            basePath={basePath}
+            searchParams={sp}
+            page={win.page}
+            pageSize={win.pageSize}
+            total={win.total}
+            label={q ? 'matching users' : 'connected users'}
+          />
         </>
       )}
     </div>

@@ -39,6 +39,22 @@ function statusPanel({ stats, failedChecks, failedChecksTotal, viewMoreHref }) {
     return <Badge color="success">Fully Compliant</Badge>;
   }
 
+  // ⛔ scorePct === null with checks present means every check for this
+  // standard resolved `na` — questions SecVault could not ask of this device
+  // at all, excluded from the score denominator (CLAUDE.md's warning-vs-na
+  // rule). This used to fall through to "No failing checks.", which reads as a
+  // clean bill of health for a standard that was never actually evaluated:
+  // our inability to measure, rendered as good news about the device. The
+  // donut already shows "—" here; this line says why.
+  if (stats.scorePct === null && stats.total > 0) {
+    return (
+      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+        Not measurable — all {stats.total} check{stats.total === 1 ? '' : 's'} are N/A, so this standard has no
+        score.
+      </span>
+    );
+  }
+
   if (stats.fail > 0) {
     const shown = failedChecks.slice(0, 5);
     const remaining = Math.max(0, (failedChecksTotal || 0) - shown.length);
@@ -170,6 +186,13 @@ export default function StandardCard({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 160, flex: '1 1 200px' }}>
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
               {`${stats.pass} pass · ${stats.fail} fail · ${stats.warning} warning · ${stats.na} n/a`}
+              {/* The four counts are not four equal parts of the score: `na`
+                  is excluded from its denominator entirely (CLAUDE.md's
+                  warning-vs-na rule), so the donut is pass / (pass+fail+
+                  warning). Only said when there IS an n/a to misread. */}
+              {stats.na > 0 && (
+                <span style={{ display: 'block', fontSize: 'var(--text-xs)' }}>n/a excluded from the score</span>
+              )}
             </span>
             {statusPanel({ stats, failedChecks, failedChecksTotal, viewMoreHref })}
           </div>

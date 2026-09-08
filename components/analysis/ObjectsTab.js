@@ -3,6 +3,8 @@ import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
+import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 
 // Rule Analysis Dashboard -- "Objects" tab (address/service object catalog
 // hygiene: Unused Objects + Duplicate Objects, the ManageEngine Firewall
@@ -72,10 +74,25 @@ function detailFor(row, findingType) {
   return (match && match.detail) || '—';
 }
 
-// How many rows each object table shows before it collapses the remainder
-// behind a "Show all (N)" toggle. Keeps the tab compact when a device has a
-// large object catalog — otherwise both tables render every matching row
-// inline, producing two very long tables on one tab.
+// ── TWO LISTS, ONE `page` PARAM: why only Unused Objects is paginated ──────
+// This tab renders two independent lists (Unused, Duplicate). Real pagination
+// needs one query param per list, but components/ui/Pagination.js hardcodes
+// `page` as its buildPageHref override key, so only ONE list on a given
+// screen can carry page links without a `paramName` prop being added to that
+// shared control — which is not this file's to change.
+//
+// Unused Objects gets it, because that is the list that actually grows
+// without bound: it is every catalogued object no rule references, so it
+// scales with the whole object catalog. Duplicates are pairs the engine
+// actually found, a far smaller and self-limiting set, and it keeps the
+// existing <details> "Show all (N)" collapse below — which already bounds its
+// height AND states its true full count, so the reader is never shown ten
+// rows as though they were all of them.
+//
+// See RiskyRulesTab.js's "PAGINATION: why the plain `page` param" block for
+// why `page` (not ?opage=) is safe across the tabs of this page.
+//
+// OBJECT_ROW_LIMIT now governs the Duplicate table only.
 const OBJECT_ROW_LIMIT = 10;
 
 // This tab is an async SERVER component (it does its own pool.query), so it
@@ -137,6 +154,29 @@ function ObjectRows({ rows, valueMode, detailType }) {
   });
 }
 
+// Plain (non-collapsing) table, used by the paginated Unused Objects list.
+// The page window already bounds its height, so layering a "Show all" toggle
+// on top would be a second, contradictory bounding mechanism — and one that
+// would let a "show all" expand back to the endless list pagination exists to
+// end. Module top level, per CLAUDE.md's never-nest-a-component rule.
+function ObjectTable({ rows, headers, valueMode, detailType }) {
+  return (
+    <Table>
+      <ObjectColgroup />
+      <thead>
+        <tr>
+          {headers.map((h) => (
+            <th key={h}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        <ObjectRows rows={rows} valueMode={valueMode} detailType={detailType} />
+      </tbody>
+    </Table>
+  );
+}
+
 // Renders the first OBJECT_ROW_LIMIT rows always; any remainder goes inside a
 // <details> whose <summary> is the "Show all (N)" / "Show fewer" toggle. The
 // overflow table reuses the same fixed-width colgroup so it lines up under
@@ -179,7 +219,7 @@ function CollapsibleObjectTable({ rows, headers, valueMode, detailType, limit = 
   );
 }
 
-export default async function ObjectsTab({ deviceId }) {
+export default async function ObjectsTab({ deviceId, searchParams }) {
   const objects = await getObjectsWithFindings(pool, deviceId);
 
   if (objects.length === 0) {
@@ -194,6 +234,11 @@ export default async function ObjectsTab({ deviceId }) {
     if (!o.collected_at) return latest;
     return !latest || new Date(o.collected_at) > new Date(latest) ? o.collected_at : latest;
   }, null);
+
+  // The three StatCards above stay whole-catalog counts, not page counts — a
+  // paginated view must never restate its window as the total.
+  const pagedUnused = paginateArray(unused, resolvePage(searchParams?.page), DEFAULT_PAGE_SIZE);
+  const pageParams = { ...(searchParams || {}), tab: 'objects' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -225,12 +270,22 @@ export default async function ObjectsTab({ deviceId }) {
         {unused.length === 0 ? (
           <EmptyState message="No unused objects found." />
         ) : (
-          <CollapsibleObjectTable
-            rows={unused}
-            headers={['Name', 'Type', 'Value / Members', 'Detail']}
-            valueMode="members"
-            detailType="unused"
-          />
+          <>
+            <ObjectTable
+              rows={pagedUnused.rows}
+              headers={['Name', 'Type', 'Value / Members', 'Detail']}
+              valueMode="members"
+              detailType="unused"
+            />
+            <Pagination
+              basePath={`/devices/${deviceId}/analysis`}
+              searchParams={pageParams}
+              page={pagedUnused.page}
+              pageSize={pagedUnused.pageSize}
+              total={pagedUnused.total}
+              label="unused objects"
+            />
+          </>
         )}
       </div>
 
@@ -239,12 +294,22 @@ export default async function ObjectsTab({ deviceId }) {
         {duplicates.length === 0 ? (
           <EmptyState message="No duplicate objects found." />
         ) : (
-          <CollapsibleObjectTable
-            rows={duplicates}
-            headers={['Name', 'Type', 'Value', 'Duplicate Of']}
-            valueMode="value"
-            detailType="duplicate"
-          />
+          <>
+            {/* Not page-linked (see the OBJECT_ROW_LIMIT block above), so the
+                true total is stated in words here — the <details> toggle below
+                repeats it, but the count must be visible while collapsed too,
+                or ten rows read as the whole set. */}
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
+              {duplicates.length.toLocaleString()} duplicate object{duplicates.length === 1 ? '' : 's'}
+              {duplicates.length > OBJECT_ROW_LIMIT ? ` — showing the first ${OBJECT_ROW_LIMIT}` : ''}
+            </p>
+            <CollapsibleObjectTable
+              rows={duplicates}
+              headers={['Name', 'Type', 'Value', 'Duplicate Of']}
+              valueMode="value"
+              detailType="duplicate"
+            />
+          </>
         )}
       </div>
     </div>

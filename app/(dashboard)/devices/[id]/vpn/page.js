@@ -11,12 +11,17 @@ import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
 import { getVpnSessions } from '../../../../../lib/engines/vpnSessions';
 import { getVpnTunnels as getStoredVpnTunnels } from '../../../../../lib/engines/vpnTunnels';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { resolvePage } from '../../../../../lib/pagination';
 
 export const dynamic = 'force-dynamic';
 
-// Per-device VPN Summary — config-derived (device_configs.config_parsed),
-// NOT log/session-report data (that needs syslog ingestion — see CLAUDE.md's
-// Phase 8 notes). Mirrors this app's "server component queries the DB
+// Per-device VPN Summary — the top card is config-derived
+// (device_configs.config_parsed); the tables below it are management-plane
+// snapshots (vpn_active_sessions / vpn_ipsec_tunnels), and log-observed VPN
+// activity lives on the fleet /vpn page. This comment used to say log data
+// "needs syslog ingestion" — that stopped being true when
+// services/collector.js shipped, and a stale caveat sends the next reader
+// looking for data SecVault already has. Mirrors this app's "server component queries the DB
 // directly" convention throughout (see compliance/[deviceId]/page.js,
 // devices/[id]/analysis/page.js). lib/engines/vpnSummary.js does the actual
 // per-vendor interpretation of config_parsed — this page only renders
@@ -89,10 +94,24 @@ function fieldRow(label, value) {
   );
 }
 
-export default async function DeviceVpnPage({ params }) {
+export default async function DeviceVpnPage({ params, searchParams }) {
   if (!isValidUuid(params.id)) {
     return notFound();
   }
+
+  // Every list on this page keeps its state in the URL, not in component
+  // state: this is a server component, and any router.refresh() would silently
+  // reset client state, dropping the operator back to page 1 of an unfiltered
+  // list mid-read.
+  //
+  // ⛔ TWO independently paged tables live here, so they use SEPARATE params —
+  // `?page=` for Active VPN Users (plus `?vpnq=` for its filter) and
+  // `?tunnelPage=` for IPSec Tunnels. One shared param would make paging one
+  // table silently repaginate the other; see components/ui/Pagination's
+  // `paramName` note.
+  const sp = searchParams || {};
+  const usersQuery = Array.isArray(sp.vpnq) ? sp.vpnq[0] : sp.vpnq || '';
+  const usersPage = resolvePage(sp.page);
 
   const device = await getDevice(pool, params.id);
   if (!device) {
@@ -193,9 +212,20 @@ export default async function DeviceVpnPage({ params }) {
         </Card>
       )}
 
-      <ActiveVpnUsersTable sessions={activeSessions} />
+      <ActiveVpnUsersTable
+        sessions={activeSessions}
+        basePath={`/devices/${device.id}/vpn`}
+        searchParams={sp}
+        page={usersPage}
+        query={usersQuery}
+      />
 
-      <IpsecTunnelsTable tunnels={ipsecTunnels} />
+      <IpsecTunnelsTable
+        tunnels={ipsecTunnels}
+        basePath={`/devices/${device.id}/vpn`}
+        searchParams={sp}
+        page={resolvePage(sp.tunnelPage)}
+      />
 
       {sessionHistory.length > 0 ? (
         <VpnSessionTrendChart points={sessionHistory} />

@@ -3,6 +3,8 @@ import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
+import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 import { computeRuleRiskBand } from '../../lib/engines/riskScore';
 
 // Rule Analysis Dashboard -- "Risky Rules" tab (sibling of the existing
@@ -51,6 +53,36 @@ const STAT_TILE_COLOR = {
 const SORT_RANK = { critical: 0, high: 1, medium: 2, attention: 3, low: 4 };
 const BAND_ORDER = ['critical', 'high', 'medium', 'attention', 'low'];
 
+// ── PAGINATION: why the plain `page` param, on every tab of this page ──────
+// (Canonical explanation. ReorderTab.js / ObjectsTab.js /
+// RuleRelationshipTab.js in this directory make the same choice and point
+// back here rather than repeating this.)
+//
+// These tabs live under /devices/[id]/analysis?tab=..., so a page param that
+// clobbered or lost `tab` would silently throw the reader back to Summary.
+// Two facts make the single shared `page` name correct here:
+//
+//  1. The parent page's tabLink() builds every tab href from scratch as
+//     `?tab=<key>` and carries NO other params. Moving between tabs therefore
+//     already resets the page to 1 — there is no stale-page-from-another-tab
+//     problem for a per-tab name (?rpage=/?opage=) to solve.
+//  2. Exactly one tab renders per request, so `page` is never ambiguous about
+//     which list it addresses.
+//
+// A per-tab name is also not expressible today: components/ui/Pagination.js
+// hardcodes `page` as its buildPageHref override key.
+//
+// Belt and braces: `tab` is re-asserted into the searchParams handed to
+// <Pagination> below, so a Prev/Next link cannot navigate away from this tab
+// even if the parent ever stops forwarding its own searchParams. And
+// paginateArray() clamps a past-the-end page to the LAST page, so a
+// hand-edited or bookmarked `?page=99` shows real rows, never a blank table
+// that reads as "everything is gone".
+//
+// URL-driven, not React state, because this is an async SERVER component —
+// there is no state to hold, and a page in the query string stays linkable
+// and survives AutoRefresh's router.refresh().
+
 // Same array-to-readable-string cell convention as
 // devices/[id]/rules/page.js's joinArray() -- mirrored here rather than
 // imported, matching this app's established per-file-duplication convention
@@ -96,7 +128,7 @@ async function getRulesWithFindings(dbPool, deviceId) {
   return result.rows;
 }
 
-export default async function RiskyRulesTab({ deviceId }) {
+export default async function RiskyRulesTab({ deviceId, searchParams }) {
   const rules = await getRulesWithFindings(pool, deviceId);
 
   if (rules.length === 0) {
@@ -118,6 +150,13 @@ export default async function RiskyRulesTab({ deviceId }) {
 
   const totalRules = banded.length;
   const riskyCount = totalRules - bandCounts.low;
+
+  // The band tiles and the "N Risky Rules of Total: M" line above deliberately
+  // count the WHOLE ruleset, not the current page — they are a summary of the
+  // device, and re-counting them per page would turn a fleet fact into a
+  // pagination artefact. Only the table below is windowed.
+  const paged = paginateArray(banded, resolvePage(searchParams?.page), DEFAULT_PAGE_SIZE);
+  const pageParams = { ...(searchParams || {}), tab: 'risky-rules' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -158,7 +197,7 @@ export default async function RiskyRulesTab({ deviceId }) {
           </tr>
         </thead>
         <tbody>
-          {banded.map((rule) => (
+          {paged.rows.map((rule) => (
             <tr key={rule.id}>
               <td title={ruleLabel(rule)}>{ruleLabel(rule)}</td>
               <td>{rule.action || '—'}</td>
@@ -173,6 +212,15 @@ export default async function RiskyRulesTab({ deviceId }) {
           ))}
         </tbody>
       </Table>
+
+      <Pagination
+        basePath={`/devices/${deviceId}/analysis`}
+        searchParams={pageParams}
+        page={paged.page}
+        pageSize={paged.pageSize}
+        total={paged.total}
+        label="rules"
+      />
     </div>
   );
 }

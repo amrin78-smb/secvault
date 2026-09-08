@@ -122,7 +122,7 @@ ComplianceScoreWidget  no props — fleet compliance score gauge + per-standard 
 ConfigChangesWidget  days — fleet-wide config-change summary over a trailing window
 CveSeveritySummary  no props — live fleet CVE severity counts + day-over-day delta
 DeviceStatusSummary  no props — active-device counts by last connectivity test result
-RecentActivityFeed  limit — fleet-wide recent activity_log table
+RecentActivityFeed  limit, pageSize?, searchParams?, basePath? — fleet-wide recent activity_log table. TWO MODES: with `searchParams` it paginates via `<Pagination>`; without, it stays the dashboard's top-N widget but carries an honest footer ("8 most recent of 226") instead of implying N is everything.
 RecentCriticalAlerts  limit — most recent open patch-now CVE assessments
 RiskByCategory  no props — CVE counts by CWE-derived vulnerability category, bar list
 RulesetOverview  no props — fleet-wide rule totals + finding-type stat tiles (Total/Enabled/Disabled/Unused/Shadow/Redundant/Any-Any; Disabled added 2026-07-23, fleet-wide analog of the per-device Inactive/Disabled tiles on the Analysis Summary tab and Overview Rule Hygiene card)
@@ -135,6 +135,10 @@ SecurityLogWidgets.js (no props): TopAttackersWidget, TopTargetsWidget, TopThrea
 ⛔ DeviceThreatTable renders a dash, not a zero, and says in words that it cannot distinguish a quiet device from one not forwarding IPS/antivirus logs.
 
 GeoUserWidgets.js (no props): TopCountriesWidget, TopUsersWidget, UrlCategoriesWidget. ⛔ No GeoIP database anywhere — country is the firewall's own answer. TopCountriesWidget states the internal and unreported totals it excluded; TopUsersWidget states its coverage percentage, because a top-users chart that does not invites the reader to assume the listed users are the only ones active.
+
+Pagination  basePath, searchParams, page, pageSize, total, label?, pages?, paramName? — the shared list control (`components/ui/Pagination.js`). SERVER component with real `<Link>`s, so it survives AutoRefresh's `router.refresh()` and keeps the page in the URL like every other view state in this app.
+⛔ The range label is not decoration: "51–100 of 1,522" is what stops fifty rows on screen being read as the whole set, and `total={null}` renders "total not counted" rather than a fabricated figure.
+⛔ `paramName` exists because ONE URL can carry several independently paged lists (`/lifecycle` has three, the analysis Objects tab has two). With a hardcoded `page` they all move together — clicking "next" on one table silently repaginates another the reader is not looking at, which is worse than no control.
 
 ## logs/
 
@@ -149,6 +153,12 @@ LogResults  result, deviceNames — the results table plus the raw line behind a
 (c) SnmpTrendMini  points — compact sparkline pair for the Overview-tab summary card
 
 ## vpn/
+
+ActiveVpnUsersTable  sessions, basePath, searchParams, page, query — ⛔ NO LONGER a client component (2026-09-08). Its search box and page number were useState, which AutoRefresh's router.refresh() silently reset mid-read; both now live in the URL (?vpnq= via a plain GET form, ?page=). Filtering runs over the FULL set before the window and the header states "filtered to N of M", so a filtered count is never mistaken for the connected count.
+IpsecTunnelsTable  rows, basePath, searchParams, page — paginated on ?tunnelPage=. The up / down / status-not-reported tally is computed over the full set, not the visible page. ⛔ "status not reported" is its own bucket: a tunnel whose state the device did not send is not a tunnel that is down.
+VpnSyslogActivity  searchParams, page — log-observed VPN activity, the only VPN source covering Palo Alto. Replaced a raw-line dump with a 7-column event table (time with the ~ tz-assumed caveat, severity, event, user, source, firewall, raw line behind a collapsed <details>), paginated on ?evPage= with SQL LIMIT/OFFSET.
+⛔ PAN-OS carries NO action on GLOBALPROTECT rows, so the Event column is legitimately empty for Palo Alto — it renders an em-dash with a hover explaining why, never a fabricated outcome. tunnel-down/logout are coloured MUTED, not danger: a normal session close is not a failure.
+⛔ It must tolerate a NULL message: syslog_events.message became nullable on 2026-09-08 (parsed traffic keeps its raw line in the compressed archive), and the previous code called message.slice() unconditionally and threw on any archived row.
 
 (c) VpnSessionTrendChart  points — active VPN session-count trend line chart
 (c) ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Data/Client) from vpn_active_sessions; Data column = ↓in/↑out bytes (Fortinet/Cisco). CLIENT component (2.38.1): search box (filters user/IP/client) + 25-per-page pagination for busy firewalls (100s of users). Added 2026-07-31.

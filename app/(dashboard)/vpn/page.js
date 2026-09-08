@@ -4,6 +4,8 @@ import PageHeader from '../../../components/ui/PageHeader';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
+import Pagination from '../../../components/ui/Pagination';
+import { resolvePage, pageWindow, DEFAULT_PAGE_SIZE } from '../../../lib/pagination';
 import { summarizeVpnConfig } from '../../../lib/engines/vpnSummary';
 import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
 
@@ -26,27 +28,57 @@ export const dynamic = 'force-dynamic';
 //
 // Server component queries the DB directly, same convention as every other
 // fleet-wide page in this app (compliance/page.js, alerts/page.js).
+//
+// ── PAGINATION ────────────────────────────────────────────────────────────
+// TWO independently paged lists live on this URL, so they get separate params:
+// `?page=` drives the fleet status table below, `?evPage=` drives
+// VpnSyslogActivity's event table. Sharing one param would mean paging the
+// events silently repaginated the fleet table underneath it — see
+// components/ui/Pagination's `paramName` note.
+//
+// Both use the shared lib/pagination.js helpers + components/ui/Pagination
+// (server-rendered links, so a page survives AutoRefresh's router.refresh() and
+// is pasteable into a ticket — client state would not be). Here the window is
+// applied in SQL, not by slicing an already-fetched array: the two follow-up
+// queries below fetch config and session rows PER DEVICE ON THIS PAGE, so
+// paging bounds the work done rather than just what is drawn.
 
-// One row per active device: latest config_parsed (for the VPN summary) +
-// latest vpn_session_snapshots.active_session_count (if this device's
-// adapter supports session polling — currently Fortinet only). Two separate
-// LEFT JOIN DISTINCT ON subqueries rather than a single query with window
-// functions — clearer to read, and this table is fleet-sized (dozens, not
-// millions of rows), not a place where that tradeoff matters.
-async function getFleetVpnStatus(dbPool) {
+const PAGE_SIZE = DEFAULT_PAGE_SIZE;
+
+async function countActiveDevices(dbPool) {
+  const { rows } = await dbPool.query('SELECT count(*)::int AS total FROM devices WHERE active = true');
+  return rows[0] ? rows[0].total : 0;
+}
+
+// One row per active device on the requested page: latest config_parsed (for
+// the VPN summary) + latest vpn_session_snapshots.active_session_count (if this
+// device's adapter supports session polling — currently Fortinet only). Two
+// separate DISTINCT ON lookups rather than a single query with window
+// functions — clearer to read, and this is a page of rows, not millions.
+async function getFleetVpnStatus(dbPool, limit, offset) {
   const { rows: devices } = await dbPool.query(
     `SELECT id AS device_id, name AS device_name, vendor
      FROM devices
      WHERE active = true
-     ORDER BY name ASC`
+     ORDER BY name ASC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
   );
+
+  // A page past the end of the table is possible (a device was deactivated
+  // between the count and the fetch); returning [] here is correct — it means
+  // "no rows on this page", not "no devices", and the count above is what the
+  // pager reports.
+  if (devices.length === 0) return [];
+
+  const ids = devices.map((d) => d.device_id);
 
   const { rows: configRows } = await dbPool.query(
     `SELECT DISTINCT ON (device_id) device_id, config_parsed, collected_at
      FROM device_configs
      WHERE device_id = ANY($1::uuid[])
      ORDER BY device_id, collected_at DESC`,
-    [devices.map((d) => d.device_id)]
+    [ids]
   );
   const configByDevice = new Map(configRows.map((r) => [r.device_id, r]));
 
@@ -55,7 +87,7 @@ async function getFleetVpnStatus(dbPool) {
      FROM vpn_session_snapshots
      WHERE device_id = ANY($1::uuid[])
      ORDER BY device_id, sampled_at DESC`,
-    [devices.map((d) => d.device_id)]
+    [ids]
   );
   const sessionByDevice = new Map(sessionRows.map((r) => [r.device_id, r]));
 
@@ -91,8 +123,13 @@ function statusBadge(summary) {
   return <Badge color="warning">Configured (state unknown)</Badge>;
 }
 
-export default async function VpnFleetPage() {
-  const devices = await getFleetVpnStatus(pool);
+export default async function VpnFleetPage({ searchParams }) {
+  const sp = searchParams || {};
+  const total = await countActiveDevices(pool);
+  // pageWindow clamps a past-the-end `?page=` to the LAST page rather than
+  // rendering an empty table, which would read as "there are no devices".
+  const win = pageWindow(resolvePage(sp.page), PAGE_SIZE, total);
+  const devices = await getFleetVpnStatus(pool, win.limit, win.offset);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -107,52 +144,67 @@ export default async function VpnFleetPage() {
       />
 
       {/* Log-observed activity sits ABOVE the config table: it is the only
-          one of the three views that reflects what actually happened. */}
-      <VpnSyslogActivity />
+          one of the three views that reflects what actually happened. It pages
+          on its OWN param (`?evPage=`) so the two lists on this page never move
+          together — see components/ui/Pagination's paramName note. */}
+      <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
 
-      {devices.length === 0 ? (
+      {total === 0 ? (
         <EmptyState message="No active devices." />
       ) : (
-        <Table>
-          <colgroup>
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '14%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>Device</th>
-              <th>Vendor</th>
-              <th>VPN Status</th>
-              <th>Config as of</th>
-              <th>Active Sessions</th>
-              <th>Sampled</th>
-            </tr>
-          </thead>
-          <tbody>
-            {devices.map((d) => (
-              <tr key={d.device_id}>
-                <td title={d.device_name}>
-                  <Link href={`/devices/${d.device_id}/vpn`} className="link-quiet">
-                    {d.device_name}
-                  </Link>
-                </td>
-                <td>
-                  <Badge color="info">{d.vendor}</Badge>
-                </td>
-                <td>{statusBadge(d.summary)}</td>
-                <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(d.lastConfigAt)}</td>
-                <td style={{ color: 'var(--text-secondary)' }}>
-                  {d.activeSessionCount === null ? '—' : d.activeSessionCount}
-                </td>
-                <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(d.sessionSampledAt)}</td>
+        <>
+          <Table>
+            <colgroup>
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '14%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Device</th>
+                <th>Vendor</th>
+                <th>VPN Status</th>
+                <th>Config as of</th>
+                <th>Active Sessions</th>
+                <th>Sampled</th>
               </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {devices.map((d) => (
+                <tr key={d.device_id}>
+                  <td title={d.device_name}>
+                    <Link href={`/devices/${d.device_id}/vpn`} className="link-quiet">
+                      {d.device_name}
+                    </Link>
+                  </td>
+                  <td>
+                    <Badge color="info">{d.vendor}</Badge>
+                  </td>
+                  <td>{statusBadge(d.summary)}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(d.lastConfigAt)}</td>
+                  <td style={{ color: 'var(--text-secondary)' }}>
+                    {/* ⛔ null = this vendor/adapter does not poll sessions at
+                        all. A 0 would claim nobody is connected. */}
+                    {d.activeSessionCount === null ? '—' : d.activeSessionCount}
+                  </td>
+                  <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(d.sessionSampledAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+
+          <Pagination
+            basePath="/vpn"
+            searchParams={sp}
+            page={win.page}
+            pageSize={win.pageSize}
+            total={total}
+            label="active devices"
+          />
+        </>
       )}
     </div>
   );

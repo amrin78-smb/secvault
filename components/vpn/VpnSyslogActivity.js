@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import IconChip from '../ui/IconChip';
+import Pagination from '../ui/Pagination';
 import { IconActivity } from '../icons';
-import { getVpnActivityByDevice, getVpnActivity } from '../../lib/syslog/trafficStats';
+import { resolvePage, pageWindow } from '../../lib/pagination';
+import { getVpnActivityByDevice } from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,20 +28,201 @@ export const dynamic = 'force-dynamic';
 // captured events, not vendor documentation. A device absent from this list has
 // not sent VPN logs, which is NOT the same as "no VPN activity", and the empty
 // state says so rather than showing a reassuring zero.
+//
+// ── WHY THIS RENDERS A TABLE AND NOT A LIST OF RAW LINES ──────────────────
+// This block used to print the first 160 characters of each raw syslog line,
+// ellipsis-clipped to one row. That is the least readable form of any data
+// SecVault holds: a FortiOS VPN line is ~40 key=value pairs, so the only fields
+// on screen were whichever ones the vendor happened to emit first. Every field
+// an operator actually asks for — who connected, from where, to which firewall,
+// and whether it worked — already has its own parsed column on syslog_events
+// (src_user / src_ip / action / severity / log_subtype). So the columns come
+// from those columns, and the raw line moves behind a per-row <details> toggle:
+// still the evidence, no longer the presentation.
+//
+// ⛔ This table pages on `?evPage=`, NOT `?page=`. /vpn carries two
+// independently paged lists (this one and the fleet status table below), and
+// the shared Pagination's `paramName` exists precisely so they do not move
+// together — clicking "next" here must not silently repaginate a table the
+// reader is not looking at. `page` stays with the fleet table, which is the
+// page's principal list.
+//
+// ⛔ OFFSET over a live table is honest about being a moving window: events
+// arrive continuously, so page 3 an hour from now is not the same rows as page
+// 3 today. That is stated on screen, and /logs?logClass=vpn — which pins an
+// explicit time range — is linked as the stable way to look at a fixed window.
 
-function fmt(ts) {
-  if (!ts) return '—';
-  return new Date(ts).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+const EVENTS_PAGE_SIZE = 25;
+const WINDOW_HOURS = 24;
+const DEVICE_ROWS = 10;
+
+// RFC 5424 numeric severity -> the word. The index IS the value, so 0 = emergency.
+// ⛔ Never rendered as a bare number: "3" and "error" are the same fact, but
+// only one of them is readable next to a login failure.
+const SEVERITY_WORDS = [
+  'emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug',
+];
+
+// ⛔ Outcome tone, not activity tone. A `tunnel-down` or a `logout` is the
+// NORMAL end of a session, not a failure — colouring every non-"up" action red
+// would paint an ordinary working day as an incident and train the operator to
+// ignore the colour entirely. Only a real failure is danger; an ordinary close
+// is muted; only a confirmed establish is success.
+const OPEN_ACTIONS = new Set([
+  'tunnel-up', 'ssl-new-con', 'ssl-login', 'login', 'auth-success', 'tunnel-connect',
+]);
+const CLOSE_ACTIONS = new Set([
+  'tunnel-down', 'tunnel-stats', 'ssl-exit', 'logout', 'close', 'ssl-logout',
+]);
+const FAILURE_HINTS = ['fail', 'denied', 'deny', 'reject', 'error', 'invalid', 'timeout'];
+
+function actionTone(action) {
+  const a = String(action).toLowerCase();
+  if (FAILURE_HINTS.some((h) => a.includes(h))) return 'danger';
+  if (OPEN_ACTIONS.has(a)) return 'success';
+  if (CLOSE_ACTIONS.has(a)) return 'muted';
+  // An unrecognized vendor verb gets a neutral colour, never a guessed
+  // good/bad one — a confident wrong colour is a fabricated verdict.
+  return 'info';
 }
 
-export default async function VpnSyslogActivity() {
-  const [byDevice, recent] = await Promise.all([
-    getVpnActivityByDevice(pool, 24),
-    getVpnActivity(pool, 24, 8),
+function severityTone(sev) {
+  if (sev <= 3) return 'danger';   // emergency .. error
+  if (sev === 4) return 'warning'; // warning
+  return 'muted';
+}
+
+function fmtTime(value, tzAssumed) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  const s = d.toISOString().replace('T', ' ').slice(0, 19);
+  // The caveat travels with the value (same convention as LogResults): the
+  // device sent no timezone, so the collector's own zone was assumed.
+  return tzAssumed ? s + ' ~' : s;
+}
+
+// Which compressed archive file holds a raw line that is not in the DB. Mirrors
+// lib/syslog/archive.js's fileNameFor() — UTC day, the same key as the
+// partition. Locally duplicated per this codebase's small-helper-per-file
+// convention (LogResults.js carries the identical three lines).
+function archiveFileFor(value) {
+  if (!value) return 'the daily archive';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return 'the daily archive';
+  return 'syslog-' + d.toISOString().slice(0, 10).replace(/-/g, '') + '.log.gz';
+}
+
+function stripMask(ip) {
+  return String(ip || '').replace('/32', '');
+}
+
+// Most recent VPN-class events with their PARSED columns, not just the raw line.
+// Written here rather than reusing trafficStats.getVpnActivity(), which returns
+// only (received_at, source_ip, vendor, device_name, severity, message) — no
+// user, no action, no client IP, no subtype, which is exactly what this table
+// exists to show.
+//
+// Index-backed: idx_syslog_events_class covers (log_class, received_at DESC)
+// for every class except 'traffic', so this never scans the raw partitions the
+// way a `message LIKE '%vpn%'` would.
+async function getRecentVpnEvents(dbPool, hours, limit, offset) {
+  const { rows } = await dbPool.query(
+    `SELECT e.received_at, e.tz_assumed, e.source_ip::text AS source_ip,
+            e.device_id, d.name AS device_name, e.vendor, e.severity,
+            e.action, e.log_subtype, e.src_user,
+            e.src_ip::text AS src_ip, e.src_country, e.message
+       FROM syslog_events e
+       LEFT JOIN devices d ON d.id = e.device_id
+      WHERE e.received_at >= now() - ($1::int * interval '1 hour')
+        AND e.log_class = 'vpn'
+      ORDER BY e.received_at DESC
+      LIMIT $2 OFFSET $3`,
+    [hours, limit, offset]
+  );
+  return rows;
+}
+
+// Distinct VPN users seen, AND how many events carried a username at all.
+// ⛔ The second number is not padding. Fortinet names the user on most SSL-VPN
+// events and PAN-OS GlobalProtect frequently does not, so "12 users" without
+// "named on 61% of events" invites the reader to conclude those twelve are
+// everyone who connected.
+async function getVpnUserCoverage(dbPool, hours) {
+  const { rows } = await dbPool.query(
+    `SELECT count(DISTINCT src_user)::bigint AS users,
+            count(*) FILTER (WHERE src_user IS NOT NULL)::bigint AS with_user,
+            count(*)::bigint AS events
+       FROM syslog_events
+      WHERE received_at >= now() - ($1::int * interval '1 hour')
+        AND log_class = 'vpn'`,
+    [hours]
+  );
+  const r = rows[0] || {};
+  return {
+    users: Number(r.users || 0),
+    withUser: Number(r.with_user || 0),
+    events: Number(r.events || 0),
+  };
+}
+
+// Plain functions returning JSX, called imperatively — NOT nested component
+// definitions. CLAUDE.md's rule is about components rendered as <Tag/>.
+function dash(title) {
+  return (
+    <span style={{ color: 'var(--text-muted)' }} title={title || undefined}>
+      —
+    </span>
+  );
+}
+
+function statTile(value, label, sub) {
+  return (
+    <div>
+      <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{label}</div>
+      {sub ? <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{sub}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * @param {object} searchParams  the /vpn page's searchParams, preserved on paging links
+ * @param {*}      page          raw `?evPage=` value (resolved here, not by the caller)
+ */
+export default async function VpnSyslogActivity({ searchParams, page }) {
+  const sp = searchParams || {};
+
+  const [byDevice, coverage] = await Promise.all([
+    getVpnActivityByDevice(pool, WINDOW_HOURS),
+    getVpnUserCoverage(pool, WINDOW_HOURS),
   ]);
 
-  const total = byDevice.reduce((n, r) => n + r.events, 0);
+  // ONE total, from ONE query, used by both the headline tile and the pager.
+  // The per-source counts come from a separate query milliseconds apart and can
+  // differ by a handful of events under live ingest; showing two subtly
+  // different "totals" on one card would read as a bug in the data rather than
+  // the ordinary consequence of counting a moving stream twice.
+  const total = coverage.events;
+  const win = pageWindow(resolvePage(page), EVENTS_PAGE_SIZE, total);
+  // Skip the round trip entirely when the window is empty — an OFFSET query
+  // against the raw partitions is not free.
+  const recent = total > 0 ? await getRecentVpnEvents(pool, WINDOW_HOURS, win.limit, win.offset) : [];
+
   const unmanaged = byDevice.filter((r) => !r.deviceName).length;
+  const shownDevices = byDevice.slice(0, DEVICE_ROWS);
+
+  // Deep link into the forensic view, pre-filtered to the same class and the
+  // same window this card summarises — so "show me the rest" lands on the same
+  // set of events rather than a fresh unfiltered search.
+  const searchHref =
+    '/logs?logClass=vpn&from=' +
+    encodeURIComponent(new Date(Date.now() - WINDOW_HOURS * 3600 * 1000).toISOString());
+
+  // ⛔ A percentage only when there is something to divide by. 0/0 is not
+  // "0% of events named a user", it is "no events".
+  const userCoveragePct =
+    coverage.events > 0 ? Math.round((coverage.withUser / coverage.events) * 100) : null;
 
   return (
     <Card>
@@ -58,26 +242,41 @@ export default async function VpnSyslogActivity() {
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 20, alignItems: 'baseline', marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
-                  {total.toLocaleString()}
-                </div>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>VPN events</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
-                  {byDevice.length}
-                </div>
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>reporting sources</div>
-              </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 28,
+                alignItems: 'baseline',
+                flexWrap: 'wrap',
+                marginBottom: 14,
+              }}
+            >
+              {statTile(total.toLocaleString(), 'VPN events')}
+              {statTile(byDevice.length, 'reporting sources')}
+              {statTile(
+                // ⛔ Em-dash, not 0. "No firewall told us a username" and "zero
+                // people used the VPN" are different facts and must not look
+                // the same on screen.
+                coverage.users > 0 ? coverage.users.toLocaleString() : '—',
+                'named users',
+                userCoveragePct === null
+                  ? 'no events to measure'
+                  : coverage.users === 0
+                    ? 'no event carried a username'
+                    : 'named on ' + userCoveragePct + '% of events'
+              )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
-              {byDevice.slice(0, 10).map((r, i) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+              {shownDevices.map((r, i) => (
                 <div
-                  key={`${r.deviceId || 'unmanaged'}-${i}`}
-                  style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 'var(--text-base)' }}
+                  key={(r.deviceId || 'unmanaged') + '-' + i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    fontSize: 'var(--text-base)',
+                  }}
                 >
                   <span>
                     {r.deviceName ? (
@@ -93,39 +292,225 @@ export default async function VpnSyslogActivity() {
                     {r.vendor ? (
                       <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}> · {r.vendor}</span>
                     ) : null}
+                    {/* last_seen was already being queried and thrown away.
+                        "Which of these stopped talking six hours ago" is a
+                        question a flat 24h count cannot answer. */}
+                    {r.lastSeen ? (
+                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                        {' '}· last {fmtTime(r.lastSeen) || '—'} UTC
+                      </span>
+                    ) : null}
                   </span>
                   <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.events.toLocaleString()}</span>
                 </div>
               ))}
+              {byDevice.length > shownDevices.length ? (
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                  Showing the {shownDevices.length} busiest of {byDevice.length} reporting sources.
+                </div>
+              ) : null}
             </div>
 
-            {recent.length > 0 && (
-              <details>
-                <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-                  Most recent VPN events
-                </summary>
-                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {recent.map((e, i) => (
-                    <div key={i} style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>{fmt(e.receivedAt)}</span>{' '}
-                      <strong>{e.deviceName || e.sourceIp.replace('/32', '')}</strong>{' '}
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          maxWidth: '100%',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          verticalAlign: 'bottom',
-                        }}
-                      >
-                        {e.message.slice(0, 160)}
-                      </span>
-                    </div>
-                  ))}
+            {recent.length > 0 ? (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    flexWrap: 'wrap',
+                    marginBottom: 6,
+                  }}
+                >
+                  <span
+                    style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--text-primary)' }}
+                  >
+                    Most recent VPN events
+                  </span>
+                  {/* ⛔ The old block showed eight lines with no total, which
+                      reads as "this is what happened". The pager below now
+                      carries the honest range; this says the window MOVES, so
+                      a page number here is not a stable citation, and points at
+                      the view where a fixed time range is. */}
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                    newest first — arriving events shift later pages ·{' '}
+                    <Link href={searchHref} style={{ color: 'var(--primary)' }}>
+                      search a fixed time range →
+                    </Link>
+                  </span>
                 </div>
-              </details>
-            )}
+
+                <Table>
+                  <colgroup>
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '17%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '15%' }} />
+                    <col style={{ width: '12%' }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Time (UTC)</th>
+                      <th>Severity</th>
+                      <th>Event</th>
+                      <th>User</th>
+                      <th>Source</th>
+                      <th>Firewall</th>
+                      <th>Raw</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recent.map((e, i) => {
+                      const time = fmtTime(e.received_at, e.tz_assumed);
+                      const sev =
+                        e.severity === null || e.severity === undefined ? null : Number(e.severity);
+                      const sevWord = sev !== null && SEVERITY_WORDS[sev] ? SEVERITY_WORDS[sev] : null;
+                      return (
+                        <tr key={String(e.received_at) + '-' + i}>
+                          <td className="mono" style={{ verticalAlign: 'top', whiteSpace: 'normal' }}>
+                            {time || dash('The device sent no usable timestamp')}
+                          </td>
+                          <td style={{ verticalAlign: 'top' }}>
+                            {/* ⛔ Tri-state. A missing severity is a dash, never
+                                "info" — the vendor sending nothing and the
+                                vendor saying "informational" are different
+                                facts. */}
+                            {sev === null ? (
+                              dash('This event carried no syslog severity')
+                            ) : (
+                              <Badge color={severityTone(sev)}>{sevWord || 'level ' + sev}</Badge>
+                            )}
+                          </td>
+                          <td style={{ verticalAlign: 'top' }}>
+                            {/* The ACTION is the outcome, so it gets the colour.
+                                The SUBTYPE is only the vendor's log family
+                                (FortiOS "vpn", PAN-OS "globalprotect") and stays
+                                plain muted text underneath — badging it the same
+                                way would present a log category as an outcome.
+                                PAN-OS carries no action on GlobalProtect rows at
+                                all (vendorParsers.js sets action only for
+                                TRAFFIC), which is why this dash is common and
+                                says why on hover. */}
+                            {e.action ? (
+                              <Badge color={actionTone(e.action)}>{e.action}</Badge>
+                            ) : (
+                              dash('This vendor reports no action/outcome on VPN log lines')
+                            )}
+                            {e.log_subtype ? (
+                              <div
+                                style={{
+                                  fontSize: 'var(--text-xs)',
+                                  color: 'var(--text-muted)',
+                                  marginTop: 3,
+                                }}
+                              >
+                                {e.log_subtype}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td
+                            style={{ verticalAlign: 'top', wordBreak: 'break-word' }}
+                            title={e.src_user || ''}
+                          >
+                            {e.src_user ? (
+                              <span style={{ color: 'var(--accent-teal)', fontWeight: 600 }}>
+                                {e.src_user}
+                              </span>
+                            ) : (
+                              dash('No username in this event')
+                            )}
+                          </td>
+                          <td className="mono" style={{ verticalAlign: 'top', whiteSpace: 'normal' }}>
+                            {stripMask(e.src_ip) || dash('No client address in this event')}
+                            {e.src_country ? (
+                              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                                {/* The firewall's own answer — SecVault holds no
+                                    GeoIP database of its own. */}
+                                {e.src_country}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td style={{ verticalAlign: 'top', wordBreak: 'break-word' }}>
+                            {e.device_id && e.device_name ? (
+                              <Link
+                                href={`/devices/${e.device_id}/vpn`}
+                                style={{ color: 'var(--text-primary)' }}
+                              >
+                                {e.device_name}
+                              </Link>
+                            ) : (
+                              <>
+                                <span className="mono">{stripMask(e.source_ip)}</span>{' '}
+                                <Badge color="warning">unmanaged</Badge>
+                              </>
+                            )}
+                          </td>
+                          <td style={{ verticalAlign: 'top' }}>
+                            {/* ⛔ A null message does NOT mean nothing was
+                                received: ordinary parsed traffic keeps its raw
+                                text in the compressed archive rather than the
+                                database (schema.sql — message became NULLABLE on
+                                2026-09-08). An empty cell would read as "no
+                                evidence", so this names the file it is in. The
+                                previous version of this block called
+                                e.message.slice() unconditionally, which throws
+                                on exactly those rows. */}
+                            {e.message ? (
+                              <details>
+                                <summary
+                                  style={{
+                                    cursor: 'pointer',
+                                    color: 'var(--text-muted)',
+                                    fontSize: 'var(--text-xs)',
+                                  }}
+                                >
+                                  raw line
+                                </summary>
+                                <pre
+                                  style={{
+                                    margin: '4px 0 0',
+                                    padding: 8,
+                                    background: 'var(--bg-primary)',
+                                    borderRadius: 'var(--radius-sm)',
+                                    fontSize: 'var(--text-xs)',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-all',
+                                  }}
+                                >
+                                  {e.message}
+                                </pre>
+                              </details>
+                            ) : (
+                              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                                in archive{' '}
+                                <code style={{ fontSize: 'var(--text-xs)' }}>
+                                  {archiveFileFor(e.received_at)}
+                                </code>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+
+                {/* paramName keeps this list independent of the fleet status
+                    table's own `?page=` further down /vpn. */}
+                <Pagination
+                  basePath="/vpn"
+                  searchParams={sp}
+                  page={win.page}
+                  pageSize={win.pageSize}
+                  total={total}
+                  label="VPN events in 24h"
+                  paramName="evPage"
+                />
+              </>
+            ) : null}
 
             <div
               style={{

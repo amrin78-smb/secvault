@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import { paginateArray } from '../../lib/pagination';
 
 // Deliberate deviation from this app's usual `?tab=` server-navigation
 // convention (see app/(dashboard)/devices/[id]/analysis/page.js) -- see
@@ -43,9 +44,91 @@ const STATUS_FILTERS = [
   { key: 'pass', label: 'Pass' },
 ];
 
+// ── Pagination: CLIENT state, not the URL ────────────────────────────────────
+// The rest of this app pages through the query string (lib/pagination.js), and
+// that is right for a server-rendered list. It is wrong HERE: the two filters
+// this table already has (the standard tab and the pass/fail chips) are client
+// state by deliberate design — see this file's header comment — so a page
+// number in the URL would be the only one of the three that survives a reload,
+// and `?page=3` left over from the CIS tab would describe a different list the
+// moment the reader clicks ISO 27001. Page, tab and filter therefore live and
+// reset together. The paging ARITHMETIC is still paginateArray(), with its
+// clamp (a page past the end shows the LAST page, never a blank table).
+const CHECKS_PAGE_SIZE = 20;
+
+// Prev/next strip. components/ui/Pagination is the shared control but is
+// href-driven, which the client state above rules out; this renders the same
+// shape (honest range on the left, controls on the right, count shown even
+// when there is only one page) off local state instead.
+//
+// Module top level, never nested inside StandardTabs (CLAUDE.md).
+const PAGER_BTN = (enabled) => ({
+  padding: '4px 10px',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-card)',
+  color: enabled ? 'var(--text-primary)' : 'var(--text-muted)',
+  opacity: enabled ? 1 : 0.45,
+  cursor: enabled ? 'pointer' : 'default',
+  whiteSpace: 'nowrap',
+});
+
+function ChecksPager({ page, totalPages, total, pageSize, onPage }) {
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginTop: 12,
+        paddingTop: 12,
+        borderTop: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+        {total === 0
+          ? 'No checks'
+          : `${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()} checks in this view`}
+      </div>
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} style={PAGER_BTN(page > 1)}>
+            ← Prev
+          </button>
+          <span
+            style={{
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-secondary)',
+              padding: '0 6px',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPage(page + 1)}
+            disabled={page >= totalPages}
+            style={PAGER_BTN(page < totalPages)}
+          >
+            Next →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StandardTabs({ standards, findings, deviceId }) {
   const [active, setActive] = useState(standards?.[0]?.key || '');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [page, setPage] = useState(1);
   const containerRef = useRef(null);
 
   // Nice-to-have deep-link support: /compliance/[deviceId]#CIS_V8 preselects
@@ -83,6 +166,9 @@ export default function StandardTabs({ standards, findings, deviceId }) {
       const hash = window.location.hash.replace('#', '');
       if (hash && standards.some((s) => s.key === hash)) {
         setActive(hash);
+        // Arriving at a different standard means a different list — page 1 of
+        // it, never whatever page number the previous standard was on.
+        setPage(1);
         containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     };
@@ -100,6 +186,15 @@ export default function StandardTabs({ standards, findings, deviceId }) {
       (statusFilter === 'all' || f.status === statusFilter)
   );
 
+  // ⛔ This count is every finding in the current view, INCLUDING `na` — the
+  // table shows all four states, and `na` rows are the ones SecVault could not
+  // ask of this device at all. They are deliberately excluded from the
+  // compliance score (see CLAUDE.md's warning-vs-na rule), so the caption below
+  // says which number this is; a reader must never infer the score's
+  // denominator from this table's row count.
+  const pageInfo = paginateArray(filtered, page, CHECKS_PAGE_SIZE);
+  const naCount = filtered.filter((f) => f.status === 'na').length;
+
   return (
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
@@ -109,7 +204,10 @@ export default function StandardTabs({ standards, findings, deviceId }) {
             <button
               key={s.key}
               type="button"
-              onClick={() => setActive(s.key)}
+              onClick={() => {
+                setActive(s.key);
+                setPage(1);
+              }}
               style={{
                 padding: '8px 12px',
                 fontSize: 'var(--text-base)',
@@ -133,7 +231,10 @@ export default function StandardTabs({ standards, findings, deviceId }) {
             <button
               key={sf.key}
               type="button"
-              onClick={() => setStatusFilter(sf.key)}
+              onClick={() => {
+                setStatusFilter(sf.key);
+                setPage(1);
+              }}
               style={{
                 padding: '4px 10px',
                 fontSize: 'var(--text-sm)',
@@ -153,6 +254,7 @@ export default function StandardTabs({ standards, findings, deviceId }) {
       {filtered.length === 0 ? (
         <EmptyState message="No findings for this standard yet." />
       ) : (
+        <>
         <Table>
           <colgroup>
             <col style={{ width: '28%' }} />
@@ -171,7 +273,7 @@ export default function StandardTabs({ standards, findings, deviceId }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((f) => {
+            {pageInfo.rows.map((f) => {
               const sev = SEVERITY_BADGE[f.severity] || SEVERITY_BADGE.info;
               const st = STATUS_BADGE[f.status] || STATUS_BADGE.na;
               const hasEvidence = f.status === 'fail' && Array.isArray(f.ruleEvidence) && f.ruleEvidence.length > 0;
@@ -208,6 +310,21 @@ export default function StandardTabs({ standards, findings, deviceId }) {
             })}
           </tbody>
         </Table>
+        <ChecksPager
+          page={pageInfo.page}
+          totalPages={pageInfo.totalPages}
+          total={pageInfo.total}
+          pageSize={pageInfo.pageSize}
+          onPage={setPage}
+        />
+        {naCount > 0 && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+            {naCount} of these {naCount === 1 ? 'is' : 'are'} N/A — questions SecVault could not ask of this device
+            (no usable config, no collected ruleset, or a check that a config snapshot cannot answer). They are
+            listed here for manual verification but are excluded from the compliance score.
+          </div>
+        )}
+        </>
       )}
     </div>
   );

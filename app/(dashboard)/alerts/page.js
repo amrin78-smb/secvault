@@ -7,8 +7,10 @@ import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import PageHeader from '../../../components/ui/PageHeader';
+import Pagination from '../../../components/ui/Pagination';
 import AlertsFilters from '../../../components/alerts/AlertsFilters';
 import AlertAckControl from '../../../components/alerts/AlertAckControl';
+import { resolvePage, pageWindow } from '../../../lib/pagination';
 import { isValidUuid } from '../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
@@ -26,18 +28,31 @@ export const dynamic = 'force-dynamic';
 // AlertAckControl's post-save router.refresh() path and any future
 // client-side use, not for this page's read path.
 //
-// The two fetch*/merge/sort/paginate functions below are therefore a
-// deliberate duplicate of app/api/events/route.js's fetchPatchNow/
-// fetchConfigDiffs/GET -- the same duplication already exists once between
-// app/api/notifications/summary/route.js (top-5 bell preview) and this
-// route (full paginated feed), for the same reason: different call sites,
-// shared logic that's cheap enough to keep in step by inspection. If the
-// query logic in one changes, check the other.
+// The query below is therefore a deliberate duplicate of
+// app/api/events/route.js's fetchPatchNow/fetchConfigDiffs/GET -- the same
+// duplication already exists once between app/api/notifications/summary/
+// route.js (top-5 bell preview) and this route (full paginated feed), for
+// the same reason: different call sites, shared logic that's cheap enough to
+// keep in step by inspection. If the query logic in one changes, check the
+// other.
 //
 // ⛔ 'new_finding' REMOVED 2026-07-20, direct user feedback -- see
 // app/api/events/route.js's identical removal comment for the full
 // reasoning (rule-level findings belong in Rule Analysis's Cleanup/
 // Optimization/Reorder tabs, not the curated Alerts feed).
+//
+// ── PAGINATION (rewritten to real SQL LIMIT/OFFSET) ──────────────────────
+// This page used to fetch BOTH sources with a hard `LIMIT 500` each, merge
+// them in memory, and slice. Two things were wrong with that beyond the
+// wasted work: the "N items" line was capped at 1,000 no matter how many
+// alerts really existed (a fabricated total, the same class of lie as a
+// truncated result presented as complete), and every page view dragged up to
+// a thousand rows across the wire to show twenty-five.
+//
+// The two sources are now UNION ALL'd in ONE statement so Postgres does the
+// ordering and the windowing, with a COUNT over the identical CTE for an
+// honest total. Only the SQL SHAPE is composed here (which branches, which
+// conditions); every value is still a bound parameter.
 
 const TYPES = new Set(['patch_now', 'config_diff']);
 const PAGE_SIZE = 25;
@@ -56,87 +71,128 @@ function formatWhen(value) {
 
 // ⛔ BUG FIXED 2026-07-18, found in a bug-sweep pass (mirrored identically
 // in app/api/events/route.js — see that file's comment for the full
-// reasoning): d.active = true added unconditionally to both fetch
-// functions below, so a decommissioned device's stale alerts stop
-// inflating the bell/feed forever; fetchPatchNow's "open" definition
-// aligned to only count bare 'new' as open, not 'acknowledged', since
-// AlertAckControl.js renders the identical select for both row kinds.
+// reasoning): d.active = true added unconditionally to both branches below,
+// so a decommissioned device's stale alerts stop inflating the bell/feed
+// forever; the patch_now "open" definition aligned to only count bare 'new'
+// as open, not 'acknowledged', since AlertAckControl.js renders the
+// identical select for both row kinds.
 //
 // ⛔ fetchNewFindings() REMOVED 2026-07-20, direct user feedback -- see
 // app/api/events/route.js's identical removal comment for the full
 // reasoning.
-async function fetchPatchNow(dbPool, deviceId, open) {
-  const conditions = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
+//
+// Builds the `events` CTE body plus its bound values. Both branches project
+// the SAME column list in the SAME order — a UNION ALL requires it — with an
+// explicit ::type cast on every column one side cannot supply, since an
+// untyped NULL leaves Postgres unable to resolve the union's column type.
+function buildEventsCte(typeParam, deviceId, open) {
   const values = [];
-  if (open) conditions.push(`(caa.status IS NULL OR caa.status = 'new')`);
+  let deviceIdx = 0;
   if (deviceId) {
     values.push(deviceId);
-    conditions.push(`dca.device_id = $${values.length}`);
+    deviceIdx = values.length;
   }
-  const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-  const { rows } = await dbPool.query(
-    `SELECT dca.id, dca.device_id, d.name AS device_name, dca.advisory_id,
-            a.cve_id, a.cvss_score, dca.assessed_at, caa.status AS caa_status
-     FROM device_cve_assessments dca
-     JOIN advisories a ON a.id = dca.advisory_id
-     JOIN devices d ON d.id = dca.device_id
-     LEFT JOIN cve_assessment_acknowledgements caa
-       ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
-     ${whereClause}
-     ORDER BY dca.assessed_at DESC
-     LIMIT 500`,
-    values
-  );
+  const branches = [];
 
-  return rows.map((r) => ({
-    id: r.id,
-    type: 'patch_now',
-    deviceId: r.device_id,
-    deviceName: r.device_name,
-    label: r.cve_id,
-    severity: r.cvss_score != null ? `CVSS ${r.cvss_score}` : null,
-    status: r.caa_status || 'new',
-    occurredAt: r.assessed_at,
-    ack: { kind: 'cve', advisory_id: r.advisory_id },
-  }));
+  if (!typeParam || typeParam === 'patch_now') {
+    const conds = [`dca.priority_band = 'patch_now'`, 'd.active = true'];
+    if (open) conds.push(`(caa.status IS NULL OR caa.status = 'new')`);
+    if (deviceIdx) conds.push(`dca.device_id = $${deviceIdx}`);
+    branches.push(
+      `SELECT 'patch_now'::text AS kind,
+              dca.id                       AS id,
+              dca.device_id                AS device_id,
+              d.name                       AS device_name,
+              a.cve_id                     AS label,
+              dca.assessed_at              AS occurred_at,
+              COALESCE(caa.status, 'new')  AS status,
+              dca.advisory_id              AS advisory_id,
+              a.cvss_score                 AS cvss_score,
+              NULL::timestamptz            AS acknowledged_at,
+              NULL::text                   AS acknowledged_by,
+              NULL::text                   AS acknowledged_note
+       FROM device_cve_assessments dca
+       JOIN advisories a ON a.id = dca.advisory_id
+       JOIN devices d ON d.id = dca.device_id
+       LEFT JOIN cve_assessment_acknowledgements caa
+         ON caa.device_id = dca.device_id AND caa.advisory_id = dca.advisory_id
+       WHERE ${conds.join(' AND ')}`
+    );
+  }
+
+  if (!typeParam || typeParam === 'config_diff') {
+    const conds = ['d.active = true'];
+    if (open) conds.push('cd.acknowledged_at IS NULL');
+    if (deviceIdx) conds.push(`cd.device_id = $${deviceIdx}`);
+    branches.push(
+      `SELECT 'config_diff'::text AS kind,
+              cd.id                                        AS id,
+              cd.device_id                                 AS device_id,
+              d.name                                       AS device_name,
+              COALESCE(cd.change_summary, 'Config changed') AS label,
+              cd.detected_at                               AS occurred_at,
+              CASE WHEN cd.acknowledged_at IS NULL THEN 'new' ELSE 'acknowledged' END AS status,
+              NULL::uuid                                   AS advisory_id,
+              NULL::numeric                                AS cvss_score,
+              cd.acknowledged_at                           AS acknowledged_at,
+              cd.acknowledged_by                           AS acknowledged_by,
+              cd.acknowledged_note                         AS acknowledged_note
+       FROM config_diffs cd
+       JOIN devices d ON d.id = cd.device_id
+       WHERE ${conds.join(' AND ')}`
+    );
+  }
+
+  return { cte: branches.join('\n       UNION ALL\n'), values };
 }
 
-async function fetchConfigDiffs(dbPool, deviceId, open) {
-  const conditions = ['d.active = true'];
-  const values = [];
-  if (open) conditions.push(`cd.acknowledged_at IS NULL`);
-  if (deviceId) {
-    values.push(deviceId);
-    conditions.push(`cd.device_id = $${values.length}`);
-  }
-  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+async function countEvents(dbPool, cte, values) {
+  const { rows } = await dbPool.query(`WITH events AS (${cte}) SELECT COUNT(*)::int AS total FROM events`, values);
+  return rows[0]?.total ?? 0;
+}
 
+async function fetchEventPage(dbPool, cte, values, limit, offset) {
+  // ⛔ `id` is a tiebreaker, not decoration. ORDER BY occurred_at alone is not
+  // a TOTAL order — a config pull writes many diffs with near-identical
+  // timestamps — and Postgres is free to return ties in any order per query,
+  // which makes a row appear on both page 2 and page 3 (or on neither).
   const { rows } = await dbPool.query(
-    `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary,
-            cd.detected_at, cd.acknowledged_at, cd.acknowledged_by, cd.acknowledged_note
-     FROM config_diffs cd
-     JOIN devices d ON d.id = cd.device_id
-     ${whereClause}
-     ORDER BY cd.detected_at DESC
-     LIMIT 500`,
-    values
+    `WITH events AS (${cte})
+     SELECT * FROM events
+     ORDER BY occurred_at DESC NULLS LAST, id DESC
+     LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset]
   );
 
-  return rows.map((r) => ({
-    id: r.id,
-    type: 'config_diff',
-    deviceId: r.device_id,
-    deviceName: r.device_name,
-    label: r.change_summary || 'Config changed',
-    severity: null,
-    status: r.acknowledged_at ? 'acknowledged' : 'new',
-    occurredAt: r.detected_at,
-    acknowledgedBy: r.acknowledged_by,
-    acknowledgedAt: r.acknowledged_at,
-    acknowledgedNote: r.acknowledged_note,
-    ack: { kind: 'diff', diff_id: r.id },
-  }));
+  return rows.map((r) =>
+    r.kind === 'patch_now'
+      ? {
+          id: r.id,
+          type: 'patch_now',
+          deviceId: r.device_id,
+          deviceName: r.device_name,
+          label: r.label,
+          severity: r.cvss_score != null ? `CVSS ${r.cvss_score}` : null,
+          status: r.status,
+          occurredAt: r.occurred_at,
+          ack: { kind: 'cve', advisory_id: r.advisory_id },
+        }
+      : {
+          id: r.id,
+          type: 'config_diff',
+          deviceId: r.device_id,
+          deviceName: r.device_name,
+          label: r.label,
+          severity: null,
+          status: r.status,
+          occurredAt: r.occurred_at,
+          acknowledgedBy: r.acknowledged_by,
+          acknowledgedAt: r.acknowledged_at,
+          acknowledgedNote: r.acknowledged_note,
+          ack: { kind: 'diff', diff_id: r.id },
+        }
+  );
 }
 
 async function getDevices(dbPool) {
@@ -165,30 +221,32 @@ export default async function AlertsPage({ searchParams }) {
   // as no filter) and a notice is shown next to the filters below.
   const deviceIdParam = rawDeviceId && isValidUuid(rawDeviceId) ? rawDeviceId : '';
   const invalidDeviceId = rawDeviceId && !isValidUuid(rawDeviceId);
-  const pageNum = Number(searchParams?.page);
-  const page = Number.isInteger(pageNum) && pageNum >= 1 ? pageNum : 1;
 
-  const fetchers = [];
-  if (!typeParam || typeParam === 'patch_now') fetchers.push(fetchPatchNow(pool, deviceIdParam, open));
-  if (!typeParam || typeParam === 'config_diff') fetchers.push(fetchConfigDiffs(pool, deviceIdParam, open));
+  const { cte, values } = buildEventsCte(typeParam, deviceIdParam, open);
 
-  const [results, devices] = await Promise.all([Promise.all(fetchers), getDevices(pool)]);
+  // ⛔ The COUNT runs BEFORE the row query, not alongside it, because
+  // pageWindow() clamps a past-the-end `?page=` back to the LAST page and it
+  // needs the total to do that. A bookmarked ?page=40 whose alerts have since
+  // been acknowledged must land on real rows, not an empty table that reads
+  // as "everything is gone". getDevices() has no such dependency, so it rides
+  // along in parallel.
+  const [total, devices] = await Promise.all([countEvents(pool, cte, values), getDevices(pool)]);
+  const win = pageWindow(resolvePage(searchParams?.page), PAGE_SIZE, total);
+  const items = total > 0 ? await fetchEventPage(pool, cte, values, win.limit, win.offset) : [];
 
-  const merged = results.flat().sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt));
-  const total = merged.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const offset = (page - 1) * PAGE_SIZE;
-  const items = merged.slice(offset, offset + PAGE_SIZE);
-
-  function pageHref(p) {
-    const params = new URLSearchParams();
-    if (typeParam) params.set('type', typeParam);
-    if (statusParam !== 'open') params.set('status', statusParam);
-    if (deviceIdParam) params.set('device_id', deviceIdParam);
-    if (p > 1) params.set('page', String(p));
-    const qs = params.toString();
-    return `/alerts${qs ? `?${qs}` : ''}`;
-  }
+  // ⛔ Page links must carry the ACTIVE FILTERS, or clicking "next" silently
+  // changes what is being read. These are the params this render actually
+  // honoured -- built exactly as AlertsFilters builds them (omit the default
+  // status, omit empties), so a filter link and a page link produce the same
+  // URL shape, and a rejected device_id is not carried forward into links
+  // that would keep re-triggering the notice below.
+  // AlertsFilters itself never emits `page`, so changing a filter always
+  // resets to page 1 -- a stale page number from a larger result set would
+  // otherwise land past the end.
+  const linkParams = {};
+  if (typeParam) linkParams.type = typeParam;
+  if (statusParam !== 'open') linkParams.status = statusParam;
+  if (deviceIdParam) linkParams.device_id = deviceIdParam;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -246,8 +304,15 @@ export default async function AlertsPage({ searchParams }) {
                     </td>
                     <td style={{ color: 'var(--text-primary)' }} title={item.label}>
                       {item.type === 'config_diff' ? (
+                        // ⛔ `?diff=` as well as the hash. Now that /changes is
+                        // paginated, only the current page's anchors exist in
+                        // the DOM, so a bare `#diff-<id>` for an older change
+                        // resolves to nothing and the link silently lands on
+                        // page 1 — looking like the change is gone. The query
+                        // param tells that page which page to open; the hash
+                        // still scrolls to the row once it is there.
                         <Link
-                          href={`/devices/${item.deviceId}/changes#diff-${item.id}`}
+                          href={`/devices/${item.deviceId}/changes?diff=${item.id}#diff-${item.id}`}
                           className="link-quiet"
                         >
                           {item.label}
@@ -273,31 +338,14 @@ export default async function AlertsPage({ searchParams }) {
             </tbody>
           </Table>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-              {total} item{total === 1 ? '' : 's'} · page {page} of {totalPages}
-            </span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {page > 1 ? (
-                <Link href={pageHref(page - 1)} className="btn btn-secondary">
-                  ← Prev
-                </Link>
-              ) : (
-                <span className="btn btn-secondary" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-                  ← Prev
-                </span>
-              )}
-              {page < totalPages ? (
-                <Link href={pageHref(page + 1)} className="btn btn-secondary">
-                  Next →
-                </Link>
-              ) : (
-                <span className="btn btn-secondary" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-                  Next →
-                </span>
-              )}
-            </div>
-          </div>
+          <Pagination
+            basePath="/alerts"
+            searchParams={linkParams}
+            page={win.page}
+            pageSize={win.pageSize}
+            total={total}
+            label="alerts"
+          />
         </>
       )}
     </div>

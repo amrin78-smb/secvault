@@ -452,6 +452,15 @@ Detail-rollup readers (Phase 8b): `getTopHosts(pool, hours, limit)`, `getTopAppl
 ⛔ `getTopApplications` returns rows with no application as a separate `unclassified` COUNT rather than a synthetic `(unknown)` row — that row would usually rank #1 and bury the real answer behind a label that means nothing.
 ⛔ `getDeviceTrafficStats` lists every ACTIVE device including ones that sent NOTHING (`events:0`, `lastSeen:null`). A firewall that has silently stopped logging is the most valuable row in that table; a query returning only devices present in the rollup would hide exactly it.
 
+## lib/pagination.js
+
+Shared server-side pagination. Pure, dependency-free CommonJS (no DB, no React) so both Server Components and API routes use it.
+`resolvePage(raw)` -> `>= 1` · `resolvePageSize(raw, def)` (capped at `MAX_PAGE_SIZE` 500) · `totalPages(total, pageSize)` -> `>= 1` · `pageWindow(page, pageSize, total)` -> `{page, pageSize, limit, offset, totalPages}` · `buildPageHref(basePath, searchParams, overrides)` · `describeRange(page, pageSize, total)` · `paginateArray(items, page, pageSize)` · `DEFAULT_PAGE_SIZE` 50.
+⛔ **A page number is USER INPUT.** `resolvePage` always returns a usable page (handles arrays, junk, negatives), and `pageWindow` **clamps a past-the-end page to the LAST page** — a bookmarked `?page=40` after rows were deleted must not render a blank table, which reads as "everything is gone".
+⛔ **The total must be honest.** `describeRange` renders `51–100 of 1,522` so the rows on screen are never mistaken for the whole set, and returns **null** rather than inventing a count when the caller genuinely cannot count — `<Pagination>` then says "total not counted". Same class of honesty as log search's truncation notice.
+⛔ `buildPageHref` preserves every other query param: losing the active filter on "next" silently changes what the reader is looking at halfway through reading it. A `null` override REMOVES a param, which is how page 1 drops `page=` from the URL.
+`paginateArray` is for genuinely computed in-memory collections only — prefer SQL `LIMIT/OFFSET` + `COUNT` wherever rows come from a table.
+
 ## lib/dashboardTabs.js
 
 `DASHBOARD_TABS` -> `{key,label,description}[]` — the dashboard's tab model, the single source for the tab bar, the `?tab=` whitelist and the default. ⛔ `key` is a URL value and therefore a public contract: add and deprecate, never rename in place.

@@ -1,6 +1,8 @@
 import { pool } from '../../lib/db';
 import Table from '../ui/Table';
 import EmptyState from '../ui/EmptyState';
+import Pagination from '../ui/Pagination';
+import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 import SeverityBadge from './SeverityBadge';
 import AcknowledgeControl from './AcknowledgeControl';
 
@@ -90,7 +92,11 @@ function shadowingRuleLabel(affectedRuleIds, ruleMap) {
     .join(', ');
 }
 
-export default async function ReorderTab({ deviceId, canWrite = false }) {
+// Paginated on the shared `page` query param — see RiskyRulesTab.js's
+// "PAGINATION: why the plain `page` param" block for the full reasoning
+// (the parent's tabLink() drops every param but `tab`, so switching tabs
+// already resets the page; only one tab renders per request).
+export default async function ReorderTab({ deviceId, canWrite = false, searchParams }) {
   const [findings, deviceRules, acks] = await Promise.all([
     getReorderFindings(pool, deviceId),
     getDeviceRules(pool, deviceId),
@@ -105,6 +111,15 @@ export default async function ReorderTab({ deviceId, canWrite = false }) {
 
   const ruleMap = new Map(deviceRules.map((r) => [r.id, r]));
   const ackMap = new Map(acks.map((a) => [a.rule_id_vendor, a.status]));
+
+  // ruleMap/ackMap deliberately stay built from the FULL device snapshot, not
+  // just this page's findings: affected_rule_ids on any visible row can point
+  // at a rule that lives on another page, and a lookup miss renders
+  // "(rule no longer present)" — a factual claim about the device. Narrowing
+  // the map to the page would make that claim a lie about rules that are
+  // simply off-screen.
+  const paged = paginateArray(findings, resolvePage(searchParams?.page), DEFAULT_PAGE_SIZE);
+  const pageParams = { ...(searchParams || {}), tab: 'reorder' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -135,7 +150,7 @@ export default async function ReorderTab({ deviceId, canWrite = false }) {
         </tr>
       </thead>
       <tbody>
-        {findings.map((row) => (
+        {paged.rows.map((row) => (
           <tr key={row.finding_id}>
             <td>
               <SeverityBadge severity={row.severity} />
@@ -167,6 +182,15 @@ export default async function ReorderTab({ deviceId, canWrite = false }) {
         ))}
       </tbody>
     </Table>
+
+      <Pagination
+        basePath={`/devices/${deviceId}/analysis`}
+        searchParams={pageParams}
+        page={paged.page}
+        pageSize={paged.pageSize}
+        total={paged.total}
+        label="reorder findings"
+      />
     </div>
   );
 }

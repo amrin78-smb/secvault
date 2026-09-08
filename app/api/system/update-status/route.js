@@ -7,6 +7,20 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.78.0': [
+    'Long lists across the app now page instead of scrolling forever: alerts, recent activity, licence renewals, the five rule-analysis tabs, config changes and backups, compliance checks, VPN users, VPN events and IPsec tunnels.',
+    'Every list states what it is not showing - "51-100 of 1,522" - so the rows on screen can never be mistaken for the whole set.',
+    'The VPN page no longer dumps raw log lines. VPN events are now a proper table of time, severity, event, user, source and firewall, with the raw line tucked behind a toggle.',
+    'Fixed: a compliance standard where every check was Not Applicable displayed "No failing checks", which reads as a clean result when in fact nothing could be measured. It now says so plainly.',
+    'Fixed: the VPN activity panel could crash on any log line whose full text is held in the archive rather than the database.',
+    'Fixed: links from an alert to a specific config change now open the page that actually contains it, rather than landing on the first page as though the change were gone.',
+  ],
+  '2.77.0': [
+    'Firewall logs are now used as evidence of which rules are actually in use.',
+    'This matters for firewalls that cannot report rule hit counters at all - 164 rules across your fleet - which until now could produce no usage finding whatsoever. 58 of them gain real evidence immediately, and more as the log history grows.',
+    'A rule is only reported as unused on log evidence when the firewall was logging for the whole period AND the rule itself has logging enabled. Otherwise it stays marked as not measured, because an absent log measures the collector rather than the rule.',
+    'Log-derived counts are kept separate from the counters a device reports itself, since the two measure different periods.',
+  ],
   '2.76.1': [
     'Where a log line is held in the archive rather than the database, the database now records that properly as empty rather than storing a blank string.',
     'This matters for searching: a blank string would have been impossible to tell apart from a log line that genuinely arrived empty.',

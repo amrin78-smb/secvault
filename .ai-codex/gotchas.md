@@ -116,6 +116,24 @@ of text stored in 752 bytes. TOAST only compresses once a tuple exceeds ~2 KB an
 ~1 KB. Even forced, per-row compression is 2-3x, because the 11x comes from compressing ACROSS
 lines. This is why the archive is a file and not a column.
 
+## `node --check` does NOT validate JSX (found 2026-09-08)
+
+⛔ `node --check` exits **0** on a component containing broken JSX. Verified: appending
+`export function Broken() { return <div><span>oops</div>; }` to `components/ui/Badge.js` still
+passes. It parses the file as ESM and never reaches the JSX, so an unclosed tag, a stray brace
+inside a `{...}` expression, or a mismatched fragment all sail through.
+
+CLAUDE.md's pre-commit checklist is CORRECT as written — it scopes `node --check` to
+`lib/**`, `services/**` and `app/api/**`, which are non-JSX. ⛔ **Do not widen that glob to
+`components/**` or `app/(dashboard)/**` thinking it adds a check.** It would add only a false
+green. For those files the real gate is `npm run build`.
+
+Confusingly, `node --check` DOES catch some errors in the same files — an unclosed *paren*
+breaks the CommonJS fallback parse and is reported. So it fails loudly on some corruption and
+silently on JSX corruption, which is worse than failing consistently: it looks like a working
+check. A JSX-aware alternative is `next/dist/build/swc`'s `parse(src, {filename, syntax:
+'ecmascript', jsx: true, isModule: true})`, which does catch it.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

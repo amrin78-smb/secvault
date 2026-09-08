@@ -410,18 +410,24 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
       {tab === 'optimization' && <OptimizationTab deviceId={device.id} canWrite={canWrite} />}
 
-      {tab === 'reorder' && <ReorderTab deviceId={device.id} canWrite={canWrite} />}
+      {/* ⛔ searchParams is REQUIRED by every paginated tab below. Without it
+          they read page 1 forever while still rendering a "Page 1 of 8"
+          control whose Next link silently does nothing -- a visibly broken
+          control is worse than no control. Each tab re-asserts its own
+          tab value into the params it hands to Pagination, so a page link
+          can never navigate away from the tab it belongs to. */}
+      {tab === 'reorder' && <ReorderTab deviceId={device.id} canWrite={canWrite} searchParams={searchParams} />}
 
       {tab === 'risk' && <RiskTab deviceId={device.id} />}
 
-      {tab === 'risky-rules' && <RiskyRulesTab deviceId={device.id} />}
-      {tab === 'objects' && <ObjectsTab deviceId={device.id} />}
+      {tab === 'risky-rules' && <RiskyRulesTab deviceId={device.id} searchParams={searchParams} />}
+      {tab === 'objects' && <ObjectsTab deviceId={device.id} searchParams={searchParams} />}
 
       {tab === 'tracking' && <TrackingTab deviceId={device.id} />}
 
       {tab === 'reachability' && <ReachabilityTab deviceId={device.id} />}
       {tab === 'access-path' && <AccessPathTab deviceId={device.id} />}
-      {tab === 'relationships' && <RuleRelationshipTab deviceId={device.id} />}
+      {tab === 'relationships' && <RuleRelationshipTab deviceId={device.id} searchParams={searchParams} />}
 
       {tab === 'findings' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -6,6 +6,7 @@ import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import { ruleFromBraceEntry } from '../../lib/adapters/paloalto/sshParser';
 import { parseRuleEntry } from '../../lib/adapters/paloalto/parser';
+import { paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 
 // Renders one grouped section of a config diff (Added / Removed / Modified).
 // Defined at module top level (never nested inside DiffViewer — CLAUDE.md rule).
@@ -88,6 +89,74 @@ const TOGGLE_BUTTON_STYLE = {
   textDecoration: 'underline',
   fontFamily: 'inherit',
 };
+
+// ---------------------------------------------------------------------------
+// InlinePager — paging for the lists INSIDE one diff panel
+// ---------------------------------------------------------------------------
+// ⛔ Deliberately NOT components/ui/Pagination. That control pages through the
+// URL (`?page=N` <Link>s), which is right for a page-level list and wrong
+// here for three reasons: a Changes page renders MANY DiffViewers, so they
+// would all collide on one `?page=`; a diff panel's contents are fetched
+// client-side on expand, so a real navigation would discard them and
+// re-collapse the panel; and the Compare Versions / Baseline Drift cards
+// render DiffBody with a diff that has no URL identity at all.
+//
+// The paging ARITHMETIC is still lib/pagination.js's paginateArray() — the
+// same clamping (a page past the end shows the LAST page, never an empty
+// list) as every server-side list in the app. Only the transport is local
+// state.
+//
+// The range text is not decoration: "51–100 of 240" is what stops the reader
+// taking the rows on screen for the whole change set.
+//
+// Module top level, never nested inside another component (CLAUDE.md).
+const PAGER_NAV_STYLE = { ...TOGGLE_BUTTON_STYLE, marginLeft: 0 };
+const PAGER_NAV_DISABLED_STYLE = { ...PAGER_NAV_STYLE, color: 'var(--text-muted)', cursor: 'default', textDecoration: 'none' };
+
+function InlinePager({ page, totalPages, total, pageSize, label, onPage }) {
+  if (!Number.isFinite(totalPages) || totalPages <= 1) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 6,
+        fontSize: 'var(--text-xs)',
+        color: 'var(--text-muted)',
+      }}
+    >
+      <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+        {from.toLocaleString()}–{to.toLocaleString()} of {total.toLocaleString()} {label}
+      </span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          type="button"
+          onClick={() => onPage(page - 1)}
+          disabled={page <= 1}
+          style={page <= 1 ? PAGER_NAV_DISABLED_STYLE : PAGER_NAV_STYLE}
+        >
+          ← Prev
+        </button>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          Page {page.toLocaleString()} of {totalPages.toLocaleString()}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPage(page + 1)}
+          disabled={page >= totalPages}
+          style={page >= totalPages ? PAGER_NAV_DISABLED_STYLE : PAGER_NAV_STYLE}
+        >
+          Next →
+        </button>
+      </span>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // ValueTree — readable nested object/array renderer (replaces raw JSON)
@@ -708,12 +777,25 @@ function DiffModifiedRow({ path, oldValue, newValue, friendlyDescription }) {
 // never floods the page. Applies to every section list, not just that case.
 const SECTION_ROW_LIMIT = 12;
 
+// ...and once the reader DOES ask for the rest, hand it over a page at a time
+// rather than dumping 200+ rows in one go — "Show all" used to trade a capped
+// list for an unbounded one, which is the endless scroll this cap existed to
+// avoid, just one click later.
+const SECTION_EXPANDED_PAGE_SIZE = DEFAULT_PAGE_SIZE;
+
 function DiffSection({ title, tone, rows, renderRow }) {
   const [showAll, setShowAll] = useState(false);
+  const [page, setPage] = useState(1);
   if (!Array.isArray(rows) || rows.length === 0) return null;
   const toneStyle = TONE_STYLES[tone] || TONE_STYLES.warning;
   const overLimit = rows.length > SECTION_ROW_LIMIT;
-  const visibleRows = showAll ? rows : rows.slice(0, SECTION_ROW_LIMIT);
+  const expandedPage = paginateArray(rows, page, SECTION_EXPANDED_PAGE_SIZE);
+  const visibleRows = showAll ? expandedPage.rows : rows.slice(0, SECTION_ROW_LIMIT);
+  // ⛔ The toggle must not promise more than it delivers: past one page,
+  // clicking it BROWSES the full list rather than showing all of it at once.
+  // "Show all 240" followed by 50 rows is the same class of lie as a truncated
+  // list presented as complete.
+  const pagedWhenOpen = rows.length > SECTION_EXPANDED_PAGE_SIZE;
 
   return (
     <div
@@ -747,9 +829,26 @@ function DiffSection({ title, tone, rows, renderRow }) {
         ))}
       </ul>
       {overLimit && (
-        <button type="button" onClick={() => setShowAll((s) => !s)} style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0, marginTop: 6 }}>
-          {showAll ? '▾ Show fewer' : `▸ Show all ${rows.length}`}
+        <button
+          type="button"
+          onClick={() => {
+            setShowAll((s) => !s);
+            setPage(1);
+          }}
+          style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0, marginTop: 6 }}
+        >
+          {showAll ? '▾ Show fewer' : pagedWhenOpen ? `▸ Browse all ${rows.length}` : `▸ Show all ${rows.length}`}
         </button>
+      )}
+      {showAll && (
+        <InlinePager
+          page={expandedPage.page}
+          totalPages={expandedPage.totalPages}
+          total={expandedPage.total}
+          pageSize={expandedPage.pageSize}
+          label="entries"
+          onPage={setPage}
+        />
       )}
     </div>
   );
@@ -1179,11 +1278,24 @@ function RuleChangeCard({ group, expanded, onToggle }) {
 // whose Value column embedded a full-height per-rule table — the space hog and
 // off-screen clipping a user reported. Collapsed by default; each card owns its
 // own expand state via a shared Set keyed by index.
+// A single config pull can rewrite hundreds of rules (a policy push, a
+// bulk object rename), and every one of them rendered a card here. Paged at
+// 25 — small enough that a page is scannable, large enough that the common
+// handful-of-rules diff never grows a pager at all.
+const RULE_CHANGE_PAGE_SIZE = 25;
+
 function RuleChangesTable({ ruleChanges }) {
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  const [page, setPage] = useState(1);
   if (!Array.isArray(ruleChanges) || ruleChanges.length === 0) return null;
 
   const keys = ruleChanges.map((rc, i) => `${rc.ruleName}-${i}`);
+
+  // Keys stay indexed against the FULL list, so a card's expand state belongs
+  // to that rule and not to a position on the current page — paging away and
+  // back must not silently re-collapse (or worse, re-open a different rule).
+  const pageInfo = paginateArray(ruleChanges, page, RULE_CHANGE_PAGE_SIZE);
+  const pageOffset = (pageInfo.page - 1) * pageInfo.pageSize;
 
   function toggle(key) {
     setExpandedKeys((prev) => {
@@ -1220,10 +1332,25 @@ function RuleChangesTable({ ruleChanges }) {
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {ruleChanges.map((rc, i) => (
-          <RuleChangeCard key={keys[i]} group={rc} expanded={expandedKeys.has(keys[i])} onToggle={() => toggle(keys[i])} />
-        ))}
+        {pageInfo.rows.map((rc, i) => {
+          const key = keys[pageOffset + i];
+          return (
+            <RuleChangeCard key={key} group={rc} expanded={expandedKeys.has(key)} onToggle={() => toggle(key)} />
+          );
+        })}
       </div>
+      {/* "Expand all" deliberately still targets EVERY key, not just this
+          page's — it is a stated intent about the whole change set, and a
+          card opened on page 3 must still be open when the reader gets
+          there. */}
+      <InlinePager
+        page={pageInfo.page}
+        totalPages={pageInfo.totalPages}
+        total={pageInfo.total}
+        pageSize={pageInfo.pageSize}
+        label="rule changes"
+        onPage={setPage}
+      />
     </div>
   );
 }
@@ -1456,13 +1583,20 @@ function groupIndexedRuleEntries(entries) {
   return [...groups.entries()].sort((a, b) => a[0] - b[0]);
 }
 
+// One IndexedRuleGroup is a whole per-rule table, and a PAN-OS rulebase diff
+// can carry one per changed rule — the only list in this file that had no
+// bound of any kind. Ten tables is already a long scroll.
+const RULE_GROUP_PAGE_SIZE = 10;
+
 function SectionGroup({ section }) {
   const [expanded, setExpanded] = useState(false);
+  const [rulePage, setRulePage] = useState(1);
   const entries = Array.isArray(section.entries) ? section.entries : [];
 
   // Indexed (XML/API) rulebase entries get regrouped into one table per rule;
   // everything else keeps the existing flat Added/Removed/Modified rendering.
   const ruleGroups = groupIndexedRuleEntries(entries);
+  const rulePageInfo = paginateArray(ruleGroups, rulePage, RULE_GROUP_PAGE_SIZE);
   const nonRuleEntries = entries.filter((e) => typeof e.ruleIndex !== 'number');
   const addedEntries = nonRuleEntries.filter((e) => e.changeType === 'added');
   const removedEntries = nonRuleEntries.filter((e) => e.changeType === 'removed');
@@ -1481,7 +1615,14 @@ function SectionGroup({ section }) {
           <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{section.label}</span>
           <span style={{ color: 'var(--text-muted)' }}> — {sectionSummaryLine(section)}</span>
         </span>
-        <button type="button" onClick={() => setExpanded((e) => !e)} style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0 }}>
+        <button
+          type="button"
+          onClick={() => {
+            setExpanded((e) => !e);
+            setRulePage(1);
+          }}
+          style={{ ...TOGGLE_BUTTON_STYLE, marginLeft: 0 }}
+        >
           {expanded ? '▾ Hide details' : '▸ Show details'}
         </button>
       </div>
@@ -1489,9 +1630,17 @@ function SectionGroup({ section }) {
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ruleGroups.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {ruleGroups.map(([index, groupEntries]) => (
+              {rulePageInfo.rows.map(([index, groupEntries]) => (
                 <IndexedRuleGroup key={index} index={index} entries={groupEntries} />
               ))}
+              <InlinePager
+                page={rulePageInfo.page}
+                totalPages={rulePageInfo.totalPages}
+                total={rulePageInfo.total}
+                pageSize={rulePageInfo.pageSize}
+                label="rules"
+                onPage={setRulePage}
+              />
             </div>
           )}
           <DiffSection title="Added" tone="success" rows={addedEntries} renderRow={renderAddedRow} />
