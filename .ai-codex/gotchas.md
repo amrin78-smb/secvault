@@ -95,6 +95,27 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   succeeded (output went to stderr, not a real failure) — accept `-1` as success for schema
   migration steps. Set `$env:PGPASSWORD` before calling `psql` for unattended execution.
 
+## Syslog archive (lib/syslog/archive.js)
+
+⛔ **The archive is CONCATENATED GZIP MEMBERS — one per flush — and not every reader handles that.**
+The gzip spec defines a stream as a *sequence* of members, so appending independent members keeps
+the file valid. GNU `gunzip`/`zcat`/`zgrep` and Node's `zlib.gunzipSync` read all of them.
+**.NET Framework's `System.IO.Compression.GZipStream` reads only the FIRST member and stops** —
+which is what PowerShell 5.1 gives you. Verifying a 15.5 MB archive with PowerShell returned 1,146
+lines and a "0.1x ratio"; the same file through Node returned 231,567 lines and 11.1x. The archive
+was correct and the *verifier* was wrong, which is the dangerous shape of this bug: it reports
+catastrophic data loss that has not happened, and would just as happily hide real loss.
+Use `node -e` or GNU tools to read these files. .NET Core 3.0+ handles multi-member; Framework 4.x does not.
+
+⛔ **Archiving happens BEFORE the DB insert**, while the spool file is still on disk. So the archive
+legitimately runs slightly AHEAD of the database (measured 0.33% — the in-flight flush), never
+behind. When checking completeness, archive-ahead-of-DB is correct and DB-ahead-of-archive is a bug.
+
+⛔ **PostgreSQL does not compress `message` and cannot be made to compete here.** Measured: 748 bytes
+of text stored in 752 bytes. TOAST only compresses once a tuple exceeds ~2 KB and these rows are
+~1 KB. Even forced, per-row compression is 2-3x, because the 11x comes from compressing ACROSS
+lines. This is why the archive is a file and not a column.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed
