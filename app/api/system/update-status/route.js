@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.69.1': [
+    'Fixed the per-rule usage summary, which was failing to rebuild within a minute of going live.',
+    'It grouped by day while the rebuild works in hours, so the last part-day was never cleared and collided with itself on every retry.',
+    'It now summarises by hour like the traffic figures do, and totals up to days when displayed.',
+  ],
   '2.69.0': [
     'New Traffic tab on the dashboard: log volume over 24 hours, busiest log sources, session outcomes, threat and UTM events, busiest firewall rules, and collector health.',
     'The VPN page now shows what actually happened, taken from the firewall logs. Previously it could only show what VPN was configured, plus live session counts for Fortinet.',

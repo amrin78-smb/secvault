@@ -178,11 +178,11 @@ PARTITIONED BY RANGE (received_at), one partition per UTC day, ~7 days retained.
 ⛔ Aged out by **DROPPING the partition**, never DELETE — at ~93M rows/day a DELETE costs more WAL
 and vacuum than the ingest and does not reclaim space. See `lib/syslog/eventStore.js`.
 
-### syslog_rollup_hourly / syslog_rule_hits_daily   (Phase 8, permanent)
-Hourly device/vendor/action/severity counts, and DAILY per-rule usage (daily on purpose: "has this
-rule seen traffic" needs no hour resolution, and daily keeps it at ~3.5k rows/day for this fleet
+### syslog_rollup_hourly / syslog_rule_hits_hourly   (Phase 8, permanent)
+Hourly device/vendor/action/severity counts, and hourly per-rule usage. ⛔ The per-rule rollup was
+DAILY for a few hours on 2026-09-08 and that was WRONG: the recompute window is a timestamp range, so
 instead of 24x that). `syslog_rule_hits_daily` is the Phase 8b input that will give real hit counts
-to the vendors/transports whose APIs cannot report them.
+was caught within a minute of going live) or wiped a day the INSERT only partly rebuilt (a silent under-count). It now shares the traffic rollup's proven hourly window semantics and aggregates to days at READ time.  is the Phase 8b input that will give real hit counts to the vendors/transports whose APIs cannot report them.
 ⛔ Both use `UNIQUE NULLS NOT DISTINCT` (PG15+) so grouping keys stay nullable — without it every
 flush inserts a duplicate "unknown vendor" row instead of incrementing one, and the usual
 workaround (sentinel strings) is the fabricated-value pattern this codebase bans.

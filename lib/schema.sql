@@ -1346,31 +1346,10 @@ CREATE TABLE IF NOT EXISTS syslog_rollup_hourly (
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_rollup_hourly_time ON syslog_rollup_hourly (bucket_hour DESC);
 
--- Per-rule usage evidence, DAILY (not hourly) on purpose: "has this rule seen
--- traffic" does not need hour resolution, and daily keeps this at roughly
--- (rules x actions) rows/day -- ~3.5k for this fleet -- instead of 24x that.
--- This is the table that will let Phase 8b give real hit counts to the
--- vendors/transports whose APIs cannot report them at all.
-CREATE TABLE IF NOT EXISTS syslog_rule_hits_daily (
-  id             BIGSERIAL PRIMARY KEY,
-  bucket_day     DATE NOT NULL,
-  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
-  source_ip      INET NOT NULL,
-  vendor         TEXT,
-  rule_id        TEXT,
-  rule_uuid      TEXT,
-  rule_name      TEXT,
-  action         TEXT,
-  hit_count      BIGINT NOT NULL DEFAULT 0,
-  bytes_sent     BIGINT,
-  bytes_received BIGINT,
-  first_seen_at  TIMESTAMPTZ,
-  last_seen_at   TIMESTAMPTZ,
-  CONSTRAINT uq_syslog_rule_hits_daily UNIQUE NULLS NOT DISTINCT
-    (bucket_day, device_id, source_ip, vendor, rule_id, rule_uuid, rule_name, action)
-);
-CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_day ON syslog_rule_hits_daily (bucket_day DESC);
-CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_device ON syslog_rule_hits_daily (device_id, bucket_day DESC);
+-- (The original DAILY per-rule rollup lived here. It was replaced by the HOURLY
+-- version further down the same day -- see that block for why the daily bucket
+-- was wrong. Removed rather than left to be created-then-dropped on every
+-- fresh install.)
 
 -- Per-run ingest health. ⛔ `dropped` is the number the operator actually needs:
 -- a collector that silently loses datagrams under load looks identical to a
@@ -1418,3 +1397,44 @@ ALTER TABLE syslog_rollup_hourly DROP CONSTRAINT IF EXISTS uq_syslog_rollup_hour
 ALTER TABLE syslog_rollup_hourly
   ADD CONSTRAINT uq_syslog_rollup_hourly UNIQUE NULLS NOT DISTINCT
     (bucket_hour, source_ip, device_id, vendor, action, severity, log_class);
+
+-- ⛔ syslog_rule_hits_daily -> HOURLY buckets (2026-09-08, same day it shipped).
+--
+-- The daily version was WRONG and the collector caught it within a minute of
+-- going live: "duplicate key value violates unique constraint
+-- uq_syslog_rule_hits_daily". The recompute window is a [from, to) TIMESTAMP
+-- range, but the DELETE cast it to dates and used a half-open DAY range, so the
+-- final partial day the INSERT wrote was never deleted first. Every rerun then
+-- collided with itself.
+--
+-- Casting the DELETE to cover that last day would have been worse: it would
+-- wipe a whole day's rollup while the INSERT only rebuilds the slice inside the
+-- window, silently UNDER-counting the current day. The honest fix is to give
+-- this rollup the SAME hourly window semantics as syslog_rollup_hourly, which
+-- is already proven correct, and aggregate to days at READ time instead.
+--
+-- Cardinality is fine: rules x actions x devices x 24h is ~85k rows/day for
+-- this fleet. Dropped and recreated rather than migrated -- it is derived data,
+-- fully rebuilt by the next sweep.
+DROP TABLE IF EXISTS syslog_rule_hits_daily;
+
+CREATE TABLE IF NOT EXISTS syslog_rule_hits_hourly (
+  id             BIGSERIAL PRIMARY KEY,
+  bucket_hour    TIMESTAMPTZ NOT NULL,
+  device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  source_ip      INET NOT NULL,
+  vendor         TEXT,
+  rule_id        TEXT,
+  rule_uuid      TEXT,
+  rule_name      TEXT,
+  action         TEXT,
+  hit_count      BIGINT NOT NULL DEFAULT 0,
+  bytes_sent     BIGINT,
+  bytes_received BIGINT,
+  first_seen_at  TIMESTAMPTZ,
+  last_seen_at   TIMESTAMPTZ,
+  CONSTRAINT uq_syslog_rule_hits_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, source_ip, vendor, rule_id, rule_uuid, rule_name, action)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_hour ON syslog_rule_hits_hourly (bucket_hour DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_rule_hits_device ON syslog_rule_hits_hourly (device_id, bucket_hour DESC);

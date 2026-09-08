@@ -655,7 +655,7 @@ rather than blanking it, so a DB blip cannot orphan every event.
 |---|---|---|
 | `syslog_events` | ~7 days, DAILY PARTITIONS | raw forensics |
 | `syslog_rollup_hourly` | permanent | low-cardinality traffic/severity counts |
-| `syslog_rule_hits_daily` | permanent | per-rule usage evidence (Phase 8b input) |
+| `syslog_rule_hits_hourly` | permanent | per-rule usage evidence (Phase 8b input) |
 | `syslog_ingest_stats` | permanent | received/parsed/stored/**dropped** per flush |
 
 ⛔ **Raw events are aged out by DROPPING A PARTITION, never by DELETE.** At ~93M rows/day a

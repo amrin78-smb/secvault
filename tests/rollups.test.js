@@ -135,7 +135,7 @@ describe('rollups: recomputeWindow never throws and is DELETE-then-INSERT', () =
     await recomputeWindow(pool, new Date('2026-09-08T10:00:00Z'), new Date('2026-09-08T14:00:00Z'));
     const sqls = pool.calls.map((c) => c.sql).join('\n');
     assert.match(sqls, /INSERT INTO syslog_rollup_hourly/);
-    assert.match(sqls, /INSERT INTO syslog_rule_hits_daily/);
+    assert.match(sqls, /INSERT INTO syslog_rule_hits_hourly/);
   });
 
   it('⛔ returns the error instead of throwing — one bad sweep must not kill the collector', async () => {
