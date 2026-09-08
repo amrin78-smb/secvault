@@ -15,7 +15,15 @@
 # logs
 *.log
 npm-debug.log*
-logs/
+# ⛔ ROOT-ANCHORED, and it must stay that way. An unanchored `logs/` matches a
+# directory called "logs" at ANY depth, and on 2026-09-08 it silently excluded
+# app/(dashboard)/logs/, app/api/logs/ and components/logs/ — the entire Log
+# Search feature. It was committed, pushed and "deployed" without ever reaching
+# the server, and the build PASSED because the page was missing too, so nothing
+# imported the missing components. Verifying over HTTP did not catch it either:
+# an unauthenticated /logs returns 307 from middleware whether or not the route
+# exists. Only `git check-ignore` and looking for the file on disk found it.
+/logs/
 
 # editor
 .vscode/

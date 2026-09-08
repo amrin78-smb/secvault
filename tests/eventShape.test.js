@@ -152,3 +152,77 @@ describe('⛔ every stored column is reachable from a real log line', () => {
     }
   });
 });
+
+describe('⛔ raw-line retention: keeps it exactly where investigations look', () => {
+  // `message` is 755 of 1,122 bytes per row on the live fleet — 67% of the
+  // whole database — and for a fully parsed event every field in it already
+  // has its own column. Dropping it for ordinary allowed traffic is what makes
+  // 30-day retention fit. The exceptions below are the entire point, and the
+  // compressed archive keeps EVERY line regardless of any of this.
+  const { shouldKeepRawMessage } = require('../lib/syslog/eventShape');
+
+  it('drops it only for parsed, allowed, ordinary traffic', () => {
+    assert.equal(
+      shouldKeepRawMessage({ vendor: 'fortinet', logClass: 'traffic', action: 'accept' }, 'security'),
+      false
+    );
+  });
+
+  it('⛔ ALWAYS keeps it for a line nothing could parse', () => {
+    // If we did not understand it, the raw text is the only record of what
+    // arrived. This is the one exception that must never be optimised away.
+    assert.equal(shouldKeepRawMessage({ vendor: null, logClass: null }, 'security'), true);
+    assert.equal(shouldKeepRawMessage({}, 'security'), true);
+    assert.equal(shouldKeepRawMessage(null, 'security'), true);
+  });
+
+  it('keeps it for denied traffic, whatever the vendor calls the refusal', () => {
+    for (const a of ['deny', 'drop', 'block', 'block-url', 'reset-both', 'RESET-CLIENT']) {
+      assert.equal(
+        shouldKeepRawMessage({ vendor: 'paloalto', logClass: 'traffic', action: a }, 'security'),
+        true, a
+      );
+    }
+  });
+
+  it('keeps it for every non-traffic class', () => {
+    for (const c of ['threat', 'vpn', 'system', 'utm', 'event']) {
+      assert.equal(shouldKeepRawMessage({ vendor: 'fortinet', logClass: c }, 'security'), true, c);
+    }
+  });
+
+  it('keeps it when the class could not be determined', () => {
+    // An unclassified event is one we understood less than we thought.
+    assert.equal(
+      shouldKeepRawMessage({ vendor: 'fortinet', logClass: null, action: 'accept' }, 'security'),
+      true
+    );
+  });
+
+  it('honours the all and none modes', () => {
+    const allowed = { vendor: 'fortinet', logClass: 'traffic', action: 'accept' };
+    const unparsed = { vendor: null, logClass: null };
+    assert.equal(shouldKeepRawMessage(allowed, 'all'), true);
+    assert.equal(shouldKeepRawMessage(unparsed, 'none'), false, 'none means none');
+  });
+
+  it('⛔ falls back to `security` on an unrecognised mode, never to `none`', () => {
+    // A typo in the env var must not silently start discarding evidence.
+    for (const bad of ['', 'off', 'SECURITY!', undefined, null, 42, {}]) {
+      assert.equal(
+        shouldKeepRawMessage({ vendor: null, logClass: null }, bad), true,
+        `mode=${JSON.stringify(bad)} must still keep an unparsed line`
+      );
+    }
+  });
+
+  it('buildEvent applies the policy end to end', () => {
+    const raw = { line: FORTI_LINE, sourceIp: '10.248.65.1', receivedAt: RECEIVED };
+    const frame = parseSyslogLine(raw.line, raw.receivedAt);
+    const payload = parseVendorPayload(frame.message);
+    // This fixture is utm, so it is kept under the security policy.
+    assert.ok(buildEvent(raw, frame, payload, null, 'security').message);
+    assert.equal(buildEvent(raw, frame, payload, null, 'none').message, null);
+    assert.ok(buildEvent(raw, frame, payload, null, 'all').message);
+  });
+});

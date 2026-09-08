@@ -1334,6 +1334,18 @@ ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_name TEXT;
 -- onto one scale at READ time and returns null for anything unrecognized.
 ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_severity TEXT;
 
+-- ⛔ message becomes NULLABLE (2026-09-08). NULL does NOT mean "no raw line
+-- existed" -- it means the line lives in the COMPRESSED ARCHIVE rather than
+-- the database. The archive keeps every line unconditionally; this only
+-- decides what stays searchable in SQL.
+--
+-- Measured on the live fleet: message is 755 of 1,122 bytes per row, 67% of
+-- the whole database, and for a fully parsed event every field in it already
+-- has its own column. Keeping it only for the 8.3% that is security-relevant
+-- (unparsed, non-traffic, or denied) is what makes 30-day retention fit.
+-- See shouldKeepRawMessage() in lib/syslog/eventShape.js.
+ALTER TABLE syslog_events ALTER COLUMN message DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_syslog_events_source_time ON syslog_events (source_ip, received_at DESC);
 -- ⛔ NO per-rule index on the RAW table, deliberately. It was created on

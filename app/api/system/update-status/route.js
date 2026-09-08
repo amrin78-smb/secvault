@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.76.0': [
+    'Log Search is now actually installed. In the previous release its files were being excluded from the code repository by an over-broad ignore rule, so the feature never reached the server at all.',
+    'Raw log retention increased from 7 days to 30 days.',
+    'This is possible because the full text of a log line is no longer stored in the database for ordinary allowed traffic - it is kept in the compressed archive instead, which shrinks each stored record from about 1,100 bytes to under 400.',
+    'The full text is still stored in the database for anything that was blocked, anything flagged as a threat or VPN or system event, and anything the parser did not understand - about 8% of traffic, and the part investigations actually look at.',
+    'Where the text is not in the database, Log Search names the archive file that holds it rather than showing an empty box.',
+  ],
   '2.75.0': [
     'Raw firewall logs are now also written to compressed daily archive files, the same way Firewall Analyzer stored them.',
     'This is why Firewall Analyzer held roughly a year in about a terabyte while the database needs that much for a week: it compressed the text about 13 times over. Measured on your own logs, ours compresses about 11 times.',

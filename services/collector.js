@@ -94,7 +94,10 @@ const UDP_PORTS = parsePortList(process.env.SYSLOG_UDP_PORT, [514, 1514]);
 const TCP_PORTS = parsePortList(process.env.SYSLOG_TCP_PORT, [514, 1514]);
 const FLUSH_MS      = intEnv('SYSLOG_FLUSH_MS', 2000, 250, 60000);
 const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 200000, 1000, 5000000);
-const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 7, 1, 3650);
+// 30, not 7. Dropping the raw line for ordinary allowed traffic (see
+// SYSLOG_RAW_MESSAGE below) took the row from 1,122 bytes to 367, which is
+// what makes a 30-day window affordable: ~37 GB/day, ~1.1 TB for 30 days.
+const RETENTION_DAYS = intEnv('SYSLOG_RETENTION_DAYS', 30, 1, 3650);
 // The DETAIL rollups (per-host / per-application / blocked-destination) are
 // keyed on high-cardinality values, so unlike the two PERMANENT rollups they
 // are bounded by time. Deliberately LONGER than the raw retention: the whole
@@ -111,6 +114,13 @@ const ARCHIVE_DIR = process.env.SYSLOG_ARCHIVE_DIR || path.join(__dirname, '..',
 const ARCHIVE_RETENTION_DAYS = intEnv('SYSLOG_ARCHIVE_RETENTION_DAYS', 60, 1, 3650);
 // Log the archive ratio roughly every GB of raw text, not every flush.
 const ARCHIVE_LOG_EVERY_BYTES = 1e9;
+
+// How much of the raw line the DATABASE keeps. The archive above keeps every
+// line regardless; this only decides what stays searchable in SQL.
+//   all | security (default) | none  -- see shouldKeepRawMessage().
+// ⛔ Only meaningful while the archive is running. With the archive disabled
+// AND this set to none, a line nothing could parse would exist nowhere.
+const RAW_MESSAGE_MODE = String(process.env.SYSLOG_RAW_MESSAGE || 'security').toLowerCase();
 const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..', 'spool');
 
 // Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
@@ -181,7 +191,7 @@ function accept(line, sourceIp) {
 function toEvent(raw) {
   const frame = parseSyslogLine(raw.line, raw.receivedAt);
   const payload = parseVendorPayload(frame.message);
-  return buildEvent(raw, frame, payload, deviceByIp.get(raw.sourceIp) || null);
+  return buildEvent(raw, frame, payload, deviceByIp.get(raw.sourceIp) || null, RAW_MESSAGE_MODE);
 }
 
 // --- spool -----------------------------------------------------------------
@@ -453,6 +463,11 @@ function startTcp(port) {
 async function main() {
   log('SecVault-Collector starting.');
   log(`spool dir : ${SPOOL_DIR}`);
+  log(`raw line  : ${RAW_MESSAGE_MODE} in the database (the archive keeps every line regardless)`);
+  // ⛔ The one combination that can lose a line nothing understood.
+  if (!ARCHIVE_ENABLED && RAW_MESSAGE_MODE === 'none') {
+    log('WARN archive is DISABLED and raw lines are not stored - unparsed lines will exist nowhere');
+  }
   log(
     `retention : ${RETENTION_DAYS} day(s) of raw events, ` +
     `${DETAIL_RETENTION_DAYS} day(s) of detail rollups`
