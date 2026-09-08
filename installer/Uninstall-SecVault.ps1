@@ -61,6 +61,14 @@ $out | Write-Host
 $out = sc.exe stop SecVault-Engine
 $out | Write-Host
 
+# ⛔ The collector was registered by Install-SecVault.ps1 with
+# Start SERVICE_AUTO_START and AppRestartDelay 3000. Leaving it behind means an
+# uninstalled machine keeps an auto-starting LocalSystem service crash-looping
+# `node services\collector.js` against a deleted directory, restarting every
+# 3 seconds, forever.
+$out = sc.exe stop SecVault-Collector
+$out | Write-Host
+
 Start-Sleep -Seconds 2
 
 # -----------------------------------------------------------------------
@@ -73,6 +81,20 @@ $out | Write-Host
 
 $out = sc.exe delete SecVault-Engine
 $out | Write-Host
+
+$out = sc.exe delete SecVault-Collector
+$out | Write-Host
+
+# ⛔ And the inbound firewall rules Install-SecVault.ps1 opened for every port
+# in -SyslogPorts. Leaving UDP/TCP 514 and 1514 permanently allowed inbound on
+# a decommissioned host is an exposure the uninstall is supposed to remove.
+Write-Step 'Removing syslog firewall rules...'
+try {
+    Get-NetFirewallRule -DisplayName 'SecVault Syslog *' -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+} catch {
+    Write-Host "  [WARN] Could not remove syslog firewall rules: $($_.Exception.Message)"
+}
 
 # -----------------------------------------------------------------------
 # 4. Optionally drop database + user

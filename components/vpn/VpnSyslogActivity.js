@@ -56,6 +56,17 @@ export const dynamic = 'force-dynamic';
 // explicit time range — is linked as the stable way to look at a fixed window.
 
 const EVENTS_PAGE_SIZE = 25;
+
+// ⛔ DEPTH CAP. Without one this list offered ~1,823 clickable pages of OFFSET
+// against the raw partition the collector is writing to at ~1,400 rows/sec.
+// Measured on the live database, page 1800 took 13.5 SECONDS and did 18,796
+// cold buffer reads — holding a page render that long AND evicting the
+// ingest's working set. lib/syslog/logSearch.js caps at MAX_PAGE=200 for
+// exactly this reason; the cap simply was not applied here.
+//
+// Deep history is answered by /logs?logClass=vpn, which is fixed-window and
+// index-backed, and the UI says so rather than silently dead-ending.
+const MAX_EVENT_PAGES = 40;
 const WINDOW_HOURS = 24;
 const DEVICE_ROWS = 10;
 
@@ -142,7 +153,7 @@ function stripMask(ip) {
 // way a `message LIKE '%vpn%'` would.
 async function getRecentVpnEvents(dbPool, hours, limit, offset) {
   const { rows } = await dbPool.query(
-    `SELECT e.received_at, e.tz_assumed, e.source_ip::text AS source_ip,
+    `SELECT e.id, e.received_at, e.tz_assumed, e.source_ip::text AS source_ip,
             e.device_id, d.name AS device_name, e.vendor, e.severity,
             e.action, e.log_subtype, e.src_user,
             e.src_ip::text AS src_ip, e.src_country, e.message
@@ -150,7 +161,15 @@ async function getRecentVpnEvents(dbPool, hours, limit, offset) {
        LEFT JOIN devices d ON d.id = e.device_id
       WHERE e.received_at >= now() - ($1::int * interval '1 hour')
         AND e.log_class = 'vpn'
-      ORDER BY e.received_at DESC
+      -- ⛔ id is a TIEBREAKER, not decoration. received_at is stamped per
+      -- datagram at millisecond resolution, and live the VPN class had 6,222
+      -- tied timestamps across 13,744 rows in six hours — the MAJORITY of rows
+      -- share a timestamp. Without a total order, OFFSET paging lets Postgres
+      -- order ties differently between the query for page 1 and the query for
+      -- page 2, so a row can appear twice while another is never shown at all.
+      -- An operator paging for a failed login could silently never see it.
+      -- logSearch.js already orders by (received_at DESC, id DESC).
+      ORDER BY e.received_at DESC, e.id DESC
       LIMIT $2 OFFSET $3`,
     [hours, limit, offset]
   );
@@ -278,7 +297,10 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
   // different "totals" on one card would read as a bug in the data rather than
   // the ordinary consequence of counting a moving stream twice.
   const total = coverage.events;
-  const win = pageWindow(resolvePage(page), EVENTS_PAGE_SIZE, total);
+  // Clamp BEFORE the query, so a pasted ?evPage=1500 cannot reach OFFSET.
+  const cappedTotal = Math.min(total, MAX_EVENT_PAGES * EVENTS_PAGE_SIZE);
+  const win = pageWindow(resolvePage(page), EVENTS_PAGE_SIZE, cappedTotal);
+  const depthLimited = total > cappedTotal;
   // Skip the round trip entirely when the window is empty — an OFFSET query
   // against the raw partitions is not free.
   const recent = total > 0 ? await getRecentVpnEvents(pool, WINDOW_HOURS, win.limit, win.offset) : [];
@@ -621,10 +643,26 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                   searchParams={sp}
                   page={win.page}
                   pageSize={win.pageSize}
-                  total={total}
+                  total={cappedTotal}
                   label="VPN events in 24h"
                   paramName="evPage"
                 />
+                {/* ⛔ Say that the list is capped. A pager that simply stops is
+                    indistinguishable from having reached the end of the data. */}
+                {depthLimited ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    Showing the most recent {cappedTotal.toLocaleString()} of{' '}
+                    {total.toLocaleString()} events. Deeper history is searchable
+                    on the Log Search page, which is far faster than paging this
+                    list.
+                  </div>
+                ) : null}
               </>
             ) : null}
 

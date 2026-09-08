@@ -128,8 +128,31 @@ export default function LogResults({ result, deviceNames, searchParams }) {
               fontSize: 'var(--text-sm)',
             }}
           >
-            The requested range was wider than raw logs are kept, so it was
-            shortened to the window shown above.
+            The requested range was wider than a single search may scan, so it
+            was shortened to the window shown above. Narrow the window and
+            search again to reach older events.
+          </div>
+        ) : null}
+
+        {/* ⛔ The depth cap must be stated. At the last page the Next control
+            pointed at a page that clamped straight back, so the same rows
+            re-rendered with the label and the address bar disagreeing and no
+            explanation — a silent truncation sitting next to two that are
+            correctly surfaced. */}
+        {result.pageCapped ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '9px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--tint-warn)',
+              color: 'var(--tint-warn-fg)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            Paging stops at page {result.maxPage}. Narrow the time window or add
+            a filter to reach the events beyond it — deep paging over the raw
+            log table is far slower than searching a smaller window.
           </div>
         ) : null}
 

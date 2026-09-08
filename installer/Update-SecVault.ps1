@@ -403,6 +403,69 @@ Invoke-Step 'sc.exe stop SecVault-Engine' {
 }
 
 # -----------------------------------------------------------------------
+# 2a. Collector prerequisites
+#
+# ⛔ THIS SCRIPT CANNOT REGISTER THE COLLECTOR -- it has no NSSM path, which
+# lives only in Install-SecVault.ps1. It only stops and starts the service. So
+# on a server installed BEFORE SecVault-Collector existed, the documented
+# deploy path (git push -> Update-SecVault.ps1) silently yields no syslog
+# ingestion at all: `sc.exe stop` against a non-existent service returns a
+# non-zero exit code WITHOUT throwing, so Invoke-Step logs "Step succeeded" and
+# the only trace is one buried [WARN].
+#
+# It cannot be fixed by carrying on quietly. Say it loudly, once, with the
+# actual remedy.
+#
+# The firewall rules below, by contrast, need no NSSM and ARE fixed here --
+# they also close a second gap: an operator who changes SYSLOG_UDP_PORT /
+# SYSLOG_TCP_PORT in .env.local after install gets a collector that binds,
+# reports itself healthy, and receives nothing, because Windows drops the
+# datagrams before they reach the socket with no error anywhere.
+# -----------------------------------------------------------------------
+$collectorRegistered = $true
+Invoke-Step 'Collector prerequisites (service registration + firewall)' {
+    $svc = Get-Service -Name 'SecVault-Collector' -ErrorAction SilentlyContinue
+    if (-not $svc) {
+        $script:collectorRegistered = $false
+        Write-Log '  [ERROR] SecVault-Collector is NOT REGISTERED on this server.'
+        Write-Log '          Syslog ingestion is not running and this script cannot register it.'
+        Write-Log '          Run installer\Install-SecVault.ps1 to register the service, then re-run this update.'
+    }
+
+    # Idempotent inbound rules for whatever ports are actually configured.
+    try {
+        $envLocalPath = Join-Path $repoRoot '.env.local'
+        $portList = @()
+        if (Test-Path $envLocalPath) {
+            foreach ($line in (Get-Content -LiteralPath $envLocalPath)) {
+                if ($line -match '^\s*SYSLOG_(UDP|TCP)_PORT\s*=\s*(.+)$') {
+                    $val = $Matches[2]
+                    # Strip an inline comment the same way the app's env loader does.
+                    $hash = $val.IndexOf('#')
+                    if ($hash -ge 0) { $val = $val.Substring(0, $hash) }
+                    foreach ($p in ($val -split ',')) {
+                        $t = $p.Trim()
+                        if ($t -match '^\d+$') { $portList += $t }
+                    }
+                }
+            }
+        }
+        if ($portList.Count -eq 0) { $portList = @('514', '1514') }
+        foreach ($p in ($portList | Select-Object -Unique)) {
+            foreach ($proto in @('UDP', 'TCP')) {
+                $sysRule = "SecVault Syslog $proto/$p"
+                if (-not (Get-NetFirewallRule -DisplayName $sysRule -ErrorAction SilentlyContinue)) {
+                    New-NetFirewallRule -DisplayName $sysRule -Direction Inbound -Protocol $proto -LocalPort $p -Action Allow | Out-Null
+                    Write-Log "  Firewall rule added for syslog $proto/$p"
+                }
+            }
+        }
+    } catch {
+        Write-Log "  [WARN] Could not verify syslog firewall rules: $($_.Exception.Message)"
+    }
+}
+
+# -----------------------------------------------------------------------
 # 2b. Stop SecVault-Collector
 #
 # Stopped with the others so `git pull` and `npm ci` never rewrite files out
@@ -647,6 +710,12 @@ if ($script:hadFailure) {
     } else {
         Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. Both services were still (re)started as a best-effort recovery.'
     }
+} elseif (-not $collectorRegistered) {
+    # ⛔ Not "successfully". The app and engine updated fine, but syslog
+    # ingestion is not running at all, and a green banner is exactly how that
+    # goes unnoticed for weeks.
+    Write-Log 'SecVault update completed, BUT SecVault-Collector is not registered  -  syslog ingestion is NOT running.'
+    Write-Log 'Run installer\Install-SecVault.ps1 to register the collector service.'
 } else {
     Write-Log 'SecVault update completed successfully.'
 }

@@ -845,7 +845,10 @@ async function runConfigRetentionJob() {
 
 // Produces `log_hit`, decision rule 2 of the CVE priority tree.
 //
-// Runs in the ENGINE and never on page load: it reads raw `syslog_events`
+// Runs in the ENGINE and never on page load: it reads the pre-aggregated
+// `syslog_device_inbound_hourly` rollup (NOT raw `syslog_events` -- that form of
+// the query was measured at over two minutes for one device-day, which is
+// why the rollup exists)
 // over a bounded lookback, which is a background cost, not an interactive
 // one. Hourly rather than per-poll because "was this service reached in the
 // last week" does not change minute to minute, and each pass re-derives the

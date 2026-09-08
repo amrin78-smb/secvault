@@ -1253,9 +1253,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_device_configs_one_baseline_per_device
 -- (~93M events/day) from 27 devices on this same host.
 --
 -- Retention model (see CLAUDE.md's Phase 8 section):
---   syslog_events            RAW, ~7 days, DAILY PARTITIONS, dropped by partition
+--   syslog_events            RAW, ~30 days, DAILY PARTITIONS, dropped by partition
 --   syslog_rollup_hourly     permanent, low-cardinality traffic/severity counts
---   syslog_rule_hits_daily   permanent, per-rule usage evidence
+--   syslog_rule_hits_hourly  permanent, per-rule usage evidence
 --
 -- ⛔ Raw events are dropped by DROPPING A PARTITION, never by DELETE. A DELETE
 -- of ~93M rows/day would generate more WAL and vacuum work than the ingest
@@ -1347,7 +1347,18 @@ ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_severity TEXT;
 ALTER TABLE syslog_events ALTER COLUMN message DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
-CREATE INDEX IF NOT EXISTS idx_syslog_events_source_time ON syslog_events (source_ip, received_at DESC);
+
+-- ⛔ NO index on source_ip, dropped 2026-09-09 for the same measured reason as
+-- the per-rule index below. Live, on every partition since ingest began:
+--   device_id_received_at_idx   24 scans   653 MB
+--   source_ip_received_at_idx    0 scans   588 MB   <- this one
+-- Zero scans, ~588 MB/day, ~17.6 GB across the 30-day window, plus the
+-- per-insert write cost at ~1,400 events/sec. It is redundant by construction:
+-- the collector derives device_id from source_ip via its IP->device map, so
+-- every query that could use it already has the better column. Unmatched-sender
+-- questions go through syslog_ingest_stats.unknown_source or the rollups.
+-- Re-adding it needs a measured read pattern the rollups genuinely cannot serve.
+DROP INDEX IF EXISTS idx_syslog_events_source_time;
 -- ⛔ NO per-rule index on the RAW table, deliberately. It was created on
 -- 2026-09-08 and dropped the same day after measurement: 60 MB per 2.5M rows
 -- with ZERO index scans, i.e. ~8.7 GB/day of pure write amplification at the
