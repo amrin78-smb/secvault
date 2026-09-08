@@ -7,7 +7,10 @@ import IconChip from '../ui/IconChip';
 import Pagination from '../ui/Pagination';
 import { IconActivity } from '../icons';
 import { resolvePage, pageWindow } from '../../lib/pagination';
-import { getVpnActivityByDeviceRollup } from '../../lib/syslog/trafficStats';
+import {
+  getVpnActivityByDeviceRollup,
+  getUserCoverageForClass,
+} from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
 
@@ -154,28 +157,13 @@ async function getRecentVpnEvents(dbPool, hours, limit, offset) {
   return rows;
 }
 
-// Distinct VPN users seen, AND how many events carried a username at all.
-// ⛔ The second number is not padding. Fortinet names the user on most SSL-VPN
-// events and PAN-OS GlobalProtect frequently does not, so "12 users" without
-// "named on 61% of events" invites the reader to conclude those twelve are
-// everyone who connected.
-async function getVpnUserCoverage(dbPool, hours) {
-  const { rows } = await dbPool.query(
-    `SELECT count(DISTINCT src_user)::bigint AS users,
-            count(*) FILTER (WHERE src_user IS NOT NULL)::bigint AS with_user,
-            count(*)::bigint AS events
-       FROM syslog_events
-      WHERE received_at >= now() - ($1::int * interval '1 hour')
-        AND log_class = 'vpn'`,
-    [hours]
-  );
-  const r = rows[0] || {};
-  return {
-    users: Number(r.users || 0),
-    withUser: Number(r.with_user || 0),
-    events: Number(r.events || 0),
-  };
-}
+// Named-user coverage now comes from getUserCoverageForClass() in
+// trafficStats.js, which reads syslog_user_hourly. ⛔ The raw version that
+// lived here measured 17.8 SECONDS cold -- ~35,000 VPN rows scattered across a
+// 26 GB daily partition, never still in cache because the ingest evicts them
+// long before anyone opens this tab. It was the last aggregate on this card
+// touching syslog_events, and it dominated the entire page load. Deleted
+// rather than left in place, so it cannot be reached for again.
 
 // Plain functions returning JSX, called imperatively — NOT nested component
 // definitions. CLAUDE.md's rule is about components rendered as <Tag/>.
@@ -281,7 +269,7 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
   // this tab. The rollup answers the same question from 273 rows.
   const [byDevice, coverage] = await Promise.all([
     getVpnActivityByDeviceRollup(pool, WINDOW_HOURS),
-    getVpnUserCoverage(pool, WINDOW_HOURS),
+    getUserCoverageForClass(pool, 'vpn', WINDOW_HOURS),
   ]);
 
   // ONE total, from ONE query, used by both the headline tile and the pager.

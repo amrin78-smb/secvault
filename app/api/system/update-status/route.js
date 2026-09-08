@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.79.2': [
+    'Removes the last slow query on the VPN Log Activity tab. Counting named VPN users was taking nearly 18 seconds on first load; it now answers from pre-aggregated data in milliseconds.',
+    'The whole tab now reads from summarised hourly data apart from the list of recent events itself, which is small and indexed.',
+  ],
   '2.79.1': [
     'The VPN Log Activity tab is much faster. Its summary figures now come from pre-aggregated hourly data instead of scanning every VPN log line in the last day.',
     'That scan was reading roughly 35,000 records spread across a 26 GB table, which took seconds every time because those records are never still in memory by the time someone opens the page.',

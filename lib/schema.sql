@@ -1640,3 +1640,27 @@ CREATE INDEX IF NOT EXISTS idx_syslog_urlcat_hour ON syslog_urlcat_hourly (bucke
 CREATE INDEX IF NOT EXISTS idx_syslog_events_threat
   ON syslog_events (threat_name, received_at DESC)
   WHERE threat_name IS NOT NULL;
+
+-- ⛔ log_class on syslog_user_hourly (2026-09-08). Without it the VPN tab had
+-- to answer "how many named users on VPN" by scanning syslog_events, which
+-- measured 17.8 SECONDS cold: ~35,000 VPN rows scattered across a 26 GB daily
+-- partition, never still in cache because the ingest evicts them long before
+-- anyone opens the page. Every other figure on that tab already came from a
+-- rollup in milliseconds; this was the last raw scan and it dominated the
+-- whole page load.
+--
+-- Cardinality cost is small: a user appears in only the one or two classes
+-- they generate, so this multiplies a few hundred rows, not millions.
+ALTER TABLE syslog_user_hourly ADD COLUMN IF NOT EXISTS log_class TEXT;
+
+-- The unique key MUST include the new grouping column or two classes for the
+-- same user in the same hour collide onto one row and the second is lost.
+-- Safe to drop and recreate: this is derived data, rebuilt from raw by the
+-- next sweep. Same treatment log_class already got on syslog_rollup_hourly.
+ALTER TABLE syslog_user_hourly DROP CONSTRAINT IF EXISTS uq_syslog_user_hourly;
+ALTER TABLE syslog_user_hourly ADD CONSTRAINT uq_syslog_user_hourly
+  UNIQUE NULLS NOT DISTINCT (bucket_hour, device_id, src_user, log_class);
+
+-- Answers "named users on VPN" straight from the rollup.
+CREATE INDEX IF NOT EXISTS idx_syslog_user_hourly_class
+  ON syslog_user_hourly (log_class, bucket_hour DESC);
