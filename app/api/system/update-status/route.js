@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.66.1': [
+    'Groundwork for SecVault collecting firewall logs directly, replacing Firewall Analyzer. Nothing changes for you yet -- no new screens and no new data.',
+    'This release adds the two log readers and their tests: one for the standard syslog envelope, one for Fortinet and Palo Alto message formats.',
+    'They were written against real logs taken from your own firewalls rather than from vendor documentation, and those exact log lines are kept as tests.',
+  ],
   '2.66.0': [
     'The dashboard now has tabs: Overview, Security, Rules, Compliance and Fleet Health. Twelve widgets in one grid had become a wall.',
     'The headline numbers and the feed-sync status stay on screen whichever tab you are on, so fleet posture is never a tab away.',

@@ -593,6 +593,52 @@ duplicates). Deduping belongs in `collectAndStore` at WRITE time, not in a reten
 stored row is also evidence that a collection succeeded at time T, so skipping the write changes
 that meaning and needs its own decision.
 
+## Phase 8 — Syslog Ingestion (IN PROGRESS, started 2026-09-08)
+
+Replaces ManageEngine Firewall Analyzer, which was removed after a failed service-pack
+upgrade left it unrecoverable. FWA had been the fleet's syslog collector on the SAME host as
+SecVault (192.168.7.69), taking **~1,083 datagrams/sec sustained (~93M events/day)** from 27
+devices. Its 335 GB raw-log archive was preserved out of the install tree before uninstall.
+
+Two reasons this belongs in SecVault rather than being left to LogVault, which also ingests
+syslog: (1) CLAUDE.md's CVE priority tree already has `log_hit=true` as decision rule 2, and
+that input has never had a data source; (2) `firewall_rules.hit_count` is NULL — genuinely
+unmeasurable — for every vendor/transport whose API cannot report hits (Fortinet SSH, Sangfor,
+Palo Alto SSH). Log evidence supplies both. **Neither is something a general log analyser can
+do, because it does not know the rulebase, the CVE exposure or the compliance posture.** The
+log storage itself is not the point; the fusion is.
+
+**Retention decision (drives the schema):** raw searchable events ~7 days (~130 GB), rolled up
+into per-rule / per-device / per-hour aggregates kept indefinitely. Anything older than the raw
+window is answered from aggregates. Time-partitioned tables, dropped by partition.
+
+### Landed so far — the pure parsers only
+
+`lib/syslog/syslogParser.js` (RFC 3164/5424 frames) and `lib/syslog/vendorParsers.js` (Fortinet
+key=value, Palo Alto positional CSV). Both pure, both unit-tested, neither wired to anything yet.
+
+⛔ **Every vendor field mapping was read off REAL CAPTURED LOGS** from the preserved archive, not
+from documentation, per this file's own "documentation lies" rule. The captured lines are the
+test fixtures.
+
+⛔ **At 93M events/day a wrong DEFAULT is not a rounding error, it is a fabricated dataset.**
+Every parser field is nullable and stays null when the log did not carry it — no defaulting a
+missing timestamp to "now", an unknown vendor to "generic", or an absent severity to info. This
+is the same Critical Rule as `hit_count`; syslog is simply where it is easiest to get wrong and
+hardest to notice.
+
+### Not built yet
+
+Schema (partitioned tables + grants), `services/collector.js` (UDP/TCP 514 listener, durable
+disk spool before DB insert per this file's Reliability Rules, batch insert, retention job),
+rule-hit correlation, `log_hit` wiring into the CVE tree, and any UI. The dashboard's Live
+Traffic tab stays deliberately absent until the collector exists — see `lib/dashboardTabs.js`.
+
+⛔ The collector cannot bind 514 until FWA is fully uninstalled (it held UDP 514 + 1514). Make
+the port configurable so it can be exercised on 1514 first.
+
+---
+
 ## Role-Based Access Control
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.

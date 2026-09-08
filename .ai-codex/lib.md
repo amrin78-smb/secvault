@@ -182,6 +182,21 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+## lib/syslog/syslogParser.js
+
+`parseSyslogLine(line, receivedAt)` -> normalized frame — RFC 3164 (BSD) + RFC 5424. Pure, never throws, and REQUIRES `receivedAt` because RFC 3164 year resolution is meaningless without a reference time. Every field is nullable and stays null when the frame does not carry it. Returns `format` (`rfc3164|rfc5424|pri-only|raw|unknown`) and `parseComplete`.
+⛔ `tzAssumed` is part of the contract: RFC 3164 has no timezone, so the collector's local zone is assumed and the flag says so. RFC 5424 carries its own offset and sets it false.
+⛔ Year resolution picks the candidate year closest to `receivedAt` and returns null beyond ~45 days. A Dec 31 event received Jan 1 must resolve BACKWARD; stamping the receive year puts it 12 months in the future where every "last 7 days" query misses it. Feb 29 in a non-leap year is rejected, not slid to Mar 1.
+`decodePri(priText)` -> `{facility, severity}`, both null when malformed. Validates the STRING before `Number()` — `Number('')` is 0, which previously decoded a blank PRI to facility 0 / severity 0, i.e. a kernel EMERGENCY invented from an empty string (found by its own test).
+
+## lib/syslog/vendorParsers.js
+
+`detectVendor(message)` -> slug | `null`. ⛔ NO "generic" fallback: a guessed vendor mis-parses every field after it, so an unrecognised payload is stored raw and unattributed.
+`parseVendorPayload(message)` -> normalized event | `null`. `parseFortinet` / `parsePaloAlto` / `parseKeyValue` / `splitCsv` exported for reuse and testing.
+⛔ **Every field position/name here was read off REAL CAPTURED LOGS** from this fleet's preserved FWA archive (2026-09-08), never from vendor docs — CLAUDE.md's "documentation lies" rule. The captured lines are the fixtures in `tests/vendorParsers.test.js`, so the evidence sits next to the code.
+Fortinet: space-separated key=value; `eventtime` is a NANOSECOND epoch (19 digits) paired with `tz`, preferred over the date/time pair. Carries `policyid` AND `poluuid` — the rule linkage that will let log evidence produce real hit counts for the SSH transport, which cannot report them via the API at all.
+Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS carries no rule id/uuid in the log at all. ⛔ Positions differ per log TYPE — only the common prefix plus TRAFFIC-verified indices are read; a THREAT row leaves the traffic-only fields null rather than borrowing the wrong column.
+
 ## lib/dashboardTabs.js
 
 `DASHBOARD_TABS` -> `{key,label,description}[]` — the dashboard's tab model, the single source for the tab bar, the `?tab=` whitelist and the default. ⛔ `key` is a URL value and therefore a public contract: add and deprecate, never rename in place.
