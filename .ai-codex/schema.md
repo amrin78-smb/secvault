@@ -954,3 +954,30 @@ same rule as `device_configs.is_baseline`.
 `users` row, so an LDAP session has no UUID to own a view; the API reports `canSave:false` instead
 of failing. A shadow `users` row on first LDAP bind is the fix and belongs with the unresolved LDAP
 group-to-role mapping.
+
+### syslog_threat_hourly (v2.89.0)
+
+Hourly threat aggregates feeding every widget on the dashboard Security tab. Grain:
+(bucket_hour, device_id, src_ip, dst_ip, threat_name, threat_severity, src_country, log_subtype)
+with event_count / first_seen_at / last_seen_at.
+
+⛔ WHY, given rollup_src deliberately excludes threat columns. That exclusion was right about the
+HOUR and wrong about the DAY: one hour of threat events is 59,129 rows and reads in 256 ms through
+the partial index, but the Security tab asks for 24 HOURS across SIX widgets — ~1.4M rows scanned
+six times per page load, and the tab was visibly slow.
+
+⛔ Populated by its OWN pass reading syslog_events directly, NOT from rollup_src. Adding
+threat_name/threat_severity to that temp table copies two extra columns for ALL ~10M rows in the
+window to serve the 1.3% that are threats. This is the ONE documented exception to the one-scan
+rule, and both rollup tests assert it stays the only one.
+
+⛔ dst_ip is IN THE GRAIN and that is what makes the rollup usable. Top Attackers reports distinct
+TARGETS per source, and a per-hour COUNT(DISTINCT) is not additive — summing 24 of them
+over-counts. With dst_ip as a grouping key, count(DISTINCT dst_ip) over any span is exact. Cost:
+5,058 rows/hour with dst_ip vs 1,555 without. Verified numerically identical to the raw query for
+attackers, severity, threats and per-device before deploy.
+
+⛔ Scope is (log_class = threat OR threat_name IS NOT NULL), not log_class alone: getTopThreats()
+filters on threat_name only, and narrowing it to log_class would silently change what that widget
+counts if a vendor ever files a named threat under another class. Measured: adds 278 rows/hour.
+log_subtype adds ZERO extra grain rows, so it is carried free.

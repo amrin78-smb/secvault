@@ -1883,3 +1883,51 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_views_one_default
 
 CREATE INDEX IF NOT EXISTS idx_saved_views_lookup
   ON saved_views (scope, user_id);
+
+-- Hourly THREAT aggregates (2026-09-09). Feeds every widget on the dashboard
+-- Security tab.
+--
+-- ⛔ WHY THIS EXISTS, given rollup_src deliberately excludes threat columns.
+-- That exclusion said threat events are ~1.3% of the stream and can be read
+-- straight from syslog_events through their own partial index. Measured on the
+-- live fleet, one hour of threat events is 59,129 rows and reads in 256 ms —
+-- so the reasoning held for an hour and broke for a day. The Security tab asks
+-- for 24 HOURS across SIX widgets: ~1.4M raw rows scanned six times per page
+-- load, and the page became visibly slow.
+--
+-- ⛔ This is populated by its OWN pass reading syslog_events directly, NOT from
+-- rollup_src. Adding threat_name/threat_severity to that temp table would copy
+-- two more columns for all ~10M rows in the window to serve the 1.3% that are
+-- threats. Reading the threat rows through their own index instead costs one
+-- extra 256 ms scan per hour swept.
+--
+-- ⛔ dst_ip is IN THE GRAIN on purpose, and it is what makes the rollup usable.
+-- "Top Attackers" reports distinct TARGETS per source, and a per-hour
+-- COUNT(DISTINCT) is not additive across hours — summing 24 of them
+-- over-counts. With dst_ip as a grouping key, count(DISTINCT dst_ip) over the
+-- rollup is exact for any window. Measured cost of that choice: 5,058 rows per
+-- hour versus 1,555 without dst_ip. Worth it.
+CREATE TABLE IF NOT EXISTS syslog_threat_hourly (
+  id              BIGSERIAL PRIMARY KEY,
+  bucket_hour     TIMESTAMPTZ NOT NULL,
+  device_id       UUID REFERENCES devices(id) ON DELETE CASCADE,
+  src_ip          INET,
+  dst_ip          INET,
+  threat_name     TEXT,
+  threat_severity TEXT,     -- the vendor's own word, verbatim
+  log_subtype     TEXT,     -- measured: adds ZERO extra grain rows, so it is free
+  src_country     TEXT,
+  event_count     BIGINT NOT NULL DEFAULT 0,
+  first_seen_at   TIMESTAMPTZ,
+  last_seen_at    TIMESTAMPTZ,
+  -- NULLS NOT DISTINCT because every dimension here is honestly nullable (a
+  -- vendor may report a threat with no source, no name or no country). Without
+  -- it NULLs compare unequal and every sweep inserts duplicates instead of
+  -- replacing the bucket.
+  CONSTRAINT uq_syslog_threat_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, src_ip, dst_ip, threat_name, threat_severity, src_country, log_subtype)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_threat_hour
+  ON syslog_threat_hourly (bucket_hour DESC);
+CREATE INDEX IF NOT EXISTS idx_syslog_threat_src
+  ON syslog_threat_hourly (src_ip, bucket_hour DESC);

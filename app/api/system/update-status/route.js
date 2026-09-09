@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.89.0': [
+    "The dashboard Security tab is much faster. Its six widgets each scanned a day of raw threat logs on every page load; they now read an hourly summary built by the engine.",
+    "First run: a new install shows a short setup checklist instead of a dashboard full of zeros. On an empty database a zero reads as \u201cnothing is wrong\u201d, when the truth is that nothing has been looked at yet.",
+    "The setup checklist reads its state from the database every time, so it cannot disagree with reality \u2014 delete the last firewall and it comes back.",
+  ],
   '2.88.0': [
     "Navigation is grouped into Monitor, Inventory, Risk and Access, and named the way operators speak: Overview, Firewalls, Rule hygiene, Vulnerabilities, VPN \u0026 identity. Every existing link and bookmark still works \u2014 only the labels changed.",
     "Press \u2318K (or Ctrl+K) anywhere to search firewalls, CVEs and pages. It still understands the old names, so typing \u201cdevices\u201d finds Firewalls.",

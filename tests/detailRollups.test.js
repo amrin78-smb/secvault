@@ -152,7 +152,12 @@ describe('detail rollups: rebuilt in the same window as the permanent ones', () 
     }
     // The DELETEs still take the bounds, and they must all agree.
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.equal(windowed.length, 11, 'one temp-table scan + one DELETE per rollup');
+    // One temp-table scan + one DELETE per rollup + the threat INSERT — which
+    // is the only INSERT that takes the window, because it reads syslog_events
+    // directly rather than the already-bounded temp table. See the amended
+    // one-scan test in rollups.test.js for why that exception exists and why a
+    // SECOND one would mean the rule has stopped holding.
+    assert.equal(windowed.length, 13, 'one scan + one DELETE per rollup + the threat INSERT');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), FROM.getTime());
       assert.equal(c.params[1].getTime(), TO.getTime());

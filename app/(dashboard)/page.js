@@ -18,6 +18,7 @@ import DeviceStatusSummary from '../../components/dashboard/DeviceStatusSummary'
 import RecentCriticalAlerts from '../../components/dashboard/RecentCriticalAlerts';
 import RecentActivityFeed from '../../components/dashboard/RecentActivityFeed';
 import ConfigChangesWidget from '../../components/dashboard/ConfigChangesWidget';
+import FirstRun from '../../components/onboarding/FirstRun';
 import HeadlineStats from '../../components/dashboard/HeadlineStats';
 import QuickActions from '../../components/dashboard/QuickActions';
 import FleetSystemHealth from '../../components/dashboard/FleetSystemHealth';
@@ -172,6 +173,20 @@ function VendorCard() {
 
 export default async function DashboardPage({ searchParams }) {
   const tab = resolveDashboardTab(searchParams?.tab);
+
+  // ⛔ FIRST RUN SHORT-CIRCUITS THE WHOLE PAGE. With no firewalls added,
+  // every widget below renders a zero or an em-dash, and on a security
+  // dashboard a zero is a CLAIM — "no critical CVEs", "no failing checks" —
+  // that a fresh install has not earned. Worse, it reads as broken rather
+  // than empty, which is the first impression an evaluator gets.
+  //
+  // Returns null the moment one device exists, so this costs one cheap
+  // count query on a populated install and never hides real data.
+  const firstRun = await FirstRun();
+  if (firstRun) {
+    return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{firstRun}</div>;
+  }
+
   const feedSyncs = await getLastFeedSync(pool);
 
   const tabs = DASHBOARD_TABS.map((t) => ({

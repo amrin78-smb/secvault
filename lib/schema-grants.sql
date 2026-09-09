@@ -137,3 +137,7 @@ GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO nocvault_readonly;
 -- name and a URL query string. user_id is a reference, not credential data.
 GRANT SELECT ON TABLE saved_views TO claude_readonly;
 GRANT SELECT ON TABLE saved_views TO nocvault_readonly;
+
+-- Hourly threat aggregates (2026-09-09). Counts only, no message text.
+GRANT SELECT ON TABLE syslog_threat_hourly TO claude_readonly;
+GRANT SELECT ON TABLE syslog_threat_hourly TO nocvault_readonly;
