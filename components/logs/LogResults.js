@@ -3,6 +3,7 @@ import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
+import { classifyAction } from '../../lib/syslog/actions';
 
 // Results for a raw log search. Server component — the rows arrive already
 // queried by the page.
@@ -12,11 +13,33 @@ import Pagination from '../ui/Pagination';
 // concludes "that host made three connections" and is wrong. Both the cap and
 // a clamped time window are stated in words above the table.
 
-const DENY = new Set(['deny', 'drop', 'reset-both', 'block', 'block-url', 'reset-client', 'reset-server']);
-
+// ⛔ THREE-STATE, from the SHARED vocabulary. This was a private deny list —
+// the fifth in the codebase — with two compounding faults:
+//
+//   1. Anything not in it rendered as a GREEN "success" badge. Measured live
+//      over one window that meant ~78,000 genuinely BLOCKED events (`blocked`
+//      14,843 and `timeout` 63,079) and ~290,000 unclassifiable ones
+//      (`ssl-login-fail`, `alert`, `dns`, `negotiate`, ...) were all shown to
+//      the reader as allowed. A failed VPN login looked like a permitted
+//      session.
+//   2. It listed `reset-client`/`reset-server`, which this fleet never emits —
+//      the real Fortinet verbs are `client-rst`/`server-rst`. It was written
+//      from documentation rather than captured logs.
+//
+// lib/syslog/actions.js exists precisely to end this: a verb in neither set is
+// UNKNOWN and must never be folded into either one.
 function actionTone(a) {
-  if (!a) return 'muted';
-  return DENY.has(String(a).toLowerCase()) ? 'danger' : 'success';
+  const verdict = classifyAction(a);
+  if (verdict === 'allowed') return 'success';
+  if (verdict === 'blocked') return 'danger';
+  return 'muted';
+}
+
+function actionTitle(a) {
+  const verdict = classifyAction(a);
+  if (verdict === 'allowed') return `${a} — session was permitted`;
+  if (verdict === 'blocked') return `${a} — session was refused`;
+  return `${a} — SecVault has not classified this vendor action as allowed or blocked`;
 }
 
 function fmtTime(v, tzAssumed) {
@@ -220,7 +243,11 @@ export default function LogResults({ result, deviceNames, searchParams }) {
                       )}
                     </Cell>
                     <Cell nowrap>
-                      {r.action ? <Badge color={actionTone(r.action)}>{r.action}</Badge> : null}
+                      {r.action ? (
+                        <Badge color={actionTone(r.action)} title={actionTitle(r.action)}>
+                          {r.action}
+                        </Badge>
+                      ) : null}
                     </Cell>
                     <Cell mono nowrap>
                       {String(r.srcIp || '').replace('/32', '') || null}

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
@@ -298,7 +299,7 @@ export default async function DevicesPage({ searchParams }) {
                   </span>
                 </td>
                 <td>
-                  <Badge color="info">{d.vendor}</Badge>
+                  <Badge color="info" title={vendorLabel(d.vendor)}>{vendorLabel(d.vendor, { short: true })}</Badge>
                 </td>
                 <td>
                   <SecurityScoreCell

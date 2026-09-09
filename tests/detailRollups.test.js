@@ -326,3 +326,52 @@ it('inbound rollup: public-source determination covers every private range', () 
   // A NULL source must stay NULL rather than counting as public.
   assert.ok(/s\.src_ip IS NULL THEN NULL/.test(INBOUND_INSERT));
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// The UI must use the SAME action vocabulary as the rollups (added 2026-09-09)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Two UI files carried their OWN deny lists — the fifth and sixth copies — and
+// both were wrong, in opposite directions:
+//
+//   components/logs/LogResults.js     anything not in its list rendered as a
+//                                     GREEN "success" badge, so ~78,000 blocked
+//                                     events and ~290,000 unclassifiable ones
+//                                     were shown to the reader as allowed.
+//   components/dashboard/SyslogWidgets.js
+//                                     listed client-rst/server-rst as DENIED,
+//                                     but those are Fortinet SESSION-END verbs
+//                                     meaning the session existed and was
+//                                     permitted.
+//
+// This pins the vocabulary itself so a seventh copy has something to fail
+// against.
+
+const { classifyAction: uiClassify } = require('../lib/syslog/actions');
+
+it('⛔ verbs seen live on this fleet classify correctly', () => {
+  // Every one of these was measured in the live rollups.
+  for (const a of ['allow', 'accept', 'close', 'client-rst', 'server-rst']) {
+    assert.equal(uiClassify(a), 'allowed', a);
+  }
+  for (const a of ['deny', 'drop', 'blocked', 'timeout', 'block-url', 'reset-both']) {
+    assert.equal(uiClassify(a), 'blocked', a);
+  }
+});
+
+it('⛔ an unclassifiable verb is UNKNOWN — never allowed, never blocked', () => {
+  // These are real, high-volume live verbs that belong to neither vocabulary.
+  // Folding them into "allowed" is what made a failed VPN login look like a
+  // permitted session.
+  for (const a of ['ssl-login-fail', 'alert', 'dns', 'negotiate', 'ip-conn', 'analytics']) {
+    assert.equal(uiClassify(a), 'unknown', a);
+  }
+});
+
+it('the fleet does not emit reset-client/reset-server — client-rst/server-rst do', () => {
+  // The old UI list was written from documentation rather than captured logs.
+  // Keep both spellings classified so neither can silently become "allowed",
+  // but the ones that actually occur are the -rst forms.
+  assert.equal(uiClassify('client-rst'), 'allowed');
+  assert.equal(uiClassify('reset-client'), 'blocked');
+});

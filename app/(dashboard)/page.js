@@ -1,4 +1,5 @@
 import { pool } from '../../lib/db';
+import { timeAgo as formatRelative, titleCase, FEED_LABELS, feedStatusRank, newestFeedAt } from '../../lib/formatDisplay';
 import Badge from '../../components/ui/Badge';
 import Card from '../../components/ui/Card';
 import IconChip from '../../components/ui/IconChip';
@@ -87,9 +88,28 @@ export const dynamic = 'force-dynamic';
 // added on 2026-09-08 once services/collector.js was live and ingesting; its
 // widgets read the ROLLUP tables, never raw syslog_events.
 
+// ⛔ ONE ROW PER FEED, not the single newest row overall.
+//
+// This used to be `ORDER BY started_at DESC LIMIT 1`, which showed whichever
+// feed happened to finish LAST as though it were the state of all four.
+// Measured live the moment this was written:
+//
+//   nvd             partial   06:00     <- hidden
+//   paloalto_psirt  success   06:10
+//   fortinet_psirt  partial   06:10     <- hidden
+//   kev             success   06:11     <- the only one shown
+//
+// So the dashboard reported an unqualified green "success" while HALF the
+// feeds — including NVD, the primary CVE source — had come back partial. This
+// strip's own comment says feed freshness "qualifies every CVE number on every
+// tab"; showing the best of four as the state of four does the opposite.
 async function getLastFeedSync(dbPool) {
-  const result = await dbPool.query('SELECT * FROM feed_sync_log ORDER BY started_at DESC LIMIT 1');
-  return result.rows[0] || null;
+  const result = await dbPool.query(
+    `SELECT DISTINCT ON (feed_name) feed_name, status, started_at, completed_at
+       FROM feed_sync_log
+      ORDER BY feed_name, started_at DESC`
+  );
+  return result.rows;
 }
 
 function formatDateTime(value) {
@@ -152,8 +172,7 @@ function VendorCard() {
 
 export default async function DashboardPage({ searchParams }) {
   const tab = resolveDashboardTab(searchParams?.tab);
-  const lastSync = await getLastFeedSync(pool);
-  const lastSyncTime = lastSync ? formatDateTime(lastSync.finished_at || lastSync.started_at) : null;
+  const feedSyncs = await getLastFeedSync(pool);
 
   const tabs = DASHBOARD_TABS.map((t) => ({
     key: t.key,
@@ -278,12 +297,27 @@ export default async function DashboardPage({ searchParams }) {
           color: 'var(--text-secondary)',
         }}
       >
-        {lastSync ? (
+        {feedSyncs.length > 0 ? (
           <>
-            <span>Last feed sync:</span>
-            <Badge color={syncBadgeColor(lastSync.status)}>{lastSync.status}</Badge>
-            <span>
-              ({lastSync.feed_name}) — {lastSyncTime || 'unknown time'}
+            <span>CVE feeds:</span>
+            {/* Worst status first — a partial NVD sync matters more than a
+                healthy KEV one, and reading order is what gets noticed. */}
+            {[...feedSyncs]
+              .sort((a, b) => feedStatusRank(a.status) - feedStatusRank(b.status))
+              .map((f) => (
+                <Badge
+                  key={f.feed_name}
+                  color={syncBadgeColor(f.status)}
+                  title={`${FEED_LABELS[f.feed_name] || f.feed_name}: ${f.status} at ${
+                    formatDateTime(f.completed_at || f.started_at) || 'unknown time'
+                  }`}
+                >
+                  {FEED_LABELS[f.feed_name] || f.feed_name}
+                  {f.status === 'success' ? '' : ` · ${titleCase(f.status)}`}
+                </Badge>
+              ))}
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+              last {formatRelative(newestFeedAt(feedSyncs)) || 'unknown'}
             </span>
           </>
         ) : (

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { pool } from '../../../lib/db';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
@@ -26,7 +27,8 @@ async function getFleetRows(dbPool) {
        COUNT(rar.id) FILTER (WHERE rar.severity = 'high')::int AS high,
        COUNT(rar.id) FILTER (WHERE rar.severity = 'medium')::int AS medium,
        COUNT(rar.id) FILTER (WHERE rar.severity = 'info')::int AS info,
-       COUNT(rar.id)::int AS total
+       COUNT(rar.id)::int AS total,
+       MAX(rar.analyzed_at) AS last_analyzed_at
      FROM devices d
      LEFT JOIN rule_analysis_results rar ON rar.device_id = d.id
      WHERE d.active = true
@@ -99,14 +101,36 @@ export default async function FleetAnalysisPage() {
                     {r.name}
                   </Link>
                 </td>
-                <td style={{ color: 'var(--text-secondary)' }}>{r.vendor || '—'}</td>
+                <td style={{ color: 'var(--text-secondary)' }} title={r.vendor || ''}>
+                  {vendorLabel(r.vendor, { short: true }) || '—'}
+                </td>
                 <td style={{ color: 'var(--text-secondary)' }} title={r.site || ''}>
                   {r.site || '—'}
                 </td>
                 <td>
-                  <Badge color={RISK_BAND_COLOR[r.risk.band]}>
-                    {RISK_BAND_LABEL[r.risk.band]} ({r.risk.score})
-                  </Badge>
+                  {/* ⛔ "never analysed" is a REAL state, distinct from "low". A
+                      device with no rule_analysis_results rows has earned no band
+                      at all and must not be filed under the BEST one:
+                      computeRiskScoreFromCounts returns {'{score:0, band:"low"}'} for
+                      all-zero counts, so an unanalysed firewall rendered a green
+                      "Low (0)" identical to the cleanest device in the fleet.
+                      app/(dashboard)/devices/page.js already documents and
+                      implements the correct behaviour — these two fleet pages
+                      disagreed. Invisible today only because all 15 devices have
+                      findings; it fires the day someone adds a firewall, which is
+                      exactly when someone is watching. */}
+                  {r.last_analyzed_at ? (
+                    <Badge color={RISK_BAND_COLOR[r.risk.band]}>
+                      {RISK_BAND_LABEL[r.risk.band]} ({r.risk.score})
+                    </Badge>
+                  ) : (
+                    <Badge
+                      color="muted"
+                      title="This device has never been analysed, so it has no rule-health band yet"
+                    >
+                      Not analysed
+                    </Badge>
+                  )}
                 </td>
                 <td
                   style={{

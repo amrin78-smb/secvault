@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
 import Table from '../../../components/ui/Table';
@@ -199,7 +200,7 @@ export default async function VpnFleetPage({ searchParams }) {
                     </Link>
                   </td>
                   <td>
-                    <Badge color="info">{d.vendor}</Badge>
+                    <Badge color="info" title={vendorLabel(d.vendor)}>{vendorLabel(d.vendor, { short: true })}</Badge>
                   </td>
                   <td>{statusBadge(d.summary)}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{formatDateTime(d.lastConfigAt)}</td>

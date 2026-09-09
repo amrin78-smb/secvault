@@ -12,6 +12,17 @@ const BAND_MAP = {
 };
 
 export default function PriorityBadge({ band }) {
-  const entry = BAND_MAP[band] || BAND_MAP.monitor;
+  const entry = BAND_MAP[band];
+  // ⛔ An unrecognised or missing band is NOT "Monitor". Falling back to the
+  // lowest band rendered "we have not assessed this" as a confident "nothing
+  // to do here" — the failed-read-as-a-fact rule, applied to the product's
+  // headline judgement. Say we do not know instead.
+  if (!entry) {
+    return (
+      <Badge color="muted" title="No priority band recorded for this assessment">
+        Unassessed
+      </Badge>
+    );
+  }
   return <Badge color={entry.color}>{entry.label}</Badge>;
 }

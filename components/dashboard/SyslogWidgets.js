@@ -176,8 +176,19 @@ export async function TopTalkersWidget() {
 export async function ActionBreakdownWidget() {
   const rows = await getActionBreakdown(pool, 24);
   const total = rows.reduce((n, r) => n + r.events, 0);
-  const DENY = new Set(['deny', 'drop', 'reset-both', 'block', 'client-rst', 'server-rst']);
-  const tone = (a) => (DENY.has(a) ? 'var(--red)' : a === '(unreported)' ? 'var(--text-muted)' : 'var(--green)');
+  // ⛔ Three-state, from lib/syslog/actions.js. This was a SIXTH private deny
+  // list and it was wrong in the opposite direction to LogResults': it listed
+  // client-rst/server-rst as DENIED, but those are Fortinet SESSION-END verbs —
+  // the session existed and was permitted, then ended. Counting them as denied
+  // inflated 'Session Outcomes' with established sessions. Anything the shared
+  // vocabulary cannot classify renders muted, never green and never red.
+  const tone = (a) => {
+    if (a === '(unreported)') return 'var(--text-muted)';
+    const verdict = classifyAction(a);
+    if (verdict === 'blocked') return 'var(--red)';
+    if (verdict === 'allowed') return 'var(--green)';
+    return 'var(--text-muted)';
+  };
 
   return (
     <Card>

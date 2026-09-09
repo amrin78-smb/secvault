@@ -136,6 +136,43 @@ export const VENDOR_META = {
 
 export const VENDOR_SLUGS = Object.keys(VENDOR_META);
 
+// Short forms for narrow table columns. The full `label` stays available for
+// the `title` attribute, so nothing is lost by using these.
+export const VENDOR_SHORT_LABEL = {
+  forcepoint: 'Forcepoint',
+  fortinet: 'FortiGate',
+  paloalto: 'Palo Alto',
+  checkpoint: 'Check Point',
+  cisco_asa: 'Cisco ASA',
+  sangfor: 'Sangfor',
+};
+
+/**
+ * Human name for a vendor slug.
+ *
+ * ⛔ WHY THIS EXISTS: `paloalto`, `cisco_asa` and `checkpoint` are internal
+ * DISPATCH KEYS, not product names, and they were rendered raw at 18 sites —
+ * the fleet Devices table, the dashboard's Top Risky Devices, every compliance
+ * header, the advisories table and the VPN page. The damning part was the
+ * inconsistency: VendorDistribution.js on the SAME dashboard already resolved
+ * the label correctly, and AdvisoriesTab's own filter dropdown read "Cisco ASA"
+ * while the rows beneath it read `cisco_asa`.
+ *
+ * ⛔ Falls back to the slug itself, never to a blank or a prettified guess. An
+ * unrecognised slug is a real signal (a vendor added to the DB but not to this
+ * table) and hiding it would make that invisible.
+ *
+ * @param {string} slug
+ * @param {{short?: boolean}} [opts] short form for narrow columns
+ */
+export function vendorLabel(slug, opts) {
+  if (!slug) return null;
+  if (opts && opts.short) {
+    return VENDOR_SHORT_LABEL[slug] || (VENDOR_META[slug] && VENDOR_META[slug].label) || slug;
+  }
+  return (VENDOR_META[slug] && VENDOR_META[slug].label) || slug;
+}
+
 // The only credential_type values credStore rows may carry.
 //
 // 'snmp' (added 2026-07-21) is deliberately NOT part of any vendor's

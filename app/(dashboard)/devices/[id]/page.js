@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { vendorLabel } from '../../../../components/devices/vendorMeta';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
@@ -417,7 +418,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <StatusDot status={status} />
         <div className="page-title">{device.name}</div>
-        <Badge color="info">{device.vendor}</Badge>
+        <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
