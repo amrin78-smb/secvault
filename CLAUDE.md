@@ -17,6 +17,7 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/components.md`     — component index
 - `.ai-codex/gotchas.md`        — footguns and redaction rules
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
+- `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
 
 ### Maintaining the index — MANDATORY
 
@@ -748,13 +749,18 @@ stay honestly nullable. Without it NULLs compare unequal and every flush inserts
 "unknown vendor" row instead of incrementing one — and the usual workaround, sentinel strings
 like `'unknown'`, is precisely the fabricated-value pattern this file bans.
 
-### Not built yet
+### Phase 8b — BUILT (this section was stale until 2026-09-09)
 
-Rule-hit correlation to `firewall_rules` (Phase 8b — the parsers already capture Fortinet's
-`policyid`/`poluuid` and Palo Alto's rule name, so this is a join, not new collection),
-the rollup population job, and any UI. The
-dashboard's Live Traffic tab stays absent until there is something real to show — see
-`lib/dashboardTabs.js`.
+Rule-hit correlation to `firewall_rules` is DONE (`lib/engines/ruleHitCorrelation.js`, consumed
+by `ruleAnalysis.js`), the rollup population job runs in the collector, and the dashboard Traffic
+tab is live. Measured on the fleet: 8,803 rows in `syslog_rule_hits_hourly` across all 15 devices,
+and `firewall_rules.hit_count` genuinely tri-state at 164 unmeasured / 466 measured-zero / 1,086
+with hits — which is what makes the 185 `unused` findings evidence-backed rather than assumed.
+
+⛔ This section previously said none of that was built, a full phase after it shipped. A stale
+"not built yet" is worse than none: it sends a session off to rebuild something that works. If
+you finish a phase, correct the sentence that says you have not. Forward-looking work now lives
+in `.ai-codex/roadmap.md`, which exists so this file does not have to track it.
 
 Both installer scripts now handle `SecVault-Collector`: `Install-SecVault.ps1` registers it
 (NSSM, auto-start, depends on PostgreSQL), creates the spool directory from its `-SpoolDir`
