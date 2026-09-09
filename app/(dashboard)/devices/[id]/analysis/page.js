@@ -10,7 +10,7 @@ import StatCard from '../../../../../components/ui/StatCard';
 import PageHeader from '../../../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../../../components/ui/Card';
 import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
-import FindingTypeBadge from '../../../../../components/analysis/FindingTypeBadge';
+import FindingTypeBadge, { TYPE_LABELS } from '../../../../../components/analysis/FindingTypeBadge';
 import RunAnalysisButton from '../../../../../components/analysis/RunAnalysisButton';
 import FindingsBarChart from '../../../../../components/analysis/FindingsBarChart';
 import RuleStatsBarChart from '../../../../../components/analysis/RuleStatsBarChart';

@@ -57,8 +57,15 @@ function exportedNames(file) {
 }
 
 describe('pages and components import what they use', () => {
+  // ⛔ components/ IS A SOURCE OF EXPORTS TOO, not just a consumer. This walked
+  // only lib/, so a name exported by a COMPONENT was never in the set to check
+  // against — and that is exactly how TYPE_LABELS (exported by
+  // components/analysis/FindingTypeBadge.js, used by the device analysis page)
+  // shipped without its import and threw ReferenceError on every visit to the
+  // findings tab. The guard existed and its scope was too narrow.
   const libFiles = [
     ...walk(path.join(REPO, 'lib')),
+    ...walk(path.join(REPO, 'components')),
   ].filter((f) => !f.includes(`${path.sep}adapters${path.sep}`));
 
   const exported = new Map(); // name -> defining file (first wins)
@@ -94,9 +101,29 @@ describe('pages and components import what they use', () => {
         .replace(/'(?:\\.|[^'\\])*'/g, "''")
         .replace(/"(?:\\.|[^"\\])*"/g, '""');
       const missing = [];
-      for (const [name] of exported) {
+      for (const [name, definedIn] of exported) {
+        // ⛔ A file is never checked against a name IT ITSELF exports. Once
+        // components/ became an export SOURCE as well as a consumer, every
+        // module that uses its own constant (vendorMeta.js reading
+        // VENDOR_META) looked like a missing import. This is an exact test
+        // against the defining file, not another heuristic.
+        //
+        // It also sidesteps a real weakness: the comment/string stripper above
+        // mangles some files badly enough that a genuine `export const NAME`
+        // disappears from `src`, so the "declared locally" regex below cannot
+        // see it. That weakness can still cause a FALSE NEGATIVE elsewhere —
+        // it is a known limit of this guard, not a solved problem.
+        if (definedIn === file) continue;
         // Mentioned as a bare identifier (call, JSX use, or reference)?
-        const used = new RegExp(`(^|[^\\w$.'"\`])${name}\\s*[({.]`).test(src);
+        //
+        // ⛔ `[` IS IN THIS SET AND MUST STAY. It was omitted, and that is a
+        // systematic blind spot rather than a typo: a lookup MAP — which is
+        // most of what this codebase exports as a constant — is consumed as
+        // TYPE_LABELS[key], not TYPE_LABELS( or TYPE_LABELS. . So every
+        // *_LABELS / *_MAP / *_COLOR export was invisible to this guard.
+        // Missing that let TYPE_LABELS ship without its import and throw
+        // ReferenceError on every visit to the device findings tab.
+        const used = new RegExp(`(^|[^\\w$.'"\`])${name}\\s*[({.[]`).test(src);
         if (!used) continue;
         // Imported, destructured, or defined locally in this same file?
         const declared = new RegExp(
