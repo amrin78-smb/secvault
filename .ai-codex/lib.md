@@ -1231,3 +1231,52 @@ Runs in the ENGINE (`device-discovery`, hourly at :35, offset from `log-hit` at 
 collector — nothing goes in a path handling 250-1,400 events/sec for a feature producing ~8 rows an
 hour, and "seen across >= 2 distinct hours" is a rollup question an in-memory accumulator would lose
 on every deploy restart.
+
+## `lib/syslog/authOutcomes.js` + `lib/syslog/vpnAuthStats.js` (added 2026-09-09)
+
+VPN login locations — "where are users logging in from, and which are attacks".
+
+⛔ THREE-STATE. `classifyAuthOutcome()` returns `success|failure|null`, and null ("not an
+authentication event") is the answer for ~95% of VPN rows: IPsec negotiation, HIP checks,
+tunnel-latency reports, pre-login page fetches.
+
+⛔ THE TRAP THAT MAKES THIS A MODULE: PAN-OS writes `status=success` on rows that are NOT logins.
+`portal-prelogin`/`before-login` carried success on 3,399 rows in three hours — the portal serving
+its page to an anonymous browser, carrying no username. `gateway-connected`/`gateway-register`/
+`gateway-setup-ipsec` also carry success and are later stages of the SAME login. So the rule is
+gate on the EVENT ID first, then read status; reading status alone inflates successful logins by
+roughly an order of magnitude.
+
+⛔ COVERAGE IS LOPSIDED. Measured over 12h: Fortinet logged 2,037 `ssl-login-fail` against ~4
+successes — its SSL-VPN success logids are effectively absent, which is a DEVICE-SIDE logging
+setting. The UI renders that as "not reported", never 0, and shows NO fleet-wide success/failure
+ratio: it would be a Palo Alto ratio with Fortinet's failures in the denominator.
+
+Two attack rules, no score and no severity band (CLAUDE.md bans that class of unfounded escalation):
+  A `findUsernameSprayers()` — one address, >= 5 DISTINCT usernames, zero successes. The
+    discriminator is the username count, not failure volume: a user mistyping a password fails
+    against ONE username. Live separation was 18 vs 1.
+  B `findFailureOnlyCountries()` — a country with failures and no successes. ⛔ DISABLED unless a
+    vendor actually reported a success in the window; applied to Fortinet data it would flag every
+    country including Thailand, where the real users are.
+
+⛔ Private-range pseudo-countries are bucketed, never ranked: PAN-OS writes
+"172.16.0.0-172.31.255.255" into the country field and FortiOS writes "Reserved". Both are the
+vendor's own answer, kept verbatim, but neither is a location.
+
+Reads `syslog_vpn_auth_hourly`, NEVER raw `syslog_events` — the equivalent raw query was measured at
+85.6 SECONDS over 24h (the log_class index finds the rows; they are ~84k needles across a 26 GB
+partition, costing 38,502 cold reads).
+
+## `PAN_GLOBALPROTECT` map in `lib/syslog/vendorParsers.js` (added 2026-09-09)
+
+GlobalProtect's own positional map — eventId 8, stage 9, srcUser 12, srcRegion 13, publicIp 15,
+error 26, description 27, status 28 — VERIFIED against captured lines from TUM-FW-ACTIVE, counted
+field by field across three subtypes. Separate from PAN_COMMON because PAN_COMMON is not common past
+index 7; reading it here produced srcIp="vsys1" and application="SM-A066B-<hostid>".
+
+⛔ Index 27 is a QUOTED description genuinely containing commas ("Pre-tunnel latency: 34ms,
+Post-tunnel latency: 26ms"), so this must be read with splitCsv() — a naive split shifts the status
+at 28. ⛔ Index 4 is the Threat/Content type ("0"), NOT a subtype; the real one is the Event ID at 8.
+Fortinet VPN rows carry the peer as `remip=`, not `srcip=`, which is why src_ip was NULL on 100% of
+them.

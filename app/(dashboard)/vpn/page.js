@@ -11,6 +11,7 @@ import { summarizeVpnConfig } from '../../../lib/engines/vpnSummary';
 import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
 import TabBar from '../../../components/ui/TabBar';
 import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs } from '../../../lib/vpnTabs';
+import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
 
 export const dynamic = 'force-dynamic';
 
@@ -166,6 +167,13 @@ export default async function VpnFleetPage({ searchParams }) {
            its OWN param (`?evPage=`) so it cannot move in step with the
            config table -- see components/ui/Pagination's paramName note. */
         <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
+      )}
+
+      {tab === 'locations' && (
+        /* Where VPN logins come from, and which are failing. Reads the
+           syslog_vpn_auth_hourly rollup, never the raw table -- the equivalent
+           raw query was measured at 85.6 SECONDS over a 24h window. */
+        <VpnLoginLocations />
       )}
 
       {showStatus && (total === 0 ? (

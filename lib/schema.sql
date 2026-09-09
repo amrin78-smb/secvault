@@ -1346,6 +1346,13 @@ ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS threat_severity TEXT;
 -- See shouldKeepRawMessage() in lib/syslog/eventShape.js.
 ALTER TABLE syslog_events ALTER COLUMN message DROP NOT NULL;
 
+-- ⛔ Added 2026-09-09 for VPN login locations. CREATE TABLE IF NOT EXISTS
+-- guards TABLE creation only, never a column, so an already-deployed server
+-- needs this ALTER or the first query selecting it crashes with "column does
+-- not exist" -- and the CREATE TABLE body above would still LOOK correct in the
+-- diff, which is what makes this easy to repeat.
+ALTER TABLE syslog_events ADD COLUMN IF NOT EXISTS auth_outcome TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_syslog_events_device_time ON syslog_events (device_id, received_at DESC);
 
 -- ⛔ NO index on source_ip, dropped 2026-09-09 for the same measured reason as
@@ -1791,3 +1798,43 @@ CREATE TABLE IF NOT EXISTS device_syslog_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_device_syslog_sources_device_id
   ON device_syslog_sources(device_id);
+
+-- ===========================================================================
+-- VPN login locations (added 2026-09-09)
+-- ===========================================================================
+-- Where VPN logins come from, and which ones failed. Answers the "geoip / map"
+-- question with a ranked country view rather than a world map: ~21 countries,
+-- recharts has no geographic component, and a map cannot show the
+-- success/failure ratio per country that is the actual question.
+--
+-- ⛔ A ROLLUP IS MANDATORY. The equivalent question against raw syslog_events
+-- was measured at 85.6 SECONDS for a 24h window — the log_class index finds the
+-- rows, but they are ~84k needles scattered across a 26 GB daily partition, so
+-- it costs 38,502 cold random reads. The index does not save you.
+--
+-- ⛔ `usernames` is an ARRAY, not a distinct-count, and that is deliberate:
+-- COUNT(DISTINCT) is NOT additive across hours, so summing 24 hourly counts to
+-- answer "how many usernames did this address try today" over-counts badly.
+-- The attack rule needs a window-wide distinct, so the set must be retained.
+-- Capped, with usernames_truncated set when clipped, so a capped list can never
+-- read as a complete one.
+CREATE TABLE IF NOT EXISTS syslog_vpn_auth_hourly (
+  id                  BIGSERIAL PRIMARY KEY,
+  bucket_hour         TIMESTAMPTZ NOT NULL,
+  device_id           UUID REFERENCES devices(id) ON DELETE CASCADE,
+  vendor              TEXT,
+  src_country         TEXT,      -- the vendor's own word, verbatim
+  src_ip              INET,
+  auth_outcome        TEXT,      -- 'success' | 'failure' -- never NULL here
+  event_count         BIGINT NOT NULL DEFAULT 0,
+  usernames           TEXT[],
+  usernames_truncated BOOLEAN NOT NULL DEFAULT false,
+  first_seen_at       TIMESTAMPTZ,
+  last_seen_at        TIMESTAMPTZ,
+  -- NULLS NOT DISTINCT because src_country, src_ip and device_id are all
+  -- honestly nullable; without it every sweep inserts duplicates.
+  CONSTRAINT uq_syslog_vpn_auth_hourly UNIQUE NULLS NOT DISTINCT
+    (bucket_hour, device_id, vendor, src_country, src_ip, auth_outcome)
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_vpn_auth_hour
+  ON syslog_vpn_auth_hourly (bucket_hour DESC);

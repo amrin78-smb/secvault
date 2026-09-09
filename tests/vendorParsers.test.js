@@ -228,11 +228,23 @@ describe('vendorParsers: Palo Alto positional CSV', () => {
     const e = parsePaloAlto(gp);
     assert.equal(e.logType, 'GLOBALPROTECT');
     assert.equal(e.logClass, 'vpn', 'the row is still classified, just not mis-parsed');
+
+    // ⛔ CORRECTED 2026-09-09. These fields DO exist on a GlobalProtect row —
+    // at GlobalProtect's OWN indices (12/13/15), not PAN_COMMON's. The point
+    // was never "GP rows have no data", it was "do not read them at TRAFFIC's
+    // positions", which is what produced srcIp="vsys1" and
+    // application="SM-A066B-<hostid>".
+    assert.equal(e.srcUser, 'eng_itc_adisakc', 'index 12');
+    assert.equal(e.srcCountry, 'TH', 'index 13');
+    assert.equal(e.srcIp, '49.230.93.232', 'index 15 — the client public address');
+
+    // These have no GlobalProtect mapping at all, so they must stay null
+    // rather than borrowing a TRAFFIC index.
     for (const field of [
-      'srcIp', 'dstIp', 'application', 'srcZone', 'dstZone',
-      'srcUser', 'ruleName', 'vdom', 'srcInterface', 'dstInterface',
+      'dstIp', 'application', 'srcZone', 'dstZone',
+      'ruleName', 'vdom', 'srcInterface', 'dstInterface',
     ]) {
-      assert.equal(e[field], null, `${field} must be null on an unverified log type`);
+      assert.equal(e[field], null, `${field} has no GlobalProtect mapping and must be null`);
     }
   });
 

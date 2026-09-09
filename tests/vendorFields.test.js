@@ -259,3 +259,89 @@ describe('⛔ PAN threat rows: the signature name, not the category', () => {
     assert.equal(e.urlCategory, 'block-Deny Web-O365', 'its category is still kept');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// VPN authentication outcomes (added 2026-09-09)
+// ─────────────────────────────────────────────────────────────────────────
+
+const { classifyAuthOutcome } = require('../lib/syslog/authOutcomes');
+const {
+  isPrivateCountry,
+  findUsernameSprayers,
+  findFailureOnlyCountries,
+} = require('../lib/syslog/vpnAuthStats');
+
+it('⛔ a pre-login page fetch is not a successful login', () => {
+  // THE trap, verified live: PAN-OS writes status=success on portal-prelogin
+  // rows — the portal serving its page to an anonymous browser, 3,399 of them
+  // in three hours, carrying no username. Reading status without gating on the
+  // event id inflates "successful logins" by roughly an order of magnitude.
+  assert.equal(classifyAuthOutcome('paloalto', 'portal-prelogin', 'success', null), null);
+  // Post-auth stages of the SAME login must not each count as a login either.
+  for (const evt of ['gateway-connected', 'gateway-register', 'gateway-hip-check']) {
+    assert.equal(classifyAuthOutcome('paloalto', evt, 'success', null), null, evt);
+  }
+  // A genuine authentication does count.
+  assert.equal(classifyAuthOutcome('paloalto', 'gateway-auth', 'success', null), 'success');
+  assert.equal(classifyAuthOutcome('paloalto', 'portal-auth', 'failure', null), 'failure');
+});
+
+it('an unrecognised status on a real auth event is unknown, not a failure', () => {
+  assert.equal(classifyAuthOutcome('paloalto', 'gateway-auth', 'weird', null), null);
+});
+
+it('Fortinet SSL-VPN outcomes come from action', () => {
+  assert.equal(classifyAuthOutcome('fortinet', null, null, 'ssl-login-fail'), 'failure');
+  assert.equal(classifyAuthOutcome('fortinet', null, null, 'ssl-login'), 'success');
+  // IPsec lifecycle chatter is not an authentication at all.
+  for (const a of ['negotiate', 'install_sa', 'tunnel-stats', 'ssl-alert', 'ssl-new-con']) {
+    assert.equal(classifyAuthOutcome('fortinet', null, null, a), null, a);
+  }
+});
+
+it('a vendor with no parser classifies nothing rather than guessing', () => {
+  assert.equal(classifyAuthOutcome('checkpoint', 'x', 'success', 'y'), null);
+});
+
+it('⛔ private-range pseudo-countries are not countries', () => {
+  // PAN-OS writes the RFC1918 range into the country field and FortiOS writes
+  // "Reserved". Both are the vendor's own answer and are stored verbatim — but
+  // letting one top a "top countries" ranking would be nonsense.
+  for (const c of ['172.16.0.0-172.31.255.255', '10.0.0.0-10.255.255.255', 'Reserved']) {
+    assert.equal(isPrivateCountry(c), true, c);
+  }
+  for (const c of ['Thailand', 'US', 'United States', null, '']) {
+    assert.equal(isPrivateCountry(c), false, String(c));
+  }
+});
+
+it('the spray rule keys on DISTINCT USERNAMES, not failure volume', () => {
+  // A user mistyping a password fails many times against ONE username. The
+  // discriminator is the username count — live, the separation was 18 vs 1.
+  const flagged = findUsernameSprayers([
+    { srcIp: 'spray', failure: 19, success: 0, usernames: 18 },
+    { srcIp: 'fat-fingers', failure: 32, success: 0, usernames: 1 },
+    { srcIp: 'legit', failure: 9, success: 3, usernames: 9 },
+  ]).map((s) => s.srcIp);
+  assert.deepEqual(flagged, ['spray']);
+});
+
+it('⛔ the failure-only-country rule is DISABLED when a vendor reports no successes', () => {
+  // The most dangerous case in this feature. Fortinet on this fleet logs
+  // failures and essentially no successes, so "no success from country X" is
+  // not a measurement — applied naively it would flag EVERY country including
+  // Thailand, where the real users are.
+  const countries = [{ country: 'Thailand', located: true, failure: 500, success: 0 }];
+  const noSuccess = findFailureOnlyCountries(countries, [
+    { vendor: 'fortinet', success: 0, failure: 2037 },
+  ]);
+  assert.equal(noSuccess.evaluable, false);
+  assert.deepEqual(noSuccess.rows, []);
+
+  // With a vendor that DOES report successes, the rule becomes meaningful.
+  const withSuccess = findFailureOnlyCountries(countries, [
+    { vendor: 'paloalto', success: 388, failure: 2900 },
+  ]);
+  assert.equal(withSuccess.evaluable, true);
+  assert.equal(withSuccess.rows.length, 1);
+});

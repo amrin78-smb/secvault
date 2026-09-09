@@ -152,7 +152,7 @@ describe('detail rollups: rebuilt in the same window as the permanent ones', () 
     }
     // The DELETEs still take the bounds, and they must all agree.
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    assert.equal(windowed.length, 10, 'one temp-table scan + one DELETE per rollup');
+    assert.equal(windowed.length, 11, 'one temp-table scan + one DELETE per rollup');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), FROM.getTime());
       assert.equal(c.params[1].getTime(), TO.getTime());
@@ -202,7 +202,7 @@ describe('detail rollups: retention', () => {
     assert.deepEqual(Object.keys(out.deleted).sort(), [
       'syslog_app_hourly', 'syslog_blocked_dst_hourly', 'syslog_country_hourly',
       'syslog_device_inbound_hourly', 'syslog_talker_hourly', 'syslog_urlcat_hourly',
-      'syslog_user_hourly',
+      'syslog_user_hourly', 'syslog_vpn_auth_hourly',
     ]);
     for (const c of pool.calls) {
       assert.match(c.sql, /^DELETE FROM syslog_/);

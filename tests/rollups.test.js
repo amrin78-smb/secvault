@@ -29,7 +29,8 @@ const NOW = new Date('2026-09-08T14:37:12.500Z');
 // sweep succeeded. Bump this deliberately when adding one.
 // 8 -> 9 on 2026-09-08: syslog_device_inbound_hourly, the Internet Exposure /
 // log_hit input (lib/syslog/rollups.js INBOUND_INSERT).
-const ROLLUP_COUNT = 9;
+// 9 -> 10 on 2026-09-09: syslog_vpn_auth_hourly, the VPN login-locations input.
+const ROLLUP_COUNT = 10;
 
 describe('rollups: bucket boundaries are UTC hours', () => {
   it('floors to the start of the UTC hour', () => {

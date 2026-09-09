@@ -124,6 +124,10 @@ describe('⛔ every stored column is reachable from a real log line', () => {
     bytes_received: 'same',
     device_id: 'the fixture deliberately passes an unmatched sender',
     program: 'FortiOS opens with the PRI then bare key=value — there is no syslog tag',
+    auth_outcome:
+      'this fixture is a utm row, not a VPN authentication — auth_outcome is ' +
+      'deliberately null outside log_class=vpn, and the GlobalProtect tests ' +
+      'below cover the populated case end to end',
   };
 
   it('populates every column that this vendor line can populate', () => {
@@ -286,4 +290,72 @@ it('malformed IPv4 is null rather than a coerced guess', () => {
   for (const v of ['999.1.1.1', '1.2.3', 'not-an-ip', 'N/A', '', null, undefined]) {
     assert.equal(toInetOrNull(v), null, String(v));
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// VPN auth outcome — the three-hop guard, applied to a new column
+// ─────────────────────────────────────────────────────────────────────────
+//
+// A field must survive parser -> buildEvent -> eventStore COLUMNS/flattenRow.
+// Miss one hop and nothing throws; the column just stores NULL, which is
+// indistinguishable from "the device never sent it". That is precisely how
+// 360,025 events were written with eight null columns on 2026-09-08.
+
+const { parseSyslogLine: parseFrame } = require('../lib/syslog/syslogParser');
+const { parseVendorPayload: parsePayload } = require('../lib/syslog/vendorParsers');
+const { COLUMNS: STORE_COLUMNS, flattenRow: toRow } = require('../lib/syslog/eventStore');
+
+// A real GlobalProtect authentication failure, in the exact shape captured
+// live from TUM-FW-ACTIVE.
+const GP_AUTH_FAIL =
+  '1,2026/09/09 08:03:37,023001020713,GLOBALPROTECT,0,2817,2026/09/09 08:03:37,vsys1,' +
+  'gateway-auth,login,,,jdoe,BG,,93.152.210.31,0.0.0.0,0.0.0.0,0.0.0.0,,,,,,1,,,' +
+  '"Authentication failed: Invalid username or password",failure,,0,,0,GW';
+
+// The pre-login page fetch that carries status=success and is NOT a login.
+const GP_PRELOGIN =
+  '1,2026/09/09 08:03:37,023001020713,GLOBALPROTECT,0,2817,2026/09/09 08:03:37,vsys1,' +
+  'portal-prelogin,before-login,,,,US,,145.79.182.14,0.0.0.0,0.0.0.0,0.0.0.0,,,Browser,' +
+  'Browser,,1,,,,success,,0,,0,SSLVPN-PORTAL';
+
+function storeRow(line) {
+  const raw = { line, sourceIp: '1.2.3.4', receivedAt: new Date('2026-09-09T01:03:37Z') };
+  const frame = parseFrame(line, raw.receivedAt);
+  const payload = parsePayload(frame.message);
+  const row = toRow(buildEvent(raw, frame, payload, null, 'security'));
+  const get = (c) => row[STORE_COLUMNS.indexOf(c)];
+  return { get };
+}
+
+it('⛔ a GlobalProtect auth failure survives all three hops', () => {
+  const r = storeRow(GP_AUTH_FAIL);
+  assert.equal(r.get('auth_outcome'), 'failure');
+  // These four were ALL null before the GlobalProtect map existed, because
+  // PAN_COMMON was gated off for this log type and GP uses different indices.
+  assert.equal(r.get('src_country'), 'BG');
+  assert.equal(r.get('src_user'), 'jdoe');
+  assert.equal(r.get('src_ip'), '93.152.210.31');
+  assert.equal(r.get('log_class'), 'vpn');
+  // ⛔ index 4 is the Threat/Content type ("0") on GP rows; the real subtype is
+  // the Event ID at index 8.
+  assert.equal(r.get('log_subtype'), 'gateway-auth');
+});
+
+it('⛔ a pre-login page fetch is NOT a successful login', () => {
+  // THE trap. PAN-OS writes status=success on portal-prelogin rows — the portal
+  // serving its page to an anonymous browser, 3,399 of them in three hours.
+  // Reading status without gating on the event id inflates "successful logins"
+  // by roughly an order of magnitude. The tell is the absent username.
+  const r = storeRow(GP_PRELOGIN);
+  assert.equal(r.get('auth_outcome'), null, 'pre-login must not count as a login');
+  assert.equal(r.get('src_user'), null);
+  // It is still stored, and still located — it just is not an authentication.
+  assert.equal(r.get('src_country'), 'US');
+  assert.equal(r.get('log_class'), 'vpn');
+});
+
+it('auth_outcome is a real stored column, not just a parsed field', () => {
+  // Guards the hop that has been missed before: the column must exist in
+  // COLUMNS, or flattenRow silently drops the value.
+  assert.ok(STORE_COLUMNS.includes('auth_outcome'));
 });

@@ -130,3 +130,5 @@ GRANT SELECT ON TABLE discovered_devices TO claude_readonly;
 GRANT SELECT ON TABLE discovered_devices TO nocvault_readonly;
 GRANT SELECT ON TABLE device_syslog_sources TO claude_readonly;
 GRANT SELECT ON TABLE device_syslog_sources TO nocvault_readonly;
+GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO claude_readonly;
+GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO nocvault_readonly;
