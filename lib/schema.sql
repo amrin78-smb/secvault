@@ -2125,3 +2125,53 @@ CREATE INDEX IF NOT EXISTS idx_rcri_request ON rule_change_request_items (reques
 -- pull failed for a week still looks freshly collected. Stamped by
 -- collectAndStore ONLY when getRules() returned successfully.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_rules_collected_at TIMESTAMPTZ;
+
+-- ─────────────────────────────────────────
+-- BACKGROUND JOBS (v2.94.0)
+-- ─────────────────────────────────────────
+
+-- Work that must not run on the request path. Two things forced this:
+--
+-- 1. Deleting a device rewrites every syslog row it owns (3.35M for one live
+--    device, across 47 GB of partitions) and holds an exclusive row lock on
+--    `devices` the whole time — which the COLLECTOR needs a KEY SHARE lock on
+--    to insert any event for that device. So a synchronous delete stalls log
+--    ingestion, and the operator sees a dead button for minutes.
+-- 2. Collect Now runs getVersion + getRules + getConfig in sequence, each with
+--    its own adapter timeout (PAN-OS budgets 120s for getConfig alone).
+--
+-- ⛔ Jobs are executed by services/engine-worker.js, NOT by the App process.
+-- The App may be restarted by a deploy at any moment, and a half-finished
+-- delete owned by a dead request is exactly the state nothing can report on.
+CREATE TABLE IF NOT EXISTS background_jobs (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_type         TEXT NOT NULL,
+  device_id        UUID REFERENCES devices(id) ON DELETE SET NULL,
+  -- queued -> running -> (succeeded | failed | cancelled)
+  -- ⛔ Nothing may set 'succeeded' implicitly. A job that vanished (worker
+  -- killed mid-run) is reaped to 'failed' with a reason, never left 'running'
+  -- and never assumed to have worked — the same failed-read-as-a-fact rule the
+  -- rest of this schema is built on.
+  status           TEXT NOT NULL DEFAULT 'queued',
+  -- ⛔ TRI-STATE, both nullable. NULL total means "the size is not known yet",
+  -- NOT zero — a progress bar that renders unknown as 0/0 reads as "finished".
+  progress_current BIGINT,
+  progress_total   BIGINT,
+  detail           TEXT,
+  error            TEXT,
+  requested_by     TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at       TIMESTAMPTZ,
+  finished_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_background_jobs_pending
+  ON background_jobs (created_at) WHERE status IN ('queued', 'running');
+CREATE INDEX IF NOT EXISTS idx_background_jobs_device
+  ON background_jobs (device_id, created_at DESC);
+
+-- ⛔ At most ONE live job per (type, device). Without this, a double-click
+-- enqueues two deletes — which is exactly what happened live on 2026-09-09:
+-- the second DELETE queued behind the first and both were doomed. A partial
+-- unique index is the guarantee; app-level checks are the convenience.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_background_jobs_live
+  ON background_jobs (job_type, device_id) WHERE status IN ('queued', 'running');

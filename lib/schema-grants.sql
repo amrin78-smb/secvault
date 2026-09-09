@@ -158,3 +158,6 @@ GRANT SELECT ON TABLE rule_change_requests TO claude_readonly;
 GRANT SELECT ON TABLE rule_change_requests TO nocvault_readonly;
 GRANT SELECT ON TABLE rule_change_request_items TO claude_readonly;
 GRANT SELECT ON TABLE rule_change_request_items TO nocvault_readonly;
+
+GRANT SELECT ON TABLE background_jobs TO claude_readonly;
+GRANT SELECT ON TABLE background_jobs TO nocvault_readonly;
