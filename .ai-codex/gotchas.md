@@ -220,6 +220,40 @@ category, so Top Threats showed `any` where it should have named the malware. No
 **Lesson:** one captured sample of one subtype cannot validate a positional map. Both a
 url-filtering row AND a real IPS row are now fixtures in `tests/vendorFields.test.js`.
 
+## A range-based text edit silently deletes whatever sits inside the range (2026-09-09)
+
+⛔ The v2.88.0 chart-grammar merge collapsed two modules by cutting text BETWEEN TWO MARKERS
+(`cut(src, 'export const TOOLTIP_SURFACE', '// Hover affordance')`). A constant that happened to
+live inside one of those ranges — `TOOLTIP_LABEL_STYLE` — went with it, and the dashboard threw
+
+```
+ReferenceError: TOOLTIP_LABEL_STYLE is not defined
+```
+
+the moment a chart tooltip rendered on `/?tab=security`.
+
+**Every static gate passed.** `npm run build` compiled cleanly, `jsxSyntax.test.js` parsed every
+file, `importIntegrity.test.js` was satisfied, `sqlColumns.test.js` was satisfied. A reference to a
+deleted MODULE-SCOPE identifier inside a component body is invisible to all of them, because it is
+only evaluated when that component actually renders. Same shape as the `completed_at` outage the
+same day: a wrong column name is invisible until the query runs.
+
+⛔ **Prefer replacing an exact known block over cutting a range.** A range edit cannot tell you what
+it removed. If a range really is necessary, print or diff the removed text and read it.
+
+⛔ **A general "no-undef" lint was attempted and DELIBERATELY NOT SHIPPED.** A narrow version keyed
+on SCREAMING_SNAKE identifiers in code positions produced **187 false positives** across the repo —
+acronyms in JSX prose (`CVSS`, `NAT`, `PCI_DSS`), plus real corruption from trying to strip JSX text
+with a `>...<` range (in a plain `.js` file `>` and `<` are operators, so that strip deletes code and
+invents undefined names). A lint that noisy gets switched off, which costs more than the coverage it
+buys. Doing it properly needs real scope analysis over the swc AST, which is ESLint's job. Until
+then the gate for this class is **loading the page**.
+
+The one-off scanner used to find the damage is worth re-creating ad hoc after any shared-module
+refactor: strip comments and strings, collect `const|let|var|function|class NAME` plus imports and
+destructures, then report SCREAMING_SNAKE names used in `={NAME}` / `...NAME` / `NAME.` positions
+that are not declared. Run it over the changed files only — repo-wide it is unusable.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

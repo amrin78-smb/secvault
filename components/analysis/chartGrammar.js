@@ -46,6 +46,9 @@ import {
   AXIS_TICK,
   GRID_PROPS,
   TOOLTIP_SURFACE,
+  // Hover affordance. A bar chart gets a faint filled column, a line chart
+  // a vertical hairline — neither in a status hue, so neither can be
+  // mistaken for data.
   TOOLTIP_CURSOR_BAR,
   TOOLTIP_CURSOR_LINE,
   LEGEND_PROPS,
@@ -80,12 +83,24 @@ export const COUNT_AXIS_PROPS = {
   allowDecimals: false,
 };
 
-/* ── Grid ──────────────────────────────────────────────────────────────
-   Horizontal only. Vertical grid lines on a categorical axis imply the
-   categories are ordered on a continuous scale, which none of these are. */
 /* ── Tooltip ──────────────────────────────────────────────────────────── */
-// Hover affordance. A bar chart gets a faint filled column, a line chart a
-// vertical hairline — both in --border so neither can be mistaken for data.
+
+// The heading line inside a tooltip (the x-axis label for the hovered
+// point). Separated from the rows below it by weight and colour rather than
+// a rule, so a two-line tooltip does not need a divider.
+//
+// ⛔ RESTORED after being deleted by accident during the chartGrammar
+// collapse: the merge removed a RANGE between two markers, and this
+// constant happened to sit inside that range. `npm run build` passed, both
+// lint tests passed, and the dashboard threw a ReferenceError the moment a
+// tooltip rendered — a component-scope identifier that no longer exists is
+// invisible to every static gate this repo has -- see gotchas.md.
+const TOOLTIP_LABEL_STYLE = {
+  marginBottom: 'var(--s1)',
+  fontWeight: 600,
+  color: 'var(--text-primary)',
+};
+
 export function ChartTooltip({
   active,
   payload,
