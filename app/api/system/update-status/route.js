@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.86.1': [
+    "Fixed: the dashboard home page returned a server-side exception for every user. Its feed-freshness strip queried feed_sync_log.completed_at; the column is named finished_at, so every render of / failed.",
+    "The same wrong column name was in lib/formatDisplay.js newestFeedAt(), which the strip uses to pick the newest sync time.",
+  ],
   '2.81.0': [
     'New Internet Exposure page. It lists what is reachable from the internet on every firewall: the public address, the service, the internal host behind any destination NAT, and the rule that permits it.',
     'Each path says whether traffic was actually observed arriving from a public source, so you can tell a live exposure from an open but unused one.',

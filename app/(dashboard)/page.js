@@ -105,7 +105,7 @@ export const dynamic = 'force-dynamic';
 // tab"; showing the best of four as the state of four does the opposite.
 async function getLastFeedSync(dbPool) {
   const result = await dbPool.query(
-    `SELECT DISTINCT ON (feed_name) feed_name, status, started_at, completed_at
+    `SELECT DISTINCT ON (feed_name) feed_name, status, started_at, finished_at
        FROM feed_sync_log
       ORDER BY feed_name, started_at DESC`
   );
@@ -309,7 +309,7 @@ export default async function DashboardPage({ searchParams }) {
                   key={f.feed_name}
                   color={syncBadgeColor(f.status)}
                   title={`${FEED_LABELS[f.feed_name] || f.feed_name}: ${f.status} at ${
-                    formatDateTime(f.completed_at || f.started_at) || 'unknown time'
+                    formatDateTime(f.finished_at || f.started_at) || 'unknown time'
                   }`}
                 >
                   {FEED_LABELS[f.feed_name] || f.feed_name}
