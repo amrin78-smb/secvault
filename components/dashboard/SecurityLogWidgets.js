@@ -10,6 +10,7 @@ import {
   getTopTargets,
   getTopThreats,
   getThreatsBySeverity,
+  getThreatCoverage,
   getDeviceThreatSummary,
 } from '../../lib/syslog/threatStats';
 
@@ -57,6 +58,40 @@ function Empty({ children }) {
   return <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>{children}</div>;
 }
 
+// ⛔ AN EMPTY RESULT IS TWO DIFFERENT FACTS AND THEY MUST NOT SHARE A SENTENCE.
+//
+// Every widget here reads syslog_threat_hourly. An unpopulated rollup answers
+// all of them with a confident zero — "no attackers", "no threats", "0
+// critical" — which is a security dashboard asserting calm because its own
+// aggregation has not run. Not hypothetical: that was the live state for the
+// first minutes after the rollup shipped, before the first sweep.
+//
+// getThreatCoverage() answers it from syslog_rollup_hourly, which the SAME
+// sweep writes in the SAME transaction — so a bucket there proves the hour
+// was aggregated, and a zero over an aggregated hour is a real measurement.
+function ThreatEmpty({ coverage, measured }) {
+  if (coverage && coverage.evaluable) {
+    return (
+      <Empty>
+        {measured}
+        {coverage.aggregatedHours < coverage.windowHours && (
+          <span style={{ display: 'block', marginTop: 'var(--s1)', fontSize: 'var(--text-sm)' }}>
+            Threat aggregation currently covers {coverage.aggregatedHours} of the last{' '}
+            {coverage.windowHours} hours.
+          </span>
+        )}
+      </Empty>
+    );
+  }
+  return (
+    <div style={{ fontSize: 'var(--text-base)', color: 'var(--unmeasured)' }}>
+      Not measured — no syslog has been aggregated for this window yet, so this is
+      <strong> not</strong> a report of zero threats. It fills in once the collector&rsquo;s
+      next rollup sweep completes.
+    </div>
+  );
+}
+
 // Rank -> tone. Only ranks the mapper produced; nothing is inferred.
 // Severity ALIASES, never raw hues: these ARE the severity ramp, so they have
 // to move with it. Rank 2 ("low") is now slate rather than blue — blue is off
@@ -79,7 +114,10 @@ function logsHref(params) {
 // ---------------------------------------------------------------------------
 
 export async function TopAttackersWidget() {
-  const rows = await getTopAttackers(pool, 24, 8);
+  const [rows, coverage] = await Promise.all([
+    getTopAttackers(pool, 24, 8),
+    getThreatCoverage(pool, 24),
+  ]);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
 
   return (
@@ -92,7 +130,7 @@ export async function TopAttackersWidget() {
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
-          <Empty>No threat events with a source address in the last 24 hours.</Empty>
+          <ThreatEmpty coverage={coverage} measured="No threat events with a source address in the last 24 hours." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {rows.map((r) => (
@@ -132,7 +170,10 @@ export async function TopAttackersWidget() {
 }
 
 export async function TopTargetsWidget() {
-  const rows = await getTopTargets(pool, 24, 8);
+  const [rows, coverage] = await Promise.all([
+    getTopTargets(pool, 24, 8),
+    getThreatCoverage(pool, 24),
+  ]);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
 
   return (
@@ -145,7 +186,7 @@ export async function TopTargetsWidget() {
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
-          <Empty>No threat events with a destination address in the last 24 hours.</Empty>
+          <ThreatEmpty coverage={coverage} measured="No threat events with a destination address in the last 24 hours." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {rows.map((r) => (
@@ -177,7 +218,10 @@ export async function TopTargetsWidget() {
 }
 
 export async function TopThreatsWidget() {
-  const rows = await getTopThreats(pool, 24, 8);
+  const [rows, coverage] = await Promise.all([
+    getTopThreats(pool, 24, 8),
+    getThreatCoverage(pool, 24),
+  ]);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
 
   return (
@@ -236,7 +280,10 @@ export async function TopThreatsWidget() {
 }
 
 export async function ThreatSeverityWidget() {
-  const { levels, unranked, unreported } = await getThreatsBySeverity(pool, 24);
+  const [{ levels, unranked, unreported }, coverage] = await Promise.all([
+    getThreatsBySeverity(pool, 24),
+    getThreatCoverage(pool, 24),
+  ]);
   const total = levels.reduce((n, l) => n + l.events, 0);
 
   return (
@@ -249,7 +296,7 @@ export async function ThreatSeverityWidget() {
       </CardHeader>
       <CardBody>
         {levels.length === 0 && unranked === 0 && unreported === 0 ? (
-          <Empty>No threat events in the last 24 hours.</Empty>
+          <ThreatEmpty coverage={coverage} measured="No threat events in the last 24 hours." />
         ) : (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
