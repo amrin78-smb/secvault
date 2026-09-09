@@ -169,7 +169,15 @@ test('no curated conditions means no work and no syslog scan at all', async () =
   assert.ok(!pool.calls.some((c) => c.sql.includes('syslog_events')));
 });
 
-test('a device with no syslog coverage is SKIPPED, not written false', async () => {
+// ⛔ Both skip cases below asserted "no UPDATE was issued at all" until
+// 2026-09-09, because the column was NOT NULL DEFAULT false and "issue no
+// write" was the only way to avoid recording a fabricated `false`. It was half
+// a fix: it also left whatever a previous run concluded standing as if it were
+// still true today. log_hit is tri-state now, so the skip WRITES NULL — the
+// invariant these two protect is unchanged (never a `false`), only its
+// expression. Full three-state coverage lives in tests/logHitTriState.test.js.
+
+test('a device with no syslog coverage is UNMEASURED, not written false', async () => {
   // ⛔ The failed-read-as-a-fact case. "We were not listening" must never be
   // recorded as "nothing reached it".
   const pool = makePool(
@@ -181,10 +189,13 @@ test('a device with no syslog coverage is SKIPPED, not written false', async () 
   const s = await runLogHitCorrelation(pool);
   assert.equal(s.devicesSkippedNoCoverage, 1);
   assert.equal(s.setFalse, 0);
-  assert.ok(!pool.calls.some((c) => c.sql.includes('SET log_hit')));
+  assert.equal(s.setUnmeasured, 1);
+  const wrote = pool.calls.filter((c) => c.sql.includes('SET log_hit'));
+  assert.equal(wrote.length, 1);
+  assert.equal(wrote[0].params[0], null, 'the stale true must be withdrawn as NULL, never false');
 });
 
-test('a device with no collected interfaces is SKIPPED, not written false', async () => {
+test('a device with no collected interfaces is UNMEASURED, not written false', async () => {
   // Without the device's own addresses we cannot tell traffic TO it from
   // traffic THROUGH it, so there is no measurement to record either way.
   const pool = makePool(
@@ -196,7 +207,10 @@ test('a device with no collected interfaces is SKIPPED, not written false', asyn
   const s = await runLogHitCorrelation(pool);
   assert.equal(s.devicesSkippedNoInterfaces, 1);
   assert.equal(s.setFalse, 0);
-  assert.ok(!pool.calls.some((c) => c.sql.includes('SET log_hit')));
+  assert.equal(s.setUnmeasured, 1);
+  const wrote = pool.calls.filter((c) => c.sql.includes('SET log_hit'));
+  assert.equal(wrote.length, 1);
+  assert.equal(wrote[0].params[0], null, 'the stale true must be withdrawn as NULL, never false');
 });
 
 test('a covered device with no reach clears a stale true', async () => {

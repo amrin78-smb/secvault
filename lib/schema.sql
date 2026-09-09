@@ -946,6 +946,21 @@ CREATE TABLE IF NOT EXISTS advisories (
   kev_date TIMESTAMPTZ,
   published_at TIMESTAMPTZ,
   affected_version_ranges JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- ⛔ WHY AN EMPTY affected_version_ranges IS AMBIGUOUS, and this column
+  -- resolves it. versionMatcher's `if (!versionAffected) continue;` cannot
+  -- tell "the source declared no affected version" from "we could not
+  -- extract the ranges at all" — so a failed extraction was stored, and
+  -- later read, as an affirmative "this device is not affected".
+  --   matched        ranges were extracted (or the source genuinely
+  --                  declared none) — an empty list here is an ANSWER
+  --   other_product  the record is about a different product; correctly
+  --                  not applicable to this vendor's devices
+  --   unmatchable    the record DECLARES affected versions but none could
+  --                  be extracted — an empty list here is a FAILED READ
+  --                  and must never be scored as "not affected"
+  --   NULL           ingested before this column existed and not yet
+  --                  reclassified
+  matchability TEXT,
   fixed_in_versions JSONB NOT NULL DEFAULT '[]'::jsonb,
   advisory_url TEXT,
   raw_data JSONB,
@@ -1011,7 +1026,26 @@ CREATE TABLE IF NOT EXISTS device_cve_assessments (
   version_affected BOOLEAN NOT NULL DEFAULT false,
   config_applies VARCHAR(10) NOT NULL DEFAULT 'unknown', -- 'yes' | 'no' | 'unknown'
   kev_listed BOOLEAN NOT NULL DEFAULT false,
-  log_hit BOOLEAN NOT NULL DEFAULT false,
+  -- ⛔ TRI-STATE, and NULL is the resting state, not false.
+  --   true   the vulnerable service was REACHED on this device from the
+  --          internet (all four conditions in CLAUDE.md's log_hit rule)
+  --   false  MEASURED, and not reached
+  --   NULL   NOT MEASURED — lib/engines/logHit.js deliberately writes
+  --          nothing for a device with no syslog coverage in the window,
+  --          or with no collected device_interfaces rows (without which
+  --          traffic TO the device cannot be told from traffic THROUGH it)
+  --
+  -- ⛔ It was NOT NULL DEFAULT false until 2026-09-09, which made the
+  -- engine's documented skip UNREPRESENTABLE: both skip branches left the
+  -- row alone, and the row was born `false`, so "never measured" and
+  -- "measured, not reached" were the same stored value. Harmless while
+  -- nothing rendered it — priority tree rule 2 only escalates on true —
+  -- but it is the same failed-read-as-a-fact shape as hit_count's old
+  -- DEFAULT 0, and the first UI to show it would have inherited the lie.
+  --
+  -- ⛔ No default. A row created without an explicit value is unmeasured,
+  -- which is the truth at insert time.
+  log_hit BOOLEAN,
   priority_band VARCHAR(20) NOT NULL DEFAULT 'monitor', -- 'patch_now' | 'scheduled' | 'monitor'
   fixed_in TEXT,
   is_fixed_recommended BOOLEAN NOT NULL DEFAULT false,
@@ -2125,6 +2159,24 @@ CREATE INDEX IF NOT EXISTS idx_rcri_request ON rule_change_request_items (reques
 -- pull failed for a week still looks freshly collected. Stamped by
 -- collectAndStore ONLY when getRules() returned successfully.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_rules_collected_at TIMESTAMPTZ;
+
+-- ⛔ Column changes need an explicit ALTER: CREATE TABLE IF NOT EXISTS
+-- guards table creation only, so an already-deployed server keeps the old
+-- shape forever without these.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS matchability TEXT;
+CREATE INDEX IF NOT EXISTS idx_advisories_matchability
+  ON advisories (matchability) WHERE matchability IS DISTINCT FROM 'matched';
+
+-- ⛔ Making log_hit nullable is what makes "not measured" storable at all.
+-- Dropping the DEFAULT matters as much as dropping NOT NULL: with the
+-- default still in place a new row would be born `false` and the engine's
+-- skip would still be unrepresentable.
+-- Existing `false` rows are LEFT AS THEY ARE. They cannot be reclassified
+-- after the fact — nothing recorded which of them were measured — and
+-- rewriting them all to NULL would discard real measurements alongside the
+-- fabricated ones. They correct themselves on the next [log-hit] run.
+ALTER TABLE device_cve_assessments ALTER COLUMN log_hit DROP NOT NULL;
+ALTER TABLE device_cve_assessments ALTER COLUMN log_hit DROP DEFAULT;
 
 -- ─────────────────────────────────────────
 -- BACKGROUND JOBS (v2.94.0)

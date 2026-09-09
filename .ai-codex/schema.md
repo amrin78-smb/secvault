@@ -1095,3 +1095,27 @@ observed the operator's change.
 ⛔ Never stamp it on a failed pull. `getRules()` throws rather than returning `[]` precisely so a
 failed pull cannot be mistaken for an empty ruleset; stamping on failure would resurrect that bug
 one level up, and in the direction that fabricates success.
+
+### advisories.matchability + device_cve_assessments.log_hit tri-state (v2.98.0)
+
+**`advisories.matchability`** — `matched` | `other_product` | `unmatchable` | NULL.
+⛔ It exists because an empty `affected_version_ranges` was AMBIGUOUS: `versionMatcher`’s
+`if (!versionAffected) continue;` could not tell "the source declared no affected version" from
+"we could not extract the ranges at all", so a failed extraction was stored, and later read, as an
+affirmative "this device is not affected". Partial index on the non-`matched` values.
+
+**`device_cve_assessments.log_hit` is now `BOOLEAN` with NO NOT NULL and NO DEFAULT.**
+⛔ Dropping the DEFAULT matters as much as dropping NOT NULL — with it in place a new row is born
+`false` and `logHit.js`’s documented skip stays unrepresentable. The three states:
+`true` = the vulnerable service was REACHED (all four conditions in CLAUDE.md’s log_hit rule);
+`false` = MEASURED, not reached; `NULL` = NOT MEASURED (no syslog coverage in the window, or no
+collected `device_interfaces` rows, without which traffic TO the device cannot be told from traffic
+THROUGH it).
+
+⛔ Existing `false` rows are deliberately NOT rewritten. Nothing recorded which of them were
+genuinely measured, so rewriting them all to NULL would discard real measurements alongside the
+fabricated ones — the same error in reverse. They correct themselves on the next `[log-hit]` run.
+
+⛔ An unmeasured device now WRITES NULL rather than writing nothing. "Write nothing" left a
+previous run’s conclusion standing as if it were still current; an explicit NULL withdraws it, and
+the device is re-banded so a `true → NULL` withdrawal de-escalates.

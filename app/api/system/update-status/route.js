@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.98.0': [
+    "Every vendor advisory now carries an explicit status: matched, belongs to another product, or cannot be matched. Previously an advisory SecVault failed to read was indistinguishable from one that had been checked and did not apply — 351 of 1,001 were in that state.",
+    "Vulnerability matching now skips advisories it cannot evaluate AND reports how many, instead of quietly treating them as “not affected”.",
+    "Sangfor advisories now match. The vendor spells its own product differently from the public CVE dictionary; a reviewed alias bridges the two, rather than approximate name matching.",
+    "Advisories that state affected versions in prose (“5.6.7 and below”) are now read correctly instead of being narrowed to a single version.",
+    "“Reached from the internet” can now record that it was not measured, rather than defaulting to “not reached”. A firewall with no log coverage no longer looks the same as one that was checked and found quiet.",
+    "A FortiGate that answers but cannot report performance metrics is no longer counted as unreachable.",
+    "Corrected stored traffic history: sessions that ended by timing out were counted as blocked, overstating denied traffic by about 5%.",
+  ],
   '2.97.0': [
     "Log collection is more durable. A backlog could previously be processed twice at startup, storing every event in it twice; and a database hiccup lasting about ten seconds could set a batch of events aside permanently, with nothing that ever picked them up again. Both are fixed, and set-aside batches are now retried for 30 minutes and re-queued on restart.",
     "Fixed: some vendor advisories could never be matched against a firewall, so a device could be reported as assessed and clean against a set of vulnerabilities that was never actually checked. 82 advisories now match properly, and any that still cannot be matched are reported rather than stored as if they had been.",
