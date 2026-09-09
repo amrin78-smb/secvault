@@ -134,6 +134,45 @@ silently on JSX corruption, which is worse than failing consistently: it looks l
 check. A JSX-aware alternative is `next/dist/build/swc`'s `parse(src, {filename, syntax:
 'ecmascript', jsx: true, isModule: true})`, which does catch it.
 
+## A wrong COLUMN NAME passes every gate (found 2026-09-09, production down)
+
+⛔ The dashboard home page (`/`) returned "Application error: a server-side exception has
+occurred", digest `539791548`, **for every user on every load**, from the moment the
+feed-freshness strip landed until v2.86.1. Cause:
+
+```
+error: column "completed_at" does not exist   (SQLSTATE 42703)
+  at .next/server/app/(dashboard)/page.js
+```
+
+`feed_sync_log`'s column is `finished_at`; it has never been called `completed_at`. The same
+wrong name was in `lib/formatDisplay.js`'s `newestFeedAt()`.
+
+**Why nothing caught it — all three gates are structurally blind to it:**
+
+| gate | why it passed |
+|---|---|
+| `node --check` | a SQL string is an opaque string literal to the JS parser |
+| `npm test` | the engine tests take STUB pools; nothing here touches a schema |
+| `npm run build` | a `force-dynamic` page's query is never executed at build time |
+
+So the only real gate was loading the page — and the page that broke is the one route you never
+click while verifying a feature, because you are already sitting on it. ⛔ **After any change
+that adds or edits SQL, load the actual page, including `/`.** A wrong column name is the
+cheapest available way to take this app down.
+
+`tests/sqlColumns.test.js` now checks every SQL identifier in the repo against `lib/schema.sql`
+(no DB — it parses the same file `lib/migrate.js` runs). It was verified to catch this exact
+bug by re-injecting it. Two parsing details that matter if you touch it: a partitioned table
+ends `) PARTITION BY RANGE (received_at);`, so the CREATE TABLE terminator is `\n)` + anything
++ `;` — the stricter `\n);` silently swallows the NEXT table's columns into `syslog_events`;
+and a column added by `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` is not in any CREATE body, so
+the ALTERs are parsed too.
+
+A one-off audit against the LIVE database at the time of the fix found no other bad column name
+anywhere in the repo — the 51 other flagged identifiers were all table aliases (`dca`, `rar`,
+`caa`), the `xmax` system column, and one temp table.
+
 ## PAN-OS positional indices differ per SUBTYPE, not just per TYPE (2026-09-08)
 
 ⛔ CLAUDE.md warns that PAN-OS CSV positions differ per log TYPE. They also differ in MEANING per

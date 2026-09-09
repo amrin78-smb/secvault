@@ -55,3 +55,26 @@ the wrong answer is a plausible number rather than a crash.
 - Name each test after the BEHAVIOUR, not the function, and reference the real
   incident where there was one — a test called "unused is not emitted when
   hit_count is null" survives a refactor that renames the function.
+
+## The three lint-shaped tests
+
+Most files here pin an engine's behaviour. Three do something different — they
+read the whole repo and assert a property of it. Each was written after a bug
+that every other gate let through:
+
+- `moduleLoad.test.js` — `require()`s every module under `lib/` and
+  `services/`. v2.82.0 shipped a syntax error inside a template literal that
+  `npm run build` never evaluated, because a server-only module is not part of
+  any client bundle.
+- `importIntegrity.test.js` — an identifier a page uses must be imported or
+  locally defined. Caught three live instances of a symbol used with no import.
+- `sqlColumns.test.js` — every SQL identifier names a column that exists in
+  `lib/schema.sql`. The dashboard home page was down for every user on
+  2026-09-09 asking `feed_sync_log` for a `completed_at` it has never had; a
+  SQL string is opaque to `node --check`, no test touches a schema, and a
+  `force-dynamic` page's query is not executed at build.
+
+⛔ All three are CONSERVATIVE: anything they cannot parse with confidence is
+SKIPPED, not guessed at. A false failure in a repo-wide lint gets the lint
+deleted, which costs more than the coverage it gives up. If one starts firing
+on a legal construct, widen the skip — do not lower the assertion.
