@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.92.0': [
+    "Config snapshots are no longer stored again when nothing changed. Around 93% of pulls were storing another copy of an identical configuration; a row now records that a configuration was seen from one time to another, and how many times.",
+    "The nightly rollup sweep is roughly twice as fast. Most of its time was one query reading a whole day of logs to find a few hours of them.",
+    "CVSS scores now show which scale they were measured on (v4.0 / v3.1). Scores on different scales are not directly comparable, and a ranked list now says so.",
+    "The device CVE tab no longer claims a firewall “has been assessed” just because a software version was collected. Having a version is what makes an assessment possible, not proof that one ran.",
+    "Vulnerability coverage notes now count a firewall as covered only when an assessment actually ran for it, rather than when it merely could have.",
+  ],
   '2.91.0': [
     "Fixed: the Support Expiry tile said “Not collected for any device” about every firewall, including the ones whose licences are collected. A value was computed but never carried through to the tile.",
     "Fixed: a daily fleet snapshot was being overwritten with mid-day numbers every time the app was updated, so a day on the trend chart showed whatever the last restart happened to see rather than the midnight measurement.",

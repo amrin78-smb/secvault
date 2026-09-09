@@ -47,6 +47,11 @@ GRANT SELECT ON settings_readonly TO claude_readonly, nocvault_readonly;
 -- the view definition explicitly or it silently stays hidden/exposed wrongly.
 GRANT SELECT ON TABLE devices TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_versions TO claude_readonly, nocvault_readonly;
+-- Same whole-table reasoning for device_configs.first_collected_at /
+-- observation_count / content_hash (added 2026-09-09): all three are covered by
+-- the table grant below. None is secret-bearing -- the hash is taken over
+-- config_raw/config_parsed, which these roles can already read in full and which
+-- every adapter has already redacted before storage.
 GRANT SELECT ON TABLE device_configs TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE firewall_rules TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE network_objects TO claude_readonly, nocvault_readonly;

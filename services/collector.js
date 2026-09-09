@@ -600,16 +600,35 @@ async function rollupCycle(wide) {
       // silently returns zero rows (an empty address set, a column that stops
       // parsing) would commit, log "success", and flatline unnoticed. Deriving
       // the list means a tenth rollup cannot be added without appearing here.
+      //
+      // ⛔ AND ITS DURATION, from the same derivation, for the same reason in
+      // the other axis. A sweep that slows from 130s to 900s still commits and
+      // still reports honest counts; its only symptom was "rollup skipped -
+      // previous sweep still running", which names no pass and left the 2026-09
+      // investigation guessing between the window scan and ten aggregations.
+      // The answer turned out to be the scan (`build`), which no line reported
+      // at all — so build/analyze/deletes are named explicitly and every pass
+      // carries its own ms.
+      const t = r.timings || {};
       const counts = Object.keys(r)
         .filter((k) => k.endsWith('Rows'))
-        .map((k) => `${r[k]} ${k.slice(0, -4)}`)
+        .map((k) => {
+          const name = k.slice(0, -4);
+          const ms = t[name];
+          return `${r[k]} ${name}${ms === undefined ? '' : `/${ms}ms`}`;
+        })
         .join(' + ');
+      const prologue = ['build', 'analyze', 'deletes']
+        .filter((k) => t[k] !== undefined)
+        .map((k) => `${k} ${t[k]}ms`)
+        .join(', ');
       log(
         `rollup ${r.tier} (${r.hours}h` +
         (r.sliceIndex === null || r.sliceIndex === undefined
           ? ''
           : `, slice ${r.sliceIndex}/${r.sliceHours}h`) +
-        `): ${counts} row(s) in ${r.ms}ms`
+        `): ${counts} row(s) in ${r.ms}ms` +
+        (prologue ? ` [${prologue}]` : '')
       );
     } else {
       log(`ERROR rollup ${r.tier} failed after ${r.ms}ms: ${r.error}`);

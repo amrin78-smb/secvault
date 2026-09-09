@@ -48,11 +48,22 @@ async function getConfigChanges(dbPool, deviceId, days) {
 // changes in the last 7 days" that is a failed read reported as a reassuring
 // fact, the same shape as the Support tile's old green "All current".
 //
-// Two snapshots is the real threshold: change detection needs a predecessor to
-// compare against, so one snapshot can never produce a diff either.
+// Two OBSERVATIONS is the real threshold: change detection needs a predecessor
+// to compare against, so a single collection can never produce a diff.
+//
+// ⛔ SUM(observation_count), not COUNT(*). Since write-time dedupe (v2.92.0)
+// an unchanged pull UPDATEs the surviving row rather than inserting, so a ROW
+// is a distinct CONFIGURATION and no longer a COLLECTION. Counting rows would
+// tell an operator that a device collected 60 times has nothing to compare
+// against — reporting our own storage efficiency as a coverage gap, which is
+// the failed-read-as-a-fact rule wearing a new hat.
+//
+// coalesce because a pre-dedupe row can hold NULL until the backfill runs;
+// one observation each is exactly what those rows were.
 async function getConfigCoverage(dbPool, deviceId) {
   const { rows } = await dbPool.query(
-    `SELECT COUNT(*)::int AS snapshot_count FROM device_configs WHERE device_id = $1`,
+    `SELECT COALESCE(SUM(COALESCE(observation_count, 1)), 0)::int AS snapshot_count
+       FROM device_configs WHERE device_id = $1`,
     [deviceId]
   );
   return rows[0] || { snapshot_count: 0 };

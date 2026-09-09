@@ -99,20 +99,59 @@ period, because the job runs both on cron and at every service start.
    write was `ON CONFLICT DO UPDATE`, every deploy restart REPLACED that day's snapshot with
    mid-day numbers — a day's trend point was whatever the last restart happened to see. Past gaps
    stay permanent by design.
-2. **CVSS v3/v4 not normalised.** 110 of 159 live assessments are scored on v4, 49 on v3, 255
-   advisories carry no vector. Provenance is now recorded (v2.90.3); choosing one authoritative
-   version is the open decision, and needs a re-match.
+2. ~~CVSS v3/v4 not normalised.~~ **CLOSED AS NOT FIXABLE — the item rested on a wrong premise.**
+   "Pick one authoritative version and normalise" assumed both metrics were usually available for
+   the same CVE. Measured 2026-09-09: of 1,001 advisories exactly **1** carries both a v3 and a v4
+   metric, and of the 159 live assessments **110 are banded on v4 with no v3 available at all**.
+
+   ⛔ So choosing v3 as authoritative would leave 110 assessments UNSCORED, which the priority tree
+   reads as "not scored" — it would lose real signal to buy a consistency that does not exist. And
+   v3 and v4 use different formulas and metrics; there is no valid conversion, so any "normalised"
+   score would be a fabricated number of exactly the kind this codebase bans.
+
+   Each CVE carries whichever version its CNA published. The mix is **structural, not a defect**.
+   The real fix was the one already shipped in v2.90.3 — record `cvss_source` and `cvss_version` so
+   a score cannot silently change meaning — plus surfacing the version in the UI (v2.92.0) so
+   nobody compares two numbers that were never on the same scale.
+
+   ⛔ Do not reopen this as a normalisation task. If it is reopened at all, the only honest version
+   is "re-score every CVE ourselves from its vector", which needs a full v3 and v4 implementation
+   and is a different, much larger piece of work.
 3. ~~`CveCell` cannot distinguish "assessed and clean" from "never assessed".~~ **DONE v2.91.0**
-   via `devices.last_cve_assessed_at`. Two call sites remain unblocked but not yet updated:
-   `OverviewCveCard.js` and `CvePostureTab.js` — both can now gate their zeros on the stamp.
+   via `devices.last_cve_assessed_at`; the remaining call sites closed in v2.92.0
+   (`OverviewCveCard.js`, `CvePostureTab.js`, and the device CVE tab, which had been asserting
+   "This device HAS been assessed" purely because a version row existed — a precondition, never
+   evidence of a run). ⛔ Still open elsewhere: `components/dashboard/CveSeveritySummary.js` has no
+   coverage statement at all, and `lib/engines/dashboardSnapshot.js` persists those uncovered
+   counts nightly, so the gap is baked into history.
 4. ~~Fleet tiles lack `cveNoVersion` and a config-snapshot count.~~ **DONE v2.91.0.** While doing
    it, found `licence_row_count` was computed but never projected, so `supportNoData` silently
    equalled the whole fleet and the Support tile claimed "Not collected for any device" about 15
    devices whose licences ARE collected.
-5. **Config snapshots are not deduped at write time.** 508 of 1,730 snapshots were byte-identical
-   to their predecessor (~161 MB). Retention bounds it; the write path still creates it.
-6. **Wide rollup sweep takes ~900s per 6h slice** and skips cycles. Needs profiling per pass, not
-   a guess — `work_mem` is already 32MB, so the obvious lever is gone.
+5. ~~Config snapshots are not deduped at write time.~~ **DONE v2.92.0 — and the stated premise was
+   wrong.** "508 of 1,730 byte-identical" does not reproduce: measured today, only 60 of 2,160
+   (2.8%) are byte-identical. But by SecVault’s OWN definition of no-change (`isEmptyDiff`),
+   **93.3%** are duplicates — corroborated by only 142 `config_diffs` rows across 2,160 snapshots.
+   An exact-byte hash would have saved 2.8%; the semantic key saves ~93%. ⛔ The hash fails in
+   OPPOSITE directions per vendor: Fortinet’s `config_raw` carries ~412 volatile bytes per pull
+   while its `config_parsed` is stable; Palo Alto’s `config_raw` is stable while its
+   `config_parsed` carries volatile `system_info`.
+6. ~~Wide rollup sweep takes ~900s per 6h slice.~~ **PROFILED AND HALVED in v2.92.0.** ⛔ The item's
+   own assumption was wrong: `work_mem` was never the lever — every pass reports `Batches: 1`
+   using 129 kB–13 MB of the 32 MB configured, so nothing ever spilled.
+
+   The real cost is the TEMP-TABLE BUILD — **63% of a 3h sweep**, and no log line reported it at
+   all. Writing into a TEMP table makes the statement parallel-unsafe, so the planner picks a
+   single-threaded Seq Scan of the whole daily partition (1,881,660 pages read to return the
+   588,017 that hold the window). `SET LOCAL enable_seqscan = off` around the build ONLY takes a
+   3h sweep from 268s to 135s. ⛔ The win is selectivity-dependent — measured worst case (window
+   covering 81% of its partition) is only 10%, but never a regression. Expect 30–50% typical.
+
+   Two follow-ups, both deliberately deferred with reasons: a **BRIN index on
+   `syslog_events.received_at`** would make the correct plan cheap rather than hinted (and help
+   log search too), and **grid-anchoring `wideSliceWindow`** would drop the window from 10h to 7h
+   — but that changes a coverage property `tests/rollups.test.js` pins, so it needs its own
+   decision rather than riding along with a performance fix.
 7. ~~SNMP Overview sparkline cannot show per-sample confidence.~~ **DONE v2.91.0** — provenance
    vocabulary shared via `components/snmp/chartGrammar.js` so the sparkline and the full page
    cannot draw the same sample two ways.

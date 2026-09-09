@@ -1024,3 +1024,32 @@ while making the column look populated.
 
 ⛔ A device the matcher skips (`no version row - skipped`) never enters the transaction and keeps
 a NULL stamp. That is the point.
+
+### device_configs write-time dedupe (v2.92.0)
+
+New columns: `first_collected_at`, `observation_count`, `content_hash`. An unchanged pull now
+UPDATEs the surviving row instead of inserting, so **a ROW is a distinct CONFIGURATION, not a
+COLLECTION**.
+
+⛔ The dedupe key is `isEmptyDiff(diffConfigs(prev, incoming, vendor))` — SecVault’s own
+definition of "nothing changed" — NOT the content hash. Measured: byte-identical catches 2.8% of
+consecutive pairs, the semantic key catches 93.3%. The hash fails in OPPOSITE directions per
+vendor (Fortinet: volatile `config_raw`, stable `config_parsed`; Palo Alto: the reverse), so no
+single hash column could have worked. `content_hash` is kept as an auditable fingerprint.
+
+⛔ `collected_at` KEEPS ITS MEANING — "the most recent moment this configuration was observed" —
+and is refreshed on a deduped pull. Freezing it and putting last-seen in a new column would have
+made a live device render as "last collected 60 days ago" across the whole app: the evidence of
+collection destroyed in a different way. `first_collected_at` + `observation_count` say what N
+duplicate rows never said out loud: observed from T_first to T_last, N times.
+
+⛔ `device_versions` still gets one row per pull, so the per-pull collection audit trail keeps
+full granularity regardless of dedupe.
+
+⛔ Change detection is unaffected BY CONSTRUCTION: the dedupe condition IS
+`detectAndStoreDiff`’s no-change condition. Every failure direction falls toward STORING — a diff
+that throws inserts, because an uncomputable comparison is not "no change".
+
+⛔ Anything counting collections must use `SUM(observation_count)`, never `COUNT(*)`. Two call
+sites used `COUNT(*) < 2` as "no predecessor to diff against" and would have reported a
+well-collected device as a coverage gap.

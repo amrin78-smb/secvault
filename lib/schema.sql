@@ -1280,6 +1280,89 @@ ALTER TABLE device_configs ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL
 CREATE UNIQUE INDEX IF NOT EXISTS idx_device_configs_one_baseline_per_device
   ON device_configs(device_id) WHERE is_baseline;
 
+-- Write-time snapshot dedupe (added 2026-09-09).
+--
+-- device_configs stored ONE FULL SNAPSHOT PER DEVICE PER PULL whether or not
+-- anything had changed: 540 MB of the live database. Measured with the change
+-- engine's OWN emptiness test, 93.3% of consecutive snapshot pairs were "no
+-- change". lib/engines/configRetention.js bounds that growth; it never stopped
+-- it being created.
+--
+-- The objection that kept this undone, and how these three columns answer it:
+-- a stored row is not only a payload, it is EVIDENCE THAT A COLLECTION
+-- SUCCEEDED AT TIME T. Simply skipping the INSERT would destroy that evidence
+-- -- a successful read recorded as nothing, the mirror image of this
+-- codebase's most-repeated bug. So the evidence is kept SEPARATELY from the
+-- payload: an unchanged pull UPDATEs the existing row instead of inserting a
+-- new one, moving collected_at forward to the new observation, leaving
+-- first_collected_at where it was, and incrementing observation_count. The row
+-- then states "this configuration was observed from first_collected_at to
+-- collected_at, observation_count times" -- which no run of duplicate rows
+-- ever said out loud.
+--
+-- collected_at KEEPS ITS EXISTING MEANING: the most recent moment this
+-- configuration was observed, which is exactly what the newest duplicate row
+-- carried before. Every existing reader (ORDER BY collected_at DESC LIMIT 1,
+-- "Config as of ...", lastConfigAt, the version picker, retention's own
+-- ranking) therefore keeps working unchanged. first_collected_at is a NEW
+-- fact, not a redefinition of an old one.
+ALTER TABLE device_configs ADD COLUMN IF NOT EXISTS first_collected_at TIMESTAMPTZ;
+-- Successful collections that observed this configuration. 1 for every
+-- pre-existing row, which is exactly what each of them represented.
+ALTER TABLE device_configs ADD COLUMN IF NOT EXISTS observation_count INTEGER NOT NULL DEFAULT 1;
+-- Fingerprint of the payload actually stored in THIS row (expression below).
+-- NULL means "not computed", never "no content" -- the usual tri-state
+-- discipline. It is NOT the dedupe decision (that is the change engine's, in
+-- lib/adapters/index.js): an exact-byte hash was measured against the live
+-- fleet and matches only 2.8% of consecutive snapshots, because Palo Alto's
+-- parsed tree and Fortinet's raw text each carry volatile bytes that change on
+-- nearly every pull. What the hash IS for is making an exact duplicate
+-- provable to a later analysis or collapse pass.
+ALTER TABLE device_configs ADD COLUMN IF NOT EXISTS content_hash TEXT;
+
+-- Order matters, and `ADD COLUMN ... DEFAULT now()` would have been WRONG:
+-- adding a column WITH a default fills every EXISTING row with that default,
+-- so all 2,160 historical rows would have claimed they were first collected at
+-- migration time -- a fabricated fact. The default is therefore attached AFTER
+-- the column exists, then historical rows are backfilled from the only true
+-- answer available for them (their own collected_at), then the column is made
+-- NOT NULL. Setting the default before the backfill also means a row inserted
+-- concurrently cannot land NULL and fail the SET NOT NULL. All three
+-- statements are idempotent.
+ALTER TABLE device_configs ALTER COLUMN first_collected_at SET DEFAULT now();
+UPDATE device_configs SET first_collected_at = collected_at WHERE first_collected_at IS NULL;
+ALTER TABLE device_configs ALTER COLUMN first_collected_at SET NOT NULL;
+
+-- ONE-TIME, IDEMPOTENT hash backfill. `WHERE content_hash IS NULL` makes every
+-- run after the first a no-op (the write path always sets the hash), so this
+-- costs one pass over the table on the deploy that introduces it and nothing
+-- afterwards. It deliberately DELETES NOTHING: computing a hash is safe;
+-- collapsing existing history is a separate decision that nothing here takes.
+--
+-- THIS EXPRESSION IS DUPLICATED IN lib/adapters/index.js (CONTENT_HASH_SQL)
+-- AND THE TWO COPIES MUST STAY IN STEP. They differ in exactly one respect --
+-- this one names config_raw/config_parsed, the write path binds $2/$3 -- and
+-- must agree on everything else. tests/configSnapshotDedupe.test.js normalises
+-- those two operand spellings away and asserts the remainder is
+-- character-for-character equal. If they drift, a backfilled row and a freshly
+-- written one holding the same content would carry different hashes. It is
+-- computed in SQL on both sides on purpose: config_parsed is jsonb and
+-- PostgreSQL re-normalises key order and whitespace on storage, so a hash taken
+-- over JSON.stringify() in Node could never equal one taken over the stored
+-- value. Hashing config_parsed::text hashes WHAT IS ACTUALLY STORED -- which is
+-- also, per CLAUDE.md's redaction rules, already-redacted text, because every
+-- adapter redacts before getConfig() returns.
+UPDATE device_configs
+   SET content_hash = encode(
+         sha256(convert_to(coalesce(config_raw, '') || chr(10) || coalesce(config_parsed::text, ''), 'UTF8')),
+         'hex')
+ WHERE content_hash IS NULL;
+
+-- Supports "which other rows for this device hold this exact content", which
+-- is the question a future exact-duplicate collapse pass would ask.
+CREATE INDEX IF NOT EXISTS idx_device_configs_device_content_hash
+  ON device_configs(device_id, content_hash);
+
 -- Readonly diagnostic roles + per-table grants are NOT created here.
 -- Creating a ROLE requires CREATEROLE/superuser privilege, which secvault_user
 -- (the account this file normally runs as, via lib/migrate.js) does not have —

@@ -211,7 +211,7 @@ async function getHaStatusRow(dbPool, id) {
 
 async function getCveAssessments(dbPool, id) {
   const result = await dbPool.query(
-    `SELECT a.cve_id, a.cvss_score, dca.kev_listed, dca.priority_band, dca.fixed_in, dca.is_fixed_recommended
+    `SELECT a.cve_id, a.cvss_score, a.cvss_version, a.cvss_source, dca.kev_listed, dca.priority_band, dca.fixed_in, dca.is_fixed_recommended
      FROM device_cve_assessments dca
      JOIN advisories a ON a.id = dca.advisory_id
      WHERE dca.device_id = $1
@@ -617,17 +617,34 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           used to collapse into one. CVE matching is SKIPPED outright for a
           device with no device_versions row (versionMatcher.js logs "no
           version row - skipped"), so an empty table there is the absence of an
-          attempt, not a clean bill of health. This page already reads the
-          version row for the Details card above, so the distinction costs
-          nothing. */}
+          attempt, not a clean bill of health.
+
+          ⛔ CORRECTED 2026-09-09. The first version of this said, for any
+          device that HAD a version, "This device HAS been assessed." That was
+          an unearned claim: a version row is a PRECONDITION for assessment,
+          never evidence that one ran. A device collected an hour ago and not
+          yet reached by the matcher would have been told it was clean.
+
+          It now reads devices.last_cve_assessed_at (v2.91.0), which persists
+          the RUN rather than its output, ORed with the presence of assessment
+          rows — the same two signals CveCell uses, and neither is redundant:
+          the stamp is NULL until the matcher next runs, and rows can exist for
+          a device whose findings are all in the monitor band. */}
       {tab === 'cve' && (
         <CVETable
           rows={cveRows}
           showDeviceColumn={false}
           emptyMessage={
-            version?.version_string
-              ? `No advisory currently applies to ${version.version_string}. This device HAS been assessed.`
-              : 'No software version has been collected from this device, so CVE matching has never run for it. This is NOT "no vulnerabilities" — nothing has been checked.'
+            !version?.version_string
+              ? 'No software version has been collected from this device, so CVE matching has never run for it. This is NOT "no vulnerabilities" — nothing has been checked.'
+              // ⛔ Only the stamp is consulted here, NOT the row-count signal
+              // CveCell also uses. That second signal is meaningless in this
+              // branch: emptyMessage renders only when cveRows is empty, so
+              // "rows exist" can never be true. Including it would have been a
+              // dead condition that read as thoroughness.
+              : device.last_cve_assessed_at
+                ? `No advisory currently applies to ${version.version_string}. This device has been assessed.`
+                : 'A software version is on record but SecVault holds no evidence that a CVE assessment has run for this device yet. This is NOT a clean result — nothing has been compared.'
           }
         />
       )}
