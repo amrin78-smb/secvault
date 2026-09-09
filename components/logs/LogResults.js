@@ -224,6 +224,27 @@ export default function LogResults({ result, deviceNames, searchParams }) {
           </div>
         ) : null}
 
+        {/* ⛔ THE SAME CONTROL, ABOVE AND BELOW. Rows-per-page lived only
+            under the table, so choosing 50 meant scrolling past the 100 rows
+            you already had in order to ask for fewer — the control is
+            furthest away exactly when the page is too long, which is the only
+            time anyone reaches for it. Prev/Next stay at the bottom too,
+            because that is where you are when you finish reading a page.
+            Both read the same props, so they cannot disagree. */}
+        {rows.length > 0 ? (
+          <Pagination
+            basePath="/logs"
+            searchParams={searchParams}
+            page={result.page}
+            pageSize={result.limit}
+            total={null}
+            hasMore={result.hasMore}
+            pageSizes={[50, 100, 200]}
+            label="events"
+            placement="top"
+          />
+        ) : null}
+
         {rows.length === 0 ? (
           <EmptyState message="Nothing in this window matched. Widen the time range or remove a filter — note that raw events are only kept for a few days." />
         ) : (

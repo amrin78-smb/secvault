@@ -65,8 +65,12 @@ const btn = (enabled) => ({
 // arbitrary.
 export default function Pagination({
   basePath, searchParams, page, pageSize, total, label, pages, paramName, hasMore,
-  pageSizes, sizeParam,
+  pageSizes, sizeParam, placement,
 }) {
+  // ⛔ 'top' is not decorative. A control rendered above the table needs its
+  // divider on the BOTTOM edge, or it reads as the footer of whatever came
+  // before it rather than the header of the table it belongs to.
+  const atTop = placement === 'top';
   const param = paramName || 'page';
   const sizeKey = sizeParam || 'limit';
 
@@ -96,9 +100,12 @@ export default function Pagination({
         justifyContent: 'space-between',
         flexWrap: 'wrap',
         gap: 10,
-        marginTop: 12,
-        paddingTop: 12,
-        borderTop: '1px solid var(--border)',
+        marginTop: atTop ? 0 : 12,
+        marginBottom: atTop ? 12 : 0,
+        paddingTop: atTop ? 0 : 12,
+        paddingBottom: atTop ? 12 : 0,
+        borderTop: atTop ? 'none' : '1px solid var(--border)',
+        borderBottom: atTop ? '1px solid var(--border)' : 'none',
       }}
     >
       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
