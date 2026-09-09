@@ -30,10 +30,7 @@ const NOW = new Date('2026-09-08T14:37:12.500Z');
 // 8 -> 9 on 2026-09-08: syslog_device_inbound_hourly, the Internet Exposure /
 // log_hit input (lib/syslog/rollups.js INBOUND_INSERT).
 // 9 -> 10 on 2026-09-09: syslog_vpn_auth_hourly, the VPN login-locations input.
-// 10 passes over the materialized window + the threat pass, which reads
-// syslog_events directly through its partial index (see the amended one-scan
-// test below for why that exception exists).
-const ROLLUP_COUNT = 11;
+const ROLLUP_COUNT = 10;
 
 describe('rollups: bucket boundaries are UTC hours', () => {
   it('floors to the start of the UTC hour', () => {
@@ -231,9 +228,7 @@ describe('rollups: recomputeWindow never throws and is DELETE-then-INSERT', () =
     const pool = stubPool();
     await recomputeWindow(pool, from, to);
     const windowed = pool.calls.filter((c) => Array.isArray(c.params) && c.params.length === 2);
-    // One scan + one DELETE per rollup + the threat INSERT, the only INSERT
-    // that takes the window because it does not read the bounded temp table.
-    assert.equal(windowed.length, ROLLUP_COUNT + 2, 'one scan + one DELETE each + the threat INSERT');
+    assert.equal(windowed.length, ROLLUP_COUNT + 1, 'one temp-table scan + one DELETE each');
     for (const c of windowed) {
       assert.equal(c.params[0].getTime(), from.getTime());
       assert.equal(c.params[1].getTime(), to.getTime());

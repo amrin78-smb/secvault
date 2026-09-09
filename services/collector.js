@@ -79,7 +79,7 @@ const { buildEvent } = require('../lib/syslog/eventShape');
 const archive = require('../lib/syslog/archive');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
-const { runRollupMaintenance, trimDetailRollups } = require('../lib/syslog/rollups');
+const { runRollupMaintenance, trimDetailRollups, refreshThreatRollup } = require('../lib/syslog/rollups');
 
 // --- configuration ---------------------------------------------------------
 function intEnv(name, def, min, max) {
@@ -713,6 +713,7 @@ async function main() {
     log('archive   : DISABLED');
   }
   log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
+  log(`threat    : ${ROLLUP_LOOKBACK_HOURS}h now, then ${ROLLUP_RECENT_HOURS + 1}h every ${ROLLUP_INTERVAL_MIN}min (separate from the sweep)`);
 
   ensureSpoolDir();
   await pool.query('SELECT 1');
@@ -736,7 +737,48 @@ async function main() {
 
   replayBacklog().catch((err) => log(`ERROR replaying backlog: ${err.stack || err.message}`));
 
+  // ⛔ THREAT ROLLUP RUNS SEPARATELY AND EAGERLY, on purpose.
+  //
+  // It used to be one of the eleven passes inside the heavy sweep, and the
+  // Security tab was consequently HOURS behind: that sweep builds a ~10M-row
+  // temp table for the traffic rollups, its wide tier fires once an hour and
+  // covers a 6-hour slice per run, so a 24-hour backfill took four hourly
+  // passes. An operator opening a SECURITY view expects what the firewalls
+  // just reported, not what they reported before lunch.
+  //
+  // This pass reads syslog_events through the partial log_class index, where
+  // an hour of threat events is ~59k rows and ~256ms, so a full 24h rebuild
+  // is seconds. Running it immediately at startup means the tab is populated
+  // by the time anyone can click it, and re-running the recent window every
+  // cycle keeps it current.
+  //
+  // ⛔ Awaited nowhere: like every sibling timer here it must not let a
+  // rejection escape, or an unhandled rejection kills ingest. refreshThreatRollup
+  // never throws, and this catch is the second line of that defence.
+  async function threatRollupCycle(hours) {
+    try {
+      const r = await refreshThreatRollup(pool, hours);
+      if (r.ok) {
+        log(`threat rollup (${r.hours}h): ${r.rows} row(s) over ${r.buckets} bucket(s) in ${r.ms}ms`);
+      } else {
+        log(`ERROR threat rollup (${r.hours}h) failed after ${r.ms}ms: ${r.error}`);
+      }
+    } catch (err) {
+      log(`ERROR threat rollup threw: ${err && err.message ? err.message : err}`);
+    }
+  }
+
+  // Full window once, now, so the Security tab is not empty for a moment
+  // longer than it has to be after a restart.
+  threatRollupCycle(ROLLUP_LOOKBACK_HOURS);
+
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
+  // Only the recent window on the frequent tick — rebuilding 24h every few
+  // minutes would be wasted work, since older buckets cannot change.
+  const threatTimer = setInterval(
+    () => { threatRollupCycle(ROLLUP_RECENT_HOURS + 1); },
+    ROLLUP_INTERVAL_MIN * 60 * 1000,
+  );
   const mapTimer = setInterval(() => { refreshDeviceMap(); }, 5 * 60 * 1000);
   const maintTimer = setInterval(() => { maintenance(); }, 60 * 60 * 1000);
   const rollupTimer = setInterval(() => { rollupCycle(false); }, ROLLUP_INTERVAL_MIN * 60 * 1000);
@@ -752,6 +794,7 @@ async function main() {
     clearInterval(flushTimer);
     clearInterval(mapTimer);
     clearInterval(maintTimer);
+    clearInterval(threatTimer);
     clearInterval(rollupTimer);
     clearInterval(rollupWideTimer);
     for (const s of udpSockets) { try { s.close(); } catch (_e) {} }
