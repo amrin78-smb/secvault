@@ -63,16 +63,34 @@ function archiveFileFor(v) {
   return `syslog-${d.toISOString().slice(0, 10).replace(/-/g, '')}.log.gz`;
 }
 
-function Cell({ children, mono, muted, nowrap }) {
+// ⛔ ONE ROW, ONE LINE. Each row used to stack up to FIVE blocks in the
+// Detail column (threat, host, category, class/subtype, raw) and three in
+// Source, which made a row ~105px tall — so a 100-row page was roughly nine
+// screens of scrolling and the pagination at the bottom was effectively
+// unreachable. A forensic log table is scanned, not read: the operator is
+// looking for the row that matters, and every row that is four lines tall is
+// three lines of noise between them and it.
+//
+// ⛔ NOTHING IS DROPPED. The stacked values are joined onto one line with
+// middots and truncated with an ellipsis; the full text is on the title
+// attribute, and the raw line keeps its own disclosure. Hiding a field
+// outright would be a different and much worse change — this is the same
+// rule as the density switch, which may compress a row but never remove a
+// fact from it.
+function Cell({ children, mono, muted, nowrap, maxWidth, title }) {
   return (
     <td
+      title={title}
       style={{
-        padding: '7px 10px',
-        fontSize: 'var(--text-xs)',
-        fontFamily: mono ? 'ui-monospace, Consolas, monospace' : undefined,
+        padding: 'var(--row-pad-y) var(--row-pad-x)',
+        fontSize: 'var(--row-font)',
+        fontFamily: mono ? 'var(--font-mono)' : undefined,
         color: muted ? 'var(--text-muted)' : 'var(--text-primary)',
-        whiteSpace: nowrap ? 'nowrap' : undefined,
-        verticalAlign: 'top',
+        whiteSpace: nowrap === false ? undefined : 'nowrap',
+        maxWidth,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        verticalAlign: 'middle',
       }}
     >
       {children === null || children === undefined || children === '' ? (
@@ -81,6 +99,14 @@ function Cell({ children, mono, muted, nowrap }) {
     </td>
   );
 }
+
+// Joins the parts of a former stack onto one line. Falsy parts drop out, so
+// a row with no user and no country is just the address.
+function inline(parts) {
+  return parts.filter((p) => p !== null && p !== undefined && p !== '');
+}
+
+const DOT = <span style={{ color: 'var(--text-muted)' }}> · </span>;
 
 export default function LogResults({ result, deviceNames, searchParams }) {
   if (!result) return null;
@@ -249,22 +275,31 @@ export default function LogResults({ result, deviceNames, searchParams }) {
                         </Badge>
                       ) : null}
                     </Cell>
-                    <Cell mono nowrap>
+                    <Cell
+                      mono
+                      maxWidth={230}
+                      title={inline([String(r.srcIp || '').replace('/32', ''), r.srcUser, r.srcCountry]).join(' · ')}
+                    >
                       {String(r.srcIp || '').replace('/32', '') || null}
                       {r.srcPort ? <span style={{ color: 'var(--text-muted)' }}>:{r.srcPort}</span> : null}
-                      {r.srcUser ? <div style={{ color: 'var(--accent-teal)' }}>{r.srcUser}</div> : null}
-                      {r.srcCountry ? <div style={{ color: 'var(--text-muted)' }}>{r.srcCountry}</div> : null}
+                      {r.srcUser ? <>{DOT}<span style={{ color: 'var(--accent-teal)' }}>{r.srcUser}</span></> : null}
+                      {r.srcCountry ? <>{DOT}<span style={{ color: 'var(--text-muted)' }}>{r.srcCountry}</span></> : null}
                     </Cell>
-                    <Cell mono nowrap>
+                    <Cell
+                      mono
+                      maxWidth={210}
+                      title={inline([String(r.dstIp || '').replace('/32', ''), r.dstCountry]).join(' · ')}
+                    >
                       {String(r.dstIp || '').replace('/32', '') || null}
                       {r.dstPort ? <span style={{ color: 'var(--text-muted)' }}>:{r.dstPort}</span> : null}
-                      {r.dstCountry ? <div style={{ color: 'var(--text-muted)' }}>{r.dstCountry}</div> : null}
+                      {r.dstCountry ? <>{DOT}<span style={{ color: 'var(--text-muted)' }}>{r.dstCountry}</span></> : null}
                     </Cell>
-                    <Cell nowrap>
+                    <Cell
+                      maxWidth={190}
+                      title={inline([r.application, r.ruleName]).join(' · ')}
+                    >
                       {r.application || null}
-                      {r.ruleName ? (
-                        <div style={{ color: 'var(--text-muted)' }}>{r.ruleName}</div>
-                      ) : null}
+                      {r.ruleName ? <>{r.application ? DOT : null}<span style={{ color: 'var(--text-muted)' }}>{r.ruleName}</span></> : null}
                     </Cell>
                     <Cell>
                       {r.threatName ? (

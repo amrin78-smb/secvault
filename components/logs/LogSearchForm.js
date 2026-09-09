@@ -113,9 +113,21 @@ export default function LogSearchForm({ params, devices, options }) {
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
               <div style={{ width: 130 }}>
-                <label style={LABEL} htmlFor="f-limit">Max results</label>
-                <select id="f-limit" name="limit" defaultValue={p.limit || '100'} style={FIELD}>
-                  {['50', '100', '250', '500'].map((n) => (
+                {/* ⛔ "Max results" was a LIE ABOUT PAGING, and it is why log
+                    search looked like it had none. The value is the PAGE SIZE:
+                    the search fetches this many rows plus one, and the extra
+                    row is what drives the Next control. Labelled "Max results",
+                    an operator reads 100 rows as the complete answer, capped —
+                    so they never look for pagination, and the "More matches
+                    exist" banner below reads as a contradiction rather than an
+                    invitation. Verified live: paging itself works, returning
+                    distinct rows per page in 18-25ms. Only the word was wrong. */}
+                <label style={LABEL} htmlFor="f-limit">Rows per page</label>
+                <select id="f-limit" name="limit" defaultValue={p.limit || '25'} style={FIELD}>
+                  {/* 25 first and default: it fits on one screen together with
+                      the pagination control below the table. The larger sizes
+                      remain for deliberate wide scans. */}
+                  {['25', '50', '100', '250', '500'].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </select>

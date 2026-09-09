@@ -26,6 +26,7 @@ const {
   resolveWindow,
   clampLimit,
   MAX_LIMIT,
+  DEFAULT_LIMIT,
   MAX_WINDOW_DAYS,
 } = require('../lib/syslog/logSearch');
 
@@ -77,7 +78,11 @@ describe('logSearch: results are capped and the cap is honest', () => {
     assert.equal(clampLimit(999999), MAX_LIMIT);
     assert.equal(clampLimit(0), 1);
     assert.equal(clampLimit(-5), 1);
-    assert.equal(clampLimit('abc'), 100);
+    // ⛔ Reads the constant rather than repeating it. This asserted a
+    // literal 100 and broke the moment the default page size changed to 25 —
+    // the behaviour under test is 'an unparseable limit falls back to the
+    // default', not 'the default is 100'.
+    assert.equal(clampLimit('abc'), DEFAULT_LIMIT);
     assert.equal(clampLimit(250), 250);
   });
 
