@@ -97,6 +97,33 @@ ALTER TABLE device_versions ADD COLUMN IF NOT EXISTS hostname TEXT;
 -- Forcepoint-specific. ADD COLUMN IF NOT EXISTS is idempotent — safe to re-run.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS mgmt_port INTEGER;
 
+-- ⛔ THE RUN, NOT ITS OUTPUT. Added 2026-09-09 (roadmap Tier 3 items 3/4).
+-- device_cve_assessments only ever holds advisories that STILL apply --
+-- matchDeviceToAdvisories() emits nothing for a non-match and
+-- runMatchForAllDevices()'s reconciliation DELETE removes rows that stopped
+-- applying -- so a device assessed and found CLEAN holds zero rows, exactly
+-- like a device that has never been assessed at all. Every consumer
+-- COALESCEd that to 0 and rendered a confident zero for both: the
+-- failed-read-as-a-fact bug, one layer up in the UI.
+--
+-- The only thing that can tell them apart is evidence that the RUN happened,
+-- which no output table can carry. This column is stamped by
+-- lib/engines/versionMatcher.js inside the SAME per-device transaction as the
+-- DELETE/INSERT/prioritisation, immediately before COMMIT -- so it is written
+-- if and only if the match completed for that device, and a device the matcher
+-- SKIPPED ('no version row - skipped', which `continue`s before the
+-- transaction opens) is never stamped. NULL therefore means "no completed
+-- assessment on record", never "assessed, nothing found".
+--
+-- ⛔ NULL on every already-deployed row until the matcher next runs, and that
+-- is correct, not a migration gap: at that instant SecVault genuinely does not
+-- know whether the stored assessments are current. Do NOT backfill it from
+-- MAX(device_cve_assessments.assessed_at) -- that timestamp exists only for
+-- devices that HAVE rows, i.e. precisely the devices that were never ambiguous,
+-- and it would leave the clean-vs-never-assessed case exactly as it was while
+-- looking fixed. Nullable with no DEFAULT for the same reason.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_cve_assessed_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_device_versions_device_id ON device_versions(device_id);
 CREATE INDEX IF NOT EXISTS idx_device_versions_collected_at ON device_versions(collected_at);
 

@@ -148,7 +148,22 @@ test('every SQL identifier names a column that exists', () => {
       // Catalog probes describe tables rather than reading them.
       if (/information_schema|pg_catalog|pg_class|pg_stat/i.test(q)) continue;
 
-      const refs = [...q.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)/gi)].map((m) => m[1]);
+      // ⛔ `LATERAL` is a KEYWORD, not a table. Without skipping it, every
+      // `LEFT JOIN LATERAL (...)` captured the literal word "lateral" as a
+      // table reference; "lateral" is not in the schema, so the whole query was
+      // treated as unverifiable and SKIPPED. deviceInventory.js's
+      // getDeviceRows() has TEN of them, which meant the entire Devices-page
+      // query — one of the largest in the app — was never checked at all.
+      // Confirmed by renaming a real column to nonsense and watching this test
+      // stay green.
+      //
+      // Same reasoning applies to the other join-shape keywords that can follow
+      // JOIN: a bare `JOIN LATERAL`/`CROSS JOIN LATERAL` names its table after
+      // the parenthesised subquery, not before it.
+      const JOIN_KEYWORDS = new Set(['lateral', 'only']);
+      const refs = [...q.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_][a-z0-9_]*)/gi)]
+        .map((m) => m[1])
+        .filter((t) => !JOIN_KEYWORDS.has(t.toLowerCase()));
       if (refs.length === 0) continue;
       // Any table this file does not know about (a CTE, a temp table, a
       // fragment-supplied name) makes the whole query unverifiable.

@@ -254,6 +254,42 @@ refactor: strip comments and strings, collect `const|let|var|function|class NAME
 destructures, then report SCREAMING_SNAKE names used in `={NAME}` / `...NAME` / `NAME.` positions
 that are not declared. Run it over the changed files only — repo-wide it is unusable.
 
+## A parser that speculatively probes can misdiagnose its own input (2026-09-09)
+
+⛔ `app-error.log` carried 253 instances of
+
+```
+[cidrUtils] "24" looks like an IPv4 literal/CIDR but failed to parse ...
+[cidrUtils] "1"  ... same
+```
+
+The obvious reading — single digits reaching an IPv4 parser means something upstream is SPLITTING an
+address into fragments — was wrong, and cost time. Nothing upstream fragments anything.
+
+`objectResolver.resolveAddressEntry()` deliberately tries a literal parse BEFORE falling back to an
+object-name lookup. `parseIpRange()` splits any value on the first `-` and probes both halves. Palo
+Alto address OBJECT NAMES routinely contain dashes — `SERVER-24`, `WIFI-23`, `PAM-1`,
+`172.16.12.0-24` — so the half `24` reached the warning path, and `IP_SHAPED` used `(\.[0-9]+)*`,
+which allows ZERO dots. A bare integer was therefore judged "a malformed IP" instead of "not an IP".
+
+⛔ **No comparison was ever skipped, and that was PROVEN rather than argued**: resolution output over
+all 1,716 rules of all 16 devices hashed identically before and after the fix, warnings 253 -> 0.
+Those names resolve one step later through the object lookup.
+
+Two separate changes, and keeping them separate matters:
+1. **The cause** — `parseIpRange()` parses its halves with a silent core and judges shapedness on the
+   WHOLE string. A genuinely malformed range still warns, once, naming the whole value.
+2. **Belt and braces, separately justified** — `IP_SHAPED` now requires at least one dot. A lone `24`
+   is not an IPv4 literal by any reading. ⛔ This narrows WHAT WARNS, never what parses; the strict
+   4-octet validation is untouched.
+
+⛔ The general lesson: when a parser is used as a TEST ("is this thing an IP?") rather than as a
+converter ("turn this into an IP"), a failure is an ordinary answer and must not be logged as a
+defect. Diagnostics belong where the value's meaning is known, not inside a speculative probe.
+
+Pinned by `tests/cidrUtils.test.js`, which uses the real object names from the fleet and fails 11 of
+16 against the pre-fix parser.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

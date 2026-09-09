@@ -44,7 +44,7 @@ import NotMeasured from '../ui/NotMeasured';
 // type scale, silently, exactly like a hardcoded hex opts out of the palette.
 // Horizontal-only. Spread as {...GRID_PROPS} onto <CartesianGrid/>.
 // Shared line geometry, so a sample dot is the same size on every chart and a
-// per-point mark (see ConfidenceDot in SnmpMetricsCharts.js) can be compared
+// per-point mark (see ConfidenceDot at the bottom of this file) can be compared
 // against a plain one across charts.
 // ── Time formatting, shared so two charts on one page label time alike ──────
 
@@ -347,3 +347,159 @@ export function ChartEmpty({ title, message, height = 220 }) {
 
 // CHART_TITLE_STYLE now comes from components/ui/chartGrammar.js and is
 // re-exported at the top of this file.
+
+// ── ⛔ PER-SAMPLE CONFIDENCE. Read this before changing a dot. ───────────────
+//
+// Lives HERE, in the polling-data module, rather than in either chart file,
+// because BOTH SNMP surfaces draw the same samples and must draw them the same
+// way: the full page (SnmpMetricsCharts.js) and the device Overview sparkline
+// (SnmpTrendMini.js). It was duplicated-by-omission until 2026-09-09 — the
+// Overview simply had no marks at all, because its caller selected only the
+// four value columns. Widening that query (getRecentSnmpHistory in
+// devices/[id]/page.js) is what let this move; ⛔ do not re-copy it back into
+// a chart file, the redesign already had to merge two parallel chartGrammar
+// modules once and this is exactly how that starts.
+//
+// Confidence is a property of the SAMPLE, not of the vendor — a Palo Alto read
+// over the management transport and a generic MIB-II guess can sit next to each
+// other in one series, and the page's "Low confidence" badge describes only the
+// LATEST sample. Drawing a mixed history as one uniform line is the
+// failed-read-as-a-fact bug in its quietest form: nothing is missing, the line
+// just claims more than the data supports.
+//
+// ⛔ THREE sample states, three marks. `low_confidence` is genuinely tri-state
+// and NULL is never folded into either boolean:
+//   measured   low_confidence === false  solid filled dot in the series colour
+//   qualified  low_confidence === true   HOLLOW ring in the series colour —
+//                                        a real reading from a generic MIB
+//   unknown    low_confidence is NULL    hollow DASHED ring in --unmeasured —
+//                                        a pre-v2.55.0 row whose provenance was
+//                                        never recorded. Hueless on purpose:
+//                                        we do not know that it is bad, only
+//                                        that we cannot vouch for it.
+//
+// ⛔ STILL NOT FULLY SOLVED, and deliberately so: recharts draws ONE path per
+// series, so the SEGMENT between a measured sample and a qualified one is still
+// a single uniform stroke. Splitting the series into per-confidence sub-series
+// would fix the segments and break the line into misleading fragments wherever
+// confidence alternates. The per-sample DOT plus the tooltip plus the mix
+// caption carry the fact instead; the line carries only the shape. If this is
+// ever revisited, the honest fix is a custom segment renderer, not a second
+// <Line>.
+export function sampleConfidence(row) {
+  if (!row) return 'unknown';
+  if (row.low_confidence === true) return 'qualified';
+  if (row.low_confidence === false) return 'measured';
+  return 'unknown';
+}
+
+export const CONFIDENCE_WORDS = {
+  measured: 'read over the management transport / a vendor MIB',
+  qualified: 'low confidence — generic MIB only',
+  unknown: 'provenance not recorded for this sample (pre-v2.55.0)',
+};
+
+/** Tally the three states across the REAL rows (never the synthetic gap fillers). */
+export function countConfidence(rows) {
+  const out = { measured: 0, qualified: 0, unknown: 0, total: 0 };
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows) {
+    if (row && row.__gap) continue;
+    out[sampleConfidence(row)] += 1;
+    out.total += 1;
+  }
+  return out;
+}
+
+/**
+ * Custom recharts dot. Module top level, passed as an ELEMENT — recharts
+ * cloneElement()s it with cx/cy/value/payload per point (see Dots.js).
+ * ⛔ Never define this inside a chart component (CLAUDE.md's React rule).
+ *
+ * ⛔ Geometry is deliberately NOT parameterised by chart size. The full page
+ * and the 90px sparkline draw the same sample the same way, so a reader moving
+ * between the two views never has to re-learn the mark.
+ */
+export function ConfidenceDot(props) {
+  const { cx, cy, value, payload, color } = props;
+  // A null sample has no dot at all. connectNulls={false} already leaves the
+  // gap; drawing a marker on the axis would put a point where no reading exists.
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  if (value === null || value === undefined) return null;
+  const conf = sampleConfidence(payload);
+  if (conf === 'measured') {
+    return <circle cx={cx} cy={cy} r={2.5} fill={color} stroke="none" />;
+  }
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={3.4}
+      fill="var(--bg-card)"
+      stroke={conf === 'unknown' ? 'var(--unmeasured)' : color}
+      strokeWidth={1.5}
+      strokeDasharray={conf === 'unknown' ? '2 2' : undefined}
+    />
+  );
+}
+
+/**
+ * Key for the marks above. Rendered only when the history actually CONTAINS a
+ * non-measured sample — a key for a distinction the reader cannot see on screen
+ * is just noise.
+ */
+export function ConfidenceKey({ qualified, unknown, total }) {
+  if (!qualified && !unknown) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 'var(--s3)',
+        marginTop: 'var(--s2)',
+        fontSize: 'var(--text-xs)',
+        color: 'var(--text-muted)',
+      }}
+    >
+      {qualified > 0 ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s1)' }}>
+          <svg width={12} height={12} aria-hidden="true">
+            <circle cx={6} cy={6} r={3.4} fill="var(--bg-card)" stroke="var(--text-secondary)" strokeWidth={1.5} />
+          </svg>
+          {qualified} of {total} samples read from a generic MIB (low confidence)
+        </span>
+      ) : null}
+      {unknown > 0 ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s1)' }}>
+          <svg width={12} height={12} aria-hidden="true">
+            <circle
+              cx={6}
+              cy={6}
+              r={3.4}
+              fill="var(--bg-card)"
+              stroke="var(--unmeasured)"
+              strokeWidth={1.5}
+              strokeDasharray="2 2"
+            />
+          </svg>
+          {unknown} of {total} samples have no recorded provenance
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The provenance line inside a tooltip: "<source> — <what that means>".
+ * Shared so the two SNMP surfaces cannot word the same sample differently.
+ */
+export function ConfidenceTooltipMeta({ point }) {
+  const conf = sampleConfidence(point);
+  return (
+    <TooltipMeta>
+      {point && point.source ? `${point.source} — ` : ''}
+      {CONFIDENCE_WORDS[conf]}
+    </TooltipMeta>
+  );
+}

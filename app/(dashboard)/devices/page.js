@@ -347,10 +347,21 @@ export default async function DevicesPage({ searchParams }) {
                   )}
                 </td>
                 <td>
+                  {/* ⛔ All three coverage props matter, not just the counts.
+                      versionString separates "the matcher skipped this device"
+                      from a result; lastAssessedAt is the stamp
+                      versionMatcher.js writes only on a COMPLETED per-device
+                      match; assessmentCount is the corroborating evidence that
+                      covers both the not-yet-stamped fleet and devices holding
+                      only monitor-band rows (which this column does not show).
+                      Drop any of them and a zero silently goes back to meaning
+                      two different things. */}
                   <CveCell
                     patchNow={d.patch_now_count}
                     scheduled={d.scheduled_count}
                     versionString={d.version_string}
+                    lastAssessedAt={d.last_cve_assessed_at}
+                    assessmentCount={d.assessment_count}
                   />
                 </td>
                 <td>

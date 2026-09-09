@@ -170,38 +170,73 @@ export function HaCell({ enabled, mode, localState, peerStatus }) {
 //        dv.version_string, so this needs NO query change: the Devices page
 //        only has to forward it (see the ⛔ below).
 //
-//   CANNOT: version present, zero assessment rows. That is EITHER "the matcher
-//        ran and this firmware matches no advisory" (a real, earned zero) OR
-//        "the matcher has never run since this device was added". They are
-//        indistinguishable BY CONSTRUCTION, and this is not fixable in the UI:
-//        matchDeviceToAdvisories() only emits rows for advisories that still
-//        apply, and the reconciliation DELETE removes the rest — so a clean
-//        device holds zero rows and there is no assessed_at left to read.
-//        ⛔ THE QUERY CHANGE THAT WOULD FIX IT: persist the run itself, not
-//        just its output — a `devices.last_cve_assessed_at` stamped by
-//        versionMatcher.js at the end of each per-device transaction (it
-//        already has the device id and an open client there), SELECTed
-//        alongside version_string in deviceInventory.js's getDeviceRows() and
-//        passed here as `lastAssessedAt`. Then: version present + no timestamp
-//        -> NotMeasured; version present + timestamp + 0 rows -> a real 0.
-//        Until that column exists this cell must NOT pretend to know, so the
-//        residual case stays a neutral, uncoloured 0 — never green, never a
-//        "Clear" badge.
+//   NOW ALSO CAN (2026-09-09): version present, zero rows. This used to be
+//        indistinguishable BY CONSTRUCTION — matchDeviceToAdvisories() emits
+//        rows only for advisories that still apply and the reconciliation
+//        DELETE removes the rest, so a clean device holds zero rows and there
+//        is no assessed_at left to read. Fixed by persisting the RUN rather
+//        than its output: devices.last_cve_assessed_at, stamped by
+//        versionMatcher.js inside the per-device transaction only when the
+//        match completed (never for a skipped device), and passed here as
+//        `lastAssessedAt`.
 //
-// `versionString` is optional so the cell degrades to exactly its previous
-// behaviour if a caller does not pass it.
-export function CveCell({ patchNow, scheduled, versionString }) {
+// ⛔ TWO SIGNALS, ORed, and neither is redundant:
+//   lastAssessedAt   — proof the run happened. The authoritative one, but NULL
+//                      on every already-deployed device until the matcher next
+//                      runs, so it cannot stand alone yet.
+//   assessmentCount  — total device_cve_assessments rows in ANY band. Rows can
+//                      only exist because a match produced them, so a non-zero
+//                      count is independent proof of the same fact. It also
+//                      covers a case the two visible numbers never will: this
+//                      column shows patch_now + scheduled ONLY, so a device
+//                      holding nothing but monitor-band rows is fully assessed
+//                      and would otherwise be reported as unmeasured.
+// Requiring BOTH would flag the entire fleet as unassessed on the day this
+// shipped; accepting EITHER flags only devices for which SecVault holds no
+// evidence at all. Absence of both is the honest "we do not know".
+//
+// ⛔ A real zero here is still MUTED, never green and never a "Clear" badge —
+// "no advisory currently matches this firmware" is a fact about today's feed,
+// not a clean bill of health.
+//
+// `versionString`, `lastAssessedAt` and `assessmentCount` are all optional so
+// the cell degrades to exactly its previous behaviour if a caller omits them.
+export function CveCell({ patchNow, scheduled, versionString, lastAssessedAt, assessmentCount }) {
   const hasVersion = versionString !== null && versionString !== undefined && versionString !== '';
   if (versionString !== undefined && !hasVersion) {
     return (
       <NotMeasured reason="No firmware version has been collected from this device, so CVE matching has never run for it. This is an absence of assessment, not a clean result." />
     );
   }
-  if (patchNow === 0 && scheduled === 0) return <span style={{ color: 'var(--text-muted)' }}>0</span>;
+  // A non-zero band count is itself proof the matcher ran — show the numbers
+  // before asking any coverage question.
+  if (patchNow > 0 || scheduled > 0) {
+    return (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        {patchNow > 0 && <Badge color="danger">{patchNow} now</Badge>}
+        {scheduled > 0 && <Badge color="warning">{scheduled}</Badge>}
+      </span>
+    );
+  }
+  // Zero in both bands. Whether that is a result or an absence depends
+  // entirely on the two coverage signals.
+  const legacyCaller = lastAssessedAt === undefined && assessmentCount === undefined;
+  const assessed = Boolean(lastAssessedAt) || (assessmentCount || 0) > 0;
+  if (!legacyCaller && !assessed) {
+    return (
+      <NotMeasured reason="No completed CVE assessment is on record for this device — no assessment run has been stamped and it holds no assessment rows in any band. This is an absence of assessment, not a clean result. It clears itself the next time the match engine runs (after each feed sync, or via Assess Now)." />
+    );
+  }
   return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-      {patchNow > 0 && <Badge color="danger">{patchNow} now</Badge>}
-      {scheduled > 0 && <Badge color="warning">{scheduled}</Badge>}
+    <span
+      style={{ color: 'var(--text-muted)' }}
+      title={
+        lastAssessedAt
+          ? `Assessed ${new Date(lastAssessedAt).toISOString().replace('T', ' ').slice(0, 16)} UTC — no advisory currently matches this firmware in the patch-now or scheduled bands.`
+          : 'Assessed — this device holds CVE assessment rows, none of them in the patch-now or scheduled bands.'
+      }
+    >
+      0
     </span>
   );
 }

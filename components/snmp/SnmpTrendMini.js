@@ -17,6 +17,10 @@ import {
   countPollingGaps,
   PollingGapNote,
   GapTooltipBody,
+  ConfidenceDot,
+  ConfidenceKey,
+  ConfidenceTooltipMeta,
+  countConfidence,
 } from './chartGrammar';
 
 // Compact version of SnmpMetricsCharts.js's two-chart layout (CPU/Memory
@@ -55,16 +59,15 @@ const CPU_MEM_KEY = [
 // TooltipMetric) with this reason, never as a 0 and never as a bare dash.
 const NO_READING = 'The poll ran but this device did not return this metric.';
 
-// ⛔ PROVENANCE IS NOT AVAILABLE IN THIS VIEW, and that is a caller limitation,
-// not a data one. snmp_metric_snapshots carries `source`/`low_confidence` per
-// row and the full SNMP page's chart marks each sample accordingly — but the
-// Overview page's getRecentSnmpHistory() selects only
-// (cpu_percent, memory_percent, session_count, sampled_at), so nothing here can
-// tell a management-transport reading from a generic-MIB one. Rather than
-// silently implying every sample is equally trustworthy, the caption below says
-// where that distinction is visible. If the Overview query is ever widened to
-// select those two columns, lift SnmpMetricsCharts.js's ConfidenceDot in here
-// and delete the caption.
+// ⛔ PROVENANCE IS SHOWN HERE, identically to the full SNMP page (fixed
+// 2026-09-09). It used to be absent — not because the data lacked it, but
+// because getRecentSnmpHistory() selected only the four value columns, so this
+// summary drew every sample as equally trustworthy and carried a caption
+// pointing at the full page instead. The Overview query now selects
+// `source`/`low_confidence` too, and the marks, their key and the tooltip's
+// provenance line all come from the SHARED ./chartGrammar vocabulary — the same
+// components the full page uses, not a second copy at sparkline size. The two
+// views therefore cannot disagree about the same sample.
 function UsageTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0].payload;
@@ -74,6 +77,8 @@ function UsageTooltip({ active, payload }) {
       <TooltipMetric color={CPU_COLOR} label="CPU" value={point.cpu_percent} unit="%" reason={NO_READING} />
       <TooltipMetric color={MEM_COLOR} label="Memory" value={point.memory_percent} unit="%" reason={NO_READING} />
       <TooltipMeta>{utcFull(point.sampled_at)}</TooltipMeta>
+      {/* ⛔ Provenance travels with the sample, not with the device. */}
+      <ConfidenceTooltipMeta point={point} />
     </TooltipShell>
   );
 }
@@ -91,6 +96,7 @@ function SessionTooltip({ active, payload }) {
         reason="The poll ran but this device did not report a session count."
       />
       <TooltipMeta>{utcFull(point.sampled_at)}</TooltipMeta>
+      <ConfidenceTooltipMeta point={point} />
     </TooltipShell>
   );
 }
@@ -101,8 +107,8 @@ function allNull(data, keys) {
 
 const MINI_LABEL = { marginBottom: 'var(--s1)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' };
 
-// points: [{ cpu_percent, memory_percent, session_count, sampled_at }],
-// oldest-to-newest (same convention as SnmpMetricsCharts.js). Renders
+// points: [{ cpu_percent, memory_percent, session_count, sampled_at, source,
+// low_confidence }], oldest-to-newest (same convention as SnmpMetricsCharts.js). Renders
 // nothing (returns null) when there are fewer than 2 points -- a single
 // snapshot can't show a trend, and the caller's StatCard tiles already
 // cover the "just one number" case.
@@ -125,6 +131,10 @@ export default function SnmpTrendMini({ points }) {
   // Measured over the REAL rows, never the synthetic gap fillers.
   const usageMissing = allNull(rows, ['cpu_percent', 'memory_percent']);
   const sessionsMissing = allNull(rows, ['session_count']);
+
+  // Same tally, same key wording, same marks as the full SNMP page. Counted
+  // over the REAL rows, never the synthetic gap fillers.
+  const { qualified, unknown } = countConfidence(rows);
 
   return (
     <div style={{ marginTop: 'var(--s3)', display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
@@ -161,8 +171,12 @@ export default function SnmpTrendMini({ points }) {
                         samples either side — an invented reading where a
                         measurement failed. That is hit_count's old DEFAULT 0
                         rendered in a chart. The gap is now visibly a gap. */}
-                    <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="cpu_percent" name="CPU %" stroke={CPU_COLOR} dot={false} activeDot={{ r: 4 }} />
-                    <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="memory_percent" name="Memory %" stroke={MEM_COLOR} dot={false} activeDot={{ r: 4 }} />
+                    {/* ⛔ dot={<ConfidenceDot/>}, not dot={false}. A sparkline
+                        that hides provenance implies every sample is equally
+                        trustworthy — the quiet form of the failed-read-as-a-fact
+                        bug. Same element, same geometry as the full page. */}
+                    <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="cpu_percent" name="CPU %" stroke={CPU_COLOR} dot={<ConfidenceDot color={CPU_COLOR} />} activeDot={{ r: 4 }} />
+                    <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="memory_percent" name="Memory %" stroke={MEM_COLOR} dot={<ConfidenceDot color={MEM_COLOR} />} activeDot={{ r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -191,7 +205,7 @@ export default function SnmpTrendMini({ points }) {
                   />
                   <Tooltip cursor={TOOLTIP_CURSOR} content={<SessionTooltip />} />
                   {/* Single series — no key, by the shared grammar. */}
-                  <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="session_count" name="Sessions" stroke={SESSION_COLOR} dot={false} activeDot={{ r: 4 }} />
+                  <Line {...LINE_PROPS} strokeWidth={1.5} dataKey="session_count" name="Sessions" stroke={SESSION_COLOR} dot={<ConfidenceDot color={SESSION_COLOR} />} activeDot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -199,16 +213,13 @@ export default function SnmpTrendMini({ points }) {
         </div>
       </div>
 
-      <PollingGapNote gaps={gaps} />
+      {/* One key for both sparklines — they are drawn from the same rows, so a
+          per-chart copy would just say the same sentence twice. Renders nothing
+          at all when every sample is a plain measurement (ConfidenceKey's own
+          rule: no key for a distinction the reader cannot see on screen). */}
+      <ConfidenceKey qualified={qualified} unknown={unknown} total={rows.length} />
 
-      {/* ⛔ See the note above UsageTooltip: this summary cannot show per-sample
-          confidence because its caller does not select it. Saying where that
-          distinction lives is better than letting every sample look equally
-          trustworthy. */}
-      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-        Sample provenance (management transport vs. generic MIB) is marked per sample on this
-        device&apos;s SNMP page, not in this summary.
-      </div>
+      <PollingGapNote gaps={gaps} />
     </div>
   );
 }

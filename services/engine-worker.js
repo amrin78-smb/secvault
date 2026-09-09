@@ -765,14 +765,20 @@ async function runSnmpPollJob() {
 // configurable interval like the other jobs — "once a day" is the actual
 // requirement here, a settings-driven N-hour interval would just add drift
 // risk for no benefit).
-async function runDashboardSnapshotJob() {
+//
+// `options.ifAbsent` is used only by the startup catch-up below: it makes the
+// write an INSERT ... ON CONFLICT DO NOTHING, so an already-recorded day is
+// left exactly as measured. The 00:10 tick calls this with no options and
+// keeps its original upsert semantics.
+async function runDashboardSnapshotJob(options = {}) {
+  const ifAbsent = (options && options.ifAbsent) === true;
   const start = Date.now();
-  logger.info('Job [dashboard-snapshot] starting.');
+  logger.info(`Job [dashboard-snapshot] starting${ifAbsent ? ' (catch-up: write only if today is unrecorded).' : '.'}`);
   try {
-    const { cve, compliance } = await computeAndStoreDashboardSnapshot(pool);
+    const { cve, compliance, stored } = await computeAndStoreDashboardSnapshot(pool, { ifAbsent });
     const durationMs = Date.now() - start;
     logger.info(
-      `Job [dashboard-snapshot] finished in ${durationMs}ms — CVE critical=${cve.critical} high=${cve.high} medium=${cve.medium} low=${cve.low}, compliance overall=${compliance.overall}.`
+      `Job [dashboard-snapshot] finished in ${durationMs}ms — ${stored ? 'row written' : "today already recorded, left untouched"}; CVE critical=${cve.critical} high=${cve.high} medium=${cve.medium} low=${cve.low}, compliance overall=${compliance.overall}.`
     );
   } catch (err) {
     const durationMs = Date.now() - start;
@@ -942,11 +948,31 @@ async function runLogHitJob() {
   }
 }
 
-// Startup catch-up for the daily snapshot — see the call site's comment.
-// Deliberately checks for TODAY's row rather than backfilling history: the
-// counts it stores are all "as of now" values (current CVE bands, current
-// compliance state), so a missed day cannot be reconstructed after the fact.
-// Inventing one from today's numbers would fabricate history.
+// Startup catch-up for the daily snapshot. The [dashboard-snapshot] cron
+// fires ONLY on the 00:10 tick, and node-cron does not re-run a tick missed
+// while the process was down — so a deploy or outage spanning that minute
+// loses that day permanently (measured on the live fleet: 21 snapshots across
+// the last 28 days, with no weekly pattern, consistent with deploy restarts).
+// Snapshots are the sole source of every day-over-day delta, so a lost day is
+// a lost comparison.
+//
+// ⛔ TODAY ONLY, and NEVER an overwrite. Two rules, for two different reasons:
+//
+//  1. No backfill of any other date. Every column here is an "as of now"
+//     value — current CVE bands, current compliance findings, current rule
+//     analysis. Aug 19's numbers no longer exist anywhere and cannot be
+//     reconstructed. Stamping today's numbers on an older snapshot_date would
+//     fabricate history, which is strictly worse than a gap: the chart already
+//     renders the gaps honestly, and an honest gap is a true statement.
+//  2. No rewrite of today. If the 00:10 measurement already landed, a restart
+//     at 14:00 must not replace it with 14:00's numbers under the same date —
+//     that silently rewrites a point-in-time measurement and every delta drawn
+//     from it. The SELECT below is only for a clear log line; the actual
+//     guarantee is the ifAbsent write's ON CONFLICT (snapshot_date) DO NOTHING
+//     against the table's own UNIQUE constraint, so nothing rests on the
+//     read-then-write window.
+//
+// Never throws — same reliability contract as every other job here.
 async function runDashboardSnapshotIfMissing() {
   try {
     const { rows } = await pool.query(
@@ -957,10 +983,14 @@ async function runDashboardSnapshotIfMissing() {
       return;
     }
     logger.info("Startup [dashboard-snapshot] catch-up: today's snapshot missing — taking it now.");
-    await runDashboardSnapshotJob();
   } catch (err) {
-    logger.error(`Startup [dashboard-snapshot] catch-up check failed: ${err.stack || err.message}`);
+    // A failed check is NOT a measurement either: fall through to the write
+    // rather than skipping. The write is safe on its own (DO NOTHING), so the
+    // worst case of a failed pre-check is a wasted compute pass, never a lost
+    // day and never an overwrite.
+    logger.error(`Startup [dashboard-snapshot] catch-up check failed (attempting the guarded write anyway): ${err.stack || err.message}`);
   }
+  await runDashboardSnapshotJob({ ifAbsent: true });
 }
 
 // Outbound alerting poll — checks for new patch_now CVEs / critical
@@ -1107,19 +1137,16 @@ async function scheduleJobs() {
     runTrackedJob(runSnmpPollJob, 'snmp-poll');
   });
 
-  // Fixed daily time (00:10 UTC) rather than a configurable interval — see
-  // runDashboardSnapshotJob()'s own comment for why.
-  // ⛔ Catch-up. This job fires ONLY on the 00:10 UTC tick, so any restart or
-  // outage spanning that minute loses that day permanently — the trend chart
-  // showed 18 days of span but only 14 snapshots, i.e. 4 silently missing
-  // days. Snapshots are the sole source of every day-over-day delta, so a lost
-  // day is a lost comparison. On startup, take today's snapshot if it is not
-  // already recorded; the upsert is keyed on snapshot_date, so this is
-  // idempotent and a same-day restart just refreshes the row.
-  runDashboardSnapshotIfMissing().catch((err) =>
-    logger.error(`Startup [dashboard-snapshot] catch-up failed: ${err.stack || err.message}`)
-  );
-
+  // Fixed daily time (00:10) rather than a configurable interval — see
+  // runDashboardSnapshotJob()'s own comment for why. Unchanged: this tick is
+  // still the authoritative daily measurement, and still upserts.
+  //
+  // The startup catch-up for a tick missed while the service was down lives in
+  // main()'s startup block (runDashboardSnapshotIfMissing), NOT here — this
+  // function is called at the END of main(), so a catch-up placed here would
+  // run after the startup passes have already settled and, historically, after
+  // an unconditional snapshot run had already created today's row, which made
+  // the guard a permanent no-op.
   logger.info('Scheduling [dashboard-snapshot] with cron "10 0 * * *" (daily).');
   const dashboardSnapshotTask = cron.schedule('10 0 * * *', () => {
     if (shuttingDown) return;
@@ -1213,7 +1240,17 @@ async function main() {
   await runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
   await runTrackedJob(runVpnSessionPollJob, 'vpn-session-poll');
   await runTrackedJob(runSnmpPollJob, 'snmp-poll');
-  await runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
+  // ⛔ GUARDED, not unconditional. This used to be a plain
+  // runDashboardSnapshotJob() call, which ran on every startup and — because
+  // the write is keyed ON CONFLICT (snapshot_date) — REPLACED today's already
+  // recorded row with mid-day numbers on every deploy restart. Visible on the
+  // live fleet as rows whose recorded_at is 12:56 / 15:32 / 23:31 instead of
+  // the 00:10 tick that actually measured them. It also made the separate
+  // catch-up guard downstream a permanent no-op, since the row it checked for
+  // had just been written by this line. Now the ONE startup path, and it only
+  // ever fills TODAY when today is unrecorded. See
+  // runDashboardSnapshotIfMissing() for why it never backfills older days.
+  await runTrackedJob(runDashboardSnapshotIfMissing, 'dashboard-snapshot');
   // Runs on every startup (not just its 00:30 UTC cron tick) — cheap,
   // idempotent DELETEs, and this service restarts on every deploy (see
   // installer/Update-SecVault.ps1), so relying on the cron tick alone meant

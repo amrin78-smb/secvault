@@ -205,6 +205,25 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 
 ## lib/engines/dashboardSnapshot.js
 
+`computeAndStoreDashboardSnapshot(pool, { ifAbsent })` — `ifAbsent:true` switches the upsert from
+`ON CONFLICT DO UPDATE` to `DO NOTHING` and returns `{stored}` reporting honestly whether a row was
+written. ⛔ Used by the STARTUP catch-up; the 00:10 cron still uses the default DO UPDATE.
+
+⛔ There used to be TWO startup paths that cancelled each other: an unconditional run in `main()`
+and a guarded `runDashboardSnapshotIfMissing()` in `scheduleJobs()`, which is called AFTER it. The
+guard always found the row the unconditional run had just written, so it was a permanent no-op —
+and because the write was DO UPDATE, every deploy restart REPLACED that day’s snapshot with
+mid-day numbers. A day’s trend point was whatever the last restart happened to see.
+
+⛔ The catch-up leans on the existing `UNIQUE (snapshot_date)` constraint, not on a read-then-write
+check, so two racing startups cannot both conclude the row is missing.
+
+⛔ It writes `CURRENT_DATE` as a SQL literal and never as a parameter, so the engine has no way to
+express any other date. Past gaps are permanent by design: those days’ CVE bands, compliance
+findings and rule analysis no longer exist, and writing today’s numbers under an old date would
+fabricate history.
+
+
 `computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
 `computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>, byStandardCounts: Record<string, {pass,fail,warning}>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable. `byStandardCounts` (added 2026-08-02, additive — `computeAndStoreDashboardSnapshot` below ignores it) is the raw counts behind each percentage, for `lib/engines/complianceReport.js`'s fleet summary section.
 `computeAndStoreDashboardSnapshot(pool)` -> `Promise<{cve, compliance}>` — computes + `UPSERT`s today's `fleet_dashboard_snapshots` row (idempotent per calendar day).
@@ -413,6 +432,25 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `storeVpnTunnels(deviceId, tunnels, pool)` / `getVpnTunnels(deviceId, pool)` — same live-snapshot DELETE+reinsert + read pattern as vpnSessions.js, for `vpn_ipsec_tunnels`. Tunnel shape: `{name, peer, status, ike_version, bytes_in, bytes_out, raw}`. Fed by the adapters' optional `getVpnTunnels()` (PAN-OS `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco `show vpn-sessiondb l2l`), stored by the engine-worker VPN poll in its own try/catch (a tunnel-pull failure never fails the session poll). Added 2026-07-31.
 
 ## lib/engines/dashboardSnapshot.js
+
+`computeAndStoreDashboardSnapshot(pool, { ifAbsent })` — `ifAbsent:true` switches the upsert from
+`ON CONFLICT DO UPDATE` to `DO NOTHING` and returns `{stored}` reporting honestly whether a row was
+written. ⛔ Used by the STARTUP catch-up; the 00:10 cron still uses the default DO UPDATE.
+
+⛔ There used to be TWO startup paths that cancelled each other: an unconditional run in `main()`
+and a guarded `runDashboardSnapshotIfMissing()` in `scheduleJobs()`, which is called AFTER it. The
+guard always found the row the unconditional run had just written, so it was a permanent no-op —
+and because the write was DO UPDATE, every deploy restart REPLACED that day’s snapshot with
+mid-day numbers. A day’s trend point was whatever the last restart happened to see.
+
+⛔ The catch-up leans on the existing `UNIQUE (snapshot_date)` constraint, not on a read-then-write
+check, so two racing startups cannot both conclude the row is missing.
+
+⛔ It writes `CURRENT_DATE` as a SQL literal and never as a parameter, so the engine has no way to
+express any other date. Past gaps are permanent by design: those days’ CVE bands, compliance
+findings and rule analysis no longer exist, and writing today’s numbers under an old date would
+fabricate history.
+
 
 `computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
 `computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>, byStandardCounts: Record<string, {pass,fail,warning}>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable. `byStandardCounts` (added 2026-08-02, additive — `computeAndStoreDashboardSnapshot` below ignores it) is the raw counts behind each percentage, for `lib/engines/complianceReport.js`'s fleet summary section.

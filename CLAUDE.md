@@ -832,12 +832,21 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
 | VPN session poll (vendors with `getVpnSessionSummary()`) | 5-59 min | `VPN_POLL_INTERVAL_MINUTES` |
 | Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
-| Fleet dashboard snapshot | Daily, fixed 00:10 UTC | (not configurable) |
-| Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 UTC | `SNMP_VPN_RETENTION_DAYS` |
-| Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 UTC | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
+| Fleet dashboard snapshot | Daily, fixed 00:10 **server-local** | (not configurable) |
+| Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 **server-local** | `SNMP_VPN_RETENTION_DAYS` |
+| Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 **server-local** | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 | `log_hit` correlation (`log-hit`) | Hourly, fixed `20 * * * *` | `LOG_HIT_LOOKBACK_DAYS` |
 | Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
+
+⛔ **These "fixed HH:MM" cron jobs run in the SERVER’S LOCAL ZONE, not UTC.** `node-cron` is
+registered with no `timezone` option, so `10 0 * * *` fires at 00:10 **Asia/Bangkok** on the
+reference deployment (UTC+7). This table said UTC for a long time and was simply wrong.
+
+It is harmless TODAY only because the value written alongside it is `CURRENT_DATE`, which
+PostgreSQL also evaluates in that same local zone — the tick and the date agree. ⛔ Change either
+one ALONE — add a `timezone` to the cron, or move the database to UTC — and every `snapshot_date`
+shifts by a day while nothing errors and nothing looks broken. If you touch one, touch both.
 
 ### Reliability Rules (learned from LogVault collector)
 

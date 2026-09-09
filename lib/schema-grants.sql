@@ -39,6 +39,12 @@ CREATE OR REPLACE VIEW settings_readonly AS
   SELECT key, value, updated_at FROM settings WHERE key <> 'admin_password_hash';
 
 GRANT SELECT ON settings_readonly TO claude_readonly, nocvault_readonly;
+-- ⛔ A whole-TABLE grant covers columns added later, so
+-- devices.last_cve_assessed_at (added 2026-09-09) needs no entry of its own —
+-- checked, not assumed. This only holds because `devices` is granted as a
+-- table; the column-list/VIEW grants above (settings_readonly, users_readonly)
+-- do NOT auto-extend, and a new secret-bearing column there must be added to
+-- the view definition explicitly or it silently stays hidden/exposed wrongly.
 GRANT SELECT ON TABLE devices TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_versions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_configs TO claude_readonly, nocvault_readonly;

@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.91.0': [
+    "Fixed: the Support Expiry tile said “Not collected for any device” about every firewall, including the ones whose licences are collected. A value was computed but never carried through to the tile.",
+    "Fixed: a daily fleet snapshot was being overwritten with mid-day numbers every time the app was updated, so a day on the trend chart showed whatever the last restart happened to see rather than the midnight measurement.",
+    "The device list now distinguishes “no vulnerabilities found” from “never assessed” instead of showing zero for both, and the fleet tiles say how many firewalls they could not include.",
+    "The Config Drift tile now says when a firewall has too few stored configurations to compare, rather than reporting no drift.",
+    "SNMP charts on the device Overview now mark which readings came from a generic MIB rather than the vendor API, matching the full SNMP page.",
+    "Fixed a flood of misleading parser warnings in the server log caused by firewall object names that contain a dash, such as SERVER-24. No data or comparison was affected.",
+  ],
   '2.89.0': [
     "The dashboard Security tab is much faster. Its six widgets each scanned a day of raw threat logs on every page load; they now read an hourly summary built by the engine.",
     "First run: a new install shows a short setup checklist instead of a dashboard full of zeros. On an empty database a zero reads as \u201cnothing is wrong\u201d, when the truth is that nothing has been looked at yet.",

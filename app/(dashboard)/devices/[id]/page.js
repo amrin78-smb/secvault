@@ -272,9 +272,16 @@ async function getLatestSnmpSnapshot(dbPool, id) {
 // the oldest-to-newest convention every chart component in this app expects.
 async function getRecentSnmpHistory(dbPool, id) {
   const result = await dbPool.query(
-    `SELECT cpu_percent, memory_percent, session_count, sampled_at
+    // ⛔ `source`/`low_confidence` are selected because provenance is a property
+    // of the SAMPLE, not of the device: SnmpTrendMini marks each point with the
+    // same ConfidenceDot the full SNMP page uses, and it can only do that if
+    // the row carries its provenance. `low_confidence` is TRI-STATE here —
+    // false (vendor MIB / management transport), true (generic MIB, real but
+    // coarse) and NULL (pre-v2.55.0, never recorded). Do not COALESCE it to
+    // false in this query; NULL is a distinct, honestly-rendered state.
+    `SELECT cpu_percent, memory_percent, session_count, sampled_at, source, low_confidence
      FROM (
-       SELECT cpu_percent, memory_percent, session_count, sampled_at
+       SELECT cpu_percent, memory_percent, session_count, sampled_at, source, low_confidence
        FROM snmp_metric_snapshots
        WHERE device_id = $1
        ORDER BY sampled_at DESC

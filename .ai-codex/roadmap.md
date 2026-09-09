@@ -92,23 +92,30 @@ period, because the job runs both on cron and at every service start.
 
 ## Tier 3 — data-integrity debt (small, high value, mostly one-sitting each)
 
-1. **Missed daily snapshots are never backfilled.** 21 of the last 28 days present; a day the
-   engine is restarting at 00:10 UTC is lost permanently. Fix: at engine start, take today's
-   snapshot if absent. *(Cheapest item on this page; directly fixes the gaps in Vulnerability
-   Trends.)*
+1. ~~Missed daily snapshots are never backfilled.~~ **DONE v2.91.0** — and the real bug was worse
+   than the gaps. TWO startup paths cancelled each other: an unconditional run in `main()`, then a
+   guarded "if missing" check in `scheduleJobs()` which is called *after* it, so the guard always
+   found the row the unconditional run had just written and was a permanent no-op. Because the
+   write was `ON CONFLICT DO UPDATE`, every deploy restart REPLACED that day's snapshot with
+   mid-day numbers — a day's trend point was whatever the last restart happened to see. Past gaps
+   stay permanent by design.
 2. **CVSS v3/v4 not normalised.** 110 of 159 live assessments are scored on v4, 49 on v3, 255
    advisories carry no vector. Provenance is now recorded (v2.90.3); choosing one authoritative
    version is the open decision, and needs a re-match.
-3. **`CveCell` cannot distinguish "assessed and clean" from "never assessed".** Needs
-   `devices.last_cve_assessed_at`, stamped by `versionMatcher.js` inside its existing transaction.
-4. **Fleet tiles lack `cveNoVersion` and a config-snapshot count**, so two tiles cannot state
-   their own coverage.
+3. ~~`CveCell` cannot distinguish "assessed and clean" from "never assessed".~~ **DONE v2.91.0**
+   via `devices.last_cve_assessed_at`. Two call sites remain unblocked but not yet updated:
+   `OverviewCveCard.js` and `CvePostureTab.js` — both can now gate their zeros on the stamp.
+4. ~~Fleet tiles lack `cveNoVersion` and a config-snapshot count.~~ **DONE v2.91.0.** While doing
+   it, found `licence_row_count` was computed but never projected, so `supportNoData` silently
+   equalled the whole fleet and the Support tile claimed "Not collected for any device" about 15
+   devices whose licences ARE collected.
 5. **Config snapshots are not deduped at write time.** 508 of 1,730 snapshots were byte-identical
    to their predecessor (~161 MB). Retention bounds it; the write path still creates it.
 6. **Wide rollup sweep takes ~900s per 6h slice** and skips cycles. Needs profiling per pass, not
    a guess — `work_mem` is already 32MB, so the obvious lever is gone.
-7. **SNMP Overview sparkline cannot show per-sample confidence** because its query omits
-   `source`/`low_confidence`. Widen the query, lift `ConfidenceDot` in, delete the caption.
+7. ~~SNMP Overview sparkline cannot show per-sample confidence.~~ **DONE v2.91.0** — provenance
+   vocabulary shared via `components/snmp/chartGrammar.js` so the sparkline and the full page
+   cannot draw the same sample two ways.
 
 ---
 

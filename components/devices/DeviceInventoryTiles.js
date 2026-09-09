@@ -1,4 +1,5 @@
 import StatCard from '../ui/StatCard';
+import { CoverageNote } from '../ui/NotMeasured';
 import {
   IconDevices,
   IconActivity,
@@ -47,6 +48,42 @@ export default function DeviceInventoryTiles({ tiles }) {
               ? `All current — ${tiles.supportNoData} of ${tiles.total} not collected`
               : 'All current';
 
+  // ⛔ COVERAGE FOR BOTH CVE TILES. Both are fleet SUMS over
+  // device_cve_assessments, so a device with no completed assessment
+  // contributes exactly 0 — the same as one assessed and found clean. The
+  // colour was already honest (muted, never green at zero); the NUMBER still
+  // could not say how much of the fleet it actually covers. computeTiles() now
+  // supplies that as cveNotAssessed (no stamp AND no assessment rows, i.e. no
+  // evidence of a run by either signal), with cveNoVersion naming the
+  // definite subset the matcher skips outright.
+  //
+  // ⛔ Rendered as a CoverageNote UNDER the number, not as a tooltip: per
+  // NotMeasured.js, a confident fleet figure over partial data is the most
+  // dangerous thing this product can draw, and stating the gap belongs beside
+  // the figure that depends on it. `covered` is derived by subtraction, never
+  // from a second source that could disagree with the total.
+  const cveNotAssessed = tiles.cveNotAssessed || 0;
+  const cveCovered = tiles.total - cveNotAssessed;
+  const cveNote =
+    cveNotAssessed > 0 ? (
+      <span
+        title={
+          tiles.cveNoVersion > 0
+            ? `${tiles.cveNoVersion} of these have no firmware version collected, so CVE matching cannot begin for them. The rest have no completed assessment on record yet.`
+            : 'These devices have no completed CVE assessment on record — no assessment run has been stamped and they hold no assessment rows.'
+        }
+      >
+        <CoverageNote covered={cveCovered} total={tiles.total} />
+      </span>
+    ) : null;
+
+  // ⛔ Same statement for drift, and it is NOT the same question as "no open
+  // diffs". A config_diff is computed between two consecutive snapshots, so a
+  // device holding fewer than two can never produce one no matter how much its
+  // config changes. Its zero is arithmetic. Without this the tile read as a
+  // fleet-wide all-clear that those devices never took part in.
+  const driftNotComparable = tiles.driftNotComparable || 0;
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
       <StatCard
@@ -69,28 +106,30 @@ export default function DeviceInventoryTiles({ tiles }) {
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
       />
-      {/* ⛔ SAME AMBIGUITY AS THE SUPPORT TILE, STILL OPEN — recorded here so
-          it is not rediscovered as a surprise. Both CVE tiles sum
-          device_cve_assessments rows across the fleet, and a device that was
-          never assessed (no firmware version collected — versionMatcher.js
-          skips it outright) contributes 0 to both, exactly like a device
-          assessed and found clean. The colour is already honest (muted, never
-          green at zero) but the NUMBER cannot tell the two apart and there is
-          no field on `tiles` to say so.
-          ⛔ The one-line fix, when someone takes it: computeTiles() in
-          lib/engines/deviceInventory.js already has `version_string` on every
-          row, so
-              cveNoVersion: rows.filter((r) => !r.version_string).length
-          is all that is missing; this component can then render a CoverageNote
-          ("N of M firewalls contribute nothing and are excluded") under the
-          pair. Deliberately NOT faked from any other field here — inventing a
-          coverage number the data does not support would be the same bug in a
-          new place. Same signal now wired through to the per-row CveCell. */}
+      {/* ⛔ THE AMBIGUITY THAT USED TO BE RECORDED HERE IS NOW STATED ON THE
+          TILE, not just in this comment. Both CVE tiles sum
+          device_cve_assessments rows across the fleet, so a device with no
+          completed assessment contributes 0 to both, exactly like a device
+          assessed and found clean. The colour was already honest (muted, never
+          green at zero); what was missing was any field on `tiles` able to say
+          how much of the fleet the number covers. cveNotAssessed/cveNoVersion
+          (computeTiles, lib/engines/deviceInventory.js) supply that, and
+          cveNote renders it as a CoverageNote directly beneath the figure.
+          ⛔ Both tiles carry the SAME note deliberately — an un-assessed device
+          is missing from both sums, and stating it on only one would invite the
+          reader to treat the other as complete. */}
       <StatCard
         compact
         label="Critical CVEs"
         value={tiles.criticalCves}
-        sub={`Across ${tiles.criticalCveDevices} device${tiles.criticalCveDevices === 1 ? '' : 's'}`}
+        sub={
+          <>
+            <span>
+              Across {tiles.criticalCveDevices} device{tiles.criticalCveDevices === 1 ? '' : 's'}
+            </span>
+            {cveNote}
+          </>
+        }
         color={tiles.criticalCves > 0 ? 'var(--red)' : 'var(--text-muted)'}
         icon={IconShield}
         iconColor="var(--tint-danger-fg)"
@@ -100,7 +139,14 @@ export default function DeviceInventoryTiles({ tiles }) {
         compact
         label="Patch Now"
         value={tiles.patchNow}
-        sub={`On ${tiles.patchNowDevices} device${tiles.patchNowDevices === 1 ? '' : 's'}`}
+        sub={
+          <>
+            <span>
+              On {tiles.patchNowDevices} device{tiles.patchNowDevices === 1 ? '' : 's'}
+            </span>
+            {cveNote}
+          </>
+        }
         color={tiles.patchNow > 0 ? 'var(--red)' : 'var(--text-muted)'}
         icon={IconAlertTriangle}
         iconColor="var(--tint-danger-fg)"
@@ -157,20 +203,34 @@ export default function DeviceInventoryTiles({ tiles }) {
         iconColor="var(--tint-danger-fg)"
         iconBg="var(--tint-danger)"
       />
-      {/* ⛔ Same class again, weaker but real: a device with fewer than two
-          config snapshots can never produce a config_diff, so it contributes 0
+      {/* ⛔ Same class again, weaker but real, and now STATED rather than only
+          noted: a device with fewer than two config snapshots can never produce
+          a config_diff — diffing needs a predecessor — so it contributes 0
           drift for a reason that has nothing to do with its stability. The
-          per-device card (OverviewConfigChangesCard) now states this because it
-          can count snapshots; the fleet tile cannot, and a
-          `driftNotComparable: rows.filter(...)` in computeTiles would need a
-          snapshot count added to getDeviceRows() first. The colour is at least
-          honest (muted at zero, never green). */}
+          per-device card (OverviewConfigChangesCard) already said this because
+          it could count snapshots; getDeviceRows() now projects
+          config_snapshot_count so computeTiles can too (driftNotComparable).
+          The colour stays honest (muted at zero, never green) and goes
+          --unmeasured when NO device in view could have produced a diff, since
+          at that point the tile is measuring nothing at all. */}
       <StatCard
         compact
         label="Config Drift"
         value={tiles.driftDevices}
-        sub="Unacknowledged changes"
-        color={tiles.driftDevices > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
+        sub={
+          driftNotComparable >= tiles.total && tiles.total > 0
+            ? 'No device has two config snapshots to compare'
+            : driftNotComparable > 0
+              ? `Unacknowledged changes — ${driftNotComparable} of ${tiles.total} cannot be compared`
+              : 'Unacknowledged changes'
+        }
+        color={
+          tiles.driftDevices > 0
+            ? 'var(--yellow)'
+            : driftNotComparable >= tiles.total && tiles.total > 0
+              ? 'var(--unmeasured)'
+              : 'var(--text-muted)'
+        }
         icon={IconTrendingUp}
         iconColor="var(--tint-warn-fg)"
         iconBg="var(--tint-warn)"

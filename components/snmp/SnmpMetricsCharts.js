@@ -20,6 +20,10 @@ import {
   countPollingGaps,
   PollingGapNote,
   GapTooltipBody,
+  ConfidenceDot,
+  ConfidenceKey,
+  ConfidenceTooltipMeta,
+  countConfidence,
 } from './chartGrammar';
 
 // Series colours are design TOKENS handed straight to the SVG presentation
@@ -35,119 +39,18 @@ const CPU_COLOR = 'var(--red)';
 const MEM_COLOR = 'var(--blue)';
 const SESSION_COLOR = 'var(--accent-teal)';
 
-// ── ⛔ PER-SAMPLE CONFIDENCE. Fixed 2026-09-09; read this before changing a dot.
+// ── ⛔ PER-SAMPLE CONFIDENCE lives in ./chartGrammar. ────────────────────────
+// sampleConfidence / ConfidenceDot / ConfidenceKey / ConfidenceTooltipMeta were
+// defined in this file until 2026-09-09, when the device Overview sparkline
+// (SnmpTrendMini.js) gained the same marks and the pair had to be ONE
+// vocabulary rather than two copies that could drift apart about the same
+// sample. The tri-state rules, the three marks and the "one path per series"
+// caveat are documented there, above sampleConfidence(). This file only decides
+// WHICH SERIES COLOUR each dot gets.
 //
 // The caller selects `source` and `low_confidence` PER ROW (getSnmpHistory in
-// devices/[id]/snmp/page.js) because confidence is a property of the SAMPLE,
-// not of the vendor — a Palo Alto read over the management transport and a
-// generic MIB-II guess can sit next to each other in one series. This chart
-// used to draw both identically, and the page's "Low confidence" badge
-// describes only the LATEST sample, so a history that MIXES the two rendered as
-// one uniform, equally-trustworthy line. That is the failed-read-as-a-fact bug
-// in its quietest form: nothing is missing, the line just claims more than the
-// data supports.
-//
-// Three sample states, three marks:
-//   measured   low_confidence === false  solid filled dot in the series colour
-//   qualified  low_confidence === true   HOLLOW ring in the series colour —
-//                                        a real reading from a generic MIB
-//   unknown    low_confidence is NULL    hollow DASHED ring in --unmeasured —
-//                                        a pre-v2.55.0 row whose provenance was
-//                                        never recorded. Hueless on purpose:
-//                                        we do not know that it is bad, only
-//                                        that we cannot vouch for it.
-//
-// ⛔ STILL NOT FULLY SOLVED, and deliberately so: recharts draws ONE path per
-// series, so the SEGMENT between a measured sample and a qualified one is
-// still a single uniform stroke. Splitting the series into per-confidence
-// sub-series would fix the segments and break the line into misleading
-// fragments wherever confidence alternates. The per-sample DOT plus the tooltip
-// plus the mix caption below carry the fact instead; the line carries only the
-// shape. If this is ever revisited, the honest fix is a custom segment
-// renderer, not a second <Line>.
-function sampleConfidence(row) {
-  if (!row) return 'unknown';
-  if (row.low_confidence === true) return 'qualified';
-  if (row.low_confidence === false) return 'measured';
-  return 'unknown';
-}
-
-const CONFIDENCE_WORDS = {
-  measured: 'read over the management transport / a vendor MIB',
-  qualified: 'low confidence — generic MIB only',
-  unknown: 'provenance not recorded for this sample (pre-v2.55.0)',
-};
-
-// Custom recharts dot. Module top level, passed as an ELEMENT — recharts
-// cloneElement()s it with cx/cy/value/payload per point (see Dots.js).
-// ⛔ Never define this inside the chart component (CLAUDE.md's React rule).
-function ConfidenceDot(props) {
-  const { cx, cy, value, payload, color } = props;
-  // A null sample has no dot at all. connectNulls={false} already leaves the
-  // gap; drawing a marker on the axis would put a point where no reading exists.
-  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
-  if (value === null || value === undefined) return null;
-  const conf = sampleConfidence(payload);
-  if (conf === 'measured') {
-    return <circle cx={cx} cy={cy} r={2.5} fill={color} stroke="none" />;
-  }
-  return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={3.4}
-      fill="var(--bg-card)"
-      stroke={conf === 'unknown' ? 'var(--unmeasured)' : color}
-      strokeWidth={1.5}
-      strokeDasharray={conf === 'unknown' ? '2 2' : undefined}
-    />
-  );
-}
-
-// Key for the marks above. Rendered only when the history actually contains a
-// non-measured sample — a key for a distinction the reader cannot see on screen
-// is just noise.
-function ConfidenceKey({ qualified, unknown, total }) {
-  if (qualified === 0 && unknown === 0) return null;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: 'var(--s3)',
-        marginTop: 'var(--s2)',
-        fontSize: 'var(--text-xs)',
-        color: 'var(--text-muted)',
-      }}
-    >
-      {qualified > 0 ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s1)' }}>
-          <svg width={12} height={12} aria-hidden="true">
-            <circle cx={6} cy={6} r={3.4} fill="var(--bg-card)" stroke="var(--text-secondary)" strokeWidth={1.5} />
-          </svg>
-          {qualified} of {total} samples read from a generic MIB (low confidence)
-        </span>
-      ) : null}
-      {unknown > 0 ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s1)' }}>
-          <svg width={12} height={12} aria-hidden="true">
-            <circle
-              cx={6}
-              cy={6}
-              r={3.4}
-              fill="var(--bg-card)"
-              stroke="var(--unmeasured)"
-              strokeWidth={1.5}
-              strokeDasharray="2 2"
-            />
-          </svg>
-          {unknown} of {total} samples have no recorded provenance
-        </span>
-      ) : null}
-    </div>
-  );
-}
+// devices/[id]/snmp/page.js); the Overview's getRecentSnmpHistory now selects
+// them too, which is what made the shared treatment possible.
 
 // ⛔ A poll that could not read a metric stores NULL -- which is not zero and
 // not a measurement. Rendered through NotMeasured with a reason, never in the
@@ -158,17 +61,13 @@ function UsageTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0].payload;
   if (point && point.__gap) return <GapTooltipBody point={point} />;
-  const conf = sampleConfidence(point);
   return (
     <TooltipShell>
       <TooltipMetric color={CPU_COLOR} label="CPU" value={point.cpu_percent} unit="%" reason={NO_READING} />
       <TooltipMetric color={MEM_COLOR} label="Memory" value={point.memory_percent} unit="%" reason={NO_READING} />
       <TooltipMeta>{utcFull(point.sampled_at)}</TooltipMeta>
       {/* ⛔ Provenance travels with the sample, not with the device. */}
-      <TooltipMeta>
-        {point.source ? `${point.source} — ` : ''}
-        {CONFIDENCE_WORDS[conf]}
-      </TooltipMeta>
+      <ConfidenceTooltipMeta point={point} />
     </TooltipShell>
   );
 }
@@ -177,7 +76,6 @@ function SessionTooltip({ active, payload }) {
   if (!active || !payload || !payload.length) return null;
   const point = payload[0].payload;
   if (point && point.__gap) return <GapTooltipBody point={point} />;
-  const conf = sampleConfidence(point);
   return (
     <TooltipShell>
       <TooltipMetric
@@ -187,10 +85,7 @@ function SessionTooltip({ active, payload }) {
         reason="The poll ran but this device did not report a session count."
       />
       <TooltipMeta>{utcFull(point.sampled_at)}</TooltipMeta>
-      <TooltipMeta>
-        {point.source ? `${point.source} — ` : ''}
-        {CONFIDENCE_WORDS[conf]}
-      </TooltipMeta>
+      <ConfidenceTooltipMeta point={point} />
     </TooltipShell>
   );
 }
@@ -226,13 +121,8 @@ export default function SnmpMetricsCharts({ points }) {
   const usageMissing = rows.length === 0 || allNull(rows, ['cpu_percent', 'memory_percent']);
   const sessionsMissing = rows.length === 0 || allNull(rows, ['session_count']);
 
-  let qualified = 0;
-  let unknown = 0;
-  for (const row of rows) {
-    const c = sampleConfidence(row);
-    if (c === 'qualified') qualified += 1;
-    else if (c === 'unknown') unknown += 1;
-  }
+  // Counted over the REAL rows, never the synthetic gap fillers.
+  const { qualified, unknown } = countConfidence(rows);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--s4)' }}>

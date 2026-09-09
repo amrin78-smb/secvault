@@ -1006,3 +1006,21 @@ documentation described an intention the code never carried. Corrected 2026-09-0
 
 log_subtype adds ZERO extra grain rows and is carried free — though it was missing from the
 INSERT column list on first ship, so it stored NULL until v2.89.2.
+
+### devices.last_cve_assessed_at (v2.91.0)
+
+Stamped by `versionMatcher.js` inside the per-device transaction, AFTER prioritisation and
+immediately before COMMIT. It records that a CVE match RAN, which is the one thing the output
+could never express: `matchDeviceToAdvisories()` writes rows only for advisories that still
+apply and the reconciliation DELETE removes the rest, so a genuinely clean device ends with zero
+rows and no `assessed_at` anywhere — indistinguishable from a device nobody ever assessed.
+
+⛔ Persist the RUN, not its output. Stamping on entry would record "assessed" for a run that then
+threw; the stamp is inside the transaction so a ROLLBACK discards it with the writes it claims.
+
+⛔ NOT backfilled from `MAX(assessed_at)`. That timestamp exists only for devices that HAVE rows —
+precisely the ones that were never ambiguous — so a backfill would leave the real case untouched
+while making the column look populated.
+
+⛔ A device the matcher skips (`no version row - skipped`) never enters the transaction and keeps
+a NULL stamp. That is the point.
