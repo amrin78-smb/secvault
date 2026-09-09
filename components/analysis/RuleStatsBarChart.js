@@ -14,25 +14,38 @@ import Card, { CardBody } from '../ui/Card';
 // `varName` points at the CSS custom property that carries this bar's
 // intended semantic color -- resolved from app/globals.css at render time
 // (see resolveColor() below), matching this app's existing semantic color
-// usage: --green for allowed (StatCard "Allowed Rules"), --red for denied
-// AND for any_any (matches its severity=critical treatment elsewhere, e.g.
-// SeverityBadge.js / the "Allowed Any-to-Any" StatCard), --text-muted for
-// inactive AND log_disabled (matches the "Logging Disabled" StatCard's
-// muted treatment), --blue for NAT (a neutral informational hue, following
-// this app's medium/info convention -- see SeverityBadge.js).
+// usage: --green for allowed and --red for denied (the firewall allow/deny
+// convention; these are COMPOSITION categories, not severities, hence the raw
+// hues rather than the --sev-* aliases), --text-muted for inactive AND
+// log_disabled (matches the "Logging Disabled" StatCard's muted treatment),
+// --blue for NAT (a neutral informational hue -- and blue is no longer part
+// of the severity ramp at all after the 2026-09-09 palette rewrite, which is
+// exactly what makes it safe for a non-severity category here).
+//
+// any_any is the ONE bar that is a severity rather than a composition
+// category -- it is a critical finding count (matching its severity=critical
+// treatment elsewhere, e.g. SeverityBadge.js / the "Allowed Any-to-Any"
+// StatCard) -- so it uses the semantic --sev-crit alias. Same hue as --red
+// today; the alias is what keeps it correct if the ramp ever moves.
+//
+// The fallback values are TOKEN REFERENCES, not hex (changed 2026-09-09 with
+// the palette rewrite). Literal hex here meant the SSR pass painted the OLD
+// palette regardless of app/globals.css; `var(--x)` is a valid SVG `fill`
+// presentation-attribute value, so the browser resolves it against the live
+// theme on that pass too.
 const RULE_STAT_BARS = [
-  { key: 'allowed', label: 'Allowed', varName: '--green', fallbackHex: '#16a34a' },
-  { key: 'denied', label: 'Denied', varName: '--red', fallbackHex: '#dc2626' },
-  { key: 'inactive', label: 'Inactive', varName: '--text-muted', fallbackHex: '#64748b' },
-  { key: 'nat', label: 'NAT Enabled', varName: '--blue', fallbackHex: '#2563eb' },
-  { key: 'any_any', label: 'Any-to-Any', varName: '--red', fallbackHex: '#dc2626' },
-  { key: 'log_disabled', label: 'Logging Disabled', varName: '--text-muted', fallbackHex: '#64748b' },
+  { key: 'allowed', label: 'Allowed', varName: '--green', fallbackHex: 'var(--green)' },
+  { key: 'denied', label: 'Denied', varName: '--red', fallbackHex: 'var(--red)' },
+  { key: 'inactive', label: 'Inactive', varName: '--text-muted', fallbackHex: 'var(--text-muted)' },
+  { key: 'nat', label: 'NAT Enabled', varName: '--blue', fallbackHex: 'var(--blue)' },
+  { key: 'any_any', label: 'Any-to-Any', varName: '--sev-crit', fallbackHex: 'var(--sev-crit)' },
+  { key: 'log_disabled', label: 'Logging Disabled', varName: '--text-muted', fallbackHex: 'var(--text-muted)' },
 ];
 
 // Reads the app's own CSS custom properties (app/globals.css) rather than
-// hardcoding hex values a second time -- same pattern as
-// FindingsBarChart.js's resolveSeverityColor(), with a hardcoded fallback
-// for the SSR case where window/document don't exist yet.
+// hardcoding color values a second time -- same pattern as
+// FindingsBarChart.js's resolveSeverityColor(), with a fallback for the SSR
+// case where window/document don't exist yet.
 function resolveColor(varName, fallbackHex) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return fallbackHex;

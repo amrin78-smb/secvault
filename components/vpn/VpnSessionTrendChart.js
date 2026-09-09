@@ -3,19 +3,16 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Card, { CardBody } from '../ui/Card';
 
-// Same "resolve a CSS custom property to its computed value at render time,
-// with a hardcoded hex fallback for the SSR pass" pattern as
-// components/analysis/RiskTrendChart.js, which this component otherwise
-// mirrors closely (same LineChart shape, same axis/tooltip styling).
-const ACCENT_FALLBACK_HEX = '#0891b2'; // --accent-teal, this app's own identity color
-
-function resolveAccentColor() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return ACCENT_FALLBACK_HEX;
-  }
-  const value = getComputedStyle(document.documentElement).getPropertyValue('--accent-teal');
-  return value ? value.trim() : ACCENT_FALLBACK_HEX;
-}
+// The line colour is a design TOKEN handed straight to the SVG presentation
+// attributes recharts renders (stroke/fill). This replaced the older "resolve
+// a CSS custom property through getComputedStyle, with a hardcoded hex
+// fallback for the SSR pass" pattern: the fallback had already drifted off the
+// token it named, and a literal opts a chart out of both the token layer and
+// dark mode in the one code path nobody ever looks at.
+// --accent-teal is this app's own identity hue (and, since the palette
+// rewrite, the same value as --primary). It is not a severity: nothing about a
+// VPN session count is a risk reading.
+const LINE_COLOR = 'var(--accent-teal)';
 
 function formatAxisTick(value) {
   const d = new Date(value);
@@ -57,7 +54,6 @@ function SessionTooltip({ active, payload }) {
 // data (that needs syslog ingestion, not built yet).
 export default function VpnSessionTrendChart({ points }) {
   const data = Array.isArray(points) ? points : [];
-  const lineColor = resolveAccentColor();
 
   return (
     <Card>
@@ -96,9 +92,9 @@ export default function VpnSessionTrendChart({ points }) {
               <Line
                 type="monotone"
                 dataKey="active_session_count"
-                stroke={lineColor}
+                stroke={LINE_COLOR}
                 strokeWidth={2}
-                dot={{ r: 2, fill: lineColor, strokeWidth: 0 }}
+                dot={{ r: 2, fill: LINE_COLOR, strokeWidth: 0 }}
                 activeDot={{ r: 5 }}
                 isAnimationActive={false}
               />

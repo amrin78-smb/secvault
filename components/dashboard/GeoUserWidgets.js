@@ -58,7 +58,7 @@ export async function TopCountriesWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconTopology} color="#2dd4bf" bg="rgba(45,212,191,0.20)" />
+          <IconChip icon={IconTopology} color="var(--tint-teal-fg)" bg="var(--tint-teal)" />
           Top Destination Countries (24h)
         </CardTitle>
       </CardHeader>
@@ -89,7 +89,7 @@ export async function TopCountriesWidget() {
                     </span>
                     <span style={{ fontSize: 'var(--text-base)' }}><Num value={c.events} /></span>
                   </div>
-                  <Bar pct={max > 0 ? (c.events / max) * 100 : 0} tone="#2dd4bf" />
+                  <Bar pct={max > 0 ? (c.events / max) * 100 : 0} tone="var(--teal)" />
                 </div>
               ))}
             </div>
@@ -119,7 +119,7 @@ export async function TopUsersWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconUser} color="#818cf8" bg="rgba(129,140,248,0.20)" />
+          <IconChip icon={IconUser} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Top Users (24h)
         </CardTitle>
       </CardHeader>
@@ -151,7 +151,7 @@ export async function TopUsersWidget() {
                     </span>
                     <span style={{ fontSize: 'var(--text-base)' }}><Num value={u.events} /></span>
                   </div>
-                  <Bar pct={max > 0 ? (u.events / max) * 100 : 0} tone="#818cf8" />
+                  <Bar pct={max > 0 ? (u.events / max) * 100 : 0} tone="var(--blue)" />
                 </div>
               ))}
             </div>
@@ -179,7 +179,7 @@ export async function UrlCategoriesWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="#f472b6" bg="rgba(244,114,182,0.20)" />
+          <IconChip icon={IconGrid} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
           Web / Application Categories (24h)
         </CardTitle>
       </CardHeader>
@@ -209,7 +209,7 @@ export async function UrlCategoriesWidget() {
                   </span>
                   <span style={{ fontSize: 'var(--text-base)' }}><Num value={r.events} /></span>
                 </div>
-                <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="#f472b6" />
+                <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="var(--purple)" />
               </div>
             ))}
           </div>

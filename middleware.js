@@ -45,6 +45,15 @@ export const config = {
     // Server Actions SSRF, a middleware bypass). Those remain on the
     // authenticated surface and only the 14 -> 16 upgrade closes them.
     // npm audit will still report the HIGH after this change.
-    '/((?!api/auth|_next/static|favicon.ico|login).*)',
+    // ⛔ "fonts" is excluded, and it MUST be. The self-hosted IBM Plex faces
+    // live at /fonts/*.woff2 under public/. Without this exclusion every font
+    // request from an UNAUTHENTICATED page — i.e. the login screen, the first
+    // thing any evaluator sees — is 307d to /login and the page renders in the
+    // browser fallback. Authenticated pages would look right, so this breaks
+    // in exactly the one place nobody re-checks after logging in once.
+    //
+    // Safe to exclude: a woff2 is a static asset with no tenant data, the same
+    // reasoning already applied to _next/static above.
+    '/((?!api/auth|_next/static|fonts|favicon.ico|login).*)',
   ],
 };

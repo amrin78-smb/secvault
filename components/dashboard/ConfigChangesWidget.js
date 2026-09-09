@@ -64,7 +64,7 @@ export default async function ConfigChangesWidget({ days = 7 }) {
     <Card>
       <div className="card-header-compact">
         <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconRefresh} color="#a78bfa" bg="rgba(167,139,250,0.20)" />
+          <IconChip icon={IconRefresh} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
           Config Changes ({days}d)
         </div>
       </div>

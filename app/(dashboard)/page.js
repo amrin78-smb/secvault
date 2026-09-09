@@ -143,7 +143,7 @@ function WidgetCard({ icon, color, bg, title, children }) {
 
 function CveSeverityCard() {
   return (
-    <WidgetCard icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.22)" title="CVE Severity (Fleet)">
+    <WidgetCard icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" title="CVE Severity (Fleet)">
       <CveSeveritySummary />
     </WidgetCard>
   );
@@ -153,8 +153,8 @@ function TopRiskyCard() {
   return (
     <WidgetCard
       icon={IconTrendingUp}
-      color="#f87171"
-      bg="rgba(248,113,113,0.22)"
+      color="var(--tint-danger-fg)"
+      bg="var(--tint-danger)"
       title="Top Risky Devices"
     >
       <TopRiskyDevices />
@@ -164,7 +164,7 @@ function TopRiskyCard() {
 
 function VendorCard() {
   return (
-    <WidgetCard icon={IconDevices} color="#60a5fa" bg="rgba(96,165,250,0.20)" title="Vendor Distribution">
+    <WidgetCard icon={IconDevices} color="var(--tint-teal-fg)" bg="var(--tint-teal)" title="Vendor Distribution">
       <VendorDistribution />
     </WidgetCard>
   );

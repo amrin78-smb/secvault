@@ -24,31 +24,40 @@ const FINDING_TYPE_ORDER = [
 ];
 
 // Reads the app's own CSS custom properties (app/globals.css) rather than
-// hardcoding hex values a second time -- stays correct if the palette ever
+// hardcoding color values a second time -- stays correct if the palette ever
 // changes, and automatically matches SeverityBadge/StatusDot/etc. Read at
 // render time in a browser context (useEffect-free: getComputedStyle on
 // document.documentElement is synchronous and cheap for 4 lookups), with a
-// hardcoded fallback for the (never-expected-in-practice) case of SSR-time
-// evaluation before hydration.
+// fallback for the (never-expected-in-practice) case of SSR-time evaluation
+// before hydration.
 //
-// Var names match SeverityBadge.js's severity->Badge-color mapping one to
-// one (critical->danger/red, high->warning/yellow, medium->info/blue,
-// info->muted/text-muted) so this chart's bars and that badge always agree
-// on what each severity looks like. Reads the suite's solid status hues
-// directly (--red/--yellow/--blue) rather than the transitional
-// --danger/--warning/--info aliases in app/globals.css's legacy block, which
-// are slated for removal once nothing references them.
+// ⛔ These are the palette's SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues
+// (changed 2026-09-09 with the palette rewrite). Every bar here IS a severity,
+// which is exactly what those aliases exist to say, so a future ramp change is
+// one edit in app/globals.css rather than a hunt through the charts.
+//
+// ⛔ medium used to be --blue and that is now FORBIDDEN, not merely
+// discouraged: the rewritten palette pulled blue OUT of the severity ramp
+// (low severity is slate) precisely so the teal brand hue can never be
+// mistaken for a severity. Putting blue back on a severity collapses that
+// separation. medium is --sev-med (yellow) and high moved to --sev-high
+// (orange) so the two stay distinguishable.
+//
+// ⛔ The fallback values are TOKEN REFERENCES, not hex. Literal hex here meant
+// the SSR pass painted the OLD palette regardless of app/globals.css;
+// `var(--x)` is a valid SVG `fill` presentation-attribute value, so the
+// browser resolves it against the live theme on that pass too.
 const SEVERITY_VAR = {
-  critical: '--red',
-  high: '--yellow',
-  medium: '--blue',
-  info: '--text-muted',
+  critical: '--sev-crit',
+  high: '--sev-high',
+  medium: '--sev-med',
+  info: '--sev-low',
 };
 const SEVERITY_FALLBACK_HEX = {
-  critical: '#dc2626',
-  high: '#d97706',
-  medium: '#2563eb',
-  info: '#64748b',
+  critical: 'var(--sev-crit)',
+  high: 'var(--sev-high)',
+  medium: 'var(--sev-med)',
+  info: 'var(--sev-low)',
 };
 
 function resolveSeverityColor(severity) {

@@ -39,13 +39,29 @@ import EmptyState from '../ui/EmptyState';
 // maximum pairwise hue separation across all six, spaced around the color
 // wheel, with Fortinet and Palo Alto specifically placed as far apart as
 // possible since they're this fleet's two actual vendors today.
+//
+// TOKENS, not literals, since the palette rewrite: the old hexes were picked
+// against a white ground and the darkest of them (#1d4ed8 blue, #7c3aed
+// violet) sank into the dark theme's near-black card. Vendor identity is
+// CATEGORICAL -- these hues are borrowed for pairwise separation and encode no
+// severity, because nothing on this map encodes severity.
+// ⛔ Two tokens are excluded from this palette on purpose:
+//   --red is DANGER and nothing else now. Check Point was #dc2626, which made
+//     every Check Point device on the fleet map read as critically exposed. It
+//     is amber here for hue separation only.
+//   --unmeasured is reserved for the no-interface-data node state below, so a
+//     known vendor can never be mistaken for a coverage gap.
+// ⛔ Forcepoint takes --teal knowing that is also --primary, the hue the VPN
+// edges and the clickable node labels use. Its old pink has no token, and the
+// only other free slot was --red: a dot falsely claiming DANGER is a worse
+// confusion than one faintly claiming "clickable", which most nodes here are.
 const VENDOR_COLOR = {
-  paloalto: '#f97316',
-  fortinet: '#0ea5e9',
-  cisco_asa: '#1d4ed8',
-  checkpoint: '#dc2626',
-  sangfor: '#7c3aed',
-  forcepoint: '#db2777',
+  paloalto: 'var(--orange)',
+  fortinet: 'var(--blue)',
+  cisco_asa: 'var(--green)',
+  checkpoint: 'var(--yellow)',
+  sangfor: 'var(--purple)',
+  forcepoint: 'var(--teal)',
 };
 const VENDOR_LABEL = {
   paloalto: 'Palo Alto',
@@ -55,12 +71,21 @@ const VENDOR_LABEL = {
   sangfor: 'Sangfor',
   forcepoint: 'Forcepoint',
 };
-const DEFAULT_VENDOR_COLOR = '#64748b';
+// An unrecognised vendor slug simply has no identity in the palette above.
+// ⛔ Deliberately NOT --unmeasured: the vendor IS known and collected, we just
+// have no colour for it -- that is a gap in this map's lookup table, not a
+// failed read, and the two must not render alike.
+const DEFAULT_VENDOR_COLOR = 'var(--text-muted)';
 
 // Small inline SVG swatches for the legend — a line sample for edge types, a
 // dot sample for node vendor/collection-state — so the legend visually
 // matches exactly what's drawn on the map itself, rather than describing it
 // in prose alone.
+// ⛔ The "not measured" swatch is --unmeasured + a dashed hollow ring, NOT the
+// --hatch gradient. Two reasons, both hard: an SVG fill attribute cannot take
+// a CSS repeating-linear-gradient at all (it needs a paint server), and a
+// hatched legend chip would stop matching the dashed ring actually drawn on
+// the map, which is the entire point of these swatches.
 function LineSwatch({ color, dashed }) {
   return (
     <svg width={22} height={10} aria-hidden="true">
@@ -176,10 +201,10 @@ export default async function FleetMap() {
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', padding: '10px 14px', background: 'var(--surface-subtle)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-        <LegendItem swatch={<LineSwatch color="var(--border)" />} label="Shared subnet" />
+        <LegendItem swatch={<LineSwatch color="var(--text-muted)" />} label="Shared subnet" />
         <LegendItem swatch={<LineSwatch color="var(--primary)" dashed />} label="VPN tunnel (active)" />
         <LegendItem swatch={<DotSwatch color="var(--text-secondary)" />} label="Interface data collected" />
-        <LegendItem swatch={<DotSwatch color="var(--text-secondary)" muted />} label="Not yet collected" />
+        <LegendItem swatch={<DotSwatch color="var(--unmeasured)" muted />} label="Not yet collected" />
         {presentVendors.map((vendor) => (
           <LegendItem
             key={vendor}
@@ -218,7 +243,7 @@ export default async function FleetMap() {
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    stroke={isVpn ? 'var(--primary)' : 'var(--border)'}
+                    stroke={isVpn ? 'var(--primary)' : 'var(--text-muted)'}
                     strokeWidth={isVpn ? 1.5 : 2}
                     strokeDasharray={isVpn ? '5 3' : undefined}
                     opacity={isVpn ? 0.75 : 1}
@@ -236,6 +261,16 @@ export default async function FleetMap() {
 
               {positioned.map((node) => {
                 const color = VENDOR_COLOR[node.vendor] || DEFAULT_VENDOR_COLOR;
+                // ⛔ A device with no collected interface data is drawn in
+                // --unmeasured, the palette's hueless not-measured colour --
+                // hollow, dashed, and deliberately NOT in its vendor hue. That
+                // node is a COVERAGE GAP IN SECVAULT, not a fact about the
+                // device, and it must not read as a measured node just dimmed
+                // a little. It stays on the map (never silently omitted, per
+                // CLAUDE.md) and its vendor is still in the label and the
+                // tooltip; what the ring stops asserting is that we know
+                // anything at all about this device's topology.
+                const ringColor = node.hasInterfaceData ? color : 'var(--unmeasured)';
                 const labelY = node.y + (node.y >= CENTER ? 22 : -16);
                 const titleText = node.srcIp
                   ? `${node.name} (${node.vendor}) - click to query a path from ${node.srcIp}`
@@ -247,7 +282,7 @@ export default async function FleetMap() {
                       cy={node.y}
                       r={NODE_R}
                       fill={node.hasInterfaceData ? color : 'var(--bg-primary)'}
-                      stroke={color}
+                      stroke={ringColor}
                       strokeWidth={2}
                       strokeDasharray={node.hasInterfaceData ? undefined : '3,3'}
                       opacity={node.hasInterfaceData ? 1 : 0.6}

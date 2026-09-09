@@ -7,6 +7,17 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.87.0': [
+    "Redesign phase 1: SecVault has its own visual identity. Buttons, links and focus rings are now teal; red is reserved for danger alone. Previously the interactive colour and the critical-severity colour were the same red, so the most urgent signal on screen competed with the Save button.",
+    "Fonts are self-hosted. The app loaded Inter from Google over the internet, which the product\u2019s own Content-Security-Policy was already blocking in production \u2014 so every page has been rendering in a fallback typeface. It now ships IBM Plex and works on an air-gapped network.",
+    "\u201cNot measured\u201d is now a visible state, distinct from zero and from pass, everywhere it occurs \u2014 hatched or greyed with an em-dash, never a reassuring colour.",
+    "Fixed: SNMP charts drew a straight line across a polling cycle that returned no reading, making an invented value look exactly like a real one. Gaps are now gaps.",
+    "Fixed: a compliance standard with nothing measurable rendered an identical ring to a genuine 0%. The two are now distinguishable.",
+    "Fixed (latent): the Support Expiry tile said \u201cAll current\u201d for firewalls whose licences SecVault never collects. It now says how many devices it could not answer for.",
+    "Finding severity colours were remapped so the badge and the chart agree: critical red, high orange, medium yellow, info slate.",
+    "110 hardcoded colours across 29 files now read from the design tokens, so the whole app follows a theme change instead of half of it.",
+    "Accessibility: every text colour in both themes clears WCAG AA 4.5:1, verified by calculation rather than by eye.",
+  ],
   '2.86.2': [
     "VPN activity now says \"Login failed\" instead of ssl-login-fail, and \"Tunnel up\" instead of tunnel-up. An unmapped vendor verb still shows verbatim, and the raw verb is always on hover.",
     "Fixed: the VPN login-locations table ranked US and United States as two separate countries. Palo Alto emits ISO codes, Fortinet emits full names; they are now normalised to one row per country at read time.",

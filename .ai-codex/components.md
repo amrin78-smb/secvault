@@ -21,7 +21,7 @@ LoadingSpinner  size, className — spinning loader indicator
 PageHeader  title, subtitle, actions — page title/subtitle/actions row
 StatusDot  status, className — colored status indicator dot
 Table  children, className, layout='fixed', minWidth — bordered table wrapper (its own overflow-x:auto box, so callers never need to add one). `layout='auto'` (2.51.2) is ONLY for a table with no colgroup and no percentage widths, where 'fixed' would slice width into N equal columns and truncate every heading — pair it with `minWidth` so the table keeps its natural width and scrolls. ⛔ Never use 'auto' on a table with colgroup/percentage widths; CLAUDE.md requires 'fixed' there
-IconChip  icon, color, bg — small colored icon badge
+IconChip  icon, color, bg — small colored icon badge. ⛔ `color`/`bg` must be a MATCHED TINT PAIR (`var(--tint-danger-fg)` with `var(--tint-danger)`), not a raw status hue: a raw hue as a background does not adapt between themes. Every call site moved from literal hex+rgba to tokens in v2.87.0.
 (c) Modal  open, onClose, title, children, maxWidth=420 — focus-trapped dialog overlay; panel is viewport-height-capped + scrolls internally (never clips a tall form's submit button); maxWidth widens the panel for dense content (Edit Device passes 680)
 StatCard  label, value, sub, color, className, compact, icon, iconColor, iconBg — colored-border stat tile
 (c) RowActionsMenu  actions[] — "⋮" overflow menu for table-row actions (2026-07-23 UI audit; replaces stacked underlined text links). actions: {type:'link'|'button', label, href|onClick, disabled?, pending?, pendingLabel?, danger?}. Does NOT auto-close on a pending button click (needs somewhere to show "Collecting…"/etc.) — only closes on outside-click or a link navigation.
@@ -69,7 +69,7 @@ CVETable  rows, showDeviceColumn, deviceColumnLabel — reusable CVE table for d
 
 ## analysis/
 
-SeverityBadge  severity — colored badge for finding severity level
+SeverityBadge  severity — colored badge for finding severity level. ⛔ REMAPPED v2.87.0: critical→danger(red), high→**orange**, medium→**warning(yellow)**, info→muted(slate). medium used to be `info` (BLUE); blue is now off the severity ramp entirely, which is what stops the brand teal reading as a severity. This file must not drift from FindingsBarChart.js, which colours the same values.
 (c) AcknowledgeControl  deviceId, ruleIdVendor, findingType, currentStatus — auto-saving status select for a finding
 RiskTab  deviceId — renders device risk-score trend history
 (c) RiskTrendChart  points — line chart of risk score over time

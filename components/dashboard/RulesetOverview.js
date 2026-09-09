@@ -71,7 +71,7 @@ export default async function RulesetOverview() {
       <Card>
         <div className="card-body-compact">
           <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <IconChip icon={IconChart} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+            <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
             Ruleset Overview
           </div>
           <EmptyState message="No rules collected yet — add a device and run a collect to see fleet-wide rule health." />
@@ -100,7 +100,7 @@ export default async function RulesetOverview() {
     <Card>
       <div className="card-body-compact">
         <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconChart} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+          <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
           Ruleset Overview
         </div>
         <div style={subtextStyle}>

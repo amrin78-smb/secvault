@@ -978,18 +978,89 @@ NETVAULT_URL=
 
 ---
 
-## Design System — NocVault Suite Alignment (v2.0.0)
+## Design System — SecVault's own (rewritten 2026-09-09, v2.87.0)
 
-SecVault's UI matches the shared NocVault suite design system (NetVault/LogVault/DDIVault/SpanVault
-are byte-for-byte identical on tokens; SecVault ports the same `app/globals.css` plus one addition,
-`--accent-teal`).
+⛔ **No longer aligned with the NocVault suite.** Until 2026-09-09 `app/globals.css` was a port of
+the shared suite token file (NetVault/LogVault/DDIVault/SpanVault are byte-for-byte identical on
+tokens) plus one `--accent-teal` addition. It now carries SecVault's own palette, type scale and
+spacing scale. **Do not resync this file with the siblings, and do not copy changes from it into
+them.** The cost of the divergence is two token sets to maintain; it was accepted because SecVault
+is a separate product with its own auth, DB and server, and because the shared palette contained a
+defect this product could not carry (below).
 
-- **No Tailwind** — fully removed, not re-themed. Plain CSS custom properties + inline `style={{}}` + a shared hand-written utility-class set, all in `app/globals.css`. Do not reintroduce a CSS framework.
-- **Dual theme, light default**: `localStorage['secvault-theme']`, applied as `data-theme="dark"` on `<html>` (not a class, not `prefers-color-scheme` alone) by a blocking inline `<script>` in `app/layout.js`'s `<head>` before first paint; a `secvault:theme` window event keeps every `ThemeToggle` in sync. Brand/status colors stay the same in both themes — only neutral surfaces and the adaptive `--tint-*`/`--tint-*-fg` pairs flip. **Any tinted surface behind text MUST use a `--tint-*`/`--tint-*-fg` pair, never a hardcoded hex**, or it won't adapt in dark mode.
-- `app/globals.css` is authoritative for tokens: `--primary` (shared suite red `#C8102E`), `--navy`, `--accent-teal` (SecVault's own identity — logo + active sidebar chip only, controls still use `--primary`), status colors, `--tint-{info,success,warn,danger}`/`-fg`.
-- **Icons**: hand-rolled in `components/icons.js`, Feather-compatible convention. Never add an icon library.
-- Shared `components/ui/`: `Badge`/`Button`/`Card`(+sub-parts)/`Table`(enforces `tableLayout: 'fixed'`)/`Modal`/`StatusDot`/`EmptyState`/`LoadingSpinner`/`StatCard`(opt-in `compact` prop)/`PageHeader`/`IconChip`.
-- Priority band colors: `patch_now`→red "Patch Now", `scheduled`→yellow "Scheduled", `monitor`→muted "Monitor". KEV badge is a hand-rolled solid-red span, deliberately not a tinted `<Badge>`.
+- **No Tailwind** — unchanged and still load-bearing. Plain CSS custom properties + inline
+  `style={{}}` + a shared hand-written utility-class set, all in `app/globals.css`. Do not
+  reintroduce a CSS framework.
+
+### ⛔ Colour means RISK — the rule the palette exists to enforce
+
+`--primary` was `#C8102E`, the shared suite red, and drove every button, link, focus ring and
+active state — while `--red` (`#dc2626`) meant "this firewall is critically exposed". One hue
+family doing both jobs, so the product's most urgent signal competed with its own Save button.
+**Red is now reserved for danger and nothing else**; every interactive affordance uses `--primary`,
+which is SecVault's own teal.
+
+⛔ **That separation only holds because `--sev-low` is SLATE, not blue.** Dropping blue out of the
+severity ramp is what keeps the brand hue unambiguous. Putting blue back into severity collapses
+the whole scheme — do not.
+
+⛔ **NOT MEASURED is a first-class visual state with NO HUE**: `--unmeasured` for the text/em-dash,
+`--hatch` for a bar segment or swatch. This is CLAUDE.md's own failed-read-as-a-fact rule made
+visible on screen. A null hit count, a device with no ruleset, a compliance check SecVault cannot
+ask — none of these may be drawn as a zero, a pass, or a reassuring grey that reads as fine.
+
+### Themes
+
+- **Dual theme, light default**: `localStorage['secvault-theme']`, applied as `data-theme="dark"` on
+  `<html>` (not a class, not `prefers-color-scheme` alone) by a blocking inline `<script>` in
+  `app/layout.js`'s `<head>` before first paint; a `secvault:theme` window event keeps every
+  `ThemeToggle` in sync.
+- ⛔ **CHANGED: brand and status hues now flip between themes.** The old file froze them across both
+  themes deliberately. That is affordable for a saturated red and wrong for anything else —
+  `#0A8FA3` teal is correct on white and goes muddy on a near-black ground; `#17825A` green reads
+  almost black. Each dark value is re-picked for that ground, not algorithmically inverted.
+- **Any tinted surface behind text MUST use a `--tint-*`/`--tint-*-fg` pair**, never a hardcoded hex.
+- ⛔ **EXCEPT on the shell.** The header and sidebar are dark in BOTH themes, so `--tint-*-fg` is
+  wrong there — it flips, and in light mode a flipped fg is a dark colour on a dark bar, i.e.
+  invisible. Text and icons sitting on `--navy` use `--shell-fg` / `--shell-fg-ok` /
+  `--shell-fg-bad`, which do not flip.
+
+### Tokens (`app/globals.css` is authoritative)
+
+Brand `--primary`/`--primary-dark`/`--primary-light`/`--focus-ring`/`--accent-teal` · shell
+`--navy*`, `--shell-fg*` · surfaces `--bg-primary`/`--bg-card`/`--surface-subtle`/`--border`/
+`--border-light` · text `--text-primary`/`--text-secondary`/`--text-muted` · status
+`--red`/`--orange`/`--yellow`/`--green`/`--blue`/`--purple`/`--teal` with semantic aliases
+`--sev-crit`/`--sev-high`/`--sev-med`/`--sev-low`/`--sev-ok` (prefer the aliases in new code) ·
+unmeasured `--unmeasured`/`--hatch` · tints `--tint-{info,success,warn,danger,purple,teal,orange}`
+and `-fg` · **space `--s1`(4px) … `--s9`(96px)** · radius `--radius-sm`/`--radius`/`--radius-lg`/
+`--radius-pill` · type `--text-xs` … `--text-3xl`, `--font-sans`, `--font-mono`.
+
+⛔ **Spacing is a token scale now.** Before the rewrite there was none: 14 distinct inline gap
+values (including 1, 3, 5, 7 and 14px) and five near-identical paddings doing the same job. A
+component that invents its own 7px gap opts itself out of every future spacing change silently,
+exactly the way a hardcoded hex opts out of the palette.
+
+### Fonts — SELF-HOSTED, never a CDN
+
+⛔ `globals.css` used to open with `@import url('https://fonts.googleapis.com/…Inter…')`. SecVault
+installs on an on-premises firewall-management server, frequently segmented or air-gapped, where
+that request **fails silently** and the whole product renders in the browser default — for exactly
+the customers most likely to buy it, with no error anywhere. IBM Plex Sans/Mono (OFL) are vendored
+into `public/fonts/` and declared with `@font-face`. Do not reintroduce a font CDN and do not add a
+font npm package: `Update-SecVault.ps1` runs `npm ci`, and a font is a static asset, not a
+dependency.
+
+### The rest
+
+- **Icons**: hand-rolled in `components/icons.js`, Feather-compatible convention. Never add an icon
+  library. ⛔ Every sidebar entry must keep a DISTINCT GLYPH — that, not colour, is the per-item
+  wayfinding cue (the active nav chip is always the brand accent; see the note in `Sidebar.js`).
+- Shared `components/ui/`: `Badge`(forwards `title`)/`Button`/`Card`(+sub-parts)/`Table`(enforces
+  `tableLayout: 'fixed'`)/`Modal`/`StatusDot`/`EmptyState`/`LoadingSpinner`/`StatCard`(opt-in
+  `compact`)/`PageHeader`/`IconChip`/`TimeAgo`.
+- Priority band colors: `patch_now`→red "Patch Now", `scheduled`→yellow "Scheduled", `monitor`→muted
+  "Monitor". KEV badge is a hand-rolled solid-red span, deliberately not a tinted `<Badge>`.
 
 ---
 

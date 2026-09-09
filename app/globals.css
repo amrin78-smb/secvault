@@ -112,7 +112,7 @@
   color-scheme: light;
 
   /* ── Brand / interactive. NOT a severity. ── */
-  --primary:        #0A8FA3;
+  --primary:        #098294;
   --primary-dark:   #067183;
   --primary-light:  rgba(10,143,163,0.10);
   --focus-ring:     rgba(10,143,163,0.22);
@@ -124,13 +124,22 @@
   --navy-light:     #1B2536;
   --navy-dark:      #0A101B;
 
+  /* ⛔ ON-DARK SHELL TEXT. The header and sidebar are dark in BOTH themes, so
+     anything drawn on them must NOT use the --tint-*-fg pairs: those flip with
+     the theme, and in light mode a flipped fg is a dark colour on a dark bar —
+     invisible. These three do not flip, and they are the only correct choice
+     for text or icons sitting on --navy. */
+  --shell-fg:     #FFFFFF;
+  --shell-fg-ok:  #6FE0AC;
+  --shell-fg-bad: #FF9296;
+
   --bg-primary:     #F7F9FB;
   --bg-card:        #FFFFFF;
   --border:         #DDE3EB;
   --border-light:   #EAEFF4;
   --text-primary:   #0D131C;
   --text-secondary: #3D4A5C;
-  --text-muted:     #6B7A8D;
+  --text-muted:     #69788B;
   --shadow-sm:      0 1px 2px rgba(13,19,28,0.06);
   --shadow-md:      0 4px 14px rgba(13,19,28,0.08);
   --shadow-lg:      0 18px 48px rgba(13,19,28,0.12);
@@ -156,6 +165,15 @@
   --purple:  #6D45C9;
   --teal:    #0A8FA3;
 
+  /* ⛔ CONTRAST: these raw status hues are for GRAPHICS ONLY -- chart fills,
+     bar segments, dots, borders. Measured on white: --orange 3.63:1 and
+     --yellow 3.64:1. That clears WCAG 1.4.11s 3:1 for a non-text graphical
+     object and FAILS 1.4.3s 4.5:1 for text. For TEXT on a tinted surface use
+     the paired tint tokens (--tint-danger with --tint-danger-fg, and so on
+     for success, warn, info, teal, orange, purple), which clear 4.5:1
+     (lowest is --tint-orange-fg at 5.39). Every dark-theme value clears 4.5:1
+     already. Re-run the check if you change a hue; it is arithmetic, not taste.
+  */
   /* Semantic aliases for the ramp. Prefer these in new code — they say what
      the colour MEANS, so a future palette change is one edit here rather than
      a hunt for every place --yellow happened to mean "medium". */
@@ -171,7 +189,7 @@
      them as either (CLAUDE.md's failed-read-as-a-fact rule, made visible).
      Use --unmeasured for the text/em-dash and --hatch for any bar segment or
      swatch standing in for the missing measurement. */
-  --unmeasured: #93A1B2;
+  --unmeasured: #6D7784;
   --hatch: repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 7px);
 
   /* SecVault's own brand/logo/active-nav hue. Now the SAME value as
@@ -891,7 +909,10 @@ select.input {
 .sv-nav-chip svg { width: 16px; height: 16px; }
 .sv-nav a:hover { background: rgba(255,255,255,0.06); color: #fff; }
 .sv-nav a.active { background: var(--accent-teal-bg); color: #fff; }
-.sv-nav a.active .sv-nav-chip { background: var(--chip-bg); color: var(--chip-color); }
+/* The active chip is ALWAYS the brand accent -- see the note in Sidebar.js.
+   --chip-bg/--chip-color are no longer set by that component; .widget-icon-chip
+   above still uses them and is unaffected. */
+.sv-nav a.active .sv-nav-chip { background: var(--accent-teal-bg); color: var(--primary); }
 .sv-nav a.active::before {
   content: '';
   position: absolute;

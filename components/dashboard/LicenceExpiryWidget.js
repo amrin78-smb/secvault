@@ -113,7 +113,7 @@ export default async function LicenceExpiryWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconClock} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+          <IconChip icon={IconClock} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
           Licence &amp; Support Expiry
         </CardTitle>
       </CardHeader>

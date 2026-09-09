@@ -69,7 +69,7 @@ export async function TrafficVolumeWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconActivity} color="#60a5fa" bg="rgba(96,165,250,0.20)" />
+          <IconChip icon={IconActivity} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Log Volume (24h)
         </CardTitle>
       </CardHeader>
@@ -137,7 +137,7 @@ export async function TopTalkersWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconDevices} color="#4ade80" bg="rgba(74,222,128,0.20)" />
+          <IconChip icon={IconDevices} color="var(--tint-success-fg)" bg="var(--tint-success)" />
           Top Log Sources (24h)
         </CardTitle>
       </CardHeader>
@@ -182,20 +182,21 @@ export async function ActionBreakdownWidget() {
   // client-rst/server-rst as DENIED, but those are Fortinet SESSION-END verbs —
   // the session existed and was permitted, then ended. Counting them as denied
   // inflated 'Session Outcomes' with established sessions. Anything the shared
-  // vocabulary cannot classify renders muted, never green and never red.
+  // vocabulary cannot classify renders as --unmeasured (the palette's no-hue
+  // "not measured" token), never green and never red.
   const tone = (a) => {
-    if (a === '(unreported)') return 'var(--text-muted)';
+    if (a === '(unreported)') return 'var(--unmeasured)';
     const verdict = classifyAction(a);
     if (verdict === 'blocked') return 'var(--red)';
     if (verdict === 'allowed') return 'var(--green)';
-    return 'var(--text-muted)';
+    return 'var(--unmeasured)';
   };
 
   return (
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.22)" />
+          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Session Outcomes (24h)
         </CardTitle>
       </CardHeader>
@@ -233,7 +234,7 @@ export async function TopRulesWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconTrendingUp} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+          <IconChip icon={IconTrendingUp} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
           Busiest Rules (today)
         </CardTitle>
       </CardHeader>
@@ -280,7 +281,7 @@ export async function ThreatActivityWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.22)" />
+          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Threat &amp; UTM Events (24h)
         </CardTitle>
       </CardHeader>
@@ -316,13 +317,13 @@ export async function IngestHealthWidget() {
 
   // ⛔ dropped is the number that matters. A collector losing datagrams under
   // load looks exactly like a quiet network from every other angle.
-  const dropTone = h.dropped === null ? 'var(--text-muted)' : h.dropped > 0 ? 'var(--red)' : 'var(--green)';
+  const dropTone = h.dropped === null ? 'var(--unmeasured)' : h.dropped > 0 ? 'var(--red)' : 'var(--green)';
 
   return (
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconRefresh} color="#60a5fa" bg="rgba(96,165,250,0.20)" />
+          <IconChip icon={IconRefresh} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Collector Health
         </CardTitle>
       </CardHeader>

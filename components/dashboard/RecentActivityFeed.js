@@ -107,7 +107,7 @@ export default async function RecentActivityFeed({
     <Card>
       <div className="card-header-compact">
         <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconClock} color="#9ca3af" bg="rgba(156,163,175,0.20)" />
+          <IconChip icon={IconClock} color="var(--text-secondary)" bg="var(--surface-subtle)" />
           Recent Activity
         </div>
       </div>

@@ -142,7 +142,7 @@ export default async function ComplianceScoreWidget() {
     <Card>
       <div className="card-body-compact">
         <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconSearch} color="#34d399" bg="rgba(52,211,153,0.20)" />
+          <IconChip icon={IconSearch} color="var(--tint-success-fg)" bg="var(--tint-success)" />
           Compliance Score
         </div>
         <div style={subtextStyle}>{asOfLabel}</div>

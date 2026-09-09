@@ -55,7 +55,7 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
     <Card>
       <div className="card-header-compact">
         <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconBell} color="#fb923c" bg="rgba(251,146,60,0.20)" />
+          <IconChip icon={IconBell} color="var(--tint-orange-fg)" bg="var(--tint-orange)" />
           Recent Critical Alerts
         </div>
       </div>

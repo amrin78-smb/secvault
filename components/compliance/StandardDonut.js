@@ -4,23 +4,27 @@ import { PieChart, Pie, Cell } from 'recharts';
 import { scoreColor, SCORE_COLOR_VAR } from './ComplianceMatrix';
 
 // Same "resolve a CSS custom property to its computed value at render time,
-// with a hardcoded hex fallback for the SSR pass" pattern as
+// with a fallback for the SSR pass" pattern as
 // components/analysis/FindingsBarChart.js's resolveSeverityColor() -- keeps
 // this donut's arc color in sync with the exact same tokens
 // ComplianceMatrix.js's scoreChip()/StatCard tiles already use, rather than
-// hardcoding hex a second time. SCORE_COLOR_VAR values are 'var(--xxx)'
+// hardcoding a color a second time. SCORE_COLOR_VAR values are 'var(--xxx)'
 // strings (built for a CSS `color` prop, e.g. StatCard's `color`); the var
-// name is pulled back out here so getComputedStyle can resolve it to a real
-// value -- handing a raw 'var(--xxx)' string straight to recharts' `fill`
-// prop only resolves correctly once mounted in a browser DOM, never during
-// the SSR pass this component (imported by the server-rendered
-// StandardCard.js) also runs through.
+// name is pulled back out here so getComputedStyle can resolve it once mounted.
+//
+// ⛔ The fallback values below are TOKEN REFERENCES, not hex (changed with the
+// 2026-09-09 palette rewrite). They used to be literal hex, which meant the
+// server-rendered pass drew this gauge in the OLD palette no matter what
+// app/globals.css says. `var(--xxx)` is a valid value for an SVG `fill`
+// presentation attribute, so the browser resolves it against the live theme
+// on that pass too.
 const VAR_FALLBACK_HEX = {
-  '--green': '#16a34a',
-  '--yellow': '#d97706',
-  '--red': '#dc2626',
-  '--text-muted': '#64748b',
-  '--border': '#e2e8f0',
+  '--green': 'var(--green)',
+  '--yellow': 'var(--yellow)',
+  '--red': 'var(--red)',
+  '--text-muted': 'var(--text-muted)',
+  '--border': 'var(--border)',
+  '--unmeasured': 'var(--unmeasured)',
 };
 
 function resolveCssVar(varRef) {
@@ -38,8 +42,17 @@ function resolveCssVar(varRef) {
 // full ring, rather than layering two separate <Pie> elements. `pct === null`
 // (never audited / nothing measurable -- see CLAUDE.md's "null and 0% mean
 // very different things" convention, already followed by ComplianceMatrix's
-// scoreChip()) renders one flat muted ring with no colored arc at all, since
-// there is nothing to show a proportion of.
+// scoreChip()) renders one flat ring with no colored arc at all, since there
+// is nothing to show a proportion of.
+//
+// ⛔ That null ring is drawn in --unmeasured, NOT in the --border track color
+// (changed 2026-09-09 with the palette rewrite). A measured 0% also renders as
+// a full track-colored ring, so painting "nothing was measurable" in the same
+// color made the two states pixel-identical apart from the centre label --
+// i.e. an unmeasured value rendered as a confident zero, which is exactly the
+// failed-read-as-a-fact bug CLAUDE.md bans. --unmeasured is the palette's
+// deliberately hue-less "not measured" token (--hatch, its sibling, is a
+// repeating-linear-gradient and so cannot be used as an SVG fill).
 //
 // Fixed-size wrapper div (size x size px), NOT ResponsiveContainer -- this is
 // a small fixed-size widget dropped into a two-column card layout
@@ -48,7 +61,7 @@ function resolveCssVar(varRef) {
 export default function StandardDonut({ pct, size = 120 }) {
   const clamped = pct == null ? null : Math.max(0, Math.min(100, pct));
   const color = resolveCssVar(SCORE_COLOR_VAR[scoreColor(clamped)]);
-  const track = resolveCssVar('var(--border)');
+  const track = resolveCssVar(clamped == null ? 'var(--unmeasured)' : 'var(--border)');
 
   const data =
     clamped == null
@@ -91,7 +104,7 @@ export default function StandardDonut({ pct, size = 120 }) {
           justifyContent: 'center',
           fontSize,
           fontWeight: 700,
-          color: clamped == null ? 'var(--text-muted)' : 'var(--text-primary)',
+          color: clamped == null ? 'var(--unmeasured)' : 'var(--text-primary)',
           pointerEvents: 'none',
         }}
       >

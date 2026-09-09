@@ -51,6 +51,28 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   server-driven pattern every other tabbed page in this app uses — deliberate, copied from
   netvault's own Settings page. Don't "fix" this to match the other pages.
 
+## The shell is dark in BOTH themes, so `--tint-*-fg` is wrong on it (2026-09-09)
+
+The header and sidebar use `--navy` in light mode and in dark mode. Everything else in the app sits
+on `--bg-card`/`--bg-primary`, which flip.
+
+⛔ So the usual rule — "any tinted surface behind text uses a `--tint-*`/`--tint-*-fg` pair" — is
+**inverted on the shell**. A `-fg` token flips with the theme; on a bar that does not flip, the
+light-mode value is a dark colour on a dark ground, i.e. invisible. This is easy to introduce and
+hard to notice, because whoever adds it is almost certainly looking at dark mode at the time.
+
+Text and icons drawn on `--navy` use `--shell-fg`, `--shell-fg-ok`, `--shell-fg-bad`, which are
+defined once on `:root` and are NOT redefined in the dark block. `components/layout/Header.js`'s
+sync pill is the reference case: it previously hardcoded `#86efac`/`#fca5a5` for exactly this
+reason, and the hardcoding was correct in effect even though it bypassed the token layer.
+
+Related, same file: `.sv-nav a.active .sv-nav-chip` is now always the brand accent. Each nav entry
+used to carry its own hue, but only the ACTIVE chip was ever coloured, so the "you are here" signal
+was a different colour on every page — and on `/vulnerability` it was a red sitting beside severity
+badges that use red to mean critically exposed. ⛔ The per-item wayfinding cue is the GLYPH, and
+every sidebar entry must keep a distinct one; the old comments in `Sidebar.js` claimed the colour
+was that cue, which was never true.
+
 ## Services / process model
 - NEVER use PowerShell service cmdlets (`Start-Service`/`Stop-Service`/`Get-Service` for
   state-changing calls) — they silently disconnect WinRM sessions. Use `sc.exe`. Read-only

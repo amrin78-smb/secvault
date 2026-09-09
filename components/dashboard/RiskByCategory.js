@@ -73,7 +73,7 @@ export default async function RiskByCategory() {
             color: 'var(--text-muted)',
           }}
         >
-          <IconChip icon={IconGrid} color="#f87171" bg="rgba(248,113,113,0.22)" />
+          <IconChip icon={IconGrid} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Risk by Category
         </div>
         <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>

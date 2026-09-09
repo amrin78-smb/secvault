@@ -82,7 +82,7 @@ export default async function ComplianceStandardsBreakdown() {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="#4ade80" bg="rgba(74,222,128,0.20)" />
+          <IconChip icon={IconShield} color="var(--tint-success-fg)" bg="var(--tint-success)" />
           Score by Standard (Fleet)
         </CardTitle>
       </CardHeader>

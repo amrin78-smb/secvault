@@ -11,11 +11,15 @@ import { titleCase } from '../../lib/formatDisplay';
 // better), which is a reliable way to get one read as the other. Per the user's
 // decision, the security score is the only FIGURE and the risk band is carried
 // as its COLOUR plus a text label underneath.
+// The band names ARE the severity ramp, so they use the semantic aliases
+// rather than raw hues — --sev-low is deliberately NOT used here: in this map
+// "low" means the device is in good shape, which is --sev-ok (green), not the
+// slate reserved for a low-severity finding.
 const RISK_COLOR = {
-  critical: 'var(--red)',
-  high: '#f97316',
-  medium: 'var(--yellow)',
-  low: 'var(--green)',
+  critical: 'var(--sev-crit)',
+  high: 'var(--sev-high)',
+  medium: 'var(--sev-med)',
+  low: 'var(--sev-ok)',
 };
 
 const RISK_LABEL = {
@@ -31,12 +35,14 @@ export function SecurityScoreCell({ score, riskBand, components }) {
   // which would say "measured, and terrible".
   if (score === null || score === undefined) {
     return (
-      <span style={{ color: 'var(--text-muted)' }} title="No measurable data yet">
+      <span style={{ color: 'var(--unmeasured)' }} title="No measurable data yet">
         —
       </span>
     );
   }
-  const color = RISK_COLOR[riskBand] || 'var(--text-muted)';
+  // A score with no band was produced but not classified — --unmeasured, the
+  // hueless "not measured" colour, never a point on the ramp.
+  const color = RISK_COLOR[riskBand] || 'var(--unmeasured)';
   // Hover shows the decomposition — an opaque composite nobody can explain
   // gets ignored.
   const breakdown = Array.isArray(components)
@@ -107,7 +113,12 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
       </span>
     );
   }
-  return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  // ⛔ Nothing expired, nothing expiring, nothing unparsed — which also covers
+  // a device from which NO licence rows were ever collected (Check Point,
+  // Cisco ASA, Sangfor, Forcepoint and Fortinet-over-API collect none). Hence
+  // --unmeasured and an em-dash rather than a reassuring colour or a "Current"
+  // badge: this cell cannot tell "all licences fine" from "never looked".
+  return <span style={{ color: 'var(--unmeasured)' }}>—</span>;
 }
 
 // HA state from device_ha_status. A device whose adapter does not report HA at
@@ -115,7 +126,7 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
 // simply not collected yet).
 export function HaCell({ enabled, mode, localState, peerStatus }) {
   if (enabled === null || enabled === undefined) {
-    return <span style={{ color: 'var(--text-muted)' }} title="This vendor does not report HA state to SecVault">—</span>;
+    return <span style={{ color: 'var(--unmeasured)' }} title="This vendor does not report HA state to SecVault">—</span>;
   }
   if (!enabled) return <span style={{ color: 'var(--text-muted)' }}>Standalone</span>;
   const peerDown = peerStatus && peerStatus !== 'up';
@@ -135,6 +146,12 @@ export function HaCell({ enabled, mode, localState, peerStatus }) {
 }
 
 export function CveCell({ patchNow, scheduled }) {
+  // ⛔ This 0 is AMBIGUOUS and the colour deliberately does not resolve it.
+  // deviceInventory.js COALESCEs both counts to 0, so a device that has never
+  // been assessed at all (no version collected, no advisory matched) is
+  // indistinguishable here from one assessed and found clean. Left neutral —
+  // never a green/"clear" colour — until the query can report the two apart;
+  // at that point the not-assessed case should render — in var(--unmeasured).
   if (patchNow === 0 && scheduled === 0) return <span style={{ color: 'var(--text-muted)' }}>0</span>;
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -190,7 +207,9 @@ export function PollHealthNote({ band, health }) {
     <span
       style={{
         fontSize: 'var(--text-xs)',
-        color: band === 'failing' ? 'var(--red)' : band === 'degraded' ? 'var(--yellow)' : 'var(--text-muted)',
+        // healthy/flaky returned above, so the fall-through band is 'unknown'
+        // — never observed, which is --unmeasured and not a ramp hue.
+        color: band === 'failing' ? 'var(--red)' : band === 'degraded' ? 'var(--yellow)' : 'var(--unmeasured)',
       }}
     >
       {tone.label}{pct}

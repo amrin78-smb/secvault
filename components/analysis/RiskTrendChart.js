@@ -4,14 +4,25 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import Card, { CardBody } from '../ui/Card';
 
 // Reads the app's own CSS custom properties (app/globals.css) rather than
-// hardcoding hex values a second time -- same convention as
+// hardcoding a color value a second time -- same convention as
 // FindingsBarChart.js's resolveSeverityColor(). Read at render time in a
-// browser context, with a hardcoded fallback (app/globals.css's --primary,
-// #C8102E) for the (never-expected-in-practice) case of SSR-time evaluation
-// before hydration, where window/document don't exist yet. Reads --primary
-// directly rather than the transitional --accent alias in app/globals.css's
-// legacy block, which is slated for removal once nothing references it.
-const PRIMARY_FALLBACK_HEX = '#C8102E';
+// browser context, with a fallback for the (never-expected-in-practice) case
+// of SSR-time evaluation before hydration, where window/document don't exist
+// yet.
+//
+// --primary is the right token here BECAUSE this line is not a severity: it
+// is the single data series of a trend chart, so it takes the brand/
+// interactive hue and leaves the severity ramp to mean risk. (The score it
+// plots is 0-100 higher-is-WORSE; the band label in the tooltip carries that,
+// not the line color.)
+//
+// The fallback is a TOKEN REFERENCE, not hex (changed 2026-09-09 with the
+// palette rewrite; it used to be the old suite-red --primary, which
+// is now neither the brand hue nor a color this chart may use -- red is
+// reserved for danger). `var(--x)` is a valid SVG stroke/fill
+// presentation-attribute value, so the browser resolves it against the live
+// theme on the SSR pass too.
+const PRIMARY_FALLBACK_HEX = 'var(--primary)';
 
 function resolveAccentColor() {
   if (typeof window === 'undefined' || typeof document === 'undefined') {

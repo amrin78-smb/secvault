@@ -7,22 +7,29 @@ import { PieChart, Pie, Cell } from 'recharts';
 // a score band). This component renders N independently-colored categories with a legend,
 // for any caller that needs a categorical breakdown rather than a percentage gauge.
 //
-// Same "resolve a CSS custom property via getComputedStyle, with a hardcoded hex SSR
-// fallback" pattern as StandardDonut.js's resolveCssVar()/VAR_FALLBACK_HEX, generalized:
-// this component doesn't know ahead of time which --tokens a caller will pass as
-// `categories[].color`, so resolveColor() only special-cases the `var(--x)` shape and
-// otherwise passes the value straight through (a literal hex/rgb string works as-is,
-// both server-rendered and once mounted).
+// Same "resolve a CSS custom property via getComputedStyle, with an SSR fallback" pattern
+// as StandardDonut.js's resolveCssVar()/VAR_FALLBACK_HEX, generalized: this component
+// doesn't know ahead of time which --tokens a caller will pass as `categories[].color`,
+// so resolveColor() only special-cases the `var(--x)` shape and otherwise passes the
+// value straight through (a literal color string works as-is).
+//
+// ⛔ The fallback values below are TOKEN REFERENCES, not hex (changed with the 2026-09-09
+// palette rewrite). Literal hex here silently opted this donut out of app/globals.css on
+// the server-rendered pass -- it kept the OLD palette's colors regardless of what the
+// tokens say. `var(--x)` is a valid value both for an SVG `fill` presentation attribute
+// and for a DOM `background`, so the browser resolves it against the live theme. The
+// map's SHAPE (one entry per token name a caller may pass) is unchanged; only its values
+// are, so every caller and the --text-muted default below behave exactly as before.
 const VAR_FALLBACK_HEX = {
-  '--red': '#dc2626',
-  '--orange': '#ea580c',
-  '--yellow': '#d97706',
-  '--purple': '#7c3aed',
-  '--blue': '#2563eb',
-  '--teal': '#0891b2',
-  '--green': '#16a34a',
-  '--text-muted': '#64748b',
-  '--border': '#e2e8f0',
+  '--red': 'var(--red)',
+  '--orange': 'var(--orange)',
+  '--yellow': 'var(--yellow)',
+  '--purple': 'var(--purple)',
+  '--blue': 'var(--blue)',
+  '--teal': 'var(--teal)',
+  '--green': 'var(--green)',
+  '--text-muted': 'var(--text-muted)',
+  '--border': 'var(--border)',
 };
 
 function resolveColor(colorValue) {

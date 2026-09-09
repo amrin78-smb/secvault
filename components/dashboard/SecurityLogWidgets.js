@@ -58,11 +58,16 @@ function Empty({ children }) {
 }
 
 // Rank -> tone. Only ranks the mapper produced; nothing is inferred.
+// Severity ALIASES, never raw hues: these ARE the severity ramp, so they have
+// to move with it. Rank 2 ("low") is now slate rather than blue — blue is off
+// the ramp entirely in the current palette (see globals.css).
+// Ranks 0-1 (debug/informational) are MEASURED levels that simply do not earn
+// a hue, which is a different thing from an unranked word (--unmeasured).
 function rankTone(rank) {
-  if (rank >= 5) return 'var(--red)';
-  if (rank === 4) return '#f97316';
-  if (rank === 3) return 'var(--yellow)';
-  if (rank === 2) return '#60a5fa';
+  if (rank >= 5) return 'var(--sev-crit)';
+  if (rank === 4) return 'var(--sev-high)';
+  if (rank === 3) return 'var(--sev-med)';
+  if (rank === 2) return 'var(--sev-low)';
   return 'var(--text-muted)';
 }
 
@@ -81,7 +86,7 @@ export async function TopAttackersWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconAlertTriangle} color="#f87171" bg="rgba(248,113,113,0.20)" />
+          <IconChip icon={IconAlertTriangle} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Top Attackers (24h)
         </CardTitle>
       </CardHeader>
@@ -134,7 +139,7 @@ export async function TopTargetsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="#fb923c" bg="rgba(251,146,60,0.20)" />
+          <IconChip icon={IconShield} color="var(--tint-orange-fg)" bg="var(--tint-orange)" />
           Most Targeted Hosts (24h)
         </CardTitle>
       </CardHeader>
@@ -161,7 +166,7 @@ export async function TopTargetsWidget() {
                     </span>
                   </span>
                 </div>
-                <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="#fb923c" />
+                <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="var(--orange)" />
               </div>
             ))}
           </div>
@@ -179,7 +184,7 @@ export async function TopThreatsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconBell} color="#c084fc" bg="rgba(192,132,252,0.20)" />
+          <IconChip icon={IconBell} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
           Top Threats (24h)
         </CardTitle>
       </CardHeader>
@@ -214,9 +219,12 @@ export async function TopThreatsWidget() {
                     </span>
                   </span>
                 </div>
+                {/* ⛔ An unranked severity word is NOT MEASURED, so it takes the
+                    no-hue --unmeasured token rather than any point on the ramp —
+                    colouring it would file it under a guessed level. */}
                 <Bar
                   pct={max > 0 ? (r.events / max) * 100 : 0}
-                  tone={r.severityRank === null ? 'var(--text-muted)' : rankTone(r.severityRank)}
+                  tone={r.severityRank === null ? 'var(--unmeasured)' : rankTone(r.severityRank)}
                 />
               </div>
             ))}
@@ -235,7 +243,7 @@ export async function ThreatSeverityWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconActivity} color="#facc15" bg="rgba(250,204,21,0.20)" />
+          <IconChip icon={IconActivity} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
           Threats by Severity (24h)
         </CardTitle>
       </CardHeader>
@@ -290,7 +298,7 @@ export async function DeviceThreatTable() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.20)" />
+          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Security Events by Device (24h)
         </CardTitle>
       </CardHeader>

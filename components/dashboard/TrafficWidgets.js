@@ -102,7 +102,7 @@ export async function TopHostsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconDevices} color="#38bdf8" bg="rgba(56,189,248,0.20)" />
+          <IconChip icon={IconDevices} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Top Hosts by Traffic (24h)
         </CardTitle>
       </CardHeader>
@@ -159,7 +159,7 @@ export async function TopApplicationsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="#a78bfa" bg="rgba(167,139,250,0.20)" />
+          <IconChip icon={IconGrid} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
           Top Applications (24h)
         </CardTitle>
       </CardHeader>
@@ -185,7 +185,7 @@ export async function TopApplicationsWidget() {
                       </span>
                     </span>
                   </div>
-                  <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="#a78bfa" />
+                  <Bar pct={max > 0 ? (r.events / max) * 100 : 0} tone="var(--purple)" />
                 </div>
               ))}
             </div>
@@ -214,7 +214,7 @@ export async function ProtocolBreakdownWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconChart} color="#fbbf24" bg="rgba(251,191,36,0.20)" />
+          <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
           Protocols (24h)
         </CardTitle>
       </CardHeader>
@@ -260,7 +260,7 @@ export async function BlockedDestinationsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="#f87171" bg="rgba(248,113,113,0.20)" />
+          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
           Top Blocked Destinations (24h)
         </CardTitle>
       </CardHeader>
@@ -313,7 +313,7 @@ export async function DeviceTrafficTable() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconActivity} color="#4ade80" bg="rgba(74,222,128,0.20)" />
+          <IconChip icon={IconActivity} color="var(--tint-success-fg)" bg="var(--tint-success)" />
           Traffic &amp; Security by Device (24h)
         </CardTitle>
       </CardHeader>

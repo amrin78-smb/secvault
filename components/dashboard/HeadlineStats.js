@@ -91,8 +91,8 @@ export default async function HeadlineStats() {
         sub={`Online ${h.devicesOnline}`}
         color="var(--accent-teal)"
         icon={IconDevices}
-        iconColor="#60a5fa"
-        iconBg="rgba(96,165,250,0.20)"
+        iconColor="var(--tint-info-fg)"
+        iconBg="var(--tint-info)"
         delta={<DeltaBadge current={h.deviceCount} previous={prev?.device_count} goodDirection={GOOD.up} />}
       />
       <StatCard
@@ -102,8 +102,8 @@ export default async function HeadlineStats() {
         sub={h.securityScore === null ? 'Not enough data yet' : `${BAND_LABEL[secBand]} — ${secSub}`}
         color={BAND_COLOR[secBand] || 'var(--border)'}
         icon={IconShield}
-        iconColor="#4ade80"
-        iconBg="rgba(74,222,128,0.20)"
+        iconColor="var(--tint-success-fg)"
+        iconBg="var(--tint-success)"
         delta={<DeltaBadge current={h.securityScore} previous={prev?.security_score} goodDirection={GOOD.up} />}
       />
       <StatCard
@@ -113,8 +113,8 @@ export default async function HeadlineStats() {
         sub="Patch now"
         color="var(--red)"
         icon={IconAlertTriangle}
-        iconColor="#f87171"
-        iconBg="rgba(248,113,113,0.22)"
+        iconColor="var(--tint-danger-fg)"
+        iconBg="var(--tint-danger)"
         delta={<DeltaBadge current={h.patchNowCount} previous={prev?.patch_now_count} goodDirection={GOOD.down} />}
       />
       <StatCard
@@ -124,8 +124,8 @@ export default async function HeadlineStats() {
         sub="Critical + high findings"
         color="var(--yellow)"
         icon={IconTrendingUp}
-        iconColor="#fbbf24"
-        iconBg="rgba(251,191,36,0.20)"
+        iconColor="var(--tint-warn-fg)"
+        iconBg="var(--tint-warn)"
         delta={<DeltaBadge current={h.highRiskCount} previous={prev?.high_risk_count} goodDirection={GOOD.down} />}
       />
       <StatCard
@@ -135,8 +135,8 @@ export default async function HeadlineStats() {
         sub={`${h.rulesEnabled.toLocaleString()} enabled`}
         color="var(--blue)"
         icon={IconActivity}
-        iconColor="#60a5fa"
-        iconBg="rgba(96,165,250,0.20)"
+        iconColor="var(--tint-info-fg)"
+        iconBg="var(--tint-info)"
         delta={<DeltaBadge current={h.rulesTotal} previous={prev?.rules_total} goodDirection={GOOD.down} />}
       />
       <StatCard
@@ -146,8 +146,8 @@ export default async function HeadlineStats() {
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
         color={BAND_COLOR[compBand] || 'var(--border)'}
         icon={IconChart}
-        iconColor="#4ade80"
-        iconBg="rgba(74,222,128,0.20)"
+        iconColor="var(--tint-success-fg)"
+        iconBg="var(--tint-success)"
         delta={
           <DeltaBadge
             current={h.complianceScore}

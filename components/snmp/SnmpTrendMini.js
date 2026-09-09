@@ -11,14 +11,33 @@ import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 // trend indicator sitting under the current-value StatCard tiles, not a
 // replacement for the full /devices/[id]/snmp page's detailed charts
 // (which keep their full axes/gridlines/220px height, untouched).
-const CPU_FALLBACK_HEX = '#dc2626'; // --red
-const MEM_FALLBACK_HEX = '#2563eb'; // --blue
-const SESSION_FALLBACK_HEX = '#0891b2'; // --accent-teal
+//
+// Series colours are design TOKENS handed straight to the SVG presentation
+// attributes recharts renders (stroke/fill) -- not hexes resolved out of
+// getComputedStyle. That older pattern needed a hardcoded hex fallback for the
+// SSR pass, and those fallbacks had already drifted off the very tokens they
+// named: a literal opts a chart out of both the token layer and dark mode, in
+// the one code path nobody ever looks at.
+// ⛔ --red/--blue here are SERIES colours, not severity -- they exist only to
+// tell the CPU line from the Memory line, and they match the CPU/Memory
+// StatCard tiles this trend sits directly under (devices/[id]/page.js).
+const CPU_COLOR = 'var(--red)';
+const MEM_COLOR = 'var(--blue)';
+const SESSION_COLOR = 'var(--accent-teal)';
 
-function resolveColor(varName, fallback) {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName);
-  return value ? value.trim() : fallback;
+// ⛔ A poll that could not read a metric stores NULL -- which is not zero and
+// not a measurement. Draw it hueless (--unmeasured), never in the same colour
+// as a real reading. Same tri-state rule as firewall_rules.hit_count.
+function MetricValue({ value, unit = '' }) {
+  if (value === null || value === undefined) {
+    return <span style={{ color: 'var(--unmeasured)' }}>—</span>;
+  }
+  return (
+    <>
+      {value}
+      {unit}
+    </>
+  );
 }
 
 function formatFullTimestamp(value) {
@@ -39,7 +58,8 @@ function UsageTooltip({ active, payload }) {
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 11 }}>
       <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-        CPU {point.cpu_percent ?? '—'}% · Memory {point.memory_percent ?? '—'}%
+        CPU <MetricValue value={point.cpu_percent} unit="%" /> · Memory{' '}
+        <MetricValue value={point.memory_percent} unit="%" />
       </div>
       <div style={{ color: 'var(--text-muted)' }}>{formatFullTimestamp(point.sampled_at)}</div>
     </div>
@@ -51,7 +71,9 @@ function SessionTooltip({ active, payload }) {
   const point = payload[0].payload;
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 11 }}>
-      <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{point.session_count ?? '—'} sessions</div>
+      <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+        <MetricValue value={point.session_count} /> sessions
+      </div>
       <div style={{ color: 'var(--text-muted)' }}>{formatFullTimestamp(point.sampled_at)}</div>
     </div>
   );
@@ -65,10 +87,6 @@ function SessionTooltip({ active, payload }) {
 export default function SnmpTrendMini({ points }) {
   const data = Array.isArray(points) ? points : [];
   if (data.length < 2) return null;
-
-  const cpuColor = resolveColor('--red', CPU_FALLBACK_HEX);
-  const memColor = resolveColor('--blue', MEM_FALLBACK_HEX);
-  const sessionColor = resolveColor('--accent-teal', SESSION_FALLBACK_HEX);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 12 }}>
@@ -86,8 +104,16 @@ export default function SnmpTrendMini({ points }) {
                 minTickGap={40}
               />
               <Tooltip cursor={{ stroke: 'var(--border)' }} content={<UsageTooltip />} />
-              <Line type="monotone" dataKey="cpu_percent" stroke={cpuColor} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls />
-              <Line type="monotone" dataKey="memory_percent" stroke={memColor} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls />
+              {/* ⛔ connectNulls={false}, deliberately. With it on, a poll
+                  cycle that returned NULL was bridged by a straight
+                  interpolated segment, pixel-identical to the real samples
+                  either side — an invented reading where a measurement
+                  failed. That is hit_count's old DEFAULT 0 rendered in a
+                  chart. The gap is now visibly a gap; a broken line here means
+                  the poll did not answer, and that is the true shape of the
+                  data. */}
+              <Line type="monotone" dataKey="cpu_percent" stroke={CPU_COLOR} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls={false} />
+              <Line type="monotone" dataKey="memory_percent" stroke={MEM_COLOR} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -107,7 +133,7 @@ export default function SnmpTrendMini({ points }) {
                 minTickGap={40}
               />
               <Tooltip cursor={{ stroke: 'var(--border)' }} content={<SessionTooltip />} />
-              <Line type="monotone" dataKey="session_count" stroke={sessionColor} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls />
+              <Line type="monotone" dataKey="session_count" stroke={SESSION_COLOR} strokeWidth={1.5} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>

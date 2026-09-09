@@ -69,7 +69,7 @@ export default async function DeviceStatusSummary() {
             color: 'var(--text-muted)',
           }}
         >
-          <IconChip icon={IconActivity} color="#60a5fa" bg="rgba(96,165,250,0.20)" />
+          <IconChip icon={IconActivity} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Device Connectivity
         </div>
         <div style={{ marginTop: 2, marginBottom: 8, fontSize: 10, color: 'var(--text-muted)' }}>

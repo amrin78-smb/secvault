@@ -19,6 +19,25 @@ import {
   IconAlertTriangle,
 } from '../icons';
 
+// ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
+//
+// Each entry used to carry its own `color`/`bg` hex pair — cyan, amber, blue,
+// red, gold, green, indigo, violet, lime, sky, rose, grey. Only the ACTIVE
+// entry ever rendered coloured (`.sv-nav a.active .sv-nav-chip` in
+// globals.css; every inactive chip is white-alpha), so this was never a
+// twelve-hue rainbow on screen at once. The real defect was subtler and
+// worse: the "you are here" signal was A DIFFERENT HUE ON EVERY PAGE, so it
+// could not be learned — and on /vulnerability it was #f87171, a red, sitting
+// three inches from severity badges that use red to mean "critically
+// exposed". An interface element must never borrow the severity palette.
+//
+// The old comments here defended the hues on the grounds that the chip colour
+// is "the ONLY wayfinding cue when the sidebar is collapsed". That was not
+// true: collapsed or not, only one chip is ever coloured, so eleven of the
+// twelve were already indistinguishable. The actual per-item cue is the
+// GLYPH, and all twelve glyphs are distinct — which is the invariant worth
+// keeping, and the one to check when adding a nav entry.
+//
 // Icon reuse note (Phase 7, Compliance): IconShield is already taken by
 // "Vulnerability" (formerly "CVE Posture" -- merged with the separate
 // "Advisories" entry, which used to take IconDocument, into one /vulnerability
@@ -27,35 +46,23 @@ import {
 // a new SVG icon file -- the same "reuse what's there even if not a perfect
 // semantic match" call this file already made when Alerts reused IconBell.
 const NAV = [
-  { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true, color: '#0891b2', bg: 'rgba(8,145,178,0.20)' },
-  { href: '/alerts', label: 'Alerts', Icon: IconBell, color: '#fb923c', bg: 'rgba(251,146,60,0.20)' },
-  { href: '/devices', label: 'Devices', Icon: IconDevices, color: '#60a5fa', bg: 'rgba(96,165,250,0.20)' },
-  { href: '/vulnerability', label: 'Vulnerability', Icon: IconShield, color: '#f87171', bg: 'rgba(248,113,113,0.22)' },
-  { href: '/analysis', label: 'Rule Analysis', Icon: IconChart, color: '#fbbf24', bg: 'rgba(251,191,36,0.20)' },
-  { href: '/compliance', label: 'Compliance', Icon: IconSearch, color: '#34d399', bg: 'rgba(52,211,153,0.20)' },
-  // No dedicated VPN/tunnel icon exists in components/icons.js — reusing
+  { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true },
+  { href: '/alerts', label: 'Alerts', Icon: IconBell },
+  { href: '/devices', label: 'Devices', Icon: IconDevices },
+  { href: '/vulnerability', label: 'Vulnerability', Icon: IconShield },
+  { href: '/analysis', label: 'Rule Analysis', Icon: IconChart },
+  { href: '/compliance', label: 'Compliance', Icon: IconSearch },
+  // No dedicated VPN/tunnel icon exists in components/icons.js -- reusing
   // IconUser (VPN is fundamentally remote-USER access) rather than inventing
-  // a new SVG file, same "reuse what's there even if not a perfect semantic
-  // match" call this file already made for Compliance -> IconSearch.
-  { href: '/vpn', label: 'VPN', Icon: IconUser, color: '#818cf8', bg: 'rgba(129,140,248,0.20)' },
-  { href: '/topology', label: 'Topology', Icon: IconTopology, color: '#a78bfa', bg: 'rgba(167,139,250,0.20)' },
-  // Lime + IconAlertTriangle. This was amber (#fb923c) on first commit, which
-  // is byte-identical to Alerts one row up — and the chip colour is the ONLY
-  // wayfinding cue when the sidebar is collapsed and labels drop to a title
-  // attribute, so two identical chips two rows apart is exactly where that cue
-  // stops working. Every entry here keeps a hue no other entry uses; that
-  // invariant is asserted twice below and was broken the moment it was added.
-  { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle, color: '#a3e635', bg: 'rgba(163,230,53,0.20)' },
-  // Cyan — the last hue not already spoken for by another entry. IconDocument
-  // was the one remaining glyph both unused here and semantically right: a log
-  // IS a record. Same "reuse what exists" call made for Compliance and VPN.
-  { href: '/logs', label: 'Log Search', Icon: IconDocument, color: '#22d3ee', bg: 'rgba(34,211,238,0.20)' },
-  // Rose — the one hue not already spoken for by another nav entry. Unlike
-  // Compliance/VPN above, this one DID get its own icon (IconLifecycle): every
-  // remaining glyph in components/icons.js is either already a nav entry or
-  // semantically unrelated, so reuse would have meant a duplicate chip.
-  { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle, color: '#f472b6', bg: 'rgba(244,114,182,0.20)' },
-  { href: '/settings', label: 'Settings', Icon: IconSettings, color: '#9ca3af', bg: 'rgba(156,163,175,0.20)' },
+  // a new SVG file, same 'reuse what exists even if not a perfect semantic
+  // match' call this file already made for Compliance -> IconSearch.
+  { href: '/vpn', label: 'VPN', Icon: IconUser },
+  { href: '/topology', label: 'Topology', Icon: IconTopology },
+  { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
+  // IconDocument for Log Search: a log IS a record. Same reuse call again.
+  { href: '/logs', label: 'Log Search', Icon: IconDocument },
+  { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle },
+  { href: '/settings', label: 'Settings', Icon: IconSettings },
 ];
 
 const COLLAPSE_KEY = 'secvault-sidebar-collapsed';
@@ -93,11 +100,11 @@ export default function Sidebar({ version }) {
     <aside className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}>
       <div className="sv-nav-label">Navigation</div>
       <nav className="sv-nav">
-        {NAV.map(({ href, label, Icon, exact, color, bg }) => {
+        {NAV.map(({ href, label, Icon, exact }) => {
           const active = isActive(pathname, href, exact);
           return (
             <Link key={href} href={href} className={active ? 'active' : ''} title={collapsed ? label : undefined}>
-              <span className="sv-nav-chip" style={{ '--chip-color': color, '--chip-bg': bg }}>
+              <span className="sv-nav-chip">
                 <Icon width={16} height={16} />
               </span>
               <span>{label}</span>

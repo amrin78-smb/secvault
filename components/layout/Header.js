@@ -29,7 +29,7 @@ function SecVaultLogo() {
         strokeLinejoin="round"
       />
       <text x="42" y="27" fontSize="22" fontWeight="700" letterSpacing="-0.3" fontFamily="Inter, system-ui, sans-serif">
-        <tspan fill="#ffffff">Sec</tspan>
+        <tspan fill="var(--shell-fg)">Sec</tspan>
         <tspan fill="var(--accent-teal)">Vault</tspan>
       </text>
     </svg>
@@ -86,7 +86,10 @@ export default async function Header({ session }) {
             style={{
               fontSize: 'var(--text-xs)',
               fontWeight: 600,
-              color: syncStatus.ok ? '#86efac' : '#fca5a5',
+              // ⛔ --shell-fg-ok/bad, NOT --tint-success-fg: this pill sits on the
+              // always-dark header, and a theme-flipping fg goes invisible there
+              // in light mode.
+              color: syncStatus.ok ? 'var(--shell-fg-ok)' : 'var(--shell-fg-bad)',
               letterSpacing: '0.03em',
             }}
           >
