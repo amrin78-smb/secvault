@@ -494,7 +494,17 @@ function stubPool(rowsByTable) {
       if (sql.startsWith('SELECT config_raw')) {
         const table = sql.includes('FROM device_configs') ? 'device_configs' : 'config_backups';
         const row = (rowsByTable[table] || []).find((r) => r.id === params[0]);
-        return { rows: row ? [{ config_raw: row.config_raw }] : [] };
+        if (!row) return { rows: [] };
+        // ⛔ config_parsed only exists on device_configs, and the engine only
+        // asks for it there — mirroring that here is what keeps this stub
+        // honest about the real schema.
+        return {
+          rows: [
+            sql.includes('config_parsed')
+              ? { config_raw: row.config_raw, config_parsed: row.config_parsed ?? null }
+              : { config_raw: row.config_raw },
+          ],
+        };
       }
       return { rows: [], rowCount: 1 };
     },
@@ -519,15 +529,71 @@ describe('backfillPaloAltoConfigRedaction — DB plumbing', () => {
     }
   });
 
-  it('⛔ never touches config_parsed and never deletes a row', async () => {
-    // config_parsed already redacts correctly via redactConfigTree, and it is the
-    // column configDiff actually diffs — so writing it here could manufacture a
-    // false config-change alert on a security product.
+  it('⛔ never deletes a row', async () => {
     const pool = stubPool({ device_configs: [{ id: 'cfg-1', config_raw: FULL_XML_FIXTURE }] });
     await backfillPaloAltoConfigRedaction(pool);
     for (const sql of pool.sql()) {
       assert.ok(!/\bDELETE\b/i.test(sql), 'the backfill must never delete a row');
-      assert.ok(!/SET[\s\S]*config_parsed\s*=/i.test(sql), 'config_parsed must never be written');
+    }
+  });
+
+  it('DOES re-redact config_parsed — it was not already clean', async () => {
+    // ⛔ THIS TEST INVERTED ON 2026-09-09. It previously asserted config_parsed
+    // must NEVER be written, on the reasoning that redactConfigTree already
+    // handled it. Measured on production after the first two passes shipped:
+    // 772 device_configs rows still held PAN-OS `-AQ=` blobs under the
+    // `wmi-password` and `agent-user-override-key` KEYS — because
+    // redactConfigTree matches on the object key against the SAME list that was
+    // missing those names. The forward fix covered new collections; the JSON
+    // history stayed exposed.
+    //
+    // The original caution was still right about one thing: config_parsed is
+    // what configDiff diffs, so a careless rewrite manufactures a false
+    // config-change alert. That is why the pass writes ONLY when
+    // redactConfigTree actually changes the tree, and reuses the live redactor
+    // rather than a bespoke one — a row that was already clean is untouched, so
+    // no diff can be invented.
+    const pool = stubPool({
+      device_configs: [
+        {
+          id: 'cfg-1',
+          config_raw: '<x/>',
+          config_parsed: { setting: { 'wmi-password': '-AQ==SYNTHETIC==', 'wmi-account': 'dom\\svc' } },
+        },
+      ],
+    });
+    const res = await backfillPaloAltoConfigRedaction(pool);
+    const update = pool.calls.find((c) => /UPDATE device_configs/.test(c.sql));
+    assert.ok(update, 'a device_configs UPDATE must be issued');
+    assert.match(update.sql, /config_parsed = COALESCE\(\$3::jsonb, config_parsed\)/);
+    const written = JSON.parse(update.params[2]);
+    assert.ok(!JSON.stringify(written).includes('-AQ='), 'the blob must be gone');
+    assert.equal(written.setting['wmi-account'], 'dom\\svc', 'a username is not a secret');
+    assert.equal(res.parsedRows, 1);
+  });
+
+  it('leaves config_parsed alone when the tree is already clean', async () => {
+    // The guard against inventing a config-change alert.
+    const pool = stubPool({
+      device_configs: [
+        { id: 'cfg-1', config_raw: FULL_XML_FIXTURE, config_parsed: { system: { hostname: 'fw1' } } },
+      ],
+    });
+    const res = await backfillPaloAltoConfigRedaction(pool);
+    assert.equal(res.parsedRows, 0);
+    const update = pool.calls.find((c) => /UPDATE device_configs/.test(c.sql));
+    assert.equal(update.params[2], null, 'null means "do not change config_parsed"');
+  });
+
+  it('never names config_parsed against config_backups, which has no such column', async () => {
+    // ⛔ tests/sqlColumns.test.js caught this when the pass was first written
+    // table-blind. config_backups stores config_raw alone.
+    const pool = stubPool({ config_backups: [{ id: 'bak-1', config_raw: PTPL_ATTRIBUTED }] });
+    await backfillPaloAltoConfigRedaction(pool);
+    for (const sql of pool.sql()) {
+      if (/config_backups/.test(sql)) {
+        assert.ok(!/config_parsed/.test(sql), 'config_backups has no config_parsed column');
+      }
     }
   });
 
@@ -539,7 +605,13 @@ describe('backfillPaloAltoConfigRedaction — DB plumbing', () => {
     const update = pool.calls.find((c) => c.sql.includes('UPDATE device_configs'));
     assert.ok(update, 'no device_configs UPDATE issued');
     assert.match(update.sql, /content_hash = encode\(/);
-    assert.match(update.sql, /sha256\(convert_to\(coalesce\(\$2, ''\) \|\| chr\(10\) \|\| coalesce\(config_parsed::text, ''\), 'UTF8'\)\)/);
+    // ⛔ The hash must be computed over the NEW value of BOTH columns. Since
+    // this statement may also rewrite config_parsed, the expression reads
+    // COALESCE($3::jsonb, config_parsed) rather than the bare column —
+    // hashing the pre-update config_parsed would leave content_hash
+    // meaningless for exactly the rows being repaired.
+    assert.match(update.sql, /sha256\(convert_to\(coalesce\(\$2, ''\) \|\| chr\(10\)/);
+    assert.match(update.sql, /coalesce\(COALESCE\(\$3::jsonb, config_parsed\)::text, ''\)/);
     // config_backups has no content_hash column — it must not be named there.
     const backupUpdate = pool.calls.find((c) => c.sql.includes('UPDATE config_backups'));
     if (backupUpdate) assert.ok(!backupUpdate.sql.includes('content_hash'));
