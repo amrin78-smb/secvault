@@ -621,8 +621,15 @@ describe('backfillPaloAltoConfigRedaction — DB plumbing', () => {
     const pool = stubPool({});
     await backfillPaloAltoConfigRedaction(pool);
     const selects = pool.sql().filter((s) => s.includes('JOIN devices'));
-    assert.equal(selects.length, 2, 'both tables must be scanned');
+    // device_configs, config_backups, and config_diffs — the fourth column the
+    // whole-database sweep turned up. Every one must be vendor-scoped: this is
+    // PAN-OS grammar and a wider scan would be both wasteful and wrong.
+    assert.equal(selects.length, 3, 'all three tables must be scanned');
     for (const s of selects) assert.match(s, /d\.vendor = 'paloalto'/);
+    assert.ok(
+      selects.some((s) => /FROM config_diffs/.test(s)),
+      'config_diffs must be scanned — it carried the blob inside a diff VALUE'
+    );
   });
 
   it('writes nothing when a row needs no change', async () => {
