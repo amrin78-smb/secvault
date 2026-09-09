@@ -932,3 +932,25 @@ Every new table added to `schema.sql` needs its own `GRANT SELECT` line added he
 `Install-SecVault.ps1` and `Update-SecVault.ps1` re-apply this file unconditionally on every run
 (idempotent, best-effort — a failure here logs a warning and never fails the install/update, since
 these roles are diagnostic-only).
+
+### saved_views (v2.88.0, UI redesign Phase 3)
+
+Named filter/column/sort states per user per table. `user_id` -> `users(id)`, `scope` is the table
+(`devices`, `rules`, ...) as free TEXT so a new page needs no migration, `name`, `query`, `shared`,
+`is_default`.
+
+⛔ `query` stores the URL QUERY STRING verbatim, not a parsed filter structure. Every table in this
+app already encodes filter/sort/page state in the URL, so the query string IS the state. A parsed
+shape would need a migration every time a page adds a filter, and until someone remembered, a saved
+view would silently restore a DIFFERENT row set than the one saved — on a security product that is
+how a critical finding stops being on screen.
+
+⛔ `uq_saved_views_one_default` is a PARTIAL unique index (`WHERE is_default`), so one default per
+user per scope is a DATABASE guarantee. Setting a new default must CLEAR the old one first, in the
+same transaction — the other order fails the insert rather than moving the default. Same shape and
+same rule as `device_configs.is_baseline`.
+
+⛔ Only reachable for LOCAL accounts. The LDAP provider returns a bare username and creates no
+`users` row, so an LDAP session has no UUID to own a view; the API reports `canSave:false` instead
+of failing. A shadow `users` row on first LDAP bind is the fix and belongs with the unresolved LDAP
+group-to-role mapping.

@@ -6,6 +6,7 @@ import EmptyState from '../../../../../components/ui/EmptyState';
 import StandardTabs from '../../../../../components/compliance/StandardTabs';
 import { STANDARDS } from '../../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,7 +112,7 @@ export default async function ComplianceStandardsPage({ params }) {
 
       <PageHeader
         title={`All Checks — ${device.name}`}
-        subtitle={<Badge color="info">{device.vendor}</Badge>}
+        subtitle={<Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>}
       />
 
       {findings.length === 0 ? (

@@ -1838,3 +1838,48 @@ CREATE TABLE IF NOT EXISTS syslog_vpn_auth_hourly (
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_vpn_auth_hour
   ON syslog_vpn_auth_hourly (bucket_hour DESC);
+
+-- ─────────────────────────────────────────
+-- SAVED VIEWS (2026-09-09, UI redesign Phase 3)
+-- ─────────────────────────────────────────
+
+-- A named filter + column + sort state for one table, so an operator stops
+-- rebuilding "internet-facing Fortinets awaiting a patch window" by hand every
+-- morning. This is the feature that turns a table into a workflow, and its
+-- absence is a common reason a technical evaluation stalls.
+--
+-- ⛔ `query` stores the URL QUERY STRING, not a parsed filter structure. This
+-- app already encodes every table's filter/sort/page state in the URL (that is
+-- why a view can be pasted into a ticket at all), so the query string IS the
+-- state. Storing a parsed shape instead would mean this table needs a
+-- migration every time a page adds a filter, and would silently drop any
+-- parameter the parser did not know about -- a saved view that quietly returns
+-- a DIFFERENT set of rows than the one that was saved is worse than no saved
+-- views, on a security product.
+--
+-- `scope` is the table the view belongs to ('devices', 'rules', 'cve', ...).
+-- It is deliberately a free TEXT rather than an enum: a new page must not
+-- require a migration, and an unknown scope simply never matches a list.
+CREATE TABLE IF NOT EXISTS saved_views (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  scope      TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  query      TEXT NOT NULL,
+  -- Shared views are visible to every user; only the owner may edit or delete.
+  -- One user today, but this is the shape an evaluator asks about.
+  shared     BOOLEAN NOT NULL DEFAULT false,
+  is_default BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_saved_views_name UNIQUE (user_id, scope, name)
+);
+
+-- One default per user per scope, enforced by the DATABASE rather than by app
+-- logic -- same reasoning as device_configs.is_baseline's partial unique index.
+-- Setting a new default must CLEAR the old one first.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_saved_views_one_default
+  ON saved_views (user_id, scope) WHERE is_default;
+
+CREATE INDEX IF NOT EXISTS idx_saved_views_lookup
+  ON saved_views (scope, user_id);

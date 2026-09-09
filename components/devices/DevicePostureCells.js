@@ -1,5 +1,6 @@
 import Badge from '../ui/Badge';
 import StatusDot from '../ui/StatusDot';
+import NotMeasured from '../ui/NotMeasured';
 import { titleCase } from '../../lib/formatDisplay';
 
 // Presentational cells shared by the Devices table. Server components (no
@@ -35,9 +36,7 @@ export function SecurityScoreCell({ score, riskBand, components }) {
   // which would say "measured, and terrible".
   if (score === null || score === undefined) {
     return (
-      <span style={{ color: 'var(--unmeasured)' }} title="No measurable data yet">
-        —
-      </span>
+      <NotMeasured reason="No security score yet — this device has no rule analysis, no compliance findings and no CVE assessment, so none of the three components can be scored. This is not a zero." />
     );
   }
   // A score with no band was produced but not classified — --unmeasured, the
@@ -116,9 +115,12 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
   // ⛔ Nothing expired, nothing expiring, nothing unparsed — which also covers
   // a device from which NO licence rows were ever collected (Check Point,
   // Cisco ASA, Sangfor, Forcepoint and Fortinet-over-API collect none). Hence
-  // --unmeasured and an em-dash rather than a reassuring colour or a "Current"
-  // badge: this cell cannot tell "all licences fine" from "never looked".
-  return <span style={{ color: 'var(--unmeasured)' }}>—</span>;
+  // NotMeasured rather than a reassuring colour or a "Current" badge: this
+  // cell cannot tell "all licences fine" from "never looked", and the reason
+  // string is what lets the operator find out which of the two it is.
+  return (
+    <NotMeasured reason="No licence or support-contract data has been collected from this device. Only Palo Alto (both transports) and Fortinet-over-SSH report licences to SecVault — this is NOT a statement that support is current." />
+  );
 }
 
 // HA state from device_ha_status. A device whose adapter does not report HA at
@@ -126,7 +128,9 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
 // simply not collected yet).
 export function HaCell({ enabled, mode, localState, peerStatus }) {
   if (enabled === null || enabled === undefined) {
-    return <span style={{ color: 'var(--unmeasured)' }} title="This vendor does not report HA state to SecVault">—</span>;
+    return (
+      <NotMeasured reason="No HA state collected — this vendor/transport does not report HA to SecVault (only Palo Alto does today). Blank is NOT 'standalone': those are different facts." />
+    );
   }
   if (!enabled) return <span style={{ color: 'var(--text-muted)' }}>Standalone</span>;
   const peerDown = peerStatus && peerStatus !== 'up';
@@ -137,21 +141,62 @@ export function HaCell({ enabled, mode, localState, peerStatus }) {
         {/* An em-dash, not "?". The rest of this table already uses — for
             "not reported", and a question mark reads as the app being
             confused rather than the device being silent. Title Case matches
-            the /lifecycle HA table's wording for the same value. */}
-        {localState ? titleCase(localState) : '—'}
+            the /lifecycle HA table's wording for the same value. Now the
+            SHARED marker, so it carries a reason and follows the palette. */}
+        {localState ? (
+          titleCase(localState)
+        ) : (
+          <NotMeasured reason="HA is enabled on this device but it did not report a local HA state (active/passive) in the last collection." />
+        )}
         {peerDown ? ' · peer down' : ''}
       </span>
     </span>
   );
 }
 
-export function CveCell({ patchNow, scheduled }) {
-  // ⛔ This 0 is AMBIGUOUS and the colour deliberately does not resolve it.
-  // deviceInventory.js COALESCEs both counts to 0, so a device that has never
-  // been assessed at all (no version collected, no advisory matched) is
-  // indistinguishable here from one assessed and found clean. Left neutral —
-  // never a green/"clear" colour — until the query can report the two apart;
-  // at that point the not-assessed case should render — in var(--unmeasured).
+// ⛔ THE 0 IN THIS CELL WAS AMBIGUOUS. deviceInventory.js COALESCEs both counts
+// to 0, so a device that has NEVER BEEN ASSESSED rendered the same bare `0` as
+// one assessed and found clean. Neither number is wrong; the CLAIM around it
+// was — the same shape as the Support tile's old green "All current".
+//
+// What the data CAN and CANNOT tell apart, established by reading the
+// producers rather than guessing:
+//
+//   CAN: no firmware version collected  ->  NOT MEASURED, definitively.
+//        versionMatcher.js's runMatchForAllDevices() SKIPS any device with no
+//        device_versions row outright ("no version row - skipped") — CVE
+//        matching cannot even begin, so a 0 there is the absence of an
+//        attempt, not a result. deviceInventory.js already SELECTs
+//        dv.version_string, so this needs NO query change: the Devices page
+//        only has to forward it (see the ⛔ below).
+//
+//   CANNOT: version present, zero assessment rows. That is EITHER "the matcher
+//        ran and this firmware matches no advisory" (a real, earned zero) OR
+//        "the matcher has never run since this device was added". They are
+//        indistinguishable BY CONSTRUCTION, and this is not fixable in the UI:
+//        matchDeviceToAdvisories() only emits rows for advisories that still
+//        apply, and the reconciliation DELETE removes the rest — so a clean
+//        device holds zero rows and there is no assessed_at left to read.
+//        ⛔ THE QUERY CHANGE THAT WOULD FIX IT: persist the run itself, not
+//        just its output — a `devices.last_cve_assessed_at` stamped by
+//        versionMatcher.js at the end of each per-device transaction (it
+//        already has the device id and an open client there), SELECTed
+//        alongside version_string in deviceInventory.js's getDeviceRows() and
+//        passed here as `lastAssessedAt`. Then: version present + no timestamp
+//        -> NotMeasured; version present + timestamp + 0 rows -> a real 0.
+//        Until that column exists this cell must NOT pretend to know, so the
+//        residual case stays a neutral, uncoloured 0 — never green, never a
+//        "Clear" badge.
+//
+// `versionString` is optional so the cell degrades to exactly its previous
+// behaviour if a caller does not pass it.
+export function CveCell({ patchNow, scheduled, versionString }) {
+  const hasVersion = versionString !== null && versionString !== undefined && versionString !== '';
+  if (versionString !== undefined && !hasVersion) {
+    return (
+      <NotMeasured reason="No firmware version has been collected from this device, so CVE matching has never run for it. This is an absence of assessment, not a clean result." />
+    );
+  }
   if (patchNow === 0 && scheduled === 0) return <span style={{ color: 'var(--text-muted)' }}>0</span>;
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>

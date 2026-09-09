@@ -41,12 +41,22 @@ export default function DeviceActions({ deviceId }) {
         });
       } else {
         const errCount = Array.isArray(data.errors) ? data.errors.length : 0;
+        // ⛔ NOT `data.rulesCount ?? 0`. collectAndStore sets rulesCount to
+        // NULL when the rule pull FAILED and to a number (including a genuine
+        // 0) when it succeeded — the same tri-state as hit_count. The `?? 0`
+        // that used to be here turned a failed pull into the sentence
+        // "Collected — 0 rules.", reporting a failed read as a measured zero
+        // in the one place the operator is actively watching for the result.
+        // It survived only because a rule failure also pushes an error, so the
+        // branch was unreachable today; a shape change upstream is all it
+        // would take. Say what actually happened instead.
+        const rulesText =
+          data.rulesCount === null || data.rulesCount === undefined
+            ? 'Collected, but the device reported no rule count — the ruleset was NOT updated.'
+            : `Collected — ${data.rulesCount} rules.`;
         setResult({
           ok: errCount === 0,
-          text:
-            errCount === 0
-              ? `Collected — ${data.rulesCount ?? 0} rules.`
-              : `Collected with ${errCount} error(s): ${data.errors[0]}`,
+          text: errCount === 0 ? rulesText : `Collected with ${errCount} error(s): ${data.errors[0]}`,
         });
       }
       router.refresh();

@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { IconRefresh } from '../icons';
+import { PRODUCT_NAME } from '../../lib/branding';
 
 const DISMISS_KEY_PREFIX = 'sv-update-dismissed-';
 
@@ -81,7 +82,9 @@ export default function UpdateNotifier() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <IconRefresh width={16} height={16} style={{ flexShrink: 0 }} />
         <span style={{ fontSize: 'var(--text-base)', fontWeight: 500 }}>
-          {info.latest ? `SecVault v${info.latest} is available` : 'A SecVault update is available'}
+          {info.latest
+            ? `${PRODUCT_NAME} v${info.latest} is available`
+            : `A ${PRODUCT_NAME} update is available`}
         </span>
         <Link
           href="/settings"

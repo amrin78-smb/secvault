@@ -17,6 +17,7 @@
 // so overriding these td styles to wrap grows the row taller within its
 // allocated column width and does not disturb the fixed layout.
 import Table from '../ui/Table';
+import NotMeasured from '../ui/NotMeasured';
 
 // Identical logic to devices/[id]/rules/page.js's joinArray() -- that file
 // doesn't export it, so it's mirrored here rather than imported. Used for the
@@ -65,7 +66,15 @@ const PILL_WRAP = {
 // falling back to the shared "—" placeholder for empty/null/non-array.
 function ListPills({ value }) {
   if (!Array.isArray(value) || value.length === 0) {
-    return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+    // ⛔ An empty JSONB list on a collected rule is ambiguous in exactly the way
+    // this codebase cares about: the vendor may not populate that field for this
+    // rule type, or the pull may have stored nothing for it. It is NOT "this
+    // rule matches nothing", which for a source/destination field would be the
+    // opposite of the truth (an absent source usually means ANY). NotMeasured
+    // says so rather than leaving a bare dash to be read either way.
+    return (
+      <NotMeasured reason="This field was not populated for this rule — not a statement that the rule matches nothing. An absent source or destination often means the vendor recorded 'any'." />
+    );
   }
   return (
     <span style={PILL_WRAP}>
@@ -104,8 +113,16 @@ export default function RuleEvidenceTable({ rules }) {
       <tbody>
         {rules.map((r) => (
           <tr key={r.id}>
-            <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
-            <td>{r.action || '—'}</td>
+            <td title={r.rule_name || ''}>
+              {r.rule_name || (
+                <NotMeasured reason="This rule was collected without a name — many vendors leave unnamed rules identified only by position." />
+              )}
+            </td>
+            <td>
+              {r.action || (
+                <NotMeasured reason="No action was recorded for this rule. It is not an implicit allow or deny — SecVault does not know." />
+              )}
+            </td>
             <td style={WRAP_CELL} title={joinArray(r.src_addresses)}>
               <ListPills value={r.src_addresses} />
             </td>

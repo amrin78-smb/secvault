@@ -132,3 +132,8 @@ GRANT SELECT ON TABLE device_syslog_sources TO claude_readonly;
 GRANT SELECT ON TABLE device_syslog_sources TO nocvault_readonly;
 GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO claude_readonly;
 GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO nocvault_readonly;
+
+-- Saved views (2026-09-09, UI redesign Phase 3). No secret material: a view
+-- name and a URL query string. user_id is a reference, not credential data.
+GRANT SELECT ON TABLE saved_views TO claude_readonly;
+GRANT SELECT ON TABLE saved_views TO nocvault_readonly;

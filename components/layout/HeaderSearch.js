@@ -3,6 +3,46 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconSearch } from '../icons';
+import { NAV } from './Sidebar';
+
+// ⛔ ONE SEARCH SURFACE, NOT TWO. The redesign called for a ⌘K command
+// palette, and the cheapest way to get one wrong is to add a second
+// overlay beside a search box that already works. This component already
+// had debouncing, a stale-response guard and a "/" shortcut, so ⌘K became
+// another way in rather than another thing to build.
+//
+// PAGES are matched client-side against the nav list — no API call, no
+// round trip, and it stays correct automatically when a nav label is
+// renamed, which just happened in Phase 2.
+//
+// `keywords` carry the OLD names and the words an operator would actually
+// type. Someone who has used this product for a year will type "devices"
+// long after the label became "Firewalls", and a palette that answers
+// "no results" to the product’s own former vocabulary is worse than no
+// palette. Same reasoning for "cve" -> Vulnerabilities.
+const PAGE_KEYWORDS = {
+  '/': ['dashboard', 'home', 'overview', 'summary'],
+  '/alerts': ['notifications', 'events'],
+  '/logs': ['syslog', 'search logs', 'traffic', 'events'],
+  '/devices': ['devices', 'firewalls', 'inventory', 'fleet'],
+  '/topology': ['map', 'network', 'path', 'route'],
+  '/lifecycle': ['licences', 'licenses', 'support', 'expiry', 'ha', 'disk'],
+  '/vulnerability': ['cve', 'cves', 'advisories', 'patch', 'vulnerability'],
+  '/exposure': ['attack surface', 'internet facing', 'exposed'],
+  '/analysis': ['rule analysis', 'rules', 'hygiene', 'shadow', 'unused'],
+  '/compliance': ['audit', 'pci', 'iso', 'cis', 'nist', 'benchmark'],
+  '/vpn': ['vpn', 'remote access', 'tunnel', 'users', 'identity'],
+  '/settings': ['config', 'preferences', 'admin', 'notifications', 'appearance'],
+};
+
+function matchPages(q) {
+  const needle = q.trim().toLowerCase();
+  if (needle.length < 2) return [];
+  return NAV.filter(({ href, label }) => {
+    if (label.toLowerCase().includes(needle)) return true;
+    return (PAGE_KEYWORDS[href] || []).some((k) => k.includes(needle));
+  }).slice(0, 5);
+}
 
 // Centered header search — debounced, "/" keyboard shortcut, hits
 // GET /api/search (devices + advisories). Matches the suite's GlobalSearch
@@ -34,6 +74,16 @@ export default function HeaderSearch() {
 
   useEffect(() => {
     function onKeyDown(e) {
+      // ⌘K on macOS, Ctrl+K elsewhere. Unlike "/", this fires even from
+      // inside an input: it is the shortcut people reach for precisely
+      // when they are already typing somewhere else and want to leave.
+      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+        setOpen(true);
+        return;
+      }
       if (e.key === '/' && document.activeElement !== inputRef.current) {
         const tag = document.activeElement?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -83,7 +133,9 @@ export default function HeaderSearch() {
     return () => clearTimeout(debounceRef.current);
   }, [query]);
 
-  const hasResults = results.devices.length > 0 || results.advisories.length > 0;
+  const pages = matchPages(query);
+  const hasResults =
+    pages.length > 0 || results.devices.length > 0 || results.advisories.length > 0;
 
   function go(href) {
     setOpen(false);
@@ -111,7 +163,7 @@ export default function HeaderSearch() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder="Search devices, CVEs..."
+          placeholder="Search firewalls, CVEs, pages…"
           style={{
             flex: 1,
             background: 'transparent',
@@ -158,10 +210,34 @@ export default function HeaderSearch() {
             </div>
           ) : (
             <>
+              {/* Pages first: matched locally, so they are correct
+                  instantly while the device/CVE fetch is still in flight. */}
+              {pages.length > 0 && (
+                <div>
+                  <div style={{ padding: '8px 14px 4px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    Pages
+                  </div>
+                  {pages.map((p) => (
+                    <button
+                      key={p.href}
+                      type="button"
+                      onClick={() => go(p.href)}
+                      style={resultRowStyle}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <p.Icon width={14} height={14} />
+                        {p.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {results.devices.length > 0 && (
                 <div>
                   <div style={{ padding: '8px 14px 4px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                    Devices
+                    Firewalls
                   </div>
                   {results.devices.map((d) => (
                     <button

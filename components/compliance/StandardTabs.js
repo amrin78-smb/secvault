@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import NotMeasured from '../ui/NotMeasured';
 import { paginateArray } from '../../lib/pagination';
 
 // Deliberate deviation from this app's usual `?tab=` server-navigation
@@ -252,7 +253,16 @@ export default function StandardTabs({ standards, findings, deviceId }) {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState message="No findings for this standard yet." />
+        // ⛔ "No findings" is ambiguous between "this device passed everything"
+        // and "this audit never ran / this filter hides everything". Say which
+        // one, using the state this component actually has.
+        <EmptyState
+          message={
+            statusFilter === 'all'
+              ? 'No checks have been evaluated against this standard on this device — the audit has not run, or no check in the library maps to it. This is not a clean result.'
+              : `No ${statusFilter === 'fail' ? 'failing' : 'passing'} checks in this standard. Switch to "All" to see every check, including the ones SecVault could not evaluate.`
+          }
+        />
       ) : (
         <>
         <Table>
@@ -292,10 +302,30 @@ export default function StandardTabs({ standards, findings, deviceId }) {
                     <Badge color={sev.color}>{sev.label}</Badge>
                   </td>
                   <td>
-                    <Badge color={st.color}>{st.label}</Badge>
+                    {/* ⛔ `na` is not a fourth grade, it is the absence of one:
+                        a question SecVault could not ask of this device at all,
+                        excluded from the score's denominator (CLAUDE.md's
+                        warning-vs-na rule). A muted Badge put it in the same
+                        visual family as pass/fail/warning; the hueless marker
+                        says it is a different KIND of answer. `warning`, by
+                        contrast, IS a graded result about this device and keeps
+                        its badge. */}
+                    {f.status === 'na' ? (
+                      <NotMeasured
+                        text="N/A"
+                        reason={
+                          f.detail ||
+                          'SecVault could not ask this question of this device — no usable config, no collected ruleset, or a check a config snapshot cannot answer. Excluded from the score, not failed.'
+                        }
+                      />
+                    ) : (
+                      <Badge color={st.color}>{st.label}</Badge>
+                    )}
                   </td>
                   <td style={{ color: 'var(--text-secondary)' }} title={f.detail || ''}>
-                    {f.detail || '—'}
+                    {f.detail || (
+                      <NotMeasured reason="This check recorded no detail line." />
+                    )}
                     {hasEvidence && (
                       <div style={{ marginTop: 4, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
                         {f.ruleEvidence.length} offending rule{f.ruleEvidence.length === 1 ? '' : 's'} — click the check name for details
@@ -303,7 +333,9 @@ export default function StandardTabs({ standards, findings, deviceId }) {
                     )}
                   </td>
                   <td style={{ color: 'var(--text-secondary)' }} title={f.remediationGuidance || ''}>
-                    {f.remediationGuidance || '—'}
+                    {f.remediationGuidance || (
+                      <NotMeasured reason="The check library carries no remediation text for this check." />
+                    )}
                   </td>
                 </tr>
               );

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import { getCorners, applyCorners } from '../../lib/corners';
 import { getTheme, applyTheme } from '../../lib/theme';
+import { getDensity, applyDensity, DENSITIES, DENSITY_LABELS } from '../../lib/density';
 
 /**
  * Appearance controls — purely client-side presentation preferences stored in
@@ -26,6 +27,9 @@ const SEGMENT_OPTIONS = {
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
   ],
+  // Built from lib/density.js rather than written out here, so the list
+  // cannot drift from the values applyDensity() will actually accept.
+  density: DENSITIES.map((v) => ({ value: v, label: DENSITY_LABELS[v] })),
 };
 
 // Small segmented control. Module top level, never nested inside the panel
@@ -84,17 +88,22 @@ const HINT_STYLE = { fontSize: 'var(--text-xs)', color: 'var(--text-muted)', mar
 export default function AppearancePanel() {
   const [corners, setCorners] = useState('rounded');
   const [theme, setTheme] = useState('light');
+  const [density, setDensity] = useState('comfortable');
 
   useEffect(() => {
     setCorners(getCorners());
     setTheme(getTheme());
+    setDensity(getDensity());
     const onCorners = (e) => setCorners(e.detail);
     const onTheme = (e) => setTheme(e.detail);
+    const onDensity = (e) => setDensity(e.detail);
     window.addEventListener('secvault:corners', onCorners);
     window.addEventListener('secvault:theme', onTheme);
+    window.addEventListener('secvault:density', onDensity);
     return () => {
       window.removeEventListener('secvault:corners', onCorners);
       window.removeEventListener('secvault:theme', onTheme);
+      window.removeEventListener('secvault:density', onDensity);
     };
   }, []);
 
@@ -105,6 +114,28 @@ export default function AppearancePanel() {
       </CardHeader>
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={ROW_STYLE}>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Table density</div>
+              <div style={HINT_STYLE}>
+                {/* ⛔ Says what density does NOT do, on purpose. A setting
+                    that might hide information is one an operator has to
+                    think about before touching; this one never can. */}
+                Row height and cell text size in every table. A denser table shows the same
+                columns and the same values in less space — nothing is hidden or truncated.
+              </div>
+            </div>
+            <Segmented
+              ariaLabel="Table density"
+              options={SEGMENT_OPTIONS.density}
+              value={density}
+              onChange={(v) => {
+                applyDensity(v);
+                setDensity(v);
+              }}
+            />
+          </div>
+
           <div style={ROW_STYLE}>
             <div>
               <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Corners</div>

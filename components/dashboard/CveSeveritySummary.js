@@ -50,11 +50,18 @@ export default async function CveSeveritySummary() {
   );
 }
 
+// ⛔ SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues — these four tiles ARE
+// the severity ramp. 'Low' was --blue, which the 2026-09-09 palette rewrite
+// made forbidden rather than merely discouraged: blue was pulled OUT of the
+// ramp entirely (low severity is slate) so the teal brand hue can never be
+// mistaken for a severity, and putting blue back on a severity collapses that
+// separation. Matches VulnerabilityTrendChart.js's SERIES exactly, which plots
+// these same four counts over time.
 const SEVERITY = [
-  { key: 'critical', label: 'Critical', color: 'var(--red)' },
-  { key: 'high', label: 'High', color: 'var(--orange)' },
-  { key: 'medium', label: 'Medium', color: 'var(--yellow)' },
-  { key: 'low', label: 'Low', color: 'var(--blue)' },
+  { key: 'critical', label: 'Critical', color: 'var(--sev-crit)' },
+  { key: 'high', label: 'High', color: 'var(--sev-high)' },
+  { key: 'medium', label: 'Medium', color: 'var(--sev-med)' },
+  { key: 'low', label: 'Low', color: 'var(--sev-low)' },
 ];
 
 async function getLiveSeverityCounts(dbPool) {

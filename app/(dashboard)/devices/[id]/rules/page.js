@@ -32,7 +32,7 @@ function joinArray(value) {
 //
 // ⛔ Extended 2026-07-19: `action` now accepts a comma-separated list (e.g.
 // `action=deny,drop,reject`), matched via `= ANY($N::text[])` instead of
-// plain `=` — added so the Rule Analysis Summary tab's "Denied Rules"
+// plain `=` — added so the Rule hygiene Summary tab's "Denied Rules"
 // StatCard (which counts action IN ('deny','drop','reject','block'), see
 // getRuleStats() in devices/[id]/analysis/page.js) can link to a filtered
 // view that actually matches what it counted, rather than only the single
@@ -128,7 +128,7 @@ export default async function DeviceRulesPage({ params, searchParams }) {
     return (
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
-          ← Back to devices
+          ← Back to firewalls
         </Link>
         <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>

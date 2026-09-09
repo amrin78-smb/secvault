@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import StatCard from '../ui/StatCard';
+import NotMeasured from '../ui/NotMeasured';
 import {
   worstLicenseStatus,
   worstSignatureStatus,
@@ -112,9 +113,23 @@ export default async function OverviewHealthCard({ deviceId }) {
   const worstLicense = worstLicenseStatus(licenses, now);
   const expiredCount = licenses.filter((r) => licenseStatus(r, now).status === 'expired').length;
 
-  let licenseValue = 'Unknown';
+  // ⛔ "Unknown" in these four tiles is the NOT-MEASURED state, not a status
+  // any device reported, so it renders with the shared marker (and a reason)
+  // rather than as a word set in the same type as 'OK' or 'Degraded'. Note the
+  // difference from 'None' below: 'None' is the device DEFINITIVELY saying a
+  // component is unlicensed, which is a measured fact and stays a plain word.
+  let licenseValue = (
+    <NotMeasured
+      text="Unknown"
+      reason={
+        licenses.length === 0
+          ? 'No licence data has been collected from this device. Only Palo Alto (both transports) and Fortinet-over-SSH report licences to SecVault — this is NOT a statement that support is current.'
+          : 'Licence rows exist for this device but none carries a usable expiry — no parsed date and no recognisable raw value. Treating an unparsed expiry as fine is how a support contract lapses unnoticed.'
+      }
+    />
+  );
   let licenseSub = null;
-  let licenseColor = 'var(--text-muted)';
+  let licenseColor = 'var(--unmeasured)';
   if (worstLicense.status === 'expired') {
     licenseValue = `${expiredCount} expired`;
     licenseColor = 'var(--red)';
@@ -141,9 +156,18 @@ export default async function OverviewHealthCard({ deviceId }) {
 
   // ── HA
   const ha = haStatus(haRow);
-  let haValue = 'Unknown';
+  let haValue = (
+    <NotMeasured
+      text="Unknown"
+      reason={
+        haRow
+          ? 'An HA row exists for this device but it does not say whether HA is enabled, so no state can be derived.'
+          : 'No HA state has been collected from this device — this vendor/transport does not report it to SecVault. Blank is NOT "standalone": those are different facts.'
+      }
+    />
+  );
   let haSub = haRow ? null : 'Not collected';
-  let haColor = 'var(--text-muted)';
+  let haColor = 'var(--unmeasured)';
   if (ha.status === 'degraded') {
     haValue = 'Degraded';
     haColor = 'var(--red)';
@@ -160,11 +184,23 @@ export default async function OverviewHealthCard({ deviceId }) {
 
   // ── Disk
   const disk = diskStatus(disks);
-  const diskValue = disk.usePercent === null ? '—' : `${disk.usePercent}%`;
+  const diskValue =
+    disk.usePercent === null ? (
+      <NotMeasured
+        reason={
+          disks.length === 0
+            ? 'No disk usage has been collected from this device — only Palo Alto reports it to SecVault today. A bare 0% here would read as an empty disk.'
+            : 'Disk rows were collected but none carried a usable percentage, so no utilisation can be reported.'
+        }
+      />
+    ) : (
+      `${disk.usePercent}%`
+    );
   const diskColor =
-    disk.status === 'critical' ? 'var(--red)'
-      : disk.status === 'warning' ? 'var(--yellow)'
-        : 'var(--text-muted)';
+    disk.usePercent === null ? 'var(--unmeasured)'
+      : disk.status === 'critical' ? 'var(--red)'
+        : disk.status === 'warning' ? 'var(--yellow)'
+          : 'var(--text-muted)';
   const diskSub =
     disk.row ? (disk.row.mounted_on || disk.row.filesystem || null)
       : disks.length === 0 ? 'Not collected'
@@ -172,8 +208,17 @@ export default async function OverviewHealthCard({ deviceId }) {
 
   // ── Signatures
   const worstSig = worstSignatureStatus(content, now);
-  let sigValue = 'Unknown';
-  let sigColor = 'var(--text-muted)';
+  let sigValue = (
+    <NotMeasured
+      text="Unknown"
+      reason={
+        content.length === 0
+          ? 'No content/signature versions have been collected from this device. "Current" cannot be claimed for a version nobody read.'
+          : 'Content versions were collected but none carried a release date, so their age cannot be computed.'
+      }
+    />
+  );
+  let sigColor = 'var(--unmeasured)';
   if (worstSig.status === 'stale') {
     sigValue = `${worstSig.ageDays}d old`;
     sigColor = 'var(--yellow)';

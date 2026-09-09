@@ -18,9 +18,15 @@ function cvssStyle(score) {
 // a click target to the CVE detail page — same behavior as the original Tailwind
 // version's "block" links, just re-expressed with inline styles now that table
 // cells get their padding from app/globals.css by default.
+// ⛔ The padding here must be the DENSITY TOKENS, not fixed px. Because the
+// <td> padding is stripped to 0 and this link carries it instead, a literal
+// here would make this one table ignore the density switch entirely while
+// every other table in the app changed height around it — which reads as a
+// broken layout rather than a setting. Same failure mode as a hardcoded
+// border-radius under the corners switch.
 const linkCellStyle = {
   display: 'block',
-  padding: '12px 16px',
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -33,11 +39,27 @@ const linkCellStyle = {
 // advisory across the whole fleet). The optional column shows whichever of
 // `device_name` (single device) or `affected_device_count` (fleet) the caller
 // populates per row — this component never decides which mode it's in globally.
-export default function CVETable({ rows = [], showDeviceColumn = false, deviceColumnLabel = 'Devices' }) {
+// ⛔ `emptyMessage` exists because "No CVEs found." is THREE different facts
+// wearing one sentence: this device is genuinely clean, the current filters
+// exclude everything, or nothing was ever assessed here. Only the caller
+// knows which, and on a security product the difference between "clean" and
+// "never looked" is the entire value of the answer. The default stays
+// deliberately non-committal rather than reassuring.
+export default function CVETable({
+  rows = [],
+  showDeviceColumn = false,
+  deviceColumnLabel = 'Devices',
+  emptyMessage = 'No CVEs to show for the current view.',
+}) {
   const colCount = showDeviceColumn ? 7 : 6;
 
   return (
-    <Table>
+    // ⛔ stickyHeader and maxHeight are a PAIR — position:sticky resolves
+    // against the nearest scrolling ancestor, so without a bounded height the
+    // page scrolls and the header sticks to a container that is fully on
+    // screen. This table renders up to 300 rows (~8 screens); viewport-
+    // relative so it adapts to the window rather than guessing a pixel count.
+    <Table stickyHeader maxHeight="70vh">
       <colgroup>
         <col style={{ width: showDeviceColumn ? '16%' : '20%' }} />
         <col style={{ width: '8%' }} />
@@ -80,7 +102,7 @@ export default function CVETable({ rows = [], showDeviceColumn = false, deviceCo
                   className="link-quiet"
                   style={{
                     display: 'block',
-                    padding: '12px 16px',
+                    padding: 'var(--row-pad-y) var(--row-pad-x)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -138,8 +160,8 @@ export default function CVETable({ rows = [], showDeviceColumn = false, deviceCo
         })}
         {rows.length === 0 && (
           <tr>
-            <td colSpan={colCount} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px 16px' }}>
-              No CVEs found.
+            <td colSpan={colCount} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--s5) var(--s4)' }}>
+              {emptyMessage}
             </td>
           </tr>
         )}

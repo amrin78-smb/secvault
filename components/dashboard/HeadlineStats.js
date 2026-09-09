@@ -66,6 +66,14 @@ const BAND_LABEL = {
 // A nullable 0-100 score renders as "—", never 0 — the app-wide null-vs-zero
 // rule (a score of 0 means "measured, and terrible"; null means "nothing to
 // measure yet", and they must not look alike).
+// ⛔ A null band is NOT "no accent given" — it is "nothing was measurable".
+// These two tiles used to fall through to StatCard's var(--border) SENTINEL,
+// which that component reads as "the caller passed no colour" and answers by
+// rendering the value in ordinary body text. So the em-dash looked exactly
+// like any other unstyled number rather than like a gap. --unmeasured says
+// the true thing, and colours the accent border and the value together.
+const UNMEASURED = 'var(--unmeasured)';
+
 function scoreValue(score) {
   return score === null || score === undefined ? '—' : `${score}`;
 }
@@ -100,7 +108,7 @@ export default async function HeadlineStats() {
         label="Security Score"
         value={<>{scoreValue(h.securityScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.securityScore === null ? 'Not enough data yet' : `${BAND_LABEL[secBand]} — ${secSub}`}
-        color={BAND_COLOR[secBand] || 'var(--border)'}
+        color={BAND_COLOR[secBand] || UNMEASURED}
         icon={IconShield}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
@@ -144,7 +152,7 @@ export default async function HeadlineStats() {
         label="Compliance Score"
         value={<>{scoreValue(h.complianceScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
-        color={BAND_COLOR[compBand] || 'var(--border)'}
+        color={BAND_COLOR[compBand] || UNMEASURED}
         icon={IconChart}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"

@@ -190,7 +190,10 @@ export default async function DashboardPage({ searchParams }) {
       {/* Outside the tabs on purpose — fleet posture is never a tab away. */}
       <HeadlineStats />
 
-      <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="Dashboard sections" />
+      {/* The accessible name follows the nav label (Dashboard -> Overview,
+          redesign Phase 2). A screen-reader user who activated "Overview" in
+          the sidebar should not land in a tablist announced as "Dashboard". */}
+      <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="Overview sections" />
 
       {tab === 'overview' && (
         <div className="dashboard-widget-grid">

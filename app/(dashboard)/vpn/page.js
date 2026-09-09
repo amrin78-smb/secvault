@@ -150,7 +150,7 @@ export default async function VpnFleetPage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
-        title="VPN"
+        title="VPN &amp; identity"
         subtitle="Fleet-wide VPN/remote-access exposure, derived from each device's latest collected config."
         actions={
           <a href="/api/vpn/fleet?format=csv" className="btn btn-secondary">

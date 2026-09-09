@@ -162,6 +162,22 @@ export const authOptions = {
     async session({ session, token }) {
       if (session.user) {
         session.user.role = token.role || VIEWER_ROLE;
+        // ⛔ id and provider are exposed for per-user data (saved_views, added
+        // 2026-09-09), and the two providers do NOT return the same kind of id:
+        //
+        //   local — storedUser.id, a real UUID with a row in `users`
+        //   ldap  — the bare username string, with NO `users` row at all
+        //
+        // saved_views.user_id is `UUID REFERENCES users(id)`, so it can only
+        // key off a local account. `provider` travels with the id so a caller
+        // can tell the two apart instead of discovering it as a foreign-key
+        // violation at write time. An LDAP session is a valid, fully
+        // authenticated session that simply has no per-user storage yet;
+        // creating a shadow `users` row on first LDAP bind is the fix, and it
+        // belongs with the unresolved LDAP group-to-role mapping in CLAUDE.md,
+        // not bolted on here.
+        session.user.id = token.id || null;
+        session.user.provider = token.provider || null;
       }
       return session;
     },

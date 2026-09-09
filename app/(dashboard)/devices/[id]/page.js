@@ -347,7 +347,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     return (
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
-          ← Back to devices
+          ← Back to firewalls
         </Link>
         <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
@@ -411,7 +411,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
-          ← Back to devices
+          ← Back to firewalls
         </Link>
       </div>
 
@@ -606,7 +606,24 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </div>
       )}
 
-      {tab === 'cve' && <CVETable rows={cveRows} showDeviceColumn={false} />}
+      {/* ⛔ The empty message distinguishes the three facts "No CVEs found."
+          used to collapse into one. CVE matching is SKIPPED outright for a
+          device with no device_versions row (versionMatcher.js logs "no
+          version row - skipped"), so an empty table there is the absence of an
+          attempt, not a clean bill of health. This page already reads the
+          version row for the Details card above, so the distinction costs
+          nothing. */}
+      {tab === 'cve' && (
+        <CVETable
+          rows={cveRows}
+          showDeviceColumn={false}
+          emptyMessage={
+            version?.version_string
+              ? `No advisory currently applies to ${version.version_string}. This device HAS been assessed.`
+              : 'No software version has been collected from this device, so CVE matching has never run for it. This is NOT "no vulnerabilities" — nothing has been checked.'
+          }
+        />
+      )}
 
       {tab === 'rules' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -676,7 +693,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               href={`/devices/${device.id}/analysis`}
               style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}
             >
-              Rule analysis →
+              Rule hygiene →
             </Link>
             <Link
               href={`/devices/${device.id}/vpn`}

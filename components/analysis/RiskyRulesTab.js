@@ -25,17 +25,28 @@ const RULE_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', criti
 const RULE_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical', attention: 'Attention' };
 
 // StatCard takes a raw CSS color (its left-border accent), not a Badge color
-// name -- same var(--red)/var(--yellow)/var(--blue)/var(--text-muted)
-// convention already used for the severity tiles on the Summary tab in
-// devices/[id]/analysis/page.js, extended with var(--green) for 'low'
-// (success/green is the "no issues" meaning used everywhere else in this
-// app -- StatusDot, etc.).
+// name.
+//
+// ⛔ SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues — these bands ARE the
+// severity ramp, so they must move with it. This map was still the
+// pre-rewrite mapping and was wrong twice over after 2026-09-09: 'high' was
+// --yellow (the ramp's MEDIUM hue, so high and medium rules were arguing over
+// one colour) and 'medium' was --blue, which the palette rewrite made
+// forbidden rather than merely discouraged — blue was pulled out of the ramp
+// entirely so the teal brand hue can never be mistaken for a severity.
+//
+// ⛔ 'attention' is --unmeasured, NOT a muted grey text colour. Read
+// computeRuleRiskBand() in lib/engines/riskScore.js: an 'attention' rule is an
+// enabled rule with no finding of its own — "nothing wrong found, but also
+// nothing confirming this one's fine". That is the definition of not measured,
+// and --unmeasured is the palette's no-hue token for exactly it. Colouring it
+// anywhere on the ramp, in either direction, would be a claim.
 const STAT_TILE_COLOR = {
-  critical: 'var(--red)',
-  high: 'var(--yellow)',
-  medium: 'var(--blue)',
-  low: 'var(--green)',
-  attention: 'var(--text-muted)',
+  critical: 'var(--sev-crit)',
+  high: 'var(--sev-high)',
+  medium: 'var(--sev-med)',
+  low: 'var(--sev-ok)',
+  attention: 'var(--unmeasured)',
 };
 
 // Display/sort order for this tab: worst band first, with 'attention'

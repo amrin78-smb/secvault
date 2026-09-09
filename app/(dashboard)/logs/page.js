@@ -70,7 +70,7 @@ export default async function LogsPage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Log Search"
+        title="Log search"
         subtitle={
           `Search raw firewall logs for investigation. Raw events are kept for a ` +
           `few days; searches are limited to ${MAX_WINDOW_DAYS} days and always ` +

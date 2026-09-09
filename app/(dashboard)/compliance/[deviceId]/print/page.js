@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { pool } from '../../../../../lib/db';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import { STANDARDS, scoreColor, SCORE_COLOR_VAR } from '../../../../../components/compliance/ComplianceMatrix';
 import PrintReportButton from '../../../../../components/compliance/PrintReportButton';
 
@@ -154,7 +155,7 @@ export default async function CompliancePrintPage({ params }) {
         <header style={{ marginBottom: 24, borderBottom: '2px solid var(--border)', paddingBottom: 12 }}>
           <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, margin: 0 }}>SecVault Compliance Report</h1>
           <p style={{ marginTop: 6, fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>
-            {device.name} <span style={{ color: 'var(--text-muted)' }}>({device.vendor})</span>
+            {device.name} <span style={{ color: 'var(--text-muted)' }}>({vendorLabel(device.vendor)})</span>
           </p>
           <p style={{ marginTop: 4, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
             Generated: {generatedAt} &middot; Last audit run: {formatDateTime(lastRunAt)}

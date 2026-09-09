@@ -152,6 +152,15 @@
      which use 50% directly) sit outside the switch; squaring those looks like
      a rendering bug rather than a style. */
   --radius-pill:    999px;
+  /* ── Table density. Row GEOMETRY only -- see lib/density.js. ──
+     comfortable is the default and lives here; [data-density] below
+     overrides only these three. A table cell that hardcodes its padding
+     opts itself out silently, exactly like a hardcoded border-radius does
+     under the corners switch. */
+  --row-pad-y:  12px;
+  --row-pad-x:  16px;
+  --row-font:   var(--text-base);
+
   --sidebar-width:  240px;
   --sidebar-width-collapsed: 64px;
   --header-height:  72px;
@@ -247,11 +256,50 @@
 
    True circles (status dots, avatars) use 50% directly and are deliberately
    NOT covered - squaring those looks broken, not hard-edged. */
+/* ── Density (opt-in) ──────────────────────────────────────
+   Set from Settings -> Appearance; lib/density.js stores the choice and
+   stamps data-density on <html> (no-flash inline script in app/layout.js,
+   same contract as data-theme and data-corners).
+
+   ⛔ These override ROW GEOMETRY ONLY. Density must never hide a column,
+   truncate a value or drop a badge -- a denser table shows the same facts
+   in less space, not fewer facts. */
+:root[data-density="compact"] {
+  --row-pad-y: 8px;
+  --row-pad-x: 12px;
+  --row-font:  var(--text-base);
+}
+:root[data-density="dense"] {
+  --row-pad-y: 5px;
+  --row-pad-x: 10px;
+  --row-font:  var(--text-sm);
+}
+
 :root[data-corners="square"] {
   --radius:         0;
   --radius-sm:      0;
   --radius-pill:    0;
 }
+
+/* ⛔ THE DARK THEME IS SCOPED TO @media screen, and that is load-bearing.
+
+   A printed page must never use dark-theme colours: it is illegible and
+   expensive on paper, and it must not depend on the operator's saved theme.
+   This used to be handled inside @media print by RESTATING every light
+   value to undo the dark block — twenty-odd hexes duplicated, with nothing
+   keeping the two copies in step. They drifted immediately: after the
+   v2.87.0 token rewrite the print block was still resetting to the
+   PRE-REDESIGN palette, so a dark-mode operator printing a compliance
+   report got the old brand colours while their screen showed the new ones.
+
+   Scoping the dark block to `screen` deletes the duplicate outright. On
+   print the selector never matches, :root wins, and the light palette
+   applies automatically and permanently in step, because there is only one
+   copy of it. Nothing to remember and nothing to drift.
+
+   ⛔ Any future [data-theme="dark"] rule must go INSIDE this block. One
+   left outside would apply on paper and be very hard to notice. */
+@media screen {
 
 /* Dark theme.
    ⛔ CHANGED 2026-09-09: the brand and status hues NOW FLIP TOO. The old file
@@ -312,6 +360,8 @@
 [data-theme="dark"] th { background: rgba(255,255,255,0.03); }
 [data-theme="dark"] tbody tr:hover td { background: rgba(255,255,255,0.03); }
 
+} /* end @media screen — see the note above the dark theme block */
+
 html, body {
   height: 100%;
   font-family: var(--font-sans);
@@ -338,7 +388,7 @@ th {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  padding: 12px 16px;
+  padding: var(--row-pad-y) var(--row-pad-x);
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
@@ -346,16 +396,29 @@ th {
   text-overflow: ellipsis;
 }
 td {
-  padding: 12px 16px;
+  padding: var(--row-pad-y) var(--row-pad-x);
   border-bottom: 1px solid var(--border-light);
   color: var(--text-primary);
-  font-size: var(--text-base);
+  font-size: var(--row-font);
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 tr:last-child td { border-bottom: none; }
+
+/* Sticky column headings. Opt-in via components/ui/Table stickyHeader, and
+   only effective when the wrapper has a bounded maxHeight -- see the note in
+   that file. border-bottom on a sticky th is painted by the cell itself
+   because the table border-collapse edge does NOT travel with a sticky
+   element: without this the heading row loses its rule the moment it detaches
+   and appears to float. */
+table.sticky-header thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 tbody tr { transition: background 0.1s; }
 tbody tr:hover td { background: var(--bg-primary); }
 
@@ -871,6 +934,8 @@ select.input {
   transition: width 0.18s ease, min-width 0.18s ease;
 }
 .sv-sidebar.collapsed { width: var(--sidebar-width-collapsed); min-width: var(--sidebar-width-collapsed); }
+/* Retained: the single "Navigation" heading this replaced is gone, but the
+   class is still referenced by the login brand panel. */
 .sv-nav-label {
   padding: 22px 22px 12px;
   font-size: var(--text-xs);
@@ -881,7 +946,34 @@ select.input {
   white-space: nowrap;
   overflow: hidden;
 }
-.sv-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding-bottom: 10px; }
+
+/* ── Grouped navigation (2026-09-09, Phase 2) ──────────────────────
+   Four groups + a pinned Settings. The GAP between clusters is what does
+   the grouping work; the heading only names it. That matters because the
+   heading is hidden when the sidebar is collapsed (no room at 64px) and the
+   structure has to survive without it. */
+.sv-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: 14px 0 10px; }
+.sv-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.sv-nav-group + .sv-nav-group { margin-top: 14px; }
+.sv-nav-group-label {
+  padding: 0 22px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.30);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Settings sits at the bottom of the rail, away from the four questions. */
+.sv-nav-group-pinned { margin-top: auto; padding-top: 14px; }
+/* Collapsed: no headings, so a hairline keeps the clusters legible. */
+.sv-sidebar.collapsed .sv-nav-group + .sv-nav-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
 .sv-nav a {
   position: relative;
   display: flex;
@@ -992,36 +1084,12 @@ body[data-readonly="true"] .btn-danger {
    so it applies to any page rendered inside the dashboard shell, not
    just the print report route. ────────────────────────────────────── */
 @media print {
-  /* A printed page should never render dark-theme colors (expensive/
-     illegible on paper), regardless of the operator's saved
-     localStorage['secvault-theme'] preference (lib/theme.js sets
-     [data-theme="dark"] on <html> before first paint). Simplest robust
-     fix: reset the exact same custom properties the real
-     [data-theme="dark"] block above (line ~80) overrides, back to
-     their :root/light values (line ~16), scoped inside this @media
-     print block only — the real dark-mode block is untouched. */
-  [data-theme="dark"] {
-    color-scheme: light;
-    --bg-primary:     #f4f6f9;
-    --bg-card:        #ffffff;
-    --border:         #e2e8f0;
-    --border-light:   #f1f5f9;
-    --text-primary:   #0f172a;
-    --text-secondary: #334155;
-    --text-muted:     #64748b;
-    --surface-subtle: #f8fafc;
-    --tint-info:    #eff6ff;  --tint-info-fg:    #1d4ed8;
-    --tint-success: #f0fdf4;  --tint-success-fg: #15803d;
-    --tint-warn:    #fffbeb;  --tint-warn-fg:    #b45309;
-    --tint-danger:  #fef2f2;  --tint-danger-fg:  #b91c1c;
-    --tint-purple:  #f5f3ff;  --tint-purple-fg:  #6d28d9;
-    --tint-teal:    #ecfeff;  --tint-teal-fg:    #0e7490;
-    --tint-orange:  #ffedd5;  --tint-orange-fg:  #c2410c;
-  }
-
+  /* No palette reset needed here: the dark theme is scoped to
+     @media screen, so on paper :root already applies. This block used to
+     restate every light value and had drifted a whole redesign behind. */
   html, body {
-    background: #ffffff !important;
-    color: #0f172a !important;
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
   }
 
   /* App chrome never belongs on paper, and anything explicitly marked

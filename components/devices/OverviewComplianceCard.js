@@ -112,7 +112,12 @@ export default async function OverviewComplianceCard({ deviceId }) {
         </div>
 
         {neverAudited ? (
-          <EmptyState message="This device has not been audited yet." />
+          <EmptyState
+            message={
+              'No compliance audit has run for this device, so every standard is unscored rather than scored zero. ' +
+              'Checks are evaluated against a collected configuration — run Collect Now on the Manage tab, then an audit.'
+            }
+          />
         ) : (
           <>
             {/* Overall blended score — visually distinct (bordered panel, larger
@@ -124,7 +129,8 @@ export default async function OverviewComplianceCard({ deviceId }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 16,
-                padding: '12px 16px',
+                // Spacing scale, not a literal pair (--s3/--s4 are 12/16px).
+                padding: 'var(--s3) var(--s4)',
                 marginBottom: 16,
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius)',

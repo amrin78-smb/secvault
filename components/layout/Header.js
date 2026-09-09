@@ -9,6 +9,7 @@ import HeaderSearch from './HeaderSearch';
 import ThemeToggle from './ThemeToggle';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
+import { PRODUCT_NAME_PARTS } from '../../lib/branding';
 
 function SecVaultLogo() {
   return (
@@ -28,9 +29,22 @@ function SecVaultLogo() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <text x="42" y="27" fontSize="22" fontWeight="700" letterSpacing="-0.3" fontFamily="Inter, system-ui, sans-serif">
-        <tspan fill="var(--shell-fg)">Sec</tspan>
-        <tspan fill="var(--accent-teal)">Vault</tspan>
+      {/* ⛔ fontFamily came through style, not the SVG presentation
+          attribute, and it reads the token. It said "Inter, system-ui,
+          sans-serif" until 2026-09-09 — a leftover from before the fonts
+          were self-hosted, which meant the wordmark rendered in a
+          DIFFERENT face from every other word in the product, in the one
+          place a customer looks first. */}
+      <text
+        x="42"
+        y="27"
+        fontSize="22"
+        fontWeight="700"
+        letterSpacing="-0.3"
+        style={{ fontFamily: 'var(--font-sans)' }}
+      >
+        <tspan fill="var(--shell-fg)">{PRODUCT_NAME_PARTS[0]}</tspan>
+        <tspan fill="var(--accent-teal)">{PRODUCT_NAME_PARTS[1]}</tspan>
       </text>
     </svg>
   );

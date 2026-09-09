@@ -11,6 +11,7 @@ import StandardCard from '../../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
 import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../components/devices/vendorMeta';
 
 export const dynamic = 'force-dynamic';
 
@@ -207,7 +208,7 @@ export default async function DeviceCompliancePage({ params }) {
         title={`Compliance — ${device.name}`}
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Badge color="info">{device.vendor}</Badge>
+            <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
             <span>Last run: {formatDateTime(lastRunAt)}</span>
           </span>
         }

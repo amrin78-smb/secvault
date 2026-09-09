@@ -154,7 +154,7 @@ Confusingly, `node --check` DOES catch some errors in the same files — an uncl
 breaks the CommonJS fallback parse and is reported. So it fails loudly on some corruption and
 silently on JSX corruption, which is worse than failing consistently: it looks like a working
 check. A JSX-aware alternative is `next/dist/build/swc`'s `parse(src, {filename, syntax:
-'ecmascript', jsx: true, isModule: true})`, which does catch it.
+'ecmascript', jsx: true, isModule: true})`, which does catch it. **As of 2026-09-09 that alternative is wired up as `tests/jsxSyntax.test.js`**, which parses every .js file in the repo in ~1.5s and is verified to catch exactly the case above. So `npm test` now covers JSX syntax and `npm run build` is no longer the only gate — which matters most when several agents are editing JSX in parallel and a build cannot safely run.
 
 ## A wrong COLUMN NAME passes every gate (found 2026-09-09, production down)
 

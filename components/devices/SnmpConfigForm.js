@@ -12,6 +12,24 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '../ui/Button';
 import LoadingSpinner from '../ui/LoadingSpinner';
+import NotMeasured from '../ui/NotMeasured';
+
+// ⛔ A metric the agent did not return renders as "not reported", not as
+// "—%" and never as 0. Defined at MODULE TOP LEVEL, per CLAUDE.md's hardest
+// rule — a component defined inside another remounts on every keystroke and
+// loses input focus, and this file is a form full of inputs.
+function SnmpMetric({ label, value, unit = '', reason }) {
+  return (
+    <>
+      {label}{' '}
+      {value === null || value === undefined ? (
+        <NotMeasured text="not reported" reason={reason} />
+      ) : (
+        `${value}${unit}`
+      )}
+    </>
+  );
+}
 
 const SNMP_VERSION_OPTIONS = [
   { value: 'v3', label: 'SNMPv3 (recommended)' },
@@ -352,8 +370,26 @@ export default function SnmpConfigForm({ deviceId, vendor, initial, detected = f
           </span>
           {testResult.ok && testResult.metrics && (
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-              CPU {testResult.metrics.cpuPercent ?? '—'}% · Memory {testResult.metrics.memoryPercent ?? '—'}% ·
-              Sessions {testResult.metrics.sessionCount ?? '—'} — recorded as a new data point above.
+              <SnmpMetric
+                label="CPU"
+                value={testResult.metrics.cpuPercent}
+                unit="%"
+                reason="The SNMP agent returned no CPU value. Usually means no vendor MIB support on this platform (generic MIB-II only) or a blocked OID — not an idle firewall."
+              />{' '}
+              ·{' '}
+              <SnmpMetric
+                label="Memory"
+                value={testResult.metrics.memoryPercent}
+                unit="%"
+                reason="The SNMP agent returned no memory value. Usually means no vendor MIB support on this platform or a blocked OID — not an empty memory."
+              />{' '}
+              ·{' '}
+              <SnmpMetric
+                label="Sessions"
+                value={testResult.metrics.sessionCount}
+                reason="The SNMP agent returned no session count. This vendor may not expose one over SNMP — it is not a count of zero sessions."
+              />{' '}
+              — recorded as a new data point above.
             </p>
           )}
         </div>

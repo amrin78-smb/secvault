@@ -2,6 +2,7 @@ import Link from 'next/link';
 import TimeAgo from '../ui/TimeAgo';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
+import { NotMeasuredBar } from '../ui/NotMeasured';
 import StandardDonut from './StandardDonut';
 
 /**
@@ -74,17 +75,15 @@ function complianceBar(stats) {
           : null}
       </div>
       {stats.na > 0 ? (
-        <div
-          title={`${stats.na} not applicable — excluded from the score`}
-          aria-label={`${stats.na} not applicable`}
-          style={{
-            width: 22,
-            height: 8,
-            borderRadius: 'var(--radius-pill)',
-            border: '1px solid var(--border)',
-            background:
-              'repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 6px)',
-          }}
+        // ⛔ The shared NotMeasuredBar, not a locally hand-rolled hatch. The
+        // gradient was written out by hand here with its own 3px/6px period,
+        // which meant this swatch and every other "not measured" swatch in the
+        // product were subtly different textures for the identical statement.
+        // --hatch is the token; NotMeasuredBar is the component that carries it
+        // plus the reason and the aria-label.
+        <NotMeasuredBar
+          width={22}
+          reason={`${stats.na} check${stats.na === 1 ? '' : 's'} could not be asked of this device at all — excluded from the score, not failed by it.`}
         />
       ) : null}
     </div>
@@ -239,7 +238,17 @@ export default function StandardCard({
         </p>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
-          <StandardDonut pct={stats.scorePct} />
+          {/* ⛔ The donut's null ring needs a REASON, not just a hueless ring:
+              "never audited" and "audited, but every check was unanswerable"
+              land on the same em-dash and are very different facts. */}
+          <StandardDonut
+            pct={stats.scorePct}
+            reason={
+              stats.total === 0
+                ? 'Not measured: this standard has never been audited on this device.'
+                : `Not measured: all ${stats.total} checks mapped to this standard resolved N/A — questions SecVault could not ask of this device, excluded from the score.`
+            }
+          />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 160, flex: '1 1 200px' }}>
             {complianceBar(stats)}
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>

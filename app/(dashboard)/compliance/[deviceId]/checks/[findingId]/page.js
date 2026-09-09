@@ -7,6 +7,7 @@ import Card, { CardBody } from '../../../../../../components/ui/Card';
 import EmptyState from '../../../../../../components/ui/EmptyState';
 import RuleEvidenceTable from '../../../../../../components/compliance/RuleEvidenceTable';
 import { isValidUuid } from '../../../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../../../components/devices/vendorMeta';
 
 export const dynamic = 'force-dynamic';
 
@@ -151,7 +152,7 @@ export default async function ComplianceCheckDetailPage({ params }) {
         title={finding.name}
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Badge color="info">{device.vendor}</Badge>
+            <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
             <Badge color={sev.color}>{sev.label}</Badge>
             <Badge color={st.color}>{st.label}</Badge>
             {standards.map((s) => (

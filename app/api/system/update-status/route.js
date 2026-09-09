@@ -7,6 +7,20 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.88.0': [
+    "Navigation is grouped into Monitor, Inventory, Risk and Access, and named the way operators speak: Overview, Firewalls, Rule hygiene, Vulnerabilities, VPN \u0026 identity. Every existing link and bookmark still works \u2014 only the labels changed.",
+    "Press \u2318K (or Ctrl+K) anywhere to search firewalls, CVEs and pages. It still understands the old names, so typing \u201cdevices\u201d finds Firewalls.",
+    "Table density: choose Comfortable, Compact or Dense in Settings \u2192 Appearance. A denser table shows the same columns and values in less space \u2014 nothing is hidden.",
+    "Saved views: name a set of filters on a table and come back to it, or share it with a colleague.",
+    "Long tables keep their column headings visible while you scroll.",
+    "Charts across the whole product now share one set of axes, gridlines, tooltips and legends.",
+    "Fixed: a chart drew a straight line across a polling outage, so an invented reading looked exactly like a real one. Gaps in monitoring now look like gaps.",
+    "Fixed: several screens showed a confident zero for something that was never measured \u2014 a firewall with no ruleset collected showed a spotless rule-hygiene donut, a device never assessed for CVEs showed zero, and a compliance standard with nothing measurable drew the same ring as a genuine 0%.",
+    "Fixed: SNMP charts now mark which samples came from a generic MIB rather than the management API, so a low-confidence reading no longer looks identical to a precise one.",
+    "Fixed: VPN login locations reported \u201c0 successful logins\u201d as fact when no firewall reports successes at all, and drew every country\u2019s bar solid red.",
+    "Fixed: printing a report while in dark mode used the colours from before the redesign.",
+    "Failed actions now say so on screen instead of showing a small warning icon that had to be hovered.",
+  ],
   '2.87.0': [
     "Redesign phase 1: SecVault has its own visual identity. Buttons, links and focus rings are now teal; red is reserved for danger alone. Previously the interactive colour and the critical-severity colour were the same red, so the most urgent signal on screen competed with the Save button.",
     "Fonts are self-hosted. The app loaded Inter from Google over the internet, which the product\u2019s own Content-Security-Policy was already blocking in production \u2014 so every page has been rendering in a fallback typeface. It now ships IBM Plex and works on an air-gapped network.",

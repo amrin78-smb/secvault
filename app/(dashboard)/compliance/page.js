@@ -8,6 +8,7 @@ import ComplianceMatrix, { STANDARDS, STANDARD_META } from '../../../components/
 import StandardCard from '../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../components/compliance/ZoneClassificationBanner';
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
+import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { isValidUuid } from '../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ export const dynamic = 'force-dynamic';
 //    same "duplicate small per-page queries, don't extract a shared module"
 //    convention this codebase already uses for the Alerts/Compliance query
 //    triplication (see CLAUDE.md).
-//  - "table" ("Compare Devices"): unchanged fleet-wide device x standard
+//  - "table" ("Compare firewalls"): unchanged fleet-wide device x standard
 //    comparison table (ComplianceMatrix) -- still the place to see every
 //    device's score side by side.
 //
@@ -55,7 +56,7 @@ function emptyStandardCounts() {
   return standards;
 }
 
-// Only used by the "table" (Compare Devices) view now -- feeds
+// Only used by the "table" (Compare firewalls) view now -- feeds
 // ComplianceMatrix's device x standard grid. Still fleet-wide by design;
 // that view is unchanged.
 async function getFleetCompliance(dbPool) {
@@ -205,7 +206,7 @@ function viewToggle(active) {
         Cards
       </Link>
       <Link href="/compliance?view=table" style={tabStyle('table')}>
-        Compare Devices
+        Compare firewalls
       </Link>
     </div>
   );
@@ -248,7 +249,7 @@ export default async function CompliancePage({ searchParams }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
           title="Compliance"
-          subtitle="View one firewall's PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture, or switch to Compare Devices for a fleet-wide table."
+          subtitle="View one firewall's PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture, or switch to Compare firewalls for a fleet-wide table."
         />
         {viewToggle(view)}
         <EmptyState message="No active devices — add a device first." />
@@ -307,7 +308,7 @@ export default async function CompliancePage({ searchParams }) {
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Per-firewall PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture.</span>
-            <Badge color="info">{selected.vendor}</Badge>
+            <Badge color="info" title={selected.vendor}>{vendorLabel(selected.vendor)}</Badge>
           </span>
         }
         actions={

@@ -39,6 +39,25 @@ async function getConfigChanges(dbPool, deviceId, days) {
   return rows;
 }
 
+// ⛔ "No configuration changes" IS A CLAIM ABOUT STABILITY, and it is only
+// sayable if SecVault has actually been comparing configurations. config_diffs
+// rows are written by collectAndStore when a pull produces a config that
+// DIFFERS from the previous snapshot — so a device that has never been
+// collected, or has exactly one snapshot, has zero diffs for a reason that has
+// nothing to do with the firewall being stable. Rendered as "No configuration
+// changes in the last 7 days" that is a failed read reported as a reassuring
+// fact, the same shape as the Support tile's old green "All current".
+//
+// Two snapshots is the real threshold: change detection needs a predecessor to
+// compare against, so one snapshot can never produce a diff either.
+async function getConfigCoverage(dbPool, deviceId) {
+  const { rows } = await dbPool.query(
+    `SELECT COUNT(*)::int AS snapshot_count FROM device_configs WHERE device_id = $1`,
+    [deviceId]
+  );
+  return rows[0] || { snapshot_count: 0 };
+}
+
 // Section labels that classifyDiff() (lib/engines/configDiff.js) can produce
 // which represent an actual rulebase/policy change -- always High regardless
 // of ruleChanges, since a device where individual rule names can't be
@@ -99,7 +118,14 @@ function formatDateTime(value) {
 const RECENT_LIST_LIMIT = 5;
 
 export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) {
-  const rows = await getConfigChanges(pool, deviceId, days);
+  const [rows, coverage] = await Promise.all([
+    getConfigChanges(pool, deviceId, days),
+    getConfigCoverage(pool, deviceId),
+  ]);
+
+  // Fewer than two snapshots -> change detection has never been able to run,
+  // whatever the window says. See getConfigCoverage's note.
+  const canDetectChanges = coverage.snapshot_count >= 2;
 
   const totalCount = rows.length;
   const totals = rows.reduce(
@@ -122,7 +148,15 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
         </div>
 
         {totalCount === 0 ? (
-          <EmptyState message={`No configuration changes in the last ${days} days.`} />
+          <EmptyState
+            message={
+              canDetectChanges
+                ? `No configuration changes detected in the last ${days} days. SecVault holds ${coverage.snapshot_count} configuration snapshots for this device, so this is a real comparison, not a gap.`
+                : coverage.snapshot_count === 0
+                  ? 'No configuration has ever been collected from this device, so change detection has nothing to compare. This is NOT a statement that the configuration is unchanged — run Collect Now on the Manage tab.'
+                  : 'Only one configuration snapshot has been collected from this device. A change is a difference between two snapshots, so nothing can be detected until the next successful pull — this is NOT a statement that the configuration is unchanged.'
+            }
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -152,7 +186,8 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 4,
-                    padding: '8px 10px',
+                    // On the spacing scale (was an off-scale 8px/10px pair).
+                    padding: 'var(--s2) var(--s3)',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--border)',
                     color: 'inherit',

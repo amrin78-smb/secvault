@@ -31,7 +31,7 @@ export default function NewDevicePage() {
 
   return (
     <div style={{ maxWidth: 576, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <PageHeader title="Add Device" />
+      <PageHeader title="Add firewall" />
       {error && <p style={{ fontSize: 'var(--text-base)', color: 'var(--red)' }}>{error}</p>}
       <DeviceForm onSubmit={handleSubmit} />
     </div>

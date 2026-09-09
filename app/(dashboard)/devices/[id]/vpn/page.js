@@ -13,6 +13,7 @@ import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
 import { getVpnSessions } from '../../../../../lib/engines/vpnSessions';
 import { getVpnTunnels as getStoredVpnTunnels } from '../../../../../lib/engines/vpnTunnels';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import { resolvePage } from '../../../../../lib/pagination';
 
 export const dynamic = 'force-dynamic';
@@ -73,7 +74,7 @@ function notFound() {
   return (
     <div>
       <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-        ← Back to Devices
+        ← Back to firewalls
       </Link>
       <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
     </div>
@@ -157,7 +158,7 @@ export default async function DeviceVpnPage({ params, searchParams }) {
         title={`VPN — ${device.name}`}
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Badge color="info">{device.vendor}</Badge>
+            <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
             <span>Config as of: {formatDateTime(configRow ? configRow.collected_at : null)}</span>
           </span>
         }
@@ -177,7 +178,11 @@ export default async function DeviceVpnPage({ params, searchParams }) {
       <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="VPN sections" />
 
       {!summary.supported ? (
-        <EmptyState message={`VPN config collection is not yet implemented for "${device.vendor}" devices.`} />
+        <EmptyState
+          message={`VPN config collection is not yet implemented for ${
+            vendorLabel(device.vendor) || 'this vendor'
+          } devices.`}
+        />
       ) : !summary.hasConfig ? (
         <EmptyState message="No VPN configuration found on this device's latest collected config (or none collected yet)." />
       ) : (

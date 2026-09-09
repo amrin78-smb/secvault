@@ -119,24 +119,47 @@ export default async function ComplianceStandardsBreakdown() {
                     {s.scorePct === null ? '—' : `${s.scorePct}%`}
                   </span>
                 </div>
-                <div
-                  // Decorative: the number above is the accessible value.
-                  aria-hidden="true"
-                  style={{
-                    height: 6,
-                    borderRadius: 3,
-                    background: 'var(--border)',
-                    overflow: 'hidden',
-                  }}
-                >
+                {/* ⛔ FAILED READ RENDERED AS A VALUE. The number above already
+                    renders an unmeasurable standard as an em-dash — but the bar
+                    under it drew a 0%-wide fill in a plain --border track,
+                    which is pixel-identical to a standard that genuinely scores
+                    0%. The eye reads the bars before the numbers, so the row
+                    said "you fail every control" while the number said "we have
+                    not audited this". The unmeasurable track is now hatched,
+                    which is the vocabulary NotMeasuredBar defines for exactly
+                    this: a texture, never a hue, because a flat grey fill reads
+                    as a real category with a muted colour. */}
+                {s.scorePct === null ? (
                   <div
+                    title="No check for this standard produced a pass, fail or warning on any active device — nothing measurable to score."
                     style={{
-                      width: `${s.scorePct === null ? 0 : s.scorePct}%`,
-                      height: '100%',
-                      background: toneFor(s.scorePct),
+                      height: 6,
+                      borderRadius: 'var(--radius-pill)',
+                      border: '1px solid var(--border)',
+                      background: 'var(--hatch)',
+                      backgroundColor: 'var(--surface-subtle)',
                     }}
                   />
-                </div>
+                ) : (
+                  <div
+                    // Decorative: the number above is the accessible value.
+                    aria-hidden="true"
+                    style={{
+                      height: 6,
+                      borderRadius: 3,
+                      background: 'var(--border)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${s.scorePct}%`,
+                        height: '100%',
+                        background: toneFor(s.scorePct),
+                      }}
+                    />
+                  </div>
+                )}
                 <div
                   style={{
                     marginTop: 2,

@@ -55,7 +55,10 @@ export default async function FleetAnalysisPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <PageHeader title="Rule Health — Fleet" />
+      <PageHeader
+        title="Rule hygiene — Fleet"
+        subtitle="Rule findings across every active firewall. Open a firewall to see its cleanup, optimization and reorder detail."
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
         <StatCard label="Critical" value={totals.critical} color={totals.critical > 0 ? 'var(--red)' : 'var(--text-muted)'} />
@@ -66,7 +69,7 @@ export default async function FleetAnalysisPage() {
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState message="No active devices — add devices to see rule health." />
+        <EmptyState message="No active devices — add one to see rule hygiene." />
       ) : (
         <Table>
           <colgroup>
@@ -126,7 +129,7 @@ export default async function FleetAnalysisPage() {
                   ) : (
                     <Badge
                       color="muted"
-                      title="This device has never been analysed, so it has no rule-health band yet"
+                      title="This device has never been analysed, so it has no rule-hygiene band yet"
                     >
                       Not analysed
                     </Badge>

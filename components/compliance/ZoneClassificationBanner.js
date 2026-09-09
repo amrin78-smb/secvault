@@ -31,6 +31,14 @@ export default function ZoneClassificationBanner({ standards, deviceId }) {
     Array.isArray(standards) && standards.length > 0
       ? standards.map(standardLabel).join(', ')
       : 'PCI DSS, NIST, CIS v8';
+  // ⛔ NEUTRAL, not amber. This banner used --tint-warn/--tint-warn-fg, which
+  // spends the severity ramp on an absence of data: an unclassified zone is not
+  // a risk finding about the firewall, it is a question SecVault cannot ask yet
+  // (the check resolves `na` and is excluded from the denominator entirely).
+  // components/ui/NotMeasured.js's rule — a gap gets no hue, in either
+  // direction — applies to a banner exactly as it does to a cell. The hatched
+  // swatch ties it to every other "not measured" mark in the product, and the
+  // action link keeps the brand hue because the ACTION is a real affordance.
   return (
     <div
       style={{
@@ -38,21 +46,34 @@ export default function ZoneClassificationBanner({ standards, deviceId }) {
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
-        gap: 8,
-        padding: '10px 14px',
+        gap: 'var(--s2)',
+        padding: 'var(--s3) var(--s4)',
         borderRadius: 'var(--radius)',
-        background: 'var(--tint-warn)',
-        color: 'var(--tint-warn-fg)',
+        background: 'var(--surface-subtle)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
         fontSize: 'var(--text-sm)',
       }}
     >
-      <span>
+      <span
+        aria-hidden="true"
+        style={{
+          width: 14,
+          height: 8,
+          flex: 'none',
+          borderRadius: 3,
+          border: '1px solid var(--border)',
+          background: 'var(--hatch)',
+          backgroundColor: 'var(--surface-subtle)',
+        }}
+      />
+      <span style={{ flex: '1 1 320px' }}>
         Zones haven&apos;t been classified yet — the External-to-Internal segmentation check is excluded from the{' '}
         {list} score{Array.isArray(standards) && standards.length === 1 ? '' : 's'} below.
       </span>
       <Link
         href={`/devices/${deviceId}?tab=manage`}
-        style={{ fontWeight: 600, color: 'inherit', textDecoration: 'underline', whiteSpace: 'nowrap' }}
+        style={{ fontWeight: 600, color: 'var(--primary)', whiteSpace: 'nowrap' }}
       >
         Classify zones →
       </Link>

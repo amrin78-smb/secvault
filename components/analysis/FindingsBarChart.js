@@ -2,6 +2,15 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import Card, { CardBody } from '../ui/Card';
+import {
+  GRID_PROPS,
+  X_AXIS_PROPS,
+  COUNT_AXIS_PROPS,
+  TOOLTIP_CURSOR_BAR,
+  ChartTooltip,
+  ChartNotMeasured,
+  CHART_HEADING_STYLE,
+} from './chartGrammar';
 
 // The finding types in the fixed severity order CLAUDE.md documents for the
 // rule analysis engine (lib/engines/ruleAnalysis.js), each mapped to the
@@ -23,115 +32,84 @@ const FINDING_TYPE_ORDER = [
   { type: 'log_disabled', label: 'Log Off', severity: 'info' },
 ];
 
-// Reads the app's own CSS custom properties (app/globals.css) rather than
-// hardcoding color values a second time -- stays correct if the palette ever
-// changes, and automatically matches SeverityBadge/StatusDot/etc. Read at
-// render time in a browser context (useEffect-free: getComputedStyle on
-// document.documentElement is synchronous and cheap for 4 lookups), with a
-// fallback for the (never-expected-in-practice) case of SSR-time evaluation
-// before hydration.
-//
-// ⛔ These are the palette's SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues
-// (changed 2026-09-09 with the palette rewrite). Every bar here IS a severity,
-// which is exactly what those aliases exist to say, so a future ramp change is
-// one edit in app/globals.css rather than a hunt through the charts.
+// ⛔ These are the palette's SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues.
+// Every bar here IS a severity, which is exactly what those aliases exist to
+// say, so a future ramp change is one edit in app/globals.css rather than a
+// hunt through the charts.
 //
 // ⛔ medium used to be --blue and that is now FORBIDDEN, not merely
-// discouraged: the rewritten palette pulled blue OUT of the severity ramp
-// (low severity is slate) precisely so the teal brand hue can never be
-// mistaken for a severity. Putting blue back on a severity collapses that
-// separation. medium is --sev-med (yellow) and high moved to --sev-high
-// (orange) so the two stay distinguishable.
+// discouraged: the rewritten palette pulled blue OUT of the severity ramp (low
+// severity is slate) precisely so the teal brand hue can never be mistaken for
+// a severity. Putting blue back on a severity collapses that separation.
 //
-// ⛔ The fallback values are TOKEN REFERENCES, not hex. Literal hex here meant
-// the SSR pass painted the OLD palette regardless of app/globals.css;
-// `var(--x)` is a valid SVG `fill` presentation-attribute value, so the
-// browser resolves it against the live theme on that pass too.
-const SEVERITY_VAR = {
-  critical: '--sev-crit',
-  high: '--sev-high',
-  medium: '--sev-med',
-  info: '--sev-low',
-};
-const SEVERITY_FALLBACK_HEX = {
+// ⛔ The token strings go STRAIGHT into recharts. The getComputedStyle-based
+// resolveSeverityColor() that used to live here is deleted — see the header of
+// chartGrammar.js for the two bugs it caused.
+const SEVERITY_COLOR = {
   critical: 'var(--sev-crit)',
   high: 'var(--sev-high)',
   medium: 'var(--sev-med)',
   info: 'var(--sev-low)',
 };
 
-function resolveSeverityColor(severity) {
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    return SEVERITY_FALLBACK_HEX[severity] || SEVERITY_FALLBACK_HEX.info;
-  }
-  const varName = SEVERITY_VAR[severity] || SEVERITY_VAR.info;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(varName);
-  return value ? value.trim() : SEVERITY_FALLBACK_HEX[severity] || SEVERITY_FALLBACK_HEX.info;
-}
-
 // counts: { [finding_type]: number } -- same shape devices/[id]/analysis/page.js
 // already builds via getFindingTypeCounts(), zero-filled for every known type.
-export default function FindingsBarChart({ counts }) {
+//
+// lastAnalyzedAt: OPTIONAL. Pass `null` when rule analysis has never run on
+// this device, so the chart can say "not measured" instead of drawing twelve
+// confident zeros. See the ⛔ note in the body.
+export default function FindingsBarChart({ counts, lastAnalyzedAt }) {
   const data = FINDING_TYPE_ORDER.map((f) => ({
     ...f,
     count: (counts && counts[f.type]) || 0,
-    color: resolveSeverityColor(f.severity),
+    color: SEVERITY_COLOR[f.severity] || SEVERITY_COLOR.info,
   }));
+
+  // ⛔ FAILED READ RENDERED AS A VALUE. A recharts BarChart handed all-zero
+  // counts does not look empty — it draws a full axis, a full grid and twelve
+  // zero-height bars sitting on the baseline, which reads as "we checked all
+  // twelve finding types and this ruleset is clean". That is a completely
+  // different claim from "rule analysis has never run here", and the two used
+  // to be pixel-identical.
+  //
+  // `counts` absent is unambiguous. An explicit `lastAnalyzedAt === null` is
+  // the caller telling us the engine has never run. Either way this is not a
+  // measurement, so it does not get drawn as one. (An all-zero count WITH a
+  // real lastAnalyzedAt is a genuine, earned clean result and still charts.)
+  const notMeasured =
+    !counts || (lastAnalyzedAt === null && data.every((d) => d.count === 0));
 
   return (
     <Card>
       <CardBody>
-        <div
-          style={{
-            marginBottom: 12,
-            fontSize: 'var(--text-xs)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            color: 'var(--text-muted)',
-          }}
-        >
-          Findings by Type
-        </div>
-        <div style={{ width: '100%', height: 260 }}>
-          <ResponsiveContainer>
-            <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-                axisLine={{ stroke: 'var(--border)' }}
-                tickLine={false}
-                interval={0}
-                angle={-20}
-                textAnchor="end"
-                height={50}
-              />
-              <YAxis
-                allowDecimals={false}
-                tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
-                axisLine={{ stroke: 'var(--border)' }}
-                tickLine={false}
-                width={28}
-              />
-              <Tooltip
-                cursor={{ fill: 'var(--bg-card)' }}
-                contentStyle={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  fontSize: 12,
-                }}
-                labelStyle={{ color: 'var(--text-primary)' }}
-                itemStyle={{ color: 'var(--text-primary)' }}
-              />
-              <Bar dataKey="count" radius={[3, 3, 0, 0]} maxBarSize={40}>
-                {data.map((entry) => (
-                  <Cell key={entry.type} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <div style={CHART_HEADING_STYLE}>Findings by Type</div>
+        {notMeasured ? (
+          <ChartNotMeasured reason="Rule analysis has not run on this device yet — no finding counts have been measured. This is not the same as a clean ruleset." />
+        ) : (
+          <div style={{ width: '100%', height: 260 }}>
+            <ResponsiveContainer>
+              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+                <CartesianGrid {...GRID_PROPS} />
+                <XAxis
+                  {...X_AXIS_PROPS}
+                  dataKey="label"
+                  interval={0}
+                  angle={-20}
+                  textAnchor="end"
+                  height={50}
+                />
+                <YAxis {...COUNT_AXIS_PROPS} width={28} />
+                {/* Single series: no Legend — the card heading already names it. */}
+                <Tooltip cursor={TOOLTIP_CURSOR_BAR} content={<ChartTooltip />} />
+                <Bar dataKey="count" name="Findings" radius={[3, 3, 0, 0]} maxBarSize={40}>
+                  {data.map((entry) => (
+                    <Cell key={entry.type} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </CardBody>
     </Card>
   );

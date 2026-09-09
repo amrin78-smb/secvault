@@ -2,6 +2,7 @@ import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import NotMeasured from '../ui/NotMeasured';
 
 // The 4 standards this UI scores against, in the fixed display order used by
 // both the fleet matrix (this file) and the per-device tabs
@@ -85,7 +86,19 @@ export const SCORE_COLOR_VAR = {
 // by devices/[id]/analysis/page.js's tabLink(), not a component defined
 // inside another component (CLAUDE.md's critical React rule).
 function scoreChip(pct) {
-  return <Badge color={scoreColor(pct)}>{pct == null ? '—' : `${pct}%`}</Badge>;
+  // ⛔ A null score is NOT a muted 0%. It means this device was never audited
+  // against this standard, or every check that maps to it resolved `na` —
+  // questions SecVault could not ask, excluded from the denominator (CLAUDE.md's
+  // warning-vs-na rule). Rendered through NotMeasured so it is hueless, carries
+  // the reason on hover and to a screen reader, and can never be read as a
+  // measured result. A muted Badge was the closest thing on this page to a
+  // fabricated zero: same pill, same size, same row as a real score.
+  if (pct == null) {
+    return (
+      <NotMeasured reason="Not measured: this device has never been audited against this standard, or every check mapped to it resolved N/A (excluded from the score)." />
+    );
+  }
+  return <Badge color={scoreColor(pct)}>{`${pct}%`}</Badge>;
 }
 
 // The fleet query already computes lastRunAt per device (see
@@ -148,7 +161,16 @@ export default function ComplianceMatrix({ devices }) {
             <td>
               <Badge color="info">{d.vendor}</Badge>
             </td>
-            <td style={{ color: 'var(--text-secondary)' }}>{formatLastRun(d.lastRunAt)}</td>
+            <td style={{ color: 'var(--text-secondary)' }}>
+              {d.lastRunAt ? (
+                formatLastRun(d.lastRunAt)
+              ) : (
+                <NotMeasured
+                  text="Never run"
+                  reason="No compliance audit has ever been run against this device, so every score on this row is an absence, not a result."
+                />
+              )}
+            </td>
             {STANDARDS.map((s) => {
               const stat = d.standards ? d.standards[s.key] : null;
               const pct = stat ? stat.scorePct : null;

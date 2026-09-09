@@ -178,7 +178,9 @@ export default async function FleetMap() {
   const { nodes, edges, interfacesByDevice } = await getFleetGraph(pool);
 
   if (nodes.length === 0) {
-    return <EmptyState message="No active devices to map yet." />;
+    return (
+      <EmptyState message="No active devices in the inventory, so there is nothing to map. This is an empty inventory, not a measured absence of network links." />
+    );
   }
 
   const positioned = layoutNodes(nodes).map((node) => ({
@@ -195,10 +197,59 @@ export default async function FleetMap() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
         Every active device, plus every inferred link between them — see the legend below for what each line and
-        dot style means.
-        {uncollectedCount > 0 && ` ${uncollectedCount} of ${positioned.length} devices shown have no interface data yet.`}{' '}
-        Click a solid device to query a path starting there.
+        dot style means. Click a solid device to query a path starting there.
       </p>
+
+      {/* ⛔ A map of nodes and NO lines is the strongest wrong statement this
+          diagram can make: it looks like a measured finding that nothing in the
+          fleet is connected. It is almost always the opposite — interface and
+          route collection is implemented for Palo Alto and Fortinet only, so a
+          fleet of other vendors can be fully meshed and draw nothing. */}
+      {edges.length === 0 && positioned.length > 1 ? (
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)', margin: 0 }}>
+          No links could be inferred between these {positioned.length} devices. Links are derived from
+          collected interface subnets and IPsec tunnel peers; where that data is missing, no line can be
+          drawn. An empty map is not evidence that the fleet is unconnected.
+        </p>
+      ) : null}
+
+      {/* ⛔ ABSENCE OF A LINE IS NOT ABSENCE OF A LINK. Every edge on this map is
+          INFERRED from collected interface/tunnel data, so a device with none
+          draws no edges at all — and an empty region of the map reads as "this
+          firewall is isolated", which is a claim SecVault has not measured. The
+          node stays visible and hollow (never silently omitted), and this line
+          states the coverage in words, under the picture that depends on it —
+          the same job CoverageNote does for a headline number, said in the terms
+          this map needs (these devices are DRAWN, not excluded, so CoverageNote's
+          own wording would be wrong here). */}
+      {uncollectedCount > 0 ? (
+        <p
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--s2)',
+            fontSize: 'var(--text-sm)',
+            color: 'var(--text-muted)',
+            margin: 0,
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 14,
+              height: 8,
+              flex: 'none',
+              borderRadius: 3,
+              border: '1px solid var(--border)',
+              background: 'var(--hatch)',
+              backgroundColor: 'var(--surface-subtle)',
+            }}
+          />
+          {uncollectedCount} of {positioned.length} devices have no collected interface data. They are
+          drawn hollow and dashed, and no link to or from them can be inferred — their missing lines
+          mean SecVault has not looked, not that they are unconnected.
+        </p>
+      ) : null}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px 20px', padding: '10px 14px', background: 'var(--surface-subtle)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
         <LegendItem swatch={<LineSwatch color="var(--text-muted)" />} label="Shared subnet" />
@@ -295,7 +346,12 @@ export default async function FleetMap() {
                       x={node.x}
                       y={labelY}
                       textAnchor="middle"
-                      fontSize={11}
+                      // ⛔ The size is a TOKEN, carried on `style` rather than
+                      // the fontSize attribute: --text-xs resolves as a CSS
+                      // value, and a hardcoded 11 would opt this label out of
+                      // the type scale the same way a hex opts out of the
+                      // palette. Same tick size as every chart axis.
+                      style={{ fontSize: 'var(--text-xs)' }}
                       fill={node.srcIp ? 'var(--primary)' : 'var(--text-primary)'}
                     >
                       {node.name}

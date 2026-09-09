@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import StatCard from '../ui/StatCard';
+import NotMeasured from '../ui/NotMeasured';
 import RuleHygieneDonut from '../analysis/RuleHygieneDonut';
 
 // Overview-tab card for the per-device page (app/(dashboard)/devices/[id]/page.js), which
@@ -90,6 +91,26 @@ export default async function OverviewRuleHygieneCard({ deviceId }) {
 
   const totalFindings = categories.reduce((sum, c) => sum + c.count, 0);
 
+  // ⛔ NO RULESET COLLECTED IS NOT A CLEAN RULESET. rule_analysis_results is
+  // written by ruleAnalysis.js from inside collectAndStore, over the rules it
+  // just stored — so a device with zero firewall_rules necessarily has zero
+  // findings, and the four tiles plus an empty donut rendered that as a
+  // spotless firewall. A firewall with genuinely no rules does not exist in
+  // practice; zero here means the pull has not succeeded (getRules() THROWS on
+  // a retrieval failure precisely so a failure is never stored as an empty
+  // ruleset, and nothing is stored at all in that case).
+  //
+  // ⛔ SecVault cannot currently prove which of the two it is: devices
+  // .last_collected_at is stamped when ANY capability succeeded (version alone
+  // counts), so it does not attest to a successful RULE pull. Per the tri-state
+  // rule the uncertain bound is widened, not narrowed — this reports "not
+  // measured" rather than claiming a measured zero. The clean fix is a
+  // persisted per-device rule-pull outcome (collectAndStore already computes
+  // `rulesCount`, null on failure, and simply does not store it).
+  const rulesCollected = ruleStats.total > 0;
+  const noRulesReason =
+    'No ruleset has been collected from this device, so no hygiene finding can exist for it. An empty ruleset and a rule pull that has never succeeded look identical here — this is not a clean firewall.';
+
   return (
     <Card>
       <CardBody>
@@ -113,13 +134,47 @@ export default async function OverviewRuleHygieneCard({ deviceId }) {
             marginBottom: 20,
           }}
         >
-          <StatCard label="Total Rules" value={ruleStats.total} color="var(--text-muted)" />
-          <StatCard label="Active" value={ruleStats.active} color="var(--green)" />
-          <StatCard label="Disabled" value={ruleStats.disabled} color="var(--text-muted)" />
-          <StatCard label="Expired" value={ruleStats.expired} color={ruleStats.expired > 0 ? 'var(--red)' : 'var(--text-muted)'} />
+          <StatCard
+            label="Total Rules"
+            value={rulesCollected ? ruleStats.total : <NotMeasured reason={noRulesReason} />}
+            color={rulesCollected ? 'var(--text-muted)' : 'var(--unmeasured)'}
+          />
+          <StatCard
+            label="Active"
+            value={rulesCollected ? ruleStats.active : <NotMeasured reason={noRulesReason} />}
+            color={rulesCollected ? 'var(--green)' : 'var(--unmeasured)'}
+          />
+          <StatCard
+            label="Disabled"
+            value={rulesCollected ? ruleStats.disabled : <NotMeasured reason={noRulesReason} />}
+            color={rulesCollected ? 'var(--text-muted)' : 'var(--unmeasured)'}
+          />
+          <StatCard
+            label="Expired"
+            value={rulesCollected ? ruleStats.expired : <NotMeasured reason={noRulesReason} />}
+            color={
+              !rulesCollected ? 'var(--unmeasured)' : ruleStats.expired > 0 ? 'var(--red)' : 'var(--text-muted)'
+            }
+          />
         </div>
 
-        <RuleHygieneDonut categories={categories} total={totalFindings} />
+        {rulesCollected ? (
+          <RuleHygieneDonut categories={categories} total={totalFindings} />
+        ) : (
+          // A donut drawn over six zeros is a picture of a perfect ruleset.
+          // Say instead which question could not be answered, and why.
+          <div
+            style={{
+              border: '1px dashed var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: 'var(--s5) var(--s4)',
+              fontSize: 'var(--text-base)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {noRulesReason} Run Collect Now on the Manage tab, then re-check this card.
+          </div>
+        )}
       </CardBody>
     </Card>
   );

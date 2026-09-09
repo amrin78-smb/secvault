@@ -2,6 +2,7 @@ import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import NotMeasured, { NotMeasuredBar } from '../ui/NotMeasured';
 import { vendorLabel } from '../devices/vendorMeta';
 import { timeAgo, absoluteUtc } from '../../lib/formatDisplay';
 import {
@@ -43,7 +44,7 @@ const CELL = { padding: '9px 12px', fontSize: 'var(--text-sm)', verticalAlign: '
 const TH = {
   textAlign: 'left',
   padding: '8px 12px',
-  fontSize: 10,
+  fontSize: 'var(--text-xs)',
   letterSpacing: '0.07em',
   textTransform: 'uppercase',
   color: 'var(--text-muted)',
@@ -51,7 +52,7 @@ const TH = {
   whiteSpace: 'nowrap',
 };
 
-const MONO = { fontFamily: 'ui-monospace, Consolas, monospace' };
+const MONO = { fontFamily: 'var(--font-mono)' };
 const NUM = { textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
 
 // Module top level, plain functions returning JSX, called imperatively.
@@ -60,7 +61,7 @@ function kpi(value, label, sub, tone) {
     tone === 'bad' ? 'var(--red)' : tone === 'good' ? 'var(--green)' : 'var(--text-primary)';
   return (
     <div style={{ background: 'var(--bg-card)', padding: '14px 16px' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color, fontVariantNumeric: 'tabular-nums' }}>
+      <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, lineHeight: 1.1, color, fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </div>
       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 4 }}>
@@ -75,7 +76,19 @@ function kpi(value, label, sub, tone) {
 
 // Bar scaled to the busiest row, with a visible floor so a one-event country
 // does not vanish — the same treatment VpnSyslogActivity already uses.
-function ratioBar(success, failure, max) {
+//
+// ⛔ `successMeasurable === false` means NO vendor in this window reported a
+// successful login at all (findFailureOnlyCountries' own `evaluable` flag). A
+// success/failure MIX cannot be drawn from a denominator nobody reported: the
+// bar would be solid red for every country and read as "100% of logins here
+// failed", which is a claim about the world made out of a device-side logging
+// gap. It is hatched instead — the graphical form of "not measured".
+function ratioBar(success, failure, max, successMeasurable) {
+  if (!successMeasurable) {
+    return (
+      <NotMeasuredBar reason="No device in this window reports successful logins, so there is no success/failure mix to draw — only the failure count is real." />
+    );
+  }
   const w = (n) => (max > 0 ? Math.max(n > 0 ? 1.5 : 0, (n / max) * 100) : 0);
   return (
     <div style={{ display: 'flex', height: 7, borderRadius: 'var(--radius-pill)', overflow: 'hidden', background: 'var(--bg-primary)' }}>
@@ -93,8 +106,28 @@ export default async function VpnLoginLocations() {
     return (
       <Card>
         <CardBody>
-          <div style={{ color: 'var(--red)', fontSize: 'var(--text-sm)' }}>
-            <strong>Could not load VPN login locations.</strong> {err.message}
+          {/* ⛔ An error is not an empty result. Name the question that went
+              unanswered and say explicitly that nothing may be concluded from
+              the blank space — a failed query that renders as "no attacks
+              observed" is the failed-read-as-a-fact bug wearing a stack trace. */}
+          <div
+            style={{
+              background: 'var(--tint-danger)',
+              color: 'var(--tint-danger-fg)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: 'var(--s3) var(--s4)',
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.6,
+            }}
+          >
+            <strong>Could not answer &ldquo;where are VPN logins coming from?&rdquo;</strong>
+            <div style={{ marginTop: 'var(--s1)' }}>
+              The query against the syslog rollups failed: {err.message}
+            </div>
+            <div style={{ marginTop: 'var(--s1)' }}>
+              Nothing below this point was measured — this is not a report of zero login activity.
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -105,6 +138,16 @@ export default async function VpnLoginLocations() {
   const sprayers = findUsernameSprayers(sources);
   const failureOnly = findFailureOnlyCountries(countries, vendors);
   const maxTotal = countries.reduce((m, c) => Math.max(m, c.total), 0);
+
+  // ⛔ THE SINGLE MOST DANGEROUS ZERO ON THIS PAGE. When no vendor in the window
+  // reported ANY successful login (measured live: Fortinet's SSL-VPN success
+  // logids are effectively absent on this fleet), every success count here is
+  // 0 — not because nobody logged in, but because no firewall said so. Drawn as
+  // a number, that 0 is a fabricated fact, and next to a four-digit failure
+  // count it manufactures an incident. It is rendered as NotMeasured instead,
+  // everywhere it appears: the KPI, both tables' Successful column, and the mix
+  // bar. `failureOnly.evaluable` is exactly this question, already computed.
+  const successMeasurable = failureOnly.evaluable;
 
   if (countries.length === 0 && totals.privateSuccess + totals.privateFailure === 0) {
     return (
@@ -129,7 +172,13 @@ export default async function VpnLoginLocations() {
           overflow: 'hidden',
         }}
       >
-        {kpi(totals.success.toLocaleString(), 'successful logins', `last ${windowHours}h`, 'good')}
+        {successMeasurable
+          ? kpi(totals.success.toLocaleString(), 'successful logins', `last ${windowHours}h`, 'good')
+          : kpi(
+              <NotMeasured reason="No device in this window reported a successful VPN login. This is a device-side logging gap, not a count of zero." />,
+              'successful logins',
+              'not reported by any device'
+            )}
         {kpi(totals.failure.toLocaleString(), 'failed logins', `last ${windowHours}h`, totals.failure > 0 ? 'bad' : null)}
         {kpi(String(countries.filter((c) => c.located).length), 'countries', 'with at least one attempt')}
         {kpi(String(sprayers.length), 'unusual sources', 'see below', sprayers.length > 0 ? 'bad' : null)}
@@ -152,7 +201,12 @@ export default async function VpnLoginLocations() {
                     {v.success > 0 ? (
                       `${v.success.toLocaleString()} successful.`
                     ) : (
-                      <span style={{ color: 'var(--yellow)' }}>
+                      // ⛔ HUELESS, not amber. This was --yellow, which spends
+                      // the severity ramp on an absence of data: a reader
+                      // scanning for colour saw a warning about the FIREWALL
+                      // when the fact is about SECVAULT's visibility.
+                      // components/ui/NotMeasured.js: never colour a gap.
+                      <span style={{ color: 'var(--unmeasured)' }}>
                         successful logins <strong>not reported</strong> by these devices — so
                         failures here have no success baseline to compare against.
                       </span>
@@ -244,21 +298,32 @@ export default async function VpnLoginLocations() {
                       {c.located ? c.country : (
                         <span style={{ color: 'var(--text-muted)' }}>{c.country}</span>
                       )}
-                      {c.failure > 0 && c.success === 0 ? (
-                        <Badge color="warning" style={{ marginLeft: 6 }}>
-                          no success
-                        </Badge>
+                      {/* ⛔ Only a claim worth making when a success COULD have
+                          been observed. With no success baseline anywhere in
+                          the window, "no success" describes our logging, not
+                          this country. Badge takes no `style` prop (it is
+                          silently dropped), so the spacing hangs on a wrapper. */}
+                      {successMeasurable && c.failure > 0 && c.success === 0 ? (
+                        <span style={{ marginLeft: 6 }}>
+                          <Badge color="warning">no success</Badge>
+                        </span>
                       ) : null}
                     </td>
                     <td style={{ ...CELL, ...NUM, color: c.success > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
-                      {c.success.toLocaleString()}
+                      {successMeasurable ? (
+                        c.success.toLocaleString()
+                      ) : (
+                        <NotMeasured reason="No device in this window reports successful logins, so this is not a count of zero." />
+                      )}
                     </td>
                     <td style={{ ...CELL, ...NUM, color: c.failure > 0 ? 'var(--red)' : 'var(--text-muted)' }}>
                       {c.failure.toLocaleString()}
                     </td>
                     <td style={{ ...CELL, ...NUM }}>{c.sources.toLocaleString()}</td>
                     <td style={{ ...CELL, ...NUM }}>{c.usernames.toLocaleString()}</td>
-                    <td style={{ ...CELL, width: 140 }}>{ratioBar(c.success, c.failure, maxTotal)}</td>
+                    <td style={{ ...CELL, width: 140 }}>
+                      {ratioBar(c.success, c.failure, maxTotal, successMeasurable)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -302,10 +367,16 @@ export default async function VpnLoginLocations() {
                     <tr key={s.srcIp} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ ...CELL, ...MONO, whiteSpace: 'nowrap' }}>{s.srcIp}</td>
                       <td style={{ ...CELL, color: 'var(--text-secondary)' }}>
-                        {s.country || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        {s.country || (
+                          <NotMeasured reason="The firewall did not attach a country to this source. SecVault holds no GeoIP database of its own." />
+                        )}
                       </td>
                       <td style={{ ...CELL, ...NUM, color: s.success > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
-                        {s.success.toLocaleString()}
+                        {successMeasurable ? (
+                          s.success.toLocaleString()
+                        ) : (
+                          <NotMeasured reason="No device in this window reports successful logins, so this is not a count of zero." />
+                        )}
                       </td>
                       <td style={{ ...CELL, ...NUM, color: s.failure > 0 ? 'var(--red)' : 'var(--text-muted)' }}>
                         {s.failure.toLocaleString()}
@@ -315,7 +386,9 @@ export default async function VpnLoginLocations() {
                         {s.usernamesTruncated ? '+' : ''}
                       </td>
                       <td style={{ ...CELL, whiteSpace: 'nowrap' }} title={absoluteUtc(s.lastSeenAt) || ''}>
-                        {timeAgo(s.lastSeenAt) || '—'}
+                        {timeAgo(s.lastSeenAt) || (
+                          <NotMeasured reason="No usable timestamp on this source's most recent event." />
+                        )}
                       </td>
                     </tr>
                   ))}

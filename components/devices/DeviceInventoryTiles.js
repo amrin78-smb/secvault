@@ -69,6 +69,23 @@ export default function DeviceInventoryTiles({ tiles }) {
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
       />
+      {/* ⛔ SAME AMBIGUITY AS THE SUPPORT TILE, STILL OPEN — recorded here so
+          it is not rediscovered as a surprise. Both CVE tiles sum
+          device_cve_assessments rows across the fleet, and a device that was
+          never assessed (no firmware version collected — versionMatcher.js
+          skips it outright) contributes 0 to both, exactly like a device
+          assessed and found clean. The colour is already honest (muted, never
+          green at zero) but the NUMBER cannot tell the two apart and there is
+          no field on `tiles` to say so.
+          ⛔ The one-line fix, when someone takes it: computeTiles() in
+          lib/engines/deviceInventory.js already has `version_string` on every
+          row, so
+              cveNoVersion: rows.filter((r) => !r.version_string).length
+          is all that is missing; this component can then render a CoverageNote
+          ("N of M firewalls contribute nothing and are excluded") under the
+          pair. Deliberately NOT faked from any other field here — inventing a
+          coverage number the data does not support would be the same bug in a
+          new place. Same signal now wired through to the per-row CveCell. */}
       <StatCard
         compact
         label="Critical CVEs"
@@ -89,14 +106,17 @@ export default function DeviceInventoryTiles({ tiles }) {
         iconColor="var(--tint-danger-fg)"
         iconBg="var(--tint-danger)"
       />
-      {/* ⛔ The fall-through colour is NOT green, and that is not a style
-          choice. computeTiles() derives all three counts from device_licenses
-          rows, so a device with NO licence rows at all — every Check Point,
-          Cisco ASA, Sangfor, Forcepoint and Fortinet-over-API device, none of
-          which collect licences — lands in none of them. Green + "All current"
-          there reports an uncollected fact as an all-clear, the
-          failed-read-as-a-fact bug. --unmeasured until computeTiles() can
-          report "no licence data" separately from "all current". */}
+      {/* ⛔ The fall-through colour is NOT unconditionally green, and that is
+          not a style choice. computeTiles() derives all three counts from
+          device_licenses rows, so a device with NO licence rows at all — every
+          Check Point, Cisco ASA, Sangfor, Forcepoint and Fortinet-over-API
+          device, none of which collect licences — lands in none of them.
+          Green + "All current" there reports an uncollected fact as an
+          all-clear, the failed-read-as-a-fact bug. `supportNoData` (added to
+          computeTiles for exactly this) is what separates the two: when it
+          covers the whole fleet the tile goes --unmeasured and says so, and
+          when it covers part of it the sub-line states the coverage instead of
+          claiming health for devices nobody asked. */}
       <StatCard
         compact
         label="Support Expiry"
@@ -137,6 +157,14 @@ export default function DeviceInventoryTiles({ tiles }) {
         iconColor="var(--tint-danger-fg)"
         iconBg="var(--tint-danger)"
       />
+      {/* ⛔ Same class again, weaker but real: a device with fewer than two
+          config snapshots can never produce a config_diff, so it contributes 0
+          drift for a reason that has nothing to do with its stability. The
+          per-device card (OverviewConfigChangesCard) now states this because it
+          can count snapshots; the fleet tile cannot, and a
+          `driftNotComparable: rows.filter(...)` in computeTiles would need a
+          snapshot count added to getDeviceRows() first. The colour is at least
+          honest (muted at zero, never green). */}
       <StatCard
         compact
         label="Config Drift"

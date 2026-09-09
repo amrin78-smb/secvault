@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import Card, { CardBody } from '../ui/Card';
+import NotMeasured from '../ui/NotMeasured';
 
 // Fleet-wide "Path Query" tool — type a source/destination IP (optional
 // protocol/port) and see the multi-hop path that traffic takes ACROSS the
@@ -15,8 +16,25 @@ import Card, { CardBody } from '../ui/Card';
 // instead of one device's decided rule. Backed by lib/engines/topology.js via
 // POST /api/topology/path-query.
 
-const VERDICT_BADGE_COLOR = { allow: 'success', deny: 'danger', unspecified: 'muted' };
+const VERDICT_BADGE_COLOR = { allow: 'success', deny: 'danger' };
 const VERDICT_LABEL = { allow: 'Allow', deny: 'Deny', unspecified: 'Unspecified' };
+
+// ⛔ `unspecified` IS NOT A THIRD OUTCOME, IT IS THE ABSENCE OF ONE. No rule on
+// that device decided this traffic, and SecVault holds no default/implicit-
+// policy data for ANY vendor (lib/engines/topology.js is explicit that it must
+// never be upgraded to 'deny'). A muted Badge put it in the same visual family
+// as Allow and Deny, one shade quieter — so the reader saw a verdict. It is
+// hueless with a reason instead: the firewall's real behaviour here is unknown
+// to this tool, and the operator must go and look.
+const UNSPECIFIED_REASON =
+  'No rule on this device decided this traffic, and SecVault holds no default/implicit-policy data for any vendor. This is not "denied" and not "allowed" — it is unknown.';
+
+// ⛔ A CAVEAT IS UNCERTAINTY, NOT SEVERITY. This was a `warning` Badge, which
+// borrows the amber of a risk finding to say "one address/service object in the
+// matched rule could not be resolved" — a limitation of what SecVault could
+// read, exactly the state NotMeasured exists to render hueless.
+const CAVEAT_REASON =
+  'The rule that matched involved an object SecVault could not fully resolve (an FQDN address, or a name with no matching object), so this hop is a best-effort match rather than a certain one.';
 
 const FIELD_LABEL_STYLE = {
   marginBottom: 4,
@@ -37,6 +55,15 @@ const INPUT_STYLE = {
   fontSize: 'var(--text-sm)',
 };
 
+// Verdict chip, shared by the per-hop card and the overall result. Module top
+// level (never define a component inside another, per CLAUDE.md's #1 rule).
+function VerdictChip({ verdict }) {
+  if (verdict === 'allow' || verdict === 'deny') {
+    return <Badge color={VERDICT_BADGE_COLOR[verdict]}>{VERDICT_LABEL[verdict]}</Badge>;
+  }
+  return <NotMeasured text={VERDICT_LABEL[verdict] || verdict || 'Unspecified'} reason={UNSPECIFIED_REASON} />;
+}
+
 // One hop card in the horizontal chain — top-level component (never define a
 // component inside another, per CLAUDE.md's #1 critical rule).
 function HopCard({ hop }) {
@@ -56,21 +83,22 @@ function HopCard({ hop }) {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <strong style={{ fontSize: 'var(--text-sm)' }}>{hop.deviceName}</strong>
-        <Badge color={VERDICT_BADGE_COLOR[hop.verdict] || 'muted'}>
-          {VERDICT_LABEL[hop.verdict] || hop.verdict}
-        </Badge>
+        <VerdictChip verdict={hop.verdict} />
       </div>
       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-        {hop.matchedRule
-          ? hop.matchedRule.ruleName || hop.matchedRule.ruleIdVendor || '(unnamed rule)'
-          : 'No deciding rule'}
+        {hop.matchedRule ? (
+          hop.matchedRule.ruleName || hop.matchedRule.ruleIdVendor || '(unnamed rule)'
+        ) : (
+          <NotMeasured text="No deciding rule" reason={UNSPECIFIED_REASON} />
+        )}
       </div>
       {(hop.natApplied || hop.hasCaveat) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--s1)' }}>
           {hop.natApplied && (
             <Badge color="info">NAT{hop.natRuleName ? `: ${hop.natRuleName}` : ''}</Badge>
           )}
-          {hop.hasCaveat && <Badge color="warning">Caveat</Badge>}
+          {/* ⛔ Hueless, with the reason — see CAVEAT_REASON above. */}
+          {hop.hasCaveat && <NotMeasured text="Unresolved object" reason={CAVEAT_REASON} />}
         </div>
       )}
     </div>
@@ -194,13 +222,40 @@ export default function PathQueryTab({ initialSrcIp = '' }) {
               {querying ? 'Querying…' : 'Query'}
             </Button>
           </form>
+          {/* ⛔ An error is not a verdict. Say that the query did not RUN, so a
+              reader cannot carry away "nothing was found" from a request that
+              never completed. */}
           {error && (
-            <p style={{ color: 'var(--red)', fontSize: 'var(--text-sm)', marginTop: 10, marginBottom: 0 }}>{error}</p>
+            <div
+              style={{
+                marginTop: 'var(--s3)',
+                padding: 'var(--s2) var(--s3)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--tint-danger)',
+                color: 'var(--tint-danger-fg)',
+                fontSize: 'var(--text-sm)',
+              }}
+              role="alert"
+            >
+              <strong>The path query did not run.</strong> {error}
+            </div>
           )}
         </CardBody>
       </Card>
 
-      {result && (
+      {/* Loading state: the result panel is replaced, not left showing a stale
+          answer next to a spinning button. */}
+      {querying && (
+        <Card>
+          <CardBody>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
+              Walking the path across every managed firewall the traffic might cross…
+            </p>
+          </CardBody>
+        </Card>
+      )}
+
+      {result && !querying && (
         <Card>
           <CardBody>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -208,9 +263,7 @@ export default function PathQueryTab({ initialSrcIp = '' }) {
                 <span style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
                   Overall verdict
                 </span>
-                <Badge color={VERDICT_BADGE_COLOR[result.finalVerdict] || 'muted'}>
-                  {VERDICT_LABEL[result.finalVerdict] || result.finalVerdict}
-                </Badge>
+                <VerdictChip verdict={result.finalVerdict} />
               </div>
 
               {result.note && (
@@ -231,9 +284,14 @@ export default function PathQueryTab({ initialSrcIp = '' }) {
                   </div>
                 </div>
               ) : (
-                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
-                  No hops resolved — neither the source nor destination address landed on a device this tool has
-                  routing/interface data for.
+                // ⛔ Zero hops is a COVERAGE result, not a network result. The
+                // verdict above already renders hueless for `unspecified`; this
+                // says why, so nobody reads an empty chain as "nothing is in
+                // the way".
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)', margin: 0 }}>
+                  No hops resolved — neither the source nor the destination address landed on a device this
+                  tool has routing/interface data for (collected today for Palo Alto and Fortinet only). SecVault
+                  did not evaluate a single rule for this traffic; this says nothing about whether it is allowed.
                 </p>
               )}
             </div>

@@ -11,6 +11,7 @@ import EmptyState from '../../../../../components/ui/EmptyState';
 import SnmpMetricsCharts from '../../../../../components/snmp/SnmpMetricsCharts';
 import SnmpConfigForm from '../../../../../components/devices/SnmpConfigForm';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import { detectSnmpConfig, looksConfigured } from '../../../../../lib/engines/snmpConfigDetection';
 
 export const dynamic = 'force-dynamic';
@@ -97,7 +98,7 @@ function notFound() {
   return (
     <div>
       <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-        ← Back to Devices
+        ← Back to firewalls
       </Link>
       <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
     </div>
@@ -145,7 +146,7 @@ export default async function DeviceSnmpPage({ params }) {
         title={`SNMP Monitoring — ${device.name}`}
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Badge color="info">{device.vendor}</Badge>
+            <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
             {device.snmp_enabled ? <Badge color="success">SNMP Enabled</Badge> : <Badge color="muted">SNMP Disabled</Badge>}
             {/* Source of the LATEST sample. A device can be polled over the
                 management transport with SNMP switched off entirely, so the

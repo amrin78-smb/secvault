@@ -39,6 +39,15 @@ const MONO = {
   fontSize: 'var(--text-sm)',
 };
 
+// The "Already decided" badge printed the bare column value ('promoted',
+// 'linked', 'ignored'). An unrecognised status still falls through to the raw
+// string — a status we have no word for is information, not nothing.
+const DECISION_LABELS = {
+  promoted: 'Promoted',
+  linked: 'Linked',
+  ignored: 'Ignored',
+};
+
 // ⛔ Module top level, plain functions returning JSX, called imperatively.
 function seenCell(row) {
   return (
@@ -278,7 +287,9 @@ export default async function DiscoveredDevicesPage() {
                     fontSize: 'var(--text-sm)',
                   }}
                 >
-                  <Badge color={r.status === 'ignored' ? 'muted' : 'success'}>{r.status}</Badge>
+                  <Badge color={r.status === 'ignored' ? 'muted' : 'success'}>
+                    {DECISION_LABELS[r.status] || r.status}
+                  </Badge>
                   <span style={MONO}>{r.sourceIp}</span>
                   <span style={{ color: 'var(--text-muted)' }}>
                     {r.observed_hostname || 'name not reported'}

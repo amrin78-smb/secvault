@@ -76,9 +76,18 @@ export default function DeviceRowActions({ deviceId, baseHref = '/devices', canW
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <RowActionsMenu actions={actions} />
+      {/* ⛔ A bare "⚠" with the message only in a tooltip meant a failed
+          Collect/Test looked almost identical to a successful one — the row
+          simply did not change. The glyph keeps the cell narrow, but it now
+          carries a word saying an action FAILED; the full server message stays
+          on hover, since a td is ellipsised at this width. */}
       {error && (
-        <span style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }} title={error}>
-          ⚠
+        <span
+          style={{ color: 'var(--red)', fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}
+          title={error}
+          role="status"
+        >
+          ⚠ Failed
         </span>
       )}
     </div>

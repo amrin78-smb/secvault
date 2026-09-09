@@ -17,6 +17,12 @@ only call a pure engine module (`lib/engines/*`) even if that engine reads adapt
 
 ---
 
+## /api/saved-views (v2.88.0)
+`GET  /api/saved-views?scope=<scope>` -> `{views, canSave}`. `canSave:false` with an EMPTY LIST, not an error, when the session has no `users` row — an LDAP session authenticates fine but has no UUID to own rows, and a read should not fail for a feature that was never offered.
+`POST /api/saved-views` -> create/update by (scope, name).
+`DELETE /api/saved-views/[id]` -> 404 (not 403) on someone else s view, so guessing an id cannot confirm that another user s private view exists.
+⛔ NOT admin-gated, deliberately. CLAUDE.md gates mutations of SHARED SYSTEM STATE; a saved view is this user s own bookmark and changes no device, assessment or score — the same class as the documented "change your own password" exception. What does the security work is that `user_id` comes from the SESSION and never the request body, and that the delete is owner-scoped inside the SQL.
+
 ## /api/auth
 
 GET/POST /api/auth/[...nextauth] [public] [db] — NextAuth handler: local (bcrypt vs `users` table) + LDAP credential providers; JWT session re-validates role against `users` on every request for local accounts (fail-closed on DB error or deleted user).

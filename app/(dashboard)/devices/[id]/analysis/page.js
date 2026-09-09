@@ -222,7 +222,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     return (
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-          ← Back to devices
+          ← Back to firewalls
         </Link>
         <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>
@@ -269,7 +269,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       </div>
 
       <PageHeader
-        title={`Rule Analysis — ${device.name}`}
+        title={`Rule hygiene — ${device.name}`}
         actions={
           <>
             <Badge color={RISK_BAND_COLOR[riskScore.band]}>
@@ -383,7 +383,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 16 }}>
             <RuleStatsBarChart ruleStats={ruleStats} findingTypeCounts={findingTypeCounts} />
-            <FindingsBarChart counts={findingTypeCounts} />
+            <FindingsBarChart counts={findingTypeCounts} lastAnalyzedAt={severitySummary.last_analyzed_at} />
           </div>
         </>
       )}

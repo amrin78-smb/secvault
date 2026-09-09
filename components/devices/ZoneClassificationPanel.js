@@ -37,6 +37,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Table from '../ui/Table';
 
 const ROLE_OPTIONS = [
   { value: '', label: 'Unclassified' },
@@ -102,9 +103,15 @@ function ZoneRoleSelect({ deviceId, zoneName, role }) {
           </option>
         ))}
       </select>
+      {/* The select reverts on failure, which on its own is easy to miss —
+          it looks like the click simply did not register. Say it failed. */}
       {error && (
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
-          ⚠
+        <span
+          style={{ fontSize: 'var(--text-xs)', color: 'var(--red)', whiteSpace: 'nowrap' }}
+          title={error}
+          role="status"
+        >
+          ⚠ Not saved
         </span>
       )}
     </div>
@@ -134,60 +141,47 @@ export default function ZoneClassificationPanel({ deviceId, initialZones }) {
         {introText}
       </p>
       {zones.length === 0 ? (
+        // ⛔ Says WHOSE gap this is. An empty zone list is not "this device has
+        // no zones" — it is SecVault not having collected a ruleset carrying
+        // zone names yet, which is a different problem with a different fix.
         <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>
-          No zone data yet — this fills in once rules with zone information are collected for this device.
+          No zone data yet. Zone names are read off this device&rsquo;s collected rules, so this list
+          fills in after the first successful rule collection that carries zone information — use
+          Collect Now above. An empty list is not a statement that the device has no zones.
         </p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        // ⛔ Was a hand-rolled <table> with `padding: '8px 12px'` written into
+        // every th/td. That opted this table out of the density switch: its
+        // rows would have stayed at one fixed height while every other table in
+        // the app changed, which reads as a broken layout rather than a
+        // setting. The shared Table gives it --row-pad-y/--row-pad-x, the
+        // suite's th/td styling, and tableLayout:'fixed' (required by
+        // CLAUDE.md, since the columns below are percentage-width).
+        // A Fortinet branch box can carry a zone per tunnel interface, so this
+        // list does run long — hence stickyHeader WITH maxHeight (neither works
+        // without the other).
+        <Table stickyHeader maxHeight="420px">
+          <colgroup>
+            <col style={{ width: '60%' }} />
+            <col style={{ width: '40%' }} />
+          </colgroup>
           <thead>
             <tr>
-              <th
-                style={{
-                  width: '60%',
-                  textAlign: 'left',
-                  padding: '8px 12px',
-                  borderBottom: '1px solid var(--border)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                Zone Name
-              </th>
-              <th
-                style={{
-                  width: '40%',
-                  textAlign: 'left',
-                  padding: '8px 12px',
-                  borderBottom: '1px solid var(--border)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                Role
-              </th>
+              <th>Zone Name</th>
+              <th>Role</th>
             </tr>
           </thead>
           <tbody>
             {zones.map((z) => (
               <tr key={z.zone_name}>
-                <td
-                  style={{
-                    padding: '8px 12px',
-                    borderBottom: '1px solid var(--border)',
-                    fontSize: 'var(--text-base)',
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-mono)',
-                  }}
-                >
-                  {z.zone_name}
-                </td>
-                <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+                <td style={{ fontFamily: 'var(--font-mono)' }}>{z.zone_name}</td>
+                <td>
                   <ZoneRoleSelect deviceId={deviceId} zoneName={z.zone_name} role={z.role} />
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </div>
   );

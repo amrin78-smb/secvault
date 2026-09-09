@@ -4,6 +4,7 @@ import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 import IconChip from '../ui/IconChip';
+import NotMeasured from '../ui/NotMeasured';
 import { IconRefresh } from '../icons';
 
 // Dashboard widget: fleet-wide config-change summary over the trailing
@@ -30,9 +31,24 @@ import { IconRefresh } from '../icons';
 async function getConfigChanges(dbPool, days) {
   const { rows } = await dbPool.query(
     `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary, cd.diff, cd.detected_at,
-            COALESCE(jsonb_array_length(cd.diff->'added'), 0) AS added_count,
-            COALESCE(jsonb_array_length(cd.diff->'removed'), 0) AS removed_count,
-            COALESCE(jsonb_array_length(cd.diff->'modified'), 0) AS modified_count
+            -- ⛔ NO COALESCE(..., 0) HERE, deliberately. These three used to be
+            -- wrapped in COALESCE(x, 0), which made "this diff row has no
+            -- structured added/removed/modified payload" indistinguishable from
+            -- "this change added, removed and modified exactly nothing" — a
+            -- fabricated zero standing in for an absent read, the exact class
+            -- CLAUDE.md names as a Critical Rule. NULL now means the key was
+            -- absent or was not an array, and the render below reports that
+            -- separately instead of summing it in as zero.
+            --
+            -- The jsonb_typeof guard also removes a real crash: jsonb_array_length()
+            -- RAISES on a non-array input, so one malformed diff row would have
+            -- failed the whole dashboard query.
+            CASE WHEN jsonb_typeof(cd.diff->'added') = 'array'
+                 THEN jsonb_array_length(cd.diff->'added') END AS added_count,
+            CASE WHEN jsonb_typeof(cd.diff->'removed') = 'array'
+                 THEN jsonb_array_length(cd.diff->'removed') END AS removed_count,
+            CASE WHEN jsonb_typeof(cd.diff->'modified') = 'array'
+                 THEN jsonb_array_length(cd.diff->'modified') END AS modified_count
      FROM config_diffs cd
      JOIN devices d ON d.id = cd.device_id
      WHERE d.active = true
@@ -49,14 +65,26 @@ export default async function ConfigChangesWidget({ days = 7 }) {
   const rows = await getConfigChanges(pool, days);
 
   const totalCount = rows.length;
+  // ⛔ A row whose diff carries none of the three arrays contributes NOTHING to
+  // the totals and is counted separately as unstructured. Folding it in as
+  // 0/0/0 would report "this change touched no lines", which is a measurement
+  // we never made.
   const totals = rows.reduce(
     (acc, r) => {
-      acc.added += Number(r.added_count) || 0;
-      acc.removed += Number(r.removed_count) || 0;
-      acc.modified += Number(r.modified_count) || 0;
+      const a = r.added_count;
+      const d = r.removed_count;
+      const m = r.modified_count;
+      if (a === null && d === null && m === null) {
+        acc.unstructured += 1;
+        return acc;
+      }
+      acc.measured += 1;
+      acc.added += Number(a) || 0;
+      acc.removed += Number(d) || 0;
+      acc.modified += Number(m) || 0;
       return acc;
     },
-    { added: 0, removed: 0, modified: 0 }
+    { added: 0, removed: 0, modified: 0, measured: 0, unstructured: 0 }
   );
   const recent = rows.slice(0, RECENT_LIST_LIMIT);
 
@@ -83,11 +111,26 @@ export default async function ConfigChangesWidget({ days = 7 }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', fontSize: 'var(--text-xs)' }}>
-                <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added} added</span>
-                <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed} removed</span>
-                <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified} modified</span>
+                {totals.measured === 0 ? (
+                  // Every row in the window lacked a structured diff — there is
+                  // no added/removed/modified count to report at all. Three
+                  // zeros here would be three fabricated measurements.
+                  <NotMeasured reason="None of these changes stored a structured added/removed/modified diff, so the line counts are unknown." />
+                ) : (
+                  <>
+                    <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added} added</span>
+                    <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed} removed</span>
+                    <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified} modified</span>
+                  </>
+                )}
               </div>
             </div>
+            {totals.unstructured > 0 && totals.measured > 0 && (
+              <div style={{ fontSize: 10, color: 'var(--unmeasured)' }}>
+                Counts cover {totals.measured} of {totalCount} changes — {totals.unstructured} stored no structured
+                diff.
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {recent.map((r) => (

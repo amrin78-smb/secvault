@@ -205,7 +205,7 @@ export default async function DevicesPage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Devices"
+        title="Firewalls"
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {/* ⛔ The count excludes senders already matched to a managed
@@ -222,7 +222,7 @@ export default async function DevicesPage({ searchParams }) {
             </Link>
             {canWrite && (
               <Link href="/devices/new" className="btn btn-primary">
-                Add Device
+                Add firewall
               </Link>
             )}
           </div>
@@ -295,7 +295,7 @@ export default async function DevicesPage({ searchParams }) {
             <tr>
               <th>Device</th>
               <th>Vendor</th>
-              <th title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Colour shows the rule-analysis risk band.">
+              <th title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Colour shows the rule-hygiene risk band.">
                 Score
               </th>
               <th>Version</th>
@@ -347,7 +347,11 @@ export default async function DevicesPage({ searchParams }) {
                   )}
                 </td>
                 <td>
-                  <CveCell patchNow={d.patch_now_count} scheduled={d.scheduled_count} />
+                  <CveCell
+                    patchNow={d.patch_now_count}
+                    scheduled={d.scheduled_count}
+                    versionString={d.version_string}
+                  />
                 </td>
                 <td>
                   <SupportCell
@@ -379,7 +383,7 @@ export default async function DevicesPage({ searchParams }) {
       )}
 
       {canWrite && (
-        <Modal open={Boolean(confirmDevice)} title="Delete Device">
+        <Modal open={Boolean(confirmDevice)} title="Delete firewall">
           {confirmDevice && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>

@@ -152,9 +152,17 @@ export default function AlertAckControl({ item }) {
               + note
             </button>
           )}
+          {/* ⛔ The message used to live only in the tooltip, so a failed
+              acknowledge looked almost the same as a successful one. The glyph
+              keeps the cell narrow; the word says the action failed; the full
+              server message stays on hover. */}
           {error && (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
-              ⚠
+            <span
+              style={{ fontSize: 'var(--text-xs)', color: 'var(--red)', whiteSpace: 'nowrap' }}
+              title={error}
+              role="status"
+            >
+              ⚠ Save failed
             </span>
           )}
         </span>
@@ -190,8 +198,12 @@ export default function AlertAckControl({ item }) {
         ))}
       </select>
       {error && (
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red)' }} title={error}>
-          ⚠
+        <span
+          style={{ fontSize: 'var(--text-xs)', color: 'var(--red)', whiteSpace: 'nowrap' }}
+          title={error}
+          role="status"
+        >
+          ⚠ Save failed
         </span>
       )}
     </div>

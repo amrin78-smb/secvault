@@ -3,6 +3,7 @@ import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+import NotMeasured from '../ui/NotMeasured';
 import IconChip from '../ui/IconChip';
 import Pagination from '../ui/Pagination';
 import { IconActivity } from '../icons';
@@ -216,12 +217,15 @@ async function getRecentVpnEvents(dbPool, hours, limit, offset) {
 
 // Plain functions returning JSX, called imperatively — NOT nested component
 // definitions. CLAUDE.md's rule is about components rendered as <Tag/>.
+//
+// ⛔ Now delegates to the shared NotMeasured marker rather than painting its own
+// muted em-dash. Same three reasons as everywhere else: it is hueless
+// (--unmeasured, never a severity), it carries the REASON to a screen reader as
+// well as to a tooltip, and it is the one visual vocabulary for "we did not
+// measure this" across the whole product. Every call site already passes a
+// reason, which is what makes the swap safe.
 function dash(title) {
-  return (
-    <span style={{ color: 'var(--text-muted)' }} title={title || undefined}>
-      —
-    </span>
-  );
+  return <NotMeasured reason={title} />;
 }
 
 // ── Presentation primitives ──────────────────────────────────────────────
@@ -243,7 +247,7 @@ const KPI_GRID = {
 };
 
 const SECTION_LABEL = {
-  fontSize: 11,
+  fontSize: 'var(--text-xs)',
   fontWeight: 700,
   letterSpacing: '0.08em',
   textTransform: 'uppercase',
@@ -262,7 +266,7 @@ function kpiCell(value, label, sub, tone) {
     >
       <div
         style={{
-          fontSize: 26,
+          fontSize: 'var(--text-xl)',
           fontWeight: 700,
           lineHeight: 1.1,
           letterSpacing: '-0.02em',
@@ -390,10 +394,15 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                 unmanaged > 0 ? 'warn' : null
               )}
               {kpiCell(
-                // ⛔ Em-dash, not 0. "No firewall told us a username" and "zero
-                // people used the VPN" are different facts and must not look
-                // the same on screen.
-                coverage.users > 0 ? coverage.users.toLocaleString() : '—',
+                // ⛔ NotMeasured, not 0, and not a bare em-dash either. "No
+                // firewall told us a username" and "zero people used the VPN"
+                // are different facts; the marker carries the reason so the
+                // reader can tell which one they are looking at.
+                coverage.users > 0 ? (
+                  coverage.users.toLocaleString()
+                ) : (
+                  <NotMeasured reason="No VPN event in this window carried a username. The devices are logging, but not identifying the user — this is not a count of zero users." />
+                ),
                 'named users',
                 userCoveragePct === null
                   ? 'no events to measure'
@@ -438,10 +447,15 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                             style={{
                               color: 'var(--text-primary)',
                               fontWeight: 600,
-                              fontFamily: 'ui-monospace, Consolas, monospace',
+                              fontFamily: 'var(--font-mono)',
                             }}
                           >
-                            {stripMask(r.sourceIp) || 'unknown source'}
+                            {stripMask(r.sourceIp) || (
+                              <NotMeasured
+                                text="unknown source"
+                                reason="These events arrived without a resolvable sender address."
+                              />
+                            )}
                           </span>{' '}
                           {/* ⛔ A firewall sending us VPN logs that is not in
                               the inventory is a FINDING, not noise. */}
@@ -451,7 +465,12 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                       <span
                         style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)', marginLeft: 8 }}
                       >
-                        {r.vendor || 'unidentified vendor'}
+                        {r.vendor || (
+                          <NotMeasured
+                            text="unidentified vendor"
+                            reason="No vendor parser recognised these lines, so the sending product is unknown. The events are still stored and counted."
+                          />
+                        )}
                         {/* ⛔ Hour granularity, and labelled as such. The rollup
                             buckets by hour; presenting it as a precise time
                             would be a precision we do not have. */}

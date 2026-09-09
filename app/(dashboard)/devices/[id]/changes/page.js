@@ -243,7 +243,7 @@ export default async function DeviceChangesPage({ params, searchParams }) {
     return (
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
-          ← Back to devices
+          ← Back to firewalls
         </Link>
         <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
       </div>

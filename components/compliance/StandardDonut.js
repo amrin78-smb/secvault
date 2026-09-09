@@ -58,7 +58,17 @@ function resolveCssVar(varRef) {
 // a small fixed-size widget dropped into a two-column card layout
 // (StandardCard.js), not a full-width chart like FindingsBarChart.js, and
 // ResponsiveContainer needs a sized parent that this component can't assume.
-export default function StandardDonut({ pct, size = 120 }) {
+// ⛔ `reason` is REQUIRED in spirit whenever `pct` can be null (the caller
+// knows WHY — never audited vs. every check unanswerable; this component
+// cannot tell). Without it the ring and the "—" are honest about the absence
+// but silent about its cause, which components/ui/NotMeasured.js calls out as
+// "only marginally better than a fabricated zero". The default below is a
+// last-resort fallback, not a licence to omit it.
+export default function StandardDonut({
+  pct,
+  size = 120,
+  reason = 'Not measured — nothing scoreable was collected for this standard.',
+}) {
   const clamped = pct == null ? null : Math.max(0, Math.min(100, pct));
   const color = resolveCssVar(SCORE_COLOR_VAR[scoreColor(clamped)]);
   const track = resolveCssVar(clamped == null ? 'var(--unmeasured)' : 'var(--border)');
@@ -76,7 +86,12 @@ export default function StandardDonut({ pct, size = 120 }) {
   const fontSize = Math.max(12, Math.round(size * 0.18));
 
   return (
-    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+    <div
+      style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}
+      title={clamped == null ? reason : `${clamped}% of scoreable checks pass`}
+      role="img"
+      aria-label={clamped == null ? reason : `Compliance score ${clamped} percent`}
+    >
       <PieChart width={size} height={size}>
         <Pie
           data={data}
@@ -90,9 +105,26 @@ export default function StandardDonut({ pct, size = 120 }) {
           stroke="none"
           isAnimationActive={false}
         >
-          {data.map((entry) => (
-            <Cell key={entry.name} fill={entry.name === 'score' ? color : track} />
-          ))}
+          {data.map((entry) =>
+            // ⛔ The "nothing measurable" ring is HOLLOW AND DASHED, not just a
+            // different grey. Colour alone separated it from a genuine 0% ring
+            // only for a reader who knows both greys; texture separates it for
+            // everyone, and it is the same dashed-ring vocabulary FleetMap uses
+            // for a device with no collected interfaces. --hatch itself cannot
+            // be used here: it is a CSS gradient, and an SVG fill needs a paint
+            // server (see components/ui/NotMeasured.js).
+            entry.name === 'track' ? (
+              <Cell
+                key={entry.name}
+                fill="var(--surface-subtle)"
+                stroke={track}
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+              />
+            ) : (
+              <Cell key={entry.name} fill={entry.name === 'score' ? color : track} />
+            )
+          )}
         </Pie>
       </PieChart>
       <div

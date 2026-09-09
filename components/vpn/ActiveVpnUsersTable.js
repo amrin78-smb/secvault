@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Table from '../ui/Table';
+import NotMeasured from '../ui/NotMeasured';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
@@ -36,10 +37,19 @@ const PAGE_SIZE = 25;
 
 const SEARCH_FIELDS = ['username', 'source_ip', 'assigned_ip', 'client', 'tunnel_type', 'gateway'];
 
+// ⛔ Every absent value on this table goes through NotMeasured WITH A REASON,
+// never a bare em-dash. A dash on its own leaves the reader unable to tell
+// whether the firewall does not report the field or SecVault failed to read it
+// — which is the whole distinction this table exists to preserve (see
+// components/ui/NotMeasured.js).
 function formatDuration(seconds) {
-  if (seconds == null) return '—';
+  if (seconds == null) {
+    return <NotMeasured reason="This vendor does not report a session duration for this tunnel type." />;
+  }
   const s = Number(seconds);
-  if (!Number.isFinite(s) || s < 0) return '—';
+  if (!Number.isFinite(s) || s < 0) {
+    return <NotMeasured reason="The device reported a duration this app could not parse." />;
+  }
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   if (h > 0) return `${h}h ${m}m`;
@@ -63,13 +73,24 @@ function formatBytes(n) {
 }
 
 // ⛔ Tri-state: a vendor that does not report per-session byte counters gets a
-// dash, never "0 B" — "we did not measure" must not render as "this user moved
-// no data".
+// NotMeasured marker, never "0 B" — "we did not measure" must not render as
+// "this user moved no data".
 function dataCell(bytesIn, bytesOut) {
   const din = formatBytes(bytesIn);
   const dout = formatBytes(bytesOut);
-  if (din == null && dout == null) return '—';
-  return `↓ ${din || '—'} / ↑ ${dout || '—'}`;
+  if (din == null && dout == null) {
+    return (
+      <NotMeasured reason="This vendor does not report per-session byte counters. Not the same as this user moving no data." />
+    );
+  }
+  return (
+    <>
+      &darr;{' '}
+      {din == null ? <NotMeasured reason="No inbound counter reported for this session." /> : din} /
+      &uarr;{' '}
+      {dout == null ? <NotMeasured reason="No outbound counter reported for this session." /> : dout}
+    </>
+  );
 }
 
 function matches(row, q) {
@@ -138,7 +159,16 @@ export default function ActiveVpnUsersTable({ sessions, basePath, searchParams, 
       </div>
 
       {all.length === 0 ? (
-        <EmptyState message="No users currently connected — or live per-user detail isn't available for this device/vendor yet (only the session count is collected there)." />
+        // ⛔ TWO DIFFERENT FACTS, and this component cannot tell them apart.
+        // An empty `sessions` array means EITHER a measured zero (the device
+        // answered, nobody is connected) OR that this vendor/transport does not
+        // return per-user detail at all — only a session count. The caller
+        // (app/(dashboard)/devices/[id]/vpn/page.js) knows which, because it
+        // knows the adapter; this component is only handed the array. Until it
+        // is told, the empty state must state BOTH possibilities rather than
+        // pick the reassuring one. Do not "tidy" this into "No users
+        // connected." — that is a failed read rendered as an affirmative fact.
+        <EmptyState message="Nobody is connected right now — OR live per-user detail is not collected for this device's vendor/transport, which reports only a session count. This view cannot tell those two apart." />
       ) : filtered.length === 0 ? (
         <EmptyState message={`No active users match "${query}".`} />
       ) : (
@@ -180,20 +210,43 @@ export default function ActiveVpnUsersTable({ sessions, basePath, searchParams, 
               {win.rows.map((r, i) => (
                 <tr key={`${win.page}-${i}`}>
                   <td className="mono" title={r.username || ''} style={{ wordBreak: 'break-word' }}>
-                    {r.username || '—'}
+                    {/* ⛔ An anonymous session is a real gap in what the device
+                        tells us, not an empty string. Each of these says which
+                        field the firewall withheld. */}
+                    {r.username || (
+                      <NotMeasured reason="This session carries no username — the device did not report one." />
+                    )}
                   </td>
-                  <td>{r.tunnel_type ? <Badge color="info">{r.tunnel_type}</Badge> : '—'}</td>
-                  <td className="mono">{r.source_ip || '—'}</td>
-                  <td className="mono">{r.assigned_ip || '—'}</td>
+                  <td>
+                    {r.tunnel_type ? (
+                      <Badge color="info">{r.tunnel_type}</Badge>
+                    ) : (
+                      <NotMeasured reason="The device did not report a tunnel type for this session." />
+                    )}
+                  </td>
+                  <td className="mono">
+                    {r.source_ip || (
+                      <NotMeasured reason="The device did not report a client source address for this session." />
+                    )}
+                  </td>
+                  <td className="mono">
+                    {r.assigned_ip || (
+                      <NotMeasured reason="The device did not report an assigned tunnel address for this session." />
+                    )}
+                  </td>
                   <td className="mono" title={r.login_time || ''}>
-                    {r.login_time || '—'}
+                    {r.login_time || (
+                      <NotMeasured reason="The device did not report a login time for this session." />
+                    )}
                   </td>
                   <td>{formatDuration(r.duration_seconds)}</td>
                   <td className="mono" style={{ whiteSpace: 'normal' }}>
                     {dataCell(r.bytes_in, r.bytes_out)}
                   </td>
                   <td title={r.client || ''} style={{ wordBreak: 'break-word' }}>
-                    {r.client || '—'}
+                    {r.client || (
+                      <NotMeasured reason="The device did not report a client/agent string for this session." />
+                    )}
                   </td>
                 </tr>
               ))}

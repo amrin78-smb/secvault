@@ -56,7 +56,7 @@ the wrong answer is a plausible number rather than a crash.
   incident where there was one — a test called "unused is not emitted when
   hit_count is null" survives a refactor that renames the function.
 
-## The three lint-shaped tests
+## The four lint-shaped tests
 
 Most files here pin an engine's behaviour. Three do something different — they
 read the whole repo and assert a property of it. Each was written after a bug
@@ -68,6 +68,11 @@ that every other gate let through:
   any client bundle.
 - `importIntegrity.test.js` — an identifier a page uses must be imported or
   locally defined. Caught three live instances of a symbol used with no import.
+- `jsxSyntax.test.js` — every .js file parses INCLUDING its JSX, via
+  next/dist/build/swc. `node --check` exits 0 on broken JSX (it never reaches
+  the JSX), so `npm run build` was the only gate — tens of seconds, and
+  unrunnable while parallel agents are mid-edit. This is the same check in
+  ~1.5s across the whole repo.
 - `sqlColumns.test.js` — every SQL identifier names a column that exists in
   `lib/schema.sql`. The dashboard home page was down for every user on
   2026-09-09 asking `feed_sync_log` for a `completed_at` it has never had; a

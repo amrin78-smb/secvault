@@ -40,8 +40,10 @@ export const dynamic = 'force-dynamic';
 //
 // ⛔ 'new_finding' REMOVED 2026-07-20, direct user feedback -- see
 // app/api/events/route.js's identical removal comment for the full
-// reasoning (rule-level findings belong in Rule Analysis's Cleanup/
-// Optimization/Reorder tabs, not the curated Alerts feed).
+// reasoning (rule-level findings belong in Rule hygiene's Cleanup/
+// Optimization/Reorder tabs -- the section formerly labelled "Rule
+// Analysis", renamed in redesign Phase 2; the /analysis href is unchanged --
+// not the curated Alerts feed).
 //
 // ── PAGINATION (rewritten to real SQL LIMIT/OFFSET) ──────────────────────
 // This page used to fetch BOTH sources with a hard `LIMIT 500` each, merge
@@ -62,6 +64,18 @@ const PAGE_SIZE = 25;
 const TYPE_BADGE = {
   patch_now: { color: 'danger', label: 'Patch Now' },
   config_diff: { color: 'warning', label: 'Config Diff' },
+};
+
+// Read-only mirror of components/alerts/AlertAckControl.js's STATUS_OPTIONS
+// labels. A viewer gets no select, and the Status cell was printing the bare
+// column value ("acknowledged") where an admin sees "Acknowledged" one row
+// over. Unknown values still fall through to the raw string rather than
+// rendering blank — an unrecognised status is information, not nothing.
+const STATUS_LABELS = {
+  new: 'New',
+  acknowledged: 'Acknowledged',
+  dismissed: 'Dismissed',
+  actioned: 'Actioned',
 };
 
 function formatWhen(value) {
@@ -257,7 +271,7 @@ export default async function AlertsPage({ searchParams }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         title="Alerts"
-        subtitle="Fleet-wide items needing attention — patch-now CVEs and unacknowledged config changes. Rule findings live in Rule Analysis."
+        subtitle="Fleet-wide items needing attention — patch-now CVEs and unacknowledged config changes. Rule findings live in Rule hygiene."
       />
 
       <AlertsFilters
@@ -336,7 +350,9 @@ export default async function AlertsPage({ searchParams }) {
                       {canWrite ? (
                         <AlertAckControl item={item} />
                       ) : (
-                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{item.status}</span>
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                          {STATUS_LABELS[item.status] || item.status}
+                        </span>
                       )}
                     </td>
                   </tr>

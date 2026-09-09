@@ -1,5 +1,6 @@
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+import NotMeasured from '../ui/NotMeasured';
 import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
 import { paginateArray } from '../../lib/pagination';
@@ -40,16 +41,34 @@ function formatBytes(n) {
   return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
-// ⛔ Tri-state: a vendor that reports no counters gets a dash, never "0 B".
+// ⛔ Tri-state: a vendor that reports no counters gets a NotMeasured marker
+// WITH A REASON, never "0 B" and never a bare dash — see
+// components/ui/NotMeasured.js for why the reason is the load-bearing part.
 function dataCell(bytesIn, bytesOut) {
   const din = formatBytes(bytesIn);
   const dout = formatBytes(bytesOut);
-  if (din == null && dout == null) return '—';
-  return `↓ ${din || '—'} / ↑ ${dout || '—'}`;
+  if (din == null && dout == null) {
+    return (
+      <NotMeasured reason="This vendor does not report byte counters for IPsec tunnels. Not the same as no traffic having crossed it." />
+    );
+  }
+  return (
+    <>
+      &darr; {din == null ? <NotMeasured reason="No inbound counter reported for this tunnel." /> : din} /
+      &uarr;{' '}
+      {dout == null ? <NotMeasured reason="No outbound counter reported for this tunnel." /> : dout}
+    </>
+  );
 }
 
+// ⛔ Four states, not two. `up`/`down` are the device's answer; an unrecognised
+// verb is still the device's answer and is shown VERBATIM (never mapped to
+// down); and NO status at all is not a state of the tunnel, it is a gap in what
+// we could read — hueless, with a reason, never a severity colour.
 function StatusBadge({ status }) {
-  if (!status) return <span>—</span>;
+  if (!status) {
+    return <NotMeasured reason="The device returned this tunnel without a status — neither up nor down was reported." />;
+  }
   const s = String(status).toLowerCase();
   if (s === 'up') return <Badge color="success">Up</Badge>;
   if (s === 'down') return <Badge color="danger">Down</Badge>;
@@ -62,13 +81,19 @@ function tunnelRow(r, key) {
   return (
     <tr key={key}>
       <td className="mono" title={r.name || ''} style={{ wordBreak: 'break-word' }}>
-        {r.name || '—'}
+        {r.name || <NotMeasured reason="The device did not report a name for this tunnel." />}
       </td>
-      <td className="mono">{r.peer || '—'}</td>
+      <td className="mono">
+        {r.peer || <NotMeasured reason="The device did not report a peer address for this tunnel." />}
+      </td>
       <td>
         <StatusBadge status={r.status} />
       </td>
-      <td>{r.ike_version || '—'}</td>
+      <td>
+        {r.ike_version || (
+          <NotMeasured reason="The device did not report an IKE version for this tunnel." />
+        )}
+      </td>
       <td className="mono" style={{ whiteSpace: 'normal' }}>
         {dataCell(r.bytes_in, r.bytes_out)}
       </td>
@@ -145,10 +170,22 @@ export default function IpsecTunnelsTable({ tunnels, basePath, searchParams, pag
             <Badge color="success">{up} up</Badge>
             <Badge color={down > 0 ? 'danger' : 'muted'}>{down} down</Badge>
             {unknown > 0 ? (
-              // Badge takes no title prop, so the explanation hangs on a
-              // wrapping span rather than being dropped.
-              <span title="Reported by the device without a usable status — neither up nor down">
-                <Badge color="warning">{unknown} status not reported</Badge>
+              // ⛔ HUELESS, not amber. This used to be a `warning` Badge, which
+              // borrows the severity ramp to describe a gap in what SecVault
+              // could read — "we do not know" is neither good news nor bad, and
+              // colouring it as a mild alarm is the same lie as colouring it
+              // green (components/ui/NotMeasured.js's rule). The count is a real
+              // measured number; what it counts is an absence.
+              <span
+                className="badge"
+                title="Reported by the device without a usable status — neither up nor down. This is a gap in what the device told us, not a tunnel fault."
+                style={{
+                  background: 'var(--surface-subtle)',
+                  color: 'var(--unmeasured)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                {unknown} status not reported
               </span>
             ) : null}
           </div>
@@ -156,7 +193,12 @@ export default function IpsecTunnelsTable({ tunnels, basePath, searchParams, pag
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState message="No IPSec tunnels reported — or tunnel status isn't collected for this device/vendor yet." />
+        // ⛔ Two different facts, and this component cannot tell them apart: a
+        // device that genuinely has no site-to-site tunnels, and a vendor whose
+        // adapter does not implement getVpnTunnels() at all. Say both; do not
+        // settle on "no tunnels", which would report a collection gap as a
+        // configuration fact.
+        <EmptyState message="No IPsec site-to-site tunnels were returned for this device — either it has none configured, or tunnel collection is not implemented for this vendor/transport. This view cannot tell those two apart." />
       ) : (
         <>
           <Table>

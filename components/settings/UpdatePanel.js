@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import Button from '../ui/Button';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Modal from '../ui/Modal';
+import { PRODUCT_NAME } from '../../lib/branding';
 
 const HEALTH_POLL_MS = 2000;
 const HEALTH_ABORT_MS = 1800;
@@ -177,7 +178,7 @@ function UpdatingOverlay({ preUpdateCommit }) {
         {isError && <div style={{ fontSize: 40, color: 'var(--yellow)' }}>&#9888;</div>}
 
         <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginTop: 14 }}>
-          Updating SecVault…
+          Updating {PRODUCT_NAME}…
         </div>
         <p style={{ color: 'var(--text-muted)', marginTop: 6, fontSize: 'var(--text-base)' }}>
           Pulling latest code and restarting services. Do not close this window.

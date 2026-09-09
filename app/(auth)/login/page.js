@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { PRODUCT_NAME } from '../../../lib/branding';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import Button from '../../../components/ui/Button';
@@ -234,7 +235,7 @@ export default function LoginPage() {
             It is still shown to signed-in users under Settings -> About, which
             is where support actually needs it. */}
         <div style={{ marginTop: 40, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          SecVault
+          {PRODUCT_NAME}
         </div>
       </div>
     </div>

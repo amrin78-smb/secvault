@@ -54,6 +54,26 @@ home for "a stored value, in words". Server and client components both import it
 `newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
 `STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
 
+## lib/density.js
+
+Client module. Table density, stamped as `data-density` on `<html>`. Structural mirror of lib/corners.js and lib/theme.js — same storage/attribute/event/no-flash-script shape, so there is one pattern for all three.
+
+`DENSITIES` -> `string[]` — `['comfortable','compact','dense']`; the default is first, and a value not in this list is ignored rather than guessed at.
+`DENSITY_LABELS` -> `object` — display names.
+`getDensity()` / `applyDensity(d)` / `DENSITY_INIT_SCRIPT` — read, set (+persist +`secvault:density` event), and the pre-paint inline script.
+⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
+⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
+
+## lib/savedViews.js
+
+Named filter/column/sort states per user per table (`saved_views`). All functions take `pool`.
+
+`listSavedViews(pool, userId, scope)` -> own views plus anyone’s shared ones; own sort first.
+`saveView(pool, userId, {scope,name,query,shared,isDefault})` -> upsert on (user_id, scope, name). ⛔ Clears the previous default INSIDE the transaction BEFORE inserting — `uq_saved_views_one_default` is a real partial unique index, so the other order fails the insert instead of moving the default (same rule as `device_configs.is_baseline`).
+`deleteSavedView(pool, userId, id)` -> ⛔ owner scoping lives in the SQL WHERE clause, not the route, so no future caller can forget it.
+`getDefaultView(pool, userId, scope)`.
+`normalizeScope/Name/Query` — ⛔ the stored query string is REPLAYED into the address bar, so it is untrusted input: leading `?` stripped, length capped, anything with whitespace, quotes, a scheme or a path separator rejected.
+
 ## lib/rbac.js
 [SENSITIVE] — entire file (auth/authorization guard)
 
@@ -242,6 +262,26 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 
 `getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
 `getSyncPillStatus(pool)` -> `Promise<{ok: boolean, label: string, lastSyncs: object[]}>` — condensed header-pill status across `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`; `label` is `'NO SYNC YET'|'FEEDS OK'|'FEED ERROR'`.
+
+## lib/density.js
+
+Client module. Table density, stamped as `data-density` on `<html>`. Structural mirror of lib/corners.js and lib/theme.js — same storage/attribute/event/no-flash-script shape, so there is one pattern for all three.
+
+`DENSITIES` -> `string[]` — `['comfortable','compact','dense']`; the default is first, and a value not in this list is ignored rather than guessed at.
+`DENSITY_LABELS` -> `object` — display names.
+`getDensity()` / `applyDensity(d)` / `DENSITY_INIT_SCRIPT` — read, set (+persist +`secvault:density` event), and the pre-paint inline script.
+⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
+⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
+
+## lib/savedViews.js
+
+Named filter/column/sort states per user per table (`saved_views`). All functions take `pool`.
+
+`listSavedViews(pool, userId, scope)` -> own views plus anyone’s shared ones; own sort first.
+`saveView(pool, userId, {scope,name,query,shared,isDefault})` -> upsert on (user_id, scope, name). ⛔ Clears the previous default INSIDE the transaction BEFORE inserting — `uq_saved_views_one_default` is a real partial unique index, so the other order fails the insert instead of moving the default (same rule as `device_configs.is_baseline`).
+`deleteSavedView(pool, userId, id)` -> ⛔ owner scoping lives in the SQL WHERE clause, not the route, so no future caller can forget it.
+`getDefaultView(pool, userId, scope)`.
+`normalizeScope/Name/Query` — ⛔ the stored query string is REPLAYED into the address bar, so it is untrusted input: leading `?` stripped, length capped, anything with whitespace, quotes, a scheme or a path separator rejected.
 
 ## lib/rbac.js
 [SENSITIVE] — entire file (auth/authorization guard)

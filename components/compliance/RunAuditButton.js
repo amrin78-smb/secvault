@@ -40,7 +40,14 @@ export default function RunAuditButton({ deviceId }) {
         {running && <LoadingSpinner size={14} />}
         {running ? 'Running…' : 'Run Audit'}
       </Button>
-      {error && <span style={{ fontSize: 'var(--text-sm)', color: 'var(--red)' }}>{error}</span>}
+      {/* ⛔ Name what did NOT happen. Without this, a failed run leaves the
+          previous audit's scores on screen with nothing saying they are stale —
+          the reader takes a number that predates the failure as current. */}
+      {error && (
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--tint-danger-fg)' }} role="alert">
+          <strong>Audit did not run.</strong> {error} Any scores shown are from the previous run.
+        </span>
+      )}
     </div>
   );
 }

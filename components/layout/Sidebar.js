@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { PRODUCT_NAME } from '../../lib/branding';
 import { useEffect, useState } from 'react';
 import {
   IconDashboard,
@@ -45,25 +46,59 @@ import {
 // magnifying glass reads reasonably as "audit/inspect") rather than inventing
 // a new SVG icon file -- the same "reuse what's there even if not a perfect
 // semantic match" call this file already made when Alerts reused IconBell.
-const NAV = [
-  { href: '/', label: 'Dashboard', Icon: IconDashboard, exact: true },
-  { href: '/alerts', label: 'Alerts', Icon: IconBell },
-  { href: '/devices', label: 'Devices', Icon: IconDevices },
-  { href: '/vulnerability', label: 'Vulnerability', Icon: IconShield },
-  { href: '/analysis', label: 'Rule Analysis', Icon: IconChart },
-  { href: '/compliance', label: 'Compliance', Icon: IconSearch },
-  // No dedicated VPN/tunnel icon exists in components/icons.js -- reusing
-  // IconUser (VPN is fundamentally remote-USER access) rather than inventing
-  // a new SVG file, same 'reuse what exists even if not a perfect semantic
-  // match' call this file already made for Compliance -> IconSearch.
-  { href: '/vpn', label: 'VPN', Icon: IconUser },
-  { href: '/topology', label: 'Topology', Icon: IconTopology },
-  { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
-  // IconDocument for Log Search: a log IS a record. Same reuse call again.
-  { href: '/logs', label: 'Log Search', Icon: IconDocument },
-  { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle },
-  { href: '/settings', label: 'Settings', Icon: IconSettings },
+// ⛔ GROUPS ARE THE STRUCTURE, LABELS ARE THE LANGUAGE (2026-09-09,
+// redesign Phase 2). Twelve flat, equally-weighted destinations asked the
+// operator to hold the whole product in their head. They answer four
+// questions, and the groups are how people actually work: what is happening,
+// what do I have, what is wrong with it, who is getting in.
+//
+// ⛔ HREFS ARE UNCHANGED. Only the LABELS were renamed. Every bookmark,
+// every link in a sent notification, every URL pasted into a ticket still
+// resolves. Renaming a route to match a renamed label would be a much larger
+// and much less reversible change, and it buys nothing the label does not.
+//
+// The renames trade "what the engine does" for "what the operator gets":
+//   Dashboard -> Overview          Devices -> Firewalls
+//   Rule Analysis -> Rule hygiene  Vulnerability -> Vulnerabilities
+//   VPN -> VPN & identity
+// "Rule Analysis" describes our engine; "Rule hygiene" describes their
+// problem. "Devices" is what the table is called internally; a customer with
+// a fleet of firewalls calls them firewalls.
+//
+// ⛔ Settings is deliberately OUTSIDE the groups and pinned last. It is not
+// one of the four questions, and filing it under any of them would make that
+// group mean less.
+const NAV_GROUPS = [
+  { group: 'Monitor', items: [
+    { href: '/', label: 'Overview', Icon: IconDashboard, exact: true },
+    { href: '/alerts', label: 'Alerts', Icon: IconBell },
+    { href: '/logs', label: 'Log search', Icon: IconDocument },
+  ] },
+  { group: 'Inventory', items: [
+    { href: '/devices', label: 'Firewalls', Icon: IconDevices },
+    { href: '/topology', label: 'Topology', Icon: IconTopology },
+    { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle },
+  ] },
+  { group: 'Risk', items: [
+    { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
+    { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
+    { href: '/analysis', label: 'Rule hygiene', Icon: IconChart },
+    { href: '/compliance', label: 'Compliance', Icon: IconSearch },
+  ] },
+  { group: 'Access', items: [
+    // No dedicated VPN/tunnel glyph exists in components/icons.js -- IconUser
+    // is reused because VPN is fundamentally remote-USER access. Same "reuse
+    // what exists" call already made for Compliance -> IconSearch and
+    // Log search -> IconDocument (a log IS a record).
+    { href: '/vpn', label: 'VPN & identity', Icon: IconUser },
+  ] },
 ];
+
+const SETTINGS_ITEM = { href: '/settings', label: 'Settings', Icon: IconSettings };
+
+// Flat list for anything that needs every destination (the active-item lookup,
+// and the command palette’s page results).
+export const NAV = [...NAV_GROUPS.flatMap((g) => g.items), SETTINGS_ITEM];
 
 const COLLAPSE_KEY = 'secvault-sidebar-collapsed';
 
@@ -98,19 +133,42 @@ export default function Sidebar({ version }) {
 
   return (
     <aside className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}>
-      <div className="sv-nav-label">Navigation</div>
       <nav className="sv-nav">
-        {NAV.map(({ href, label, Icon, exact }) => {
-          const active = isActive(pathname, href, exact);
-          return (
-            <Link key={href} href={href} className={active ? 'active' : ''} title={collapsed ? label : undefined}>
-              <span className="sv-nav-chip">
-                <Icon width={16} height={16} />
-              </span>
-              <span>{label}</span>
-            </Link>
-          );
-        })}
+        {NAV_GROUPS.map(({ group, items }) => (
+          <div key={group} className="sv-nav-group">
+            {/* Hidden when collapsed: at 64px there is no room for a heading,
+                and the grouping still reads from the gap between clusters. */}
+            {!collapsed && <div className="sv-nav-group-label">{group}</div>}
+            {items.map(({ href, label, Icon, exact }) => {
+              const active = isActive(pathname, href, exact);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={active ? 'active' : ''}
+                  title={collapsed ? label : undefined}
+                >
+                  <span className="sv-nav-chip">
+                    <Icon width={16} height={16} />
+                  </span>
+                  <span>{label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+        <div className="sv-nav-group sv-nav-group-pinned">
+          <Link
+            href={SETTINGS_ITEM.href}
+            className={isActive(pathname, SETTINGS_ITEM.href, false) ? 'active' : ''}
+            title={collapsed ? SETTINGS_ITEM.label : undefined}
+          >
+            <span className="sv-nav-chip">
+              <SETTINGS_ITEM.Icon width={16} height={16} />
+            </span>
+            <span>{SETTINGS_ITEM.label}</span>
+          </Link>
+        </div>
       </nav>
 
       <button
@@ -124,7 +182,7 @@ export default function Sidebar({ version }) {
         <span>Collapse</span>
       </button>
 
-      <div className="sv-version">SecVault{version ? ` v${version}` : ''}</div>
+      <div className="sv-version">{PRODUCT_NAME}{version ? ` v${version}` : ''}</div>
     </aside>
   );
 }

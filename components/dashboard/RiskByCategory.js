@@ -23,12 +23,16 @@ const CATEGORY_ORDER = [
   CATEGORIES.OTHER,
 ];
 
-// One color per category -- reads the suite's solid status hues directly
-// (matches the convention FindingsBarChart.js documents for itself: read
-// real CSS custom properties, not hardcoded a second time, but since this is
-// a plain server-rendered component with no browser access at render time,
-// the var(--...) tokens are used directly in inline style rather than
-// resolved via getComputedStyle -- correct and simpler for a non-chart bar).
+// One color per category -- raw status hues, NOT the --sev-* aliases, because
+// these are CWE CLASSES (what kind of vulnerability) rather than points on the
+// severity ramp. --blue is safe here for exactly that reason: the 2026-09-09
+// palette rewrite pulled blue out of the severity ramp entirely, which is what
+// frees it for non-severity categories like this one.
+//
+// The tokens go straight into the inline style. (This file never had the
+// getComputedStyle resolver the charts carried; that machinery is now deleted
+// there too -- see components/analysis/chartGrammar.js's header for why it was
+// a bug rather than a style preference.)
 const CATEGORY_COLOR = {
   [CATEGORIES.RCE]: 'var(--red)',
   [CATEGORIES.PRIV_ESC]: 'var(--orange)',

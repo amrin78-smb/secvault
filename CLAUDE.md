@@ -210,7 +210,7 @@ here. Notable groupings: `devices`/`device_versions`/`device_credentials`/`devic
 `firewall_rules` (inventory), `advisories`/`advisory_conditions`/`device_cve_assessments` (CVE),
 `audit_checks`/`audit_findings` (compliance), `rule_analysis_results`/`finding_acknowledgements`/
 `device_risk_history` (rule analysis), `config_diffs`/`config_backups` (change tracking),
-`activity_log` (operator audit trail), `credential_profiles` (reusable creds, excluded from readonly
+`saved_views` (per-user named table filters, v2.88.0), `activity_log` (operator audit trail), `credential_profiles` (reusable creds, excluded from readonly
 grants same as `device_credentials`), `notification_channels`/`notification_dispatch_log` (outbound
 alerting — Slack/Teams/email/webhook, see Outbound Alerting section below; `notification_channels`
 excluded from readonly grants same as `credential_profiles`).
@@ -778,6 +778,19 @@ Two roles only, `admin` and `viewer` — no granular permission system (a coarse
 
 `lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then checks `if (!isAdmin(session)) return forbiddenResponse();`. Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **A non-mutating POST that only computes over already-collected data and persists nothing is treated like a GET, not gated** — e.g. `POST /api/devices/[id]/access-path` (query-only, no DB write) — the "mutating" test is about persistence, not HTTP verb; don't read the rule as "every POST needs isAdmin." **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
 
+**Saved views are the second documented exception to the mutating-route rule** (after "change your
+own password"). `POST`/`DELETE /api/saved-views` are NOT admin-gated: a saved view is this user’s
+own bookmark and changes no device, no assessment and no score, and a read-only operator who cannot
+save the filter they use every morning is being denied the feature for no security benefit. The
+rule gates mutations of SHARED SYSTEM STATE. What does the security work is that `user_id` comes
+from the SESSION and never the request body, and that the DELETE is owner-scoped inside the SQL
+rather than in the route.
+
+`session.user.id` and `session.user.provider` are exposed for this. ⛔ The two providers do NOT
+return the same kind of id — local gives a UUID with a `users` row, LDAP gives the bare username
+with no row at all — so per-user storage works only for local accounts, and callers check the
+SHAPE of the id rather than trusting the provider name.
+
 **LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
 
 ---
@@ -1025,6 +1038,45 @@ ask — none of these may be drawn as a zero, a pass, or a reassuring grey that 
   invisible. Text and icons sitting on `--navy` use `--shell-fg` / `--shell-fg-ok` /
   `--shell-fg-bad`, which do not flip.
 
+### Table density (v2.88.0)
+
+A third member of the theme/corners family: `lib/density.js` stamps `data-density` on `<html>`,
+with a no-flash inline script in `app/layout.js` and a control in Settings -> Appearance. Three
+values, `comfortable` (default) / `compact` / `dense`.
+
+It exists because one row height cannot serve this product: a device on the reference fleet has
+**706 firewall rules**, and the analyst auditing that ruleset and the manager reading a compliance
+score want opposite things. `comfortable` is the default because it reads best to someone seeing
+the product for the first time, who has not found the switch yet.
+
+⛔ Row geometry resolves through `--row-pad-y` / `--row-pad-x` / `--row-font`. A cell that
+hardcodes `padding: 12px 16px` opts ITSELF out silently and sits at one height while the table
+around it changes — the same failure mode as a hardcoded `border-radius` under the corners switch.
+
+⛔ **Density changes ROW GEOMETRY ONLY.** It must never hide a column, truncate a value or drop a
+badge. A denser table shows the same facts in less space, not fewer facts — otherwise the control
+becomes a data-integrity setting an operator can get wrong from a dropdown.
+
+### Navigation (v2.88.0)
+
+Twelve flat destinations became four groups — **Monitor / Inventory / Risk / Access** — plus a
+pinned Settings, in `components/layout/Sidebar.js`. Labels were renamed to the operator’s language:
+Dashboard->Overview, Devices->Firewalls, Rule Analysis->Rule hygiene, Vulnerability->Vulnerabilities,
+VPN->VPN & identity.
+
+⛔ **HREFS ARE UNCHANGED.** Only labels moved, so every bookmark, every link inside an already-sent
+notification and every URL pasted into a ticket still resolves. Do not "finish the job" by renaming
+the routes.
+
+⛔ Every nav entry must keep a DISTINCT GLYPH. That, not colour, is the per-item wayfinding cue —
+the active chip is always the brand accent (see the note in `Sidebar.js` for why the old per-item
+hues were wrong and why the comment defending them was factually incorrect).
+
+⌘K/Ctrl+K opens the existing header search rather than a second overlay; it also matches PAGES
+client-side off the nav list. ⛔ `PAGE_KEYWORDS` there carries the OLD names on purpose — someone
+who has used this for a year will type "devices" long after the label became "Firewalls", and a
+palette that answers "no results" to the product’s own former vocabulary is worse than none.
+
 ### Tokens (`app/globals.css` is authoritative)
 
 Brand `--primary`/`--primary-dark`/`--primary-light`/`--focus-ring`/`--accent-teal` · shell
@@ -1035,6 +1087,8 @@ Brand `--primary`/`--primary-dark`/`--primary-light`/`--focus-ring`/`--accent-te
 unmeasured `--unmeasured`/`--hatch` · tints `--tint-{info,success,warn,danger,purple,teal,orange}`
 and `-fg` · **space `--s1`(4px) … `--s9`(96px)** · radius `--radius-sm`/`--radius`/`--radius-lg`/
 `--radius-pill` · type `--text-xs` … `--text-3xl`, `--font-sans`, `--font-mono`.
+
+Density adds `--row-pad-y` / `--row-pad-x` / `--row-font`.
 
 ⛔ **Spacing is a token scale now.** Before the rewrite there was none: 14 distinct inline gap
 values (including 1, 3, 5, 7 and 14px) and five near-identical paddings doing the same job. A
