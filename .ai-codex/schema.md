@@ -977,7 +977,16 @@ over-counts. With dst_ip as a grouping key, count(DISTINCT dst_ip) over any span
 5,058 rows/hour with dst_ip vs 1,555 without. Verified numerically identical to the raw query for
 attackers, severity, threats and per-device before deploy.
 
-⛔ Scope is (log_class = threat OR threat_name IS NOT NULL), not log_class alone: getTopThreats()
-filters on threat_name only, and narrowing it to log_class would silently change what that widget
-counts if a vendor ever files a named threat under another class. Measured: adds 278 rows/hour.
-log_subtype adds ZERO extra grain rows, so it is carried free.
+⛔ Scope is `log_class = 'threat'` ALONE, and that is a measured performance decision, not an
+oversight. getTopThreats() filters on threat_name only, so the wider
+`OR threat_name IS NOT NULL` looks safer — but it makes the PARTIAL index
+`(log_class, received_at DESC) WHERE log_class <> 'traffic'` unusable. Measured over a 6h slice:
+narrow = 334k cost, Index Scan; widened = 630k cost, Bitmap Heap Scan. Verified on the live fleet
+that every threat_name sits under `log_class = 'threat'`, so the narrow predicate loses nothing
+today. Re-measure before assuming that holds for a new vendor.
+
+⛔ An earlier version of this note claimed the wider scope was implemented. It was not — the
+documentation described an intention the code never carried. Corrected 2026-09-09.
+
+log_subtype adds ZERO extra grain rows and is carried free — though it was missing from the
+INSERT column list on first ship, so it stored NULL until v2.89.2.
