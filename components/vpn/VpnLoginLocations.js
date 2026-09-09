@@ -39,11 +39,21 @@ export const dynamic = 'force-dynamic';
 // is deliberately NOT shown: it would be a Palo Alto ratio with Fortinet's
 // failures added to the denominator, confidently wrong and looking fine.
 
-const CELL = { padding: '9px 12px', fontSize: 'var(--text-sm)', verticalAlign: 'top' };
+// ⛔ ROW GEOMETRY COMES FROM THE DENSITY TOKENS, never a hardcoded padding.
+// These were '9px 12px' / '8px 12px', so Settings → Appearance → Density did
+// nothing to either table on this page while every shared <Table> elsewhere
+// changed height. --row-pad-y/--row-pad-x/--row-font are exactly what
+// globals.css's own th/td rules use, so a hand-rolled table tracks the switch
+// identically to a shared one.
+const CELL = {
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
+  fontSize: 'var(--row-font)',
+  verticalAlign: 'top',
+};
 
 const TH = {
   textAlign: 'left',
-  padding: '8px 12px',
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
   fontSize: 'var(--text-xs)',
   letterSpacing: '0.07em',
   textTransform: 'uppercase',

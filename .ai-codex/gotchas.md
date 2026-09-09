@@ -834,3 +834,43 @@ are a normal configuration. `getRules()` now walks every layer in the package's 
 across layers — otherwise several rules sit at position 1 and every ordering analysis (shadow,
 reorder) is meaningless. Provenance kept as `raw_rule._secvault_access_layer`.
 ⛔ Unverified against real R80+ hardware — the ordering semantics are reasoned, not observed.
+
+## ⛔ `unused` fired against SecVault's own logs (fixed 2026-09-09)
+
+`ruleAnalysis.js`'s `loggedZero` correctly required `logEvidence === 'measured-zero'`, but
+`zeroFromDevice` looked only at `hit_count === 0` — while the rule object already carried
+`loggedHits`/`logEvidence` from `correlateDeviceRules`. A device-reported zero that syslog directly
+contradicted still produced an `unused` finding.
+
+Live: **6 stored `unused` findings on TSR_EKC** sat on rules with `hit_count = 0` and up to
+**127,069 logged hits** in 30 days. Both branches now require
+`!(logEvidence === 'hits' && loggedHits > 0)`.
+
+⛔ **Only POSITIVE log evidence contradicts.** `no-coverage`, `window-too-short`,
+`rule-logging-disabled` and absent enrichment all still leave a device-measured zero reportable —
+otherwise a device with no log coverage would lose every `unused` finding it legitimately has, which
+is the tri-state collapsing in the other direction.
+
+⛔ Those particular 6 rows are ALSO a stale-data problem (TSR_EKC last collected 2026-08-06, before
+the `hit_count` tri-state fix) — two independent causes with one symptom. `lib/migrate.js`'s
+`backfillUnmeasurableFacts()` handles the data half; this handles the code half, which a Palo Alto
+counter reset with live logged traffic would reproduce on fresh data.
+
+## ⛔ A not-measured bar segment must use `--hatch`, never a hued hatch (fixed 2026-09-09)
+
+`/exposure`'s proportion bar drew its **unmeasured** segment as a 45° hatch in `--yellow` — the
+MEDIUM step of the severity ramp — sitting between a red measured-reached and a grey measured-quiet.
+So "we could not look at this" rendered as a medium-severity finding. The design system reserves
+`--unmeasured` for text and `--hatch` (hueless) for a bar segment or swatch, precisely so this state
+carries no severity reading. The KIND distinction the bar relies on is unaffected: hatched-vs-solid
+is what carries it, and it still works in greyscale.
+
+## Two findings from the sweep that did NOT reproduce — do not re-chase
+
+- **`catch (_err) { throw err }`**, reported by two independent sweeps at specific lines in
+  `paloalto/index.js`, `paloalto/ssh.js` and `fortinet/ssh.js`, said to throw a `ReferenceError`
+  instead of the real parse error. A scan of every `catch` block in `lib/` and `services/` for an
+  out-of-scope `err` reference finds **none**.
+- **`VpnLoginLocations.js` showing 5 sources with no "of N"** — already correct at HEAD; both country
+  lists carry `Showing 5 of N` footers and the sources table says `Busiest sources (15 of 21)`. The
+  reported line number was stale.

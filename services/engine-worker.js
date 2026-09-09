@@ -68,7 +68,7 @@ const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSn
 const { storeVpnSessions } = require('../lib/engines/vpnSessions');
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
-const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
+const { dispatchMonthlyReport, reportingPeriod } = require('../lib/engines/complianceReport');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
 const { isCapabilityUnavailable } = require('../lib/adapters/interface');
 const { runLogHitCorrelation } = require('../lib/engines/logHit');
@@ -797,7 +797,39 @@ async function runSnmpPollJob() {
         await recordConnectivity(pool, device.id, { reachable: true, source: 'metrics' });
       } catch (err) {
         logger.warn(`Job [snmp-poll] failed for device ${device.id} (${device.name || 'unnamed'}): ${err.message}`);
-        await recordConnectivity(pool, device.id, { reachable: false, source: 'metrics', message: err.message });
+        // ⛔ THREE outcomes, not two (2026-09-09). Until now this poll knew only
+        // "a row was written" and "something threw", and filed the second as
+        // `reachable: false` — the same conflation that made the VPN poll report
+        // "Failing 0% of polls succeeding" about a firewall answering every other
+        // poll, except this is the fleet's DENSEST heartbeat, so one unreadable
+        // capability here outweighs every other source in worstRate.
+        //
+        //   1. metrics stored            → reachable: true  (above; the read itself is the proof)
+        //   2. CapabilityUnavailableError → reachable: true  (here; connect + login +
+        //      command all succeeded and only the FEATURE was unreadable — the
+        //      device demonstrably answered. The gap is kept in the message,
+        //      which is a different fact from reachability and does not belong
+        //      in the same boolean.)
+        //   3. anything else             → reachable: false (a connect, login,
+        //      auth or timeout failure IS reachability evidence and must keep
+        //      counting against the device — including a missing credential and
+        //      the pre-network snmp_host checks, which is exactly why those
+        //      throws stay bare Errors in the adapters.)
+        //
+        // ⛔ Detection is by the err.deviceWasReached FLAG via
+        // isCapabilityUnavailable(), never instanceof: adapters and engines load
+        // through several paths here and an instanceof across two module
+        // instances of interface.js silently returns false — which would fail
+        // CLOSED into case 3 and quietly restore the bug.
+        if (isCapabilityUnavailable(err)) {
+          await recordConnectivity(pool, device.id, {
+            reachable: true,
+            source: 'metrics',
+            message: `reached, but the metric reading could not be taken: ${err.message}`,
+          });
+        } else {
+          await recordConnectivity(pool, device.id, { reachable: false, source: 'metrics', message: err.message });
+        }
       }
     }
 
@@ -1088,9 +1120,18 @@ async function runNotificationDispatchJob() {
 // this never opens a per-device SSH/REST/SNMP session.
 async function runComplianceReportJob() {
   const start = Date.now();
-  logger.info('Job [compliance-report] starting.');
+  // ⛔ The period is computed HERE, from the same server-local clock the cron
+  // tick fires on, and passed in explicitly — rather than letting the engine
+  // infer it from a second, different clock. It used to be derived inside
+  // dispatchMonthlyReport() from getUTC*(), while this cron ran in server-local
+  // time (Asia/Bangkok on the reference deployment), so 06:00 ICT on the 1st
+  // asked about the wrong month and the once-a-month guarantee broke both ways:
+  // a double send in the first month, then a permanently skipped tick from
+  // month two. Full arithmetic in reportingPeriod()'s own comment.
+  const period = reportingPeriod();
+  logger.info(`Job [compliance-report] starting for period ${period} (the month that just ended, server-local).`);
   try {
-    const result = await dispatchMonthlyReport(pool);
+    const result = await dispatchMonthlyReport(pool, { period });
     const durationMs = Date.now() - start;
     if (result.skipped) {
       logger.info(`Job [compliance-report] finished in ${durationMs}ms — skipped (${result.reason}).`);
@@ -1548,12 +1589,28 @@ async function scheduleJobs() {
     runTrackedJob(runLogHitJob, 'log-hit');
   });
 
-  // Fixed monthly time (06:00 UTC on the 1st) — same "housekeeping, not
-  // freshness" reasoning as dashboard-snapshot/snapshot-retention for why
-  // this isn't a configurable interval; dispatchMonthlyReport()'s own
-  // per-period idempotency check makes the immediate startup run in main()
-  // below a safe no-op mid-month.
-  logger.info('Scheduling [compliance-report] with cron "0 6 1 * *" (monthly).');
+  // Fixed monthly time: 06:00 on the 1st in the SERVER'S LOCAL ZONE — 06:00
+  // Asia/Bangkok (UTC+7) on the reference deployment, which is 23:00 UTC on the
+  // LAST DAY OF THE PREVIOUS MONTH. ⛔ This comment claimed the tick was in UTC
+  // until 2026-09-09 and was simply wrong: node-cron is registered here with no
+  // `timezone` option, so like every other fixed HH:MM job in this file it
+  // fires local, not UTC (see CLAUDE.md's Engine Worker note).
+  //
+  // ⛔ The zone of this cron and the derivation of the report's period are ONE
+  // decision — CLAUDE.md's rule, and this job is what it was written about.
+  // runComplianceReportJob() above now computes the period from this same local
+  // clock (reportingPeriod(), "the month that just ended") and passes it in.
+  // Adding a `timezone` here without moving that function to the same zone in
+  // the same commit re-opens the double-send-then-silence bug documented in
+  // lib/engines/complianceReport.js.
+  //
+  // Same "housekeeping, not freshness" reasoning as dashboard-snapshot/
+  // snapshot-retention for why this isn't a configurable interval;
+  // dispatchMonthlyReport()'s own per-period idempotency check makes the
+  // immediate startup run in main() below a safe no-op mid-month — and it is
+  // only genuinely safe now that every call anywhere within a given local month
+  // answers with the SAME period string.
+  logger.info('Scheduling [compliance-report] with cron "0 6 1 * *" (monthly, server-local zone).');
   const complianceReportTask = cron.schedule('0 6 1 * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runComplianceReportJob, 'compliance-report');

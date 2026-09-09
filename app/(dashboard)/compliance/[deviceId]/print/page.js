@@ -4,6 +4,7 @@ import { isValidUuid } from '../../../../../lib/apiUtils';
 import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import { STANDARDS, scoreColor, SCORE_COLOR_VAR } from '../../../../../components/compliance/ComplianceMatrix';
 import PrintReportButton from '../../../../../components/compliance/PrintReportButton';
+import { SEVERITY_LABEL, SEVERITY_TEXT_COLOR } from '../../../../../components/analysis/severityRamp';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,20 +93,28 @@ function aggregateStandards(findings) {
 // StandardTabs.js's STATUS_BADGE/SEVERITY_BADGE Badge-color maps, just
 // resolved straight to a CSS var instead of a Badge `color` prop name,
 // since a print report wants dense colored text, not pill chrome.
+// ⛔ TEXT, NOT A GRAPHIC — and on PAPER, where there is no hover, no title
+// attribute and no second chance. These were the raw ramp hues (--red/--yellow/
+// --blue), and globals.css measures --yellow at 3.64:1 on white: it clears
+// 1.4.11's 3:1 for a graphical object and FAILS 1.4.3's 4.5:1 for text. Every
+// value here is now a --tint-*-fg token, the pair globals.css guarantees at
+// >=4.5:1 in both themes.
 const STATUS_LABEL = {
-  pass: { label: 'Pass', color: 'var(--green)' },
-  fail: { label: 'Fail', color: 'var(--red)' },
-  warning: { label: 'Warning', color: 'var(--yellow)' },
+  pass: { label: 'Pass', color: 'var(--tint-success-fg)' },
+  fail: { label: 'Fail', color: 'var(--tint-danger-fg)' },
+  warning: { label: 'Warning', color: 'var(--tint-warn-fg)' },
   na: { label: 'N/A', color: 'var(--text-muted)' },
 };
 
-const SEVERITY_LABEL = {
-  critical: { label: 'Critical', color: 'var(--red)' },
-  high: { label: 'High', color: 'var(--yellow)' },
-  medium: { label: 'Medium', color: 'var(--blue)' },
-  low: { label: 'Low', color: 'var(--text-muted)' },
-  info: { label: 'Info', color: 'var(--text-muted)' },
-};
+// ⛔ Severity words come from components/analysis/severityRamp.js. The local
+// map that used to live here was the pre-v2.87.0 ramp — 'high' in --yellow
+// (the ramp's MEDIUM hue) and 'medium' in --blue, which the palette rewrite
+// pulled off severity entirely so the brand teal can never read as one. It was
+// printing that ramp onto paper a release after the screen stopped using it.
+function severityCell(severity) {
+  const key = SEVERITY_LABEL[severity] ? severity : 'info';
+  return { label: SEVERITY_LABEL[key], color: SEVERITY_TEXT_COLOR[key] };
+}
 
 function notFound() {
   return (
@@ -191,7 +200,19 @@ export default async function CompliancePrintPage({ params }) {
                   No findings mapped to this standard.
                 </p>
               ) : (
-                <table>
+                /* ⛔ tableLayout: 'fixed' — a named Critical Rule, and the only
+                    thing that makes the <col> percentages below binding. Without
+                    it the table runs in 'auto', where the percentages are hints a
+                    browser is free to ignore: on the real report the two prose
+                    columns (Detail averages 124 chars, Remediation 143) won the
+                    negotiation and squeezed Check Name, the column the reader
+                    scans by. The shared <Table> component enforces this for
+                    every other table in the app; this hand-rolled one opted
+                    itself out.
+                    ⛔ Do NOT also "fix" truncation here — globals.css already
+                    resets max-width/white-space/overflow for .print-report, so
+                    fixed layout wraps these cells rather than clipping them. */
+                <table style={{ tableLayout: 'fixed' }}>
                   <colgroup>
                     <col style={{ width: '24%' }} />
                     <col style={{ width: '10%' }} />
@@ -210,7 +231,7 @@ export default async function CompliancePrintPage({ params }) {
                   </thead>
                   <tbody>
                     {sFindings.map((f) => {
-                      const sev = SEVERITY_LABEL[f.severity] || SEVERITY_LABEL.info;
+                      const sev = severityCell(f.severity);
                       const st = STATUS_LABEL[f.status] || STATUS_LABEL.na;
                       return (
                         <tr key={f.id}>

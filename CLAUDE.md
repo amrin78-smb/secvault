@@ -985,6 +985,12 @@ SYSLOG_RAW_MESSAGE=security                # all|security|none -- which events k
                                            # raw line for ordinary allowed traffic (~89% of rows)
                                            # and KEEPS it for threat/vpn/utm/denied. Junk value
                                            # falls back to `security`, never to `all`.
+SYSLOG_SPOOL_RETRY_MINUTES=30              # how long a spool file keeps being retried before
+                                           # quarantine. ⛔ TIME-based, not attempt-based: the old
+                                           # 5-attempt budget expired in ~10 SECONDS at a 2s flush,
+                                           # and nothing ever re-read a quarantined `.failed` file,
+                                           # so a one-minute DB blip stranded ~78,000 events for
+                                           # good. Startup now re-arms `.failed` back to `.ready`.
 SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the DB insert;
                                            # blank = <install dir>\spool. Installer sets it.
 SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)

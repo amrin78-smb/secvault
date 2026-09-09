@@ -6,6 +6,7 @@ import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
 import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 import { computeRuleRiskBand } from '../../lib/engines/riskScore';
+import { BAND_BADGE_COLOR, BAND_FILL, BAND_LABEL } from './severityRamp';
 
 // Rule Analysis Dashboard -- "Risky Rules" tab (sibling of the existing
 // device-level "Risk" tab / RiskTab.js, which trends ONE score for the whole
@@ -16,38 +17,14 @@ import { computeRuleRiskBand } from '../../lib/engines/riskScore';
 // pool.query -- same convention as RiskTab.js/CleanupTab.js/ReorderTab.js.
 // Do not add 'use client'.
 
-// Same color convention as app/(dashboard)/devices/[id]/analysis/page.js's
-// RISK_BAND_COLOR/RISK_BAND_LABEL (device-level bands) and RiskTab.js's copy
-// of the same, extended with a 5th 'attention' band -- see
-// computeRuleRiskBand()'s own comment in lib/engines/riskScore.js for why
-// 'attention' exists and must not be collapsed into 'low' or relabeled.
-const RULE_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger', attention: 'muted' };
-const RULE_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical', attention: 'Attention' };
-
-// StatCard takes a raw CSS color (its left-border accent), not a Badge color
-// name.
-//
-// ⛔ SEMANTIC SEVERITY ALIASES (--sev-*), not raw hues — these bands ARE the
-// severity ramp, so they must move with it. This map was still the
-// pre-rewrite mapping and was wrong twice over after 2026-09-09: 'high' was
-// --yellow (the ramp's MEDIUM hue, so high and medium rules were arguing over
-// one colour) and 'medium' was --blue, which the palette rewrite made
-// forbidden rather than merely discouraged — blue was pulled out of the ramp
-// entirely so the teal brand hue can never be mistaken for a severity.
-//
-// ⛔ 'attention' is --unmeasured, NOT a muted grey text colour. Read
-// computeRuleRiskBand() in lib/engines/riskScore.js: an 'attention' rule is an
-// enabled rule with no finding of its own — "nothing wrong found, but also
-// nothing confirming this one's fine". That is the definition of not measured,
-// and --unmeasured is the palette's no-hue token for exactly it. Colouring it
-// anywhere on the ramp, in either direction, would be a claim.
-const STAT_TILE_COLOR = {
-  critical: 'var(--sev-crit)',
-  high: 'var(--sev-high)',
-  medium: 'var(--sev-med)',
-  low: 'var(--sev-ok)',
-  attention: 'var(--unmeasured)',
-};
+// ⛔ Bands (badge colour, label and tile fill) all come from
+// ./severityRamp.js. This file used to hold TWO maps that contradicted each
+// other on the same screen: STAT_TILE_COLOR had already been moved onto the
+// --sev-* aliases, while RULE_BAND_COLOR was still the pre-v2.87.0 badge ramp
+// — so a 'medium' rule was a YELLOW tile at the top of the tab and a BLUE
+// badge in the table three inches below it. See computeRuleRiskBand()'s own
+// comment in lib/engines/riskScore.js for why 'attention' exists, must not be
+// collapsed into 'low', and is --unmeasured rather than any ramp hue.
 
 // Display/sort order for this tab: worst band first, with 'attention'
 // placed between 'medium' and 'low' (an uninspected rule deserves more
@@ -175,9 +152,9 @@ export default async function RiskyRulesTab({ deviceId, searchParams }) {
         {BAND_ORDER.map((band) => (
           <StatCard
             key={band}
-            label={RULE_BAND_LABEL[band]}
+            label={BAND_LABEL[band]}
             value={bandCounts[band]}
-            color={STAT_TILE_COLOR[band]}
+            color={BAND_FILL[band]}
           />
         ))}
       </div>
@@ -216,7 +193,7 @@ export default async function RiskyRulesTab({ deviceId, searchParams }) {
               <td title={joinArray(rule.dst_addresses)}>{joinArray(rule.dst_addresses)}</td>
               <td title={joinArray(rule.services)}>{joinArray(rule.services)}</td>
               <td>
-                <Badge color={RULE_BAND_COLOR[rule.band]}>{RULE_BAND_LABEL[rule.band]}</Badge>
+                <Badge color={BAND_BADGE_COLOR[rule.band] || 'muted'}>{BAND_LABEL[rule.band] || rule.band}</Badge>
               </td>
               <td>{rule.findingCount}</td>
             </tr>

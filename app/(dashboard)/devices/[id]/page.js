@@ -405,12 +405,32 @@ async function getCveAssessments(dbPool, id) {
   return result.rows;
 }
 
+// ⛔ THE CAP AND THE TOTAL TRAVEL TOGETHER. This returned 20 rows from a tab
+// labelled plainly "Rules" with no total and no cap statement — on the
+// reference fleet's IDC firewall that is 20 of 706, so 97% of the ruleset was
+// absent from a tab whose name claims to be the ruleset. A reader has no way to
+// tell a 20-rule firewall from a 706-rule one.
+//
+// ⛔ The total comes from `count(*) OVER ()`, NOT a second COUNT(*) query.
+// The window function is evaluated over the rows this query already matched,
+// after WHERE and before LIMIT, so it rides along on the same device_id index
+// scan instead of adding a second pass over a large table on every page load.
+// It is NULL-safe by construction: no rows means no row to read it from, and
+// the caller falls back to 0, which is then a MEASURED zero (the SELECT
+// succeeded and matched nothing), not a failed read.
 async function getTopRules(dbPool, id) {
   const result = await dbPool.query(
-    `SELECT * FROM firewall_rules WHERE device_id = $1 ORDER BY sequence_number ASC NULLS LAST LIMIT 20`,
+    `SELECT *, count(*) OVER () AS total_rule_count
+     FROM firewall_rules
+     WHERE device_id = $1
+     ORDER BY sequence_number ASC NULLS LAST
+     LIMIT 20`,
     [id]
   );
-  return result.rows;
+  return {
+    rows: result.rows,
+    total: result.rows.length > 0 ? Number(result.rows[0].total_rule_count) : 0,
+  };
 }
 
 // Latest config_parsed snapshot for this device, or null if none collected
@@ -577,12 +597,12 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const deleteJob = deleteJobState.job;
   const deleteJobLive = deleteJob ? LIVE_JOB_STATUSES.includes(deleteJob.status) : false;
 
-  const [version, haRow, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
+  const [version, haRow, cveRows, ruleSample, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
     await Promise.all([
       getLatestVersion(pool, device.id),
       getHaStatusRow(pool, device.id),
       tab === 'cve' ? getCveAssessments(pool, device.id) : Promise.resolve([]),
-      tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve([]),
+      tab === 'rules' ? getTopRules(pool, device.id) : Promise.resolve({ rows: [], total: 0 }),
       // Fetched UNCONDITIONALLY now, not just for tab === 'admins' — the new
       // SNMP-detection widget below (always visible, not tab-gated) also
       // needs the latest config_parsed. Same row, two consumers.
@@ -862,6 +882,19 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
       {tab === 'rules' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {/* ⛔ SAY WHAT THIS IS A SAMPLE OF. A silently-capped list is
+              indistinguishable from a complete one, and this tab is called
+              "Rules": showing the first 20 of 706 with no caption told the
+              reader they were looking at the whole ruleset. The number is not
+              decoration — it is the difference between "this firewall has 20
+              rules" and "this firewall has 706 and you have seen 3% of them". */}
+          {ruleSample.rows.length > 0 && (
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', margin: 0 }}>
+              {ruleSample.total > ruleSample.rows.length
+                ? `First ${ruleSample.rows.length} rules of ${ruleSample.total.toLocaleString()}, in policy order — use "View all rules" below for the rest.`
+                : `All ${ruleSample.total.toLocaleString()} rule${ruleSample.total === 1 ? '' : 's'}, in policy order.`}
+            </p>
+          )}
           <Table>
             <colgroup>
               <col style={{ width: '6%' }} />
@@ -888,7 +921,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               </tr>
             </thead>
             <tbody>
-              {rules.map((r) => (
+              {ruleSample.rows.map((r) => (
                 <tr key={r.id} style={{ borderLeft: `4px solid ${actionBorderColor(r.action)}` }}>
                   <td>{r.sequence_number ?? '—'}</td>
                   <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
@@ -908,7 +941,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   <td>{r.hit_count === null || r.hit_count === undefined ? '—' : r.hit_count}</td>
                 </tr>
               ))}
-              {rules.length === 0 && (
+              {ruleSample.rows.length === 0 && (
                 <tr>
                   <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                     No rules collected yet.

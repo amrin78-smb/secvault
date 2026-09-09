@@ -15,7 +15,10 @@
 //   datagram -> in-memory buffer
 //   every FLUSH_MS: buffer -> spool file (fsync'd, .ready) -> parse ->
 //                   batch INSERT -> only then delete the spool file
-//   on startup:     any leftover .ready files are replayed first
+//   on startup:     any quarantined .failed files are re-armed to .ready, and
+//                   every leftover .ready file is drained by the ordinary
+//                   flush cycle — there is no separate replay path, because
+//                   two paths over one directory duplicated events
 //
 // The spool file is deleted ONLY after a successful insert. A crash between
 // write and insert costs a duplicate replay, never a lost event — and for
@@ -134,6 +137,18 @@ const ARCHIVE_LOG_EVERY_BYTES = 1e9;
 // AND this set to none, a line nothing could parse would exist nowhere.
 const RAW_MESSAGE_MODE = String(process.env.SYSLOG_RAW_MESSAGE || 'security').toLowerCase();
 const SPOOL_DIR     = process.env.SYSLOG_SPOOL_DIR || path.join(__dirname, '..', 'spool');
+// ⛔ HOW LONG we keep retrying a spool file the database refused — a DURATION,
+// not a number of attempts. It was 5 attempts, and because drainBacklog() runs
+// once per 2-second flush, "5 attempts" was a TEN-SECOND budget: a ten-second
+// database blip quarantined the file as `.failed`, and nothing in this process
+// ever read a `.failed` file again. At ~1,300 events/sec a spool file holds
+// ~2,600 events, so a one-minute outage permanently stranded ~78,000 events
+// that had been written durably, exactly as designed, and then never inserted.
+// "Kept for retry" with a ten-second retry budget is just a slower kind of
+// loss. Quarantine now needs BOTH a real number of attempts AND this much
+// elapsed time, and rearmFailedSpool() puts quarantined files back in the
+// queue on every start.
+const SPOOL_RETRY_MINUTES = intEnv('SYSLOG_SPOOL_RETRY_MINUTES', 30, 1, 10080);
 
 // Rollup tiers. See lib/syslog/rollups.js for why this is tiered rather than
 // LogVault's single 24h-every-5-minutes window: at ~1,400 events/sec that
@@ -287,8 +302,15 @@ async function processSpoolFile(file) {
   // replay (and at worst a duplicated archive member), never a lost line.
   // ⛔ An archive failure is a WARNING, not an abort: the database is the
   // primary store and ingest must survive a full disk on the archive volume.
+  // ⛔ Filed under each record's OWN receivedAt, never `new Date()`. The day
+  // file must line up with the daily PARTITION the same records go into, and
+  // two entirely routine paths break that if the insert time is used instead:
+  // a spool file replayed after an outage or a deploy, and every flush that
+  // crosses UTC midnight. This archive is the only copy of the raw line for
+  // the ~89% of traffic SYSLOG_RAW_MESSAGE=security drops from the database,
+  // so a `zgrep` of the right day would silently come back short.
   if (ARCHIVE_ENABLED) {
-    const a = archive.appendBatch(ARCHIVE_DIR, records.map((r) => r.line), new Date());
+    const a = archive.appendRecords(ARCHIVE_DIR, records);
     if (!a.ok) {
       archiveFailures += 1;
       log(`WARN archive append failed (${archiveFailures} so far): ${a.error}`);
@@ -314,19 +336,59 @@ async function processSpoolFile(file) {
   };
 }
 
-async function replayBacklog() {
-  ensureSpoolDir();
-  const files = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).sort();
-  if (files.length === 0) return;
-  log(`replaying ${files.length} spool file(s) left over from a previous run`);
-  for (const f of files) {
+// ⛔ THERE IS NO SEPARATE STARTUP REPLAY, AND THAT IS THE FIX.
+//
+// replayBacklog() used to iterate the .ready files once at startup, launched
+// fire-and-forget so the listeners could bind first. Its comment claimed it
+// "shares the flush cycle's `flushing` mutex". It did not — it never read or
+// set `flushing`, so two seconds later the first flush fired, drainBacklog()
+// scanned the SAME directory, and both called processSpoolFile() on the same
+// file. Every event in it was INSERTed twice (syslog_events has no unique
+// constraint that would catch it), appended to the archive twice, and
+// double-counted in every rollup that recomputes from raw; the losing
+// unlinkSync() threw ENOENT into a swallowed catch. A one-hour DB outage
+// strands ~1,800 files / ~3.6M events, so the startup path was precisely when
+// the collision was largest.
+//
+// drainBacklog() already scans that directory every single flush cycle, so
+// startup catch-up needs no second mechanism — deleting the duplicate one
+// leaves exactly ONE process-wide caller of processSpoolFile(), serialised by
+// the `flushing` mutex it actually runs inside. Bind-first is preserved for
+// free: the drain happens on the flush timer, so no datagram is missed while a
+// backlog clears.
+//
+// What startup still owes the spool is the OPPOSITE of a replay: putting back
+// anything a previous run quarantined.
+function rearmFailedSpool() {
+  // ⛔ A `.failed` file is undelivered evidence, and NOTHING in this process
+  // ever reads one — both scanners filter on `.ready`. Quarantine was designed
+  // to stop one poison file blocking the queue, not to be a delete with extra
+  // steps, so every start gives them another full retry budget. If a file is
+  // genuinely unparseable it will be re-quarantined within the hour and logged
+  // again; if it was quarantined by a database outage that has since ended, it
+  // lands. Re-armed LOUDLY, by name, so this never looks like a clean start.
+  let names;
+  try {
+    names = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.failed')).sort();
+  } catch (_e) {
+    return 0;
+  }
+  if (names.length === 0) return 0;
+  log(`spool: re-arming ${names.length} quarantined .failed file(s) from a previous run`);
+  let armed = 0;
+  for (const name of names) {
+    const full = path.join(SPOOL_DIR, name);
     try {
-      const r = await processSpoolFile(path.join(SPOOL_DIR, f));
-      log(`  replayed ${f}: stored ${r.stored}`);
+      fs.renameSync(full, full.replace(/\.failed$/, '.ready'));
+      armed += 1;
+      // Capped so a pathological backlog cannot bury the rest of the banner.
+      if (armed <= 20) log(`  re-armed ${name}`);
     } catch (err) {
-      log(`  ERROR replaying ${f}: ${err.message}`);
+      log(`  ERROR re-arming ${name}: ${err.message}`);
     }
   }
+  if (armed > 20) log(`  ... and ${armed - 20} more`);
+  return armed;
 }
 
 // --- flush cycle -----------------------------------------------------------
@@ -368,53 +430,65 @@ async function doFlush() {
   let spooled = false;
 
   try {
+    let r = { stored: 0, parsed: 0, unknownVendor: 0, unknownSource: 0 };
+    let file = null;
     if (batch.length > 0) {
-      const file = writeSpool(batch);           // durable first
+      file = writeSpool(batch);             // durable first
       spooled = true;
-      const r = await processSpoolFile(file);   // then the DB
-      // Retry anything a previous cycle could not insert. Bounded per cycle so
-      // a large backlog cannot starve live ingest.
-      await drainBacklog(file);
-      const backlog = countReadyFiles();
+      r = await processSpoolFile(file);     // then the DB
+    }
+
+    // ⛔ UNCONDITIONAL, not inside the `batch.length > 0` branch it used to
+    // live in. The backlog is exactly the state where live traffic may have
+    // stopped — a device stops sending, or every datagram is being dropped —
+    // and gating the only retry path on new arrivals meant a quiet fleet
+    // stranded its own spool indefinitely. Bounded per cycle so draining a
+    // large backlog still cannot starve live ingest.
+    const drain = await drainBacklog(file);
+
+    if (batch.length > 0 || droppedThisCycle > 0 || drain.files > 0) {
+      // ⛔ `stored` COUNTS THE DRAIN. It used to report only the current
+      // file's rows, so while a backlog was clearing the health panel showed
+      // stored far below received and read as ongoing loss — during the one
+      // window when the opposite was true and everything was landing. The
+      // reconciliation `stored + dropped === received` is an AGGREGATE
+      // identity over time, not a per-row one: a file that fails in cycle A
+      // counts as received there with stored 0, and its rows are credited in
+      // whichever later cycle actually inserted them. Omitting the drain broke
+      // that identity permanently in the pessimistic direction.
       await recordStats({
         received: receivedThisCycle,
-        parsed: r.parsed,
-        stored: r.stored,
+        parsed: r.parsed + drain.parsed,
+        stored: r.stored + drain.stored,
         dropped: droppedThisCycle,
-        unknownVendor: r.unknownVendor,
-        unknownSource: r.unknownSource,
-        backlog,
-        ms: Date.now() - started,
-      });
-      if (droppedThisCycle > 0) {
-        log(`WARN dropped ${droppedThisCycle} datagram(s) - buffer hit ${MAX_BUFFER}`);
-      }
-      // Report the archive's REAL ratio periodically rather than trusting the
-      // measured 10.8x forever — it moves with the traffic mix, and this is the
-      // number the retention sizing depends on.
-      if (ARCHIVE_ENABLED && archiveRaw > ARCHIVE_LOG_EVERY_BYTES) {
-        log(
-          `archive   : ${(archiveRaw / 1e9).toFixed(2)} GB raw -> ` +
-          `${(archiveGz / 1e9).toFixed(3)} GB stored (${(archiveRaw / archiveGz).toFixed(1)}x)` +
-          (archiveFailures > 0 ? `, ${archiveFailures} failure(s)` : '')
-        );
-        archiveRaw = 0;
-        archiveGz = 0;
-      }
-    } else if (droppedThisCycle > 0) {
-      // ⛔ Still persist it. `dropped` is the one number an operator cannot
-      // reconstruct from anywhere else, and a stdout line is not a record.
-      log(`WARN dropped ${droppedThisCycle} datagram(s) with an empty batch`);
-      await recordStats({
-        received: receivedThisCycle,
-        parsed: 0,
-        stored: 0,
-        dropped: droppedThisCycle,
-        unknownVendor: 0,
-        unknownSource: 0,
+        unknownVendor: r.unknownVendor + drain.unknownVendor,
+        unknownSource: r.unknownSource + drain.unknownSource,
         backlog: countReadyFiles(),
         ms: Date.now() - started,
       });
+    }
+
+    if (droppedThisCycle > 0) {
+      // ⛔ Always logged AND always persisted above. `dropped` is the one
+      // number an operator cannot reconstruct from anywhere else, and a stdout
+      // line is not a record.
+      log(
+        `WARN dropped ${droppedThisCycle} datagram(s)` +
+        (batch.length > 0 ? ` - buffer hit ${MAX_BUFFER}` : ' with an empty batch')
+      );
+    }
+
+    // Report the archive's REAL ratio periodically rather than trusting the
+    // measured 10.8x forever — it moves with the traffic mix, and this is the
+    // number the retention sizing depends on.
+    if (ARCHIVE_ENABLED && archiveRaw > ARCHIVE_LOG_EVERY_BYTES) {
+      log(
+        `archive   : ${(archiveRaw / 1e9).toFixed(2)} GB raw -> ` +
+        `${(archiveGz / 1e9).toFixed(3)} GB stored (${(archiveRaw / archiveGz).toFixed(1)}x)` +
+        (archiveFailures > 0 ? `, ${archiveFailures} failure(s)` : '')
+      );
+      archiveRaw = 0;
+      archiveGz = 0;
     }
   } catch (err) {
     log(`ERROR flush failed: ${err.stack || err.message}`);
@@ -469,31 +543,57 @@ function countReadyFiles() {
   }
 }
 
-// How many stranded spool files to retry per flush cycle, and how many times
-// to retry one before quarantining it.
+function countFailedFiles() {
+  try {
+    return fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.failed')).length;
+  } catch (_e) {
+    return 0;
+  }
+}
+
+// How many stranded spool files to retry per flush cycle, and the budget one
+// file gets before it is quarantined.
+//
+// ⛔ THE BUDGET IS A DURATION AND A COUNT, NOT A COUNT ALONE. This function
+// runs once per flush (every SYSLOG_FLUSH_MS = 2s by default), so the old
+// "5 attempts" rule expired a file's retries after about TEN SECONDS. Any
+// database restart, failover or lock storm longer than that quarantined
+// perfectly good events into `.failed`, which nothing ever reads. Both
+// conditions must now be met, so the wall-clock budget is what actually
+// governs and a faster flush interval cannot silently shrink it.
 const BACKLOG_DRAIN_PER_CYCLE = 5;
-const MAX_SPOOL_ATTEMPTS = 5;
-const spoolAttempts = new Map();   // filename -> attempts
+const MIN_SPOOL_ATTEMPTS = 5;
+const SPOOL_RETRY_MS = SPOOL_RETRY_MINUTES * 60 * 1000;
+const spoolAttempts = new Map();   // filename -> { attempts, firstAt }
 
 /**
  * Retry spool files that a previous cycle could not insert.
  *
  * ⛔ WHY THIS EXISTS: processSpoolFile() deliberately KEEPS a file whose insert
  * failed, but nothing ever picked it back up -- it was only ever called on a
- * freshly written file, or once at startup. So a database outage stranded every
+ * freshly written file. So a database outage stranded every
  * file it produced until someone restarted the service: at ~2,000 events per
  * 2s flush, a one-hour outage leaves ~1,800 files holding ~3.6M events that are
  * invisible in SQL while ingest happily continues. "Kept for retry" with no
  * retry is just a slower kind of loss.
  *
  * Bounded per cycle so draining a large backlog cannot starve live ingest.
+ *
+ * ⛔ This is now the ONLY path that picks up a spool file other than the one
+ * the current flush just wrote, including at startup. See rearmFailedSpool()
+ * for why the separate startup replay was deleted rather than synchronised.
+ *
+ * Returns the totals it inserted so the caller can add them to the cycle's
+ * ingest stats — without that, `stored` reads below `received` for the whole
+ * duration of a drain, which looks exactly like loss.
  */
 async function drainBacklog(currentFile) {
+  const totals = { files: 0, stored: 0, parsed: 0, unknownVendor: 0, unknownSource: 0 };
   let files;
   try {
     files = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).sort();
   } catch (_e) {
-    return;
+    return totals;
   }
   const current = currentFile ? path.basename(currentFile) : null;
   let done = 0;
@@ -501,26 +601,42 @@ async function drainBacklog(currentFile) {
     if (done >= BACKLOG_DRAIN_PER_CYCLE) break;
     if (name === current) continue;
     const full = path.join(SPOOL_DIR, name);
-    const attempts = (spoolAttempts.get(name) || 0) + 1;
-    spoolAttempts.set(name, attempts);
+    const prev = spoolAttempts.get(name);
+    const state = { attempts: (prev ? prev.attempts : 0) + 1, firstAt: prev ? prev.firstAt : Date.now() };
+    spoolAttempts.set(name, state);
     try {
       const r = await processSpoolFile(full);
       if (!fs.existsSync(full)) {
         spoolAttempts.delete(name);
+        totals.files += 1;
+        totals.stored += r.stored || 0;
+        totals.parsed += r.parsed || 0;
+        totals.unknownVendor += r.unknownVendor || 0;
+        totals.unknownSource += r.unknownSource || 0;
         log(`drained spool ${name}: stored ${r.stored}`);
-      } else if (attempts >= MAX_SPOOL_ATTEMPTS) {
-        // ⛔ Quarantine, never delete. A file we cannot insert is still
-        // evidence; renaming keeps it for inspection and stops it blocking
-        // the queue forever, and the rename is LOUD.
-        fs.renameSync(full, full.replace(/\.ready$/, '.failed'));
-        spoolAttempts.delete(name);
-        log(`ERROR spool ${name} failed ${attempts}x - quarantined as .failed (NOT deleted)`);
+      } else {
+        const tryingMs = Date.now() - state.firstAt;
+        if (state.attempts >= MIN_SPOOL_ATTEMPTS && tryingMs >= SPOOL_RETRY_MS) {
+          // ⛔ Quarantine, never delete. A file we cannot insert is still
+          // evidence; renaming keeps it for inspection and stops it blocking
+          // the queue forever, and the rename is LOUD. rearmFailedSpool()
+          // gives it a fresh budget on the next start, so this is a pause,
+          // not a verdict.
+          fs.renameSync(full, full.replace(/\.ready$/, '.failed'));
+          spoolAttempts.delete(name);
+          log(
+            `ERROR spool ${name} failed ${state.attempts}x over ` +
+            `${Math.round(tryingMs / 60000)}min - quarantined as .failed ` +
+            `(NOT deleted; re-armed on next start)`
+          );
+        }
       }
     } catch (err) {
       log(`ERROR draining spool ${name}: ${err.message}`);
     }
     done++;
   }
+  return totals;
 }
 
 async function recordStats(s) {
@@ -552,6 +668,18 @@ async function maintenance() {
     // SILENT -- and an un-trimmed high-cardinality table is exactly how a
     // disk fills up with every health signal still reporting green.
     if (trimmed.error) log(`WARN detail rollup trim: ${trimmed.error}`);
+
+    // ⛔ Quarantined files are counted NOWHERE else: syslog_ingest_stats'
+    // spool_backlog counts .ready only, so a .failed file is undelivered
+    // evidence that is invisible to every health signal between restarts.
+    // Say so hourly, not just in the startup banner.
+    const quarantined = countFailedFiles();
+    if (quarantined > 0) {
+      log(
+        `WARN spool: ${quarantined} quarantined .failed file(s) awaiting the next ` +
+        `restart to be re-armed - these events are NOT in the database`
+      );
+    }
 
     if (ARCHIVE_ENABLED) {
       const pruned = archive.pruneArchive(ARCHIVE_DIR, ARCHIVE_RETENTION_DAYS, new Date());
@@ -732,9 +860,17 @@ async function main() {
     log('archive   : DISABLED');
   }
   log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
-  log(`threat    : ${ROLLUP_LOOKBACK_HOURS}h now, then ${ROLLUP_RECENT_HOURS + 1}h every ${ROLLUP_INTERVAL_MIN}min (separate from the sweep)`);
+  log(
+    `threat    : ${ROLLUP_LOOKBACK_HOURS}h now, then ${ROLLUP_RECENT_HOURS + 1}h every ` +
+    `${ROLLUP_INTERVAL_MIN}min and ${ROLLUP_LOOKBACK_HOURS}h hourly (separate from the sweep)`
+  );
+  log(`spool     : ${SPOOL_RETRY_MINUTES}min retry budget before a file is quarantined as .failed`);
 
   ensureSpoolDir();
+  // Before maintenance, so the hourly "quarantined files" warning does not
+  // fire on files this is about to put back. Nothing drains yet — the drain
+  // runs on the flush timer, which starts only after the listeners bind.
+  const rearmed = rearmFailedSpool();
   await pool.query('SELECT 1');
   log('database connectivity verified.');
 
@@ -743,18 +879,26 @@ async function main() {
   log(`device map: ${deviceByIp.size} source address(es) resolvable`);
   for (const p of UDP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_UDP_PORT entry '${p}'`);
   for (const p of TCP_PORTS.rejected) log(`WARN ignoring invalid SYSLOG_TCP_PORT entry '${p}'`);
-  // ⛔ BIND FIRST, replay second. replayBacklog() used to run to completion
-  // before any socket existed, so a large backlog left the collector DEAF for
-  // its whole duration — and datagrams sent to an unbound UDP port are
-  // discarded by the OS with no counter anywhere, the one failure mode you
-  // cannot see from inside the process. A one-hour DB outage can strand ~1,800
-  // spool files; replaying those serially is minutes of silence. The replay is
-  // now started after the listeners are up and shares the flush cycle's
-  // `flushing` mutex, so the two cannot collide.
+  // ⛔ BIND FIRST. A startup backlog is drained by the ordinary flush cycle,
+  // which cannot leave the collector deaf: it processes at most
+  // BACKLOG_DRAIN_PER_CYCLE files per FLUSH_MS while the sockets are already
+  // up, and datagrams sent to an unbound UDP port are discarded by the OS with
+  // no counter anywhere — the one failure mode invisible from inside this
+  // process. There is deliberately NO separate startup replay; the drain path
+  // runs inside doFlush() and is therefore genuinely serialised by the
+  // `flushing` mutex, which the old fire-and-forget replayBacklog() only
+  // claimed to be. See rearmFailedSpool().
   const udpSockets = UDP_PORTS.ports.map((p) => startUdp(p));
   const tcpServers = TCP_PORTS.ports.map((p) => startTcp(p));
 
-  replayBacklog().catch((err) => log(`ERROR replaying backlog: ${err.stack || err.message}`));
+  const startupBacklog = countReadyFiles();
+  if (startupBacklog > 0) {
+    log(
+      `spool: ${startupBacklog} file(s) waiting` +
+      (rearmed > 0 ? ` (including ${rearmed} re-armed)` : '') +
+      ` - draining ${BACKLOG_DRAIN_PER_CYCLE} per ${FLUSH_MS}ms flush while listening`
+    );
+  }
 
   // ⛔ THREAT ROLLUP RUNS SEPARATELY AND EAGERLY, on purpose.
   //
@@ -774,29 +918,56 @@ async function main() {
   // ⛔ Awaited nowhere: like every sibling timer here it must not let a
   // rejection escape, or an unhandled rejection kills ingest. refreshThreatRollup
   // never throws, and this catch is the second line of that defence.
-  async function threatRollupCycle(hours) {
+  //
+  // ⛔ BUT IT STILL NEEDS ITS OWN WIDE TIER, for the same reason
+  // recomputeWindow() has one. Being outside the sweep also means being
+  // outside the sliced wide pass that exists solely to catch LATE arrivals.
+  // `received_at` is stamped when the datagram arrives and is never rewritten,
+  // so a spool file drained more than the recent window later — a DB outage, a
+  // deploy, a quarantined file re-armed at startup, all routine — belongs to a
+  // bucket the recent tier no longer covers. With only a startup 24h pass,
+  // that bucket stayed permanently under-counted with no error anywhere: the
+  // exact LogVault bug rollups.js's header warns about, reintroduced in the
+  // one rollup that had opted out of the protection. The wide pass is hourly
+  // and unsliced because it can be: it reads the partial log_class index at
+  // ~256ms per hour of threat events, so a full 24h rebuild is seconds.
+  let threatRunning = false;
+  async function threatRollupCycle(hours, tier) {
+    // ⛔ Never overlap two passes. They DELETE and re-INSERT the same buckets,
+    // and syslog_threat_hourly's UNIQUE NULLS NOT DISTINCT key means the loser
+    // aborts its bucket — turning a slow wide pass into an every-cycle error
+    // rather than a queued one.
+    if (threatRunning) { log(`threat rollup (${tier}) skipped - previous pass still running`); return; }
+    threatRunning = true;
     try {
       const r = await refreshThreatRollup(pool, hours);
       if (r.ok) {
-        log(`threat rollup (${r.hours}h): ${r.rows} row(s) over ${r.buckets} bucket(s) in ${r.ms}ms`);
+        log(`threat rollup ${tier} (${r.hours}h): ${r.rows} row(s) over ${r.buckets} bucket(s) in ${r.ms}ms`);
       } else {
-        log(`ERROR threat rollup (${r.hours}h) failed after ${r.ms}ms: ${r.error}`);
+        log(`ERROR threat rollup ${tier} (${r.hours}h) failed after ${r.ms}ms: ${r.error}`);
       }
     } catch (err) {
       log(`ERROR threat rollup threw: ${err && err.message ? err.message : err}`);
+    } finally {
+      threatRunning = false;
     }
   }
 
   // Full window once, now, so the Security tab is not empty for a moment
   // longer than it has to be after a restart.
-  threatRollupCycle(ROLLUP_LOOKBACK_HOURS);
+  threatRollupCycle(ROLLUP_LOOKBACK_HOURS, 'wide');
 
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   // Only the recent window on the frequent tick — rebuilding 24h every few
   // minutes would be wasted work, since older buckets cannot change.
   const threatTimer = setInterval(
-    () => { threatRollupCycle(ROLLUP_RECENT_HOURS + 1); },
+    () => { threatRollupCycle(ROLLUP_RECENT_HOURS + 1, 'recent'); },
     ROLLUP_INTERVAL_MIN * 60 * 1000,
+  );
+  // The late-arrival tier. Hourly, matching rollupWideTimer below.
+  const threatWideTimer = setInterval(
+    () => { threatRollupCycle(ROLLUP_LOOKBACK_HOURS, 'wide'); },
+    60 * 60 * 1000,
   );
   const mapTimer = setInterval(() => { refreshDeviceMap(); }, 5 * 60 * 1000);
   const maintTimer = setInterval(() => { maintenance(); }, 60 * 60 * 1000);
@@ -814,6 +985,7 @@ async function main() {
     clearInterval(mapTimer);
     clearInterval(maintTimer);
     clearInterval(threatTimer);
+    clearInterval(threatWideTimer);
     clearInterval(rollupTimer);
     clearInterval(rollupWideTimer);
     for (const s of udpSockets) { try { s.close(); } catch (_e) {} }

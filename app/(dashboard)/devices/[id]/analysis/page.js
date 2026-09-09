@@ -25,6 +25,11 @@ import ReachabilityTab from '../../../../../components/analysis/ReachabilityTab'
 import AccessPathTab from '../../../../../components/analysis/AccessPathTab';
 import RuleRelationshipTab from '../../../../../components/analysis/RuleRelationshipTab';
 import { computeRiskScoreFromCounts } from '../../../../../lib/engines/riskScore';
+import {
+  BAND_BADGE_COLOR,
+  BAND_LABEL,
+  SEVERITY_FILL,
+} from '../../../../../components/analysis/severityRamp';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,11 +64,14 @@ const FINDING_TYPES = [
 
 const SEVERITIES = ['critical', 'high', 'medium', 'info'];
 
-// Same color convention as SeverityBadge.js (critical->danger, high->warning,
-// medium->info) extended with 'low'->success, matching the green/success
-// meaning used everywhere else in the app (StatusDot, etc.) for "no issues".
-const RISK_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger' };
-const RISK_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+// ⛔ Band colours and labels come from components/analysis/severityRamp.js
+// and are NOT redeclared here. The private copy this file used to hold still
+// described the PRE-v2.87.0 ramp in its own comment ("high->warning,
+// medium->info") and rendered it: `medium` as BLUE, one step from --primary
+// teal, which the palette rewrite forbade on any severity. The tiles below sit
+// directly above <FindingsBarChart>, which was already colouring the same
+// values orange and yellow — the chart and the tiles above it disagreed about
+// what "High" looks like, on one screen.
 
 function formatDateTime(value) {
   if (!value) return 'Never';
@@ -272,8 +280,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         title={`Rule hygiene — ${device.name}`}
         actions={
           <>
-            <Badge color={RISK_BAND_COLOR[riskScore.band]}>
-              Risk: {RISK_BAND_LABEL[riskScore.band]} ({riskScore.score})
+            <Badge color={BAND_BADGE_COLOR[riskScore.band] || 'muted'}>
+              Risk: {BAND_LABEL[riskScore.band] || riskScore.band} ({riskScore.score})
             </Badge>
             <a href={`/api/devices/${device.id}/analysis?format=csv`} className="btn btn-secondary">
               Export CSV
@@ -354,19 +362,23 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             <StatCard
               label="Critical"
               value={severitySummary.critical}
-              color={severitySummary.critical > 0 ? 'var(--red)' : 'var(--text-muted)'}
+              color={severitySummary.critical > 0 ? SEVERITY_FILL.critical : 'var(--text-muted)'}
             />
             <StatCard
               label="High"
               value={severitySummary.high}
-              color={severitySummary.high > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
+              color={severitySummary.high > 0 ? SEVERITY_FILL.high : 'var(--text-muted)'}
             />
             <StatCard
               label="Medium"
               value={severitySummary.medium}
-              color={severitySummary.medium > 0 ? 'var(--blue)' : 'var(--text-muted)'}
+              color={severitySummary.medium > 0 ? SEVERITY_FILL.medium : 'var(--text-muted)'}
             />
-            <StatCard label="Info" value={severitySummary.info} color="var(--text-muted)" />
+            <StatCard
+              label="Info"
+              value={severitySummary.info}
+              color={severitySummary.info > 0 ? SEVERITY_FILL.info : 'var(--text-muted)'}
+            />
             <StatCard label="Total Findings" value={severitySummary.total} />
             {/* A datetime string, not a KPI number -- kept at the smaller
                 text-base size (as the original text-sm/font-medium styling

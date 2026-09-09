@@ -136,3 +136,24 @@ pass / (pass + fail + warning))`, `na` rows excluded entirely from the denominat
 - The "45 checks" count CLAUDE.md states matches a direct recount (`grep -c "checkId:"
   lib/auditChecksSeed.js` = 45) — `.ai-codex/lib.md`'s own "Contradictions vs CLAUDE.md" note
   claiming CLAUDE.md still said "44" was itself stale; corrected in the same pass.
+
+## ⛔ A compliance check reported PASS for an analysis that never ran (fixed 2026-09-09)
+
+`configAuditor.js`'s `evaluateRuleScanCheck` returned `pass` ("no rules matched") whenever the
+finding list for a type was empty, and the only upstream guard was `ruleCount === 0` → `na`. But
+`ruleAnalysis.js` **SKIPS** the O(n²) pairwise passes entirely above `maxRulesForShadow` (1000), with
+only a `console.warn` and no persisted marker. Two seeded checks scan exactly those types
+(`rule-no-shadowed-rules`, `rule-no-redundant-rules`), so a device over the cap would have been
+**credited with two passes for a question SecVault deliberately did not ask** — the `warning`/`na`
+distinction inverted into a full pass.
+
+`ruleAnalysis.js` now exports `PAIRWISE_FINDING_TYPES` (**all five** types emitted inside that block,
+not the three the old warning named) and `skippedPairwiseFindingTypes(ruleCount, cap)`;
+`runAnalysisForDevice` returns `skippedPasses`, and `evaluateRuleScanCheck` returns **`na`** when a
+check's `finding_types` intersect the skipped set, even partially.
+
+⛔ `na`, not `warning`: this is SecVault's own limitation, so it leaves the denominator. Scoring a
+device down for a question we could not pose is the same error as `hit_count`'s old `DEFAULT 0`.
+
+Live: largest ruleset is IDC FW at **706 rules** against a cap of 1000, so nothing changes today.
+Fixed in code, latent in data.

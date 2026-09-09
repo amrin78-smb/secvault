@@ -17,7 +17,12 @@ import Badge from '../ui/Badge';
 import Button from '../ui/Button';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 
-const ROLE_BADGE = { admin: 'danger', viewer: 'muted' };
+// ⛔ RED IS RESERVED FOR DANGER. 'admin' was `danger`, so every administrator
+// wore the same red this product uses for "critically exposed" and
+// `patch_now` — on the normal, intended state of the account the reader is
+// most likely logged in as. A role is an attribute, not an alarm: purple is
+// the palette's non-ramp identity hue and carries no severity reading.
+const ROLE_BADGE = { admin: 'purple', viewer: 'muted' };
 
 export default function UsersPanel() {
   const [users, setUsers] = useState(null); // null = loading/forbidden, [] = loaded

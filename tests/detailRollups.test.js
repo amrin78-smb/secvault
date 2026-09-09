@@ -199,10 +199,13 @@ describe('detail rollups: retention', () => {
     assert.equal(out.days, 30);
     // ⛔ Every DETAIL rollup must be trimmed. One missing from this list is a
     // table that grows forever while the log still reports success.
+    // syslog_threat_hourly added 2026-09-09: it was the omission this comment
+    // warns about, measured at 119,404 rows / 70 MB in 27 hours (~22 GB/year)
+    // with nothing anywhere deleting a row from it.
     assert.deepEqual(Object.keys(out.deleted).sort(), [
       'syslog_app_hourly', 'syslog_blocked_dst_hourly', 'syslog_country_hourly',
-      'syslog_device_inbound_hourly', 'syslog_talker_hourly', 'syslog_urlcat_hourly',
-      'syslog_user_hourly', 'syslog_vpn_auth_hourly',
+      'syslog_device_inbound_hourly', 'syslog_talker_hourly', 'syslog_threat_hourly',
+      'syslog_urlcat_hourly', 'syslog_user_hourly', 'syslog_vpn_auth_hourly',
     ]);
     for (const c of pool.calls) {
       assert.match(c.sql, /^DELETE FROM syslog_/);

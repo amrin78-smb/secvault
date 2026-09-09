@@ -2,6 +2,7 @@ import { pool } from '../../lib/db';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import RiskTrendChart from './RiskTrendChart';
+import { BAND_BADGE_COLOR, BAND_LABEL } from './severityRamp';
 
 // Risk tab (Rule Analysis Dashboard): trend of the per-device risk score
 // snapshotted into device_risk_history every time runAnalysisForDevice() runs
@@ -10,11 +11,11 @@ import RiskTrendChart from './RiskTrendChart';
 // pattern as CleanupTab.js/OptimizationTab.js/ReorderTab.js. Do not add
 // 'use client'.
 
-// Same color/label convention as app/(dashboard)/devices/[id]/analysis/page.js's
-// RISK_BAND_COLOR / RISK_BAND_LABEL consts -- keep these in step if that
-// mapping ever changes.
-const RISK_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger' };
-const RISK_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+// ⛔ Bands come from ./severityRamp.js. The "keep these in step" comment that
+// used to sit here was the whole problem: FOUR files each held their own copy
+// and a fifth (SeverityBadge.js) moved without them, so `medium` was still
+// rendering BLUE here a full release after blue was pulled off the ramp.
+// There is nothing left to keep in step.
 
 function formatDateTime(value) {
   if (!value) return 'Never';
@@ -48,8 +49,8 @@ export default async function RiskTab({ deviceId }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-        <Badge color={RISK_BAND_COLOR[latest.band] || 'muted'}>
-          Risk: {RISK_BAND_LABEL[latest.band] || latest.band} ({latest.score})
+        <Badge color={BAND_BADGE_COLOR[latest.band] || 'muted'}>
+          Risk: {BAND_LABEL[latest.band] || latest.band} ({latest.score})
         </Badge>
         <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
           Latest of {rows.length} snapshot{rows.length === 1 ? '' : 's'} — as of{' '}

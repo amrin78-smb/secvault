@@ -122,10 +122,19 @@ export default function HeaderSearch() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
         const data = await res.json();
         if (!mountedRef.current || requestSeqRef.current !== mySeq) return; // stale or unmounted
+        // ⛔ res.ok WAS NEVER CHECKED. Both the error body and the thrown case
+        // collapsed to empty arrays, which render as "No results for X" — so
+        // during a DB problem, exactly when someone is searching in a hurry,
+        // the product POSITIVELY STATED that no such firewall exists. A failed
+        // search and an empty search are different answers.
+        if (!res.ok || !data || data.error) {
+          setResults(null);
+          return;
+        }
         setResults({ devices: data.devices || [], advisories: data.advisories || [] });
       } catch (_err) {
         if (!mountedRef.current || requestSeqRef.current !== mySeq) return;
-        setResults({ devices: [], advisories: [] });
+        setResults(null);
       } finally {
         if (mountedRef.current && requestSeqRef.current === mySeq) setLoading(false);
       }
@@ -134,8 +143,12 @@ export default function HeaderSearch() {
   }, [query]);
 
   const pages = matchPages(query);
+  // ⛔ results === null means the SEARCH FAILED, not that it was empty. Every
+  // read below must tolerate it; the panel renders a distinct 'Search
+  // unavailable' branch before any of these are reached.
   const hasResults =
-    pages.length > 0 || results.devices.length > 0 || results.advisories.length > 0;
+    pages.length > 0 ||
+    (results !== null && (results.devices.length > 0 || results.advisories.length > 0));
 
   function go(href) {
     setOpen(false);
@@ -203,6 +216,13 @@ export default function HeaderSearch() {
           {loading ? (
             <div style={{ padding: '16px', fontSize: 'var(--text-base)', color: 'var(--text-muted)', textAlign: 'center' }}>
               Searching...
+            </div>
+          ) : results === null ? (
+            <div style={{ padding: '16px', fontSize: 'var(--text-base)', color: 'var(--unmeasured)', textAlign: 'center' }}>
+              Search unavailable
+              <div style={{ fontSize: 'var(--text-xs)', marginTop: 4 }}>
+                SecVault could not run the search. This does NOT mean there is no match.
+              </div>
             </div>
           ) : !hasResults ? (
             <div style={{ padding: '16px', fontSize: 'var(--text-base)', color: 'var(--text-muted)', textAlign: 'center' }}>

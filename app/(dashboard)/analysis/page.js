@@ -7,12 +7,21 @@ import EmptyState from '../../../components/ui/EmptyState';
 import StatCard from '../../../components/ui/StatCard';
 import PageHeader from '../../../components/ui/PageHeader';
 import { computeRiskScoreFromCounts } from '../../../lib/engines/riskScore';
+import {
+  BAND_BADGE_COLOR,
+  BAND_LABEL,
+  SEVERITY_FILL,
+  SEVERITY_TEXT_COLOR,
+} from '../../../components/analysis/severityRamp';
 
 export const dynamic = 'force-dynamic';
 
-// Same convention as devices/[id]/analysis/page.js.
-const RISK_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger' };
-const RISK_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+// ⛔ Band colours and labels come from components/analysis/severityRamp.js
+// and are NOT redeclared here. The private copy this file used to hold was the
+// pre-v2.87.0 ramp: `medium` rendered BLUE (one step from --primary teal, which
+// the palette rewrite forbade on any severity) and `high` rendered --yellow,
+// the ramp's MEDIUM hue, so a high-risk device and a medium-risk one argued
+// over one colour.
 
 // One row per active device, with per-severity finding counts. LEFT JOIN so
 // devices with zero findings still appear (all counts render as 0).
@@ -61,10 +70,13 @@ export default async function FleetAnalysisPage() {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        <StatCard label="Critical" value={totals.critical} color={totals.critical > 0 ? 'var(--red)' : 'var(--text-muted)'} />
-        <StatCard label="High" value={totals.high} color={totals.high > 0 ? 'var(--yellow)' : 'var(--text-muted)'} />
-        <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? 'var(--blue)' : 'var(--text-muted)'} />
-        <StatCard label="Info" value={totals.info} color="var(--text-muted)" />
+        {/* Tile accents are GRAPHICS (a 4px left border), so they take the raw
+            --sev-* hues via SEVERITY_FILL. The table cells below are TEXT and
+            take SEVERITY_TEXT_COLOR instead — see severityRamp.js. */}
+        <StatCard label="Critical" value={totals.critical} color={totals.critical > 0 ? SEVERITY_FILL.critical : 'var(--text-muted)'} />
+        <StatCard label="High" value={totals.high} color={totals.high > 0 ? SEVERITY_FILL.high : 'var(--text-muted)'} />
+        <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? SEVERITY_FILL.medium : 'var(--text-muted)'} />
+        <StatCard label="Info" value={totals.info} color={totals.info > 0 ? SEVERITY_FILL.info : 'var(--text-muted)'} />
         <StatCard label="Total Findings" value={totals.total} color="var(--text-primary)" />
       </div>
 
@@ -123,8 +135,8 @@ export default async function FleetAnalysisPage() {
                       findings; it fires the day someone adds a firewall, which is
                       exactly when someone is watching. */}
                   {r.last_analyzed_at ? (
-                    <Badge color={RISK_BAND_COLOR[r.risk.band]}>
-                      {RISK_BAND_LABEL[r.risk.band]} ({r.risk.score})
+                    <Badge color={BAND_BADGE_COLOR[r.risk.band] || 'muted'}>
+                      {BAND_LABEL[r.risk.band] || r.risk.band} ({r.risk.score})
                     </Badge>
                   ) : (
                     <Badge
@@ -135,9 +147,16 @@ export default async function FleetAnalysisPage() {
                     </Badge>
                   )}
                 </td>
+                {/* ⛔ TABLE-CELL TEXT, not a graphic. --red/--yellow/--blue are
+                    the raw ramp hues, and globals.css measures --yellow at
+                    3.64:1 on white — it clears 1.4.11's 3:1 for a graphical
+                    object and FAILS 1.4.3's 4.5:1 for text. The --tint-*-fg
+                    pairs in SEVERITY_TEXT_COLOR clear 4.5:1 in both themes by
+                    construction. (The StatCards above are 32px/800 and clear
+                    the large-text threshold on the raw hue, so they keep it.) */}
                 <td
                   style={{
-                    color: r.critical > 0 ? 'var(--red)' : 'var(--text-muted)',
+                    color: r.critical > 0 ? SEVERITY_TEXT_COLOR.critical : 'var(--text-muted)',
                     fontWeight: r.critical > 0 ? 600 : 400,
                   }}
                 >
@@ -145,13 +164,13 @@ export default async function FleetAnalysisPage() {
                 </td>
                 <td
                   style={{
-                    color: r.high > 0 ? 'var(--yellow)' : 'var(--text-muted)',
+                    color: r.high > 0 ? SEVERITY_TEXT_COLOR.high : 'var(--text-muted)',
                     fontWeight: r.high > 0 ? 600 : 400,
                   }}
                 >
                   {r.high}
                 </td>
-                <td style={{ color: r.medium > 0 ? 'var(--blue)' : 'var(--text-muted)' }}>{r.medium}</td>
+                <td style={{ color: r.medium > 0 ? SEVERITY_TEXT_COLOR.medium : 'var(--text-muted)' }}>{r.medium}</td>
                 <td style={{ color: 'var(--text-muted)' }}>{r.info}</td>
                 <td>{r.total}</td>
               </tr>

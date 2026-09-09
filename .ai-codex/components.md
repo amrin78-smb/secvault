@@ -254,3 +254,32 @@ measurement gap, and the two must not look alike.
 `Dismissed` / `—`), so a held-back rule is visibly held back where operators actually scan, and
 renders `loadError` as "Change requests could not be read — that is not the same as there being
 none." rather than an empty list.
+
+## components/analysis/severityRamp.js (added 2026-09-09)
+
+⛔ **THE single severity ramp.** Six private copies existed across pages and tabs, and the
+pre-v2.87.0 ramp had survived in all six — putting **blue back on severity**, one step from
+`--primary` teal, which is exactly the collapse the palette rewrite exists to prevent. Two of them
+sat on the SAME SCREEN as the corrected ramp (`devices/[id]/analysis` tiles above
+`FindingsBarChart`), and `RiskyRulesTab` rendered one band as a yellow tile and a blue badge five
+lines apart.
+
+One ramp in three representations, so a caller picks the REPRESENTATION and never the colour:
+- `SEVERITY_BADGE_COLOR` / `SEVERITY_LABEL` — Badge prop names
+- `SEVERITY_FILL` — `var(--sev-*)`, **graphics only** (tile accents, chart fills)
+- `SEVERITY_TEXT_COLOR` — `var(--tint-*-fg)`, **text**
+- `BAND_*` — the same ramp from the other end (`low` → `--sev-ok`, `attention` → `--unmeasured`)
+
+⛔ The FILL/TEXT split is load-bearing, not tidiness. `globals.css` measures the raw hues for
+GRAPHICS ONLY: `--yellow` is **3.64:1** on white and fails 1.4.3's 4.5:1 for text. Table cells using
+raw hues as text now use the tint-fg pairs (5.39–6.79:1 light, 8.16–10.96:1 dark). `StatCard` values
+stay on raw hues — 32px/800 clears the large-text threshold.
+
+`SeverityBadge.js` and `FindingsBarChart.js` already carried the correct ramp and were NOT edited;
+`tests/designSystemRamp.test.js` pins all of them together so they cannot drift again, and asserts
+every `--tint-*`/`--tint-*-fg` pair clears 4.5:1 in both themes by compositing the rgba over the real
+surface.
+
+Also fixed there: `exposure/page.js` returned `danger` for BOTH critical and high (a high path was
+indistinguishable from a critical one), `UsersPanel` badged the `admin` role in danger-red, and the
+`UpdateNotifier` banner was white on `--blue` at **2.48:1 in dark theme**.

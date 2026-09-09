@@ -128,6 +128,23 @@ export default function LogResults({ result, deviceNames, searchParams }) {
   const windowText =
     `${fmtTime(result.from)} to ${fmtTime(result.to)} UTC`;
 
+  // ⛔ A PAGE IS NOT A TOTAL. This line used to read "${rows.length} events"
+  // beside the window, which any reader takes as the number of events in that
+  // window — and on the last page of a 57-match hour it said a flat
+  // "7 events · 09:00 to 10:00 UTC". That is the number an investigator writes
+  // into a ticket, and it was wrong by a factor of eight.
+  //
+  // The search API deliberately carries NO total: at ~86M rows/day a COUNT(*)
+  // over the window is not something a page load can afford, which is exactly
+  // why paging here works off a limit+1 probe (result.hasMore) instead. So the
+  // honest label is the RANGE this page covers, never a count that implies a
+  // whole. A '+' on a bare number was not enough — it reads as "at least", not
+  // as "this page only".
+  const pageNum = Number.isFinite(result.page) && result.page > 0 ? result.page : 1;
+  const pageSize = Number.isFinite(result.limit) && result.limit > 0 ? result.limit : rows.length;
+  const firstRow = (pageNum - 1) * pageSize + 1;
+  const lastRow = firstRow + rows.length - 1;
+
   return (
     <Card>
       <CardBody>
@@ -143,10 +160,14 @@ export default function LogResults({ result, deviceNames, searchParams }) {
           }}
         >
           <strong style={{ color: 'var(--text-primary)', fontSize: 'var(--text-base)' }}>
-            {rows.length.toLocaleString()}{result.truncated ? '+' : ''} event
-            {rows.length === 1 ? '' : 's'}
+            {rows.length === 0
+              ? 'No rows on this page'
+              : `Rows ${firstRow.toLocaleString()}–${lastRow.toLocaleString()} on this page`}
           </strong>
-          <span>{windowText}</span>
+          {/* The window is a separate fact from the page, and is labelled as
+              one — the two used to sit side by side with nothing saying the
+              count did not describe the window. */}
+          <span>Window: {windowText}</span>
           <span>· {result.ms} ms</span>
         </div>
 
@@ -255,10 +276,18 @@ export default function LogResults({ result, deviceNames, searchParams }) {
                   {['Time (UTC)', 'Device', 'Action', 'Source', 'Destination', 'App / Rule', 'Detail'].map((h) => (
                     <th
                       key={h}
+                      /* ⛔ THE SAME GEOMETRY AS <Cell>, from the same tokens. These
+                         headings hardcoded '8px 10px' / 10px while the cells below
+                         them already used --row-pad-y/--row-pad-x/--row-font, so the
+                         heading sat 6px off its own column AND switching to dense
+                         moved every row without moving a single heading. In a
+                         seven-column forensic table that is read BY COLUMN, a
+                         heading that no longer lines up with its data is a
+                         misreading hazard, not a cosmetic one. */
                       style={{
                         textAlign: 'left',
-                        padding: '8px 10px',
-                        fontSize: 10,
+                        padding: 'var(--row-pad-y) var(--row-pad-x)',
+                        fontSize: 'var(--text-xs)',
                         letterSpacing: '0.07em',
                         textTransform: 'uppercase',
                         color: 'var(--text-muted)',

@@ -75,8 +75,18 @@ export default function UpdateNotifier() {
         width: '100%',
         flexShrink: 0,
         padding: '10px 24px',
-        background: 'var(--blue)',
-        color: '#fff',
+        /* ⛔ WHITE ON --blue IS 2.48:1 IN DARK THEME. --blue flips with the
+           theme (#2F6FE0 light → #6BA5FF dark); white text passes at 4.70:1 on
+           the light value and fails badly on the lighter dark one, so this
+           banner was legible for exactly half its users. The --tint-* pairs are
+           the tokens globals.css guarantees at >=4.5:1 in BOTH themes by
+           construction — measured here at 5.97:1 light and 8.53:1 dark over
+           --bg-primary. This banner sits in the content column, not on --navy,
+           so --tint-info-fg (which flips) is correct; --shell-fg would be the
+           right choice only on the header or sidebar. */
+        background: 'var(--tint-info)',
+        color: 'var(--tint-info-fg)',
+        borderBottom: '1px solid var(--border)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
@@ -88,7 +98,7 @@ export default function UpdateNotifier() {
         </span>
         <Link
           href="/settings"
-          style={{ color: '#fff', textDecoration: 'underline', fontWeight: 600, fontSize: 'var(--text-base)', whiteSpace: 'nowrap' }}
+          style={{ color: 'var(--tint-info-fg)', textDecoration: 'underline', fontWeight: 600, fontSize: 'var(--text-base)', whiteSpace: 'nowrap' }}
         >
           Go to Settings
         </Link>
@@ -100,7 +110,7 @@ export default function UpdateNotifier() {
         style={{
           background: 'transparent',
           border: 'none',
-          color: '#fff',
+          color: 'var(--tint-info-fg)',
           cursor: 'pointer',
           fontSize: 18,
           lineHeight: 1,

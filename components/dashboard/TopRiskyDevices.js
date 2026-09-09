@@ -3,6 +3,7 @@ import { pool } from '../../lib/db';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
+import { BAND_BADGE_COLOR, BAND_LABEL } from '../analysis/severityRamp';
 
 // Dashboard widget: top-N active devices by their LATEST rule-analysis risk
 // score. device_risk_history is populated every time runAnalysisForDevice()
@@ -14,11 +15,10 @@ import EmptyState from '../ui/EmptyState';
 // (not LEFT) -- a device with no risk history yet has nothing to rank and
 // should simply not appear in this widget.
 //
-// Same band color/label convention as components/analysis/RiskTab.js's
-// RISK_BAND_COLOR/RISK_BAND_LABEL -- keep in step if that mapping ever
-// changes.
-const RISK_BAND_COLOR = { low: 'success', medium: 'info', high: 'warning', critical: 'danger' };
-const RISK_BAND_LABEL = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+// ⛔ Bands come from components/analysis/severityRamp.js — one source, not a
+// local copy kept "in step" by comment. This file's copy was still the
+// pre-v2.87.0 ramp, so a medium-risk device wore a BLUE badge one step from
+// the --primary brand hue.
 
 async function getTopRiskyDevices(dbPool, limit) {
   const { rows } = await dbPool.query(
@@ -74,8 +74,8 @@ export default async function TopRiskyDevices({ limit = 5 }) {
               <Badge color="info">{device.vendor}</Badge>
             </td>
             <td>
-              <Badge color={RISK_BAND_COLOR[device.band] || 'muted'}>
-                {RISK_BAND_LABEL[device.band] || device.band} ({device.score})
+              <Badge color={BAND_BADGE_COLOR[device.band] || 'muted'}>
+                {BAND_LABEL[device.band] || device.band} ({device.score})
               </Badge>
             </td>
           </tr>

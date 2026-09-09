@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.97.0': [
+    "Log collection is more durable. A backlog could previously be processed twice at startup, storing every event in it twice; and a database hiccup lasting about ten seconds could set a batch of events aside permanently, with nothing that ever picked them up again. Both are fixed, and set-aside batches are now retried for 30 minutes and re-queued on restart.",
+    "Fixed: some vendor advisories could never be matched against a firewall, so a device could be reported as assessed and clean against a set of vulnerabilities that was never actually checked. 82 advisories now match properly, and any that still cannot be matched are reported rather than stored as if they had been.",
+    "Fixed: a rule could be reported as unused while SecVault’s own logs showed traffic on it — six such findings existed here, one with over 127,000 logged hits.",
+    "A firewall that answers but cannot report one optional feature is no longer counted as unreachable, and a firewall that has genuinely stopped answering is no longer counted as reachable. Six more checks were corrected across the Fortinet, Palo Alto and Cisco connectors.",
+    "Severity colours are now consistent everywhere. Blue had returned to the severity scale on six screens — twice on the same page as the corrected scale — and several table values failed contrast requirements.",
+    "Lists that were quietly cut short now say so: the device Rules tab states “First 20 rules of 706”, and log search labels its row range rather than implying it is the whole window.",
+    "Fixed: the monthly compliance report would have been sent twice and then never again, because its schedule and its idea of “last month” were on different clocks.",
+  ],
   '2.96.0': [
     "Fixed: failed VPN login counts were roughly 8x too high. A source that tried many usernames had its failure count multiplied by how many it tried, so the brute-force volume shown was far larger than what actually happened.",
     "Fixed: Palo Alto VPN login failures were counted as zero. That firewall reports the outcome in a different field, which this page was not reading.",

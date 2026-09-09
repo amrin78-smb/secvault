@@ -25,7 +25,14 @@ const TYPE_DOT_COLOR = {
 export default function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [summary, setSummary] = useState({ total: 0, items: [] });
+  // ⛔ `null`, NOT a fabricated `{total: 0}`. The initial state used to be a
+  // zero summary, and a failed first load left it in place — so a DB error on
+  // /api/notifications/summary rendered no badge, "0 open", and a bold GREEN
+  // "Nothing needs attention" on every page. The catch's own comment ("leave
+  // last-known summary in place") is right for a LATER poll and wrong for the
+  // first, when the "last known" value is one nobody measured.
+  const [summary, setSummary] = useState(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -34,9 +41,21 @@ export default function NotificationBell() {
       try {
         const res = await fetch('/api/notifications/summary');
         const data = await res.json();
-        if (!cancelled && data && !data.error) setSummary(data);
+        if (cancelled) return;
+        // ⛔ The route returns {error} with a 500 on any DB failure. Treat a
+        // non-ok status or an error body as a FAILED READ, never as data.
+        if (!res.ok || !data || data.error) {
+          setLoadFailed(true);
+          return;
+        }
+        setLoadFailed(false);
+        setSummary(data);
       } catch (_err) {
-        // leave last-known summary in place
+        // A later poll failing keeps the last real summary on screen — that is
+        // still the newest thing actually measured. It only sets the flag, so
+        // the panel can say the figure may be stale rather than silently
+        // presenting it as current.
+        if (!cancelled) setLoadFailed(true);
       }
     }
     load();
@@ -55,7 +74,10 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  const total = summary.total || 0;
+  // ⛔ null total means UNKNOWN, not zero. The badge is suppressed for both,
+  // but the panel below must say WHICH of the two it is.
+  const total = summary ? summary.total || 0 : null;
+  const unknown = summary === null;
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -110,9 +132,18 @@ export default function NotificationBell() {
         >
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--text-primary)' }}>Notifications</div>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{total} open</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: unknown ? 'var(--unmeasured)' : 'var(--text-muted)' }}>
+              {unknown ? 'count unavailable' : loadFailed ? total + ' open (may be stale)' : total + ' open'}
+            </span>
           </div>
-          {summary.items && summary.items.length > 0 ? (
+          {unknown ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', fontSize: 'var(--text-base)', color: 'var(--unmeasured)' }}>
+              Could not check for alerts — retry shortly.
+              <div style={{ fontSize: 'var(--text-xs)', marginTop: 4 }}>
+                This is not a statement that nothing needs attention.
+              </div>
+            </div>
+          ) : summary.items && summary.items.length > 0 ? (
             <div style={{ maxHeight: 320, overflow: 'auto' }}>
               {summary.items.map((item, i) => (
                 <div
@@ -145,7 +176,7 @@ export default function NotificationBell() {
               router.push('/alerts');
             }}
             style={{ width: '100%', padding: '11px 16px', background: 'var(--bg-card)', border: 'none', borderTop: '1px solid var(--border-light)', cursor: 'pointer', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--primary)', textAlign: 'center' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--tint-danger)')}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card)')}
           >
             View All Alerts &rarr;

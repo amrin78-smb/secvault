@@ -5,6 +5,7 @@ import Card, { CardBody } from '../../../components/ui/Card';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import { computeFleetExposure } from '../../../lib/engines/exposureQuery';
+import { SEVERITY_BADGE_COLOR, SEVERITY_LABEL } from '../../../components/analysis/severityRamp';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,12 +30,22 @@ export const dynamic = 'force-dynamic';
 // oblivion: an unused open door is still open, and treating quiet as closed is
 // how a forgotten vendor rule survives an audit.
 
-const CELL = { padding: '10px 12px', verticalAlign: 'top', fontSize: 'var(--text-sm)' };
+// ⛔ ROW GEOMETRY COMES FROM THE DENSITY TOKENS, never a hardcoded padding.
+// These cells used to be '10px 12px' / '9px 12px' with a literal 10px heading,
+// so Settings → Appearance → Density did nothing to this table while every
+// shared <Table> around it changed height. --row-pad-y/--row-pad-x/--row-font
+// are exactly what globals.css's own th/td rules use, so a hand-rolled table
+// tracks the switch identically to a shared one.
+const CELL = {
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
+  verticalAlign: 'top',
+  fontSize: 'var(--row-font)',
+};
 
 const TH = {
   textAlign: 'left',
-  padding: '9px 12px',
-  fontSize: 10,
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
+  fontSize: 'var(--text-xs)',
   letterSpacing: '0.07em',
   textTransform: 'uppercase',
   color: 'var(--text-muted)',
@@ -121,7 +132,16 @@ function exposureProportionBar(totals) {
       key: 'unmeasured',
       n: totals.unmeasured,
       label: 'unmeasured',
-      bg: 'repeating-linear-gradient(45deg, var(--yellow) 0 4px, transparent 4px 8px)',
+      // ⛔ --hatch, the shared hueless token, NOT a hand-rolled yellow one.
+      // This drew the same 45° pattern in --yellow until 2026-09-09, and
+      // --yellow is the MEDIUM step of the severity ramp — so "we could not
+      // look at this" rendered as a medium-severity finding sitting between a
+      // red measured-reached and a grey measured-quiet. CLAUDE.md's design
+      // system is explicit that a not-measured state has NO HUE: --unmeasured
+      // for text, --hatch for a bar segment or swatch. The KIND distinction
+      // this bar's comment above relies on survives intact — hatched versus
+      // solid is what carries it, and it still works in greyscale.
+      bg: 'var(--hatch)',
     },
   ];
 
@@ -178,11 +198,14 @@ function exposureProportionBar(totals) {
   );
 }
 
+// ⛔ THE RAMP, from components/analysis/severityRamp.js — not a local map.
+// 'critical' and 'high' both returned `danger` here, so the most exposed path
+// on the fleet was indistinguishable from the one below it and the sort order
+// was the only thing carrying the difference. 'high' is --orange on this
+// product's ramp; red stays reserved for the top band.
 function severityBadge(sev) {
-  if (sev === 'critical') return <Badge color="danger">Critical</Badge>;
-  if (sev === 'high') return <Badge color="danger">High</Badge>;
-  if (sev === 'medium') return <Badge color="warning">Medium</Badge>;
-  return <Badge color="muted">Low</Badge>;
+  const key = SEVERITY_BADGE_COLOR[sev] ? sev : 'low';
+  return <Badge color={SEVERITY_BADGE_COLOR[key]}>{SEVERITY_LABEL[key]}</Badge>;
 }
 
 // ⛔ Three distinct renderings for three distinct states. "Not seen" and
