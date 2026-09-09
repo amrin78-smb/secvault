@@ -943,6 +943,19 @@ CREATE TABLE IF NOT EXISTS advisories (
 ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cwe_ids TEXT[];
 ALTER TABLE advisories ADD COLUMN IF NOT EXISTS vulnerability_category TEXT;
 
+-- CVSS PROVENANCE (2026-09-09). A score with no source is a number whose
+-- meaning can change without anyone noticing, and it did: the fleet severity
+-- histogram alternated between 15/33/99/21 and 4/11/66/87 on IDENTICAL totals
+-- of 168, because NVD and the CIRCL fallback expose different CVSS VERSIONS
+-- for the same CVE and the picker takes whichever is present (v4 > v3.1 >
+-- v3.0 > v2). Whichever source answered that day decided the score.
+--
+-- ⛔ These columns are descriptive, never an input to the priority tree. The
+-- tree bands on cvss_score alone (CLAUDE.md rules 3 and 4); recording where a
+-- score came from must not quietly become a second way to change a band.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cvss_source TEXT;   -- nvd | circl | psirt
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cvss_version TEXT;  -- '4.0' | '3.1' | '3.0' | '2.0'
+
 CREATE INDEX IF NOT EXISTS idx_advisories_vendor ON advisories(vendor);
 CREATE INDEX IF NOT EXISTS idx_advisories_kev_listed ON advisories(kev_listed);
 CREATE INDEX IF NOT EXISTS idx_advisories_cvss_score ON advisories(cvss_score);
