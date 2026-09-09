@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { describeConfigChange } from '../../lib/configChangeSummary';
 import { pool } from '../../lib/db';
 import Card from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
@@ -28,7 +29,7 @@ import { IconRefresh } from '../icons';
 
 async function getConfigChanges(dbPool, days) {
   const { rows } = await dbPool.query(
-    `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary, cd.detected_at,
+    `SELECT cd.id, cd.device_id, d.name AS device_name, cd.change_summary, cd.diff, cd.detected_at,
             COALESCE(jsonb_array_length(cd.diff->'added'), 0) AS added_count,
             COALESCE(jsonb_array_length(cd.diff->'removed'), 0) AS removed_count,
             COALESCE(jsonb_array_length(cd.diff->'modified'), 0) AS modified_count
@@ -117,7 +118,7 @@ export default async function ConfigChangesWidget({ days = 7 }) {
                     }}
                     title={r.change_summary || 'Config changed'}
                   >
-                    {r.change_summary || 'Config changed'}
+                    {describeConfigChange(r.diff, r.change_summary) || 'Config changed'}
                   </span>
                 </Link>
               ))}

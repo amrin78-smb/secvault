@@ -34,6 +34,76 @@ function formatLastRun(value) {
 // about component definitions, not JSX-returning helper functions, but the
 // distinction only matters if this stays a plain function and is never
 // invoked as `<StatusPanel />`.
+// Composition bar for one standard.
+//
+// ⛔ Module top level, a plain function returning JSX called imperatively —
+// never a component defined inside a component (CLAUDE.md's React rule).
+//
+// The donut beside this shows only the PASS PERCENTAGE. The fail/warning
+// composition — the part that says what to go and fix — was four bare numbers
+// in a sentence the reader had to add up and divide, ten times per compliance
+// visit, and comparing two standards meant doing that arithmetic twice.
+//
+// ⛔ `na` is rendered HATCHED and set apart after a gap, NOT as a fourth
+// coloured grade. It is excluded from the score's denominator entirely
+// (CLAUDE.md's warning-vs-na rule: `na` is a fact about SecVault's inability to
+// ask the question, not about the device), so drawing it flush with the graded
+// segments would imply it counts against the score. The existing "n/a excluded
+// from the score" caption then labels a visible thing rather than floating
+// loose.
+function complianceBar(stats) {
+  const graded = stats.pass + stats.fail + stats.warning;
+  // Nothing gradeable: the card's own "Not measurable" branch already handles
+  // this case in words, and a bar of zero segments would read as an empty
+  // result rather than an unmeasurable one.
+  if (graded <= 0) return null;
+
+  const pct = (n) => `${(n / graded) * 100}%`;
+  const seg = (w, bg, label) => (
+    <div
+      key={label}
+      title={label}
+      style={{ width: w, background: bg, height: '100%' }}
+      aria-label={label}
+    />
+  );
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div
+        style={{
+          display: 'flex',
+          height: 8,
+          flex: '1 1 auto',
+          borderRadius: 'var(--radius-pill)',
+          overflow: 'hidden',
+          background: 'var(--bg-primary)',
+        }}
+      >
+        {stats.pass > 0 ? seg(pct(stats.pass), 'var(--green)', `${stats.pass} passing`) : null}
+        {stats.fail > 0 ? seg(pct(stats.fail), 'var(--red)', `${stats.fail} failing`) : null}
+        {stats.warning > 0
+          ? seg(pct(stats.warning), 'var(--yellow)', `${stats.warning} warning`)
+          : null}
+      </div>
+      {stats.na > 0 ? (
+        <div
+          title={`${stats.na} not applicable — excluded from the score`}
+          aria-label={`${stats.na} not applicable`}
+          style={{
+            width: 22,
+            height: 8,
+            borderRadius: 'var(--radius-pill)',
+            border: '1px solid var(--border)',
+            background:
+              'repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 6px)',
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function statusPanel({ stats, failedChecks, failedChecksTotal, viewMoreHref }) {
   if (stats.scorePct === 100) {
     return <Badge color="success">Fully Compliant</Badge>;
@@ -184,6 +254,7 @@ export default function StandardCard({
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16 }}>
           <StandardDonut pct={stats.scorePct} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 160, flex: '1 1 200px' }}>
+            {complianceBar(stats)}
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
               {`${stats.pass} pass · ${stats.fail} fail · ${stats.warning} warning · ${stats.na} n/a`}
               {/* The four counts are not four equal parts of the score: `na`

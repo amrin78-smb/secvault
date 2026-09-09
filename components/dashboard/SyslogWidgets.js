@@ -4,6 +4,7 @@ import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import IconChip from '../ui/IconChip';
 import { IconActivity, IconShield, IconTrendingUp, IconDevices, IconRefresh } from '../icons';
+import { classifyAction } from '../../lib/syslog/actions';
 import {
   getTrafficTimeline,
   getTopTalkers,

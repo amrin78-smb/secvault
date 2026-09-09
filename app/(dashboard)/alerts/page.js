@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { describeConfigChange } from '../../../lib/configChangeSummary';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { isAdmin } from '../../../lib/rbac';
@@ -105,6 +106,7 @@ function buildEventsCte(typeParam, deviceId, open) {
               dca.device_id                AS device_id,
               d.name                       AS device_name,
               a.cve_id                     AS label,
+              NULL::jsonb                  AS diff,
               dca.assessed_at              AS occurred_at,
               COALESCE(caa.status, 'new')  AS status,
               dca.advisory_id              AS advisory_id,
@@ -131,6 +133,7 @@ function buildEventsCte(typeParam, deviceId, open) {
               cd.device_id                                 AS device_id,
               d.name                                       AS device_name,
               COALESCE(cd.change_summary, 'Config changed') AS label,
+              cd.diff                                      AS diff,
               cd.detected_at                               AS occurred_at,
               CASE WHEN cd.acknowledged_at IS NULL THEN 'new' ELSE 'acknowledged' END AS status,
               NULL::uuid                                   AS advisory_id,
@@ -184,6 +187,7 @@ async function fetchEventPage(dbPool, cte, values, limit, offset) {
           deviceId: r.device_id,
           deviceName: r.device_name,
           label: r.label,
+          diff: r.diff,
           severity: null,
           status: r.status,
           occurredAt: r.occurred_at,
@@ -315,7 +319,7 @@ export default async function AlertsPage({ searchParams }) {
                           href={`/devices/${item.deviceId}/changes?diff=${item.id}#diff-${item.id}`}
                           className="link-quiet"
                         >
-                          {item.label}
+                          {describeConfigChange(item.diff, item.label) || item.label}
                         </Link>
                       ) : (
                         item.label

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { describeConfigChange } from '../../lib/configChangeSummary';
 import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
@@ -181,7 +182,7 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
                     }}
                     title={r.change_summary || 'Config changed'}
                   >
-                    {r.change_summary || 'Config changed'}
+                    {describeConfigChange(r.diff, r.change_summary) || 'Config changed'}
                   </span>
                 </Link>
                 );
