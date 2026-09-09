@@ -387,8 +387,11 @@ export async function DeviceThreatTable() {
                   genuinely be clean, or may simply not be sending its IPS and
                   antivirus logs. Those are different, and this does not claim
                   to tell them apart. */}
-              A dash means no threat events were received — which can mean a quiet
-              device or one not forwarding its IPS/antivirus logs.
+              A dash means no security detections were recorded for this device in the
+              window. Counted for every vendor: a BLOCK by a security profile — Palo Alto
+              threat events (including URL filtering) and Fortinet web-category blocks.
+              Not counted: sandbox submissions, informational SSL anomalies, and traffic a
+              profile explicitly allowed.
               {anyThreat ? '' : ' No device reported any threat events in this window.'}
             </div>
           </>

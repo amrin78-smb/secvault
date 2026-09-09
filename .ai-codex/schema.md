@@ -977,7 +977,23 @@ over-counts. With dst_ip as a grouping key, count(DISTINCT dst_ip) over any span
 5,058 rows/hour with dst_ip vs 1,555 without. Verified numerically identical to the raw query for
 attackers, severity, threats and per-device before deploy.
 
-⛔ Scope is `log_class = 'threat'` ALONE, and that is a measured performance decision, not an
+⛔ Scope is Palo Alto threat events PLUS Fortinet webfilter BLOCKS (v2.90.1). The two vendors use
+different words for the same thing: PAN files every detection under log_class=threat (including
+URL filtering, ~49k/hour); FortiOS has no such class and files its equivalents under log_class=utm.
+Filtering on threat alone counted one vendor's URL blocks and not the other's, so every Fortinet
+device read as a dash while actively blocking traffic — INCONSISTENT rather than merely incomplete.
+
+⛔ ONLY webfilter blocks are added, and the exclusions matter as much. Measured over 24h, FortiOS utm
+also carries 92,102 virus/analytics rows ("File submitted to Sandbox" — no verdict), ~35,000
+informational ssl-anomaly rows, and app-ctrl/ftgd_allow rows for traffic explicitly ALLOWED.
+Counting those would have added ~135k non-events per day and made the fleet look under attack. The
+rule is parity: a BLOCK by a security profile counts, for both vendors, nothing else does.
+
+⛔ ZERO eventtype=infected rows and no ips subtype exist in 24h, so this fleet has no FortiGate virus
+or IPS detections at all — either genuinely none or those log types are not enabled. A coverage fact
+about the devices, not something the query can fix.
+
+⛔ The predicate leads with log_class IN (threat, utm) so the PARTIAL index stays usable, and that is a
 oversight. getTopThreats() filters on threat_name only, so the wider
 `OR threat_name IS NOT NULL` looks safer — but it makes the PARTIAL index
 `(log_class, received_at DESC) WHERE log_class <> 'traffic'` unusable. Measured over a 6h slice:
