@@ -73,6 +73,12 @@ const { recordConnectivity } = require('../lib/engines/connectivityHistory');
 const { runLogHitCorrelation } = require('../lib/engines/logHit');
 const { runDeviceDiscovery } = require('../lib/engines/deviceDiscovery');
 const {
+  claimNextJob,
+  reportProgress,
+  finishJob,
+  reapStaleJobs,
+} = require('../lib/engines/backgroundJobs');
+const {
   runConfigRetention,
   formatRetentionSummary,
   DEFAULT_CONFIG_RETENTION_DAYS,
@@ -1080,6 +1086,297 @@ async function runComplianceReportJob() {
 }
 
 // ---------------------------------------------------------------------------
+// Background job queue (background_jobs) — the on-demand work that used to run
+// on the HTTP request path
+// ---------------------------------------------------------------------------
+//
+// ⛔ WHY. On 2026-09-09 an operator clicked Collect Now on a FortiGate.
+// collectAndStore ran getVersion + getRules + getConfig in sequence — 111
+// seconds — and POST /api/devices/[id]/collect held the request open for all of
+// it. The collection itself was correct (38 rules, 44 licences, a config and a
+// version); what was wrong is that a 111-second FOREGROUND request existed at
+// all. The API now only enqueues; this worker executes; the UI polls
+// GET /api/jobs/[id]. See lib/engines/backgroundJobs.js for the queue itself.
+//
+// ⛔ THE WORKER, NOT THE APP. A deploy restarts SecVault-App at any moment, and
+// a half-finished delete owned by a dead HTTP request is the one state nothing
+// can report on afterwards.
+
+const JOB_QUEUE_TYPES = ['device_collect', 'device_delete'];
+
+// Every 5 seconds. This is a BUTTON's latency budget, not a housekeeping
+// cadence — the operator is watching a spinner — so it is a setInterval rather
+// than one of this file's cron tasks, whose natural unit here is the minute.
+const JOB_QUEUE_POLL_MS = 5000;
+
+// ⛔ Reaping matters as much as running. A job whose worker died leaves a row
+// saying 'running' forever, which the UI cannot tell from work in progress and
+// so spins on indefinitely. reapStaleJobs() moves it to 'failed' WITH A REASON
+// — never to 'succeeded', which on a delete would claim a device was removed
+// when it may not have been.
+const JOB_REAP_INTERVAL_MS = 5 * 60 * 1000;
+
+// A tick drains at most this many jobs, then yields to the next tick. Bounds
+// how long a single tracked job can hold up a graceful shutdown.
+const JOB_QUEUE_MAX_PER_TICK = 5;
+
+let jobQueueInFlight = false;
+let jobQueueTimer = null;
+let jobReaperTimer = null;
+
+// ⛔ HOW A STRUCTURED RESULT SURVIVES THE TRIP TO THE UI.
+// background_jobs has no JSON column, so a job's structured result is written
+// into `detail` as a JSON object and parsed back out by GET /api/jobs/[id].
+// That indirection exists for ONE reason: collectAndStore's `rulesCount` is
+// TRI-STATE — NULL when the rule pull FAILED, and a number (including a genuine
+// 0) when it succeeded, the same tri-state as hit_count. A human sentence alone
+// cannot be re-read by the client, and any step that reduced the value to "a
+// count" would turn a failed pull into "Collected — 0 rules." in the one place
+// the operator is actively watching for the result. JSON carries null as null.
+// The route treats a `detail` that is not JSON as plain progress text, so
+// another job type's onProgress may pass a bare string.
+function jobDetail(message, extra) {
+  return JSON.stringify(Object.assign({ message }, extra || {}));
+}
+
+// Progress reporting must never be able to fail a job: losing a progress line
+// is cosmetic, losing the work is not.
+async function safeProgress(jobId, patch) {
+  try {
+    const p = typeof patch === 'string' ? { detail: patch } : patch || {};
+    await reportProgress(pool, jobId, {
+      current: p.current === undefined ? null : p.current,
+      total: p.total === undefined ? null : p.total,
+      detail: typeof p.detail === 'string' ? p.detail : null,
+    });
+  } catch (err) {
+    logger.warn(`Job [job-queue] progress update failed for job ${jobId}: ${err.message}`);
+  }
+}
+
+// Returns {status, error?, detail?} — never throws for an expected condition.
+async function runDeviceCollectJob(job) {
+  const { rows } = await pool.query('SELECT * FROM devices WHERE id = $1', [job.device_id]);
+  const device = rows[0];
+  if (!device) {
+    return {
+      status: 'failed',
+      error: 'Device no longer exists — it may have been deleted while this collect was queued. Nothing was collected.',
+    };
+  }
+  if (!SUPPORTED_VENDORS.includes(device.vendor)) {
+    return {
+      status: 'failed',
+      error: `Unsupported vendor "${device.vendor}". Supported: ${SUPPORTED_VENDORS.join(', ')}. Nothing was collected.`,
+    };
+  }
+
+  // ⛔ progress_total is left NULL, deliberately. collectAndStore reports no
+  // step count, and this worker must not invent one: a bar rendering an unknown
+  // total as 0/0 reads as FINISHED. NULL means "the size is not known", which
+  // is the truth here, and the UI renders it without a hue.
+  await safeProgress(job.id, {
+    detail: jobDetail(
+      `Contacting ${device.name || device.mgmt_ip || device.smc_host || 'the device'} — version, rules and configuration…`
+    ),
+  });
+
+  const result = await collectAndStore(device, pool);
+
+  // ⛔ NOT `result.rulesCount ?? 0` and NOT `|| 0`. null here means the rule
+  // pull FAILED; a number (including 0) means it succeeded and that is what the
+  // device reported. See the header comment on jobDetail().
+  const rulesCount =
+    result.rulesCount === null || result.rulesCount === undefined ? null : Number(result.rulesCount);
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+
+  const message =
+    rulesCount === null
+      ? 'Collected, but the device reported no rule count — the ruleset was NOT updated.'
+      : `Collected — ${rulesCount} rules.`;
+
+  const detail = jobDetail(message, {
+    rulesCount,
+    version: result.version && result.version.version_string ? result.version.version_string : null,
+    configCollected: result.configCollected === true,
+    configChanged: result.configChanged === true,
+    errors,
+  });
+
+  if (errors.length > 0) {
+    // A partial collect is not a success. The structured detail still travels
+    // with it so the operator can see what DID land alongside what did not.
+    return {
+      status: 'failed',
+      error: `Collected with ${errors.length} error(s): ${errors[0]}`,
+      detail,
+    };
+  }
+  return { status: 'succeeded', detail };
+}
+
+// ⛔ lib/engines/deviceDeletion.js is required LAZILY, inside the handler.
+// A missing or broken module at the top of this file would take the whole
+// engine service down — every scheduled job with it — for a feature that is
+// only reachable from one button. Here, its absence fails exactly ONE job, with
+// a message that says plainly that the device was NOT deleted.
+async function runDeviceDeleteJobHandler(job) {
+  let mod = null;
+  try {
+    // eslint-disable-next-line global-require
+    mod = require('../lib/engines/deviceDeletion');
+  } catch (err) {
+    return {
+      status: 'failed',
+      error:
+        `Device deletion is not available in this build (${err.message}). ` +
+        'The device was NOT deleted.',
+    };
+  }
+  if (!mod || typeof mod.runDeviceDeleteJob !== 'function') {
+    return {
+      status: 'failed',
+      error:
+        'Device deletion is not available in this build — lib/engines/deviceDeletion.js exports no ' +
+        'runDeviceDeleteJob(pool, job, { onProgress }). The device was NOT deleted.',
+    };
+  }
+  // ⛔ The engine deliberately does NOT close the job out itself: the worker
+  // claimed it, so the worker owns the terminal status, and nothing else may
+  // write 'succeeded'. See the integration-seam comment in deviceDeletion.js.
+  try {
+    const summary = await mod.runDeviceDeleteJob(pool, job, {
+      onProgress: (patch) => safeProgress(job.id, patch),
+    });
+    return {
+      status: 'succeeded',
+      detail: summary && typeof summary.detail === 'string' ? summary.detail : null,
+    };
+  } catch (err) {
+    // A DeviceDeleteError carries the PARTIAL work it had completed before it
+    // stopped. Keeping that alongside the error is the difference between "the
+    // delete failed" and "the delete failed, and here is exactly how far it
+    // got" — which is what tells the operator whether re-running is safe.
+    const partial =
+      err && err.summary && typeof err.summary.detail === 'string' ? err.summary.detail : null;
+    return { status: 'failed', error: err.message || String(err), detail: partial };
+  }
+}
+
+async function executeOneJob(job) {
+  const startedAt = Date.now();
+  logger.info(
+    `Job [job-queue] start ${job.job_type} ${job.id} (device ${job.device_id || 'n/a'}, requested by ${job.requested_by || 'unknown'}).`
+  );
+
+  let outcome;
+  try {
+    if (job.job_type === 'device_collect') {
+      outcome = await runDeviceCollectJob(job);
+    } else if (job.job_type === 'device_delete') {
+      outcome = await runDeviceDeleteJobHandler(job);
+    } else {
+      outcome = {
+        status: 'failed',
+        error: `Unknown job type "${job.job_type}" — this worker has no handler for it.`,
+      };
+    }
+  } catch (err) {
+    // ⛔ One failed job must NEVER crash the service (CLAUDE.md Reliability
+    // Rules). It also must never be left 'running' — see the finishJob below.
+    outcome = { status: 'failed', error: err.message || String(err) };
+    logger.error(`Job [job-queue] ${job.job_type} ${job.id} threw: ${err.stack || err.message}`);
+  }
+
+  // ⛔ ALWAYS close the row out. A row left 'running' by a handler that returned
+  // without finishing is indistinguishable from work still in progress, and the
+  // UI polls it forever. If even this write fails, the reaper is the backstop —
+  // which fails it, honestly, rather than assuming it worked.
+  try {
+    await finishJob(pool, job.id, outcome.status, {
+      error: outcome.error || null,
+      detail: outcome.detail || null,
+    });
+  } catch (err) {
+    logger.error(
+      `Job [job-queue] could not record the result of ${job.id} (${err.message}). ` +
+        'It will be reaped to failed; whether the work completed is unknown.'
+    );
+  }
+
+  const ms = Date.now() - startedAt;
+  const line = `Job [job-queue] end ${job.job_type} ${job.id} → ${outcome.status} in ${ms}ms.${outcome.error ? ` ${outcome.error}` : ''}`;
+  if (outcome.status === 'succeeded') logger.info(line);
+  else logger.warn(line);
+}
+
+async function runJobQueueTick() {
+  // Silent, not logged: this fires every 5 seconds and a long collect would
+  // otherwise write a warning line every tick for two minutes.
+  if (jobQueueInFlight) return;
+  jobQueueInFlight = true;
+  try {
+    let drained = 0;
+    while (!shuttingDown && drained < JOB_QUEUE_MAX_PER_TICK) {
+      // eslint-disable-next-line no-await-in-loop
+      const job = await claimNextJob(pool, JOB_QUEUE_TYPES);
+      if (!job) break;
+      drained += 1;
+      // eslint-disable-next-line no-await-in-loop
+      await executeOneJob(job);
+    }
+  } catch (err) {
+    // Reaching here means the CLAIM failed (e.g. the DB went away), not a job —
+    // executeOneJob self-catches. Log and let the next tick retry.
+    logger.error(`Job [job-queue] tick failed: ${err.stack || err.message}`);
+  } finally {
+    jobQueueInFlight = false;
+  }
+}
+
+async function runJobReaperTick() {
+  try {
+    const reaped = await reapStaleJobs(pool);
+    if (reaped.length > 0) {
+      logger.warn(
+        `Job [job-reaper] reaped ${reaped.length} stale job(s) to 'failed': ` +
+          `${reaped.map((r) => `${r.job_type}/${r.id}`).join(', ')}. ` +
+          'Whether that work completed is unknown — it was not assumed to have succeeded.'
+      );
+    }
+  } catch (err) {
+    logger.error(`Job [job-reaper] failed: ${err.message}`);
+  }
+}
+
+// ⛔ Started EARLY in main(), before the long immediate-on-startup passes
+// (feed sync, rule-version pull), not from scheduleJobs(). Those run for
+// minutes on a real fleet, and a queue that only comes alive after them would
+// leave a Collect Now clicked just after a deploy sitting untouched the whole
+// time — reintroducing the wait this whole change exists to remove.
+function startJobQueue() {
+  logger.info(
+    `Starting [job-queue] polling every ${JOB_QUEUE_POLL_MS}ms for ${JOB_QUEUE_TYPES.join(', ')}, ` +
+      `with [job-reaper] every ${JOB_REAP_INTERVAL_MS}ms.`
+  );
+  jobQueueTimer = setInterval(() => {
+    if (shuttingDown) return;
+    runTrackedJob(runJobQueueTick, 'job-queue');
+  }, JOB_QUEUE_POLL_MS);
+  jobReaperTimer = setInterval(() => {
+    if (shuttingDown) return;
+    runTrackedJob(runJobReaperTick, 'job-reaper');
+  }, JOB_REAP_INTERVAL_MS);
+}
+
+function stopJobQueue() {
+  if (jobQueueTimer) clearInterval(jobQueueTimer);
+  if (jobReaperTimer) clearInterval(jobReaperTimer);
+  jobQueueTimer = null;
+  jobReaperTimer = null;
+}
+
+// ---------------------------------------------------------------------------
 // isJobRunning tracking (for graceful shutdown)
 // ---------------------------------------------------------------------------
 
@@ -1265,6 +1562,16 @@ async function main() {
 
   await verifyDbConnectivity();
 
+  // ⛔ FIRST, before every long startup pass below. A job row left 'running' by
+  // the process this one is replacing (a deploy restart is exactly that) must be
+  // failed with a reason immediately, not in five minutes' time — until it is,
+  // the partial unique index on (job_type, device_id) also blocks the operator
+  // from re-queueing the same work.
+  await runTrackedJob(runJobReaperTick, 'job-reaper');
+  // Then bring the queue up, so a Collect Now clicked seconds after a deploy is
+  // served while the startup passes below are still running.
+  startJobQueue();
+
   // Immediate on-startup passes so data is fresh before any scheduled cycle fires.
   await runTrackedJob(runFeedSyncAndMatchJob, 'feed-sync-and-match');
   await runTrackedJob(runRuleVersionPullJob, 'rule-version-pull');
@@ -1324,6 +1631,12 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info(`Received ${signal}. Stopping scheduled jobs and waiting for any in-flight job to finish.`);
+
+  // The job queue's timers are not in scheduledTasks (they are started earlier,
+  // in main(), and scheduleJobs() reassigns that array wholesale). Stop them
+  // here so no NEW job is claimed while we drain — a job already in flight is
+  // still waited for below, via runningJobCount.
+  stopJobQueue();
 
   for (const task of scheduledTasks) {
     try {

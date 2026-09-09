@@ -276,3 +276,21 @@ error. The refusal is the product working, not failing.
 
 The `export` GET is ungated to match `/api/compliance/report/pdf`; the two mutating routes follow
 CLAUDE.md's RBAC rule (mutations of shared system state), unlike saved views.
+
+## Background jobs (added 2026-09-09, v2.94.0)
+
+| route | methods | gating | notes |
+|---|---|---|---|
+| `/api/devices/[id]/collect` | `POST` | admin | ⛔ Now returns **202** with `{jobId, status, created, pollUrl}` — it ENQUEUES. It no longer imports `collectAndStore` and no longer waits (a live collect took 111s in the foreground and made the UI unusable). |
+| `/api/jobs/[id]` | `GET` | authenticated, ungated | Poll target. Parses the job's JSON `detail` back into a structured `result`. |
+
+⛔ A `202` is not a success report. `created:false` means an identical job was already live and the
+caller is now following the incumbent — surfacing that as "started" would tell an operator their
+second click did something.
+
+## DELETE /api/devices/[id] — now enqueues (v2.94.0)
+
+Returns **202 + a job id**; the work runs in the engine worker (see `lib/engines/deviceDeletion.js`).
+⛔ On `42P01` (`background_jobs` not migrated) it returns **503 naming `lib/migrate.js`** rather than
+falling back to the old inline DELETE — the inline path is the one that could never succeed, and
+silently taking it would reintroduce the outage.

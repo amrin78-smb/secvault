@@ -21,11 +21,19 @@ export const dynamic = 'force-dynamic';
 // screen. So they are separated, and the evidence for each match is shown
 // rather than a bare verdict.
 
-const CELL = { padding: '10px 12px', verticalAlign: 'top', fontSize: 'var(--text-sm)' };
+// ⛔ Row geometry comes from the density tokens, never a hardcoded padding — a
+// cell that hardcodes '10px 12px' opts ITSELF out of the density switch and
+// sits at one height while the table around it changes (see CLAUDE.md, Table
+// density).
+const CELL = {
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
+  verticalAlign: 'top',
+  fontSize: 'var(--row-font)',
+};
 
 const TH = {
   textAlign: 'left',
-  padding: '9px 12px',
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
   fontSize: 10,
   letterSpacing: '0.07em',
   textTransform: 'uppercase',
@@ -104,7 +112,14 @@ export default async function DiscoveredDevicesPage() {
 
   const pending = rows.filter((r) => r.status === 'new');
   const unmanaged = pending.filter((r) => r.correlation.kind === 'unmanaged');
-  const knownPeers = pending.filter((r) => r.correlation.kind !== 'unmanaged');
+  // ⛔ Its own group, NOT quietly dropped. This sender was genuinely unmanaged
+  // when it was discovered and is not any more, and an operator who reviewed it
+  // yesterday has to be able to see where it went. Removing it from the
+  // unmanaged count without saying so is its own bug.
+  const reconciled = pending.filter((r) => r.correlation.kind === 'managed');
+  const knownPeers = pending.filter(
+    (r) => r.correlation.kind === 'ha-peer' || r.correlation.kind === 'known-alias'
+  );
   const decided = rows.filter((r) => r.status !== 'new');
 
   return (
@@ -198,6 +213,85 @@ export default async function DiscoveredDevicesPage() {
           )}
         </CardBody>
       </Card>
+
+      {reconciled.length > 0 ? (
+        <Card>
+          <CardBody>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              Since added to the inventory ({reconciled.length})
+            </div>
+            <div
+              style={{
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-muted)',
+                marginBottom: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              These addresses were unmanaged when they were discovered, and are now the
+              management address of a firewall in the inventory.{' '}
+              <strong>There is nothing to do</strong> — their logs have been filed under
+              that device since the moment it was added. They are still listed here, rather
+              than removed, so an address you remember reviewing does not simply vanish.
+              Dismiss one to move it to &ldquo;Already decided&rdquo;.
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                <thead>
+                  <tr>
+                    <th style={TH}>Reported name</th>
+                    <th style={TH}>Source address</th>
+                    <th style={TH}>Now in the inventory as</th>
+                    <th style={TH}>Why we think so</th>
+                    <th style={TH}>Last seen unmatched</th>
+                    <th style={TH}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciled.map((r) => (
+                    <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={CELL}>
+                        {r.observed_hostname || (
+                          <span style={{ color: 'var(--text-muted)' }}>not reported</span>
+                        )}
+                      </td>
+                      <td style={{ ...CELL, ...MONO, whiteSpace: 'nowrap' }}>{r.sourceIp}</td>
+                      <td style={{ ...CELL, whiteSpace: 'nowrap' }}>
+                        <Link
+                          href={`/devices/${r.correlation.deviceId}`}
+                          style={{ color: 'var(--text-primary)', fontWeight: 600 }}
+                        >
+                          {r.correlation.deviceName}
+                        </Link>
+                      </td>
+                      {/* ⛔ The evidence, not a bare verdict — the same rule as
+                          the HA-peer table below. */}
+                      <td style={{ ...CELL, color: 'var(--text-secondary)' }}>
+                        {r.correlation.evidence}
+                      </td>
+                      {/* ⛔ "Last seen UNMATCHED", not "last seen". The rollup
+                          keeps device_id NULL on rows written before the device
+                          existed, so this timestamp stops advancing once the
+                          device is added — reading it as "last heard from" would
+                          say a live firewall had gone quiet. */}
+                      {seenCell(r)}
+                      <td style={{ ...CELL, whiteSpace: 'nowrap' }}>
+                        <DiscoveredDeviceActions
+                          id={r.id}
+                          kind="managed"
+                          sourceIp={r.sourceIp}
+                          deviceId={r.correlation.deviceId}
+                          deviceName={r.correlation.deviceName}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
 
       {knownPeers.length > 0 ? (
         <Card>
@@ -295,6 +389,14 @@ export default async function DiscoveredDevicesPage() {
                     {r.observed_hostname || 'name not reported'}
                     {r.decided_by ? ` · by ${r.decided_by}` : ''}
                     {r.decision_note ? ` · ${r.decision_note}` : ''}
+                    {/* ⛔ Recomputed at read time even here, where a decision
+                        already exists. The decision is the operator's and is
+                        never touched; this only reports what is true NOW, so an
+                        'ignored' sender that has since been added to the
+                        inventory says so instead of sitting silently. */}
+                    {r.correlation.kind === 'managed'
+                      ? ` · now in the inventory as ${r.correlation.deviceName}`
+                      : ''}
                   </span>
                 </div>
               ))}

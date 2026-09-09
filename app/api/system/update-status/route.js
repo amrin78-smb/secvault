@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.94.0': [
+    "Fixed: deleting a firewall could never succeed if it had any log history \u2014 it ran for minutes, blocked log collection for that firewall while it ran, and then silently undid itself. Deleting now runs in the background, tells you how much data it affects before you confirm, and reports what it actually did.",
+    "Fixed: a firewall that had never been assessed showed a perfect 100/100 security score \u2014 the most reassuring number in the product, on the one device nothing was known about. Devices and fleet scores now leave un-assessed firewalls out and say how many were left out.",
+    "Collect Now no longer holds the whole interface. It runs on the engine, shows progress, and you can leave the page while it works.",
+    "Fixed: a firewall already added to the inventory kept appearing under Discovered Senders as unmanaged. Those addresses now show which firewall they belong to instead.",
+    "When SecVault cannot read the status of a background task it now says the status is unknown, rather than showing it as failed.",
+  ],
   '2.93.0': [
     "New: firewall rules you have been told are unused can now be turned into a change request \u2014 pick them from the Cleanup tab, hand the exported list to whoever edits the firewall, and SecVault checks the next collection to tell you whether they were actually removed.",
     "The exported request is a document a change board can read without a SecVault account: every rule states the firewall\u2019s own hit counter at the time it was raised, what 30 days of logs showed, and every reason it was flagged.",

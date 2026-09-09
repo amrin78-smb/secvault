@@ -90,6 +90,20 @@ export default async function HeadlineStats() {
     .map((c) => `${c.label.split(' ')[0]} ${c.score === null ? '—' : c.score}`)
     .join(' · ');
 
+  // ⛔ SAY WHAT WAS LEFT OUT. The vulnerability component is scored only over
+  // devices a CVE assessment has actually run for, because counting a
+  // never-assessed device as assessed-and-clean is "never measured" recorded as
+  // "nothing found". Dropping them from the denominator is the correct fix, but
+  // a fleet number quietly averaged over fewer devices than the fleet the
+  // operator can see is its own kind of dishonesty — so the gap is stated.
+  const cveGap =
+    typeof h.devicesCveAssessed === 'number' && h.devicesCveAssessed < h.deviceCount
+      ? h.deviceCount - h.devicesCveAssessed
+      : 0;
+  const coverageNote = cveGap
+    ? `${cveGap} firewall${cveGap === 1 ? '' : 's'} not yet assessed for vulnerabilities and left out of this score`
+    : null;
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
       <StatCard
@@ -107,7 +121,11 @@ export default async function HeadlineStats() {
         compact
         label="Security Score"
         value={<>{scoreValue(h.securityScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
-        sub={h.securityScore === null ? 'Not enough data yet' : `${BAND_LABEL[secBand]} — ${secSub}`}
+        sub={
+          h.securityScore === null
+            ? 'Not enough data yet'
+            : `${BAND_LABEL[secBand]} — ${secSub}${coverageNote ? ` · ${coverageNote}` : ''}`
+        }
         color={BAND_COLOR[secBand] || UNMEASURED}
         icon={IconShield}
         iconColor="var(--tint-success-fg)"

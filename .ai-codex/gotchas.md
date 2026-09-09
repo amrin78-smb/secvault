@@ -705,3 +705,52 @@ Historical rows are repaired by `cleanupSystemInfoReadFailureDiffs()` (run from
 a modified entry qualifies ONLY when exactly one side is blank — both sides
 populated is a real change and survives. Live dry-run before shipping: 3 rows
 deleted, 0 updated, 106 of 109 untouched.
+
+## ⛔ `ON DELETE SET NULL` + `UNIQUE NULLS NOT DISTINCT` are mutually incompatible (found 2026-09-09)
+
+Device delete was **permanently broken** for any device with syslog history — not slow, impossible.
+From `app-error.log`:
+
+```
+code:   23505  (unique_violation)
+where:  UPDATE ONLY "syslog_rollup_hourly" SET "device_id" = NULL WHERE $1 = "device_id"
+detail: Key (bucket_hour, source_ip, device_id, vendor, action, severity, log_class)
+        = (2026-09-09 10:00, 10.204.6.1, null, fortinet, blocked, 4, utm) already exists
+```
+
+Two deliberate decisions collided. The FK is `ON DELETE SET NULL`; the constraint is
+`UNIQUE NULLS NOT DISTINCT` — the choice CLAUDE.md documents so grouping keys can stay honestly
+nullable instead of using `'unknown'` sentinel strings. A `device_id = NULL` row for the same bucket
+already exists (events that arrived before the sender was matched), so NULLing collides.
+
+⛔ **`syslog_rollup_hourly` is the ONLY table with this combination** — proven by a lint test over
+`lib/schema.sql`, not by inspection, and confirmed against production. The other SET NULL FKs are
+safe for distinguishable reasons: `syslog_events` has no unique constraint beyond its PK,
+`discovered_devices` is unique on `source_ip` alone, and `background_jobs`' partial unique index is
+plain NULLS DISTINCT. A second lint asserts the deletion engine's `ROLLUP_TABLES` covers every
+`syslog_*_hourly` table in the schema, so a NEW rollup cannot silently reintroduce this.
+
+⛔ **Rollup rows are DELETED, never NULLed.** Beyond fixing 23505 it is correct on the merits: they
+are derived aggregates, and NULLing would merge a deleted device's traffic into the *unmatched
+sender* bucket — the exact population `discovered_devices` reads — so a deleted device would
+resurface as a phantom unmanaged firewall.
+
+## ⛔ Deleting a device blocks syslog INGESTION, not just the UI
+
+The delete holds an exclusive row lock on `devices`; the collector needs a KEY SHARE lock on that
+same row to INSERT any event for the device. Verified in `pg_locks` on 2026-09-09:
+`INSERT INTO syslog_events` waiting on the DELETE, with 3.35M rows still to rewrite.
+
+That is why deletion is staged and batched OUTSIDE the `devices` lock, and why the final statement
+holds it for milliseconds: `SELECT … FOR UPDATE` (which conflicts with the `FOR KEY SHARE` any new
+referencing write must take) → mop up any rollup row that landed in the gap → `DELETE FROM devices`.
+Ten of the eleven rollup tables are `ON DELETE CASCADE` and would clean themselves up at that
+statement — they are swept beforehand anyway, because a cascade deleting 256,000 rows *while holding
+that lock* is the same outage in a different costume.
+
+## ⛔ An exact `COUNT(*)` on `syslog_events` for one device is NOT affordable
+
+Measured 2026-09-09: for the busiest device it does not complete in 8 seconds, even with the
+`(device_id, received_at)` index. The delete-confirmation dialog therefore estimates from the hourly
+rollups and LABELS the figure approximate; a count that fails renders "not counted", never `0`.
+Never put a bare `COUNT(*)` over `syslog_events` on a page load.

@@ -143,9 +143,20 @@ period, because the job runs both on cron and at every service start.
    via `devices.last_cve_assessed_at`; the remaining call sites closed in v2.92.0
    (`OverviewCveCard.js`, `CvePostureTab.js`, and the device CVE tab, which had been asserting
    "This device HAS been assessed" purely because a version row existed — a precondition, never
-   evidence of a run). ⛔ Still open elsewhere: `components/dashboard/CveSeveritySummary.js` has no
-   coverage statement at all, and `lib/engines/dashboardSnapshot.js` persists those uncovered
-   counts nightly, so the gap is baked into history.
+   evidence of a run). ⛔ The SCORE call sites closed in v2.94.0, after the bug surfaced on screen rather than in
+   code review: the Devices table showed **OKF(F2) at 100/100** — a perfect security score for the
+   one firewall never collected at all. `vulnerabilitySubscore` was being fed EVERY active device
+   as its denominator, so never-assessed counted as assessed-and-clean. Fixed in
+   `deviceInventory.js` (per-device) and `fleetHeadline.js` (fleet, 51 -> 48 measured live), with
+   the excluded count now STATED on the tile rather than silently averaged away.
+
+   ⛔ The fresh install was always the real risk, not the 3-point gap: with nothing assessed,
+   vulnerability scored a perfect 100 at full 40% weight and the dashboard announced excellent
+   security for a fleet SecVault had never looked at.
+
+   ⛔ Still open: `components/dashboard/CveSeveritySummary.js` has no coverage statement at all,
+   and `lib/engines/dashboardSnapshot.js` persists the pre-fix value in rows already written, so
+   that much of the gap stays baked into history.
 4. ~~Fleet tiles lack `cveNoVersion` and a config-snapshot count.~~ **DONE v2.91.0.** While doing
    it, found `licence_row_count` was computed but never projected, so `supportNoData` silently
    equalled the whole fleet and the Support tile claimed "Not collected for any device" about 15

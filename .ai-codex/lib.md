@@ -1448,3 +1448,167 @@ truth" family:
    unreachable, but "unreachable today" is not a property a later caller preserves; every branch is
    now guarded on the request having items. `verified_at` is also stamped for `partial` now, since
    that is the outcome an operator most needs dated.
+
+## Security-score coverage: "never assessed" vs "assessed, nothing found" (v2.94.0)
+
+⛔ **The same bug existed at BOTH levels and was found from the screen, not the code.** On
+2026-09-09 the Devices table showed **OKF(F2) at 100/100** — a perfect security score for the one
+firewall in the fleet that had never been collected at all. An operator scanning that column would
+skip the only device that needed attention.
+
+`vulnerabilitySubscore` is "how many of N devices carry a patch_now/scheduled finding". Feeding it
+EVERY active device as N counts a never-assessed device as an assessed-and-clean one. Both call
+sites did this:
+
+- `lib/engines/deviceInventory.js` `decorate()` — passed `activeDevices: 1` unconditionally. Now
+  gated on `last_cve_assessed_at IS NOT NULL OR assessment_count > 0`, passing `null` otherwise so
+  the engine drops the 40% component from the denominator. Hygiene and compliance were already
+  correct here; only vulnerability was not.
+- `lib/engines/fleetHeadline.js` `getDeviceCounts()` — passed `devices.total`. Now returns a
+  SEPARATE `cve_assessed` count, and `getFleetHeadline` uses that as `activeDevices`. Measured live:
+  16 active / 15 assessed took the vulnerability component from 51 to **48**.
+
+⛔ **The number that matters is not that 3-point gap, it is the FRESH INSTALL.** With nothing
+assessed, `total` as the denominator scores vulnerability a perfect 100 at its full 40% weight, and
+the dashboard headline announces excellent security for a fleet SecVault has never looked at.
+
+⛔ **A measured ZERO must keep scoring well.** Only NEVER-ASSESSED becomes unmeasurable. The fix is
+about evidence that a run happened, never about the counts being zero — do not "harden" this by
+making zero pessimistic.
+
+⛔ The two coverage signals are **ORed**, matching `computeTiles`/`CveCell`/`deviceInventory`: a
+timestamp proves a run happened, and surviving assessment rows prove one happened even if it
+predates the column. ANDing them reports the whole fleet unmeasured until the matcher next runs.
+
+⛔ **Dropping devices from the denominator is correct but must be SAID.** `getFleetHeadline` returns
+`devicesCveAssessed` and `HeadlineStats.js` renders "N firewalls not yet assessed for
+vulnerabilities and left out of this score". A fleet number quietly averaged over fewer devices than
+the fleet on screen is its own dishonesty.
+
+⛔ `lib/engines/dashboardSnapshot.js` persists this nightly, so rows written before v2.94.0 carry
+the optimistic value permanently. Past snapshots are not rewritten — same stance as the missed-
+snapshot backfill.
+
+Pinned by `tests/deviceSecurityScoreCoverage.test.js`, including the counter-test that a measured
+zero still scores 100.
+
+## `lib/engines/deviceDiscovery.js` — the `managed` correlation kind (v2.94.0)
+
+⛔ **A discovered sender was never reconciled against the inventory.** Reported from the screen
+2026-09-09: `/devices/discovered` listed `FG200ETK18912640_OkeanosFOOD` at `10.204.6.1` under
+"These addresses match nothing SecVault knows" — while that address WAS `devices.mgmt_ip` for the
+active, collected device `OKF(F2)`. Discovery had worked correctly (the device was added at 03:52,
+the row was last seen unmatched at 03:00); nothing ever went back and re-checked.
+
+Correlation previously covered `device_ha_status.peer_mgmt_ip` and `device_syslog_sources.source_ip`
+but **not `devices.mgmt_ip`** — the most obvious match of all. New fourth kind, `managed`, plus a
+`normalizeAddress()` helper.
+
+⛔ **THE TYPE TRAP THAT HID IT.** `devices.mgmt_ip` is **TEXT**; `discovered_devices.source_ip` (and
+every `syslog_*.source_ip`) is **INET**. pg renders the INET as `10.204.6.1/32`, so a direct
+comparison silently never matches, and `host()` is no help because `host(text)` does not exist —
+which is exactly how this survived. Matching is therefore done in JS after normalisation:
+- INET side: trim, lowercase, strip a trailing `/nn` rendering artefact.
+- TEXT side: trim, lowercase, **mask NOT stripped** — a `mgmt_ip` of `10.204.6.0/24` is a SUBNET,
+  not an address, so anything still containing `/` normalises to `null` and matches nothing.
+- `null`/blank on either side never matches another `null` — two missing facts must not manufacture
+  a device match.
+
+⛔ **Deliberately NOT a SQL join.** `d.mgmt_ip::inet = dd.source_ip` throws for the WHOLE query the
+first time any row holds a hostname or a typo, taking the page down instead of failing to match one
+sender. A test asserts the SQL contains no `mgmt_ip::inet`.
+
+⛔ **READ TIME, not write time**, and the reason is specific: `promoted_device_id`/`linked_device_id`
+survive a device deletion only because of `ON DELETE SET NULL` plus the existing resurrect `UPDATE`.
+A match on `mgmt_ip` has **no foreign key to null out**, so a stored verdict could never be
+un-stuck — it would strand the row exactly the way that existing ⛔ comment exists to prevent.
+`mgmt_ip` is also editable, so a stamped status goes stale on a renumber. And it would mean writing
+`status`, which this file states everywhere is an OPERATOR DECISION, not an observation. Nothing in
+the read path writes; a test pins that `getDiscoveredDevices` issues no INSERT/UPDATE/DELETE.
+
+Matches `devices.mgmt_ip` **and** `devices.snmp_host` — the same two columns
+`services/collector.js`'s `refreshDeviceMap()` uses to attribute an event, so discovery and
+ingestion cannot disagree about what counts as known. Precedence: managed → known-alias → ha-peer.
+
+⛔ **A now-managed sender is SHOWN, not hidden.** It moves to its own group naming the device it
+matched, because an operator who remembers reviewing an address needs to know where it went, not to
+find it silently vanished. Live result: unmanaged drops from 2 to **1** (StarUnion, genuinely
+unmanaged), with OKF(F2)'s address listed as managed.
+
+## Background job runner in `services/engine-worker.js` (v2.94.0)
+
+Claims `background_jobs` via `claimNextJob` every **5 seconds** (a `setInterval`, not a cron task —
+this is a button's latency budget, not housekeeping, and node-cron's natural unit is the minute),
+with a 5-minute `reapStaleJobs` pass. Drains at most 5 jobs per tick; `jobQueueInFlight` prevents
+re-entry.
+
+⛔ **Four containment layers, because CLAUDE.md's rule is that one failed job must never crash the
+service:** each handler in its own try/catch (a throw becomes `status:'failed'`); a separate
+try/catch around the CLAIM itself (a dead DB just retries next tick); both invoked through the
+existing `runTrackedJob` so `shutdown()` waits for in-flight work; and
+`require('./deviceDeletion')` is **lazy inside the handler** — a module-scope require of a broken or
+missing file would take down every scheduled job in the service, so a bad delete module fails that
+one job with "The device was NOT deleted" instead.
+
+⛔ **Startup order in `main()`: reap FIRST, then start the queue, both BEFORE the multi-minute
+feed-sync/rule-pull startup passes.** A deploy restart is precisely what strands `running` rows, and
+the partial unique index would then block re-queueing that device forever. Starting the queue early
+means a Collect Now clicked seconds after a deploy is served rather than queued behind a feed sync.
+`shutdown()` calls `stopJobQueue()` first — those timers are NOT in `scheduledTasks`, which
+`scheduleJobs()` reassigns wholesale.
+
+### The `rulesCount` tri-state across a job boundary
+
+⛔ `background_jobs` has no JSON column, so the worker writes the structured collect result into
+`detail` **as JSON**. That indirection is the whole point: a rendered sentence cannot be re-read by
+the client, and JSON carries `null` as `null`. `collectAndStore.rulesCount` → `null|undefined → null`,
+else `Number(...)`, explicitly never `?? 0` → `detail` → the route's `normalizeDetail` parses it
+back (non-JSON detail, e.g. the delete engine's plain progress strings, passes through as `message`)
+→ the component branches on `Number.isFinite`. A genuine `0` says "Collected — 0 rules."; `null` or
+absent says "Collected, but the device reported no rule count — the ruleset was NOT updated."
+Tests assert no `?? 0`/`|| 0` on any of the three files, matched against COMMENT-STRIPPED source,
+since those files document the anti-pattern they must not perform.
+
+### What the operator sees, and the three states that are not failure
+
+⛔ `progress_total` stays **NULL** for a collect — `collectAndStore` reports no step count and the
+worker does not invent one — so "0 of 0" never renders; a count with no total shows
+"(N so far — total not known)".
+
+⛔ **A failed POLL is not a failed JOB.** After 2 consecutive poll failures the UI flips to
+`--unmeasured` (no hue) with "Status unknown — SecVault could not read the job. The collect may
+still be running." Never red, never "failed". The 20-minute client ceiling behaves the same way and
+explicitly does not declare failure; the engine's 30-minute reaper is what actually decides, and it
+writes `failed` with "whether the work completed is unknown", never `succeeded`.
+
+A double-click follows the incumbent job rather than opening a second SSH session, via the partial
+unique index on `background_jobs`.
+
+⛔ **Test Connectivity stays SYNCHRONOUS** — one probe, not a three-capability collection. Do not
+"consistently" background it; the latency it has is the latency it should have.
+
+## `lib/engines/deviceDeletion.js` (added 2026-09-09, v2.94.0)
+
+`runDeviceDeleteJob(pool, job, { onProgress })` → summary; throws `DeviceDeleteError`. Executed by
+the engine worker's job queue. ⛔ It never calls `finishJob` — the worker claimed the job, so the
+worker owns the terminal status.
+
+Three stages, each in SEPARATE transactions (so committed progress is a fact on disk and a re-run
+resumes):
+
+1. **DELETE derived rollup rows**, 11 `syslog_*_hourly` tables, batches of 5,000. `syslog_rollup_hourly`
+   first — it is the only one that can fail the whole delete (see gotchas.md's 23505 entry).
+2. **Batch-NULL `syslog_events.device_id`**, 20,000/batch with a 200 ms pause, each its own
+   transaction. ⛔ Raw events are FORENSIC EVIDENCE and are never deleted — the device record goes,
+   the logs stay. Setting an FK column to NULL takes no lock on `devices`, so the collector keeps
+   inserting throughout; this is the stage that used to run *inside* the delete and stall ingestion.
+3. **DELETE the device row**, one short transaction.
+
+⛔ **23505 is impossible by construction, not by luck.** Stage 1 runs minutes before stage 3 and the
+rollup sweep runs every few minutes, so a fresh row can re-arm the collision in the gap. Stage 3
+therefore does, in ONE transaction and in this order: `SELECT … FROM devices WHERE id=$1 FOR UPDATE`
+→ `DELETE FROM syslog_rollup_hourly WHERE device_id=$1` → `DELETE FROM devices`.
+
+⛔ **Partial failure is reported with what actually committed** — "4,102 rollup rows deleted;
+1,240,000 raw events unlinked (kept); device row: not reached. Re-running resumes from here." Never
+a bare failure, and never a success that was not observed.

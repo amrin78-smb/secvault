@@ -19,6 +19,16 @@ import LoadingSpinner from '../ui/LoadingSpinner';
 //   ha-peer    -> "Link to <device>", which files the address against a device
 //                 that already exists. Offering Promote here would invite the
 //                 operator to duplicate a firewall they already manage.
+//   managed    -> NO primary action at all. The address is already this
+//                 device's own mgmt/SNMP address, so there is nothing to add
+//                 and nothing to link — the collector has been attributing its
+//                 events since the device was created. Offering "Add to
+//                 inventory" here is exactly the duplicate-firewall trap above,
+//                 and offering "Link" would write a redundant
+//                 device_syslog_sources row for an address already resolved.
+//                 Only Dismiss remains, and it carries a note saying WHY, so
+//                 the decided list keeps the reason rather than a bare
+//                 "ignored".
 //
 // ⛔ These controls are hidden from viewers by the caller as defence in depth
 // only — the real gate is isAdmin() in each route (lib/rbac.js).
@@ -75,7 +85,7 @@ export default function DiscoveredDeviceActions({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {kind === 'unmanaged' ? (
+        {kind === 'managed' ? null : kind === 'unmanaged' ? (
           <Link href={promoteHref}>
             <Button variant="primary" size="sm">
               Add to inventory
@@ -91,8 +101,26 @@ export default function DiscoveredDeviceActions({
             {busy === 'link' ? <LoadingSpinner size={14} /> : `Link to ${deviceName}`}
           </Button>
         )}
-        <Button variant="secondary" size="sm" disabled={busy !== null} onClick={() => post('ignore')}>
-          {busy === 'ignore' ? <LoadingSpinner size={14} /> : 'Ignore'}
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() =>
+            post(
+              'ignore',
+              kind === 'managed' && deviceName
+                ? { note: `already in the inventory as ${deviceName}` }
+                : undefined
+            )
+          }
+        >
+          {busy === 'ignore' ? (
+            <LoadingSpinner size={14} />
+          ) : kind === 'managed' ? (
+            'Dismiss'
+          ) : (
+            'Ignore'
+          )}
         </Button>
       </div>
       {error ? (

@@ -105,3 +105,18 @@ Closed the largest gap in the 2026-09-08 Firewall Analyzer decommission review: 
 [server] /exposure — ExposurePage — Internet Exposure & Attack Surface (added 2026-09-08): fleet table of every internet-reachable path (public address, service, internal NAT target, permitting rule) with explainable severity and a three-state observed/not-seen/UNMEASURED badge, plus a "why these scored as they did" reasons panel. Backed by `lib/engines/exposureQuery.js`. ⛔ `not_observed` ("watched, saw nothing — still open") and `unmeasured` ("no syslog coverage") are rendered differently ON PURPOSE and must never be merged; quiet paths are never filtered out. Devices that failed to compute are listed explicitly rather than silently omitted. Linked from the sidebar as "Exposure".
 [server] /devices/discovered — DiscoveredDevicesPage — syslog senders matching no device (added 2026-09-09). TWO deliberately separate groups: "Unmanaged firewalls" (promote via the normal Add Device form, prefilled only with OBSERVED fields) and "Already part of a managed device" (link only, with the matching EVIDENCE shown — peer address and/or peer serial). ⛔ The header count on /devices excludes the second group: presenting 5 known HA peers as "devices to add" is how an operator creates duplicate firewalls. Backed by `lib/engines/deviceDiscovery.js`; actions in `components/devices/DiscoveredDeviceActions.js`.
 [server] /vpn?vtab=locations — VpnLoginLocations — where VPN logins come from and which fail (added 2026-09-09). ⛔ A RANKED COUNTRY TABLE, deliberately NOT a world map: recharts has no geographic component, a world outline is 80-150 KB of inlined SVG to render ~21 dots, and a map structurally cannot show the success/failure ratio per country that is the actual question. Per-vendor coverage is stated before any number; a vendor reporting no successes renders "not reported", never 0. Two attack rules with their arithmetic shown and no score. Backed by `lib/syslog/vpnAuthStats.js` reading `syslog_vpn_auth_hourly`.
+
+### /devices/discovered — THREE groups since v2.94.0 (was two)
+
+1. **Unmanaged firewalls** — addresses matching nothing SecVault knows. Real work.
+2. **Since added to the inventory** (new) — addresses that were unmanaged when discovered and are
+   now a device's `mgmt_ip`/`snmp_host`. Shows which device, and why. ⛔ These are listed rather
+   than removed on purpose: an address an operator remembers reviewing must not simply vanish.
+   There is no primary action, only Dismiss — their logs have been filed under that device since
+   the moment it was added, so there is nothing to do.
+3. **Already decided** — operator-ignored/promoted rows. If one is now managed, that fact is
+   appended; the decision itself is never overwritten.
+
+The "Discovered senders" chip on `/devices` filters on `kind === 'unmanaged'`, so it reflects group
+1 only. Cells take `var(--row-pad-y)/var(--row-pad-x)/var(--row-font)` — they previously hardcoded
+`10px 12px` and were silently opting out of the density switch.

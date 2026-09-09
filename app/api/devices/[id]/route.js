@@ -6,6 +6,7 @@ import { isValidUuid } from '../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { enqueueJob } from '../../../../lib/engines/backgroundJobs';
 import {
   VENDOR_META,
   VENDOR_SLUGS,
@@ -354,8 +355,22 @@ export async function PUT(request, { params }) {
   }
 }
 
-// DELETE /api/devices/[id] — related rows (device_versions, device_credentials,
-// firewall_rules, device_cve_assessments, ...) cascade via ON DELETE CASCADE in schema.sql.
+// DELETE /api/devices/[id] — ENQUEUES a delete, it does not perform one.
+//
+// ⛔ It used to run `DELETE FROM devices WHERE id = $1` inline, and for any
+// device with syslog history that statement could NEVER SUCCEED. It fired the
+// ON DELETE SET NULL FK on `syslog_rollup_hourly`, whose unique key is UNIQUE
+// NULLS NOT DISTINCT, so NULLing collided with the already-present unmatched-
+// sender row for the same bucket: 23505, four minutes in, whole transaction
+// rolled back. Meanwhile it rewrote 3.35M `syslog_events` rows while holding an
+// exclusive lock on the `devices` row, which is the lock the collector needs to
+// insert ANY event for that device — so log ingestion stalled behind a delete
+// that was never going to finish. Full analysis and the staged fix:
+// lib/engines/deviceDeletion.js.
+//
+// So: 202 + a job id, immediately. The engine worker runs the stages, the UI
+// polls the job. Related rows still cascade — but at stage 3, by which time
+// every large child population has already been cleared in bounded batches.
 export async function DELETE(request, { params }) {
   const session = await getServerSession(authOptions);
   if (!isAdmin(session)) {
@@ -365,10 +380,64 @@ export async function DELETE(request, { params }) {
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }
+
+  let device;
   try {
-    await pool.query('DELETE FROM devices WHERE id = $1', [params.id]);
-    return NextResponse.json({ ok: true });
+    // 404 before enqueuing: a job for a device that does not exist would be
+    // claimed, run, find nothing, and report a success nobody asked for.
+    const found = await pool.query('SELECT id, name FROM devices WHERE id = $1', [params.id]);
+    if (found.rows.length === 0) {
+      return NextResponse.json({ error: 'Device not found' }, { status: 404 });
+    }
+    device = found.rows[0];
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Failed to delete device' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to load device' }, { status: 500 });
+  }
+
+  try {
+    const { job, created } = await enqueueJob(pool, {
+      jobType: 'device_delete',
+      deviceId: params.id,
+      requestedBy: (session && session.user && (session.user.name || session.user.email)) || null,
+      detail: `Queued: delete ${device.name}`,
+    });
+    if (!job) {
+      // enqueueJob returns a null job only if the row vanished between the
+      // conflicting insert and the read-back. Not an outcome to paper over.
+      return NextResponse.json(
+        { error: 'Could not queue the delete, and could not find an existing one. Nothing was deleted.' },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(
+      {
+        ok: true,
+        queued: true,
+        created,
+        job,
+        // ⛔ `created:false` is not an error — it means a delete for this device
+        // was ALREADY queued or running and the caller is being handed that one
+        // to poll, rather than a second doomed job. See the partial unique index
+        // uq_background_jobs_live.
+        message: created
+          ? 'Delete queued. The engine worker will run it; poll the job for progress.'
+          : 'A delete for this device is already in progress — returning that job.',
+      },
+      { status: 202 }
+    );
+  } catch (err) {
+    // 42P01 = the background_jobs table has not been migrated onto this server
+    // yet. Say that, rather than a generic 500 — and above all do not fall back
+    // to the old inline DELETE, which is the bug this route exists to fix.
+    if (err && err.code === '42P01') {
+      return NextResponse.json(
+        {
+          error:
+            'The background job queue (background_jobs) does not exist on this server yet. Run lib/migrate.js — Update-SecVault.ps1 does this at step 5. Nothing was deleted.',
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ error: err.message || 'Failed to queue device delete' }, { status: 500 });
   }
 }

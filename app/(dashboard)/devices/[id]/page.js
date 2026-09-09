@@ -18,6 +18,8 @@ import CredentialForm from '../../../../components/devices/CredentialForm';
 import DeviceActions from '../../../../components/devices/DeviceActions';
 import EditDeviceModal from '../../../../components/devices/EditDeviceModal';
 import { summarizeAdminAccounts } from '../../../../lib/engines/adminAccountSummary';
+import { enqueueJob, getJob, getLiveJobForDevice } from '../../../../lib/engines/backgroundJobs';
+import { estimateDeleteImpact } from '../../../../lib/engines/deviceDeletion';
 import { detectSnmpConfig, looksConfigured } from '../../../../lib/engines/snmpConfigDetection';
 import OverviewCveCard from '../../../../components/devices/OverviewCveCard';
 import OverviewExposureCard from '../../../../components/devices/OverviewExposureCard';
@@ -45,21 +47,201 @@ export const dynamic = 'force-dynamic';
 // underlying adapter call finished, which on an unreachable device can take up
 // to ~2 minutes (see lib/adapters' per-vendor REQUEST_TIMEOUT_MS). Replaced with
 // DeviceActions.js, a client component using the same fetch+spinner+router.refresh()
-// pattern as CredentialForm.js / RunAnalysisButton.js. Delete stays a Server
-// Action — it's a single fast DB delete, not a network call to a firewall, so
-// the blocking-navigation cost that motivated this change doesn't apply to it.
+// pattern as CredentialForm.js / RunAnalysisButton.js.
+//
+// ⛔ Delete is still a Server Action, but the sentence that used to be here —
+// "it's a single fast DB delete, not a network call to a firewall" — was
+// FACTUALLY WRONG and is the reason this comment is being corrected rather than
+// deleted. Measured live 2026-09-09: deleting a device with syslog history
+// rewrote 3,352,437 `syslog_events` rows across 47 GB of partitions, took four
+// minutes, blocked log ingestion the whole time (the collector needs a KEY SHARE
+// lock on the very `devices` row the delete holds exclusively), and then FAILED
+// with a 23505 unique violation it could never avoid. The action below now only
+// ENQUEUES; lib/engines/deviceDeletion.js does the work in the engine worker.
 // ────────────────────────────────────────────────────────────────────────
 
-async function deleteDeviceAction(formData) {
+async function enqueueDeleteAction(formData) {
   'use server';
   const session = await getServerSession(authOptions);
   const id = formData.get('deviceId');
   if (!isAdmin(session)) {
     redirect(`/devices/${id}?error=forbidden`);
   }
-  await pool.query('DELETE FROM devices WHERE id = $1', [id]);
+  let jobId = null;
+  let failure = null;
+  try {
+    const { job } = await enqueueJob(pool, {
+      jobType: 'device_delete',
+      deviceId: id,
+      requestedBy: (session && session.user && (session.user.name || session.user.email)) || null,
+      detail: 'Queued: delete device',
+    });
+    jobId = job ? job.id : null;
+    if (!jobId) failure = 'Could not queue the delete and could not find an existing one.';
+  } catch (err) {
+    failure =
+      err && err.code === '42P01'
+        ? 'The background job queue (background_jobs) does not exist on this server yet — run lib/migrate.js. Nothing was deleted.'
+        : `Could not queue the delete: ${err.message}`;
+  }
   revalidatePath('/devices');
-  redirect('/devices');
+  // ⛔ Redirect BACK to the device, not to /devices. Nothing has been deleted
+  // yet, and the job panel on the Manage tab is the only truthful place to
+  // watch it. Sending the operator to a list where the device still appears
+  // would read as "the delete did nothing".
+  if (failure) {
+    redirect(`/devices/${id}?tab=manage&deleteError=${encodeURIComponent(failure)}`);
+  }
+  redirect(`/devices/${id}?tab=manage&deleteJob=${jobId}`);
+}
+
+// ── Delete job rendering ─────────────────────────────────────────────────
+// Module-top-level plain functions, invoked as {fn(...)} rather than <Fn/>,
+// for the same reason tabLink() below is: CLAUDE.md's "NEVER define a React
+// component inside another React component" rule, kept safe against a future
+// refactor that starts rendering them as JSX tags.
+
+const LIVE_JOB_STATUSES = ['queued', 'running'];
+
+function formatCount(n) {
+  if (n === null || n === undefined) return null;
+  const num = Number(n);
+  if (!Number.isFinite(num)) return null;
+  return num.toLocaleString('en-US');
+}
+
+// ⛔ A count we could not take renders as "not counted", never as 0 or a blank
+// that reads as zero. Deleting is irreversible; an understated scale is worse
+// than an admitted gap. Same rule as hit_count's tri-state.
+function countText(n, { approx = false } = {}) {
+  const formatted = formatCount(n);
+  if (formatted === null) return 'not counted';
+  return approx ? `~${formatted}` : formatted;
+}
+
+// Loads the delete job the Manage tab should be showing, and says WHY there is
+// none when there is none. Never throws: background_jobs may not be migrated
+// onto this server yet, and a missing job table must not take the device page
+// down (it is the page an operator needs in order to fix anything).
+async function loadDeleteJob(deviceId, jobId) {
+  try {
+    if (jobId) {
+      const job = await getJob(pool, jobId);
+      // A job id from the URL is only trusted for THIS device — or for a job
+      // whose device_id has already been nulled by the delete it just finished,
+      // which is the whole reason the id travels in the URL at all.
+      if (job && (!job.device_id || !deviceId || job.device_id === deviceId)) {
+        return { job, unavailable: false };
+      }
+    }
+    const live = deviceId ? await getLiveJobForDevice(pool, deviceId, 'device_delete') : null;
+    return { job: live, unavailable: false };
+  } catch (err) {
+    return { job: null, unavailable: true, reason: err.message };
+  }
+}
+
+function jobProgressText(job) {
+  const current = formatCount(job.progress_current);
+  const total = formatCount(job.progress_total);
+  // ⛔ NULL total means the size is NOT KNOWN YET, never zero — rendering it as
+  // "0 / 0" or as a full bar would read as finished. Show the count alone.
+  if (current !== null && total !== null) return `${current} / ${total}`;
+  if (current !== null) return `${current} so far (total not yet known)`;
+  return null;
+}
+
+function deleteJobPanel(job, deviceId) {
+  const live = LIVE_JOB_STATUSES.includes(job.status);
+  const progress = jobProgressText(job);
+  const tone =
+    job.status === 'failed' ? 'danger' : job.status === 'succeeded' ? 'success' : 'info';
+  return (
+    <div
+      className="card"
+      style={{
+        padding: 20,
+        background: `var(--tint-${tone})`,
+        color: `var(--tint-${tone}-fg)`,
+      }}
+    >
+      {/* Server-rendered auto-refresh while the job is live. There is no client
+          component in this page, and a dead button that never updates is the
+          exact complaint this work exists to fix. Only rendered while the job
+          is genuinely running, so a finished page stops reloading itself. */}
+      {live ? <meta httpEquiv="refresh" content="4" /> : null}
+      <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 8 }}>
+        {job.status === 'queued' && 'Delete queued'}
+        {job.status === 'running' && 'Delete in progress'}
+        {job.status === 'succeeded' && 'Delete finished'}
+        {job.status === 'failed' && 'Delete failed'}
+        {job.status === 'cancelled' && 'Delete cancelled'}
+      </div>
+      {job.detail ? (
+        <p style={{ fontSize: 'var(--text-base)', marginBottom: 4 }}>{job.detail}</p>
+      ) : null}
+      {progress ? (
+        <p style={{ fontSize: 'var(--text-base)', fontFamily: 'var(--font-mono)', marginBottom: 4 }}>
+          {progress}
+        </p>
+      ) : null}
+      {job.error ? (
+        <p style={{ fontSize: 'var(--text-base)', marginBottom: 4 }}>{job.error}</p>
+      ) : null}
+      {job.status === 'queued' ? (
+        <p style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
+          Waiting for the engine worker (SecVault-Engine) to pick it up. If nothing happens, check
+          that the service is running.
+        </p>
+      ) : null}
+      {live ? (
+        <p style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
+          This panel refreshes itself every few seconds. Leaving the page does not stop the job — it
+          runs in the engine worker, not in this browser tab.
+        </p>
+      ) : null}
+      {job.status === 'failed' ? (
+        <p style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
+          Nothing above is undone by this failure, and nothing is left inconsistent: re-running the
+          delete resumes from where it stopped.{' '}
+          <Link href={`/devices/${deviceId}?tab=manage&confirmDelete=1`} style={{ textDecoration: 'underline', color: 'inherit' }}>
+            Try again
+          </Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// The pre-commit scale statement. ⛔ CLAUDE.md: the operator is entitled to know
+// how big an irreversible action is BEFORE they take it — one device on this
+// fleet carried 3.35M syslog events.
+function deleteImpactLines(impact) {
+  if (!impact) return null;
+  const events = impact.syslogEvents || {};
+  const rollups = impact.rollupRows || {};
+  return (
+    <ul style={{ margin: 0, paddingLeft: 20, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+      <li style={{ marginBottom: 4 }}>
+        <strong style={{ color: 'var(--text-primary)' }}>
+          {countText(events.value, { approx: !events.exact })} raw syslog events
+        </strong>{' '}
+        {events.value === null
+          ? '— the count could not be taken, so the real number may be large.'
+          : events.exact
+            ? '— these are KEPT. Only their link to this device is removed; the log evidence stays searchable.'
+            : '— approximate, counted from the hourly rollups (an exact count of the raw partitions takes over 8 seconds). These are KEPT: only their link to this device is removed.'}
+      </li>
+      <li>
+        <strong style={{ color: 'var(--text-primary)' }}>
+          {countText(rollups.total === null ? rollups.countedTotal : rollups.total)} derived rollup
+          rows
+        </strong>{' '}
+        — permanently deleted (traffic, rule-hit, talker, threat and VPN aggregates for this device).
+        {rollups.partial ? ' At least one rollup table could not be counted, so this is a floor, not a total.' : ''}
+      </li>
+    </ul>
+  );
 }
 
 function formatDateTime(value) {
@@ -351,12 +533,25 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const device = await getDevice(pool, params.id);
 
   if (!device) {
+    // ⛔ "Device not found" is the WRONG answer when the operator just deleted
+    // it — it reads as a broken link. background_jobs.device_id is ON DELETE SET
+    // NULL, so the finished job can no longer be found by device id; it is found
+    // by the job id carried in the URL, which is exactly why the enqueue action
+    // puts it there.
+    const deletedJobId = typeof searchParams?.deleteJob === 'string' ? searchParams.deleteJob : null;
+    const { job: finishedJob } = deletedJobId
+      ? await loadDeleteJob(null, deletedJobId)
+      : { job: null };
     return (
       <div>
         <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
           ← Back to firewalls
         </Link>
-        <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
+        {finishedJob ? (
+          <div style={{ marginTop: 16, maxWidth: 720 }}>{deleteJobPanel(finishedJob, params.id)}</div>
+        ) : (
+          <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
+        )}
       </div>
     );
   }
@@ -365,6 +560,22 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     ? searchParams.tab
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
+  const deleteJobId = typeof searchParams?.deleteJob === 'string' ? searchParams.deleteJob : null;
+  const deleteError = typeof searchParams?.deleteError === 'string' ? searchParams.deleteError : null;
+
+  // ⛔ The impact query runs ONLY when the confirm dialog is actually open. It
+  // counts eleven rollup tables, and no operator should pay for that on every
+  // page view of a tab they were not going to use.
+  const [deleteJobState, deleteImpact] = await Promise.all([
+    canWrite && (tab === 'manage' || deleteJobId)
+      ? loadDeleteJob(device.id, deleteJobId)
+      : Promise.resolve({ job: null, unavailable: false }),
+    canWrite && confirmDelete
+      ? estimateDeleteImpact(pool, device.id).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+  const deleteJob = deleteJobState.job;
+  const deleteJobLive = deleteJob ? LIVE_JOB_STATUSES.includes(deleteJob.status) : false;
 
   const [version, haRow, cveRows, rules, configRow, snmpSnapshot, snmpHasCredential, snmpHistory, deviceZones] =
     await Promise.all([
@@ -795,6 +1006,29 @@ export default async function DeviceDetailPage({ params, searchParams }) {
 
       {tab === 'manage' && canWrite && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {deleteError ? (
+            <div
+              className="card"
+              style={{ padding: 20, background: 'var(--tint-danger)', color: 'var(--tint-danger-fg)' }}
+            >
+              <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, marginBottom: 8 }}>
+                Delete not queued
+              </div>
+              <p style={{ fontSize: 'var(--text-base)' }}>{deleteError}</p>
+            </div>
+          ) : null}
+          {deleteJob ? deleteJobPanel(deleteJob, device.id) : null}
+          {deleteJobState.unavailable ? (
+            <div
+              className="card"
+              style={{ padding: 20, background: 'var(--tint-warn)', color: 'var(--tint-warn-fg)' }}
+            >
+              <p style={{ fontSize: 'var(--text-base)' }}>
+                The background job queue could not be read, so any delete already in progress cannot
+                be shown here. This does not mean there is none.
+              </p>
+            </div>
+          ) : null}
           <div className="card" style={{ padding: 20 }}>
             <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16 }}>
               Device Actions
@@ -802,9 +1036,20 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <DeviceActions deviceId={device.id} />
               <EditDeviceModal device={device} />
-              <Link href={`/devices/${device.id}?tab=manage&confirmDelete=1`} className="btn btn-danger">
-                Delete
-              </Link>
+              {/* ⛔ No second Delete while one is live. The partial unique index
+                  uq_background_jobs_live already refuses a duplicate, but on
+                  2026-09-09 an operator double-clicked Delete precisely because
+                  the first click looked like it had done nothing — so the button
+                  has to stop looking clickable, not just fail quietly. */}
+              {deleteJobLive ? (
+                <span className="btn btn-danger" aria-disabled="true" style={{ opacity: 0.5, pointerEvents: 'none' }}>
+                  Delete in progress…
+                </span>
+              ) : (
+                <Link href={`/devices/${device.id}?tab=manage&confirmDelete=1`} className="btn btn-danger">
+                  Delete
+                </Link>
+              )}
             </div>
           </div>
 
@@ -838,8 +1083,23 @@ export default async function DeviceDetailPage({ params, searchParams }) {
               Delete <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{device.name}</span>? This removes
               all associated versions, rules, credentials, and CVE assessments.
             </p>
+            {/* ⛔ The scale, stated before the operator commits. This is
+                irreversible and one device on this fleet carried 3.35M syslog
+                events; "are you sure?" without a number is not informed consent. */}
+            {deleteImpact ? (
+              deleteImpactLines(deleteImpact)
+            ) : (
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--sev-high)' }}>
+                The size of this delete could not be measured. Proceed only if you are sure — it may
+                affect a large amount of syslog history.
+              </p>
+            )}
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+              The delete runs in the engine worker, not in this page: it is queued immediately and
+              you can watch it on this tab. Log ingestion keeps running throughout.
+            </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <form action={deleteDeviceAction}>
+              <form action={enqueueDeleteAction}>
                 <input type="hidden" name="deviceId" value={device.id} />
                 <Button type="submit" variant="danger">
                   Delete
