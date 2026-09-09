@@ -18,6 +18,27 @@ const nextConfig = {
   // strategy and is a separate piece of work. Strict-Transport-Security is
   // deliberately NOT set: this deployment is served over plain HTTP on
   // :3010, and sending HSTS would make the app unreachable.
+  // ⛔ The image optimizer is DISABLED, not gated. This app imports next/image
+  // nowhere (zero imports, zero <Image>), but Next still serves /_next/image
+  // and it was reachable UNAUTHENTICATED — the unauthenticated DoS surface in
+  // the Next image-optimizer advisories.
+  //
+  // ⛔ The previous attempt at this was a matcher change in middleware.js, and
+  // its comment certified the result as "Verified safe: Next 14.2.35 resolves
+  // middleware at pipeline index 3, BEFORE handleNextImageRequest". That is
+  // FALSE on the running server, measured 2026-09-09: /devices correctly 307s
+  // to /login, while /_next/image returns the OPTIMIZER'S OWN 400 ("The
+  // requested resource isn't a valid image") in 25-117ms — i.e. the optimizer
+  // processed the request and middleware never ran for it. A control that is
+  // documented as verified and does not work is worse than a known gap,
+  // because nobody looks at it again.
+  //
+  // `unoptimized: true` removes the endpoint's work entirely rather than
+  // relying on middleware ordering this version does not honour. It costs
+  // nothing here precisely because next/image is unused — if that ever
+  // changes, this needs re-deciding, not deleting.
+  images: { unoptimized: true },
+
   async headers() {
     return [
       {

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.95.0': [
+    "Security: some Palo Alto configuration secrets — SNMP community strings, the User-ID WMI password, an LDAP bind password and a private key — were being stored without being masked. They are masked now, and a migration masks the copies already stored.",
+    "Fixed: on Palo Alto firewalls, a failed rule collection could be recorded as “this firewall has no rules” and replace the real ruleset with an empty one. It now fails loudly and leaves the stored rules alone. The same fault was fixed in the Check Point, Forcepoint and Sangfor connectors.",
+    "Check Point firewalls using several ordered rule layers now have every layer collected, not just the first.",
+    "Fixed: Settings could show a green “Up to date” when SecVault could not actually determine the installed version. It now says the status is unknown.",
+    "The built-in image handler, which this app never uses, is now switched off rather than left reachable without a login.",
+  ],
   '2.94.1': [
     "Fixed: a firewall could be reported as failing every poll because one optional feature could not be read. A FortiGate with no SSL-VPN configured was shown as “Failing 0% of polls succeeding” while it was answering everything else and had just been collected.",
     "The polling note now says WHICH poll is failing — config collection, metrics, VPN sessions or the manual test — instead of a percentage with no subject.",
@@ -968,9 +975,33 @@ export async function GET() {
       });
     }
 
-    // Any differing commit = update available. If the local hash is missing
-    // (git unavailable locally), treat as up to date to avoid a false alarm.
-    const update_available = !!localHash && remoteHash !== localHash;
+    // ⛔ A MISSING LOCAL HASH IS NOT "UP TO DATE". `localCommitHash()` returns
+    // null on ANY failure — git absent from the service account's PATH, a
+    // safe.directory rejection, its 30s timeout. Until 2026-09-09 that fell
+    // through to `update_available = false` and returned the FULL SUCCESS
+    // SHAPE with no `error` key, so `UpdatePanel` (which gates its green pill
+    // on `!status.error && status.up_to_date`) rendered a confident green
+    // UP TO DATE, indefinitely, on the one endpoint whose entire job is
+    // telling an operator their security product is behind.
+    //
+    // Both remote-failure paths already return `error` for exactly this
+    // reason; the local path bypassed them. "We could not read our own commit"
+    // is a failed read, and reporting it as a clean bill of health is this
+    // codebase's most-repeated bug on its worst possible surface.
+    if (!localHash) {
+      console.error('[update-status] local commit hash unreadable — cannot determine update state');
+      return Response.json({
+        current_version,
+        current_commit: null,
+        // ⛔ null, not true. The UI must render "unknown", never "up to date".
+        up_to_date: null,
+        update_available: false,
+        error: 'Could not read the installed commit — update status is unknown',
+      });
+    }
+
+    // Any differing commit = update available.
+    const update_available = remoteHash !== localHash;
 
     // The remote version is display-only. Only read it (a git fetch) when an
     // update is actually available; otherwise the local version is authoritative.

@@ -788,3 +788,49 @@ false.
 
 ⛔ **The 3-day window means history persists.** A device carries its pre-fix failures until they age
 out. That is correct — the failures were real — but do not read it as the fix not working.
+
+## ⛔ `getRules()` returning `[]` from a FAILED read — four more instances (found 2026-09-09)
+
+CLAUDE.md's adapter contract says `getRules()` must THROW on a retrieval failure, because
+`collectAndStore` DELETEs a device's `firewall_rules` before reinserting — so `[]` from a failed
+pull silently wipes the real ruleset. This is the mechanism that wiped PAKFood's 33 rules in August.
+A whole-app sweep found the contract violated in **four** adapters:
+
+- **`paloalto/index.js` — LIVE, 10 devices.** Two paths, not one. The any-vsys catch returned `[]`
+  AND short-circuited all three Panorama tiers; the final fall-through returned `[]` outright; and
+  a tier that answered with a non-null EMPTY array was accepted as a successful collection.
+- **`checkpoint/parser.js`** — a `null` page was skipped WITHOUT being counted, so `malformedPages`
+  stayed 0 and the warning never fired. `api.js` returns `parsed = null` for any HTTP-200 with an
+  empty or non-JSON body (a proxy or captive-portal page), which is the likeliest real shape.
+- **`forcepoint/index.js`** — only the `throw` branch was guarded; `smc.getPolicy()` resolving to
+  `null` fell through to `parsePolicy(null)` → warn → `[]`.
+- **`sangfor/index.js`** — `if (output.trim().length > 0)` accepted a CLI REJECTION BANNER as the
+  config, and short-circuited the remaining `CONFIG_COMMANDS`, defeating the dialect fallback.
+  Downstream `hasUsableConfig()` then returned TRUE for the banner, so compliance scored every
+  predicate `fail` instead of `na`.
+
+⛔ **The distinguishing evidence is KEY PRESENCE, not length.** PAN-OS answers a config-get whose
+xpath resolved to nothing with `<result/>` — no `rules` key; a real-but-empty rulebase answers
+`<result><rules/></result>` — key present, empty value. "The xpath found nothing" and "the rulebase
+is empty" are different statements and only the second may be stored. Forcepoint's `parsePolicy`
+already made this distinction and is the pattern the others now follow.
+
+⛔ **A PARTIAL page set must throw too.** Returning the readable pages silently truncates a real
+ruleset, because the caller DELETEs first — the same rule as Fortinet's "collect every VDOM or fail".
+
+⛔ **Plain `Error`, never `CapabilityUnavailableError`, for a rules failure.** That class means the
+transport succeeded and only an OPTIONAL capability was unreadable, and it deliberately stops the
+poller counting the device as unreachable. A rulebase is not optional — every firewall has one — so
+a device that cannot show SecVault its rules genuinely is one SecVault cannot manage, and it must
+keep counting against reachability. Using the capability class here would re-create the bug it was
+written to prevent, pointed the other way: a real management failure rendered as healthy.
+
+## ⛔ Check Point: never take `layers[0]` either (fixed 2026-09-09)
+
+Same class as the already-documented `packages[0]` bug. `checkpoint/index.js` warned about multiple
+access layers and then stored **layer 1 only** as if it were the whole rulebase. R80+ Ordered Layers
+are a normal configuration. `getRules()` now walks every layer in the package's declared order.
+⛔ Check Point restarts `rule-number` at 1 PER LAYER, so `sequence_number` is renumbered continuously
+across layers — otherwise several rules sit at position 1 and every ordering analysis (shadow,
+reorder) is meaningless. Provenance kept as `raw_rule._secvault_access_layer`.
+⛔ Unverified against real R80+ hardware — the ordering semantics are reasoned, not observed.

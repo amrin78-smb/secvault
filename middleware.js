@@ -23,21 +23,25 @@ export async function middleware(request) {
 
 export const config = {
   matcher: [
-    // ⛔ `_next/image` is deliberately NOT excluded.
+    // ⛔ `_next/image` is not excluded, but MIDDLEWARE IS NOT WHAT PROTECTS IT.
+    // The optimizer is disabled outright in next.config.js
+    // (`images: { unoptimized: true }`) — read the ⛔ note there before
+    // changing either file.
     //
-    // This app uses next/image NOWHERE (zero imports, zero <Image>, no
-    // `images` config), but Next still serves /_next/image and it was
-    // reachable unauthenticated — verified live: it returned 400 "not a
-    // valid image" in ~30-70ms, i.e. the optimizer was actively processing
-    // every request. That is the unauthenticated DoS vector in the Next
-    // image-optimizer advisories. Routing it through middleware makes it a
-    // 307 to /login before the optimizer runs.
+    // ⛔ THIS COMMENT PREVIOUSLY CERTIFIED A CONTROL THAT DID NOT EXIST. It
+    // claimed "Verified safe: Next 14.2.35 resolves middleware at pipeline
+    // index 3, BEFORE check_fs and handleNextImageRequest, so middleware
+    // genuinely gates this route". Measured on the running server 2026-09-09,
+    // that is false: /devices correctly 307s to /login, while /_next/image
+    // returns the OPTIMIZER'S OWN 400 ("The requested resource isn't a valid
+    // image") in 25-117ms. The matcher does match the path — the request
+    // never reaches middleware at all. A documented-as-verified control that
+    // does not work is worse than an acknowledged gap, because nobody
+    // re-checks it. Do not re-derive a middleware-ordering guarantee from
+    // reading Next's source; probe the running server.
     //
-    // Verified safe: Next 14.2.35 resolves middleware at pipeline index 3,
-    // BEFORE check_fs and handleNextImageRequest, so middleware genuinely
-    // gates this route rather than arriving too late. Static assets are on
-    // the SEPARATE /_next/static prefix, which stays excluded and still
-    // serves 200 unauthenticated.
+    // Static assets are on the SEPARATE /_next/static prefix, which stays
+    // excluded and still serves 200 unauthenticated.
     //
     // ⛔ This is a COMPENSATING CONTROL, not a fix for the `next` advisory.
     // npm audit reports one HIGH for `next` that bundles ~22 advisories,

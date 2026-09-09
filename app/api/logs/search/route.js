@@ -18,6 +18,16 @@ export async function GET(request) {
     'protocol', 'application', 'ruleName', 'srcUser', 'srcCountry', 'dstCountry',
     'threatName', 'urlCategory', 'urlHostname', 'sourceIp', 'srcIp', 'dstIp',
     'srcPort', 'dstPort', 'q',
+    // ⛔ `page` was missing from this list, so `buildSearchQuery` always read
+    // `f.page === undefined`, `clampPage` returned 1, and OFFSET was always 0.
+    // The response still reported `hasMore: true` / `maxPage: 200`, so an API
+    // consumer was told more results existed, asked for page 2, and got page 1
+    // back relabelled. Every bit of the paging machinery logSearch.js
+    // deliberately built (MAX_PAGE, pageCapped, hasMore) was unreachable
+    // through this route. The /logs page was unaffected — it calls
+    // searchEvents() directly and passes `page` itself, which is exactly why
+    // nobody noticed.
+    'page',
   ]) {
     const v = sp.get(k);
     if (v !== null && v !== '') filters[k] = v;

@@ -1612,3 +1612,16 @@ therefore does, in ONE transaction and in this order: `SELECT … FROM devices W
 ⛔ **Partial failure is reported with what actually committed** — "4,102 rollup rows deleted;
 1,240,000 raw events unlinked (kept); device row: not reached. Re-running resumes from here." Never
 a bare failure, and never a success that was not observed.
+
+## Adapter exports added 2026-09-09 (failed-read contract sweep)
+
+- `lib/adapters/checkpoint/parser.js` → **`parseLayeredRulebasePages(layerGroups)`** — multi-layer
+  rulebase assembly with continuous `sequence_number` renumbering. Single-layer delegates straight
+  to `parseRulebasePages`, so existing collections are byte-identical.
+- `lib/adapters/sangfor/parser.js` → **`detectCliRejection(output)`** — a NEGATIVE guard only. It
+  is bounded to two shapes (the FIRST non-empty line matches a rejection pattern, or the whole
+  response is ≤6 non-empty lines and any line does) specifically so a real config containing
+  "error" or "invalid input" inside an object name cannot be discarded as a rejection. ⛔ No
+  positive-anchor parser was invented — CLAUDE.md forbids writing a parser for hardware that cannot
+  be tested, and no live Sangfor device exists. A device on an unlisted dialect now fails LOUDLY
+  instead of storing a banner as its config.
