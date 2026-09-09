@@ -70,6 +70,7 @@ const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
+const { isCapabilityUnavailable } = require('../lib/adapters/interface');
 const { runLogHitCorrelation } = require('../lib/engines/logHit');
 const { runDeviceDiscovery } = require('../lib/engines/deviceDiscovery');
 const {
@@ -637,7 +638,26 @@ async function runVpnSessionPollJob() {
         // history, so a device whose metric poll succeeded but whose VPN poll
         // failed read as 100% healthy. TUG was exactly that: 166/166 on metrics
         // while ~23% of its VPN polls timed out waiting for an SSH prompt.
-        await recordConnectivity(pool, device.id, { reachable: false, source: 'vpn', message: err.message });
+        //
+        // ⛔ REFINED 2026-09-09: not every failure here is reachability
+        // evidence. A CapabilityUnavailableError means the transport worked —
+        // SSH connected, logged in, ran the command — and only the FEATURE was
+        // unreadable, almost always because it is not configured. Recording
+        // that as `reachable: false` reported "this device is down" about a
+        // firewall that had answered; OKF(F2) showed "Failing 0% of polls
+        // succeeding" with a full collection minutes old. `reachable: true` is
+        // the honest reading, because the device demonstrably WAS reached; the
+        // capability gap is preserved in the message, which is a different
+        // fact from reachability and does not belong in the same boolean.
+        if (isCapabilityUnavailable(err)) {
+          await recordConnectivity(pool, device.id, {
+            reachable: true,
+            source: 'vpn',
+            message: `reached, but the VPN session count could not be read: ${err.message}`,
+          });
+        } else {
+          await recordConnectivity(pool, device.id, { reachable: false, source: 'vpn', message: err.message });
+        }
       }
     }
 

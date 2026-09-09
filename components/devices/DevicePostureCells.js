@@ -248,6 +248,16 @@ export function CveCell({ patchNow, scheduled, versionString, lastAssessedAt, as
 //
 // ⛔ Per-source, never blended. TUG is 166/166 on metrics and badly degraded on
 // its VPN poll; one averaged number would hide precisely the broken collector.
+// The operator's words for each poller, not the internal source key. `collect`
+// is the scheduled configuration/rule pull, `metrics` the CPU/memory poll,
+// `vpn` the session-count poll, `test` the manual button.
+const SOURCE_LABEL = {
+  collect: 'config collection',
+  metrics: 'metrics polling',
+  vpn: 'VPN session polling',
+  test: 'connection test',
+};
+
 const POLL_TONE = {
   healthy: { color: 'green', label: 'Healthy' },
   flaky: { color: 'green', label: 'Mostly healthy' },
@@ -279,9 +289,17 @@ export function PollHealthDot({ band, health }) {
 export function PollHealthNote({ band, health }) {
   if (band === 'healthy' || band === 'flaky') return null;
   const tone = POLL_TONE[band] || POLL_TONE.unknown;
+  // ⛔ NAME THE SOURCE. "0% of polls succeeding" with no subject reads as
+  // "nothing about this device works", and on 2026-09-09 it said exactly that
+  // about OKF(F2) — a firewall that had just been collected in full, was
+  // answering its metric and test polls, and had one unreadable optional
+  // capability. worstRate is the MINIMUM across sources by design (a device is
+  // as broken as its most broken collector), so the figure is only actionable
+  // once the operator knows which collector it describes.
   const pct =
     health && health.worstRate !== null && health.worstRate !== undefined
-      ? ` ${Math.round(health.worstRate * 100)}% of polls succeeding`
+      ? ` — ${SOURCE_LABEL[health.worstSource] || health.worstSource || 'polling'}`
+        + ` ${Math.round(health.worstRate * 100)}% succeeding`
       : '';
   return (
     <span

@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.94.1': [
+    "Fixed: a firewall could be reported as failing every poll because one optional feature could not be read. A FortiGate with no SSL-VPN configured was shown as “Failing 0% of polls succeeding” while it was answering everything else and had just been collected.",
+    "The polling note now says WHICH poll is failing — config collection, metrics, VPN sessions or the manual test — instead of a percentage with no subject.",
+    "Fixed: VPN poll results were being recorded against the config-collection poll, so the wrong one was blamed for a failure.",
+  ],
   '2.94.0': [
     "Fixed: deleting a firewall could never succeed if it had any log history \u2014 it ran for minutes, blocked log collection for that firewall while it ran, and then silently undid itself. Deleting now runs in the background, tells you how much data it affects before you confirm, and reports what it actually did.",
     "Fixed: a firewall that had never been assessed showed a perfect 100/100 security score \u2014 the most reassuring number in the product, on the one device nothing was known about. Devices and fleet scores now leave un-assessed firewalls out and say how many were left out.",

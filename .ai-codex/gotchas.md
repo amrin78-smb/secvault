@@ -754,3 +754,37 @@ Measured 2026-09-09: for the busiest device it does not complete in 8 seconds, e
 `(device_id, received_at)` index. The delete-confirmation dialog therefore estimates from the hourly
 rollups and LABELS the figure approximate; a count that fails renders "not counted", never `0`.
 Never put a bare `COUNT(*)` over `syslog_events` on a page load.
+
+## ⛔ An unreadable optional capability is NOT an unreachable device (2026-09-09)
+
+The Devices table said **"Failing 0% of polls succeeding"** about OKF(F2) — a FortiGate that had
+just been collected in full, was answering its metric and test polls, and was reachable over SSH.
+Three bugs stacked to produce that one sentence:
+
+1. **`'vpn'` was missing from `VALID_SOURCES`.** `recordConnectivity` falls back to `'collect'` for
+   an unrecognised source, so every VPN-poll observation — added 2026-08-25 *specifically* so a
+   failing VPN poll would stop reading as healthy — was filed under `collect`. The tooltip then
+   showed `collect 0/14` for a device whose collect had just succeeded. ⛔ Any new poller MUST be
+   added to that set; the fallback stops an observation being lost, but pays for it by
+   misattributing it, which is worse when nobody checks.
+2. **A capability failure was recorded as unreachable.** `get vpn ssl monitor` returned output the
+   parser did not recognise (almost certainly because SSL-VPN is simply not configured), the adapter
+   correctly refused to guess a session count and threw — and the poller wrote `reachable: false`.
+   "This feature is not present" became "this device is down".
+3. **The note printed a bare percentage.** `worstRate` is the MINIMUM across sources by design (a
+   device is as broken as its most broken collector), so without naming the source it reads as
+   "nothing about this device works".
+
+**The fix.** `CapabilityUnavailableError` in `lib/adapters/interface.js`, thrown only when the
+transport genuinely succeeded, plus `isCapabilityUnavailable(err)`. The VPN poller records
+`reachable: true` for it — the device demonstrably WAS reached — and keeps the capability gap in the
+message, which is a different fact from reachability and does not belong in the same boolean.
+
+⛔ **Throw it ONLY when the transport succeeded.** If the connect, the login or the API call failed,
+throw a normal Error: that IS reachability evidence and must keep counting against the device. The
+detection is by FLAG (`err.deviceWasReached`), not `instanceof` — adapters and engines load through
+several paths here and an instanceof across two module instances of the same file silently returns
+false.
+
+⛔ **The 3-day window means history persists.** A device carries its pre-fix failures until they age
+out. That is correct — the failures were real — but do not read it as the fix not working.
