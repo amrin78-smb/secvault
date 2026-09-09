@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { getDiscoveredDevices } from '../../../lib/engines/deviceDiscovery';
 import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -186,16 +187,45 @@ export default async function DevicesPage({ searchParams }) {
   const session = await getServerSession(authOptions);
   const canWrite = isAdmin(session);
 
+  // ⛔ Counts only senders that are genuinely unmanaged — an HA passive peer we
+  // already know about is not a device waiting to be added, and counting it
+  // would invite the operator to duplicate a firewall. Best-effort: a failure
+  // here must not take down the whole fleet inventory page, so it degrades to
+  // no chip rather than an error.
+  let discoveredCount = 0;
+  try {
+    const discovered = await getDiscoveredDevices(pool);
+    discoveredCount = discovered.filter(
+      (d) => d.status === 'new' && d.correlation.kind === 'unmanaged'
+    ).length;
+  } catch (_err) {
+    discoveredCount = 0;
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
         title="Devices"
         actions={
-          canWrite && (
-            <Link href="/devices/new" className="btn btn-primary">
-              Add Device
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* ⛔ The count excludes senders already matched to a managed
+                device (HA peers), because presenting those as "devices to add"
+                is exactly how an operator ends up with duplicate firewalls.
+                Muted at zero — a zero-count chip must not read as an alert. */}
+            <Link
+              href="/devices/discovered"
+              className="btn btn-secondary"
+              title="Firewalls sending syslog from an address that is not in the inventory"
+            >
+              Discovered senders
+              {discoveredCount > 0 ? ` (${discoveredCount})` : ''}
             </Link>
-          )
+            {canWrite && (
+              <Link href="/devices/new" className="btn btn-primary">
+                Add Device
+              </Link>
+            )}
+          </div>
         }
       />
 

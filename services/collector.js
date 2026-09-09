@@ -169,13 +169,29 @@ function log(msg) {
 // discarding it would make the fleet look quieter than it is.
 async function refreshDeviceMap() {
   try {
-    const { rows } = await pool.query(
-      'SELECT id, mgmt_ip, snmp_host FROM devices WHERE active = true'
-    );
+    // ⛔ BOTH queries, or NEITHER. A partial refresh — one succeeding, one
+    // failing — would install a half-map, and every address in the missing half
+    // would start filing its events as unattributed. That is worse than keeping
+    // a slightly stale complete map, which is the failure mode this function
+    // was already written to prefer.
+    const [devices, aliases] = await Promise.all([
+      pool.query('SELECT id, mgmt_ip, snmp_host FROM devices WHERE active = true'),
+      // Additional syslog source addresses for a managed device — HA passive
+      // peers, mainly. See lib/engines/deviceDiscovery.js: on this fleet 5 of 8
+      // unmatched senders were peers of devices SecVault already had.
+      pool.query(
+        `SELECT s.device_id AS id, host(s.source_ip) AS ip
+           FROM device_syslog_sources s
+           JOIN devices d ON d.id = s.device_id AND d.active = true`
+      ),
+    ]);
     const map = new Map();
-    for (const r of rows) {
+    for (const r of devices.rows) {
       if (r.mgmt_ip) map.set(String(r.mgmt_ip), r.id);
       if (r.snmp_host) map.set(String(r.snmp_host), r.id);
+    }
+    for (const r of aliases.rows) {
+      if (r.ip) map.set(String(r.ip), r.id);
     }
     deviceByIp = map;
   } catch (err) {

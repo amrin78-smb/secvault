@@ -123,3 +123,10 @@ GRANT SELECT ON TABLE syslog_user_hourly TO claude_readonly;
 GRANT SELECT ON TABLE syslog_user_hourly TO nocvault_readonly;
 GRANT SELECT ON TABLE syslog_urlcat_hourly TO claude_readonly;
 GRANT SELECT ON TABLE syslog_urlcat_hourly TO nocvault_readonly;
+
+-- Phase 8c syslog discovery (2026-09-09). No secret material: observed identity
+-- and operator decisions only, the same sensitivity class as `devices`.
+GRANT SELECT ON TABLE discovered_devices TO claude_readonly;
+GRANT SELECT ON TABLE discovered_devices TO nocvault_readonly;
+GRANT SELECT ON TABLE device_syslog_sources TO claude_readonly;
+GRANT SELECT ON TABLE device_syslog_sources TO nocvault_readonly;

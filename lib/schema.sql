@@ -1717,3 +1717,77 @@ ALTER TABLE syslog_user_hourly ADD CONSTRAINT uq_syslog_user_hourly
 -- Answers "named users on VPN" straight from the rollup.
 CREATE INDEX IF NOT EXISTS idx_syslog_user_hourly_class
   ON syslog_user_hourly (log_class, bucket_hour DESC);
+
+-- ===========================================================================
+-- Phase 8c — syslog-discovered senders (added 2026-09-09)
+-- ===========================================================================
+-- Firewalls sending syslog from an address that matches no `devices` row. The
+-- collector already stores those events with device_id NULL, deliberately; this
+-- surfaces the SENDERS so an operator can review them and, if they are real,
+-- promote them into the managed inventory by supplying credentials.
+--
+-- ⛔ THEIR OWN TABLE, NEVER A STATUS COLUMN ON `devices`. Three reasons, each
+-- load-bearing:
+--
+--  1. `devices` is NOT NULL on name/vendor/mgmt_method with defaults of
+--     'forcepoint'/'smc'. Parking a half-known sender there would ASSERT a
+--     vendor and an access method as facts. Measured live: 2 of 8 senders have
+--     no detectable vendor at all, and a third read 0% vendor for a full hour
+--     despite being Palo Alto (its log format is one the parser does not yet
+--     recognise). That is the fabricated-value pattern at the INSERT.
+--  2. `WHERE active = true` guards ~28 query sites, but the fleet inventory
+--     table and GET /api/devices do NOT filter on it. An `active=false`
+--     discovered row would still appear in the inventory and still be
+--     Collect-Now-able.
+--  3. Once a row exists in `devices`, refreshDeviceMap() attributes that
+--     sender's syslog to it within 5 minutes — giving a device with zero rules,
+--     zero configs and zero versions a real event stream, which is exactly the
+--     empty-denominator shape that corrupts fleet metrics.
+--
+-- ⛔ Every column here is an OBSERVATION or an operator DECISION. A field the
+-- sender did not supply stays NULL.
+CREATE TABLE IF NOT EXISTS discovered_devices (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_ip          INET NOT NULL UNIQUE,        -- the only always-known fact
+  observed_vendor    TEXT,                        -- NULL = never identified
+  observed_hostname  TEXT,                        -- the device's own reported name
+  observed_serial    TEXT,
+  vendor_conflict    BOOLEAN NOT NULL DEFAULT false,  -- >1 vendor: a relay, not a device
+  hostname_conflict  BOOLEAN NOT NULL DEFAULT false,  -- >1 hostname: shared/NAT'd address
+  first_seen_at      TIMESTAMPTZ NOT NULL,        -- hour granularity (from the rollup)
+  last_seen_at       TIMESTAMPTZ NOT NULL,
+  observed_hours     INTEGER NOT NULL,            -- the anti-stray-packet evidence
+  event_count        BIGINT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'new', -- new|ignored|promoted|linked
+  promoted_device_id UUID REFERENCES devices(id) ON DELETE SET NULL,
+  linked_device_id   UUID REFERENCES devices(id) ON DELETE SET NULL,
+  decision_note      TEXT,
+  decided_by         TEXT,                        -- from the session, never the client
+  decided_at         TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_discovered_devices_status    ON discovered_devices(status);
+CREATE INDEX IF NOT EXISTS idx_discovered_devices_last_seen ON discovered_devices(last_seen_at DESC);
+
+-- Additional syslog source addresses belonging to an ALREADY-MANAGED device.
+--
+-- ⛔ THIS IS WHY THE FEATURE IS NOT "AUTO-ADD EVERY UNKNOWN SENDER". Measured
+-- live: 5 of 8 unmatched senders are HA PASSIVE PEERS whose addresses SecVault
+-- already holds in device_ha_status.peer_mgmt_ip, confirmed independently by
+-- peer_serial. Auto-adding them would have created five duplicate firewalls on
+-- the first run.
+--
+-- ⛔ A peer address must NEVER be written into devices.mgmt_ip — that column is
+-- what every adapter opens SSH/HTTPS to, and pointing it at a passive unit
+-- breaks collection on a working device.
+CREATE TABLE IF NOT EXISTS device_syslog_sources (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id   UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  source_ip   INET NOT NULL UNIQUE,   -- one address belongs to one device
+  note        TEXT,
+  created_by  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_device_syslog_sources_device_id
+  ON device_syslog_sources(device_id);

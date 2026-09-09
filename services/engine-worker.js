@@ -71,6 +71,7 @@ const { runNotificationDispatch } = require('../lib/engines/notificationDispatch
 const { dispatchMonthlyReport } = require('../lib/engines/complianceReport');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
 const { runLogHitCorrelation } = require('../lib/engines/logHit');
+const { runDeviceDiscovery } = require('../lib/engines/deviceDiscovery');
 const {
   runConfigRetention,
   formatRetentionSummary,
@@ -294,6 +295,24 @@ function getSnapshotRetentionDays() {
 // service being reached now", and a 30-day window would keep a band elevated
 // for a month after an exposure was actually closed. Clamped in the engine to
 // 90 days regardless of what is set here.
+// Window the discovery job looks back over.
+//
+// ⛔ MUST stay far shorter than SYSLOG_RETENTION_DAYS. The rollup copies
+// device_id verbatim and never re-resolves it, so historical rows for a
+// now-promoted sender keep device_id NULL permanently — an unbounded lookback
+// would re-list every promoted device forever.
+function getDiscoveryLookbackHours() {
+  const fallback = 48;
+  const raw = parseInt(process.env.DISCOVERY_LOOKBACK_HOURS, 10);
+  if (Number.isInteger(raw) && raw >= 2) return raw;
+  if (process.env.DISCOVERY_LOOKBACK_HOURS) {
+    logger.warn(
+      `DISCOVERY_LOOKBACK_HOURS value "${process.env.DISCOVERY_LOOKBACK_HOURS}" is not a valid integer >= 2 — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
 function getLogHitLookbackDays() {
   const fallback = 7;
   const raw = parseInt(process.env.LOG_HIT_LOOKBACK_DAYS, 10);
@@ -843,6 +862,38 @@ async function runConfigRetentionJob() {
   }
 }
 
+// Surfaces firewalls sending syslog from an address matching no device row.
+//
+// ⛔ SURFACES ONLY — it never inserts into `devices`. Promotion requires an
+// admin to supply working credentials, which is what keeps an unauthenticated,
+// trivially spoofable syslog packet out of the CVE / compliance / security-score
+// denominators.
+//
+// Hourly at :35, offset from [log-hit] at :20 so two syslog-reading jobs do not
+// overlap. Cheap by construction: it reads the small hourly rollup, plus one
+// narrow 15-minute slice of raw events for hostnames.
+async function runDeviceDiscoveryJob() {
+  const start = Date.now();
+  logger.info(`Job [device-discovery] starting.`);
+  try {
+    const s = await runDeviceDiscovery(pool, {
+      lookbackHours: getDiscoveryLookbackHours(),
+    });
+    const durationMs = Date.now() - start;
+    logger.info(
+      `Job [device-discovery] finished in ${durationMs}ms: ${s.candidates} candidate sender(s), ` +
+        `${s.inserted} new, ${s.updated} updated` +
+        (s.reset ? `, ${s.reset} reset to new (their device was deleted)` : '') +
+        ` (thresholds: seen in >=${s.minHours} distinct hours, >=${s.minEvents} events ` +
+        `over ${s.lookbackHours}h).`
+    );
+    for (const e of s.errors) logger.error(`Job [device-discovery] error: ${JSON.stringify(e)}`);
+  } catch (err) {
+    const durationMs = Date.now() - start;
+    logger.error(`Job [device-discovery] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  }
+}
+
 // Produces `log_hit`, decision rule 2 of the CVE priority tree.
 //
 // Runs in the ENGINE and never on page load: it reads the pre-aggregated
@@ -1111,6 +1162,12 @@ async function scheduleJobs() {
   // change minute to minute, and the job re-derives priority bands for any
   // device whose value moved, so a tighter cadence would buy nothing and
   // rewrite bands repeatedly. :20 keeps it off the top-of-hour crowd.
+  logger.info('Scheduling [device-discovery] with cron "35 * * * *" (hourly).');
+  const discoveryTask = cron.schedule('35 * * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runDeviceDiscoveryJob, 'device-discovery');
+  });
+
   logger.info('Scheduling [log-hit] with cron "20 * * * *" (hourly).');
   const logHitTask = cron.schedule('20 * * * *', () => {
     if (shuttingDown) return;
@@ -1129,6 +1186,7 @@ async function scheduleJobs() {
   });
 
   scheduledTasks = [
+    discoveryTask,
     logHitTask,
     feedTask,
     configTask,
@@ -1175,6 +1233,11 @@ async function main() {
   // Cheap by construction: with no curated port_exposed condition it returns
   // without touching syslog at all.
   await runTrackedJob(runLogHitJob, 'log-hit');
+
+  // Same reasoning as the log-hit startup run: cron registers only after every
+  // startup job finishes, so without this the first discovery pass could be an
+  // hour after a deploy.
+  await runTrackedJob(runDeviceDiscoveryJob, 'device-discovery');
   // Safe no-op mid-month — dispatchMonthlyReport()'s own per-period
   // idempotency check (compliance_report_log) skips instantly once a
   // 'success' row already exists this period, same as every other job's

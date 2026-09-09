@@ -1192,3 +1192,42 @@ Requires every module under `lib/` and `services/` (79). Exists because a syntax
 `trafficStats.js` and three gates missed it: `node --check` was chained after a script that exited
 non-zero so it never ran, no test imported the file, and `npm run build` does not evaluate
 server-only modules. A LOAD test, not a behaviour test — do not let it discourage real tests.
+
+## `lib/engines/deviceDiscovery.js` (added 2026-09-09)
+
+Surfaces firewalls sending syslog from an address matching no `devices` row.
+
+Exports: `correlateSender()` (PURE), `runDeviceDiscovery(pool, opts)` (never throws),
+`getDiscoveredDevices(pool)`.
+
+⛔ IT SURFACES, IT NEVER AUTO-INSERTS INTO `devices`. The request was "auto add them to the
+inventory"; this reads that as "auto-surface a reviewable list", and the difference is the safety
+story. UDP syslog is unauthenticated and trivially spoofable, and `devices` is NOT NULL on
+vendor/mgmt_method — auto-inserting would both admit spoofed senders into the CVE/compliance/
+security-score denominators AND assert a vendor for the 2 of 8 live senders that have none.
+
+⛔ MOST "UNKNOWN" SENDERS ARE ALREADY KNOWN. Measured live: 5 of 8 unmatched senders are HA PASSIVE
+PEERS already held in `device_ha_status.peer_mgmt_ip`, each independently confirmed by
+`peer_serial`. Those are offered as LINK (writing `device_syslog_sources`), never promote — naive
+auto-add would have created five duplicate firewalls on the first run. Correlation is computed at
+READ time, never stored: `peer_mgmt_ip` swaps on failover, so a cached match would go stale and read
+as a fact (same discipline as deviceHealth.js).
+
+⛔ A peer address must NEVER reach `devices.mgmt_ip` — that is what every adapter opens SSH/HTTPS to.
+
+Anti-fabrication: two-dimensional threshold (>= 2 distinct rollup hours AND >= 100 events); loopback/
+link-local/CGNAT excluded in SQL; `vendor_conflict` when one address emits more than one vendor (a
+relay, not a device). The UPSERT COALESCEs every observation so a pass that saw no vendor cannot
+ERASE one an earlier pass saw — vendor detection is intermittent, and one live sender read 0% for a
+full hour. Operator decisions (`status`, `decided_*`, `promoted_device_id`, `linked_device_id`) are
+never touched by the job.
+
+⛔ `DISCOVERY_LOOKBACK_HOURS` is MANDATORY and must stay far shorter than `SYSLOG_RETENTION_DAYS`:
+the rollup copies `device_id` verbatim and never re-resolves it, so historical rows for a promoted
+sender keep `device_id` NULL permanently and an unbounded window would re-list every promoted device
+forever.
+
+Runs in the ENGINE (`device-discovery`, hourly at :35, offset from `log-hit` at :20), NOT the
+collector — nothing goes in a path handling 250-1,400 events/sec for a feature producing ~8 rows an
+hour, and "seen across >= 2 distinct hours" is a rollup question an in-memory accumulator would lose
+on every deploy restart.

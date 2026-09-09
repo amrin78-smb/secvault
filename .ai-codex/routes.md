@@ -247,3 +247,7 @@ for every DB-hitting route — worth adding explicitly for consistency with the 
 
 All other DB-hitting route files (45 as of 2026-08-02's `/api/topology/path-query` addition)
 verified to export `dynamic = 'force-dynamic'`.
+
+GET  /api/discovered-devices                 — [auth] observed identity of unmatched syslog senders, each correlated against device_ha_status / device_syslog_sources at read time. Errors 500; NEVER returns [] on failure ("no unknown senders" is the dangerous wrong answer here).
+POST /api/discovered-devices/[id]/link       — [admin] file a sender's address against an EXISTING device (device_syslog_sources). The HA-peer case: 5 of 8 live senders. ⛔ Never writes devices.mgmt_ip. Transactional, 409 if already decided.
+POST /api/discovered-devices/[id]/ignore     — [admin] dismiss. ⛔ 'ignored', not DELETE — the hourly job would recreate a deleted row, so delete would appear to work and silently not.
