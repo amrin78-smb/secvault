@@ -13,7 +13,16 @@ const COLOR_CLASS = {
   orange: 'badge-orange',
 };
 
-export default function Badge({ color = 'muted', children, className = '' }) {
+// `title` is forwarded because a badge is where this app puts a LABEL over a
+// raw vendor value — "Login failed" for `ssl-login-fail`, "Synchronized" for
+// `synchronized`. The raw string is the evidence and must stay reachable on
+// hover; without this prop the attribute was silently dropped and the friendly
+// word became the only thing the operator could ever see.
+export default function Badge({ color = 'muted', children, className = '', title }) {
   const colorClass = COLOR_CLASS[color] || COLOR_CLASS.muted;
-  return <span className={`badge ${colorClass} ${className}`}>{children}</span>;
+  return (
+    <span className={`badge ${colorClass} ${className}`} title={title}>
+      {children}
+    </span>
+  );
 }

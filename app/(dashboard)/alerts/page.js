@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import TimeAgo from '../../../components/ui/TimeAgo';
 import { describeConfigChange } from '../../../lib/configChangeSummary';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
@@ -328,7 +329,9 @@ export default async function AlertsPage({ searchParams }) {
                         <span style={{ color: 'var(--text-muted)' }}> ({item.severity})</span>
                       )}
                     </td>
-                    <td style={{ color: 'var(--text-secondary)' }}>{formatWhen(item.occurredAt)}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>
+                      <TimeAgo value={item.occurredAt} />
+                    </td>
                     <td>
                       {canWrite ? (
                         <AlertAckControl item={item} />

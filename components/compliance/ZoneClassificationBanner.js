@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { standardLabel } from '../../lib/formatDisplay';
 
 // Shown on a compliance page when the External-to-Internal zone
 // segmentation check (rule-no-external-to-internal-access) resolved 'na'
@@ -23,7 +24,13 @@ import Link from 'next/link';
 // every device's zones into one unusable flat list), so the link below must
 // point at THIS device's own Manage tab, not a global settings page.
 export default function ZoneClassificationBanner({ standards, deviceId }) {
-  const list = Array.isArray(standards) && standards.length > 0 ? standards.join(', ') : 'PCI-DSS, NIST, CIS v8';
+  // Raw DB keys (PCI_DSS, ISO_27001) read as identifiers, not standards.
+  // The literal fallback below was already written in words, so the live list
+  // was the only place this banner spoke in underscores.
+  const list =
+    Array.isArray(standards) && standards.length > 0
+      ? standards.map(standardLabel).join(', ')
+      : 'PCI DSS, NIST, CIS v8';
   return (
     <div
       style={{

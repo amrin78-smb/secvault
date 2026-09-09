@@ -454,7 +454,13 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                 <option value="">All types</option>
                 {FINDING_TYPES.map((t) => (
                   <option key={t} value={t}>
-                    {t}
+                    {/* ⛔ The same words the badges use. This listed raw slugs
+                        (log_disabled) while the table two inches below labelled
+                        the very same rows "Logging Off" — two controls
+                        disagreeing about the name of one thing, in one
+                        viewport. The VALUE stays the slug, so the URL contract
+                        is untouched. */}
+                    {TYPE_LABELS[t] || t}
                   </option>
                 ))}
               </select>

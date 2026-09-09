@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import TimeAgo from '../ui/TimeAgo';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import StandardDonut from './StandardDonut';
@@ -13,20 +14,6 @@ import StandardDonut from './StandardDonut';
  * @param {string} [viewMoreHref] - link to the full findings view for this standard
  * @param {string|null} [lastRunAt] - ISO date string or null
  */
-
-// Same "d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC'" / "Never run"
-// formatting already used by ComplianceMatrix.js's formatLastRun() and
-// app/(dashboard)/compliance/[deviceId]/page.js's formatDateTime() -- inlined
-// here (rather than imported) since neither of those files exports its
-// formatter, and this component owns no other file it could add an export
-// to; matching the exact string shape is what matters, not sharing the
-// function object itself.
-function formatLastRun(value) {
-  if (!value) return 'Never run';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return 'Never run';
-  return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-}
 
 // Plain function returning JSX, called imperatively from the main component
 // body below -- same "helper, not a nested component" pattern already used
@@ -219,7 +206,7 @@ export default function StandardCard({
             </span>
           )}
           <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            Last run: {formatLastRun(lastRunAt)}
+            Last run: <TimeAgo value={lastRunAt} empty="Never run" />
           </span>
         </div>
 

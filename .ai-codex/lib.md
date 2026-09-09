@@ -41,6 +41,19 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 `getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
 `getSyncPillStatus(pool)` -> `Promise<{ok: boolean, label: string, lastSyncs: object[]}>` — condensed header-pill status across `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`; `label` is `'NO SYNC YET'|'FEEDS OK'|'FEED ERROR'`.
 
+## lib/formatDisplay.js
+
+Added v2.83.0 during the raw-text UI sweep; indexed 2026-09-09. Pure, no DB, CommonJS — the shared
+home for "a stored value, in words". Server and client components both import it.
+
+`timeAgo(value)` -> `string|null` — `'4 min ago'` / `'in 2 h'`; `null` (not `'—'`, not `'never'`) when the value is absent or unparseable, so the CALLER decides what absence reads as.
+`absoluteUtc(value)` -> `string|null` — `'2026-09-09 08:41 UTC'`. Always paired with `timeAgo` on a `title=`, because a relative time alone cannot be cross-referenced against a device log.
+`titleCase(v)` -> `string` — `snake_case`/`kebab-case` enum to `'Snake Case'`. For vendor action words and status enums with no curated label.
+`FEED_LABELS` -> `object` — feed slug to product name (`nvd` -> `'NVD'`, `kev` -> `'CISA KEV'`).
+`feedStatusRank(status)` -> `number` — sort order for feed status. ⛔ An UNKNOWN status ranks as bad (`1`), not good — a status this app has never seen is not evidence things are fine.
+`newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
+`STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
+
 ## lib/rbac.js
 [SENSITIVE] — entire file (auth/authorization guard)
 

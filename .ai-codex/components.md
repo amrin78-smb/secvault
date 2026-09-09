@@ -11,7 +11,8 @@ components sharing a `base()` helper, each taking props `p` (no domain-specific 
 
 ## ui/
 
-Badge  color, children, className — colored status pill
+Badge  color, children, className, title — colored status pill. `title` (v2.86.2) is forwarded because a badge is where this app puts a LABEL over a raw vendor value ("Login failed" for `ssl-login-fail`); without it the attribute was silently dropped and the raw evidence became unreachable.
+TimeAgo  value, empty="—" — relative time ("4 min ago") with the absolute UTC timestamp on `title`. Added v2.86.2 over lib/formatDisplay.js's timeAgo/absoluteUtc. ⛔ Renders `empty` in muted text when the value is absent — pass the words that are TRUE for that field ("Never run", not "—") rather than letting every caller invent its own.
 TabBar  tabs (`[{href,label,key?}]`), activeHref, ariaLabel — shared underline tab bar for server-driven `?tab=`/`?view=` navigation. Added v2.66.0, extracted from the inline `tabLink()` helper that had been copy-pasted into `/vulnerability`, `/compliance`, `/topology` and the 13-tab `/devices/[id]/analysis`, each with its own drifted padding. ⛔ Server component with real `<Link>`s, deliberately NOT `useState` — a URL survives `AutoRefresh`'s 60s `router.refresh()`, an F5 and a shared link; client tab state does not. Sets `aria-current="page"`. New tabbed pages should use this; the four pre-existing pages were left alone rather than refactored in the same change.
 Button  variant, className, children, ...props — styled button wrapper
 Card (+CardHeader, CardTitle, CardBody)  children, className, style — card container + sub-parts

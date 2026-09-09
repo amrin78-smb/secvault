@@ -1,5 +1,6 @@
 import Badge from '../ui/Badge';
 import StatusDot from '../ui/StatusDot';
+import { titleCase } from '../../lib/formatDisplay';
 
 // Presentational cells shared by the Devices table. Server components (no
 // interactivity), defined at module top level per CLAUDE.md.
@@ -122,7 +123,12 @@ export function HaCell({ enabled, mode, localState, peerStatus }) {
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <span style={{ color: peerDown ? 'var(--red)' : 'var(--text-primary)' }}>{mode || 'HA'}</span>
       <span style={{ fontSize: 'var(--text-xs)', color: peerDown ? 'var(--red)' : 'var(--text-muted)' }}>
-        {localState || '?'}{peerDown ? ' · peer down' : ''}
+        {/* An em-dash, not "?". The rest of this table already uses — for
+            "not reported", and a question mark reads as the app being
+            confused rather than the device being silent. Title Case matches
+            the /lifecycle HA table's wording for the same value. */}
+        {localState ? titleCase(localState) : '—'}
+        {peerDown ? ' · peer down' : ''}
       </span>
     </span>
   );

@@ -9,6 +9,7 @@ import StatCard from '../../../components/ui/StatCard';
 import Pagination from '../../../components/ui/Pagination';
 import { paginateArray } from '../../../lib/pagination';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
+import { titleCase } from '../../../lib/formatDisplay';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,6 +143,30 @@ function haBadge(status) {
   if (status === 'healthy') return <Badge color="success">Healthy</Badge>;
   if (status === 'standalone') return <Badge color="muted">Standalone</Badge>;
   return <Badge color="muted">Unknown</Badge>;
+}
+
+// The device's own word for its HA role, in Title Case. "active" and
+// "passive" are BOTH normal in an Active-Passive pair, so neither gets a
+// colour here — the verdict already has its own column, and tinting
+// "passive" amber would read as a fault on a working standby.
+function haState(value) {
+  if (!value) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  return <span title={value}>{titleCase(value)}</span>;
+}
+
+// ⛔ Config sync is the one HA field that IS a verdict, so it is the one that
+// gets a tone. "synchronized" is the only good answer; anything else the
+// device reports is at least a warning. ABSENT IS NEVER GREEN — a device that
+// reported no sync state has not told us the pair is in sync, and colouring
+// that silence as success is the failed-read-as-a-fact error.
+function configSyncCell(value) {
+  if (!value) return <span style={{ color: 'var(--text-muted)' }}>—</span>;
+  const ok = String(value).toLowerCase() === 'synchronized';
+  return (
+    <Badge color={ok ? 'success' : 'warning'} title={value}>
+      {titleCase(value)}
+    </Badge>
+  );
 }
 
 function notCollectedBadge() {
@@ -635,10 +660,10 @@ export default async function LifecyclePage({ searchParams }) {
                         <tr key={row.device_id}>
                           <td title={device?.name || ''}>{device ? deviceLink(device.id, device.name) : '—'}</td>
                           <td>{row.enabled ? row.mode || 'Enabled' : '—'}</td>
-                          <td>{row.local_state || '—'}</td>
-                          <td>{row.peer_state || '—'}</td>
+                          <td>{haState(row.local_state)}</td>
+                          <td>{haState(row.peer_state)}</td>
                           <td className="mono">{row.peer_mgmt_ip || '—'}</td>
-                          <td>{row.config_sync_state || '—'}</td>
+                          <td>{configSyncCell(row.config_sync_state)}</td>
                           <td>{haBadge(ha.status)}</td>
                         </tr>
                       );

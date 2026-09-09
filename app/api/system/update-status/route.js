@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.86.2': [
+    "VPN activity now says \"Login failed\" instead of ssl-login-fail, and \"Tunnel up\" instead of tunnel-up. An unmapped vendor verb still shows verbatim, and the raw verb is always on hover.",
+    "Fixed: the VPN login-locations table ranked US and United States as two separate countries. Palo Alto emits ISO codes, Fortinet emits full names; they are now normalised to one row per country at read time.",
+    "Timestamps across Alerts and the compliance standard cards read \"4 min ago\" with the exact UTC time on hover, instead of a bare UTC string.",
+    "Lifecycle HA states are Title Case, and config-sync now carries a tone — synchronized is green, anything else is amber, and a device that reported nothing is never green.",
+    "Exposure analysis failures are a two-column list of device and reason, each device linked, instead of one semicolon-joined run-on sentence.",
+    "Compliance standards read PCI DSS and ISO 27001 rather than the raw PCI_DSS / ISO_27001 database keys.",
+  ],
   '2.86.1': [
     "Fixed: the dashboard home page returned a server-side exception for every user. Its feed-freshness strip queried feed_sync_log.completed_at; the column is named finished_at, so every render of / failed.",
     "The same wrong column name was in lib/formatDisplay.js newestFeedAt(), which the strip uses to pick the newest sync time.",

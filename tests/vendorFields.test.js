@@ -269,6 +269,7 @@ const {
   isPrivateCountry,
   findUsernameSprayers,
   findFailureOnlyCountries,
+  normalizeCountry,
 } = require('../lib/syslog/vpnAuthStats');
 
 it('⛔ a pre-login page fetch is not a successful login', () => {
@@ -344,4 +345,26 @@ it('⛔ the failure-only-country rule is DISABLED when a vendor reports no succe
   ]);
   assert.equal(withSuccess.evaluable, true);
   assert.equal(withSuccess.rows.length, 1);
+});
+
+it('⛔ the two vendors name the same country differently — normalise or double-count', () => {
+  // Found on the FIRST live run of this feature: the ranked table showed
+  //   US            | failure | 22 | 18 sources
+  //   United States | failure | 22 | 14 sources
+  // as two separate countries, because Palo Alto emits ISO alpha-2 and FortiOS
+  // emits the full English name. A GROUP BY on the raw value splits one country
+  // in half and under-states both halves.
+  const { normalizeCountry } = require('../lib/syslog/vpnAuthStats');
+  assert.equal(normalizeCountry('US'), normalizeCountry('United States'));
+  assert.equal(normalizeCountry('TH'), normalizeCountry('Thailand'));
+  assert.equal(normalizeCountry('GB'), 'United Kingdom');
+});
+
+it('an unmapped country keeps the vendor spelling rather than being dropped', () => {
+  // A country missing from the map must still rank — a silent omission would
+  // hide logins, which is the wrong direction to be wrong in.
+  assert.equal(normalizeCountry('ZZ'), 'ZZ');
+  assert.equal(normalizeCountry('Someplace New'), 'Someplace New');
+  assert.equal(normalizeCountry(null), null);
+  assert.equal(normalizeCountry(''), null);
 });

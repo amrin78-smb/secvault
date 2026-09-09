@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { standardLabel } from '../../../../../../lib/formatDisplay';
 import { pool } from '../../../../../../lib/db';
 import PageHeader from '../../../../../../components/ui/PageHeader';
 import Badge from '../../../../../../components/ui/Badge';
@@ -154,8 +155,8 @@ export default async function ComplianceCheckDetailPage({ params }) {
             <Badge color={sev.color}>{sev.label}</Badge>
             <Badge color={st.color}>{st.label}</Badge>
             {standards.map((s) => (
-              <Badge key={s} color="muted">
-                {s}
+              <Badge key={s} color="muted" title={s}>
+                {standardLabel(s)}
               </Badge>
             ))}
             <span>Last checked: {formatDateTime(finding.detected_at)}</span>

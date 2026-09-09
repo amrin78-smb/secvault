@@ -458,12 +458,72 @@ export default async function ExposurePage() {
             <Card>
               <CardBody>
                 {/* ⛔ Surfaced, never swallowed. A device that failed to
-                    compute is not a device with no exposure. */}
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--red)' }}>
-                  {fleet.errors.length} device(s) could not be analysed and are NOT represented
-                  above:{' '}
-                  {fleet.errors.map((e) => `${e.name} (${e.error})`).join('; ')}
+                    compute is not a device with no exposure.
+
+                    This was one semicolon-joined run-on sentence: with more
+                    than two failures the device names and the Postgres error
+                    text ran together into a paragraph nobody could pick a
+                    single device out of. Same facts, one row each, name
+                    separated from reason — and the name is a link, because the
+                    next thing you do with a failed device is go and look at
+                    it. */}
+                <div
+                  style={{
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--text-secondary)',
+                    marginBottom: 8,
+                  }}
+                >
+                  <strong style={{ color: 'var(--red)' }}>
+                    {fleet.errors.length} device{fleet.errors.length === 1 ? '' : 's'} could not be
+                    analysed
+                  </strong>{' '}
+                  and {fleet.errors.length === 1 ? 'is' : 'are'} NOT represented in the totals
+                  above.
                 </div>
+                <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                  <colgroup>
+                    <col style={{ width: '30%' }} />
+                    <col style={{ width: '70%' }} />
+                  </colgroup>
+                  <tbody>
+                    {fleet.errors.map((e, i) => (
+                      <tr key={e.deviceId || i}>
+                        <td
+                          style={{
+                            padding: '4px 8px 4px 0',
+                            verticalAlign: 'top',
+                            fontSize: 'var(--text-sm)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {/* computeFleetExposure() also reports a
+                              WHOLE-RUN failure, which carries no deviceId and
+                              no name (exposureQuery.js:276). That row must not
+                              render as a device called "undefined". */}
+                          {e.deviceId && e.name ? (
+                            <Link href={`/devices/${e.deviceId}`} className="link-quiet">
+                              {e.name}
+                            </Link>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>Fleet computation</span>
+                          )}
+                        </td>
+                        <td
+                          style={{
+                            padding: '4px 0',
+                            verticalAlign: 'top',
+                            fontSize: 'var(--text-sm)',
+                            color: 'var(--red)',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {e.error}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </CardBody>
             </Card>
           ) : null}

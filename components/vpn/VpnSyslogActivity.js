@@ -90,6 +90,36 @@ const CLOSE_ACTIONS = new Set([
 ]);
 const FAILURE_HINTS = ['fail', 'denied', 'deny', 'reject', 'error', 'invalid', 'timeout'];
 
+// Vendor CLI verbs, in words. The COLOUR logic below is already correct
+// three-state; this is only about the label. "Did anyone fail to log in?" was
+// answerable only by someone who knows FortiOS verbs -- ssl-login-fail is
+// 2,773 events in a window, and it reads as jargon.
+//
+// ⛔ An unmapped verb falls through to the RAW STRING -- never to a guessed
+// friendly name, and never to "Unknown", which would be a claim. The raw verb
+// stays on the title attribute either way, because it is the evidence.
+const ACTION_LABEL = {
+  'ssl-new-con': 'SSL-VPN connect',
+  'ssl-login': 'Login',
+  'ssl-login-fail': 'Login failed',
+  'ssl-exit': 'Disconnected',
+  'ssl-exit-error': 'Disconnected (error)',
+  'ssl-alert': 'SSL alert',
+  'tunnel-up': 'Tunnel up',
+  'tunnel-down': 'Tunnel down',
+  'tunnel-stats': 'Tunnel statistics',
+  negotiate: 'Negotiating',
+  install_sa: 'Tunnel established',
+  delete_ipsec_sa: 'Tunnel removed',
+  'phase2-up': 'Phase 2 up',
+  'phase1-down': 'Phase 1 down',
+};
+
+function actionLabel(action) {
+  if (!action) return null;
+  return ACTION_LABEL[String(action).toLowerCase()] || action;
+}
+
 function actionTone(action) {
   const a = String(action).toLowerCase();
   if (FAILURE_HINTS.some((h) => a.includes(h))) return 'danger';
@@ -332,7 +362,7 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
     <Card>
       <CardHeader>
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconActivity} color="#4ade80" bg="rgba(74,222,128,0.20)" />
+          <IconChip icon={IconActivity} color="var(--green)" bg="var(--tint-success)" />
           VPN Activity from Logs (24h)
         </CardTitle>
       </CardHeader>
@@ -533,7 +563,7 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                                 TRAFFIC), which is why this dash is common and
                                 says why on hover. */}
                             {e.action ? (
-                              <Badge color={actionTone(e.action)}>{e.action}</Badge>
+                              <Badge color={actionTone(e.action)} title={e.action}>{actionLabel(e.action)}</Badge>
                             ) : (
                               dash('This vendor reports no action/outcome on VPN log lines')
                             )}
