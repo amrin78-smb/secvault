@@ -2,6 +2,10 @@ import Badge from '../ui/Badge';
 import StatusDot from '../ui/StatusDot';
 import NotMeasured from '../ui/NotMeasured';
 import { titleCase } from '../../lib/formatDisplay';
+// ⛔ THE engine that decides whether an HA pair is healthy. Imported rather
+// than re-implemented: a second opinion here is exactly what made /devices and
+// /lifecycle disagree about the same five rows.
+import { haStatus } from '../../lib/engines/deviceHealth';
 
 // Presentational cells shared by the Devices table. Server components (no
 // interactivity), defined at module top level per CLAUDE.md.
@@ -126,18 +130,52 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
 // HA state from device_ha_status. A device whose adapter does not report HA at
 // all is blank, NOT "standalone" — those are different facts (Fortinet HA is
 // simply not collected yet).
-export function HaCell({ enabled, mode, localState, peerStatus }) {
+export function HaCell({
+  enabled,
+  mode,
+  localState,
+  peerStatus,
+  versionCompatOk,
+  configSyncState,
+  peerState,
+  lastNonfunctionalReason,
+}) {
   if (enabled === null || enabled === undefined) {
     return (
-      <NotMeasured reason="No HA state collected — this vendor/transport does not report HA to SecVault (only Palo Alto does today). Blank is NOT 'standalone': those are different facts." />
+      <NotMeasured reason="No HA state collected — this vendor/transport does not report HA to SecVault. Blank is NOT 'standalone': those are different facts." />
     );
   }
   if (!enabled) return <span style={{ color: 'var(--text-muted)' }}>Standalone</span>;
-  const peerDown = peerStatus && peerStatus !== 'up';
+
+  // ⛔ DRIVEN BY THE ENGINE, NOT RE-DERIVED HERE. This used to redden on one
+  // condition — `peerStatus !== 'up'` — while deviceHealth.js's haStatus()
+  // derives `degraded` from FIVE inputs. Live on 2026-09-09, 5 of 6 HA pairs
+  // were degraded (four on version_compat_ok=false, two also reporting "Link
+  // down") and this cell drew every one of them in ordinary body text,
+  // indistinguishable from the single genuinely healthy pair — while
+  // /lifecycle, which calls the engine, showed the SAME rows as red Degraded.
+  // Two pages, one dataset, opposite verdicts, and the fleet-overview page was
+  // the reassuring one. "Versions do not match across the pair" is precisely
+  // the condition under which a failover does not deliver redundancy.
+  //
+  // A second implementation of "is this pair healthy" is what created the
+  // disagreement; do not add a third.
+  const ha = haStatus({
+    enabled,
+    peer_connection_status: peerStatus,
+    peer_state: peerState,
+    config_sync_state: configSyncState,
+    version_compat_ok: versionCompatOk,
+    last_nonfunctional_reason: lastNonfunctionalReason,
+  });
+  const degraded = ha.status === 'degraded';
   return (
-    <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <span style={{ color: peerDown ? 'var(--red)' : 'var(--text-primary)' }}>{mode || 'HA'}</span>
-      <span style={{ fontSize: 'var(--text-xs)', color: peerDown ? 'var(--red)' : 'var(--text-muted)' }}>
+    <span
+      style={{ display: 'flex', flexDirection: 'column', gap: 1 }}
+      title={degraded ? ha.reasons.join(' ') : undefined}
+    >
+      <span style={{ color: degraded ? 'var(--red)' : 'var(--text-primary)' }}>{mode || 'HA'}</span>
+      <span style={{ fontSize: 'var(--text-xs)', color: degraded ? 'var(--red)' : 'var(--text-muted)' }}>
         {/* An em-dash, not "?". The rest of this table already uses — for
             "not reported", and a question mark reads as the app being
             confused rather than the device being silent. Title Case matches
@@ -148,10 +186,25 @@ export function HaCell({ enabled, mode, localState, peerStatus }) {
         ) : (
           <NotMeasured reason="HA is enabled on this device but it did not report a local HA state (active/passive) in the last collection." />
         )}
-        {peerDown ? ' · peer down' : ''}
+        {/* One word for WHY, so the row is actionable without a hover. The
+            full reason list is on the title attribute above, and /lifecycle
+            shows it in full — this only has to say which of the five fired. */}
+        {degraded ? ` · ${shortHaReason(ha.reasons)}` : ''}
       </span>
     </span>
   );
+}
+
+// The shortest honest label for the worst reason haStatus() gave. Ordered by
+// how directly each one breaks a failover, not alphabetically.
+function shortHaReason(reasons) {
+  const all = (reasons || []).join(' ');
+  if (/Peer connection is/.test(all)) return 'peer down';
+  if (/versions do not match/i.test(all)) return 'version mismatch';
+  if (/not synchronized/i.test(all)) return 'config out of sync';
+  if (/non-functional/i.test(all)) return 'peer went non-functional';
+  if (/No peer state/i.test(all)) return 'no peer state';
+  return 'degraded';
 }
 
 // ⛔ THE 0 IN THIS CELL WAS AMBIGUOUS. deviceInventory.js COALESCEs both counts

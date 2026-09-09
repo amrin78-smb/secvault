@@ -52,6 +52,10 @@ const TH = {
   whiteSpace: 'nowrap',
 };
 
+// How many countries each of the two "unusual sources" lists shows before it
+// says "of N". Never truncate silently.
+const COUNTRIES_SHOWN = 5;
+
 const MONO = { fontFamily: 'var(--font-mono)' };
 const NUM = { textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
 
@@ -139,6 +143,20 @@ export default async function VpnLoginLocations() {
   const failureOnly = findFailureOnlyCountries(countries, vendors);
   const maxTotal = countries.reduce((m, c) => Math.max(m, c.total), 0);
 
+  // ⛔ The "no successful login from here" claim is now PER COUNTRY, because the
+  // gate behind it is per vendor: a country whose failures were reported by a
+  // vendor that reports no successes at all cannot be asserted, even while a
+  // different vendor's countries in the same window can. These two sets are the
+  // engine's own verdict, not a re-derivation of the rule in the view.
+  const assertedNoSuccess = new Set(failureOnly.rows.map((c) => c.country));
+  const caveatedNoSuccess = new Map(failureOnly.caveated.map((c) => [c.country, c]));
+  // Why THIS country's zero is not a measurement, named down to the vendor.
+  const caveatReason = (c) => {
+    const v = (c && c.unmeasuredVendors) || [];
+    const who = v.length ? v.map(vendorLabel).join(' and ') : 'the reporting device';
+    return `${who} reported these failures but reported no successful VPN login anywhere in this window, so a zero here is a device-side logging gap, not a fact about this country.`;
+  };
+
   // ⛔ THE SINGLE MOST DANGEROUS ZERO ON THIS PAGE. When no vendor in the window
   // reported ANY successful login (measured live: Fortinet's SSL-VPN success
   // logids are effectively absent on this fleet), every success count here is
@@ -221,7 +239,7 @@ export default async function VpnLoginLocations() {
         </CardBody>
       </Card>
 
-      {sprayers.length > 0 || (failureOnly.evaluable && failureOnly.rows.length > 0) ? (
+      {sprayers.length > 0 || failureOnly.rows.length > 0 || failureOnly.caveated.length > 0 ? (
         <Card>
           <CardBody>
             <div style={{ fontWeight: 700, marginBottom: 10 }}>Unusual sources</div>
@@ -246,24 +264,62 @@ export default async function VpnLoginLocations() {
                   </div>
                 </div>
               ))}
-              {failureOnly.evaluable
-                ? failureOnly.rows.slice(0, 5).map((c) => (
-                    <div key={c.country} style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-                      <div style={{ fontWeight: 600 }}>{c.country}</div>
-                      <div style={{ color: 'var(--text-secondary)' }}>
-                        {c.failure.toLocaleString()} failed logins from {c.sources} address(es), none
-                        successful.
-                      </div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
-                        {/* ⛔ Never "unauthorised country". A country with no
-                            successes may simply be one no employee has
-                            travelled to yet. */}
-                        No successful login has been observed from here in the last {windowHours}{' '}
-                        hours.
-                      </div>
-                    </div>
-                  ))
-                : null}
+              {failureOnly.rows.slice(0, COUNTRIES_SHOWN).map((c) => (
+                <div key={c.country} style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
+                  <div style={{ fontWeight: 600 }}>{c.country}</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>
+                    {c.failure.toLocaleString()} failed logins from {c.sources} address(es), none
+                    successful.
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                    {/* ⛔ Never "unauthorised country". A country with no
+                        successes may simply be one no employee has
+                        travelled to yet. */}
+                    No successful login has been observed from here in the last {windowHours}{' '}
+                    hours.
+                  </div>
+                </div>
+              ))}
+              {/* ⛔ "of N". A bare truncated list is indistinguishable from a
+                  complete one, and the reader has no way to know a country was
+                  cut off — the Busiest sources table two sections down already
+                  says "15 of 21" for exactly this reason. */}
+              {failureOnly.rows.length > COUNTRIES_SHOWN ? (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  Showing {COUNTRIES_SHOWN} of {failureOnly.rows.length} countries with failures and
+                  no successful login.
+                </div>
+              ) : null}
+
+              {/* ⛔ THE UNGATED COUNTRIES. These look identical to the ones above
+                  — failures, no successes — and the whole point is that they are
+                  NOT the same finding. The vendor that reported these failures
+                  reports no successful login anywhere in this window, so its
+                  zero is our blindness, not the country's behaviour. Shown, not
+                  hidden (the failures are real evidence), but never asserted. */}
+              {failureOnly.caveated.slice(0, COUNTRIES_SHOWN).map((c) => (
+                <div key={'caveat-' + c.country} style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
+                  <div style={{ fontWeight: 600 }}>
+                    {c.country}{' '}
+                    <NotMeasured
+                      text="outcome not measurable"
+                      reason={caveatReason(c)}
+                    />
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)' }}>
+                    {c.failure.toLocaleString()} failed logins from {c.sources} address(es).
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                    Whether any login has SUCCEEDED from here is not measured: {caveatReason(c)}
+                  </div>
+                </div>
+              ))}
+              {failureOnly.caveated.length > COUNTRIES_SHOWN ? (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  Showing {COUNTRIES_SHOWN} of {failureOnly.caveated.length} countries whose success
+                  baseline is not measurable.
+                </div>
+              ) : null}
             </div>
             {!failureOnly.evaluable ? (
               <div style={{ marginTop: 10, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
@@ -292,26 +348,35 @@ export default async function VpnLoginLocations() {
                 </tr>
               </thead>
               <tbody>
-                {countries.map((c) => (
+                {countries.map((c) => {
+                  // Per-country, not fleet-wide: this country's zero successes
+                  // is a measurement only if every vendor that reported its
+                  // failures also reports successes somewhere.
+                  const caveat = caveatedNoSuccess.get(c.country);
+                  const countrySuccessMeasurable = successMeasurable && !caveat;
+                  return (
                   <tr key={c.country} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={CELL}>
                       {c.located ? c.country : (
                         <span style={{ color: 'var(--text-muted)' }}>{c.country}</span>
                       )}
                       {/* ⛔ Only a claim worth making when a success COULD have
-                          been observed. With no success baseline anywhere in
-                          the window, "no success" describes our logging, not
-                          this country. Badge takes no `style` prop (it is
-                          silently dropped), so the spacing hangs on a wrapper. */}
-                      {successMeasurable && c.failure > 0 && c.success === 0 ? (
+                          been observed FROM HERE. With no success baseline for
+                          the vendor that reported these failures, "no success"
+                          describes our logging, not this country. Badge takes no
+                          `style` prop (it is silently dropped), so the spacing
+                          hangs on a wrapper. */}
+                      {assertedNoSuccess.has(c.country) ? (
                         <span style={{ marginLeft: 6 }}>
                           <Badge color="warning">no success</Badge>
                         </span>
                       ) : null}
                     </td>
                     <td style={{ ...CELL, ...NUM, color: c.success > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
-                      {successMeasurable ? (
+                      {countrySuccessMeasurable ? (
                         c.success.toLocaleString()
+                      ) : caveat ? (
+                        <NotMeasured reason={caveatReason(caveat)} />
                       ) : (
                         <NotMeasured reason="No device in this window reports successful logins, so this is not a count of zero." />
                       )}
@@ -322,10 +387,11 @@ export default async function VpnLoginLocations() {
                     <td style={{ ...CELL, ...NUM }}>{c.sources.toLocaleString()}</td>
                     <td style={{ ...CELL, ...NUM }}>{c.usernames.toLocaleString()}</td>
                     <td style={{ ...CELL, width: 140 }}>
-                      {ratioBar(c.success, c.failure, maxTotal, successMeasurable)}
+                      {ratioBar(c.success, c.failure, maxTotal, countrySuccessMeasurable)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

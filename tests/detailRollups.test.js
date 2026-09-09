@@ -351,10 +351,14 @@ const { classifyAction: uiClassify } = require('../lib/syslog/actions');
 
 it('⛔ verbs seen live on this fleet classify correctly', () => {
   // Every one of these was measured in the live rollups.
-  for (const a of ['allow', 'accept', 'close', 'client-rst', 'server-rst']) {
+  // ⛔ `timeout` MOVED SIDES on 2026-09-09 — it is a FortiOS session-teardown
+  // verb, not a refusal, and asserting it as a block here was pinning the bug.
+  // See tests/actionClassification.test.js for the captured line and the live
+  // measurements.
+  for (const a of ['allow', 'accept', 'close', 'client-rst', 'server-rst', 'timeout']) {
     assert.equal(uiClassify(a), 'allowed', a);
   }
-  for (const a of ['deny', 'drop', 'blocked', 'timeout', 'block-url', 'reset-both']) {
+  for (const a of ['deny', 'drop', 'blocked', 'block-url', 'reset-both']) {
     assert.equal(uiClassify(a), 'blocked', a);
   }
 });

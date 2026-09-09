@@ -435,7 +435,15 @@ test('⛔ an unresolvable service is UNMEASURED, not "watched and quiet"', async
   ];
   const pool = stubPool([
     ['FROM syslog_rollup_hourly', [{ x: 1 }]],
-    ['FROM syslog_device_inbound_hourly\n      WHERE device_id = $1 AND bucket_hour', [{ x: 1 }]],
+    // ⛔ Match on the TABLE NAME only. This fragment used to carry the query's
+    // exact indentation (`\n      WHERE device_id = $1 AND bucket_hour`), so
+    // when the two coverage probes were hoisted into a Promise.all on
+    // 2026-09-09 — a pure reindent, no logic change — the stub silently stopped
+    // matching, returned [], and the engine took the `!inboundCovered` branch
+    // instead of the one under test. The test then failed for a reason that had
+    // nothing to do with what it pins. A fixture must not be coupled to
+    // whitespace.
+    ['FROM syslog_device_inbound_hourly', [{ x: 1 }]],
     ['GROUP BY host(dst_ip)', []],
   ]);
   await attachObservations(pool, 'd1', paths, new Date(0));

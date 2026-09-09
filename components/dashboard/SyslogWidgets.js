@@ -54,11 +54,24 @@ function Empty({ children }) {
 
 // ---------------------------------------------------------------------------
 
+// How many outcome rows the Session Outcomes card shows. The remainder is
+// STATED, never dropped silently — see the ⛔ note at the render site.
+const SESSION_OUTCOMES_SHOWN = 8;
+
 export async function TrafficVolumeWidget() {
   const rows = await getTrafficTimeline(pool, 24);
   const total = rows.reduce((n, r) => n + r.events, 0);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
-  const denied = rows.reduce((n, r) => n + (r.denied || 0), 0);
+  // ⛔ `denied` is deliberately TRI-STATE in trafficStats.js: NULL means this
+  // vendor never reports an action, which is not the same fact as "no denies
+  // recorded in this hour". Summing a mix of real and NULL hours still totals
+  // correctly, but an ALL-NULL window must not render a calm `0` under
+  // "denied / dropped" — that is a measured-looking zero over an unmeasurable
+  // window. `volumeGb` five lines below already draws this distinction; this
+  // line now matches it.
+  const deniedRows = rows.filter((r) => r.denied !== null && r.denied !== undefined);
+  const denied =
+    deniedRows.length === 0 ? null : deniedRows.reduce((n, r) => n + Number(r.denied), 0);
   // null when NO row had a summable byte count -- unmeasurable, not zero.
   const byteRows = rows.filter((r) => r.bytesSent !== null || r.bytesReceived !== null);
   const volumeGb = byteRows.length === 0
@@ -89,8 +102,27 @@ export async function TrafficVolumeWidget() {
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>events</div>
               </div>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: denied > 0 ? 'var(--red)' : 'var(--text-primary)' }}>
-                  <Num value={denied} />
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    // Unmeasurable gets the hueless token, never red and never
+                    // the reassuring default — the same treatment volumeGb
+                    // gives its own null case directly below.
+                    color:
+                      denied === null
+                        ? 'var(--unmeasured)'
+                        : denied > 0
+                          ? 'var(--red)'
+                          : 'var(--text-primary)',
+                  }}
+                  title={
+                    denied === null
+                      ? 'No vendor in this window reported an action on its traffic logs, so denied traffic could not be counted. This is not zero.'
+                      : undefined
+                  }
+                >
+                  {denied === null ? '—' : <Num value={denied} />}
                 </div>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>denied / dropped</div>
               </div>
@@ -205,7 +237,16 @@ export async function ActionBreakdownWidget() {
           <Empty>No sessions recorded in the last 24 hours.</Empty>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {rows.slice(0, 8).map((r) => (
+            {/* ⛔ This slice used to be silent. Live 2026-09-09 the fleet
+                reported 41 distinct action verbs in 24h, and the eight shown
+                excluded `drop` (686,947 events — a REAL deny verb) and
+                `(unreported)` (248,203 — the bucket whose whole purpose is
+                making unclassifiable traffic visible). A card presenting
+                itself as the session-outcome breakdown, missing a deny verb
+                with 687k events, is a wrong answer, not a shortened list.
+                Every sibling ranking widget on this dashboard already states
+                its exclusions; this one now does too. */}
+            {rows.slice(0, SESSION_OUTCOMES_SHOWN).map((r) => (
               <div key={r.action}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-base)' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>{r.action}</span>
@@ -219,6 +260,18 @@ export async function ActionBreakdownWidget() {
                 <Bar pct={total > 0 ? (r.events / total) * 100 : 0} tone={tone(r.action)} />
               </div>
             ))}
+            {rows.length > SESSION_OUTCOMES_SHOWN && (
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', paddingTop: 2 }}>
+                {rows.length - SESSION_OUTCOMES_SHOWN} further outcome type
+                {rows.length - SESSION_OUTCOMES_SHOWN === 1 ? '' : 's'} (
+                <Num
+                  value={rows
+                    .slice(SESSION_OUTCOMES_SHOWN)
+                    .reduce((n, r) => n + (Number(r.events) || 0), 0)}
+                />{' '}
+                events) not shown
+              </div>
+            )}
           </div>
         )}
       </CardBody>

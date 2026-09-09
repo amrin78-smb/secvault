@@ -50,14 +50,71 @@ function SecVaultLogo() {
   );
 }
 
+// ⛔ THE PILL IS TRI-STATE, because "is the advisory data complete" is.
+// It was a boolean (green/red) and read green FEEDS OK over an NVD feed that
+// had logged 464 'partial' runs and zero clean ones — see the ⛔ block at the
+// top of lib/feedStatus.js. Amber is the state that was missing: the feeds ran,
+// they came back INCOMPLETE, and every CVE number under this bar is computed
+// from what arrived.
+//
+// ⛔ TOKENS. This pill sits on --navy, which is dark in BOTH themes, so the
+// foreground colours are --shell-fg/--shell-fg-ok/--shell-fg-bad, which do NOT
+// flip. A --tint-*-fg here would be a dark colour on a dark bar in light mode,
+// i.e. invisible (gotchas.md, "The shell is dark in BOTH themes").
+// There is no --shell-fg-warn, so the DEGRADED row carries its hue in the dot
+// and the ring (--sev-med, the amber the severity ramp already uses for
+// medium) and keeps --shell-fg for the words, which is legible on navy in both
+// themes by construction. SYNCING is --unmeasured: an in-flight sync is not a
+// verdict, and per the design system an unmeasured state gets no hue.
+const PILL_TONE = {
+  ok: {
+    dot: 'var(--green)',
+    fg: 'var(--shell-fg-ok)',
+    bg: 'rgba(22,163,74,0.15)',
+    ring: 'rgba(22,163,74,0.3)',
+    pulse: true,
+  },
+  degraded: {
+    dot: 'var(--sev-med)',
+    fg: 'var(--shell-fg)',
+    bg: 'rgba(183,121,31,0.20)',
+    ring: 'rgba(183,121,31,0.45)',
+    pulse: false,
+  },
+  error: {
+    dot: 'var(--red)',
+    fg: 'var(--shell-fg-bad)',
+    bg: 'rgba(220,38,38,0.15)',
+    ring: 'rgba(220,38,38,0.3)',
+    pulse: false,
+  },
+  running: {
+    dot: 'var(--unmeasured)',
+    fg: 'var(--shell-fg)',
+    bg: 'rgba(255,255,255,0.08)',
+    ring: 'rgba(255,255,255,0.18)',
+    pulse: false,
+  },
+};
+// No advisory feed has ever run, or the status query itself failed. Both are
+// gaps, not all-clears, and both keep the alarming treatment they already had.
+PILL_TONE.none = PILL_TONE.error;
+
 export default async function Header({ session }) {
-  let syncStatus = { ok: false, label: 'UNKNOWN' };
+  let syncStatus = {
+    state: 'none',
+    ok: false,
+    label: 'FEEDS UNKNOWN',
+    title: 'SecVault could not read feed_sync_log, so it cannot say whether advisory data is complete.',
+  };
   try {
     syncStatus = await getSyncPillStatus(pool);
   } catch (_err) {
     // Sync status is informational only — never let a query failure here
-    // break the whole header/page render.
+    // break the whole header/page render. ⛔ The fallback above is NOT green:
+    // failing to read the feed log tells us nothing good.
   }
+  const tone = PILL_TONE[syncStatus.state] || PILL_TONE.none;
 
   return (
     <header className="sv-topbar">

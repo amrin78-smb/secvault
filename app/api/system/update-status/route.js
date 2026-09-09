@@ -7,6 +7,18 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.96.0': [
+    "Fixed: failed VPN login counts were roughly 8x too high. A source that tried many usernames had its failure count multiplied by how many it tried, so the brute-force volume shown was far larger than what actually happened.",
+    "Fixed: Palo Alto VPN login failures were counted as zero. That firewall reports the outcome in a different field, which this page was not reading.",
+    "Fixed: around 211,000 permitted sessions a day were being counted as blocked, because a FortiGate reports an idle session ending with the same word it uses for a refusal.",
+    "Fixed: the Firewalls page showed high-availability pairs as healthy while the Lifecycle page showed the same pairs as degraded. Both now use one shared verdict — five of six pairs here are degraded, most on mismatched software versions.",
+    "The feed indicator no longer shows green when a CVE feed finished with errors. It now reads FEEDS DEGRADED and names the feed and its error count.",
+    "Fixed: most inferred network links between firewalls were wrong, including links drawn between two firewalls holding the same address. The map and path queries now only link interfaces genuinely sharing a subnet.",
+    "Vulnerability tiles now count CVEs the same way the table beneath them does, and the Session Outcomes card says how many outcome types it is not showing.",
+  ],
+  '2.95.1': [
+    "Completes the configuration-secret masking from 2.95.0 across the remaining stored formats: the command-line style config, the parsed copy, and the change-history payloads. A full scan of every stored column now finds none.",
+  ],
   '2.95.0': [
     "Security: some Palo Alto configuration secrets — SNMP community strings, the User-ID WMI password, an LDAP bind password and a private key — were being stored without being masked. They are masked now, and a migration masks the copies already stored.",
     "Fixed: on Palo Alto firewalls, a failed rule collection could be recorded as “this firewall has no rules” and replace the real ruleset with an empty one. It now fails loudly and leaves the stored rules alone. The same fault was fixed in the Check Point, Forcepoint and Sangfor connectors.",

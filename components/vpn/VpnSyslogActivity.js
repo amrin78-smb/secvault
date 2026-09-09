@@ -186,7 +186,7 @@ async function getRecentVpnEvents(dbPool, hours, limit, offset) {
   const { rows } = await dbPool.query(
     `SELECT e.id, e.received_at, e.tz_assumed, e.source_ip::text AS source_ip,
             e.device_id, d.name AS device_name, e.vendor, e.severity,
-            e.action, e.log_subtype, e.src_user,
+            e.action, e.auth_outcome, e.log_subtype, e.src_user,
             e.src_ip::text AS src_ip, e.src_country, e.message
        FROM syslog_events e
        LEFT JOIN devices d ON d.id = e.device_id
@@ -348,7 +348,26 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
   // failures across the whole 24h window would mean a second full scan of the
   // raw table — the exact cost this rewrite removed — and quietly labelling a
   // page-scoped figure as a 24h one would be worse than not showing it.
-  const failureCount = recent.filter((e) => actionTone(e.action) === 'danger').length;
+  // ⛔ `action` ALONE MISSES EVERY PALO ALTO FAILURE. vendorParsers.js sets
+  // `action` only on PAN-OS TRAFFIC rows, so every GlobalProtect row has
+  // action = NULL — and this tile counted them as zero. The outcome IS stored,
+  // in syslog_events.auth_outcome; the query simply did not select it.
+  //
+  // Live, a 20-minute window of log_class='vpn': 88 paloalto failures with
+  // action NULL, 11 paloalto successes, 66 fortinet failures with action set.
+  // Palo Alto is the majority of VPN rows, so a page of this table was
+  // frequently all-PAN-OS and the tile read a flat 0 above rows that were
+  // themselves authentication failures.
+  //
+  // ⛔ A row where BOTH are null is UNMEASURED, not a non-failure — and if the
+  // whole page is unmeasurable the tile must say so rather than print 0.
+  const outcomeKnown = recent.filter(
+    (e) => e.auth_outcome != null || e.action != null
+  );
+  const failureCount = recent.filter(
+    (e) => e.auth_outcome === 'failure' || actionTone(e.action) === 'danger'
+  ).length;
+  const failureCountMeasurable = outcomeKnown.length > 0;
 
   // Deep link into the forensic view, pre-filtered to the same class and the
   // same window this card summarises — so "show me the rest" lands on the same
@@ -410,11 +429,17 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                     ? 'no event carried a username'
                     : 'identified on ' + userCoveragePct + '% of events'
               )}
+              {/* ⛔ A page on which NO row carries either an action or an
+                  auth_outcome cannot report a failure count — printing 0 there
+                  would be "we watched and saw none" over events nothing could
+                  be read from. */}
               {kpiCell(
-                failureCount > 0 ? failureCount.toLocaleString() : String(0),
+                failureCountMeasurable ? failureCount.toLocaleString() : '—',
                 'failed / denied',
-                'on this page of events',
-                failureCount > 0 ? 'bad' : null
+                failureCountMeasurable
+                  ? 'on this page of events'
+                  : 'no event on this page reported an outcome',
+                failureCountMeasurable && failureCount > 0 ? 'bad' : null
               )}
             </div>
 
@@ -579,12 +604,24 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
                                 way would present a log category as an outcome.
                                 PAN-OS carries no action on GlobalProtect rows at
                                 all (vendorParsers.js sets action only for
-                                TRAFFIC), which is why this dash is common and
-                                says why on hover. */}
+                                TRAFFIC).
+                                ⛔ But it DOES report the outcome, in
+                                auth_outcome — so falling straight to a dash
+                                here said "this vendor reports no outcome"
+                                about rows whose outcome SecVault had stored.
+                                The dash is now reserved for a row where both
+                                are genuinely absent. */}
                             {e.action ? (
                               <Badge color={actionTone(e.action)} title={e.action}>{actionLabel(e.action)}</Badge>
+                            ) : e.auth_outcome ? (
+                              <Badge
+                                color={e.auth_outcome === 'failure' ? 'danger' : 'success'}
+                                title={`Authentication ${e.auth_outcome} (reported as an outcome, not an action)`}
+                              >
+                                {e.auth_outcome === 'failure' ? 'Auth failed' : 'Auth OK'}
+                              </Badge>
                             ) : (
-                              dash('This vendor reports no action/outcome on VPN log lines')
+                              dash('This event carried neither an action nor an authentication outcome')
                             )}
                             {e.log_subtype ? (
                               <div

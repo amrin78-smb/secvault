@@ -377,6 +377,10 @@ export default async function DevicesPage({ searchParams }) {
                     mode={d.ha_mode}
                     localState={d.ha_local_state}
                     peerStatus={d.ha_peer_status}
+                    versionCompatOk={d.ha_version_compat_ok}
+                    configSyncState={d.ha_config_sync_state}
+                    peerState={d.ha_peer_state}
+                    lastNonfunctionalReason={d.ha_last_nonfunctional_reason}
                   />
                 </td>
                 <td title={formatDateTime(d.last_collected_at)}>{formatDateTime(d.last_collected_at)}</td>
