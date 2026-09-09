@@ -406,9 +406,13 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         </Card>
       )}
 
-      {tab === 'cleanup' && <CleanupTab deviceId={device.id} canWrite={canWrite} />}
+      {tab === 'cleanup' && (
+        <CleanupTab deviceId={device.id} canWrite={canWrite} searchParams={searchParams} />
+      )}
 
-      {tab === 'optimization' && <OptimizationTab deviceId={device.id} canWrite={canWrite} />}
+      {tab === 'optimization' && (
+        <OptimizationTab deviceId={device.id} canWrite={canWrite} searchParams={searchParams} />
+      )}
 
       {/* ⛔ searchParams is REQUIRED by every paginated tab below. Without it
           they read page 1 forever while still rendering a "Page 1 of 8"

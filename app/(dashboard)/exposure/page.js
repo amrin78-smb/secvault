@@ -93,6 +93,91 @@ function kpi(value, label, sub, tone) {
   );
 }
 
+// ⛔ Module top level, a plain function returning JSX called imperatively.
+//
+// observed + notObserved + unmeasured === paths, but they were four peer tiles
+// of identical weight, so the thing this page exists to say — what fraction of
+// the attack surface we cannot see at all — had to be computed by the reader.
+// The paragraph of prose underneath was the tell that the number needed a shape.
+//
+// ⛔ The three segments differ in KIND, not just hue, so "we could not look"
+// cannot be mistaken for a measured quiet result at a glance or in greyscale:
+//   reached      solid red      — measured, and in use
+//   not seen     solid grey     — measured, and quiet. Still an open door.
+//   unmeasured   HATCHED yellow — not a measurement at all
+//
+// ⛔ A zero-width segment still renders its label. A state that vanishes when
+// its count is 0 reads as "that state does not apply here", which is a
+// different claim from "zero".
+function exposureProportionBar(totals) {
+  const total = totals.observed + totals.notObserved + totals.unmeasured;
+  if (total <= 0) return null;
+
+  const pct = (n) => `${(n / total) * 100}%`;
+  const segments = [
+    { key: 'observed', n: totals.observed, label: 'reached', bg: 'var(--red)' },
+    { key: 'notObserved', n: totals.notObserved, label: 'not seen', bg: 'var(--border)' },
+    {
+      key: 'unmeasured',
+      n: totals.unmeasured,
+      label: 'unmeasured',
+      bg: 'repeating-linear-gradient(45deg, var(--yellow) 0 4px, transparent 4px 8px)',
+    },
+  ];
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div
+        style={{
+          display: 'flex',
+          height: 12,
+          borderRadius: 'var(--radius-pill)',
+          overflow: 'hidden',
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        {segments
+          .filter((s) => s.n > 0)
+          .map((s) => (
+            <div
+              key={s.key}
+              title={`${s.n.toLocaleString()} ${s.label}`}
+              style={{ width: pct(s.n), background: s.bg, height: '100%' }}
+            />
+          ))}
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 14,
+          marginTop: 6,
+          fontSize: 'var(--text-xs)',
+          color: 'var(--text-muted)',
+        }}
+      >
+        {segments.map((s) => (
+          <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span
+              aria-hidden="true"
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 2,
+                border: '1px solid var(--border)',
+                background: s.bg,
+                display: 'inline-block',
+              }}
+            />
+            {s.n.toLocaleString()} {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function severityBadge(sev) {
   if (sev === 'critical') return <Badge color="danger">Critical</Badge>;
   if (sev === 'high') return <Badge color="danger">High</Badge>;
@@ -157,6 +242,8 @@ export default async function ExposurePage() {
             )}
             {kpi(String(totals.publicIps), 'public addresses', 'on device interfaces')}
           </div>
+
+          {exposureProportionBar(totals)}
 
           {totals.unmeasured > 0 ? (
             <Card>

@@ -1,4 +1,7 @@
 import { pool } from '../../lib/db';
+import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
+import Pagination from '../ui/Pagination';
+import { WRAP_CELL } from '../ui/tableStyles';
 import Table from '../ui/Table';
 import EmptyState from '../ui/EmptyState';
 import SeverityBadge from './SeverityBadge';
@@ -50,8 +53,12 @@ function ruleLabel(row) {
   return `${seq} ${row.rule_name || '(unnamed rule)'}`;
 }
 
-export default async function OptimizationTab({ deviceId, canWrite = false }) {
+export default async function OptimizationTab({ deviceId, canWrite = false, searchParams }) {
   const findings = await getOptimizationFindings(pool, deviceId);
+  // ⛔ Paginated — see CleanupTab for why. Every sibling tab on this tab bar
+  // already was; these two were missed.
+  const paged = paginateArray(findings, resolvePage(searchParams?.page), DEFAULT_PAGE_SIZE);
+  const pageParams = { ...searchParams, tab: 'optimization' };
 
   if (findings.length === 0) {
     return (
@@ -60,7 +67,8 @@ export default async function OptimizationTab({ deviceId, canWrite = false }) {
   }
 
   return (
-    <Table>
+    <>
+      <Table>
       <colgroup>
         <col style={{ width: '9%' }} />
         <col style={{ width: '13%' }} />
@@ -78,7 +86,7 @@ export default async function OptimizationTab({ deviceId, canWrite = false }) {
         </tr>
       </thead>
       <tbody>
-        {findings.map((row) => (
+        {paged.rows.map((row) => (
           <tr key={row.finding_id}>
             <td>
               <SeverityBadge severity={row.severity} />
@@ -87,8 +95,16 @@ export default async function OptimizationTab({ deviceId, canWrite = false }) {
               <FindingTypeBadge type={row.finding_type} />
             </td>
             <td title={ruleLabel(row)}>{ruleLabel(row)}</td>
-            <td style={{ color: 'var(--text-secondary)' }} title={row.detail || ''}>
+            <td style={{ ...WRAP_CELL, color: 'var(--text-secondary)' }}>
               {row.detail || '—'}
+              {/* ⛔ `remediation` was SELECTed by this query and then thrown
+                  away — the advice is the half of a finding a reader can act
+                  on. Rendered the way RuleRelationshipTab already does it. */}
+              {row.remediation ? (
+                <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                  Suggested fix: {row.remediation}
+                </div>
+              ) : null}
             </td>
             <td>
               {canWrite && row.rule_id_vendor ? (
@@ -108,5 +124,15 @@ export default async function OptimizationTab({ deviceId, canWrite = false }) {
         ))}
       </tbody>
     </Table>
+
+      <Pagination
+        basePath={`/devices/${deviceId}/analysis`}
+        searchParams={pageParams}
+        page={paged.page}
+        pageSize={paged.pageSize}
+        total={paged.total}
+        label="optimization findings"
+      />
+    </>
   );
 }
