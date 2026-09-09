@@ -44,10 +44,31 @@ const btn = (enabled) => ({
  * the reader is not looking at. Give each list its own param and they stay
  * independent. The default keeps every single-list caller unchanged.
  */
+// ⛔ WHY THE PAGE-SIZE PICKER IS A SET OF LINKS AND NOT A <select>.
+// This whole control is a server component with real <Link>s — that is what
+// lets it survive AutoRefresh’s router.refresh(), an F5 and a pasted URL. A
+// <select> would need client JS and its own state, and the state it held
+// would be a second copy of something the URL already says.
+//
+// ⛔ AND WHY PAGING STAYS SERVER-SIDE. It is tempting to fetch once and page
+// in the browser, and for a small already-fetched list that is right. Log
+// search is not that: this fleet ingests ~86M events/day, a one-hour window
+// is 1.6M rows, and an exact COUNT of one hour was measured at 43 SECONDS.
+// The browser cannot hold the set and the server must not count it, which is
+// exactly why this control shows "Page 3" with a working Next rather than
+// "Page 3 of 47". Client-side paging here would mean either fetching
+// millions of rows or silently paging a truncated slice while implying it
+// is everything.
+//
+// Changing size resets to page 1: page 4 of 50-row pages is not page 4 of
+// 200-row pages, and keeping the number would land the reader somewhere
+// arbitrary.
 export default function Pagination({
   basePath, searchParams, page, pageSize, total, label, pages, paramName, hasMore,
+  pageSizes, sizeParam,
 }) {
   const param = paramName || 'page';
+  const sizeKey = sizeParam || 'limit';
 
   // ⛔ UNKNOWN-TOTAL MODE. Some sets cannot be counted at all: log search runs
   // over ~86M rows/day and an exact COUNT of a ONE-HOUR window was measured at
@@ -94,8 +115,43 @@ export default function Pagination({
         )}
       </div>
 
-      {showControls ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {Array.isArray(pageSizes) && pageSizes.length > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>Rows</span>
+            {pageSizes.map((sz) => {
+              const active = Number(sz) === Number(pageSize);
+              return active ? (
+                <span
+                  key={sz}
+                  aria-current="true"
+                  style={{
+                    padding: '3px 9px',
+                    fontSize: 'var(--text-sm)',
+                    fontWeight: 600,
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--primary)',
+                    background: 'var(--primary-light)',
+                    color: 'var(--primary)',
+                  }}
+                >
+                  {sz}
+                </span>
+              ) : (
+                <Link
+                  key={sz}
+                  href={buildPageHref(basePath, searchParams, { [sizeKey]: sz, [param]: null })}
+                  style={btn(true)}
+                >
+                  {sz}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {showControls ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {cur > 1 ? (
             <Link href={buildPageHref(basePath, searchParams, { [param]: cur === 2 ? null : cur - 1 })} style={btn(true)}>
               ← Prev
@@ -120,8 +176,9 @@ export default function Pagination({
           ) : (
             <span style={btn(false)}>Next →</span>
           )}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

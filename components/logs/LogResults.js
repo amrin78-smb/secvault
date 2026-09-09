@@ -301,21 +301,39 @@ export default function LogResults({ result, deviceNames, searchParams }) {
                       {r.application || null}
                       {r.ruleName ? <>{r.application ? DOT : null}<span style={{ color: 'var(--text-muted)' }}>{r.ruleName}</span></> : null}
                     </Cell>
-                    <Cell>
+                    {/* ⛔ FOUR STACKED BLOCKS BECAME ONE LINE. This cell alone
+                        made a row ~105px tall, so a page of results was several
+                        screens and the pagination underneath it was effectively
+                        unreachable. Same rule as everywhere else in this pass:
+                        NOTHING IS DROPPED — the values are joined with middots,
+                        the full text is on the title attribute, and the raw line
+                        keeps its own disclosure below. */}
+                    <Cell
+                      maxWidth={330}
+                      title={inline([
+                        r.threatName ? r.threatName + (r.threatSeverity ? ` (${r.threatSeverity})` : '') : null,
+                        r.urlHostname,
+                        r.urlCategory,
+                        r.logClass ? `${r.logClass}${r.logSubtype ? '/' + r.logSubtype : ''}` : null,
+                      ]).join(' · ')}
+                    >
                       {r.threatName ? (
-                        <div style={{ color: 'var(--red)' }}>
+                        <span style={{ color: 'var(--red)' }}>
                           {r.threatName}
                           {r.threatSeverity ? ` (${r.threatSeverity})` : ''}
-                        </div>
+                        </span>
                       ) : null}
-                      {r.urlHostname ? <div>{r.urlHostname}</div> : null}
+                      {r.urlHostname ? <>{r.threatName ? DOT : null}{r.urlHostname}</> : null}
                       {r.urlCategory ? (
-                        <div style={{ color: 'var(--text-muted)' }}>{r.urlCategory}</div>
+                        <>{r.threatName || r.urlHostname ? DOT : null}<span style={{ color: 'var(--text-muted)' }}>{r.urlCategory}</span></>
                       ) : null}
                       {r.logClass ? (
-                        <div style={{ color: 'var(--text-muted)' }}>
-                          {r.logClass}{r.logSubtype ? `/${r.logSubtype}` : ''}
-                        </div>
+                        <>
+                          {r.threatName || r.urlHostname || r.urlCategory ? DOT : null}
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {r.logClass}{r.logSubtype ? `/${r.logSubtype}` : ''}
+                          </span>
+                        </>
                       ) : null}
                       {/* ⛔ A null raw line does NOT mean nothing was received.
                           Ordinary allowed traffic keeps its raw text in the
@@ -370,6 +388,7 @@ export default function LogResults({ result, deviceNames, searchParams }) {
             pageSize={result.limit}
             total={null}
             hasMore={result.hasMore}
+            pageSizes={[50, 100, 200]}
             label="events"
           />
         ) : null}
