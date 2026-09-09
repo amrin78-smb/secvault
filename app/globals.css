@@ -1,11 +1,75 @@
-/* SecVault Design System — aligned with the NocVault suite (NetVault, LogVault,
-   DDIVault, SpanVault all share this exact token file; SecVault adds its own
-   --accent-teal identity slot for the logo + active sidebar-nav chips, while
-   --primary stays the shared suite red used for every interactive/focus/badge
-   color across all five apps). See CLAUDE.md "Design System" for the full
-   rationale, including the no-Tailwind decision this file is the foundation of. */
+/* SecVault Design System.
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+   ⛔ NO LONGER byte-identical to the NocVault suite token file. As of
+   2026-09-09 SecVault runs its OWN palette, type scale and spacing scale
+   (see the token block below for why). NetVault/LogVault/DDIVault/SpanVault
+   still share the original; do not "resync" this file with theirs, and do not
+   copy changes from here into them. SecVault is a separate product with its
+   own auth, database and server, and this divergence was a deliberate,
+   documented decision — the cost is two token sets to maintain.
+
+   Still true, and still load-bearing: no CSS framework. Plain custom
+   properties + inline style={{}} + the hand-written utility classes in this
+   file. See CLAUDE.md "Design System". */
+
+/* ── Fonts: SELF-HOSTED, no network at render time ──────────────────────
+   ⛔ This replaced `@import url('https://fonts.googleapis.com/...Inter...')`
+   on 2026-09-09. SecVault installs on an on-premises firewall-management
+   server, frequently on a segmented or fully air-gapped network. That import
+   FAILS SILENTLY there and the entire product renders in the browser's
+   default sans — for exactly the customers most likely to buy it, with no
+   error anywhere. Same failure shape as the collector binding a port the
+   firewall blocks: every signal green, and the thing simply does not work.
+
+   IBM Plex is OFL-licensed, so the .woff2 files are vendored into
+   public/fonts/ and committed (109 KB total, six faces). Do NOT reintroduce a
+   font CDN, and do NOT add a font npm package — Update-SecVault.ps1 runs
+   `npm ci`, and a font is a static asset, not a dependency.
+
+   Latin subset only. If a customer needs Thai/CJK glyphs, add a subset file
+   and a second @font-face with its own unicode-range; never swap the family. */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-latin-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-mono-latin-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-mono-latin-500.woff2') format('woff2');
+}
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -13,25 +77,65 @@
   padding: 0;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   TOKENS — rewritten 2026-09-09 (Phase 1 of the UI redesign).
+
+   ⛔ THE ONE RULE THIS PALETTE EXISTS TO ENFORCE: colour means RISK.
+
+   Before this rewrite --primary was #C8102E, the shared suite red, and it
+   drove every button, link, focus ring and active state — while --red
+   (#dc2626) meant "this firewall is critically exposed". The same hue family
+   was doing both jobs, so the most urgent signal the product has was
+   competing with its own Save button, and the eye stopped reading red as
+   urgent. Red is now RESERVED FOR DANGER and nothing else; every interactive
+   affordance moved to the brand hue.
+
+   ⛔ The brand hue is teal-cyan and that is STRUCTURAL, not taste. It is
+   already SecVault's own identity slot in the suite (the logo colour), and
+   more importantly it cannot be confused with any point on the severity ramp.
+   Which is only true because LOW SEVERITY IS SLATE, NOT BLUE — dropping blue
+   out of the ramp is what keeps the brand hue unambiguous. If a future change
+   puts blue back into severity, this whole separation collapses.
+
+   ⛔ Brand colour NOW FLIPS BETWEEN THEMES, which the old file deliberately
+   did not do. #0A8FA3 is correct on white and muddy on a near-black ground;
+   a single fixed brand hue is only affordable when it is a saturated red.
+   Both themes are defined; neither is an inversion of the other.
+
+   ⛔ SPACING IS NOW A TOKEN SCALE (--s1..--s9). Before this there was none at
+   all: 14 distinct inline gap values, including 1, 3, 5, 7 and 14px, and five
+   near-identical paddings doing the same job. Use the scale. A component that
+   invents its own 7px gap opts itself out of every future spacing change,
+   silently, exactly like a hardcoded hex opts out of this palette.
+   ═══════════════════════════════════════════════════════════════════════ */
 :root {
   color-scheme: light;
-  --primary:        #C8102E;
-  --primary-dark:   #a00d24;
-  --primary-light:  #fef2f4;
-  --navy:           #1a2744;
-  --navy-light:     #243258;
-  --navy-dark:      #111b33;
-  --bg-primary:     #f4f6f9;
-  --bg-card:        #ffffff;
-  --border:         #e2e8f0;
-  --border-light:   #f1f5f9;
-  --text-primary:   #0f172a;
-  --text-secondary: #334155;
-  --text-muted:     #64748b;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md:      0 4px 16px rgba(0,0,0,0.08);
-  --shadow-lg:      0 10px 40px rgba(0,0,0,0.12);
-  --radius:         8px;
+
+  /* ── Brand / interactive. NOT a severity. ── */
+  --primary:        #0A8FA3;
+  --primary-dark:   #067183;
+  --primary-light:  rgba(10,143,163,0.10);
+  --focus-ring:     rgba(10,143,163,0.22);
+
+  /* ── The shell. A neutral blue-black, not the old #1a2744 navy: the
+        sidebar and header stay dark in BOTH themes (as before), but the hue
+        no longer competes with the data. ── */
+  --navy:           #101826;
+  --navy-light:     #1B2536;
+  --navy-dark:      #0A101B;
+
+  --bg-primary:     #F7F9FB;
+  --bg-card:        #FFFFFF;
+  --border:         #DDE3EB;
+  --border-light:   #EAEFF4;
+  --text-primary:   #0D131C;
+  --text-secondary: #3D4A5C;
+  --text-muted:     #6B7A8D;
+  --shadow-sm:      0 1px 2px rgba(13,19,28,0.06);
+  --shadow-md:      0 4px 14px rgba(13,19,28,0.08);
+  --shadow-lg:      0 18px 48px rgba(13,19,28,0.12);
+  --radius:         10px;
+  --radius-lg:      14px;
   --radius-sm:      6px;
   /* Fully-rounded surfaces (badges, progress tracks). A separate token from
      --radius so the square switch can flatten it too — a squared page full of
@@ -43,41 +147,73 @@
   --sidebar-width-collapsed: 64px;
   --header-height:  72px;
 
-  --green:   #16a34a;
-  --yellow:  #d97706;
-  --red:     #dc2626;
-  --blue:    #2563eb;
-  --orange:  #ea580c;
-  --purple:  #7c3aed;
-  --teal:    #0891b2;
+  /* ── Status hues. These ARE the severity ramp; nothing else may use them. ── */
+  --green:   #17825A;
+  --yellow:  #B7791F;
+  --red:     #D4353B;
+  --blue:    #2F6FE0;
+  --orange:  #E05E12;
+  --purple:  #6D45C9;
+  --teal:    #0A8FA3;
 
-  /* SecVault's own brand/logo/active-nav-icon hue — unclaimed by any sibling
-     (NetVault=red, LogVault=blue, DDIVault=amber, SpanVault=green). The
-     shared --primary above still drives every interactive control. */
-  --accent-teal:    #0891b2;
-  --accent-teal-dark: #0e7490;
-  --accent-teal-bg: rgba(8,145,178,0.20);
+  /* Semantic aliases for the ramp. Prefer these in new code — they say what
+     the colour MEANS, so a future palette change is one edit here rather than
+     a hunt for every place --yellow happened to mean "medium". */
+  --sev-crit: var(--red);
+  --sev-high: var(--orange);
+  --sev-med:  var(--yellow);
+  --sev-low:  #64748B;          /* SLATE, not blue — see the header note */
+  --sev-ok:   var(--green);
 
-  /* Typography scale (suite standard — sizes do NOT change per theme) */
-  --text-xs:   11px;
-  --text-sm:   12px;
-  --text-base: 13px;
-  --text-md:   14px;
-  --text-lg:   16px;
-  --text-xl:   20px;
-  --text-2xl:  28px;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+  /* ⛔ NOT MEASURED is a first-class state and deliberately has NO HUE.
+     A read that failed, a device with no ruleset, a check SecVault cannot
+     ask — these are not "zero" and not "pass", and the UI must never colour
+     them as either (CLAUDE.md's failed-read-as-a-fact rule, made visible).
+     Use --unmeasured for the text/em-dash and --hatch for any bar segment or
+     swatch standing in for the missing measurement. */
+  --unmeasured: #93A1B2;
+  --hatch: repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 7px);
+
+  /* SecVault's own brand/logo/active-nav hue. Now the SAME value as
+     --primary: since --primary moved off the suite red onto SecVault's own
+     teal, the two no longer name different things. Kept as a token because
+     the logo and active-nav chip reference it by name. */
+  --accent-teal:    var(--primary);
+  --accent-teal-dark: var(--primary-dark);
+  --accent-teal-bg: rgba(10,143,163,0.20);
+
+  /* ── Space. 4px base, nine steps, nothing between them. ── */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px; --s5: 24px;
+  --s6: 32px; --s7: 48px; --s8: 64px; --s9: 96px;
+
+  /* Typography scale (sizes do NOT change per theme).
+     Raised 2026-09-09: the old scale topped out at 28px with 13px body, so no
+     screen could establish a hierarchy and prose was cramped. Table-density
+     steps (xs/sm/base) moved only half a point so no fixed-layout table
+     reflows; the body and heading steps carry the change. */
+  --text-xs:   11.5px;
+  --text-sm:   12.5px;
+  --text-base: 13.5px;
+  --text-md:   15px;
+  --text-lg:   17px;
+  --text-xl:   22px;
+  --text-2xl:  32px;
+  --text-3xl:  40px;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system,
+               'Segoe UI', BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', 'JetBrains Mono',
+               Consolas, 'Courier New', monospace;
 
   /* Adaptive surface + status tint tokens — tinted/neutral surfaces behind
      text MUST use these so they adapt to dark mode. */
-  --surface-subtle: #f8fafc;
-  --tint-info:    #eff6ff;  --tint-info-fg:    #1d4ed8;
-  --tint-success: #f0fdf4;  --tint-success-fg: #15803d;
-  --tint-warn:    #fffbeb;  --tint-warn-fg:    #b45309;
-  --tint-danger:  #fef2f2;  --tint-danger-fg:  #b91c1c;
-  --tint-purple:  #f5f3ff;  --tint-purple-fg:  #6d28d9;
-  --tint-teal:    #ecfeff;  --tint-teal-fg:    #0e7490;
-  --tint-orange:  #ffedd5;  --tint-orange-fg:  #c2410c;
+  --surface-subtle: #F1F4F8;
+  --tint-info:    rgba(47,111,224,0.09);  --tint-info-fg:    #1D53B8;
+  --tint-success: rgba(23,130,90,0.10);   --tint-success-fg: #10684A;
+  --tint-warn:    rgba(183,121,31,0.12);  --tint-warn-fg:    #8C5B12;
+  --tint-danger:  rgba(212,53,59,0.10);   --tint-danger-fg:  #B02128;
+  --tint-purple:  rgba(109,69,201,0.10);  --tint-purple-fg:  #563AA0;
+  --tint-teal:    rgba(10,143,163,0.10);  --tint-teal-fg:    #06707F;
+  --tint-orange:  rgba(224,94,18,0.10);   --tint-orange-fg:  #B54810;
 }
 
 /* ── Square corners (opt-in) ────────────────────────────
@@ -99,31 +235,60 @@
   --radius-pill:    0;
 }
 
-/* Dark theme — brand colors (--primary, --navy*, --accent-teal) and status
-   colors (--green/--yellow/--red/...) intentionally stay the same in both
-   themes; only the neutral surfaces/text/borders/shadows flip. */
+/* Dark theme.
+   ⛔ CHANGED 2026-09-09: the brand and status hues NOW FLIP TOO. The old file
+   deliberately froze them across both themes, which is affordable for a
+   saturated red but not for anything else — #0A8FA3 teal is correct on white
+   and goes muddy and low-contrast on a near-black ground, and #17825A green
+   reads almost black. Each hue below is re-picked for this ground, not
+   algorithmically inverted, and every pair is checked to clear 4.5:1 against
+   --bg-card.
+   ⛔ Elevation in dark mode is a LIGHTER SURFACE plus a border, never a black
+   shadow — a black shadow is invisible on a dark ground, and relying on it is
+   the classic tell of a light theme inverted by hand. */
 [data-theme="dark"] {
   color-scheme: dark;
-  --primary-light:  rgba(200,16,46,0.18);
-  --bg-primary:     #0a0e1a;
-  --bg-card:        #1a2235;
-  --border:         #2d3a52;
-  --border-light:   #243050;
-  --text-primary:   #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted:     #94a3b8;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md:      0 4px 16px rgba(0,0,0,0.4);
-  --shadow-lg:      0 10px 40px rgba(0,0,0,0.5);
+  --primary:        #22C1D6;
+  --primary-dark:   #4FD8E8;   /* hover goes LIGHTER on a dark ground */
+  --primary-light:  rgba(34,193,214,0.16);
+  --focus-ring:     rgba(34,193,214,0.34);
 
-  --surface-subtle: rgba(255,255,255,0.04);
-  --tint-info:    rgba(59,130,246,0.13);  --tint-info-fg:    #93c5fd;
-  --tint-success: rgba(34,197,94,0.13);   --tint-success-fg: #86efac;
-  --tint-warn:    rgba(217,119,6,0.15);   --tint-warn-fg:    #fcd34d;
-  --tint-danger:  rgba(220,38,38,0.13);   --tint-danger-fg:  #fca5a5;
-  --tint-purple:  rgba(139,92,246,0.15);  --tint-purple-fg:  #c4b5fd;
-  --tint-teal:    rgba(8,145,178,0.15);   --tint-teal-fg:    #67e8f9;
-  --tint-orange:  rgba(234,88,12,0.15);   --tint-orange-fg:  #fdba74;
+  --navy:           #0E1622;
+  --navy-light:     #182231;
+  --navy-dark:      #080D16;
+
+  --bg-primary:     #0B0F16;
+  --bg-card:        #131A25;
+  --border:         #2A3646;
+  --border-light:   #212B3A;
+  --text-primary:   #EDF2F8;
+  --text-secondary: #B9C6D6;
+  --text-muted:     #8494A8;
+  --shadow-sm:      0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md:      0 4px 16px rgba(0,0,0,0.55);
+  --shadow-lg:      0 20px 56px rgba(0,0,0,0.65);
+
+  --green:   #3FD08E;
+  --yellow:  #E8B23C;
+  --red:     #FF6B70;
+  --blue:    #6BA5FF;
+  --orange:  #FF9247;
+  --purple:  #A78BFA;
+  --teal:    #22C1D6;
+  --sev-low: #8B9BB0;
+
+  --unmeasured: #7A8BA1;
+
+  --accent-teal-bg: rgba(34,193,214,0.22);
+
+  --surface-subtle: rgba(255,255,255,0.045);
+  --tint-info:    rgba(107,165,255,0.15); --tint-info-fg:    #9CC4FF;
+  --tint-success: rgba(63,208,142,0.14);  --tint-success-fg: #6FE0AC;
+  --tint-warn:    rgba(232,178,60,0.15);  --tint-warn-fg:    #F0C86B;
+  --tint-danger:  rgba(255,107,112,0.15); --tint-danger-fg:  #FF9296;
+  --tint-purple:  rgba(167,139,250,0.16); --tint-purple-fg:  #C4B5FD;
+  --tint-teal:    rgba(34,193,214,0.16);  --tint-teal-fg:    #6FE0EE;
+  --tint-orange:  rgba(255,146,71,0.15);  --tint-orange-fg:  #FFB07A;
 }
 
 [data-theme="dark"] th { background: rgba(255,255,255,0.03); }
@@ -131,9 +296,9 @@
 
 html, body {
   height: 100%;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--text-md);
-  line-height: 1.5;
+  line-height: 1.55;
   background: var(--bg-primary);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
@@ -477,7 +642,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   box-sizing: border-box;
   line-height: 1.4;
 }
-.input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(200,16,46,0.1); }
+.input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
 .input::placeholder { color: var(--text-muted); }
 textarea.input { resize: vertical; min-height: 80px; }
 
@@ -496,7 +661,7 @@ textarea.input { resize: vertical; min-height: 80px; }
   box-sizing: border-box;
   transition: border-color 0.15s;
 }
-.select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(200,16,46,0.1); }
+.select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
 select.input {
   width: 100%;
   padding: 9px 32px 9px 12px;
@@ -725,7 +890,7 @@ select.input {
 }
 .sv-nav-chip svg { width: 16px; height: 16px; }
 .sv-nav a:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.sv-nav a.active { background: rgba(200,16,46,0.15); color: #fff; }
+.sv-nav a.active { background: var(--accent-teal-bg); color: #fff; }
 .sv-nav a.active .sv-nav-chip { background: var(--chip-bg); color: var(--chip-color); }
 .sv-nav a.active::before {
   content: '';
