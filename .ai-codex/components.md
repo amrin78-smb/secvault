@@ -220,3 +220,37 @@ inside another React component" rule were found.
   EmptyState/LoadingSpinner/StatCard/PageHeader") is fully present — no contradiction. `ui/` also
   contains `IconChip.js`, not named in that list, but this is additive, not a contradiction.
 - No other contradictions found between CLAUDE.md's component-related claims and the actual files.
+
+## components/analysis/RuleChangeRequests.js (added 2026-09-09, v2.93.0)
+
+`'use client'`. The surface of the rule-cleanup loop (roadmap Tier 1 item 1). Three exports:
+
+- **`WithheldNotice({ withheld })`** — ⛔ the load-bearing one. `getCleanupCandidates` returns
+  `{eligible, withheld}`, and this renders the second list ABOVE the candidate table: a hatched
+  swatch (`--hatch`/`--unmeasured`, deliberately no hue), the count, and the engine's `reason`
+  strings verbatim, grouped. **A cleanup screen that silently shows a shorter list looks complete
+  and is not** — so only the per-rule enumeration may sit behind `<details>`; the count and the
+  reasons never do.
+- **`CleanupRequestPanel({ deviceId, canWrite, eligibleCount, withheld, children })`** — the form.
+  Selection is UNCONTROLLED: the server renders `<input name="ruleIds">` per row and the client
+  reads `FormData` on submit, so a 136-row candidate list costs no client state.
+- **`RuleChangeRequests({ requests, canWrite, loadError })`** default export — the request list.
+
+⛔ **There is no completion control anywhere in this file, and adding one would end the feature.**
+A request reaches `verified` because a re-collected ruleset no longer contains the rules. Listing
+unused rules is what ManageEngine Firewall Analyzer already does; stating whether the change was
+actually made is the only thing SecVault does that it cannot.
+
+⛔ **`unverifiable` is deliberately ABSENT from `OUTCOME_META`** and renders through `NotMeasured`
+with a reason, not as a status badge. It means no rules collection has succeeded since the request
+was submitted — SecVault's gap, not the operator's inaction, and not `still_present`. A test fails
+if it is added to the badge map. Likewise a submitted request with `removed === 0 && still_present
+=== 0` gets an explicit sentence, because three zeroes read as failure and are not.
+
+⛔ `Dismissed` is styled muted, NOT as `NotMeasured` — "you told us not to" is a decision, not a
+measurement gap, and the two must not look alike.
+
+`CleanupTab.js` gained a **Removal** column with four states (`Candidate` / `Held back` /
+`Dismissed` / `—`), so a held-back rule is visibly held back where operators actually scan, and
+renders `loadError` as "Change requests could not be read — that is not the same as there being
+none." rather than an empty list.

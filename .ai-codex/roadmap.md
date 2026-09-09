@@ -21,6 +21,7 @@ Every number below is measured, not estimated. Where something is uncertain it s
 | **Rule-hit correlation from logs (Phase 8b)** | 8,803 rule-hit rows, all 15 devices |
 | **Tri-state `hit_count`** | 164 unmeasured / 466 measured-zero / 1,086 with hits |
 | Rule analysis, 10 finding types | 185 `unused`, 252 `overly_permissive`, 153 `shadow` |
+| **Rule cleanup loop, request → export → verified against the ruleset** | v2.93.0 |
 | CVE pipeline + KEV + priority tree | 159 live assessments |
 | `log_hit` producer | `lib/engines/logHit.js` |
 | Compliance engine + monthly PDF | 45 checks, 5 standards |
@@ -34,19 +35,40 @@ Every number below is measured, not estimated. Where something is uncertain it s
 
 ## Tier 1 — highest leverage, and only possible because the data now exists
 
-### 1. Close the rule-cleanup loop
+### 1. Close the rule-cleanup loop — **DONE v2.93.0**
 **Why first.** This is FWA's flagship report *and* the place SecVault can beat it outright. FWA
 infers rule usage from logs alone. SecVault has three independent signals for the same rule —
 log evidence, the device's own hit counter, and the parsed config — and it already knows which of
 those it could not measure. Nobody else can say "this rule is unused **and here is why we are
 sure**".
 
-**The gap is workflow, not analysis.** 185 unused findings exist and an operator cannot currently
-act on them as a batch. Needed: a cleanup campaign view (select findings → export as a change
-request → mark submitted → verify against the next `config_diffs` that the rule actually went).
+**The gap was workflow, not analysis** — 185 unused findings existed and an operator could not act
+on them as a batch. Shipped: `rule_change_requests` / `rule_change_request_items` +
+`lib/engines/ruleChangeRequests.js`, cleanup selection on the Cleanup tab, a request list/detail
+view, CSV + PDF export, and verification wired into `collectAndStore`.
 
-⛔ Must keep the tri-state visible throughout: a rule whose hit count is `unmeasured` must never
-appear in a "safe to delete" list. 164 rules are in that state today.
+⛔ **One premise in the original item was wrong and was NOT built as written.** "Verify against
+the next `config_diffs`" would have been the wrong signal: `config_diffs` compares consecutive
+CONFIG snapshots, which for several vendors do not carry the ruleset in a form that proves a
+specific rule by vendor ID is gone. Verification instead runs against the re-collected
+`firewall_rules` rows, which is where rule identity actually lives.
+
+⛔ That in turn needed a new column. `devices.last_collected_at` is stamped when ANY capability
+succeeded, so a device whose RULE pull had been failing for a week still looked freshly collected
+— and since `firewall_rules` is DELETEd and reinserted only on a SUCCESSFUL pull, "the rule is
+absent" would have been read off a stale ruleset and reported every requested rule as removed. A
+collection outage would have rendered as a completed cleanup. `devices.last_rules_collected_at`
+is stamped only on the success path, and verification requires it to be STRICTLY newer than
+`submitted_at`.
+
+⛔ The tri-state held throughout: a rule whose hit count is unmeasured is refused from a request
+server-side, not warned about — 164 of 1,716 rules on the live fleet. `getCleanupCandidates`
+returns `{eligible, withheld}` so the UI cannot silently show a shorter list, and `unverifiable`
+is rendered as its own state rather than as a failure.
+
+Deliberately NOT built: any manual "mark as done" control. A request becomes `verified` because
+the re-collected ruleset says the rules are gone. A tick box would have reduced this to the
+export button FWA already has.
 
 ### 2. Threshold and anomaly alerting
 **Why.** A security product that cannot say "denied traffic from this country just tripled" is
@@ -79,7 +101,7 @@ period, because the job runs both on cron and at every service start.
 
 | FWA capability | SecVault today | Work |
 |---|---|---|
-| **Change management workflow** (request → approve → implement → verify) | `config_diffs` detects changes after the fact; no request side | Medium. The verify half is the hard part and SecVault already has it — a change request that auto-closes when the matching diff appears would be genuinely better than FWA |
+| **Change management workflow** (request → approve → implement → verify) | **Half done v2.93.0.** Request → implement → verify exists for RULE REMOVALS (`rule_change_requests`, verified against the re-collected ruleset). Any other kind of change is still detected after the fact by `config_diffs` only | Small–medium. Remaining: an approval step, and requests for changes that are not deletions. ⛔ Do NOT generalise the verifier by pointing it at `config_diffs` — that was the original plan and it is wrong: a config diff cannot prove a specific rule by vendor ID is gone on every vendor, which is why v2.93.0 verifies against `firewall_rules` instead |
 | **Capacity planning / bandwidth forecast** | Rollups hold the history; no trend projection | Medium. ⛔ Only for vendors where `bytes_summable` is true — FortiOS cumulative counters are already excluded and must stay excluded |
 | **Custom report builder** | Fixed reports only | Large. Defer until the report registry above exists |
 | **Multi-tenancy / site scoping** | `devices.site` exists and is **empty on 14 of 15 devices** | Small technically, but pointless until sites are actually populated. Blocked on data, not code |
@@ -184,5 +206,6 @@ an external customer is real.
 If the next session has one day: **Tier 3 item 1** (snapshot backfill), then start Tier 1 item 2
 (threshold alerting) — the dispatch infrastructure already exists, so it is mostly rule definition.
 
-If it has a week: **Tier 1 item 1** (rule cleanup workflow). It is the strongest differentiator
-against the tool this product exists to replace.
+~~If it has a week: **Tier 1 item 1**.~~ Done v2.93.0. The next largest is **Tier 1 item 2**
+(threshold alerting) — dispatch already exists, so it is mostly rule definition — then **item 3**
+(report library), which item 1’s export now gives a second report type to generalise from.

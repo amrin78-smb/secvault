@@ -420,6 +420,24 @@ let snmpPollInFlight = false;
 // Duration) against real firmware output.
 let loggedVpnUserSample = false;
 
+// ⛔ THERE IS DELIBERATELY NO SEPARATE rule-cleanup-verification JOB, and adding
+// one would be a false safety net rather than extra coverage.
+//
+// Verification runs inside collectAndStore, immediately after a SUCCESSFUL
+// rules pull. That is not merely a convenient hook — it is the only moment at
+// which any new evidence exists. Its two inputs are firewall_rules (rewritten
+// ONLY by a successful pull) and devices.last_rules_collected_at (stamped ONLY
+// by a successful pull). Between pulls both are byte-identical to what the last
+// verification already read, so a sweep on its own schedule could not reach a
+// different conclusion; the only thing it could change is flipping a `pending`
+// item to `unverifiable` on no new information, which reads to an operator as
+// activity where there was none.
+//
+// A request submitted while collection is idle is therefore not stranded: it is
+// picked up by the very next successful pull of that device — this job, or an
+// on-demand collect from /api/devices/[id]/collect, which is the "verify now"
+// path. Until then it stays honestly pending/unverifiable, which is the correct
+// answer, not a gap to be papered over by re-asking the same question hourly.
 async function runRuleVersionPullJob() {
   if (ruleVersionPullInFlight) {
     logger.warn('Job [rule-version-pull] previous run still in progress — skipping this tick.');
@@ -451,10 +469,22 @@ async function runRuleVersionPullJob() {
             source: 'collect',
             message: collectedSomething ? null : (collectResult.errors || []).join('; ') || 'nothing collected',
           });
+          // Rule-cleanup verification summary, when it ran (it only runs after
+          // a SUCCESSFUL rules pull — see collectAndStore). Logged separately
+          // from the counts above because the operator-visible claim here is
+          // "SecVault confirmed these rules are gone", and an `unverifiable`
+          // count is the honest statement that no usable pull has happened
+          // since the request was submitted — never a failure, and never to be
+          // read as still_present.
+          const rcv = collectResult.ruleChangeVerification;
+          const rcvSummary = rcv && rcv.checked > 0
+            ? `, ruleCleanup: checked ${rcv.checked} (removed ${rcv.removed}, stillPresent ${rcv.stillPresent}, unverifiable ${rcv.unverifiable})`
+            : '';
           logger[level](
             `Job [rule-version-pull] device ${device.id} (${device.name || 'unnamed'}) ${collectedSomething ? 'collected OK' : 'COLLECTED NOTHING'} — ` +
               `rules: ${collectResult.rulesCount ?? 'n/a'}, findings: ${collectResult.analysisFindings ?? 'n/a'}, ` +
               `configChanged: ${collectResult.configChanged}` +
+              rcvSummary +
               (collectResult.errors.length ? `, partial errors: ${collectResult.errors.join('; ')}` : '')
           );
         }

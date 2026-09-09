@@ -257,3 +257,22 @@ verified to export `dynamic = 'force-dynamic'`.
 GET  /api/discovered-devices                 — [auth] observed identity of unmatched syslog senders, each correlated against device_ha_status / device_syslog_sources at read time. Errors 500; NEVER returns [] on failure ("no unknown senders" is the dangerous wrong answer here).
 POST /api/discovered-devices/[id]/link       — [admin] file a sender's address against an EXISTING device (device_syslog_sources). The HA-peer case: 5 of 8 live senders. ⛔ Never writes devices.mgmt_ip. Transactional, 409 if already decided.
 POST /api/discovered-devices/[id]/ignore     — [admin] dismiss. ⛔ 'ignored', not DELETE — the hourly job would recreate a deleted row, so delete would appear to work and silently not.
+
+## Rule change requests (added 2026-09-09, v2.93.0)
+
+| route | methods | gating |
+|---|---|---|
+| `/api/devices/[id]/rule-change-requests` | `GET`, `POST` | POST admin-gated |
+| `/api/rule-change-requests/[id]` | `GET`, `PATCH` | PATCH admin-gated |
+| `/api/rule-change-requests/[id]/export` | `GET` (`?format=csv\|pdf`) | authenticated, ungated |
+
+`PATCH` accepts only `submit` / `abandon`. ⛔ There is deliberately **no action that marks a request
+complete** — a request reaches `verified` only because `verifyRequestsForDevice` found the rules
+absent from a re-collected ruleset.
+
+⛔ `createRequest`'s eligibility refusal maps to **400, not 500**, so the engine's own sentence —
+which names the rules it refused and why — reaches the operator instead of being buried as a server
+error. The refusal is the product working, not failing.
+
+The `export` GET is ungated to match `/api/compliance/report/pdf`; the two mutating routes follow
+CLAUDE.md's RBAC rule (mutations of shared system state), unlike saved views.

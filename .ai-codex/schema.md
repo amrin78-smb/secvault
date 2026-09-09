@@ -1053,3 +1053,45 @@ that throws inserts, because an uncomputable comparison is not "no change".
 ⛔ Anything counting collections must use `SUM(observation_count)`, never `COUNT(*)`. Two call
 sites used `COUNT(*) < 2` as "no predecessor to diff against" and would have reported a
 well-collected device as a coverage gap.
+
+### rule_change_requests + rule_change_request_items (v2.93.0, Tier 1 item 1)
+
+The rule-cleanup loop. `rule_change_requests` is the campaign (`draft` -> `submitted` ->
+`verified`|`partial`, or `abandoned`); `rule_change_request_items` is one row per proposed rule,
+keyed `UNIQUE (request_id, rule_id_vendor)`.
+
+⛔ **Items key on `rule_id_vendor`, never on `firewall_rules.id`.** That UUID is regenerated on
+every pull — `collectAndStore` DELETEs and reinserts the whole ruleset — so a request keyed on it
+could never be matched against a later ruleset, which is the entire point of the table. Same reason
+`finding_acknowledgements` keys the same way.
+
+⛔ **`hit_count_at_request` is a SNAPSHOT and is TRI-STATE.** It is written at request time and
+never re-derived: the next pull may find hits, and the request must still show what it was
+justified by, or the reason a change was asked for gets silently rewritten. NULL still means NOT
+MEASURED — though `lib/engines/ruleChangeRequests.js` refuses to admit an unmeasured rule to a
+request at all, so a NULL here should only ever appear on legacy or hand-inserted rows.
+
+⛔ **`outcome` = `pending`|`removed`|`still_present`|`unverifiable`, and `unverifiable` is neither
+a failure nor a `still_present`.** It means no rules pull has succeeded for this device since
+`submitted_at`, so nothing can be concluded. Collapsing it into `still_present` would report
+SecVault's own collection gap as the operator's inaction; collapsing it into `removed` would report
+a collection outage as a completed cleanup. `verified_at` stays NULL for it — "we have not looked
+yet" must not carry a timestamp that reads as "we looked at this time".
+
+⛔ **No status means "the operator says it is done".** A request reaches `verified` only because a
+re-collected ruleset no longer contains the rules. If a manual-completion path is ever added, the
+feature has degraded into an export button and has lost the only thing it does that ManageEngine
+Firewall Analyzer cannot.
+
+### devices.last_rules_collected_at (v2.93.0)
+
+Stamped by `collectAndStore` **only when `getRules()` returned successfully**. It exists because
+`devices.last_collected_at` cannot answer the question verification turns on: that column is
+stamped when ANY capability succeeded (version, config, interfaces...), so a device whose *rule*
+pull has been failing for a week still looks freshly collected. Verification compares
+`last_rules_collected_at > submitted_at` **strictly** — a pull in the same instant cannot have
+observed the operator's change.
+
+⛔ Never stamp it on a failed pull. `getRules()` throws rather than returning `[]` precisely so a
+failed pull cannot be mistaken for an empty ruleset; stamping on failure would resurrect that bug
+one level up, and in the direction that fabricates success.

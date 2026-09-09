@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.93.0': [
+    "New: firewall rules you have been told are unused can now be turned into a change request \u2014 pick them from the Cleanup tab, hand the exported list to whoever edits the firewall, and SecVault checks the next collection to tell you whether they were actually removed.",
+    "The exported request is a document a change board can read without a SecVault account: every rule states the firewall\u2019s own hit counter at the time it was raised, what 30 days of logs showed, and every reason it was flagged.",
+    "Rules whose usage could never be measured are held back from a cleanup list on purpose, and the screen tells you how many were held back and why, rather than quietly showing a shorter list.",
+    "A request is never marked done by hand. It is marked verified because a later collection no longer finds the rules \u2014 and when no collection has succeeded since you submitted it, it says so instead of implying the work was not done.",
+    "Fixed: a rule flagged for several reasons at once kept only one of them on the request, so the exported document understated the case for removing it.",
+  ],
   '2.92.0': [
     "Config snapshots are no longer stored again when nothing changed. Around 93% of pulls were storing another copy of an identical configuration; a row now records that a configuration was seen from one time to another, and how many times.",
     "The nightly rollup sweep is roughly twice as fast. Most of its time was one query reading a whole day of logs to find a few hours of them.",

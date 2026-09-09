@@ -1185,6 +1185,20 @@ none of these carry Critical-Rules-level footguns.
   calendar month via a **partial unique index** (`WHERE status='success'`), not just app logic — the job
   runs both on cron and once at every service startup, so a real DB constraint is what prevents a
   double-send if a deploy lands near the monthly tick; failed attempts don't block a retry.
+- **Rule cleanup loop** (`lib/engines/ruleChangeRequests.js`, `/devices/[id]/analysis?tab=cleanup`,
+  v2.93.0): select evidence-backed `unused`/`redundant`/`shadow` rules → a change request → CSV/PDF
+  for whoever edits the firewall → **SecVault verifies against the re-collected ruleset whether they
+  actually went**. ⛔ The verify half is the reason this exists — listing unused rules is what
+  ManageEngine Firewall Analyzer already does; stating whether the change was made is what it
+  cannot. There is deliberately no manual "mark as done": a request reaches `verified` only because
+  a later `firewall_rules` pull no longer contains the rules. ⛔ An unmeasured `hit_count` is
+  REFUSED from a request server-side, never warned about — "we cannot tell whether this rule is
+  used" is not a reason to delete it, and `getCleanupCandidates` returns `{eligible, withheld}` so
+  the UI cannot silently show a shorter list. ⛔ Verification requires
+  `devices.last_rules_collected_at` (stamped ONLY when `getRules()` succeeded) to be STRICTLY newer
+  than `submitted_at`; without that, a device whose rule collection is failing would report every
+  requested rule as removed, turning a collection outage into a fabricated cleanup. Full detail:
+  `.ai-codex/lib.md` + `schema.md`.
 - **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
 - **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.

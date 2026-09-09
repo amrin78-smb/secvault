@@ -152,3 +152,9 @@ GRANT SELECT ON TABLE saved_views TO nocvault_readonly;
 -- Hourly threat aggregates (2026-09-09). Counts only, no message text.
 GRANT SELECT ON TABLE syslog_threat_hourly TO claude_readonly;
 GRANT SELECT ON TABLE syslog_threat_hourly TO nocvault_readonly;
+
+-- Rule change requests (v2.93.0). Operator workflow data, no secret material.
+GRANT SELECT ON TABLE rule_change_requests TO claude_readonly;
+GRANT SELECT ON TABLE rule_change_requests TO nocvault_readonly;
+GRANT SELECT ON TABLE rule_change_request_items TO claude_readonly;
+GRANT SELECT ON TABLE rule_change_request_items TO nocvault_readonly;

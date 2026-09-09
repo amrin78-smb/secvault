@@ -1371,3 +1371,80 @@ Post-tunnel latency: 26ms"), so this must be read with splitCsv() — a naive sp
 at 28. ⛔ Index 4 is the Threat/Content type ("0"), NOT a subtype; the real one is the Event ID at 8.
 Fortinet VPN rows carry the peer as `remip=`, not `srcip=`, which is why src_ip was NULL on 100% of
 them.
+
+## `lib/engines/ruleChangeRequests.js` (added 2026-09-09, v2.93.0)
+
+The rule-cleanup loop — roadmap Tier 1 item 1. Propose rules for removal, hand the list to whoever
+edits the firewall, then **verify against the re-collected ruleset whether they actually went**.
+
+⛔ **The verify half is the whole point.** Listing unused rules is not novel; ManageEngine Firewall
+Analyzer has done it for years by inferring usage from logs. SecVault re-collects the ruleset on a
+schedule, so it can *state* whether the change was made instead of asking someone to remember. If
+this ever degrades into an export button the feature has lost its reason to exist.
+
+Exports: `getCleanupCandidates`, `createRequest`, `submitRequest`, `abandonRequest`,
+`verifyRequestsForDevice`, `listRequests`, `getRequest`, plus `REMOVABLE_FINDING_TYPES` /
+`VALID_STATUS`.
+
+- `REMOVABLE_FINDING_TYPES` = `unused` | `redundant` | `shadow`. Deliberately **not** every finding
+  type: `overly_permissive` means "tighten this", not "delete it", and putting it in a deletion
+  list would invite exactly the wrong action.
+- `getCleanupCandidates(pool, deviceId)` returns **`{ eligible, withheld }`** — both lists, always.
+  A cleanup screen that shows 21 candidates without saying 9 more were held back looks complete and
+  is not, so the exclusion is part of the contract rather than an internal filter.
+  Two exclusions, each with a `reason` string:
+  1. **`hit_count IS NULL` — never measured.** 164 of 1,716 rules on the live fleet, because
+     Fortinet SSH / Sangfor / Palo Alto SSH cannot report hit counts at all. "We cannot tell whether
+     this rule is used" is not a reason to delete it. ⛔ A measured `0` is the opposite — it is the
+     device's own counter affirmatively reporting no matches, and it is the evidence the whole
+     feature runs on.
+  2. **`rule_id_vendor IS NULL` — no durable identity.** The rule could be proposed and then never
+     verified, leaving the request unverifiable forever, which looks like progress and is not.
+  Dismissed findings are dropped silently — a dismissal is a decision, not a measurement gap.
+- `createRequest` **re-validates server-side** against `getCleanupCandidates` and throws naming the
+  offending rules. It does not silently shorten the request: the operator would otherwise believe a
+  rule was queued that never was. The UI filter is a convenience; this is the guarantee.
+- `verifyRequestsForDevice(pool, deviceId)` **never throws** — it returns
+  `{checked, removed, stillPresent, unverifiable, error}`, because it runs as a post-step of
+  `collectAndStore` and a bookkeeping problem must never break a collection run.
+  ⛔ It requires `devices.last_rules_collected_at > submitted_at` **strictly** before concluding
+  anything. `firewall_rules` is DELETEd and reinserted on every successful pull, so "the rule is
+  absent" only means something if a pull succeeded after the request was raised. Without that guard
+  a device whose rule collection has been failing reports every requested rule as `removed` —
+  turning a collection outage into a fabricated success, the worst direction this feature can be
+  wrong in. It also re-checks items already marked `unverifiable`, so a request unsticks itself once
+  collection recovers.
+  ⛔ The parent rollup promotes to `partial` only when no item is still `pending`/`unverifiable` —
+  `partial` means "we looked and some were not done", which is a claim an unverifiable item does not
+  support.
+
+Pinned by `tests/ruleChangeRequests.test.js` (25 assertions), which covers the "we could not
+measure this" case for both halves: unmeasured `hit_count`, missing `rule_id_vendor`, no successful
+pull since submission, and a pull landing in the same instant as the submission.
+
+### `ruleChangeRequests.js` — four contract fixes made during the UI build (same day)
+
+Found by building the surface against it, all four in the "a record that quietly says less than the
+truth" family:
+
+1. ⛔ **`eligible` is one row per FINDING; a request stores one item per RULE.** 10 rules on the
+   live fleet carry two or three removable findings at once (`Block-Line-Streaming` is unused AND
+   shadowed AND redundant). `createRequest` built its lookup with a plain last-wins `Map`, so the
+   stored `evidence` kept ONE reason and the exported request would give a reviewer one where three
+   were found — and it is **not re-derivable later**, because `firewall_rules` and
+   `rule_analysis_results` are both rebuilt on every pull. Now merged by `mergeByRule()`:
+   `evidence.findings` holds all of them, and the single `finding_type` column takes the
+   WORST-severity finding rather than the alphabetically first.
+2. `eligible` and `withheld` now share ONE row shape (`shape(r)`), so a caller can render a
+   held-back rule in the same table as an offered one. If showing the exclusion costs a second
+   query, the exclusion is what gets dropped. ⛔ `hitCount` stays **null** on a withheld row — it is
+   the unmeasured value that caused the exclusion.
+3. `abandonRequest` was doing `note = COALESCE($2, note)`, overwriting the INSTRUCTION written for
+   whoever edits the firewall with the abandon reason. New `rule_change_requests.abandon_reason`
+   column; `note` is never touched.
+4. ⛔ The status rollup's `NOT EXISTS (… outcome <> 'removed')` is **vacuously true for a request
+   with zero items**, which would flip it to `verified` — a fabricated success in the one query
+   here that must never produce one. `createRequest` guarantees at least one item so it was
+   unreachable, but "unreachable today" is not a property a later caller preserves; every branch is
+   now guarded on the request having items. `verified_at` is also stamped for `partial` now, since
+   that is the outcome an operator most needs dated.

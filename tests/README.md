@@ -83,3 +83,28 @@ that every other gate let through:
 SKIPPED, not guessed at. A false failure in a repo-wide lint gets the lint
 deleted, which costs more than the coverage it gives up. If one starts firing
 on a legal construct, widen the skip — do not lower the assertion.
+
+## ⛔ "fail 0" in the summary is NOT proof the tests passed
+
+A `describe()` block that throws while being CONSTRUCTED — most commonly a
+`ReferenceError` from using `it()` in a file that imported `test()`, or a bad
+`require` at the top of a block — is reported as `not ok N` for the suite but is
+**not counted in the `# fail` tally**. The tail of the output reads:
+
+```
+not ok 7 - snapshotLogEnabled
+    error: 'it is not defined'
+...
+# pass 36
+# fail 0      <-- says zero, and four tests never ran
+```
+
+The process still **exits 1**, so `npm test` and any CI gate are correct. What
+is wrong is reading the summary. Hit on 2026-09-09 while adding tests to
+`ruleChangeRequestReport.test.js`: four new assertions silently never executed
+and the tail said everything was fine.
+
+So: check the **exit code**, or grep for `^not ok`, rather than trusting the
+`# fail` line — and if you add tests to an existing file, match the import that
+file already uses. Both `test()` and `describe()/it()` styles appear in here and
+they are not interchangeable within a file.

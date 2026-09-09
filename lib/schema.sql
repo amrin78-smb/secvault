@@ -2054,3 +2054,74 @@ CREATE INDEX IF NOT EXISTS idx_syslog_threat_hour
   ON syslog_threat_hourly (bucket_hour DESC);
 CREATE INDEX IF NOT EXISTS idx_syslog_threat_src
   ON syslog_threat_hourly (src_ip, bucket_hour DESC);
+
+-- ─────────────────────────────────────────
+-- RULE CHANGE REQUESTS (Tier 1, v2.93.0)
+-- ─────────────────────────────────────────
+
+-- The cleanup loop: an operator selects unused/redundant findings, exports them
+-- as a change request for whoever edits the firewall, and SecVault later
+-- verifies against the collected ruleset whether the rules actually went.
+--
+-- ⛔ THE VERIFY HALF IS THE POINT. Anyone can list unused rules; ManageEngine
+-- Firewall Analyzer does. What SecVault can do and FWA cannot is close the
+-- loop, because it already re-collects the ruleset and can say whether the
+-- change was actually made. Do not let this degrade into an export button.
+CREATE TABLE IF NOT EXISTS rule_change_requests (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id     UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  -- draft -> submitted -> (verified | partial) ; abandoned from anywhere.
+  -- ⛔ There is no 'done' the operator can set by hand. A request becomes
+  -- verified because the RULESET says so, never because someone ticked a box —
+  -- the whole value of this feature is that the claim is measured.
+  status        TEXT NOT NULL DEFAULT 'draft',
+  note          TEXT,
+  created_by    TEXT,
+  -- Why it was abandoned. Deliberately NOT written into note: note is the
+  -- INSTRUCTION for whoever edits the firewall, and an abandoned request is
+  -- still useful only as a record of what was asked for.
+  abandon_reason TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  submitted_at  TIMESTAMPTZ,
+  verified_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_rcr_device ON rule_change_requests (device_id, created_at DESC);
+
+-- One row per rule in the request.
+--
+-- ⛔ THE EVIDENCE IS SNAPSHOT AT REQUEST TIME, not read back later. A rule
+-- proposed for deletion because its hit count was a MEASURED ZERO must carry
+-- that fact forever: the next pull may find hits, and the request must still
+-- show what it was justified by. Re-deriving it later would quietly rewrite the
+-- reason a change was asked for.
+--
+-- ⛔ hit_count_at_request is TRI-STATE and NULL means NOT MEASURED. A rule whose
+-- hit count is unmeasured must never enter a request at all (enforced in
+-- lib/engines/ruleChangeRequests.js) — "we cannot tell whether this rule is
+-- used" is not a reason to delete it. 164 of 1,716 rules are in that state.
+CREATE TABLE IF NOT EXISTS rule_change_request_items (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id           UUID NOT NULL REFERENCES rule_change_requests(id) ON DELETE CASCADE,
+  rule_id_vendor       TEXT NOT NULL,
+  rule_name            TEXT,
+  finding_type         TEXT NOT NULL,
+  hit_count_at_request BIGINT,
+  evidence             JSONB,
+  -- pending -> removed | still_present | unverifiable
+  -- ⛔ 'unverifiable' is NOT a failure and NOT 'still_present'. It means no
+  -- rules pull has succeeded for this device since the request was submitted,
+  -- so nothing can be concluded. Collapsing it into still_present would report
+  -- our own collection gap as the operator's inaction.
+  outcome              TEXT NOT NULL DEFAULT 'pending',
+  verified_at          TIMESTAMPTZ,
+  UNIQUE (request_id, rule_id_vendor)
+);
+CREATE INDEX IF NOT EXISTS idx_rcri_request ON rule_change_request_items (request_id);
+
+-- ⛔ Verification needs to know a RULES pull succeeded, which
+-- devices.last_collected_at cannot tell it: that column is stamped when ANY
+-- capability succeeded (version, config, interfaces...), so a device whose rule
+-- pull failed for a week still looks freshly collected. Stamped by
+-- collectAndStore ONLY when getRules() returned successfully.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_rules_collected_at TIMESTAMPTZ;
