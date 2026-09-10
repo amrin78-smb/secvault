@@ -4,11 +4,13 @@ import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured, { NotMeasuredBar } from '../ui/NotMeasured';
 import { vendorLabel } from '../devices/vendorMeta';
+import { SEVERITY_FILL } from '../analysis/severityRamp';
 import { timeAgo, absoluteUtc } from '../../lib/formatDisplay';
 import {
   getVpnLoginLocations,
   findUsernameSprayers,
   findFailureOnlyCountries,
+  groupSourcesByCountry,
   MIN_USERNAMES_FOR_SPRAY,
 } from '../../lib/syslog/vpnAuthStats';
 
@@ -112,6 +114,217 @@ function ratioBar(success, failure, max, successMeasurable) {
   );
 }
 
+// ── The flagged-source drill-down ─────────────────────────────────────────
+//
+// ⛔ WHY THIS IS A <details> ACCORDION AND NOT A CLICKABLE MAP. The ask was
+// "a global heatmap the user can click and drill down, or collapse it". The
+// map half is refused for the reasons already recorded at the top of this file
+// (no geographic component in recharts, no library allowed, and a map cannot
+// show a per-country ratio). The COLLAPSE half is the real complaint and is
+// what this builds: 247 flagged addresses became 11 country rows.
+//
+// <details>/<summary> is native, server-rendered and needs no client bundle —
+// this is a server component and the page ships no JS for it today. A
+// client-side accordion would mean 'use client' on a component that queries a
+// 28M-row/day rollup, for a triangle the browser already draws.
+//
+// ⛔ ROW GEOMETRY FROM THE DENSITY TOKENS, in every summary, same as CELL
+// above. A hardcoded padding here would sit at one height while the tables
+// beside it change with Settings → Appearance → Density.
+const SUMMARY = {
+  cursor: 'pointer',
+  padding: 'var(--row-pad-y) var(--row-pad-x)',
+  fontSize: 'var(--row-font)',
+  lineHeight: 1.5,
+};
+
+// Proportional heat bar for one country row.
+//
+// ⛔ THE HUE COMES FROM components/analysis/severityRamp.js AND NOWHERE ELSE.
+// That file exists because the v2.87.0 palette rewrite left six private copies
+// of the ramp behind, each still drawing `medium` in BLUE — one step from the
+// brand teal, which is the exact collapse the palette forbids. A seventh local
+// colour map here would be the same bug again.
+//
+// ⛔ A GROUP WITH NO RESOLVABLE COUNTRY GETS NO HUE. Its bar is drawn at its
+// real proportional width — the failure count IS measured — but hatched, in
+// --unmeasured's vocabulary, because the thing we could not read is WHERE it
+// is. Colouring it on the severity ramp would rank a gap in geolocation
+// alongside eleven real places.
+function heatBar(failure, max, band, located) {
+  const pct = max > 0 ? Math.max(failure > 0 ? 2 : 0, (failure / max) * 100) : 0;
+  const hue = band ? SEVERITY_FILL[band] : null;
+  const title = located
+    ? `${failure.toLocaleString()} failed logins — ${
+        max > 0 ? Math.round((failure / max) * 100) : 0
+      }% of the worst country in this window`
+    : 'The firewall attached no country to these addresses. The failure count is real; the location is not measured, so this bar carries no severity colour.';
+  return (
+    <span
+      title={title}
+      style={{
+        display: 'block',
+        width: '100%',
+        height: 8,
+        borderRadius: 'var(--radius-pill)',
+        background: 'var(--bg-primary)',
+        border: '1px solid var(--border)',
+        overflow: 'hidden',
+      }}
+    >
+      <span
+        style={{
+          display: 'block',
+          width: `${pct}%`,
+          height: '100%',
+          ...(located && hue
+            ? { background: hue }
+            : { background: 'var(--hatch)', backgroundColor: 'var(--surface-subtle)' }),
+        }}
+      />
+    </span>
+  );
+}
+
+// One flagged address — LEVEL 3. Collapsed to a single sentence of arithmetic;
+// expands to the evidence and the provenance.
+//
+// ⛔ NEVER DEFINE A COMPONENT INSIDE A COMPONENT (CLAUDE.md Critical Rules).
+// These are module-level plain functions returning JSX, called imperatively —
+// the same convention kpi()/ratioBar() above already use.
+function sourceRow(s) {
+  return (
+    <details key={s.srcIp} style={{ borderTop: '1px dashed var(--border-light)' }}>
+      <summary style={{ ...SUMMARY, paddingLeft: 0, paddingRight: 0 }}>
+        <span style={{ ...MONO, fontWeight: 600 }}>{s.srcIp}</span>{' '}
+        <span style={{ color: 'var(--text-secondary)' }}>
+          — {s.failure.toLocaleString()} failed logins across{' '}
+          <strong>
+            {s.usernames.toLocaleString()}
+            {s.usernamesTruncated ? '+' : ''} different usernames
+          </strong>
+          , none successful.
+        </span>
+      </summary>
+      <div
+        style={{
+          padding: `0 0 var(--row-pad-y) var(--s4)`,
+          fontSize: 'var(--text-xs)',
+          color: 'var(--text-muted)',
+          lineHeight: 1.6,
+        }}
+      >
+        {/* ⛔ VERBATIM, and still PER SOURCE. This sentence is the whole reason
+            an operator trusts the flag — it is the rule stated as arithmetic,
+            with no score and no severity band. Folding 247 stanzas into 11 rows
+            must not cost the reader the one line that explains any of them. */}
+        <div>
+          Flagged because one address tried more than {MIN_USERNAMES_FOR_SPRAY} different usernames
+          and none worked. A user mistyping a password fails against ONE username.
+        </div>
+        <div style={{ marginTop: 'var(--s1)' }}>
+          Reported by {vendorLabel(s.vendor)} · last seen{' '}
+          <span title={absoluteUtc(s.lastSeenAt) || ''}>
+            {timeAgo(s.lastSeenAt) || (
+              <NotMeasured reason="No usable timestamp on this source's most recent event." />
+            )}
+          </span>
+        </div>
+        {s.usernamesTruncated ? (
+          <div style={{ marginTop: 'var(--s1)' }}>
+            The rollup truncated this address&rsquo;s username list, so {s.usernames.toLocaleString()}{' '}
+            is a FLOOR, not the total. It tried at least that many.
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+// One country — LEVEL 2. The summary states the counts and previews the worst
+// address in the group WITHOUT a click.
+function countryRow(c, maxFailures) {
+  const label = c.located ? c.country : '(no country reported)';
+  return (
+    <details key={label} style={{ borderTop: '1px solid var(--border)' }}>
+      <summary style={SUMMARY}>
+        <span
+          style={{
+            display: 'inline-flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 'var(--s3)',
+            width: 'calc(100% - 1.5em)',
+          }}
+        >
+          <span style={{ fontWeight: 700, minWidth: 150 }}>
+            {c.located ? (
+              c.country
+            ) : (
+              // ⛔ Never folded into a real country and never invented as
+              // "Unknown". SecVault holds no GeoIP database of its own; this is
+              // the firewall declining to answer.
+              <NotMeasured
+                text="No country reported"
+                reason="The firewall attached no country to these addresses, and SecVault holds no GeoIP database of its own. These failures are real; their location is not measured."
+              />
+            )}
+          </span>
+          <span style={{ flex: '0 0 110px' }}>
+            {heatBar(c.failure, maxFailures, c.band, c.located)}
+          </span>
+          {/* ⛔ THE COUNTS, STATED. A collapsed group that does not say what it
+              collapsed is the silent-truncation bug this codebase keeps
+              fixing. */}
+          <span style={{ color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+            {c.sourceCount.toLocaleString()} source{c.sourceCount === 1 ? '' : 's'},{' '}
+            {c.failure.toLocaleString()} failures
+          </span>
+        </span>
+        {/* ⛔ THE PREVIEW — the point of the whole redesign. One Bulgarian
+            address ran 1,680 failures against 834 usernames; hiding it behind
+            two clicks to save scrolling would be a worse product than the
+            scrolling. Every country shows its worst address with no
+            interaction. */}
+        {c.worst ? (
+          <span
+            style={{
+              display: 'block',
+              marginTop: 'var(--s1)',
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-muted)',
+            }}
+          >
+            Worst: <span style={MONO}>{c.worst.srcIp}</span> — {c.worst.failure.toLocaleString()}{' '}
+            failed logins across{' '}
+            <strong>
+              {c.worst.usernames.toLocaleString()}
+              {c.worst.usernamesTruncated ? '+' : ''} different usernames
+            </strong>
+            , none successful.
+          </span>
+        ) : null}
+      </summary>
+      <div style={{ padding: '0 var(--row-pad-x) var(--row-pad-y) var(--row-pad-x)' }}>
+        {c.sources.map((s) => sourceRow(s))}
+        <div
+          style={{
+            marginTop: 'var(--s2)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          {c.hiddenSources > 0
+            ? `Showing ${c.sources.length} of ${c.sourceCount.toLocaleString()} flagged addresses in ${label}, worst first. ${c.hiddenSources.toLocaleString()} more are not listed.`
+            : `Showing all ${c.sourceCount.toLocaleString()} flagged address${
+                c.sourceCount === 1 ? '' : 'es'
+              } in ${label}.`}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export default async function VpnLoginLocations() {
   let data;
   try {
@@ -150,6 +363,9 @@ export default async function VpnLoginLocations() {
 
   const { countries, sources, totals, vendors, windowHours } = data;
   const sprayers = findUsernameSprayers(sources);
+  // ⛔ PRESENTATION ONLY. `sprayers` is still exactly what findUsernameSprayers()
+  // returned — the grouping reorders it, it does not re-decide what is flagged.
+  const sprayerGroups = groupSourcesByCountry(sprayers);
   const failureOnly = findFailureOnlyCountries(countries, vendors);
   const maxTotal = countries.reduce((m, c) => Math.max(m, c.total), 0);
 
@@ -254,26 +470,50 @@ export default async function VpnLoginLocations() {
           <CardBody>
             <div style={{ fontWeight: 700, marginBottom: 10 }}>Unusual sources</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {sprayers.map((s) => (
-                <div key={s.srcIp} style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-                  <div style={{ ...MONO, fontWeight: 600 }}>
-                    {s.srcIp}
-                    {s.country ? ` — ${s.country}` : ''}
+              {/* ⛔ LEVEL 1 — the headline counts, before anything is collapsed.
+                  This list used to render one stanza per flagged address: 247
+                  of them on the live fleet, which is unreadable. It is now
+                  folded into countries, and the fold states exactly what it
+                  folded. A collapsed list that does not say what it collapsed is
+                  indistinguishable from a short one. */}
+              {sprayerGroups.totalSources > 0 ? (
+                <div>
+                  <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
+                    <strong>Username sprays</strong>{' '}
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      — {sprayerGroups.totalCountries.toLocaleString()}{' '}
+                      {sprayerGroups.totalCountries === 1 ? 'country' : 'countries'} ·{' '}
+                      {sprayerGroups.totalSources.toLocaleString()} flagged sources ·{' '}
+                      {sprayerGroups.totalFailures.toLocaleString()} failed logins in the last{' '}
+                      {windowHours} hours.
+                    </span>
                   </div>
-                  {/* ⛔ The arithmetic, in words. No score, no severity band —
-                      the operator judges, and can see exactly why it is here. */}
-                  <div style={{ color: 'var(--text-secondary)' }}>
-                    {s.failure.toLocaleString()} failed logins across{' '}
-                    <strong>{s.usernames.toLocaleString()} different usernames</strong>
-                    {s.usernamesTruncated ? '+' : ''}, none successful.
-                  </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                  <div
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.6,
+                      marginTop: 2,
+                    }}
+                  >
                     Flagged because one address tried more than {MIN_USERNAMES_FOR_SPRAY} different
                     usernames and none worked. A user mistyping a password fails against ONE
-                    username.
+                    username. Countries are ordered by failures; each shows its worst address
+                    without expanding.
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 'var(--s3)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {sprayerGroups.countries.map((c) => countryRow(c, sprayerGroups.maxFailures))}
                   </div>
                 </div>
-              ))}
+              ) : null}
+
               {failureOnly.rows.slice(0, COUNTRIES_SHOWN).map((c) => (
                 <div key={c.country} style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
                   <div style={{ fontWeight: 600 }}>{c.country}</div>

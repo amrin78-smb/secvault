@@ -1625,3 +1625,84 @@ a bare failure, and never a success that was not observed.
   positive-anchor parser was invented — CLAUDE.md forbids writing a parser for hardware that cannot
   be tested, and no live Sangfor device exists. A device on an unlisted dialect now fails LOUDLY
   instead of storing a banner as its config.
+
+## `lib/syslog/vpnAuthStats.js` — country grouping for Unusual Sources (v2.99.0)
+
+New exports: **`groupSourcesByCountry`**, **`heatBand`**, **`SOURCES_PER_COUNTRY`**.
+
+`/vpn` → Login Locations listed **247 flagged sources as a flat list**, one stanza each, which the
+operator had to scroll through endlessly. Now grouped into country rows (11 on the live fleet),
+each expanding to its sources and then to the per-source evidence — all server-rendered
+`<details>/<summary>`, no client JS.
+
+⛔ **The worst offender is previewed WITHOUT a click.** Collapsing the list is the goal, but burying
+the address running an 837-username spray behind two expansions would be a worse product than the
+scrolling. Every country row prints its worst source inline, and that preview survives group
+truncation (pinned by test).
+
+⛔ **Two different "country" counts, and they must not be conflated.** ~20 countries have ANY
+authentication attempt; only **11 contain a flagged source**. The header states the flagged number
+explicitly for that reason.
+
+⛔ **Grouping happens on the NORMALISED country**, because Fortinet reports names (`United States`)
+and Palo Alto reports ISO codes (`US`) — grouping on the raw value splits one country into two rows.
+A source with no resolvable geo gets its OWN group with `country: null` (never an invented
+`"Unknown"`), drawn hueless/hatched at its real proportional width and ranked by failures rather
+than sunk to the bottom.
+
+⛔ Heat colour comes from `components/analysis/severityRamp.js`'s `SEVERITY_FILL` — not a seventh
+local map, and never blue. `heatBand()` returns `null` (hueless) rather than `'low'` when there is no
+denominator: an unrankable group must not be drawn as a mild one.
+
+⛔ **This change is PRESENTATION ONLY.** `findUsernameSprayers` and `findFailureOnlyCountries`'
+per-vendor gate are untouched — that gate is what stops the rule flagging Thailand, where the real
+users are, and a test pins that Thailand never appears.
+
+## `lib/syslog/vpnPresence.js` (added 2026-09-10, v2.99.0)
+
+`getVpnUserPresence(pool, { days, deviceId })` — the per-user × per-day grid behind the VPN
+presence heatmap. Reads `syslog_vpn_auth_hourly`, never raw events.
+
+⛔ **IT MEASURES AUTHENTICATION, NOT CONNECTED TIME, and every surface says so.** A login held open
+for eight hours counts as ONE hour here; a client that re-authenticates every 30 minutes counts as
+several. The user asked for "how long they were connected" and this is not that — labelling it as
+connected time would be a fabricated measurement. True duration needs Phase B's `vpn_sessions`
+history.
+
+⛔ **A day with syslog but no SUCCESSFUL-login evidence cannot support a zero for anybody.** The
+first live run rendered 2026-09-08 as an earned zero for all 231 users — there were 17 hours of
+syslog from 14 firewalls, and zero rows in `syslog_vpn_auth_hourly` because the VPN rollup was not
+populating yet. That is now `no-vpn-logs`. When a day has failures but no successes the tooltip says
+so explicitly: *a gap in what the firewall reports, not evidence this user stayed away*.
+
+⛔ **Coverage is derived from `syslog_rollup_hourly`, NOT from the VPN table.** Asking "were there
+VPN rows that day" cannot tell a dead collector from a quiet Sunday.
+
+⛔ **`usernames_truncated` is honoured in both directions**: a user ABSENT from a capped day is
+hatched (their absence proves nothing), and a user PRESENT in one is drawn with a dashed outline and
+labelled "AT LEAST", because the count is a floor.
+
+⛔ The fan-out trap that inflated VPN failures 8.4x earlier the same day is pinned here: no query
+both unnests `usernames` and sums `event_count`, and a test asserts it. Verified live —
+`sum(day.authEvents)` equals a plain `sum(event_count)` over the same window (10,585).
+
+## `lib/engines/vpnSessions.js` — session HISTORY (extended 2026-09-10, v2.99.0)
+
+`storeVpnSessions()` still DELETE+reinserts `vpn_active_sessions` (who is connected RIGHT NOW,
+meaning unchanged) and now, in the SAME transaction, upserts `vpn_sessions` history keyed
+`(device_id, username, login_time)`. Full rationale and every ⛔ rule: CLAUDE.md's "VPN Session
+History" section. Reading side is `getVpnSessionHistory(pool, {deviceId, username, since, until,
+openOnly, limit})`.
+
+⛔ `since` filters on OVERLAP, not on `login_time` — a session that began before the window and was
+still up inside it belongs in the answer. Filtering on start time alone would hide exactly the
+long-running sessions an operator is looking for.
+
+⛔ Retention (`runVpnSessionRetention()`, `VPN_SESSION_RETENTION_DAYS`=365) ages rows on
+**`last_seen_at`, not `login_time`** — a session still being observed is never deleted however long
+it has been up. It NEVER THROWS (returns `{deleted, retentionDays, error}`) so one table's failure
+cannot abort the daily sweep it shares with the other three snapshot tables, which keep their own
+180-day window.
+
+⛔ `DEFAULT_VPN_SESSION_RETENTION_DAYS` is EXPORTED from here so the worker and `.env.local.example`
+cannot drift from the engine's own default.

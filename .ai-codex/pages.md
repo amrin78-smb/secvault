@@ -120,3 +120,13 @@ Closed the largest gap in the 2026-09-08 Firewall Analyzer decommission review: 
 The "Discovered senders" chip on `/devices` filters on `kind === 'unmanaged'`, so it reflects group
 1 only. Cells take `var(--row-pad-y)/var(--row-pad-x)/var(--row-font)` — they previously hardcoded
 `10px 12px` and were silently opting out of the density switch.
+
+### /vpn — presence tab (added 2026-09-10)
+
+Fourth tab, `?vtab=presence` — the per-user activity heatmap (see
+`components/vpn/VpnUserHeatmap.js`). Carries a device filter ("choose which firewall"), defaulting
+to the whole fleet.
+
+⛔ Its tab entry is appended locally in `page.js` rather than in `lib/vpnTabs.js`'s `FLEET_VPN_TABS`
+because parallel work held that file; fold it back in when convenient — the local append carries a
+comment saying so.

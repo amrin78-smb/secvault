@@ -2227,3 +2227,71 @@ CREATE INDEX IF NOT EXISTS idx_background_jobs_device
 -- unique index is the guarantee; app-level checks are the convenience.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_background_jobs_live
   ON background_jobs (job_type, device_id) WHERE status IN ('queued', 'running');
+
+-- ─────────────────────────────────────────
+-- VPN SESSION HISTORY (Phase B, v2.99.0)
+-- ─────────────────────────────────────────
+
+-- ⛔ WHY THIS EXISTS. Every VPN poll already returns username, assigned_ip,
+-- login_time and client for each connected user — measured live, 180 of 180
+-- rows populated — and lib/engines/vpnSessions.js DELETE+reinserts
+-- vpn_active_sessions on each poll, so all of it is DISCARDED every
+-- VPN_POLL_INTERVAL_MINUTES. Only a bare count survives, in
+-- vpn_session_snapshots. Every question an operator actually asks about VPN
+-- ("who was connected, when, for how long, from where") was unanswerable not
+-- because SecVault could not see it, but because it threw it away.
+--
+-- vpn_active_sessions keeps its meaning UNCHANGED: exactly who is connected
+-- RIGHT NOW. This table is the history beside it.
+--
+-- ⛔ THE NATURAL KEY IS (device_id, username, login_time), NOT a per-poll row.
+-- login_time is the DEVICE'S OWN report of when the session began, so it is
+-- stable across polls: the same triple seen in ten consecutive polls is ONE
+-- session, upserted ten times, not ten rows. That is the difference between
+-- ~180 rows/day and ~8,640, and it is what makes 30-day history affordable.
+CREATE TABLE IF NOT EXISTS vpn_sessions (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id      UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  username       TEXT NOT NULL,
+  -- The device's own start time. NOT NULL because a row cannot exist without
+  -- it — see the unsessionizable note below.
+  login_time     TIMESTAMPTZ NOT NULL,
+  tunnel_type    TEXT,
+  source_ip      TEXT,
+  -- ⛔ The join key for Phase C (VPN traffic attribution). A VPN user's
+  -- traffic appears in syslog_events under the address the gateway ASSIGNED
+  -- them, not their public source_ip, so without retaining this there is no
+  -- way to attribute bandwidth, destinations or applications to a person.
+  assigned_ip    TEXT,
+  client         TEXT,
+  gateway        TEXT,
+  -- first_seen_at is when SecVault first OBSERVED the session, which is later
+  -- than login_time by up to one poll interval. Kept distinct on purpose: one
+  -- is the device's fact, the other is ours.
+  first_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- ⛔ NULL means STILL CONNECTED AS OF last_seen_at, never "ended at an
+  -- unknown time". Set only when a SUCCESSFUL poll no longer lists the
+  -- session — a FAILED poll must never end anything, or one unreachable
+  -- firewall would fabricate a mass disconnection of every user on it.
+  ended_at       TIMESTAMPTZ,
+  -- ⛔ POLL RESOLUTION, and this is a real limit that must be surfaced, not
+  -- hidden. The START is exact (the device reported it). The END is only known
+  -- to within one poll interval, so duration is a LOWER bound with a known
+  -- error bar. A session shorter than the poll interval may never be observed
+  -- at all — VPN history is a SAMPLE of connections, not a complete register,
+  -- and any UI reporting "total connected time" has to say so.
+  poll_interval_seconds INTEGER,
+  raw            JSONB,
+  UNIQUE (device_id, username, login_time)
+);
+CREATE INDEX IF NOT EXISTS idx_vpn_sessions_device_time
+  ON vpn_sessions (device_id, login_time DESC);
+CREATE INDEX IF NOT EXISTS idx_vpn_sessions_user_time
+  ON vpn_sessions (username, login_time DESC);
+-- Partial index for "who is connected now" and for the end-detection sweep.
+CREATE INDEX IF NOT EXISTS idx_vpn_sessions_open
+  ON vpn_sessions (device_id) WHERE ended_at IS NULL;
+-- Phase C joins on the assigned address within a time window.
+CREATE INDEX IF NOT EXISTS idx_vpn_sessions_assigned_ip
+  ON vpn_sessions (assigned_ip, login_time DESC) WHERE assigned_ip IS NOT NULL;

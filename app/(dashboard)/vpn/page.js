@@ -12,6 +12,8 @@ import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
 import TabBar from '../../../components/ui/TabBar';
 import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs } from '../../../lib/vpnTabs';
 import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
+import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
+import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/syslog/vpnPresence';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +50,40 @@ export const dynamic = 'force-dynamic';
 // paging bounds the work done rather than just what is drawn.
 
 const PAGE_SIZE = DEFAULT_PAGE_SIZE;
+
+// ── The fourth tab: per-user activity ─────────────────────────────────────
+//
+// ⛔ APPENDED HERE RATHER THAN IN lib/vpnTabs.js, ON PURPOSE. The tab MODEL
+// lives in that file and normally a new tab is one entry there — but this page
+// is being edited by parallel agents under a frozen file contract, and
+// vpnTabs.js belongs to another one. Appending a local entry to the imported
+// array (never mutating it) keeps the change inside this file. Fold it back
+// into FLEET_VPN_TABS when the parallel work has landed; nothing else needs to
+// change, because `key` is already the URL contract either way.
+//
+// ⛔ APPENDED, never inserted: `status` must stay first so it remains the
+// default and a bare /vpn bookmark still lands on it.
+const PRESENCE_TAB = {
+  key: 'presence',
+  label: 'User Activity',
+  description: 'Per-user VPN authentication heatmap, by day',
+};
+const VPN_TABS = [...FLEET_VPN_TABS, PRESENCE_TAB];
+
+// Same contract as resolveFleetVpnTab: ALWAYS returns a valid key, never the
+// caller's raw input. A URL is user input and a blank page for an unknown tab
+// is indistinguishable from an outage.
+function resolveTab(raw) {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value === 'string' && value.trim().toLowerCase() === PRESENCE_TAB.key) {
+    return PRESENCE_TAB.key;
+  }
+  return resolveFleetVpnTab(raw);
+}
+
+function firstParam(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 async function countActiveDevices(dbPool) {
   const { rows } = await dbPool.query('SELECT count(*)::int AS total FROM devices WHERE active = true');
@@ -129,9 +165,12 @@ function statusBadge(summary) {
 
 export default async function VpnFleetPage({ searchParams }) {
   const sp = searchParams || {};
-  const tab = resolveFleetVpnTab(sp.vtab);
+  const tab = resolveTab(sp.vtab);
   const { tabs, activeHref } = buildVpnTabHrefs(
-    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage']
+    // `hmDevice`/`hmDays`/`hmTop` are the heatmap's own filter and are dropped
+    // when switching tabs, for the same reason the page params are: a filter
+    // from a view you are leaving means nothing in the view you are entering.
+    '/vpn', VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop']
   );
 
   // ⛔ Only the ACTIVE tab queries. The log-activity view costs ~7s on a
@@ -167,6 +206,17 @@ export default async function VpnFleetPage({ searchParams }) {
            its OWN param (`?evPage=`) so it cannot move in step with the
            config table -- see components/ui/Pagination's paramName note. */
         <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
+      )}
+
+      {tab === 'presence' && (
+        /* Per-user activity heatmap. ⛔ Reads the syslog_vpn_auth_hourly
+           ROLLUP, never syslog_events — and it measures HOURS IN WHICH A USER
+           AUTHENTICATED, not connected time. See the component's header. */
+        <VpnUserHeatmap
+          deviceId={firstParam(sp.hmDevice) || null}
+          days={clampInt(firstParam(sp.hmDays), DEFAULT_WINDOW_DAYS, 1, 90)}
+          topUsers={clampInt(firstParam(sp.hmTop), DEFAULT_TOP_USERS, 1, 100)}
+        />
       )}
 
       {tab === 'locations' && (

@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.99.0': [
+    "VPN login locations are now grouped by country instead of one long scrolling list. 247 flagged sources collapse to 11 countries, each showing its worst offender without needing to expand it — one address in Bulgaria accounts for 1,685 failures across 837 usernames.",
+    "New VPN activity heatmap: pick a firewall, see which days each user authenticated over the last 30. Days with no log coverage are drawn as not-measured rather than as quiet days.",
+    "The heatmap measures hours in which a user AUTHENTICATED, not how long they stayed connected, and says so — one login held open all day counts once.",
+    "VPN sessions are now retained as history. Until now every poll overwrote the last, so who connected, when and from where was discarded within minutes; only a total count survived.",
+    "Session duration is reported as a lower bound with its own margin of error, since the start is exactly what the firewall reported but the end is only known to within one polling interval.",
+    "A failed VPN poll can no longer end sessions. Previously an unreachable firewall would have looked like every user on it disconnecting at once.",
+    "VPN session history covers Palo Alto firewalls only today — other vendors report a connected count with no per-user detail.",
+  ],
   '2.98.0': [
     "Every vendor advisory now carries an explicit status: matched, belongs to another product, or cannot be matched. Previously an advisory SecVault failed to read was indistinguishable from one that had been checked and did not apply — 351 of 1,001 were in that state.",
     "Vulnerability matching now skips advisories it cannot evaluate AND reports how many, instead of quietly treating them as “not affected”.",

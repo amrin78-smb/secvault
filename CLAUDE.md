@@ -778,6 +778,61 @@ machine without an E: drive. It now defaults under the install root and the inst
 
 ---
 
+## VPN Session History (`vpn_sessions`, added 2026-09-10, v2.99.0)
+
+Every VPN poll already returned username, `assigned_ip`, `login_time` and `client` for each connected
+user — measured live, **187 of 187 rows populated** — and `storeVpnSessions()` DELETE+reinserted
+`vpn_active_sessions` on every poll, so all of it was DISCARDED every `VPN_POLL_INTERVAL_MINUTES`.
+Only a bare count survived, in `vpn_session_snapshots`. Every question an operator actually asks about
+VPN — who was connected, when, for how long, from where — was unanswerable not because SecVault could
+not see it, but because it threw it away.
+
+`vpn_active_sessions` keeps its meaning UNCHANGED: exactly who is connected RIGHT NOW. `vpn_sessions`
+is the history beside it, written in the SAME transaction.
+
+⛔ **The natural key is `(device_id, username, login_time)`, not a per-poll row.** `login_time` is the
+DEVICE'S OWN report of when the session began, so it is stable across polls: the same triple seen in
+ten consecutive polls is ONE session upserted ten times, not ten rows. That is ~180 rows/day instead
+of ~8,640, and it is what makes a year of history affordable.
+
+⛔ **A FAILED poll must never end anything.** End-detection runs only after `getVpnSessionSummary()`
+has already resolved, inside the same `try` — a throw jumps to the per-device catch and cannot reach
+it. Otherwise one unreachable firewall would fabricate a mass disconnection of every user on it. The
+placement is load-bearing and pinned by two tests (a source-property test, plus a repo scan asserting
+`SET ended_at =` against `vpn_sessions` appears in exactly one file).
+
+⛔ **`ended_at = last_seen_at`, never `now()`**, and `ended_at IS NULL` means STILL CONNECTED AS OF
+`last_seen_at` — never "ended at an unknown time". A session listed again by a successful poll has
+`ended_at` cleared unconditionally: it never really ended, our sampling did.
+
+⛔ **Upsert uses `COALESCE(EXCLUDED.x, vpn_sessions.x)`, not bare `EXCLUDED.x`** — a field the device
+omits on one poll must not erase one it reported earlier.
+
+⛔ **DURATION IS A LOWER BOUND WITH A KNOWN ERROR BAR, and every consumer is told so.** The START is
+exact (the device reported it); the END is only known to within one poll interval. Rows carry
+`duration_is_lower_bound: true` and `duration_precision_seconds` (the interval in force when that row
+was written, or NULL when it was unknown — an unknown error bar reads as unknown). True duration lies
+in `[duration_seconds, duration_seconds + duration_precision_seconds]`. **A session shorter than the
+poll interval may never be observed at all** — this is a SAMPLE of connections, not a complete
+register, and no UI may report "total connected time" without saying so.
+
+⛔ **A negative duration is not a number and not a zero.** It becomes `duration_seconds: null` with
+reason `clock_mismatch` — it is proof the device's clock/zone disagrees with the server's, not a
+measurement.
+
+⛔ **The live `login_time` format is `Sep.09 01:31:51` — no year, no timezone.** The year is inferred
+as the most recent one in which that month/day/time is not in the future (a session cannot start in
+the future), stable across a New Year boundary so the key never splits one session in two. The zone
+assumed is the SERVER'S local zone — the same assumption the fixed-HH:MM cron jobs already make.
+Anything missing, empty or unparseable is **counted, never guessed**: the job logs
+`N not sessionizable (no usable login_time — connected, but absent from history)`. Live today that
+count is **0 of 187**.
+
+⛔ **This is a PALO ALTO history today.** Only Palo Alto's `getVpnSessionSummary()` returns a
+per-session array; Fortinet returns a count with no per-user detail and the other four vendors have no
+VPN capability wired. Nothing in the engine assumes otherwise — but a UI must not present it as
+fleet-wide VPN history.
+
 ## Role-Based Access Control
 
 Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
@@ -834,6 +889,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
 | Fleet dashboard snapshot | Daily, fixed 00:10 **server-local** | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 **server-local** | `SNMP_VPN_RETENTION_DAYS` |
+| VPN session-history retention (`vpn_sessions`) | inside the same 00:30 job, **own window** | `VPN_SESSION_RETENTION_DAYS` |
 | Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 **server-local** | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 | `log_hit` correlation (`log-hit`) | Hourly, fixed `20 * * * *` | `LOG_HIT_LOOKBACK_DAYS` |
@@ -970,6 +1026,12 @@ NVD_API_KEY=                               # Optional — increases NVD rate lim
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
+VPN_SESSION_RETENTION_DAYS=365              # vpn_sessions history. Ages on last_seen_at, NOT login_time,
+                                           # so a session still being observed is never deleted however
+                                           # long it has been up. Deliberately longer than both
+                                           # neighbours: one row per CONNECTION (~180/day), and these
+                                           # rows are the durable index into evidence that is itself
+                                           # short-lived (SYSLOG_RETENTION_DAYS is 30).
 CONFIG_RETENTION_DAYS=60                   # device_configs snapshot retention
 CONFIG_BACKUP_RETENTION_DAYS=365           # config_backups ('auto' label only)
 NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59

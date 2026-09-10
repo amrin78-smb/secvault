@@ -283,3 +283,29 @@ surface.
 Also fixed there: `exposure/page.js` returned `danger` for BOTH critical and high (a high path was
 indistinguishable from a critical one), `UsersPanel` badged the `admin` role in danger-red, and the
 `UpdateNotifier` banner was white on `--blue` at **2.48:1 in dark theme**.
+
+## components/vpn/VpnUserHeatmap.js (added 2026-09-10)
+
+Per-user × per-day VPN activity grid on `/vpn` (`?vtab=presence`), with a device filter.
+
+**One UTC day per column.** 30 days × 24 hours would be 720 columns — a barcode, with no column wide
+enough to hover and no way to find "last Tuesday". Shade = distinct hours authenticated (0-24). The
+hour detail is not discarded: each cell carries its own hour list on hover, so the drill-down costs a
+pointer move rather than a page.
+
+⛔ **Sequential ramp, one hue, NOT the severity ramp.** Five steps of `--primary` at increasing
+opacity. A heavily-connected VPN account is busy, not critical — colouring activity red would make
+the fleet's most legitimate users look like its worst finding.
+
+⛔ **Five cell states in TWO visual families**, and the split is the whole point:
+`active` (hued) · `zero` (flat surface, "logs arrived and this user authenticated in none of them")
+· and four hatched NOT-MEASURED reasons with no hue — `pre-history`, `no-logs`, `no-vpn-logs`,
+`truncated`. Drawing a not-measured day as an empty cell would read as "this user was never active",
+which is the failed-read-as-a-fact bug rendered as a grid.
+
+⛔ **An empty filter result is a WARNING, not an empty grid.** Filtering to a Fortinet device returns
+zero users and says why — 1,789 failed logins and 0 successes recorded, flagged as
+`successReportingGaps`. An empty grid would read as "nobody used the VPN".
+
+Live today: history begins 2026-09-08, so **12 of 14 columns are honestly hatched**, and the footer
+states how much history exists rather than letting the blanks imply absence.

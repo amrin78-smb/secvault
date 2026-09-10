@@ -65,7 +65,11 @@ const { runFullSync } = require('../lib/feeds');
 const { runMatchForAllDevices } = require('../lib/engines/versionMatcher');
 const { collectAndStore, getAdapter, SUPPORTED_VENDORS } = require('../lib/adapters');
 const { computeAndStoreDashboardSnapshot } = require('../lib/engines/dashboardSnapshot');
-const { storeVpnSessions } = require('../lib/engines/vpnSessions');
+const {
+  storeVpnSessions,
+  runVpnSessionRetention,
+  DEFAULT_VPN_SESSION_RETENTION_DAYS,
+} = require('../lib/engines/vpnSessions');
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport, reportingPeriod } = require('../lib/engines/complianceReport');
@@ -279,6 +283,30 @@ function getSnapshotRetentionDays() {
   if (process.env.SNMP_VPN_RETENTION_DAYS) {
     logger.warn(
       `SNMP_VPN_RETENTION_DAYS value "${process.env.SNMP_VPN_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
+    );
+  }
+  return fallback;
+}
+
+// Retention for vpn_sessions (added 2026-09-10, Phase B). A SEPARATE, much
+// longer window than getSnapshotRetentionDays() above, and deliberately not
+// folded into it: vpn_session_snapshots is a per-poll count sampled every
+// 5-59 minutes (thousands of rows per device per month, a trend signal that
+// ages out fine), while vpn_sessions is ONE ROW PER CONNECTION — ~180/day on
+// the whole reference fleet — and is the record that "who was on the VPN when"
+// is answered from. It is also far longer than SYSLOG_RETENTION_DAYS (30), on
+// purpose: these rows are the durable index into evidence that is itself
+// short-lived. Shrinking this to match either neighbour would delete the
+// answer in order to keep the question.
+function getVpnSessionRetentionDays() {
+  const fallback = DEFAULT_VPN_SESSION_RETENTION_DAYS;
+  const raw = parseInt(process.env.VPN_SESSION_RETENTION_DAYS, 10);
+  if (Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (process.env.VPN_SESSION_RETENTION_DAYS) {
+    logger.warn(
+      `VPN_SESSION_RETENTION_DAYS value "${process.env.VPN_SESSION_RETENTION_DAYS}" is not a valid positive integer — falling back to ${fallback}.`
     );
   }
   return fallback;
@@ -557,6 +585,14 @@ async function runVpnSessionPollJob() {
 
     let polled = 0;
     let skipped = 0;
+    // vpn_sessions history counters (Phase B). `vpnUnsessionizable` is the one
+    // that matters most in the log: it is the number of connected users whose
+    // device gave no usable login_time, so they cannot be keyed into history
+    // and are simply MISSING from it. Counting them keeps that gap visible
+    // instead of letting history quietly under-report the fleet.
+    let vpnHistoryUpserted = 0;
+    let vpnHistoryEnded = 0;
+    let vpnUnsessionizable = 0;
 
     for (const device of devices) {
       if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
@@ -599,7 +635,26 @@ async function runVpnSessionPollJob() {
             }
           }
           try {
-            await storeVpnSessions(device.id, summary.sessions, pool);
+            // ⛔ THIS LINE IS INSIDE THE SUCCESS PATH, and that placement is
+            // load-bearing for vpn_sessions history (Phase B, 2026-09-10):
+            // storeVpnSessions() ends every open session for this device that
+            // the poll did not list, so reaching it after a FAILED
+            // getVpnSessionSummary() would fabricate a mass disconnection of
+            // every user on one unreachable firewall. The await above throws
+            // straight to the per-device catch, so a failed poll never gets
+            // here — do not hoist this call out of the try, and do not add a
+            // catch around getVpnSessionSummary() that falls through to it.
+            //
+            // The poll interval is passed through and stored per row as the
+            // ERROR BAR on that session's end time: we only ever learn a
+            // session ended by not seeing it again, so the end is known to
+            // within one interval and the duration is a lower bound.
+            const sessResult = await storeVpnSessions(device.id, summary.sessions, pool, {
+              pollIntervalSeconds: getVpnPollIntervalMinutes() * 60,
+            });
+            vpnHistoryUpserted += sessResult.historyUpserted || 0;
+            vpnHistoryEnded += sessResult.ended || 0;
+            vpnUnsessionizable += sessResult.unsessionizable || 0;
           } catch (sessErr) {
             logger.warn(
               `Job [vpn-session-poll] stored the count for device ${device.id} but failed to store session detail: ${sessErr.message}`
@@ -663,7 +718,7 @@ async function runVpnSessionPollJob() {
 
     const durationMs = Date.now() - start;
     logger.info(
-      `Job [vpn-session-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no VPN capability) ${skipped}, ${devices.length} active device(s) total.`
+      `Job [vpn-session-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no VPN capability) ${skipped}, ${devices.length} active device(s) total; history: ${vpnHistoryUpserted} session(s) upserted, ${vpnHistoryEnded} ended, ${vpnUnsessionizable} not sessionizable (no usable login_time — connected, but absent from history).`
     );
   } catch (err) {
     const durationMs = Date.now() - start;
@@ -882,6 +937,11 @@ async function runDashboardSnapshotJob(options = {}) {
 // session, so it can't contend with rule-version-pull/vpn-session-poll/
 // snmp-poll for a device connection. Each table's DELETE is independently
 // try/caught so one table's failure doesn't block the other's cleanup.
+//
+// TWO WINDOWS, not one: the three sampled-telemetry tables share
+// getSnapshotRetentionDays(), while vpn_sessions gets its own far longer
+// getVpnSessionRetentionDays() — see that helper for why they must not be
+// merged.
 async function runSnapshotRetentionJob() {
   const start = Date.now();
   const retentionDays = getSnapshotRetentionDays();
@@ -918,9 +978,25 @@ async function runSnapshotRetentionJob() {
   } catch (err) {
     logger.error(`Job [snapshot-retention] device_connectivity_history cleanup failed: ${err.stack || err.message}`);
   }
+  // vpn_sessions (Phase B, 2026-09-10) — its OWN, much longer window, keyed on
+  // last_seen_at so a session still being observed is never aged out however
+  // long it has been up. runVpnSessionRetention() never throws and reports its
+  // own error; the try/catch here is the same belt-and-braces the three DELETEs
+  // above carry, so one table can never skip another's cleanup.
+  const vpnSessionRetentionDays = getVpnSessionRetentionDays();
+  let vpnSessionsDeleted = 0;
+  try {
+    const sessionResult = await runVpnSessionRetention(pool, { retentionDays: vpnSessionRetentionDays });
+    vpnSessionsDeleted = sessionResult.deleted;
+    if (sessionResult.error) {
+      logger.error(`Job [snapshot-retention] vpn_sessions cleanup failed: ${sessionResult.error}`);
+    }
+  } catch (err) {
+    logger.error(`Job [snapshot-retention] vpn_sessions cleanup failed: ${err.stack || err.message}`);
+  }
   const durationMs = Date.now() - start;
   logger.info(
-    `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s), ${connDeleted} device_connectivity_history row(s).`
+    `Job [snapshot-retention] finished in ${durationMs}ms — deleted ${vpnDeleted} vpn_session_snapshots row(s), ${snmpDeleted} snmp_metric_snapshots row(s), ${connDeleted} device_connectivity_history row(s), ${vpnSessionsDeleted} vpn_sessions row(s) (${vpnSessionRetentionDays}d window).`
   );
 }
 

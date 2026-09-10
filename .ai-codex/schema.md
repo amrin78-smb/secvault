@@ -1119,3 +1119,24 @@ fabricated ones — the same error in reverse. They correct themselves on the ne
 ⛔ An unmeasured device now WRITES NULL rather than writing nothing. "Write nothing" left a
 previous run’s conclusion standing as if it were still current; an explicit NULL withdraws it, and
 the device is re-banded so a `true → NULL` withdrawal de-escalates.
+
+### vpn_sessions (v2.99.0)
+
+VPN session history — the durable counterpart to `vpn_active_sessions`, which remains a
+DELETE+reinserted snapshot of who is connected right now. Natural key
+`UNIQUE (device_id, username, login_time)`; `ON DELETE CASCADE` from `devices`.
+
+⛔ `ended_at IS NULL` means STILL CONNECTED AS OF `last_seen_at`, never "ended at an unknown time".
+⛔ `first_seen_at` (when SecVault first OBSERVED it) is kept distinct from `login_time` (the device's
+own report) on purpose — one is our fact, the other is the device's.
+⛔ `poll_interval_seconds` is the error bar on duration and is stored PER ROW, at the cadence
+actually in force when it was written — not read from config at query time, which would misreport
+history collected under a different interval.
+⛔ `assigned_ip` is the Phase C join key: a VPN user's traffic appears in `syslog_events` under the
+address the gateway ASSIGNED, not their public `source_ip`. Without retaining it there is no way to
+attribute bandwidth, destinations or applications to a person. Indexed partially
+(`WHERE assigned_ip IS NOT NULL`).
+
+Four indexes: `(device_id, login_time DESC)`, `(username, login_time DESC)`, partial
+`(device_id) WHERE ended_at IS NULL` (end-detection sweep + "who is connected now"), and the
+`assigned_ip` one above. Granted SELECT to both readonly roles in `schema-grants.sql`.
