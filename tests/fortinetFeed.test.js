@@ -412,3 +412,87 @@ describe('the degraded RSS path never writes an advisory row', () => {
     }
   });
 });
+
+// ── RSS source fallback ──────────────────────────────────────────────────────
+//
+// ⛔ The RSS is the ONLY surviving Fortinet channel while every advisory page is
+// bot-challenged. filestore.fortinet.com is tried first because it is a static
+// host and is NOT challenged, while www.fortiguard.com — which merely 302s to it
+// — is the host doing the challenging. Verified live 2026-09-10: the two
+// documents are byte-identical (38,086 bytes, 50 items).
+describe('RSS source fallback', () => {
+  const CHALLENGE = '<html><head><title>Just a moment</title></head><body>'
+    + '<div id="altcha-widget" challengeurl="/v1/challenge"></div>'
+    + '<input name="screen_id" value="SC-TEST123">'
+    + 'Just a moment - verifying connection security.</body></html>';
+
+  function withStubbedFetch(handler, fn) {
+    const fetchPath = require.resolve('node-fetch');
+    const feedPath = require.resolve('../lib/feeds/fortinet');
+    const savedFetch = require.cache[fetchPath];
+    const savedFeed = require.cache[feedPath];
+    delete require.cache[feedPath];
+    require.cache[fetchPath] = { id: fetchPath, filename: fetchPath, loaded: true, exports: handler };
+    try {
+      return fn(require('../lib/feeds/fortinet'));
+    } finally {
+      delete require.cache[feedPath];
+      if (savedFetch) require.cache[fetchPath] = savedFetch; else delete require.cache[fetchPath];
+      if (savedFeed) require.cache[feedPath] = savedFeed;
+    }
+  }
+
+  test('filestore is tried FIRST', async () => {
+    const seen = [];
+    await withStubbedFetch(
+      async (url) => { seen.push(String(url)); return { ok: true, status: 200, text: async () => RSS_XML }; },
+      async (F) => { await F.fetchRssItems(); }
+    );
+    assert.ok(/filestore\.fortinet\.com/.test(seen[0]), 'first request should go to filestore, got ' + seen[0]);
+    assert.equal(seen.length, 1, 'a working first source must not trigger the fallback');
+  });
+
+  test('a CHALLENGED first source falls through to the second', async () => {
+    const seen = [];
+    const items = await withStubbedFetch(
+      async (url) => {
+        const u = String(url);
+        seen.push(u);
+        if (/filestore/.test(u)) return { ok: true, status: 200, text: async () => CHALLENGE };
+        return { ok: true, status: 200, text: async () => RSS_XML };
+      },
+      async (F) => F.fetchRssItems()
+    );
+    assert.equal(seen.length, 2, 'should have tried both sources');
+    assert.ok(/fortiguard\.com/.test(seen[1]), 'second source should be fortiguard.com');
+    assert.ok(items.length > 0, 'the fallback source should have supplied items');
+  });
+
+  test('⛔ when EVERY source fails it THROWS — never an empty list', async () => {
+    await assert.rejects(
+      () => withStubbedFetch(
+        async () => ({ ok: true, status: 200, text: async () => CHALLENGE }),
+        async (F) => F.fetchRssItems()
+      ),
+      (err) => {
+        // An empty array would mean "Fortinet published no advisories" and the
+        // caller would report a clean run. Same rule as the adapter contract.
+        assert.match(err.message, /every FortiGuard RSS source failed/);
+        assert.match(err.message, /filestore/);
+        assert.match(err.message, /fortiguard\.com/);
+        return true;
+      }
+    );
+  });
+
+  test('a network error on the first source also falls through', async () => {
+    const items = await withStubbedFetch(
+      async (url) => {
+        if (/filestore/.test(String(url))) throw new Error('network timeout');
+        return { ok: true, status: 200, text: async () => RSS_XML };
+      },
+      async (F) => F.fetchRssItems()
+    );
+    assert.ok(items.length > 0);
+  });
+});

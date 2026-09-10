@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.102.4': [
+    "The Fortinet advisory feed now reads from Fortinet’s static file host first. It is the same document, but it no longer depends on the site that is currently blocking us to serve the redirect — the feed is the only working Fortinet input right now.",
+    "If every source fails, the sync now reports an error instead of a clean run with nothing in it.",
+  ],
+  '2.102.3': [
+    "The Overview tiles are shorter again: the day-over-day line was rendering at body text size inside a compact tile, and the Security Score summary now fits on one line so it stops setting the height for all six.",
+  ],
   '2.102.2': [
     "The six headline tiles on the Overview page are shorter: the number now sits to the right of its label instead of above it.",
   ],
