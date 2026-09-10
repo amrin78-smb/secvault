@@ -86,8 +86,16 @@ export default async function HeadlineStats() {
 
   // Shown under the Security Score tile so the number is decomposable at a
   // glance — an opaque composite nobody can explain gets ignored.
+  // ⛔ Short forms exist ONLY to fit one line at the tile width. Every component
+  // still appears with its own score -- nothing is dropped or merged. If a new
+  // component is added and its first word is long, add it here rather than
+  // letting the tile wrap and re-inflate all six.
+  const SEC_SHORT = { Vulnerability: 'Vuln' };
   const secSub = h.securityComponents
-    .map((c) => `${c.label.split(' ')[0]} ${c.score === null ? '—' : c.score}`)
+    .map((c) => {
+      const word = c.label.split(' ')[0];
+      return `${SEC_SHORT[word] || word} ${c.score === null ? '—' : c.score}`;
+    })
     .join(' · ');
 
   // ⛔ SAY WHAT WAS LEFT OUT. The vulnerability component is scored only over
@@ -126,7 +134,15 @@ export default async function HeadlineStats() {
         sub={
           h.securityScore === null
             ? 'Not enough data yet'
-            : `${BAND_LABEL[secBand]} — ${secSub}${coverageNote ? ` · ${coverageNote}` : ''}`
+            // ⛔ "Vuln" rather than "Vulnerability", and · rather than an em-dash,
+            // purely so the COMMON case fits one line at this tile width. Measured:
+            // the long form wrapped to 2 lines and, because the grid stretches every
+            // tile to the tallest, that single wrap set the height of all six.
+            // ⛔ Every fact is kept -- no score is dropped and nothing moves to a
+            // tooltip. And when coverageNote IS present it is appended and the tile is
+            // ALLOWED to wrap: a real caveat about unassessed firewalls outranks a
+            // tidy row of equal heights.
+            : `${BAND_LABEL[secBand]} · ${secSub}${coverageNote ? ` · ${coverageNote}` : ''}`
         }
         color={BAND_COLOR[secBand] || UNMEASURED}
         icon={IconShield}

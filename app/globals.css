@@ -592,6 +592,16 @@ tbody tr:hover td { background: var(--bg-primary); }
 /* The number must never wrap or be clipped -- it is the whole point of the tile. */
 .kpi-head-row .stat-value,
 .kpi-head-row .stat-value-compact { white-space: nowrap; flex: 0 0 auto; }
+
+/* ⛔ The delta font-size must be on this BLOCK, not only on the inline badge
+   inside it. A block establishes its line box from its OWN font-size (the
+   strut), so a 12px span inside a 15px div still produced a 23px line. Measured
+   on the dashboard: 23px per tile for "No change since yesterday". */
+.stat-delta {
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  margin-top: var(--s1);
+}
 .stat-label-compact { font-size: var(--text-xs); font-weight: 500; color: var(--text-secondary); margin-top: 2px; }
 .stat-sub-compact   { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 

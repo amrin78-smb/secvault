@@ -67,7 +67,7 @@ export default function StatCard({
           </div>
         </div>
         {sub && <div className={subClass}>{sub}</div>}
-        {delta && <div style={{ marginTop: 'var(--s1)' }}>{delta}</div>}
+        {delta && <div className="stat-delta">{delta}</div>}
       </div>
     );
   }
@@ -95,7 +95,7 @@ export default function StatCard({
           default, so every pre-existing call site is pixel-identical. ⛔ The
           CALLER decides the colour, because "up" is good for a compliance
           score and bad for a critical-alert count — see DeltaBadge. */}
-      {delta && <div style={{ marginTop: 4 }}>{delta}</div>}
+      {delta && <div className="stat-delta">{delta}</div>}
     </div>
   );
 }
