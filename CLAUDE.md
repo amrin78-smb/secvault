@@ -778,6 +778,37 @@ machine without an E: drive. It now defaults under the install root and the inst
 
 ---
 
+## VPN Detections (`/vpn?vtab=detections`, added 2026-09-10, v2.100.0)
+
+Six named detections over `syslog_vpn_auth_hourly`, computed at READ time — no table, no cron job,
+no env var. Full detail in `.ai-codex/lib.md`; the rules that must not drift:
+
+⛔ **A THIN BASELINE IS NOT A CLEAN BASELINE.** Each detection reports
+`measured` / `insufficient_baseline` / `no_data` with the baseline it needed and the baseline that
+exists. Two of the six are gated today (history is ~1 day; new-country needs 7, off-hours 14) and
+render as a HATCHED, HUELESS panel — never a green all-clear. "We have never seen this user" and
+"this user has never done this" are separate code paths, because rendering them the same way is this
+file's own failed-read-as-a-fact bug in detection form.
+
+⛔ **An unjudgeable observation is COUNTED, never dropped** (`unverifiable[]` + an always-exact
+`unverifiableTotal`). Dropping it makes a coverage gap look like a clean result.
+
+⛔ **A device that logs failures but not successes is excluded from every success-dependent
+detection, and the cost is accepted.** The fleet's strongest brute-force candidate (Panama, ≥57
+attempts, breadth 1) is reported UNVERIFIABLE rather than asserted, because only success-blind
+devices saw it. Asserting it would mean concluding "everyone fails here" from a reporting gap.
+
+⛔ **`country_change` IS NOT IMPOSSIBLE TRAVEL.** No city and no lat/lon exists anywhere in this
+codebase (`syslog_events` carries `src_country` only), so there is no distance/velocity model to
+build and none may be implied. Do not rename it, and do not invent coordinates for a country.
+
+⛔ **Thailand stays unflagged because of the SUCCESS GATE, not a country allowlist** — Thai NAT
+gateways do reach spray-shaped username counts but also have successes. Never add a geographic
+allowlist; it breaks the moment an attacker uses a local host.
+
+⛔ **`credential_spray` reuses `vpnAuthStats.findUsernameSprayers()` UNCHANGED.** Two files deciding
+"is this a sprayer" independently would eventually disagree.
+
 ## VPN Session History (`vpn_sessions`, added 2026-09-10, v2.99.0)
 
 Every VPN poll already returned username, `assigned_ip`, `login_time` and `client` for each connected

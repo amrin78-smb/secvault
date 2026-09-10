@@ -121,7 +121,7 @@ The "Discovered senders" chip on `/devices` filters on `kind === 'unmanaged'`, s
 1 only. Cells take `var(--row-pad-y)/var(--row-pad-x)/var(--row-font)` — they previously hardcoded
 `10px 12px` and were silently opting out of the density switch.
 
-### /vpn — presence tab (added 2026-09-10)
+### /vpn — presence + detections tabs (added 2026-09-10)
 
 Fourth tab, `?vtab=presence` — the per-user activity heatmap (see
 `components/vpn/VpnUserHeatmap.js`). Carries a device filter ("choose which firewall"), defaulting
@@ -130,3 +130,8 @@ to the whole fleet.
 ⛔ Its tab entry is appended locally in `page.js` rather than in `lib/vpnTabs.js`'s `FLEET_VPN_TABS`
 because parallel work held that file; fold it back in when convenient — the local append carries a
 comment saying so.
+
+`detections` is the sixth tab (`?vtab=detections`). Both `presence` and `detections` are now proper
+entries in `lib/vpnTabs.js`'s `FLEET_VPN_TABS` — the temporary local shim in `page.js` is gone.
+⛔ APPENDED, never inserted: `status` stays first so a bare `/vpn` bookmark still lands on it, and
+`key` is a URL contract — add and deprecate, never rename.

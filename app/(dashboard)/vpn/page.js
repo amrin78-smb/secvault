@@ -14,6 +14,8 @@ import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs } from '../../../l
 import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
 import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/syslog/vpnPresence';
+import VpnDetections from '../../../components/vpn/VpnDetections';
+import { getVpnDetections } from '../../../lib/engines/vpnDetections';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,29 +60,6 @@ const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 // is being edited by parallel agents under a frozen file contract, and
 // vpnTabs.js belongs to another one. Appending a local entry to the imported
 // array (never mutating it) keeps the change inside this file. Fold it back
-// into FLEET_VPN_TABS when the parallel work has landed; nothing else needs to
-// change, because `key` is already the URL contract either way.
-//
-// ⛔ APPENDED, never inserted: `status` must stay first so it remains the
-// default and a bare /vpn bookmark still lands on it.
-const PRESENCE_TAB = {
-  key: 'presence',
-  label: 'User Activity',
-  description: 'Per-user VPN authentication heatmap, by day',
-};
-const VPN_TABS = [...FLEET_VPN_TABS, PRESENCE_TAB];
-
-// Same contract as resolveFleetVpnTab: ALWAYS returns a valid key, never the
-// caller's raw input. A URL is user input and a blank page for an unknown tab
-// is indistinguishable from an outage.
-function resolveTab(raw) {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value === 'string' && value.trim().toLowerCase() === PRESENCE_TAB.key) {
-    return PRESENCE_TAB.key;
-  }
-  return resolveFleetVpnTab(raw);
-}
-
 function firstParam(value) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -165,12 +144,12 @@ function statusBadge(summary) {
 
 export default async function VpnFleetPage({ searchParams }) {
   const sp = searchParams || {};
-  const tab = resolveTab(sp.vtab);
+  const tab = resolveFleetVpnTab(sp.vtab);
   const { tabs, activeHref } = buildVpnTabHrefs(
     // `hmDevice`/`hmDays`/`hmTop` are the heatmap's own filter and are dropped
     // when switching tabs, for the same reason the page params are: a filter
     // from a view you are leaving means nothing in the view you are entering.
-    '/vpn', VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop']
+    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop']
   );
 
   // ⛔ Only the ACTIVE tab queries. The log-activity view costs ~7s on a
@@ -217,6 +196,17 @@ export default async function VpnFleetPage({ searchParams }) {
           days={clampInt(firstParam(sp.hmDays), DEFAULT_WINDOW_DAYS, 1, 90)}
           topUsers={clampInt(firstParam(sp.hmTop), DEFAULT_TOP_USERS, 1, 100)}
         />
+      )}
+
+      {tab === 'detections' && (
+        /* Named VPN threat detections. ⛔ Two of the six are baseline-gated
+           and currently report INSUFFICIENT BASELINE rather than "no
+           anomaly" — VPN auth history began 2026-09-08 and new-country needs
+           7 days, off-hours 14. A hatched, hueless panel says so; it must
+           never render as a green all-clear. Computed at read time (~1.0s),
+           no table and no cron job: a stored severity would stop matching its
+           own evidence the moment a threshold moved. */
+        <VpnDetections data={await getVpnDetections(pool, { hours: 24 })} />
       )}
 
       {tab === 'locations' && (

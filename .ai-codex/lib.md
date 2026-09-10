@@ -1706,3 +1706,48 @@ cannot abort the daily sweep it shares with the other three snapshot tables, whi
 
 ⛔ `DEFAULT_VPN_SESSION_RETENTION_DAYS` is EXPORTED from here so the worker and `.env.local.example`
 cannot drift from the engine's own default.
+
+## `lib/engines/vpnDetections.js` (added 2026-09-10, v2.100.0)
+
+`getVpnDetections(pool, { hours, baselineDays, now })` — six named VPN detections computed at READ
+time over `syslog_vpn_auth_hourly`. No table, no cron job, no env var (the `deviceHealth.js` /
+baseline-drift precedent). ⛔ A stored severity would stop matching its own evidence the moment a
+threshold moved.
+
+`credential_spray` · `brute_force` · `account_targeted` · `new_country_for_user` · `country_change` ·
+`off_hours_success`.
+
+⛔ **`credential_spray` REUSES `vpnAuthStats.findUsernameSprayers()` unchanged** as its candidate set
+— it names the finding and attaches evidence, it does not re-derive the flagging. Two files deciding
+"is this a sprayer" separately would eventually disagree.
+
+⛔ **Every detection carries `status: 'measured' | 'insufficient_baseline' | 'no_data'`** plus
+`baseline: {required, have, unit, satisfied, firstBucketAt}`, and BOTH `findings[]` and
+`unverifiable[]`/`unverifiableTotal` (list capped at 25, total always exact). An observation that
+could not be judged is COUNTED, never dropped — dropping it makes a gap look like a clean result.
+
+⛔ **"We have never seen this user" (`no-user-baseline`) and "this user has never done this" (a real
+finding) are separate code paths and separate output arrays.** Rendering them the same way is the
+failed-read-as-a-fact bug in detection form. Live today: `new_country_for_user` and
+`off_hours_success` are both `insufficient_baseline` — history is 1.08 days, they need 7 and 14.
+
+⛔ **A device that reports failures but no successes is excluded from every success-dependent
+detection, explicitly.** TSR-TL is exactly that. The cost is real and accepted: the fleet's STRONGEST
+brute-force candidate (`administrator` ← `179.43.145.110`, Panama, ≥57 attempts over 23h, breadth 1)
+is reported as UNVERIFIABLE rather than asserted, because only success-blind devices saw it.
+
+⛔ **`country_change` is NOT impossible travel and must never be relabelled as it.** Verified: no
+city and no lat/lon exists anywhere (`syslog_events` carries `src_country` only), so there is no
+distance or velocity model to build. It reports the country pair and the hour gap, and its own
+caveats state that a commercial VPN, proxy or mobile carrier can change apparent country
+legitimately. A `gapHours === 0` row is labelled "same hour" and deliberately avoids "and then" —
+two equal bucket timestamps carry no ordering.
+
+⛔ **What keeps Thailand out is the existing SUCCESS GATE, not a country allowlist.** Measured: Thai
+NAT gateways do reach spray-shaped username counts (`110.170.190.2` = 7 usernames / 10 failures) but
+each also has successes, so `findUsernameSprayers` excludes them. Do not add a geographic allowlist —
+it would break the moment an attacker used a Thai host.
+
+Measured false-positive picture, live: of 212 measured spray findings, **0 are Thai-attributed, 0 are
+RFC1918/CGNAT, and 0 have ever produced a successful login** anywhere in retained history — 9.9% of
+2,137 sources flagged.

@@ -309,3 +309,17 @@ zero users and says why — 1,789 failed logins and 0 successes recorded, flagge
 
 Live today: history begins 2026-09-08, so **12 of 14 columns are honestly hatched**, and the footer
 states how much history exists rather than letting the blanks imply absence.
+
+## components/vpn/VpnDetections.js (added 2026-09-10)
+
+Single prop `data` — the return value of `getVpnDetections(pool, {hours})` passed through unmodified.
+Server component, no client JS, two native `<details>`.
+
+⛔ **A `measured` detection with no findings prints a plain sentence; an `insufficient_baseline` one
+renders a HATCHED, HUELESS panel** (`--hatch`/`--unmeasured`) — never a severity hue and never a
+green tick. It states what it needs and what exists ("Needs 7 days; SecVault holds 1.08"), and says
+in words: *"221 observations could not be judged either way. This is not a finding of zero."* A
+detection that cannot yet judge must not look like one that judged and found nothing.
+
+The success-reporting-gap banner (naming the devices excluded, e.g. TSR-TL) renders at the TOP, not
+in a footnote — it bounds every claim below it.

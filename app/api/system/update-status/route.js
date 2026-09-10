@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.100.0': [
+    "New VPN Detections view: six named detections — credential spray, brute force, targeted account, new country for a user, country change, and off-hours access — each showing the evidence it was computed from.",
+    "Live on the fleet today: one address in Bulgaria running 1,737 failed logins against 861 different usernames in 24 hours, plus roughly 150 US addresses spraying in a coordinated pattern.",
+    "Two of the six detections report INSUFFICIENT BASELINE rather than \"nothing found\". VPN log history is about a day old; new-country needs a week and off-hours needs two. A detection that cannot yet judge says so instead of showing an all-clear.",
+    "An address that cannot be judged is counted, not dropped: 221 observations are listed as unverifiable rather than silently treated as clean.",
+    "Detections never assert a result from a firewall that reports failed logins but not successful ones — that is a reporting gap, not a device where everyone fails.",
+    "The User Activity heatmap and Detections are now proper tabs on the VPN page.",
+  ],
   '2.99.1': [
     "VPN session start times now use the exact timestamp the firewall reports rather than reading its display text, which carries no year and no timezone. A firewall set to a different timezone from the SecVault server no longer skews how long a session appears to have lasted.",
   ],
