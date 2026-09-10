@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.99.1': [
+    "VPN session start times now use the exact timestamp the firewall reports rather than reading its display text, which carries no year and no timezone. A firewall set to a different timezone from the SecVault server no longer skews how long a session appears to have lasted.",
+  ],
   '2.99.0': [
     "VPN login locations are now grouped by country instead of one long scrolling list. 247 flagged sources collapse to 11 countries, each showing its worst offender without needing to expand it — one address in Bulgaria accounts for 1,685 failures across 837 usernames.",
     "New VPN activity heatmap: pick a firewall, see which days each user authenticated over the last 30. Days with no log coverage are drawn as not-measured rather than as quiet days.",

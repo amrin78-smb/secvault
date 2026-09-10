@@ -820,7 +820,15 @@ register, and no UI may report "total connected time" without saying so.
 reason `clock_mismatch` — it is proof the device's clock/zone disagrees with the server's, not a
 measurement.
 
-⛔ **The live `login_time` format is `Sep.09 01:31:51` — no year, no timezone.** The year is inferred
+⛔ **The device's OWN epoch wins over parsing its display string.** PAN-OS reports BOTH on every
+session — `"login-time":"Sep.10 09:03:53"` and `"login-time-utc":"1789005833"` — and
+`resolveLoginTime()` prefers the epoch (verified live: that value is `2026-09-10T02:03:53Z`, exactly
+the displayed time at +07). Inferring a year and a zone that the source already stated verbatim is
+the same mistake as recording a failed read as a fact, in a quieter register; the epoch is also the
+only thing that stops a firewall in a different timezone from the host skewing a duration.
+
+⛔ **The string fallback still exists and still matters** — no other vendor supplies an epoch today.
+When it is used: the live format is `Sep.09 01:31:51` — no year, no timezone. The year is inferred
 as the most recent one in which that month/day/time is not in the future (a session cannot start in
 the future), stable across a New Year boundary so the key never splits one session in two. The zone
 assumed is the SERVER'S local zone — the same assumption the fixed-HH:MM cron jobs already make.
