@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.103.1': [
+    "The Advisories page now lists all six feeds. CVE.org and EPSS were running and storing data but were missing from that banner, because it kept its own separate copy of the feed list.",
+  ],
   '2.103.0': [
     "Two new vulnerability sources: FIRST EPSS (probability a vulnerability will be exploited) and CVE.org (the authoritative CVE record). Both can only enrich advisories SecVault already tracks \u2014 neither can create one.",
     "945 of your 1,004 advisories now carry an exploit probability. The 59 without one are Palo Alto advisory IDs rather than CVEs, and are shown as not-scored rather than as zero.",
