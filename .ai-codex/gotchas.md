@@ -874,3 +874,12 @@ is what carries it, and it still works in greyscale.
 - **`VpnLoginLocations.js` showing 5 sources with no "of N"** — already correct at HEAD; both country
   lists carry `Showing 5 of N` footers and the sources table says `Busiest sources (15 of 21)`. The
   reported line number was stale.
+
+### `clampInt` and the empty string (found live 2026-09-10)
+
+`Number('')` is `0`, which is FINITE — so a clamp written as
+`Number(String(value ?? '').trim())` turns an OMITTED parameter into `0`, which then clamps to the
+MINIMUM rather than falling back to the default. Live symptom: the VPN traffic panel drew **one**
+user while the total beside it said 62. Nothing threw, nothing logged, and the page looked
+deliberate. Any `clampInt`-shaped helper must treat empty/whitespace as ABSENT before `Number()`.
+Pinned by a test in `tests/vpnTrafficAttribution.test.js`.

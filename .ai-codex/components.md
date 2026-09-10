@@ -323,3 +323,18 @@ detection that cannot yet judge must not look like one that judged and found not
 
 The success-reporting-gap banner (naming the devices excluded, e.g. TSR-TL) renders at the TOP, not
 in a footnote — it bounds every claim below it.
+
+## components/vpn/VpnUserTraffic.js (added 2026-09-10)
+
+Async server component; fetches its own data via `pool` (same convention as `VpnUserHeatmap`). Props
+`days` / `deviceId` / `username` / `topUsers`, all optional and defaulted; URL params `utDays` /
+`utDevice` / `utUser` / `utTop`.
+
+⛔ **Unattributed traffic gets its OWN PANEL, not a footnote** — each reason (`partial_hour`,
+`collision`, `gap`) in words, with its share of all traffic seen. Hiding it would make a coverage gap
+look like a complete answer.
+⛔ **`bytesSent/Received: null` renders `<NotMeasured/>` (em-dash + reason), NEVER `0 B`.** A partial
+volume renders with a `≥` prefix.
+⛔ **An empty result renders the REASON** (`no_session_history` / `window_shorter_than_one_hour` /
+`no_traffic_rows` / `no_assigned_addresses` / `window_empty_after_bounds`), never an empty user list.
+⛔ An address logged by two firewalls gets an `x2` badge — a double count declared rather than halved.

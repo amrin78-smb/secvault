@@ -16,6 +16,13 @@ import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/syslog/vpnPresence';
 import VpnDetections from '../../../components/vpn/VpnDetections';
 import { getVpnDetections } from '../../../lib/engines/vpnDetections';
+import VpnUserTraffic from '../../../components/vpn/VpnUserTraffic';
+import {
+  DEFAULT_WINDOW_DAYS as TRAFFIC_DEFAULT_DAYS,
+  MAX_WINDOW_DAYS as TRAFFIC_MAX_DAYS,
+  DEFAULT_TOP_USERS as TRAFFIC_DEFAULT_TOP,
+  MAX_TOP_USERS as TRAFFIC_MAX_TOP,
+} from '../../../lib/engines/vpnTrafficAttribution';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,7 +156,7 @@ export default async function VpnFleetPage({ searchParams }) {
     // `hmDevice`/`hmDays`/`hmTop` are the heatmap's own filter and are dropped
     // when switching tabs, for the same reason the page params are: a filter
     // from a view you are leaving means nothing in the view you are entering.
-    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop']
+    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop', 'utDevice', 'utDays', 'utTop', 'utUser']
   );
 
   // ⛔ Only the ACTIVE tab queries. The log-activity view costs ~7s on a
@@ -195,6 +202,24 @@ export default async function VpnFleetPage({ searchParams }) {
           deviceId={firstParam(sp.hmDevice) || null}
           days={clampInt(firstParam(sp.hmDays), DEFAULT_WINDOW_DAYS, 1, 90)}
           topUsers={clampInt(firstParam(sp.hmTop), DEFAULT_TOP_USERS, 1, 100)}
+        />
+      )}
+
+      {tab === 'traffic' && (
+        /* Traffic attributed to named VPN users by joining vpn_sessions'
+           assigned_ip against the syslog_talker_hourly rollup.
+           ⛔ An hour counts only if it falls ENTIRELY inside exactly one
+           session's tenure on that address. A partial hour, an overlap between
+           two sessions, or an hour no known session held are each reported as
+           UNATTRIBUTED with their own reason — never handed to the most recent
+           holder. Measured live: two-thirds of pool-address traffic in the
+           rollup window belongs to no retained session, so "nearest session
+           wins" would have misfiled it under a named human being. */
+        <VpnUserTraffic
+          days={clampInt(firstParam(sp.utDays), TRAFFIC_DEFAULT_DAYS, 1, TRAFFIC_MAX_DAYS)}
+          deviceId={firstParam(sp.utDevice) || null}
+          username={firstParam(sp.utUser) || null}
+          topUsers={clampInt(firstParam(sp.utTop), TRAFFIC_DEFAULT_TOP, 1, TRAFFIC_MAX_TOP)}
         />
       )}
 

@@ -778,6 +778,33 @@ machine without an E: drive. It now defaults under the install root and the inst
 
 ---
 
+## VPN Traffic Attribution (`/vpn?vtab=traffic`, added 2026-09-10, v2.101.0)
+
+Joins `vpn_sessions.assigned_ip` against the `syslog_talker_hourly` rollup to say what a NAMED VPN
+user actually did. Read-time, no table, no cron job. Detail in `.ai-codex/lib.md`; the rules:
+
+⛔ **IP REUSE IS THE WHOLE PROBLEM.** An hour is attributed ONLY if it falls entirely inside exactly
+one session's tenure on that address. Partial hour, overlap, or an hour no known session held are
+each UNATTRIBUTED with their own reason and counts. Measured live: **two-thirds of pool-address
+traffic (3,023 buckets / 550,722 events) belongs to no retained session** — "most recent holder wins"
+would have filed one employee's activity under another's name.
+
+⛔ **Coverage is clipped PER GATEWAY, never fleet-wide.** A fleet-wide bound lets a device added later
+claim weeks its sessions could not be enumerated in, so an hour reads unambiguous while an invisible
+second session held the address. Filters are applied AFTER attribution, so narrowing can never make
+an ambiguous address look clean. Both pinned by tests.
+
+⛔ **`syslog_events` IS REFUSED and a test enforces it** — no `src_ip` index, 27 GB/day partitions,
+~1,000 inserts/sec. Adding an index is not the answer: at 28M rows/day the write cost lands on the
+collector. Per-user destinations/applications are therefore NOT POSSIBLE (no `src_ip` in
+`syslog_app_hourly`/`syslog_blocked_dst_hourly` grain) and are not approximated. Closing that gap
+needs a rollup schema change, not a query change.
+
+⛔ **`src_user` (PAN User-ID) is populated and is a genuinely better source for some questions** —
+cheaper, independent, no IP-reuse hazard — but it measures a DIFFERENT fact (all traffic under that
+identity, including on-LAN). Deliberately not shown beside session-derived numbers, because
+presenting both invites conflation. Revisit as its own view, not as a column here.
+
 ## VPN Detections (`/vpn?vtab=detections`, added 2026-09-10, v2.100.0)
 
 Six named detections over `syslog_vpn_auth_hourly`, computed at READ time — no table, no cron job,

@@ -26,6 +26,7 @@ const {
   attributeTraffic,
   normalizeIp,
   DEFAULT_WINDOW_DAYS,
+  DEFAULT_TOP_USERS,
   MAX_WINDOW_DAYS,
 } = require('../lib/engines/vpnTrafficAttribution');
 
@@ -481,6 +482,23 @@ describe('getVpnUserTraffic — end to end over the stub', () => {
     assert.ok(bucketQuery, 'the rollup was queried');
     assert.deepEqual(bucketQuery.params[2], ['10.99.0.10']);
     assert.ok(bucketQuery.params[3] > 0, 'a row ceiling is always applied');
+  });
+
+  it('⛔ an OMITTED option falls back to the default, not to the minimum', async () => {
+    // Caught on the live fleet: `Number('')` is 0, which is finite, so an
+    // absent `topUsers` clamped to 1 and the page drew one user out of 62 —
+    // with `usersTotal` correctly reporting 62 right beside it. A plausible
+    // table is the worst kind of wrong.
+    const out = await getVpnUserTraffic(stubPool(plan), { until: '2026-09-09T12:00:00Z' });
+    assert.equal(out.window.days, DEFAULT_WINDOW_DAYS);
+    assert.equal(out.topUsers, DEFAULT_TOP_USERS);
+    const blank = await getVpnUserTraffic(stubPool(plan), {
+      until: '2026-09-09T12:00:00Z',
+      days: '',
+      topUsers: '   ',
+    });
+    assert.equal(blank.window.days, DEFAULT_WINDOW_DAYS);
+    assert.equal(blank.topUsers, DEFAULT_TOP_USERS);
   });
 
   it('clamps the window rather than trusting caller input', async () => {

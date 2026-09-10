@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.101.0': [
+    "New User Traffic tab: firewall traffic attributed to named VPN users, by matching the address the gateway assigned them. Volume, event counts and denials per person.",
+    "Traffic is only attributed when an hour falls entirely inside one session's hold on that address. Overlaps, partial hours and unheld hours are reported as unattributed with the reason, never assigned to the most recent user of that address.",
+    "That strictness is not theoretical: two-thirds of the traffic from VPN pool addresses belongs to no retained session, so a looser rule would have filed it under the wrong person.",
+    "Per-user destinations and applications are deliberately not shown — the underlying data does not record which address they came from, and approximating it would be guesswork.",
+    "Fixed: a filter that was left blank collapsed to the minimum instead of its default, so the traffic view showed one user while reporting a total of 62.",
+    "Corrected a stale note on the User Activity heatmap claiming session history was not collected — it has been collecting since this morning.",
+    "Widened a detections column whose heading was being cut off.",
+  ],
   '2.100.0': [
     "New VPN Detections view: six named detections — credential spray, brute force, targeted account, new country for a user, country change, and off-hours access — each showing the evidence it was computed from.",
     "Live on the fleet today: one address in Bulgaria running 1,737 failed logins against 861 different usernames in 24 hours, plus roughly 150 US addresses spraying in a coordinated pattern.",

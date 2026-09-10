@@ -144,10 +144,13 @@ const COLUMNS = {
   credential_spray: [
     { label: 'Source', width: '16%', cell: (f) => <span style={MONO}>{f.srcIp}</span> },
     { label: 'Country', width: '14%', cell: (f) => countryCell(f.country) },
-    { label: 'Usernames tried', width: '12%', style: NUM, cell: (f) => atLeast(f.usernames, f.usernamesIsFloor) },
+    // ⛔ 15%, not 12%: at 12 the HEADING itself truncated to "Usernames tr…".
+    // A clipped header makes the reader guess what the number counts, which is
+    // exactly the column whose meaning carries the "at least" caveat.
+    { label: 'Usernames tried', width: '15%', style: NUM, cell: (f) => atLeast(f.usernames, f.usernamesIsFloor) },
     { label: 'Failures', width: '10%', style: NUM, cell: (f) => n(f.failures) },
     { label: 'Hours', width: '7%', style: NUM, cell: (f) => n(f.hours) },
-    { label: 'Seen by', width: '20%', cell: (f) => listCell(f.devices, 'This sender matched no managed firewall.') },
+    { label: 'Seen by', width: '17%', cell: (f) => listCell(f.devices, 'This sender matched no managed firewall.') },
     { label: 'Last seen', width: '11%', cell: (f) => whenCell(f.lastSeenAt) },
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],

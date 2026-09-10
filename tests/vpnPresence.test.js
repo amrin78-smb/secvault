@@ -299,9 +299,17 @@ describe('getVpnUserPresence queries', () => {
     const r = await getVpnUserPresence(pool, { days: 30, now: new Date('2026-09-10T02:00:00Z') });
     assert.match(r.notes.unit, /authenticated/i);
     assert.doesNotMatch(r.notes.unit, /^(?!.*not connected).*connected time/i);
-    // The gap the operator actually asked about must be stated, with what would
-    // close it, so a future edit cannot quietly drop the caveat.
-    assert.match(r.notes.durationGap, /vpn_active_sessions/);
+    // The gap the operator actually asked about must be stated, with where the
+    // real answer now lives, so a future edit cannot quietly drop the caveat.
+    //
+    // ⛔ This assertion used to pin the word "vpn_active_sessions", because the
+    // note said connected duration "is not collected today". That went FALSE
+    // the moment vpn_sessions shipped, and the stale claim reached the live UI
+    // — no static check catches user-facing prose about another subsystem, only
+    // a browser render did. The pin now tracks the HISTORY table, so if
+    // retention is ever removed this test fails instead of the screen lying.
+    assert.match(r.notes.durationGap, /vpn_sessions/);
+    assert.doesNotMatch(r.notes.durationGap, /not collected today/i);
     assert.match(r.notes.durationGap, /re-authenticates/);
   });
 });

@@ -1751,3 +1751,43 @@ it would break the moment an attacker used a Thai host.
 Measured false-positive picture, live: of 212 measured spray findings, **0 are Thai-attributed, 0 are
 RFC1918/CGNAT, and 0 have ever produced a successful login** anywhere in retained history — 9.9% of
 2,137 sources flagged.
+
+## `lib/engines/vpnTrafficAttribution.js` (added 2026-09-10, v2.101.0)
+
+`getVpnUserTraffic(pool, {days, deviceId, username, topUsers, until})` — joins `vpn_sessions.assigned_ip`
+against the **`syslog_talker_hourly`** rollup to attribute traffic to NAMED VPN users. Read-time, no
+table, no cron job. Also exports the pure `attributeTraffic()`, `normalizeIp`, `clampInt`,
+`UNATTRIBUTED_REASONS`.
+
+⛔ **`syslog_talker_hourly` is the ONLY per-address aggregate in the database.** Verified: 174 of 187
+live `assigned_ip` values appear in it as `src_ip`, so the join key is empirical, not assumed.
+`syslog_blocked_dst_hourly` and `syslog_app_hourly` have NO `src_ip` in their grain, so per-user
+destinations and applications are **not possible** and are not approximated — the panel says so.
+
+⛔ **`syslog_events` IS REFUSED, and a test asserts this module never references it.** There is no
+index on `src_ip` and partitions are 27 GB/day; a per-user destination query is a full partition scan
+against a database taking ~1,000 inserts/sec. An index is not the answer either — at 28M rows/day the
+write cost lands on the collector.
+
+⛔ **An hour is attributed ONLY if it falls ENTIRELY inside exactly one session's tenure on that
+address.** Partial hour → unattributed. Two sessions overlapping → unattributed AND a recorded
+collision (detected across ALL devices, since pools can overlap). No session → gap. Each reason
+carries its own bucket/event counts and renders as its own panel, never a footnote.
+
+⛔ **Why that strictness is not paranoia — measured live:** over 7 days of rollup, 3,023 gap buckets
+carrying 550,722 events belong to no retained session, versus 2,838 attributed. Two-thirds of
+pool-address traffic happened when these sessions did not hold the address. "Most recent holder wins"
+would have filed it under a named human being.
+
+⛔ **Coverage is clipped PER GATEWAY, not fleet-wide** (`DEVICE_COVERAGE_SQL`): each session's tenure
+is clipped to its own device's first observation. A fleet-wide bound would let a gateway added later
+claim weeks its sessions could not be enumerated in — an hour would read as unambiguous while an
+invisible second session held the address. Same false unambiguity through the side door. Pinned.
+
+⛔ **Filters are applied AFTER attribution**, so narrowing by user or device can never make an
+ambiguous address look clean. Pinned by a test.
+
+Live first run: 226 joinable sessions / 0 unjoinable; **150 of 191 address-hours (78.5%)** and
+22,932 of 33,580 events attributed to 105 named users; 1 REAL collision (two different users on one
+address, correctly given to neither). Bytes were dense (105/105 measurable) because `bytes_summable`
+is true exactly for PAN-OS session-close rows and these gateways are all Palo Alto.
