@@ -541,6 +541,37 @@ function tabLink(deviceId, activeTab, key, label) {
   );
 }
 
+// Device Details grid. Extracted from eight identical inline copies so the
+// overflow fix below lives in ONE place rather than being reapplied by hand
+// the next time a field is added.
+//
+// ⛔ `minWidth: 0` IS THE FIX, and it is not cosmetic. The grid is
+// `repeat(auto-fit, minmax(140px, 1fr))`, and a grid item defaults to
+// `min-width: auto`, which refuses to shrink below its own min-content. A
+// value with no spaces has a min-content width of the WHOLE STRING, so a
+// 28-character hostname (FG200ETK18912640_OkeanosFOOD, reported live by
+// OKF(F2)) pushed its track wide and overlapped the VERSION column next to
+// it — two device facts rendered on top of each other, which is worse than
+// either being cut off. Serials and build strings are the same shape and
+// were one rename away from doing it too.
+const DETAIL_FIELD = { minWidth: 0 };
+
+const DETAIL_LABEL = {
+  fontSize: 'var(--text-xs)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: 'var(--text-muted)',
+};
+
+// ⛔ `overflowWrap: anywhere` and NOT `text-overflow: ellipsis`. These are
+// identifiers an operator copies into a ticket or a vendor support case — a
+// truncated serial is useless and, worse, looks complete. Wrapping keeps
+// every character on screen; the row simply gets taller.
+const DETAIL_VALUE = {
+  color: 'var(--text-primary)',
+  overflowWrap: 'anywhere',
+};
+
 export default async function DeviceDetailPage({ params, searchParams }) {
   // Defense in depth only -- every route these controls call (PUT/DELETE
   // devices/[id], POST devices/[id]/test, POST devices/[id]/collect) already
@@ -682,11 +713,11 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                 fontSize: 'var(--text-base)',
               }}
             >
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   {device.vendor === 'forcepoint' ? 'SMC Host' : 'Management IP'}
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>
+                <div style={DETAIL_VALUE}>
                   {device.vendor === 'forcepoint' ? device.smc_host || '—' : device.mgmt_ip || '—'}
                 </div>
               </div>
@@ -697,23 +728,23 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   device itself reports. Only populated for vendors/transports that
                   parse it (see lib/schema.sql's device_versions.hostname comment);
                   '—' for everything else, same as Build/Serial below. */}
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Hostname
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>{version?.hostname || '—'}</div>
+                <div style={DETAIL_VALUE}>{version?.hostname || '—'}</div>
               </div>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Version
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>{version?.version_string || '—'}</div>
+                <div style={DETAIL_VALUE}>{version?.version_string || '—'}</div>
               </div>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Model
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>{version?.model || '—'}</div>
+                <div style={DETAIL_VALUE}>{version?.model || '—'}</div>
               </div>
               {/* Build and Serial: fixed 2026-07-19 -- Build was already queried by
                   getLatestVersion() above and never rendered here (pure UI gap);
@@ -723,33 +754,43 @@ export default async function DeviceDetailPage({ params, searchParams }) {
                   and lib/adapters/fortinet/ssh.js's getVersion()). Both render as
                   '—' for any device/transport that doesn't supply one, same as
                   every other tile here. */}
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Build
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>{version?.build || '—'}</div>
+                <div style={DETAIL_VALUE}>{version?.build || '—'}</div>
               </div>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Serial
                 </div>
-                <div style={{ color: 'var(--text-primary)' }} className="mono">
+                {/* ⛔ The serial needs the wrap MORE than the others, not less:
+                    it is monospace (wider per character) and it is the single
+                    value most likely to be copied verbatim into a vendor
+                    support case. */}
+                <div style={DETAIL_VALUE} className="mono">
                   {version?.serial || '—'}
                 </div>
               </div>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   HA
                 </div>
-                <div style={{ color: haTileColor(haRow) }} title={haStatus(haRow).reasons.join(' ') || undefined}>
+                {/* Spread first so the HA verdict's own colour still wins — it
+                    carries the degraded/healthy signal and must not be
+                    overwritten by the shared text colour. */}
+                <div
+                  style={{ ...DETAIL_VALUE, color: haTileColor(haRow) }}
+                  title={haStatus(haRow).reasons.join(' ') || undefined}
+                >
                   {haTileText(haRow)}
                 </div>
               </div>
-              <div>
-                <div style={{ fontSize: 'var(--text-xs)', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              <div style={DETAIL_FIELD}>
+                <div style={DETAIL_LABEL}>
                   Last Collected
                 </div>
-                <div style={{ color: 'var(--text-primary)' }}>{formatDateTime(device.last_collected_at)}</div>
+                <div style={DETAIL_VALUE}>{formatDateTime(device.last_collected_at)}</div>
               </div>
             </div>
           </div>
