@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.101.1': [
+    "Fixed: site-to-site IPsec tunnels between firewalls were being recorded as successful VPN logins by people. Every Fortinet VPN success on the fleet was one of these.",
+    "Those events also carried the peer firewall’s IP address in the username field, which had created 13 fake users in the traffic reports and 8 in the VPN login list.",
+    "Genuine SSL-VPN logins are untouched — the fix distinguishes the two by tunnel type, because Fortinet uses the same event for both.",
+    "Existing records are corrected on update, including the permanent hourly summaries that would otherwise keep a record of logins that never happened.",
+    "Fortinet now correctly shows no successful VPN logins reported, which is a device-side logging setting rather than a SecVault gap.",
+  ],
   '2.101.0': [
     "New User Traffic tab: firewall traffic attributed to named VPN users, by matching the address the gateway assigned them. Volume, event counts and denials per person.",
     "Traffic is only attributed when an hour falls entirely inside one session's hold on that address. Overlaps, partial hours and unheld hours are reported as unattributed with the reason, never assigned to the most recent user of that address.",

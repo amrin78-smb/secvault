@@ -883,3 +883,32 @@ MINIMUM rather than falling back to the default. Live symptom: the VPN traffic p
 user while the total beside it said 62. Nothing threw, nothing logged, and the page looked
 deliberate. Any `clampInt`-shaped helper must treat empty/whitespace as ABSENT before `Number()`.
 Pinned by a test in `tests/vpnTrafficAttribution.test.js`.
+
+### FortiOS `tunnel-up` is TWO different events, and `user=` is not always a person
+
+⛔ **A gateway is not a person.** FortiOS emits `action="tunnel-up"` both for a real SSL-VPN
+tunnel-mode login (`tunneltype="ssl-web"`/`"ssl-tunnel"`) and for a **site-to-site IPsec tunnel**
+completing phase 2 (`tunneltype="ipsec"`, logid `0101037138`, logdesc *"IPsec connection status
+changed"*). `tunnel-up` sat in `FORTINET_SUCCESS_ACTIONS` unconditionally, so every IPsec tunnel
+coming up was recorded as a successful VPN login.
+
+⛔ **`user=` holds the PEER GATEWAY ADDRESS on IPsec events** — the "user" of a site-to-site tunnel
+with no XAuth is the peer itself, which is why those rows also carry `xauthuser="N/A"`. An address is
+NOT a NULL-shaped placeholder, so `meaningful()` could never catch it: it is a real string carrying
+the WRONG FACT. `xauthuser` is the genuine account when the tunnel does authenticate one.
+
+⛔ **DO NOT "fix" this by removing `tunnel-up` from the success set.** Measured live 2026-09-10 over
+36h: 15 IPsec tunnel-ups against 3 `ssl-web` + 2 `ssl-tunnel`. Those 5 are REAL logins — three rollup
+rows belong to a named employee who genuinely logged in over SSL-VPN. Deleting the verb would have
+erased a real person's login history to remove fake gateways. **`tunneltype` is the discriminator**,
+and an absent/unrecognised tunnel type resolves to `null`, never success.
+
+Blast radius before the repair: 14 fabricated success events, 11 fabricated rows in the PERMANENT
+`syslog_vpn_auth_hourly`, ~4,000 rows in 12h carrying an address in `src_user`, and **13 fake "users"
+holding ~14,000 events in the PERMANENT `syslog_user_hourly`** — the same failure this file already
+recorded for the literal `"N/A"` becoming the 5th busiest user.
+
+⛔ **The code fix only affects NEW events** — `auth_outcome`/`src_user` are computed at INGEST and
+stored. `lib/migrate.js`'s `repairFortinetIpsecAuthMisclassification()` corrects the persisted rows,
+and it must fix `syslog_events` as well as the rollups: `syslog_user_hourly` re-aggregates a 24h
+lookback, so deleting its rows without fixing the events re-creates them within a day.

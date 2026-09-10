@@ -14,7 +14,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseVendorPayload, threatSeverityRank } = require('../lib/syslog/vendorParsers');
+const { parseVendorPayload, threatSeverityRank, parseFortinet } = require('../lib/syslog/vendorParsers');
 
 // Captured from ITC-FW-MAIN (PAN-OS 11.1), THREAT/url subtype.
 const PAN_THREAT =
@@ -367,4 +367,75 @@ it('an unmapped country keeps the vendor spelling rather than being dropped', ()
   assert.equal(normalizeCountry('Someplace New'), 'Someplace New');
   assert.equal(normalizeCountry(null), null);
   assert.equal(normalizeCountry(''), null);
+});
+
+// ─── FortiOS tunnel-up: a gateway is not a person ─────────────────────────
+//
+// ⛔ REGRESSION PIN. `tunnel-up` used to sit in FORTINET_SUCCESS_ACTIONS
+// unconditionally, so every site-to-site IPsec tunnel completing phase 2 was
+// recorded as a successful VPN LOGIN. Measured live 2026-09-10, that was 100%
+// of this fleet’s Fortinet "successes" — 14 rows / 19 events had already
+// reached the PERMANENT rollup — and each carried the peer gateway ADDRESS in
+// the username field. The discriminator is tunnel type, not the verb.
+describe('FortiOS tunnel-up is gated on tunnel type', () => {
+  it('an IPsec tunnel-up is NOT a user authentication', () => {
+    assert.equal(classifyAuthOutcome('fortinet', null, null, 'tunnel-up', 'ipsec'), null);
+  });
+
+  it('a REAL SSL-VPN tunnel-up is still a success — the fix must not delete these', () => {
+    // Live over 36h: 15 IPsec tunnel-up against 3 ssl-web + 2 ssl-tunnel.
+    // Removing the verb outright would have destroyed 5 real logins.
+    for (const tt of ['ssl', 'ssl-web', 'ssl-tunnel', 'SSL-Web']) {
+      assert.equal(classifyAuthOutcome('fortinet', null, null, 'tunnel-up', tt), 'success', tt);
+    }
+  });
+
+  it('⛔ an absent or unknown tunnel type NEVER manufactures a success', () => {
+    for (const tt of [null, undefined, '', '   ', 'ipsec', 'something-new', 'l2tp']) {
+      assert.equal(classifyAuthOutcome('fortinet', null, null, 'tunnel-up', tt), null, String(tt));
+    }
+  });
+});
+
+// ⛔ REGRESSION PIN. On IPsec events FortiOS puts the PEER GATEWAY ADDRESS in
+// `user=` — the "user" of a site-to-site tunnel with no XAuth is the peer.
+// An address is not a NULL-shaped placeholder, so meaningful() cannot catch
+// it: it is a real string carrying the WRONG FACT. Live, ~4,000 rows in 12h.
+describe('FortiOS src_user is never a peer address', () => {
+  const IPSEC_NO_XAUTH = [
+    'date=2026-09-10 time=09:59:33 devname="FG80F-TSR_HQ" logid="0101037133" type="event"',
+    'subtype="vpn" level="notice" vd="root" logdesc="IPsec SA installed" action="install_sa"',
+    'remip=27.254.21.130 user="27.254.21.130" group="N/A" xauthuser="N/A"',
+  ].join(' ');
+
+  it('drops an IPv4 peer address rather than storing it as an account', () => {
+    const r = parseFortinet(IPSEC_NO_XAUTH, {});
+    assert.equal(r.srcUser, null);
+  });
+
+  it('drops an IPv6 peer address too', () => {
+    const line = IPSEC_NO_XAUTH.replace('user="27.254.21.130"', 'user="2001:db8::1"');
+    assert.equal(parseFortinet(line, {}).srcUser, null);
+  });
+
+  it('⛔ keeps the XAuth account when the tunnel actually authenticates one', () => {
+    const line = IPSEC_NO_XAUTH.replace('xauthuser="N/A"', 'xauthuser="contractor_bob"');
+    assert.equal(parseFortinet(line, {}).srcUser, 'contractor_bob');
+  });
+
+  it('⛔ leaves a REAL username untouched — this must not become a general cleanup', () => {
+    const line = [
+      'date=2026-09-10 time=09:59:47 devname="FG80F-TSR_HQ" logid="0101039426" type="event"',
+      'subtype="vpn" level="alert" logdesc="SSL VPN login fail" action="ssl-login-fail"',
+      'tunneltype="ssl-web" remip=68.235.46.142 user="webservice"',
+    ].join(' ');
+    const r = parseFortinet(line, {});
+    assert.equal(r.srcUser, 'webservice');
+    assert.equal(r.authOutcome, 'failure');
+  });
+
+  it('a username that merely CONTAINS digits and dots survives', () => {
+    const line = IPSEC_NO_XAUTH.replace('user="27.254.21.130"', 'user="user.1.2"');
+    assert.equal(parseFortinet(line, {}).srcUser, 'user.1.2');
+  });
 });
