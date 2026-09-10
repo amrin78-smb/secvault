@@ -535,10 +535,19 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
             ) : null}
             {fleet.devices.noRowsPolled > 0 ? (
               <span style={SUBTLE}>
+                {/* ⛔ DO NOT RANK ONE BRANCH OF THIS AMBIGUITY. This said "most likely means
+                    none are configured" and was demonstrably wrong live: OKF(F2) is counted
+                    here while its own syslog, in this same database, carries IPsec
+                    tunnel-stats and SA-installed events. Saying "most likely" turned a
+                    per-device collection failure into a claim about the customer's network.
+                    ⛔ The engine's COVERAGE_REASON says the same thing; this is a SECOND copy
+                    of that wording and both had to be fixed. Keep them in step. */}
                 {fleet.devices.noRowsPolled} firewall
                 {fleet.devices.noRowsPolled === 1 ? '' : 's'} returned no tunnels on a recent
-                successful poll. That most likely means none are configured — it is not proof, because
-                a tunnel command that failed on a reachable device leaves no database trace.
+                successful poll. SecVault cannot tell whether they have none configured or the
+                tunnel command failed on a reachable device — nothing records a successful tunnel
+                pull, so both look identical. An IPsec event from one of them in the firewall logs
+                means it has tunnels this view is missing.
               </span>
             ) : null}
           </div>
