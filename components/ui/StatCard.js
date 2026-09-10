@@ -31,12 +31,47 @@ export default function StatCard({
   iconColor,
   iconBg,
   delta,
+  // "stack" (default, unchanged everywhere) or "row" -- number to the RIGHT of
+  // the label rather than above it. See the layout note below.
+  layout = 'stack',
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
   const valueColor = color === 'var(--border)' ? 'var(--text-primary)' : color;
+
+  // ⛔ ROW LAYOUT. The value moves out of the vertical stack and sits beside the
+  // label, which removes one block of height. Measured on the dashboard headline
+  // row: 114px -> see the commit. Two things differ from the stacked layout and
+  // both are deliberate:
+  //
+  //   1. The icon is INLINE before the label, not absolutely positioned in the
+  //      top-right corner -- that corner is now where the number lives, and two
+  //      things cannot occupy it.
+  //   2. `sub` and `delta` still span the FULL card width underneath, rather than
+  //      being trapped in the narrower left column. A long sub (the Security
+  //      Score tile reads "Needs attention — Vulnerability 49 · Rule 46 ·
+  //      Compliance 51") would otherwise wrap MORE than before and give back the
+  //      height this layout exists to save.
+  if (layout === 'row') {
+    return (
+      <div className={`${cardClass} ${className}`} style={{ borderLeftColor: color }}>
+        <div className="kpi-head-row">
+          <div className="kpi-head-left">
+            {icon && <IconChip icon={icon} color={iconColor} bg={iconBg} />}
+            <div className={labelClass}>{label}</div>
+          </div>
+          <div className={valueClass} style={{ color: valueColor }}>
+            {value}
+          </div>
+        </div>
+        {sub && <div className={subClass}>{sub}</div>}
+        {delta && <div style={{ marginTop: 'var(--s1)' }}>{delta}</div>}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`${cardClass} ${className}`}

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.102.2': [
+    "The six headline tiles on the Overview page are shorter: the number now sits to the right of its label instead of above it.",
+  ],
   '2.102.1': [
     "Corrected the Fortinet feed summary, which described advisories as ingested and stored when they are deliberately not stored.",
   ],

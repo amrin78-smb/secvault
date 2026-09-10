@@ -108,6 +108,7 @@ export default async function HeadlineStats() {
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
       <StatCard
         compact
+        layout="row"
         label="Devices"
         value={h.deviceCount}
         sub={`Online ${h.devicesOnline}`}
@@ -119,6 +120,7 @@ export default async function HeadlineStats() {
       />
       <StatCard
         compact
+        layout="row"
         label="Security Score"
         value={<>{scoreValue(h.securityScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={
@@ -134,6 +136,7 @@ export default async function HeadlineStats() {
       />
       <StatCard
         compact
+        layout="row"
         label="Critical Alerts"
         value={h.patchNowCount}
         sub="Patch now"
@@ -145,6 +148,7 @@ export default async function HeadlineStats() {
       />
       <StatCard
         compact
+        layout="row"
         label="High Risks"
         value={h.highRiskCount}
         sub="Critical + high findings"
@@ -156,6 +160,7 @@ export default async function HeadlineStats() {
       />
       <StatCard
         compact
+        layout="row"
         label="Total Rules"
         value={h.rulesTotal.toLocaleString()}
         sub={`${h.rulesEnabled.toLocaleString()} enabled`}
@@ -167,6 +172,7 @@ export default async function HeadlineStats() {
       />
       <StatCard
         compact
+        layout="row"
         label="Compliance Score"
         value={<>{scoreValue(h.complianceScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
