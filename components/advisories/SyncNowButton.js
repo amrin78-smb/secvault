@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { KNOWN_FEEDS } from '../../lib/feedStatus';
+import { FEED_LABELS } from '../../lib/formatDisplay';
 import { useRouter } from 'next/navigation';
 import Button from '../ui/Button';
 import LoadingSpinner from '../ui/LoadingSpinner';
@@ -28,12 +30,19 @@ import LoadingSpinner from '../ui/LoadingSpinner';
 // actually completed" from "showing a stale result from a previous run".
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 600000; // 10 minutes — same precedent as UpdatePanel.js's HEALTH_TIMEOUT_MS
-const FEED_SOURCES = [
-  { key: 'nvd', label: 'NVD' },
-  { key: 'paloalto_psirt', label: 'Palo Alto PSIRT' },
-  { key: 'fortinet_psirt', label: 'Fortinet FortiGuard' },
-  { key: 'kev', label: 'CISA KEV' },
-];
+// ⛔ DERIVED, NOT DUPLICATED — this was the FIFTH hand-maintained copy of the feed
+// list and it silently went stale when CVE.org and EPSS were added. Three wrong
+// outputs followed, all confirmed against a live run:
+//   1. `allDone` was satisfied the moment CISA KEV finished, so the button said
+//      "Sync complete." ~18s before the run was over — then called router.refresh(),
+//      re-rendering the banner with the two feeds it had just declared done showing
+//      as not-yet-finished.
+//   2. `failed` only inspected the old four, so an errored CVE.org or EPSS still
+//      produced a green "Sync complete."
+//   3. The copy said "all 4 feed sources" when there are six.
+// A registry that must be edited in five places WILL drift, and nothing errors when
+// it does — the UI just quietly describes a system that no longer exists.
+const FEED_SOURCES = KNOWN_FEEDS.map((key) => ({ key, label: FEED_LABELS[key] || key }));
 
 function summarizeBySource(bySource) {
   return FEED_SOURCES.map(({ key, label }) => {
@@ -146,7 +155,7 @@ export default function SyncNowButton() {
       )}
       {running && (
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          Runs in the background — this can take several minutes across all 4 feed sources.
+          Runs in the background — this can take several minutes across all {FEED_SOURCES.length} feed sources.
         </span>
       )}
     </div>

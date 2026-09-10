@@ -211,7 +211,12 @@ const COLUMNS = {
       // seconds". The label says so rather than printing a false precision.
       cell: (f) => (f.gapHours === 0 ? 'same hour' : `${n(f.gapHours)} h`),
     },
-    { label: 'Addresses', width: '20%', cell: (f) => <span style={MONO}>{[f.fromSrcIp, f.toSrcIp].filter(Boolean).join(' / ') || '—'}</span> },
+    // ⛔ TITLE IS REQUIRED HERE. These are the two addresses behind an
+    // impossible-travel finding — the exact identifiers that go into a ticket —
+    // and the cell clips below 1900px (measured: clientW 188 vs scrollW 291 at
+    // 1280px). Truncating an identifier with no way to recover it makes the
+    // finding unactionable.
+    { label: 'Addresses', width: '20%', cell: (f) => { const pair = [f.fromSrcIp, f.toSrcIp].filter(Boolean).join(' / '); return <span style={MONO} title={pair || undefined}>{pair || '—'}</span>; } },
     { label: 'Firewall', width: '14%', cell: (f) => (f.device || <NotMeasured reason="Not attributed to a managed firewall." />) },
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],

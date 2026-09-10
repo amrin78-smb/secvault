@@ -418,7 +418,10 @@ describe('new country for a user', () => {
     ];
     const d = buildNewCountryDetection({ successRows: rows, baseline: DEEP_BASELINE, windowStart: WINDOW_START });
     assert.deepEqual(d.findings.map((f) => f.username), ['known.user']);
-    assert.deepEqual(d.findings[0].knownCountries, ['TH']);
+    // ⛔ NORMALISED, not raw. Palo Alto emits "TH" and FortiOS emits "Thailand";
+    // these builders now fold them together before grouping. See the regression
+    // test below for what reading the raw column produced.
+    assert.deepEqual(d.findings[0].knownCountries, ['Thailand']);
     assert.equal(d.unverifiableTotal, 1);
     assert.equal(d.unverifiable[0].username, 'brand.new');
     assert.equal(d.unverifiable[0].reason, 'no-user-baseline');
@@ -712,5 +715,50 @@ describe('getVpnDetections orchestration', () => {
   it('the window start is derived from the top of the hour, matching the rollup buckets', () => {
     assert.equal(windowStartFrom(new Date('2026-09-10T03:47:12.000Z'), 24).toISOString(), '2026-09-09T04:00:00.000Z');
     assert.equal(windowStartFrom(new Date('2026-09-10T03:47:12.000Z'), 1).toISOString(), '2026-09-10T03:00:00.000Z');
+  });
+});
+
+// ── Country spellings must be folded before grouping ────────────────────────
+//
+// ⛔ REGRESSION PIN. Palo Alto emits ISO alpha-2 ("TH"); FortiOS emits the full
+// English name ("Thailand"). Both spellings are live in production and both
+// reach SUCCESS rows (measured: fortinet 5 rows "Thailand", paloalto 689 rows
+// "TH"). These builders grouped on the RAW column, so one employee
+// authenticating through both a FortiGate and a Palo Alto gateway produced:
+//
+//   severity "high" — authenticated successfully from both TH and Thailand
+//   within the same hourly bucket, fromSrcIp == toSrcIp
+//
+// Same country, same source address, same hour, naming a real person. It was
+// latent only because no username currently appears in both vendors' success
+// rows; one shared account is all it takes.
+describe('country spellings are folded before grouping', () => {
+  const { buildCountryChangeDetection, buildNewCountryDetection } = require('../lib/engines/vpnDetections');
+
+  it('⛔ TH and Thailand in the same hour are NOT a country change', () => {
+    const rows = [
+      successRow('shared.user', '2026-09-09T10:00:00.000Z', 'TH'),
+      successRow('shared.user', '2026-09-09T10:00:00.000Z', 'Thailand'),
+    ];
+    const d = buildCountryChangeDetection({ successRows: rows, baseline: DEEP_BASELINE, windowStart: WINDOW_START });
+    assert.equal(d.findings.length, 0, 'one country spelled two ways is one country');
+  });
+
+  it('⛔ Thailand is not a NEW country for a user whose history says TH', () => {
+    const rows = [
+      ...fourDayThaiBaseline('known.user'),
+      successRow('known.user', '2026-09-09T10:00:00.000Z', 'Thailand'),
+    ];
+    const d = buildNewCountryDetection({ successRows: rows, baseline: DEEP_BASELINE, windowStart: WINDOW_START });
+    assert.equal(d.findings.length, 0);
+  });
+
+  it('a genuinely different country is still a finding', () => {
+    const rows = [
+      successRow('shared.user', '2026-09-09T10:00:00.000Z', 'TH'),
+      successRow('shared.user', '2026-09-09T11:00:00.000Z', 'Singapore'),
+    ];
+    const d = buildCountryChangeDetection({ successRows: rows, baseline: DEEP_BASELINE, windowStart: WINDOW_START });
+    assert.ok(d.findings.length > 0, 'TH -> Singapore is a real change');
   });
 });

@@ -912,3 +912,40 @@ recorded for the literal `"N/A"` becoming the 5th busiest user.
 stored. `lib/migrate.js`'s `repairFortinetIpsecAuthMisclassification()` corrects the persisted rows,
 and it must fix `syslog_events` as well as the rollups: `syslog_user_hourly` re-aggregates a 24h
 lookback, so deleting its rows without fixing the events re-creates them within a day.
+
+### ⛔ Next's SWC compressor silently DELETES text from concatenated template literals
+
+Found 2026-09-10 by a browser sweep, in production, on `/vpn?vtab=detections`. The page read:
+
+> "...where the user has at least **3least 7.**"
+
+The source was correct. **37 characters were deleted by the minifier.**
+
+**The trigger:** two template literals joined by `+` where the interpolations CONSTANT-FOLD. The
+trailing static text of the left-hand literal is dropped.
+
+```js
+`a ${A} TAIL ` + `least ${B}.`          // const A=3, B=7  ->  "a 3least 7."
+`p ${a} T1 ` + `q ${b} T2 ` + `r ${c}.` // all const       ->  "p 3q 7r 9."  (both tails gone)
+```
+
+With opaque runtime values it merges correctly, which is why this is rare and why the codebase is
+full of safe-looking `\`...\` + \`...\`` (32 files). In `vpnDetections.js` it fired because
+`NEW_COUNTRY_MIN_USER_DAYS = 3` and `NEW_COUNTRY_MIN_BASELINE_DAYS = 7` are module-level literals.
+
+⛔ **RE-SPLITTING THE LITERALS DOES NOT FIX IT — it only moves which tail is eaten.** Verified: the
+first rewrite rendered `"at least 3and the fleet has at least 7."` instead. The fix is to stop
+using adjacent template literals: use **plain quoted strings with `+`**, or one literal, or
+`[...].join('')`.
+
+⛔ **INVISIBLE to every check this repo runs** — `node --check`, `npm test`, `jsxSyntax.test.js` and
+reading the source all pass. Only the BUILT BUNDLE shows it. To check a suspect file:
+
+```js
+const { minify } = require('next/dist/build/swc');
+minify(require('fs').readFileSync(f, 'utf8'), { compress: true, mangle: false })
+  .then((r) => console.log((typeof r === 'string' ? r : r.code)));
+```
+
+A whole-repo scan found this as the only user-visible loss, but the hazard is live wherever a
+module-level numeric const is interpolated into concatenated template literals.

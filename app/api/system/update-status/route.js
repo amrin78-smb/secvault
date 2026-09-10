@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.103.3': [
+    "Fixed on Tunnel Health: the caveat explaining that Palo Alto firewalls only report tunnels that are UP was never displayed, so 143 of 152 tunnels showed a flat Down: 0 with nothing qualifying it.",
+    "Fixed a sentence on the Detections page that the production build was silently truncating.",
+    "VPN detections now treat a country the same whichever way a firewall spells it (TH vs Thailand).",
+    "The Advisories page no longer reports an interrupted sync as a feed that has never run, and Sync Now now waits for all six feeds.",
+  ],
   '2.103.2': [
     "Fixed a false negative in vulnerability matching. Vendors publish a separate fix for each maintenance line, and PAN-OS lists the LOWEST of them as the headline bound — so a firewall on a newer line than that bound was treated as out of scope even when its own line had a fix it had not reached.",
     "On this fleet that hid 6 advisories across all 11 Palo Alto firewalls, including a CVSS 9.2 unauthenticated remote code execution. They now appear.",

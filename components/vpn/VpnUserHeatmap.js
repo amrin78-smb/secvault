@@ -497,11 +497,18 @@ export default async function VpnUserHeatmap({ deviceId, days, topUsers }) {
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-muted)', maxWidth: '95ch' }}>
               <strong>Why not connected time?</strong> The only per-user VPN evidence SecVault holds
               is an hourly rollup of the usernames that authenticated, built from firewall syslog. It
-              carries no session end and no duration. True connected duration would need the
+              carries no session end and no duration.
+              {/* ⛔ This paragraph used to end "...that is a schema and retention change, and it
+                  is not what this grid does" — written before vpn_sessions existed. It went FALSE
+                  on 2026-09-10 and then contradicted the note ~600px above it on the same card,
+                  which already said duration IS measured separately. A reader who scrolled
+                  concluded the product cannot answer a question it answers on the next tab. */}
+              {' '}Connected duration is measured separately, from the
+              <code style={{ fontFamily: 'var(--font-mono)' }}> vpn_sessions </code>
+              history added on 2026-09-10 — see the VPN session views.
               <code style={{ fontFamily: 'var(--font-mono)' }}> vpn_active_sessions </code>
-              table retained as history — it already carries username, assigned IP and login time,
-              but it is deleted and reinserted on every poll, so only "right now" survives. That is a
-              schema and retention change, and it is not what this grid does.
+              itself is still deleted and reinserted on every poll, so it only ever holds "right
+              now"; the history table is what retains it. This grid measures a different thing.
             </p>
           </div>
         </CardBody>

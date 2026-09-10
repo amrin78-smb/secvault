@@ -209,11 +209,17 @@ describe('"no tunnel rows" is never "no tunnels"', () => {
       pollRows: [{ device_id: FORTI.id, last_ok_at: minutesAgo(3), last_attempt_at: minutesAgo(3) }],
     });
     assert.equal(out.devices[0].coverage, 'no_rows_polled');
+    const reason = out.devices[0].coverageReason;
     assert.match(
-      out.devices[0].coverageReason,
-      /would look identical/,
-      'the reason must state that a failed tunnel command on a reachable device is indistinguishable here'
+      reason,
+      /cannot tell which of two things happened/,
+      'the reason must state the ambiguity rather than ranking one branch of it'
     );
+    // ⛔ And it must NOT rank one branch as more likely. The old wording said
+    // "most likely it has none configured", which was demonstrably wrong on the
+    // live fleet: OKF(F2) is classified no_rows_polled while its own syslog in the
+    // same database carries IPsec tunnel-stats and SA-installed events.
+    assert.doesNotMatch(reason, /most likely/i);
   });
 
   it('a capable vendor with zero rows and NO successful poll is unconfirmed — nothing may be claimed', () => {
@@ -380,7 +386,13 @@ describe('fleet counts never borrow a number from a device that could not be mea
         joinRow(SANGFOR, null),
       ],
     });
-    assert.deepEqual(out.fleet.tunnels, { total: 3, up: 1, down: 1, unknownStatus: 0, unmeasured: 1 });
+    assert.deepEqual(out.fleet.tunnels, {
+      // ⛔ Lives HERE, beside the counts it qualifies — it was briefly a sibling of
+      // , so the component read undefined and the caveat never rendered.
+      downObservability: {
+        blindDevices: 1, blindTunnels: 2, unknownDevices: 1, blindVendors: ['paloalto'],
+      },
+      total: 3, up: 1, down: 1, unknownStatus: 0, unmeasured: 1 });
     assert.equal(out.fleet.devices.total, 3);
     assert.equal(out.fleet.devices.claimable, 1);
     assert.equal(out.fleet.devices.reportingStale, 1);
