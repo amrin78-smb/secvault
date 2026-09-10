@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.102.1': [
+    "Corrected the Fortinet feed summary, which described advisories as ingested and stored when they are deliberately not stored.",
+  ],
   '2.102.0': [
     "Fortinet advisory updates have been failing since 19 August because FortiGuard now serves a bot-protection page instead of the advisory. SecVault was reporting this as \"the advisory predates CSAF\" — a wrong reason that hid the real one for three weeks.",
     "Feed errors now name what actually happened: a bot challenge, a network error, an HTTP error, or a genuine parsing failure. A sentence about an advisory's contents can no longer be said about a page that was never served.",
