@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.103.2': [
+    "Fixed a false negative in vulnerability matching. Vendors publish a separate fix for each maintenance line, and PAN-OS lists the LOWEST of them as the headline bound — so a firewall on a newer line than that bound was treated as out of scope even when its own line had a fix it had not reached.",
+    "On this fleet that hid 6 advisories across all 11 Palo Alto firewalls, including a CVSS 9.2 unauthenticated remote code execution. They now appear.",
+    "A named maintenance line is now a definite answer in both directions: at or past its fix means not affected, behind it means affected, regardless of the headline bound.",
+  ],
   '2.103.1': [
     "The Advisories page now lists all six feeds. CVE.org and EPSS were running and storing data but were missing from that banner, because it kept its own separate copy of the feed list.",
   ],
