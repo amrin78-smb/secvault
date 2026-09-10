@@ -220,3 +220,22 @@ If the next session has one day: **Tier 3 item 1** (snapshot backfill), then sta
 ~~If it has a week: **Tier 1 item 1**.~~ Done v2.93.0. The next largest is **Tier 1 item 2**
 (threshold alerting) — dispatch already exists, so it is mostly rule definition — then **item 3**
 (report library), which item 1’s export now gives a second report type to generalise from.
+
+## ⛔ `advisories.cve_id` is UNIQUE with ONE vendor — a CVE can be squatted (raised 2026-09-10)
+
+CLAUDE.md already states "a CVE affecting two vendors stays with whichever ingested it first". That
+was written as a tolerable simplification. Live evidence says it has teeth:
+
+**CVE-2022-0778** (OpenSSL) is republished by Fortinet as FG-IR-22-059 and is still in FortiGuard's
+current RSS. In this database it belongs to **`paloalto`, with 6 real version ranges and
+`matchability='matched'`**. Whichever feed had run first would own it — and a feed that could only
+supply a bare score with no ranges would have permanently displaced 6 real ones.
+
+This is why the Fortinet degraded RSS path REPORTS but does not STORE (see `cve-pipeline.md`). That
+is a workaround at one call site, not a fix: any current or future feed can still squat.
+
+The real fix is making the identity per-vendor — `UNIQUE (cve_id, vendor)` plus a per-vendor read
+path — so two vendors can each hold their own advisory for the same CVE. That is a schema change
+touching `advisories`, `device_cve_assessments`, `versionMatcher`, the KEV cross-reference and every
+fleet count, so it needs its own decision. Adding more feeds (CVE.org, EPSS) RAISES this risk, since
+each new source is another candidate first-ingester.

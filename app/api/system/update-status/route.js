@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.102.0': [
+    "Fortinet advisory updates have been failing since 19 August because FortiGuard now serves a bot-protection page instead of the advisory. SecVault was reporting this as \"the advisory predates CSAF\" — a wrong reason that hid the real one for three weeks.",
+    "Feed errors now name what actually happened: a bot challenge, a network error, an HTTP error, or a genuine parsing failure. A sentence about an advisory's contents can no longer be said about a page that was never served.",
+    "The Fortinet feed now gives up after 3 consecutive challenges instead of retrying all 50 advisories: 63 seconds down to 4 seconds per run.",
+    "NVD has never once succeeded on this deployment — it is blocked at the network edge, and the CIRCL fallback has been supplying the data. Each run wasted 8 minutes rediscovering that 11 times over; it now detects it once and takes about 2 minutes.",
+    "That saves roughly 26 minutes of pointless waiting per day. NVD is still tried first on every run, so nothing needs changing if the block is lifted.",
+    "Advisories recovered without version information are now marked as unmatchable rather than being treated as \"this device is not affected\".",
+  ],
   '2.101.1': [
     "Fixed: site-to-site IPsec tunnels between firewalls were being recorded as successful VPN logins by people. Every Fortinet VPN success on the fleet was one of these.",
     "Those events also carried the peer firewall’s IP address in the username field, which had created 13 fake users in the traffic reports and 8 in the VPN login list.",
