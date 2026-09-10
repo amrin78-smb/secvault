@@ -1791,3 +1791,34 @@ Live first run: 226 joinable sessions / 0 unjoinable; **150 of 191 address-hours
 22,932 of 33,580 events attributed to 105 named users; 1 REAL collision (two different users on one
 address, correctly given to neither). Bytes were dense (105/105 measurable) because `bytes_summable`
 is true exactly for PAN-OS session-close rows and these gateways are all Palo Alto.
+
+## `lib/engines/vpnTunnelHealth.js` (added 2026-09-10, v2.103.0)
+
+`getVpnTunnelHealth(pool, {now, staleAfterMinutes, pollEvidenceLookbackDays, deviceId})` — site-to-site
+IPsec tunnel health, computed at READ time. No table, no cron job (the `deviceHealth.js` precedent).
+
+⛔ **`vpn_ipsec_tunnels` is a LATEST SNAPSHOT** — confirmed live: `count(DISTINCT collected_at)` is
+exactly 1 for every device with rows. So **"down since" is NOT derivable**; every tunnel carries
+`downSince: null` plus a `downSinceReason`, and the panel states it above the table because
+`collected_at` sits right there looking like an answer.
+
+⛔ **A stale snapshot collapses EVERY status to `unmeasured` — including `down`.** A stale "down"
+never enters the down list, and fleet counts come only from fresh devices. Live: TSR_EKC held a
+34-day-old `up` that was being displayed as current fact.
+
+⛔ **`coverage` is five-valued, never a zero**: `reporting` / `no_rows_polled` / `no_rows_unconfirmed`
+/ `unsupported` / `support_unknown`. It uses `device_connectivity_history(source='vpn')`, NOT
+`devices.last_rules_collected_at` — that column is stamped by the daily rule/config pull, a different
+job. **No column anywhere records a successful TUNNEL pull**, so a tunnel command that failed on a
+reachable device is indistinguishable from a device with none configured, and `coverageReason` says so.
+
+⛔ **`downObservable` — reporting tunnels and reporting DOWN tunnels are different capabilities.**
+Palo Alto's `show vpn ipsec-sa` and cisco_asa's `show vpn-sessiondb l2l` list ESTABLISHED tunnels
+only, so a down tunnel is ABSENT rather than a row saying "down". Live that is **141 of 151 tunnels**.
+For those devices the count is CURRENTLY-ESTABLISHED tunnels, not CONFIGURED ones, and a zero in
+"Tunnels down" is not a measurement. The UI states this; do not let it read as an all-clear.
+
+⛔ `classifyTunnelStatus` recognises only `up`/`down` — the complete enumeration SecVault's own
+adapters write. Anything else is `unknown` AND lands in `unrecognisedStatuses` so the enumeration is
+widened on evidence, never on a guess. A lint-shaped test greps the eight adapter sources and fails
+if `VENDOR_TUNNEL_SUPPORT` disagrees with which actually define `getVpnTunnels()`.

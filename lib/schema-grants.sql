@@ -164,3 +164,12 @@ GRANT SELECT ON TABLE background_jobs TO nocvault_readonly;
 
 GRANT SELECT ON TABLE vpn_sessions TO claude_readonly;
 GRANT SELECT ON TABLE vpn_sessions TO nocvault_readonly;
+
+-- EPSS enrichment columns on `advisories` (2026-09-10, lib/feeds/epss.js).
+-- No secret material: a public exploitation probability, its percentile, the
+-- model version and two timestamps. `advisories` is already granted above; a
+-- table-level GRANT SELECT covers columns added later, but these are re-granted
+-- explicitly and idempotently so this file stays the single readable answer to
+-- "who can read what", per CLAUDE.md's per-table (never ON ALL TABLES) rule.
+GRANT SELECT ON TABLE advisories TO claude_readonly;
+GRANT SELECT ON TABLE advisories TO nocvault_readonly;

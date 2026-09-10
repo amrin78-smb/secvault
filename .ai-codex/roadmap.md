@@ -239,3 +239,18 @@ path — so two vendors can each hold their own advisory for the same CVE. That 
 touching `advisories`, `device_cve_assessments`, `versionMatcher`, the KEV cross-reference and every
 fleet count, so it needs its own decision. Adding more feeds (CVE.org, EPSS) RAISES this risk, since
 each new source is another candidate first-ingester.
+
+## Two live data bugs found 2026-09-10, reported not fixed
+
+### 1. 12 advisories store `cvss_score = 0.0` with `cvss_source IS NULL` (all `paloalto`)
+Three are real CVE ids that CVE.org scores properly: CVE-2023-44487 → **7.5**, CVE-2023-4863 → **8.8**,
+CVE-2022-22963 → **9.8**. So **CVE-2022-22963 sits in `monitor` on a fabricated 0 when decision-tree rule 3
+(`cvss>=9.0`) should fire.** A real, live mis-prioritisation.
+⛔ It is NOT safe to fix with a blanket rule: a 0.0 base score is publishable, and 682 rows predate
+`cvss_source`, so "0.0 with no source is fake" would also condemn a genuine 0.0. The fix must be per-row and
+evidence-based (an authoritative source publishing a different score), in the producing feed plus a
+`lib/migrate.js` backfill. `cveorg`’s run summary already surfaces them as `suspicious_zero_scores`.
+
+### 2. `nvd.js` never asks CIRCL for the score it actually has
+CIRCL’s legacy per-CVE endpoint returns NVD’s own CVSS and is reachable while NVD itself is blocked; the
+search endpoint SecVault uses does not carry it. This is the concrete path to filling the 255 missing scores.

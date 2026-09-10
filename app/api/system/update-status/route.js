@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.103.0': [
+    "Two new vulnerability sources: FIRST EPSS (probability a vulnerability will be exploited) and CVE.org (the authoritative CVE record). Both can only enrich advisories SecVault already tracks \u2014 neither can create one.",
+    "945 of your 1,004 advisories now carry an exploit probability. The 59 without one are Palo Alto advisory IDs rather than CVEs, and are shown as not-scored rather than as zero.",
+    "EPSS does not change any priority today: the one Patch Now item is also the highest-scoring at 0.86, and everything Scheduled scores under 0.02. It is most useful for spotting work that can safely wait.",
+    "CVE.org filled none of the 255 missing severity scores \u2014 those scores were added by NVD analysts and never existed in the CVE record itself. It is still worth having for newly published CVEs and as a second reachable source.",
+    "New VPN Tunnel Health tab: site-to-site IPsec status, which firewalls cannot be asked, and which tunnel peers are other managed firewalls.",
+    "Tunnel health states plainly that Palo Alto firewalls only report tunnels that are UP, so a zero in Tunnels Down is not a measurement for them, and that how long a tunnel has been down cannot be answered without keeping history.",
+  ],
   '2.102.4': [
     "The Fortinet advisory feed now reads from Fortinet’s static file host first. It is the same document, but it no longer depends on the site that is currently blocking us to serve the redirect — the feed is the only working Fortinet input right now.",
     "If every source fails, the sync now reports an error instead of a clean run with nothing in it.",

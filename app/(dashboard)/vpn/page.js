@@ -17,6 +17,7 @@ import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/s
 import VpnDetections from '../../../components/vpn/VpnDetections';
 import { getVpnDetections } from '../../../lib/engines/vpnDetections';
 import VpnUserTraffic from '../../../components/vpn/VpnUserTraffic';
+import VpnTunnelHealth from '../../../components/vpn/VpnTunnelHealth';
 import {
   DEFAULT_WINDOW_DAYS as TRAFFIC_DEFAULT_DAYS,
   MAX_WINDOW_DAYS as TRAFFIC_MAX_DAYS,
@@ -156,7 +157,10 @@ export default async function VpnFleetPage({ searchParams }) {
     // `hmDevice`/`hmDays`/`hmTop` are the heatmap's own filter and are dropped
     // when switching tabs, for the same reason the page params are: a filter
     // from a view you are leaving means nothing in the view you are entering.
-    '/vpn', FLEET_VPN_TABS, sp, tab, ['page', 'evPage', 'hmDevice', 'hmDays', 'hmTop', 'utDevice', 'utDays', 'utTop', 'utUser']
+    '/vpn', FLEET_VPN_TABS, sp, tab, [
+      'page', 'evPage', 'hmDevice', 'hmDays', 'hmTop',
+      'utDevice', 'utDays', 'utTop', 'utUser', 'thDevice',
+    ]
   );
 
   // ⛔ Only the ACTIVE tab queries. The log-activity view costs ~7s on a
@@ -203,6 +207,15 @@ export default async function VpnFleetPage({ searchParams }) {
           days={clampInt(firstParam(sp.hmDays), DEFAULT_WINDOW_DAYS, 1, 90)}
           topUsers={clampInt(firstParam(sp.hmTop), DEFAULT_TOP_USERS, 1, 100)}
         />
+      )}
+
+      {tab === 'tunnels' && (
+        /* Site-to-site IPsec tunnel health, computed at READ time from the
+           latest vpn_ipsec_tunnels snapshot — no history table exists.
+           ⛔ "Down since" is therefore NOT derivable and is never implied.
+           ⛔ And a stale snapshot collapses EVERY status to unmeasured,
+           including down, so a stale "down" never enters the down list. */
+        <VpnTunnelHealth deviceId={firstParam(sp.thDevice) || null} />
       )}
 
       {tab === 'traffic' && (

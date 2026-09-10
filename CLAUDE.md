@@ -930,8 +930,24 @@ SHAPE of the id rather than trusting the provider name.
 | Palo Alto PSIRT | `security.paloaltonetworks.com/api/v1/products/PAN-OS/advisories` | 6h, after NVD | Bulk beta API, ~346 advisories/call, CVE Record Format 5.x. |
 | Fortinet FortiGuard | `fortiguard.com/rss/ir.xml` → CSAF 2.0 JSON | 6h, after PA | RSS discovery-only; CSAF is the real data source. |
 | CISA KEV | `cisa.gov/.../known_exploited_vulnerabilities.json` | 6h | Full download, cross-referenced by cve_id |
+| CVE.org | `cveawg.mitre.org/api/cve/{id}` | 6h, after KEV | **ENRICHMENT-ONLY**, never inserts. CVE Record 5.2. Bounded: ~150 gap rows/run, 13 hash buckets. |
+| FIRST EPSS | `epss.empiricalsecurity.com/epss_scores-current.csv.gz` | 6h, last | **ENRICHMENT-ONLY**, never inserts. Bulk CSV; `api.first.org` fallback. |
 
-Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV. Each feed's failure is isolated (its own try/catch) and never blocks the next; each gets its own `feed_sync_log` row.
+Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV → CVE.org → EPSS.
+
+⛔ **The last two are ENRICHMENT-ONLY and run LAST for that reason** — they add facts to advisories the
+discovery feeds just landed. Neither may ever INSERT an advisory row. `advisories.cve_id` is UNIQUE and
+carries exactly ONE vendor, so an inserting feed can permanently claim a CVE for the wrong vendor (live
+proof: CVE-2022-0778 is an OpenSSL bug Fortinet republishes, and here it belongs to `paloalto` WITH 6 real
+version ranges). `inserted` is a structural 0 for both. EPSS alone covers ~371,000 CVEs against the ~1,000
+this product tracks. See `.ai-codex/roadmap.md` for the schema-level risk that remains.
+
+⛔ **EPSS DOES NOT FEED THE PRIORITY DECISION TREE**, and that is a deliberate, measured decision, not an
+oversight. Measured on the live fleet: 0 advisories are high-EPSS but banded low; the single `patch_now`
+is ALSO the highest EPSS (0.861/99.7th pct); all 26 `scheduled` sit at ≤0.0167. So EPSS would only ever
+*de*-prioritise here. It also disagrees with KEV in BOTH directions — 8 KEV-listed advisories score below
+0.1 (lowest 0.00873) and 56 non-KEV score above 0.1 — so an EPSS gate would have demoted 8 known-exploited
+CVEs. Changing the tree requires documenting it HERE first. Each feed's failure is isolated (its own try/catch) and never blocks the next; each gets its own `feed_sync_log` row.
 
 **NVD → CIRCL fallback** (`vulnerability.circl.lu`) triggers ONLY on a true network-level failure (`err.status == null` — timeout/DNS/connection refused), never on an NVD HTTP error response. `FETCH_TIMEOUT_MS = 20000` on every feed call. Full triggering condition, endpoint, and per-vendor fetch quirks (Palo Alto's beta-bulk-endpoint-only rule, Fortinet's CSAF-over-RSS + 1-second inter-fetch delay): `.ai-codex/cve-pipeline.md`, stages 1-2.
 

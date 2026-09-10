@@ -131,7 +131,7 @@ to the whole fleet.
 because parallel work held that file; fold it back in when convenient — the local append carries a
 comment saying so.
 
-`detections` is the sixth tab (`?vtab=detections`). Both `presence` and `detections` are now proper
+`tunnels` is the seventh tab (`?vtab=tunnels`). `detections` is the sixth tab (`?vtab=detections`). Both `presence` and `detections` are now proper
 entries in `lib/vpnTabs.js`'s `FLEET_VPN_TABS` — the temporary local shim in `page.js` is gone.
 ⛔ APPENDED, never inserted: `status` stays first so a bare `/vpn` bookmark still lands on it, and
 `key` is a URL contract — add and deprecate, never rename.

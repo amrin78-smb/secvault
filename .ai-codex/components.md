@@ -338,3 +338,14 @@ volume renders with a `≥` prefix.
 ⛔ **An empty result renders the REASON** (`no_session_history` / `window_shorter_than_one_hour` /
 `no_traffic_rows` / `no_assigned_addresses` / `window_empty_after_bounds`), never an empty user list.
 ⛔ An address logged by two firewalls gets an `x2` badge — a double count declared rather than halved.
+
+## components/vpn/VpnTunnelHealth.js (added 2026-09-10)
+
+Async server component on `/vpn?vtab=tunnels`. Props `staleAfterMinutes` (default 120 — the VPN poll
+is 5-59 min, so 2-4 missed polls) and `deviceId`; both optional.
+
+⛔ Renders the **down-observability caveat** whenever any device's tunnel command reports only
+established tunnels. Without that sentence the "Tunnels down" tile reads as an all-clear for
+firewalls whose down-ness SecVault structurally cannot see (live: 141 of 151 tunnels).
+⛔ Coverage gaps render as a hueless `--unmeasured` chip with the reason in `title`; Up/Down cells
+render `NotMeasured`, never `0`.

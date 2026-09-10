@@ -995,7 +995,7 @@ ALTER TABLE advisories ADD COLUMN IF NOT EXISTS vulnerability_category TEXT;
 -- ⛔ These columns are descriptive, never an input to the priority tree. The
 -- tree bands on cvss_score alone (CLAUDE.md rules 3 and 4); recording where a
 -- score came from must not quietly become a second way to change a band.
-ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cvss_source TEXT;   -- nvd | circl | psirt
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cvss_source TEXT;   -- nvd | circl | psirt | cveorg
 ALTER TABLE advisories ADD COLUMN IF NOT EXISTS cvss_version TEXT;  -- '4.0' | '3.1' | '3.0' | '2.0'
 
 CREATE INDEX IF NOT EXISTS idx_advisories_vendor ON advisories(vendor);
@@ -2295,3 +2295,69 @@ CREATE INDEX IF NOT EXISTS idx_vpn_sessions_open
 -- Phase C joins on the assigned address within a time window.
 CREATE INDEX IF NOT EXISTS idx_vpn_sessions_assigned_ip
   ON vpn_sessions (assigned_ip, login_time DESC) WHERE assigned_ip IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- EPSS (FIRST.org Exploit Prediction Scoring System) — added 2026-09-10.
+-- Populated by lib/feeds/epss.js, which is ENRICHMENT-ONLY: it may UPDATE an
+-- advisory that already exists and may NEVER INSERT one. EPSS covers ~371,000
+-- CVEs against this product's ~1,004 advisories, and `advisories.cve_id` is
+-- UNIQUE with a single `vendor`, so a feed that inserted could permanently
+-- squat a CVE under the wrong vendor (demonstrated live by CVE-2022-0778).
+--
+-- ⛔ ALTER-only, deliberately: these columns are NOT in the CREATE TABLE body
+-- above. `CREATE TABLE IF NOT EXISTS` is a no-op on every already-deployed
+-- server, so a column added there alone would never reach production — the
+-- incident CLAUDE.md records twice (device_versions.serial,
+-- audit_findings.matched_rule_ids). Adding them here covers a fresh install
+-- (schema.sql runs top to bottom) and an upgrade identically.
+--
+-- ⛔ NO SCORE IS NULL, NEVER 0. An EPSS of 0.00000 is a real measurement
+-- ("essentially never exploited"); the absence of one is not a measurement at
+-- all. Reading these three columns together tells the states apart:
+--
+--   epss_checked_at IS NULL                  -- the feed has never looked this
+--                                            -- advisory up
+--   epss_checked_at set, epss_score IS NULL  -- looked up; FIRST publishes no
+--                                            -- score for this identifier. Live
+--                                            -- on this fleet that is 59 of
+--                                            -- 1,004 rows, and all 59 are
+--                                            -- `PAN-SA-*` Palo Alto advisory
+--                                            -- ids, which are not CVEs at all
+--   epss_score = 0                           -- FIRST published a genuine zero
+--
+-- Never write 0 for an absent score, never coerce NULL to 0 in a query or a
+-- renderer, and sort with NULLS LAST — the same rule as firewall_rules.hit_count.
+--
+-- ⛔ epss_score is a PROBABILITY (0-1, "chance of exploitation in the next 30
+-- days") and epss_percentile is a RANK among all scored CVEs. They are
+-- different quantities that both live in [0,1] and must never be conflated in a
+-- column, a label or an axis: 0.02 probability sits near the 80th percentile.
+
+-- Probability of exploitation in the next 30 days, 0-1. NULL = no score.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_score NUMERIC(6, 5);
+-- Rank of that probability among all scored CVEs, 0-1. NOT the probability.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_percentile NUMERIC(6, 5);
+-- FIRST's OWN date for this score. ⛔ Mandatory alongside a score: EPSS is
+-- re-modelled and republished DAILY, so a score with no date cannot be told
+-- from one frozen in place by a feed that silently stopped running. The feed
+-- refuses to store a score it cannot date.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_score_date DATE;
+-- The EPSS model that produced the score (e.g. 'v2026.06.15'). Scores are not
+-- comparable across model versions, which is the same provenance lesson
+-- cvss_source/cvss_version exist for. NULL when the source did not say — the
+-- per-CVE api.first.org fallback does not publish it, and labelling a new score
+-- with the previous run's model would be worse than admitting we do not know.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_model_version TEXT;
+-- When SecVault last LOOKED THIS CVE UP, whether or not a score came back.
+-- ⛔ Stamped only after a fetch actually succeeded. Stamping it after a failed
+-- download would assert "we checked and there is no score", which is the
+-- failed-read-as-a-fact bug. A recent epss_checked_at beside an old
+-- epss_score_date is the honest reading of "we looked today; FIRST no longer
+-- scores this identifier" — the feed never clears a score.
+ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_checked_at TIMESTAMPTZ;
+
+-- "Which of our advisories are most likely to be exploited" is the whole point
+-- of the feed, so the ordering it will be read in is indexed. NULLS LAST
+-- matches how an unmeasured value must be sorted everywhere in this codebase.
+CREATE INDEX IF NOT EXISTS idx_advisories_epss_score
+  ON advisories (epss_score DESC NULLS LAST);
