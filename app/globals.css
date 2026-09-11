@@ -997,8 +997,29 @@ select.input {
    navigation you have to scroll to see is a navigation you stop trusting to
    show you everything. Spacing here uses the --s* scale so a future density
    change reaches it; do not reintroduce loose px. */
-.sv-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: var(--s2) 0 var(--s2); }
-.sv-nav-group { display: flex; flex-direction: column; gap: 2px; }
+/* ⛔ min-height: 0 AND overflow-y: auto ARE A SAFETY NET, NOT POLISH.
+   .sv-shell is height:100vh with overflow:hidden, and a flex item defaults to
+   min-height:auto — it refuses to shrink below its content. So the rail simply
+   GREW PAST the viewport and the shell clipped it: measured with one extra
+   group added, the last items sat at 917px on an 800px screen, invisible AND
+   unreachable, with no scrollbar to hint they existed. Navigation entries that
+   silently disappear are worse than a scrollbar. (Same rule as the min-width:0
+   the Device Details grid needed, in the other axis.)
+   With the tightening below, scrolling should stay rare — this is the floor,
+   not the plan. */
+.sv-nav {
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
+  padding: var(--s2) 0 var(--s2);
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+.sv-nav::-webkit-scrollbar { width: 6px; }
+.sv-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+.sv-nav::-webkit-scrollbar-track { background: transparent; }
+/* Rows carry their own hit area; a gap on top of it only cost vertical room. */
+.sv-nav-group { display: flex; flex-direction: column; gap: 0; }
 /* ⛔ This gap is what separates the four questions, so it is TRIMMED, never
    collapsed — losing it turns four clusters back into one long list. */
 .sv-nav-group + .sv-nav-group { margin-top: var(--s3); }
@@ -1019,8 +1040,8 @@ select.input {
 .sv-nav-group-pinned { margin-top: auto; padding-top: var(--s3); }
 /* Collapsed: no headings, so a hairline keeps the clusters legible. */
 .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: var(--s2);
+  padding-top: var(--s2);
   border-top: 1px solid rgba(255,255,255,0.07);
 }
 .sv-nav a {
@@ -1028,7 +1049,7 @@ select.input {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 1px 10px;
+  margin: 0 10px;
   padding: var(--s2) 20px;
   border-radius: var(--radius);
   color: rgba(255,255,255,0.5);
@@ -1039,7 +1060,7 @@ select.input {
   white-space: nowrap;
   overflow: hidden;
 }
-.sv-sidebar.collapsed .sv-nav a { padding: var(--s2); justify-content: center; margin: 1px 8px; }
+.sv-sidebar.collapsed .sv-nav a { padding: var(--s2); justify-content: center; margin: 0 8px; }
 .sv-sidebar.collapsed .sv-nav a span:not(.sv-nav-chip) { display: none; }
 .sv-nav-chip {
   /* 24 with a 16px glyph inside still leaves 4px of breathing room. */
