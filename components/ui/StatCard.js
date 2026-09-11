@@ -13,6 +13,24 @@ import IconChip from './IconChip';
 // When provided, an IconChip (same colored-badge language as the sidebar's
 // nav chips) renders pinned to the tile's top-right corner, positioned so it
 // never disturbs the existing value/label/sub stack below it.
+// Raw ramp hue -> its text-safe counterpart. These are the same --tint-*-fg tokens
+// components/analysis/severityRamp.js maps the whole ramp to; the pairing lives
+// there, this is just the lookup by raw value.
+const TEXT_SAFE_VALUE = {
+  'var(--red)': 'var(--tint-danger-fg)',
+  'var(--orange)': 'var(--tint-orange-fg)',
+  'var(--yellow)': 'var(--tint-warn-fg)',
+  'var(--green)': 'var(--tint-success-fg)',
+  'var(--blue)': 'var(--tint-info-fg)',
+  'var(--purple)': 'var(--tint-purple-fg)',
+  'var(--teal)': 'var(--tint-teal-fg)',
+  'var(--accent-teal)': 'var(--tint-teal-fg)',
+  'var(--sev-crit)': 'var(--tint-danger-fg)',
+  'var(--sev-high)': 'var(--tint-orange-fg)',
+  'var(--sev-med)': 'var(--tint-warn-fg)',
+  'var(--sev-ok)': 'var(--tint-success-fg)',
+};
+
 export default function StatCard({
   label,
   value,
@@ -50,7 +68,18 @@ export default function StatCard({
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
   const accentColor = color;
+  // ⛔ THE VALUE IS ALWAYS TEXT, so it always takes the text-safe form of the ramp.
+  // Passing a raw severity hue is correct for the 4px accent border and wrong for
+  // the number: measured on the live dashboard, --orange and --yellow both sat at
+  // 3.63-3.64:1 against the card, under WCAG 1.4.3’s 4.5:1.
+  //
+  // ⛔ Mapped HERE rather than at each call site on purpose. Fixing only the six
+  // dashboard headline tiles left the CVE-severity and ruleset tiles failing at the
+  // same ratios — there are ~40 call sites and the next one added would have been
+  // wrong again. An explicit  still wins, and anything not in the map is
+  // passed through untouched.
   const valueColor = textColor
+    || TEXT_SAFE_VALUE[color]
     || (color === 'var(--border)' ? 'var(--text-primary)' : color);
 
   // ⛔ ROW LAYOUT. The value moves out of the vertical stack and sits beside the
