@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.105.0': [
+    "Pages and tabs now show a loading indicator while they fetch. Slow views — the VPN log activity tab takes about seven seconds — no longer look like the app has frozen.",
+    "A thin progress bar appears under the header for tab changes, and a spinner fills the page when moving between sections.",
+    "Export and download links do not trigger it, and it gives up rather than spinning forever if a page never arrives.",
+  ],
   '2.104.0': [
     "Filtering User Traffic to one person or one firewall now shows THEIR unattributed traffic, not the whole fleet’s. Previously every filtered view repeated the same fleet totals and listed other employees’ addresses underneath the filter.",
     "For one user that is the difference between “27% of all traffic seen” and 9.9% of their own.",

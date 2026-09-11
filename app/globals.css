@@ -1287,3 +1287,58 @@ tbody tr td { transition: background 0.12s ease; }
   text-overflow: clip;
   word-break: break-word;
 }
+
+/* ── Navigation progress ────────────────────────────────────────────────────
+   A thin indeterminate bar under the header while a navigation is in flight.
+   See components/layout/NavProgress.js for why this exists alongside
+   loading.js (route-level loading boundaries do NOT fire for a tab change,
+   because every tab in this product is a search param on the same segment). */
+.nav-progress {
+  position: relative;
+  height: 3px;
+  width: 100%;
+  overflow: hidden;
+  background: var(--border-light);
+  flex: 0 0 auto;
+}
+
+.nav-progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: var(--primary);
+  border-radius: var(--radius-pill);
+  animation: nav-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes nav-progress-slide {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%;  width: 45%; }
+  100% { left: 100%; width: 40%; }
+}
+
+/* ⛔ THE GLOBAL reduced-motion BLOCK SETS animation-iteration-count: 1 !important,
+   which would run this bar ONCE and leave it parked off-screen — an indicator
+   that indicates nothing, on the setting chosen by people most likely to need
+   it. So for reduced motion the bar does not move at all: it sits as a static
+   partial fill, which still reads as "in progress" rather than "complete", and
+   the role="status" text carries it for screen readers either way. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress-bar {
+    animation: none !important;
+    left: 0;
+    width: 35%;
+  }
+}
+
+/* Visually hidden but announced. Used by NavProgress so the bar is not the ONLY
+   signal — a progress bar communicates nothing to a screen reader. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

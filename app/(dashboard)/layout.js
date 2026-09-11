@@ -1,8 +1,10 @@
+import { Suspense } from 'react';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../api/auth/[...nextauth]/route';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
+import NavProgress from '../../components/layout/NavProgress';
 import pkg from '../../package.json';
 
 export default async function DashboardLayout({ children }) {
@@ -14,6 +16,12 @@ export default async function DashboardLayout({ children }) {
       <div className="sv-body">
         <Sidebar version={pkg.version} />
         <div className="sv-content-col">
+          {/* ⛔ Suspense is REQUIRED: NavProgress calls useSearchParams(), which
+              without a boundary opts the whole subtree into client rendering.
+              fallback={null} because the bar is only ever shown mid-navigation. */}
+          <Suspense fallback={null}>
+            <NavProgress />
+          </Suspense>
           <UpdateNotifier />
           <main className="sv-content">{children}</main>
         </div>
