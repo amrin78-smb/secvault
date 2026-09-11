@@ -991,14 +991,24 @@ select.input {
    the grouping work; the heading only names it. That matters because the
    heading is hidden when the sidebar is collapsed (no room at 64px) and the
    structure has to survive without it. */
-.sv-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: 14px 0 10px; }
+/* ⛔ ROW GEOMETRY IS TUNED TO FIT A GROUP THAT DOES NOT EXIST YET. Measured
+   2026-09-11 at a 900px viewport: 12 items ended 5px from the bottom edge, so
+   the next nav group added would have pushed the rail into a scroll — and a
+   navigation you have to scroll to see is a navigation you stop trusting to
+   show you everything. Spacing here uses the --s* scale so a future density
+   change reaches it; do not reintroduce loose px. */
+.sv-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: var(--s2) 0 var(--s2); }
 .sv-nav-group { display: flex; flex-direction: column; gap: 2px; }
-.sv-nav-group + .sv-nav-group { margin-top: 14px; }
+/* ⛔ This gap is what separates the four questions, so it is TRIMMED, never
+   collapsed — losing it turns four clusters back into one long list. */
+.sv-nav-group + .sv-nav-group { margin-top: var(--s3); }
 .sv-nav-group-label {
-  padding: 0 22px 6px;
+  padding: 0 22px var(--s1);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 500;
+  /* Bold: at 10px with 0.16em tracking on a dark ground, 500 read as a faint
+     caption rather than a heading for the cluster beneath it. */
+  font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: rgba(255,255,255,0.30);
@@ -1006,7 +1016,7 @@ select.input {
   overflow: hidden;
 }
 /* Settings sits at the bottom of the rail, away from the four questions. */
-.sv-nav-group-pinned { margin-top: auto; padding-top: 14px; }
+.sv-nav-group-pinned { margin-top: auto; padding-top: var(--s3); }
 /* Collapsed: no headings, so a hairline keeps the clusters legible. */
 .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group {
   margin-top: 10px;
@@ -1017,9 +1027,9 @@ select.input {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin: 1px 10px;
-  padding: 11px 20px;
+  padding: var(--s2) 20px;
   border-radius: var(--radius);
   color: rgba(255,255,255,0.5);
   font-size: var(--text-md);
@@ -1029,10 +1039,11 @@ select.input {
   white-space: nowrap;
   overflow: hidden;
 }
-.sv-sidebar.collapsed .sv-nav a { padding: 11px; justify-content: center; margin: 1px 8px; }
+.sv-sidebar.collapsed .sv-nav a { padding: var(--s2); justify-content: center; margin: 1px 8px; }
 .sv-sidebar.collapsed .sv-nav a span:not(.sv-nav-chip) { display: none; }
 .sv-nav-chip {
-  width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
+  /* 24 with a 16px glyph inside still leaves 4px of breathing room. */
+  width: 24px; height: 24px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.45);
   transition: all .15s;

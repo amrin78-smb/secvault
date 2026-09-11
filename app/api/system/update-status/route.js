@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.105.1': [
+    "Tightened the sidebar so new sections can be added without the menu scrolling. The twelve current items previously ended 5px from the bottom of a standard screen.",
+    "Section headings (MONITOR, INVENTORY, RISK, ACCESS) are now bold.",
+  ],
   '2.105.0': [
     "Pages and tabs now show a loading indicator while they fetch. Slow views — the VPN log activity tab takes about seven seconds — no longer look like the app has frozen.",
     "A thin progress bar appears under the header for tab changes, and a spinner fills the page when moving between sections.",
