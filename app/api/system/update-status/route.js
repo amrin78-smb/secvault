@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.105.3': [
+    "The Exposure page is now paginated, with a page-size choice. It was rendering every internet-facing path on one endlessly scrolling page.",
+    "The summary tiles and the 'why the top paths scored as they did' panel still describe the whole fleet, not just the page you are on.",
+  ],
   '2.105.1': [
     "Tightened the sidebar so new sections can be added without the menu scrolling. The twelve current items previously ended 5px from the bottom of a standard screen.",
     "Section headings (MONITOR, INVENTORY, RISK, ACCESS) are now bold.",

@@ -6,6 +6,8 @@ import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import { computeFleetExposure } from '../../../lib/engines/exposureQuery';
 import { SEVERITY_BADGE_COLOR, SEVERITY_LABEL } from '../../../components/analysis/severityRamp';
+import Pagination from '../../../components/ui/Pagination';
+import { resolvePage, resolvePageSize, paginateArray, DEFAULT_PAGE_SIZE } from '../../../lib/pagination';
 
 export const dynamic = 'force-dynamic';
 
@@ -216,13 +218,27 @@ function observationBadge(observation) {
   return <Badge color="warning">Unmeasured</Badge>;
 }
 
-export default async function ExposurePage() {
+export default async function ExposurePage({ searchParams }) {
   const fleet = await computeFleetExposure(pool, { lookbackDays: 7 });
   const { totals } = fleet;
 
-  const rows = fleet.devices
+  // ⛔ `allRows` IS THE FLEET, and several things below must keep using it
+  // rather than the current page: the KPI tiles, the unmeasured caveat, and the
+  // "why the top paths scored as they did" panel, which is about the highest-
+  // severity paths ANYWHERE — not the highest-severity paths that happen to be
+  // on page 3. Scoping either of those to the page would turn a fleet statement
+  // into a per-page one without changing a word of its label.
+  const allRows = fleet.devices
     .flatMap((d) => d.paths.map((p) => ({ ...p, deviceName: d.name, deviceId: d.deviceId })))
     .sort((a, b) => b.score - a.score);
+
+  // Paginated in memory: exposure paths are COMPUTED per request from rules,
+  // interfaces and NAT, not selected from a table, so there is no LIMIT to push
+  // down to SQL. paginateArray clamps a past-the-end ?page= to the last page
+  // rather than rendering an empty table, which would read as "no exposure".
+  const pageSize = resolvePageSize(searchParams?.limit, DEFAULT_PAGE_SIZE);
+  const paged = paginateArray(allRows, resolvePage(searchParams?.page), pageSize);
+  const rows = paged.rows;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -422,6 +438,20 @@ export default async function ExposurePage() {
                   </table>
                 </div>
 
+                {/* ⛔ The label says "exposure paths" and the total is the FLEET total,
+                    not this page’s row count. A pager that says "1-50 of 50" on a
+                    fleet with 300 paths is the same class of error as a filtered view
+                    reporting itself as the whole set. */}
+                <Pagination
+                  basePath="/exposure"
+                  searchParams={searchParams}
+                  page={paged.page}
+                  pageSize={paged.pageSize}
+                  total={paged.total}
+                  label="exposure paths"
+                  pageSizes={[25, 50, 100, 200]}
+                />
+
                 <div
                   style={{
                     marginTop: 12,
@@ -448,7 +478,7 @@ export default async function ExposurePage() {
                   Why the top paths scored as they did
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {rows.slice(0, 8).map((p, i) => (
+                  {allRows.slice(0, 8).map((p, i) => (
                     <div key={`why-${i}`}>
                       <div style={{ ...MONO, fontWeight: 600, marginBottom: 4 }}>
                         {p.deviceName} · {p.publicIp} · {p.service.label} ·{' '}
