@@ -40,6 +40,33 @@ import {
 // so. Neither rollup that carries them is keyed by source address, so there is
 // no honest way to narrow them to one user today. An approximation here would
 // be a claim about where a named person went.
+//
+// ⛔ ═══ UNDER A FILTER, THE REFUSALS ARE SCOPED TOO ═══════════════════════
+// This panel used to draw the engine's FLEET-wide `unattributed` and
+// `collisions` verbatim, whatever the filter. So `?utUser=alice` rendered
+// Alice's one row above 166,892 unnamed events and a collision table naming
+// twenty other employees — the fleet's answer, printed under Alice's question.
+// Two distinct faults: other people's names shown to someone who asked about
+// one person, and a denominator ("27% of all traffic") that is not this
+// filter's.
+//
+// Now: `data.scope` (engine-side, see vpnTrafficAttribution.js) carries the
+// refusals that tie to the filtered subject, and this file renders
+//   * the scoped table, whose row labels state the TIE for each reason — the
+//     subject's own session for partial_hour and collision, the ADDRESS only
+//     for gap, because a gap is by definition nobody's;
+//   * collisions the subject was a PARTY to, and only those. Another
+//     employee's name may appear here solely as the counterparty to the
+//     subject's own missing hour, which is WHY it is missing;
+//   * ONE fleet-wide line, labelled fleet-wide, so a bucket that ties to
+//     nobody in this filter is still visible somewhere. ⛔ Scoping is a lens,
+//     never a deletion: a coverage gap that vanishes when you filter is this
+//     codebase's dominant bug wearing a filter.
+//
+// ⛔ And an unknown filter value is REFUSED, not applied. An id matching no
+// active device used to scope the page to nothing and render confident zeros
+// (VpnUserHeatmap already refused exactly this); a username matching no session
+// rendered the fleet panel under a sentence claiming it was that user's.
 
 const TH = {
   textAlign: 'left',
@@ -61,6 +88,34 @@ const REASON_LABEL = {
   partial_hour: 'Session held the address for only part of the hour',
   collision: 'Two or more sessions held the address in the same hour',
   gap: 'No known session held the address at that time',
+};
+
+// ⛔ THE SAME THREE REASONS, RE-WORDED FOR A FILTER — because the TIE to the
+// filtered subject is different in each case and blurring them would overclaim.
+// partial_hour and collision are tied by the subject's OWN session; a gap is
+// tied by the address alone, and its label has to say that the traffic is
+// nobody's rather than let a reader take it for the subject's.
+const SCOPED_REASON_LABEL = {
+  partial_hour: {
+    label: 'One of their own sessions held the address for only part of the hour',
+    why:
+      'Their session entered or left the address mid-hour. The rest of that hour may have been '
+      + 'somebody else’s, and the hourly rollup cannot separate the two halves — so the whole '
+      + 'hour is unnamed.',
+  },
+  collision: {
+    label: 'Another session held one of their addresses in the same hour',
+    why:
+      'Their own session was one of the parties. The other party is named below, because it is '
+      + 'the reason this hour is missing from their total.',
+  },
+  gap: {
+    label: 'No session at all held one of their addresses, at some hour in this window',
+    why:
+      'This traffic belongs to NOBODY SecVault can name — no session held the address then, so '
+      + 'it is not this subject’s traffic. It is shown here only because the address is one they '
+      + 'held at another time in this window.',
+  },
 };
 
 function formatBytes(n) {
@@ -215,14 +270,140 @@ function coverageStrip(coverage, windowMeta) {
   );
 }
 
-// ⛔ The refusals, given the same weight as the answers. An operator who cannot
-// see how much traffic went unnamed has no way to judge the names above it.
-function unattributedPanel(unattributed, totals, collisions, collisionsTotal) {
-  const rows = ['partial_hour', 'collision', 'gap'].map((key) => ({
+// A bordered aside. `tone` picks the tint PAIR — never a hardcoded hex, and
+// never a tint background without its own -fg, or the text goes invisible in
+// one of the two themes.
+function noticeBox(tone, children) {
+  const tinted = tone === 'warn';
+  return (
+    <div
+      style={{
+        ...SUBTLE,
+        border: '1px solid var(--border)',
+        borderLeft: '3px solid ' + (tinted ? 'var(--orange)' : 'var(--unmeasured)'),
+        borderRadius: 'var(--radius-sm)',
+        padding: 'var(--s2) var(--s3)',
+        background: tinted ? 'var(--tint-warn)' : 'var(--surface-subtle)',
+        color: tinted ? 'var(--tint-warn-fg)' : 'var(--text-secondary)',
+        maxWidth: '95ch',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// What the filter actually selected, in words, for a heading.
+function subjectLabel(scope) {
+  const who = scope.username || scope.requestedUsername;
+  const where = scope.deviceName || scope.deviceId;
+  if (who && scope.deviceId) return `${who} on ${where}`;
+  if (who) return who;
+  if (where) return `gateway ${where}`;
+  return 'this filter';
+}
+
+function collisionTable(collisions) {
+  return (
+    <Table>
+      <colgroup>
+        <col style={{ width: '22%' }} />
+        <col style={{ width: '26%' }} />
+        <col style={{ width: '32%' }} />
+        <col style={{ width: '20%' }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th style={TH}>Assigned address</th>
+          <th style={TH}>Hour (UTC)</th>
+          <th style={TH}>Sessions in contention</th>
+          <th style={{ ...TH, ...NUM }}>Events</th>
+        </tr>
+      </thead>
+      <tbody>
+        {collisions.map((c) => (
+          <tr key={`${c.assignedIp}-${c.hourStart}`}>
+            <td style={{ fontFamily: 'var(--font-mono)' }}>{c.assignedIp}</td>
+            <td>{formatWhen(c.hourStart)}</td>
+            <td>
+              {c.usernames.join(', ')}
+              {c.sameUser ? (
+                <Badge color="muted" title="Both sessions belong to the same person, so the ambiguity is benign — but the traffic is still not attributed.">
+                  same user
+                </Badge>
+              ) : null}
+            </td>
+            <td style={NUM}>{formatCount(c.events)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+function reasonRows(unattributed, labelFor) {
+  return ['partial_hour', 'collision', 'gap'].map((key) => ({
     key,
-    label: REASON_LABEL[key],
+    ...labelFor(key),
     ...unattributed[key],
   }));
+}
+
+function reasonTable(rows) {
+  return (
+    <Table>
+      <colgroup>
+        <col style={{ width: '58%' }} />
+        <col style={{ width: '21%' }} />
+        <col style={{ width: '21%' }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th style={TH}>Reason</th>
+          <th style={{ ...TH, ...NUM }}>Hours</th>
+          <th style={{ ...TH, ...NUM }}>Events</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.key}>
+            <td title={r.why || undefined}>{r.label}</td>
+            <td style={NUM}>{formatCount(r.buckets)}</td>
+            <td style={NUM}>{formatCount(r.events)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+// ⛔ THE ONE FLEET LINE, kept under every filter. Whatever could not be tied to
+// the filtered subject is counted HERE and is never dropped — and it is
+// labelled fleet-wide so it cannot be read as this filter's answer.
+function fleetLine(unattributed, totals, collisionsTotal) {
+  const buckets = ['partial_hour', 'collision', 'gap'].reduce((a, k) => a + unattributed[k].buckets, 0);
+  const events = ['partial_hour', 'collision', 'gap'].reduce((a, k) => a + unattributed[k].events, 0);
+  const share = totals.eventsConsidered > 0
+    ? Math.round((events / totals.eventsConsidered) * 100)
+    : null;
+  return noticeBox('muted', (
+    <span>
+      <strong>Fleet-wide, not this filter:</strong> {formatCount(buckets)} address-hour
+      {buckets === 1 ? '' : 's'} carrying {formatCount(events)} event{events === 1 ? '' : 's'} went
+      unnamed across every VPN pool address in this window
+      {share == null ? '' : ` — ${share}% of all traffic seen from those addresses`}, in{' '}
+      {formatCount(collisionsTotal)} collision{collisionsTotal === 1 ? '' : 's'} and the two other
+      reasons. Anything that could not be tied to this filter is counted in that figure, not
+      dropped.
+    </span>
+  ));
+}
+
+// ⛔ The refusals, given the same weight as the answers. An operator who cannot
+// see how much traffic went unnamed has no way to judge the names above it.
+function fleetUnattributedPanel(data) {
+  const { unattributed, totals, collisions, collisionsTotal } = data;
+  const rows = reasonRows(unattributed, (k) => ({ label: REASON_LABEL[k] }));
   const unnamedEvents = rows.reduce((a, r) => a + r.events, 0);
   const share = totals.eventsConsidered > 0
     ? Math.round((unnamedEvents / totals.eventsConsidered) * 100)
@@ -237,7 +418,7 @@ function unattributedPanel(unattributed, totals, collisions, collisionsTotal) {
             <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>
               Traffic SecVault would not put a name to
             </h3>
-            <p style={{ margin: '4px 0 0', ...SUBTLE, maxWidth: '90ch' }}>
+            <p style={{ margin: 'var(--s1) 0 0', ...SUBTLE, maxWidth: '90ch' }}>
               A VPN pool recycles addresses, so an hour that two sessions touched, or that a session
               held for only part of, cannot be assigned to a person without inventing the answer.
               These events are real and are counted here rather than dropped.
@@ -246,29 +427,7 @@ function unattributedPanel(unattributed, totals, collisions, collisionsTotal) {
                 : ` They are ${share}% of all traffic seen from these addresses in this window.`}
             </p>
           </div>
-          <Table>
-            <colgroup>
-              <col style={{ width: '58%' }} />
-              <col style={{ width: '21%' }} />
-              <col style={{ width: '21%' }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th style={TH}>Reason</th>
-                <th style={{ ...TH, ...NUM }}>Hours</th>
-                <th style={{ ...TH, ...NUM }}>Events</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.key}>
-                  <td>{r.label}</td>
-                  <td style={NUM}>{formatCount(r.buckets)}</td>
-                  <td style={NUM}>{formatCount(r.events)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          {reasonTable(rows)}
           {collisionsTotal > 0 ? (
             <div style={SUBTLE}>
               {formatCount(collisionsTotal)} address-hour
@@ -278,48 +437,101 @@ function unattributedPanel(unattributed, totals, collisions, collisionsTotal) {
                 : ''}
             </div>
           ) : null}
-          {collisions.length > 0 ? (
-            <Table>
-              <colgroup>
-                <col style={{ width: '22%' }} />
-                <col style={{ width: '26%' }} />
-                <col style={{ width: '32%' }} />
-                <col style={{ width: '20%' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th style={TH}>Assigned address</th>
-                  <th style={TH}>Hour (UTC)</th>
-                  <th style={TH}>Sessions in contention</th>
-                  <th style={{ ...TH, ...NUM }}>Events</th>
-                </tr>
-              </thead>
-              <tbody>
-                {collisions.map((c) => (
-                  <tr key={`${c.assignedIp}-${c.hourStart}`}>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>{c.assignedIp}</td>
-                    <td>{formatWhen(c.hourStart)}</td>
-                    <td>
-                      {c.usernames.join(', ')}
-                      {c.sameUser ? (
-                        <Badge color="muted" title="Both sessions belong to the same person, so the ambiguity is benign — but the traffic is still not attributed.">
-                          same user
-                        </Badge>
-                      ) : null}
-                    </td>
-                    <td style={NUM}>{formatCount(c.events)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          ) : null}
+          {collisions.length > 0 ? collisionTable(collisions) : null}
         </div>
       </CardBody>
     </Card>
   );
 }
 
-function notMeasuredPanel(coverage, notes, windowMeta) {
+// ⛔ THE SCOPED PANEL. Same buckets, tied to the filtered subject where a tie
+// genuinely exists — and NOTHING here may name an employee other than the
+// subject, except as the counterparty to a collision the subject was party to.
+function scopedUnattributedPanel(data) {
+  const scope = data.scope;
+  const who = subjectLabel(scope);
+  const rows = reasonRows(scope.unattributed, (k) => SCOPED_REASON_LABEL[k]);
+  const share = scope.eventsConsidered > 0
+    ? Math.round((scope.unattributedEvents / scope.eventsConsidered) * 100)
+    : null;
+  // Zeros are only drawable when traffic on the subject's own addresses was
+  // actually measured. Otherwise they would be the failed-read-as-a-fact bug.
+  const measurable = scope.bucketsConsidered > 0;
+  const sameUser = scope.collisions.filter((c) => c.sameUser).length;
+  const named = scope.collisions.filter((c) => !c.sameUser).length;
+
+  return (
+    <Card>
+      <CardBody>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>
+              Traffic SecVault would not put a name to — {who}
+            </h3>
+            <p style={{ margin: 'var(--s1) 0 0', ...SUBTLE, maxWidth: '90ch' }}>
+              Scoped to the {formatCount(scope.addresses)} address
+              {scope.addresses === 1 ? '' : 'es'} this filter&rsquo;s{' '}
+              {formatCount(scope.matchedSessions)} session
+              {scope.matchedSessions === 1 ? '' : 's'} held during the window. Each row states what
+              ties it to them — hover a row for the detail.
+              {share == null || !measurable
+                ? ''
+                : ` These are ${share}% of the ${formatCount(scope.eventsConsidered)} events seen `
+                  + 'from those addresses.'}
+            </p>
+          </div>
+
+          {/* ⛔ WHICH ZERO IT IS, in the engine's own words. "Nothing unnamed",
+              "nothing attributable", "no traffic on their addresses" and "this
+              filter matched no session" are four different facts and only one
+              of them is good news. */}
+          {scope.reasonText ? noticeBox(measurable ? 'muted' : 'warn', scope.reasonText) : null}
+
+          {measurable ? reasonTable(rows) : null}
+
+          {scope.collisionsTotal > 0 ? (
+            <div style={SUBTLE}>
+              {formatCount(scope.collisionsTotal)} of these address-hours were held by more than one
+              session at once, with one of this filter&rsquo;s own sessions as a party.
+              {sameUser > 0
+                ? ` ${sameUser} are this same person reconnecting onto the address they already held — a benign ambiguity, and still an ambiguity.`
+                : ''}
+              {named > 0
+                ? ` ${named} involve a different account, named below because that is precisely why the hour is missing from this total.`
+                : ''}
+            </div>
+          ) : null}
+          {scope.collisions.length > 0 ? collisionTable(scope.collisions) : null}
+
+          {fleetLine(data.unattributed, data.totals, data.collisionsTotal)}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function unattributedPanel(data) {
+  return data.scope && data.scope.active
+    ? scopedUnattributedPanel(data)
+    : fleetUnattributedPanel(data);
+}
+
+function notMeasuredPanel(data) {
+  const { coverage, notes, window: windowMeta, scope } = data;
+  const scoped = scope && scope.active;
+  // ⛔ ORDER MATTERS. Under a filter, the FILTER's reason is the answer to the
+  // question the operator actually asked; the fleet-level coverage reason would
+  // describe a window they did not ask about. The generic fallback below was
+  // being printed for `?utUser=<nobody>` and claimed traffic HAD been seen from
+  // "these addresses" — of which there were none. It can only ever be reached
+  // unfiltered now.
+  const message = (scoped && scope.reasonText)
+    || coverage.reasonText
+    || (scoped
+      ? 'This filter matched nothing that could be measured. Nothing on this page is its answer.'
+      : 'Traffic was seen from these addresses, but none of it fell in an hour a single '
+        + 'session demonstrably held — so no name can be put to it. Every event is '
+        + 'accounted for below.');
   return (
     <Card>
       <CardBody>
@@ -331,19 +543,32 @@ function notMeasuredPanel(coverage, notes, windowMeta) {
               and still named nobody, traffic WAS seen and every event of it is
               accounted for in the panel below — saying "no data" here would
               contradict the numbers on the same screen. */}
-          <EmptyState
-            message={
-              coverage.reasonText
-              || 'Traffic was seen from these addresses, but none of it fell in an hour a single '
-                + 'session demonstrably held — so no name can be put to it. Every event is '
-                + 'accounted for below.'
-            }
-          />
+          <EmptyState message={message} />
           <div style={SUBTLE}>{notes.vendorScope}</div>
         </div>
       </CardBody>
     </Card>
   );
+}
+
+// ⛔ A FILTER VALUE THAT MATCHES NOTHING IS REFUSED, NOT APPLIED — the
+// precedent is VpnUserHeatmap, which drops an unknown device id rather than let
+// it scope the grid to nothing and render as "no VPN users". Dropping it
+// silently is only half the job: the page then answers a question nobody asked,
+// so the refusal is stated here, at the top, in the operator's terms.
+function rejectedFilterNotice(kind, value) {
+  if (kind === 'device') {
+    return noticeBox('warn', (
+      <span>
+        <strong>That firewall filter was not applied.</strong> The id{' '}
+        <code style={{ fontFamily: 'var(--font-mono)' }}>{value}</code> matches no active device in
+        SecVault, so scoping to it would produce a page of confident zeros about a firewall that is
+        not there. The unfiltered view is shown instead — everything below is the whole fleet, not
+        that device.
+      </span>
+    ));
+  }
+  return null;
 }
 
 /**
@@ -359,8 +584,42 @@ export default async function VpnUserTraffic({
   username = null,
   topUsers = DEFAULT_TOP_USERS,
 }) {
-  const data = await getVpnUserTraffic(pool, { days, deviceId, username, topUsers });
+  // ⛔ VALIDATE THE FILTER BEFORE SCOPING ANYTHING TO IT. An id that matches no
+  // active device is dropped (VpnUserHeatmap's precedent) AND announced — see
+  // rejectedFilterNotice. An unknown USERNAME cannot be checked here, because
+  // "the set of usernames" is exactly what the engine computes; it is validated
+  // there and comes back as scope.reason = 'filter_matched_no_sessions'.
+  const requestedDeviceId = typeof deviceId === 'string' && deviceId.trim()
+    ? deviceId.trim()
+    : null;
+  const { rows: devices } = await pool.query(
+    `SELECT id, name FROM devices WHERE active = true ORDER BY name ASC`
+  );
+  const knownDevice = requestedDeviceId
+    ? devices.find((d) => d.id === requestedDeviceId) || null
+    : null;
+  const rejectedDeviceId = requestedDeviceId && !knownDevice ? requestedDeviceId : null;
+
+  const data = await getVpnUserTraffic(pool, {
+    days,
+    deviceId: knownDevice ? knownDevice.id : null,
+    username,
+    topUsers,
+  });
   const { coverage, notes, totals, users } = data;
+  const scope = data.scope;
+
+  // What this page is currently answering, stated where it cannot be missed.
+  const filterChips = scope && scope.active ? (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s2)', alignItems: 'center' }}>
+      <Badge color="info">Filtered: {subjectLabel(scope)}</Badge>
+      <span style={SUBTLE}>
+        {formatCount(scope.matchedSessions)} matching session
+        {scope.matchedSessions === 1 ? '' : 's'} · {formatCount(scope.addresses)} address
+        {scope.addresses === 1 ? '' : 'es'} held
+      </span>
+    </div>
+  ) : null;
 
   const header = (
     <Card>
@@ -390,6 +649,7 @@ export default async function VpnUserTraffic({
           >
             {notes.destinations}
           </div>
+          {filterChips}
         </div>
       </CardBody>
     </Card>
@@ -399,8 +659,12 @@ export default async function VpnUserTraffic({
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
         {header}
-        {notMeasuredPanel(coverage, notes, data.window)}
-        {data.measured ? unattributedPanel(data.unattributed, totals, data.collisions, data.collisionsTotal) : null}
+        {rejectedFilterNotice('device', rejectedDeviceId)}
+        {notMeasuredPanel(data)}
+        {/* ⛔ Still shown, because every unnamed event has to be visible
+            somewhere — but scoped when a filter is active, so a user who
+            matched nothing is never handed the fleet's collision list. */}
+        {data.measured ? unattributedPanel(data) : null}
       </div>
     );
   }
@@ -408,17 +672,34 @@ export default async function VpnUserTraffic({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
       {header}
+      {rejectedFilterNotice('device', rejectedDeviceId)}
 
       <Card>
         <CardBody>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
             {coverageStrip(coverage, data.window)}
 
+            {/* ⛔ THE DENOMINATOR FOLLOWS THE FILTER. A one-user table above
+                "of 4,025 address-hours seen" invites the reader to divide two
+                numbers that are not about the same thing. Under a filter every
+                tile counts only the subject's own addresses; the fleet figures
+                are still on the page, in the fleet line of the panel below. */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s3)' }}>
-              {statTile('Users named', formatCount(data.usersTotal), `${formatCount(coverage.sessionsJoinable)} joinable sessions`)}
-              {statTile('Hours attributed', formatCount(totals.bucketsAttributed), `of ${formatCount(totals.bucketsConsidered)} address-hours seen`)}
-              {statTile('Events attributed', formatCount(totals.eventsAttributed), `of ${formatCount(totals.eventsConsidered)} seen`)}
-              {statTile('Pool addresses', formatCount(coverage.poolAddresses), 'observed being assigned')}
+              {scope && scope.active ? (
+                <>
+                  {statTile('Users named', formatCount(data.usersTotal), `${formatCount(scope.matchedSessions)} matching sessions`)}
+                  {statTile('Hours attributed', formatCount(scope.hoursAttributed), `of ${formatCount(scope.bucketsConsidered)} address-hours on their addresses`)}
+                  {statTile('Events attributed', formatCount(scope.eventsAttributed), `of ${formatCount(scope.eventsConsidered)} on their addresses`)}
+                  {statTile('Addresses held', formatCount(scope.addresses), `of ${formatCount(coverage.poolAddresses)} pool addresses fleet-wide`)}
+                </>
+              ) : (
+                <>
+                  {statTile('Users named', formatCount(data.usersTotal), `${formatCount(coverage.sessionsJoinable)} joinable sessions`)}
+                  {statTile('Hours attributed', formatCount(totals.bucketsAttributed), `of ${formatCount(totals.bucketsConsidered)} address-hours seen`)}
+                  {statTile('Events attributed', formatCount(totals.eventsAttributed), `of ${formatCount(totals.eventsConsidered)} seen`)}
+                  {statTile('Pool addresses', formatCount(coverage.poolAddresses), 'observed being assigned')}
+                </>
+              )}
             </div>
 
             {data.usersTruncated ? (
@@ -505,7 +786,7 @@ export default async function VpnUserTraffic({
         </CardBody>
       </Card>
 
-      {unattributedPanel(data.unattributed, totals, data.collisions, data.collisionsTotal)}
+      {unattributedPanel(data)}
     </div>
   );
 }

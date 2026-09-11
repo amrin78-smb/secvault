@@ -1822,3 +1822,35 @@ For those devices the count is CURRENTLY-ESTABLISHED tunnels, not CONFIGURED one
 adapters write. Anything else is `unknown` AND lands in `unrecognisedStatuses` so the enumeration is
 widened on evidence, never on a guess. A lint-shaped test greps the eight adapter sources and fails
 if `VENDOR_TUNNEL_SUPPORT` disagrees with which actually define `getVpnTunnels()`.
+
+### `vpnTrafficAttribution` — `result.scope` (added 2026-09-11, v2.104.0)
+
+`attributeTraffic()` now also returns one record per UNATTRIBUTED bucket and per-address `ipTotals`;
+`scopeUnattributed(attributed, subjectSessions)` (pure, exported) narrows them to a filtered subject,
+and `result.scope` carries the outcome (null when no filter is active).
+
+⛔ **The fleet fields (`unattributed`, `collisions`, `totals`) are UNCHANGED under every filter.** A
+bucket that cannot be tied to the subject never vanishes — it stays in the fleet line. `scope ⊆ fleet`
+is pinned by a test over every subject. Before this, a filtered view printed the fleet's 728 buckets /
+169,066 events as if they were that user's answer, and listed other employees' addresses under their
+name.
+
+⛔ **The tie differs PER REASON and each label says which**: `partial_hour` and `collision` are tied by
+the subject's OWN session; `gap` is tied by ADDRESS ONLY, because by definition nobody held it then —
+so it is labelled "this traffic belongs to NOBODY; it is shown because the address is one they held at
+another time". Conflating those two ties would attribute a gap to a person.
+
+⛔ **Filters still apply AFTER attribution** — the rule that stops narrowing making an ambiguous address
+look clean. A test asserts the session query takes exactly 3 params (window start/end + ceiling), that
+neither the username nor a `device_id =` predicate reaches SQL, and that all pool addresses are still
+fetched.
+
+Four zero cases, reusing the existing `{reason, reasonText}` shape: `filter_matched_no_sessions` ·
+`no_traffic_on_subject_addresses` · `no_attributable_traffic_for_subject` ·
+`nothing_unattributed_for_subject`. ⛔ Only the LAST draws a table — it is a MEASURED zero
+(`bucketsConsidered > 0`). The other three draw no table at all, because zeros there would be
+fabricated.
+
+Live: `eng_itc_HirunC` scopes to 45 buckets / 10,354 events — **9.9%** of their own traffic, where the
+page previously said "27% of all traffic seen". Of 185 named users, 175 have scoped unattributed
+traffic and 10 hit the clean-zero branch.

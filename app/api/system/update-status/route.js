@@ -7,6 +7,17 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.104.0': [
+    "Filtering User Traffic to one person or one firewall now shows THEIR unattributed traffic, not the whole fleet’s. Previously every filtered view repeated the same fleet totals and listed other employees’ addresses underneath the filter.",
+    "For one user that is the difference between “27% of all traffic seen” and 9.9% of their own.",
+    "Traffic that cannot be tied to the person you filtered to is still counted — it moves to a clearly labelled fleet-wide line rather than disappearing.",
+    "Filtering to a firewall that has no retained VPN sessions now says so instead of drawing a table of zeros.",
+    "Every advisory now records which CVSS scale its score is on. All 1,004 were missing it, so every row showed a dash; 749 are filled from the score’s own vector and the rest genuinely have no score.",
+    "Palo Alto advisories now record where their score came from. 67 were labelled as coming from a fallback source while actually holding a vendor score.",
+  ],
+  '2.103.6': [
+    "Severity numbers on the CVE and ruleset tiles now use the same readable shade as the rest — the first pass only covered the six headline tiles.",
+  ],
   '2.103.5': [
     "Severity numbers and feed status words now use a readable shade. The yellow and orange headline figures measured below the accessibility minimum for text; the coloured bars, dots and badges are unchanged.",
     "Filtering Tunnel Health to a firewall that does not exist now says so, instead of showing a page of zeros that were never measured.",

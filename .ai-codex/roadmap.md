@@ -242,7 +242,27 @@ each new source is another candidate first-ingester.
 
 ## Two live data bugs found 2026-09-10, reported not fixed
 
-### 1. 12 advisories store `cvss_score = 0.0` with `cvss_source IS NULL` (all `paloalto`)
+### 1. ⛔ CORRECTED 2026-09-11 — the 0.0 scores are the VENDOR’s, not a SecVault fabrication
+
+This entry originally said the fix belonged "in the producing feed plus a `lib/migrate.js`
+backfill", on the assumption that `lib/feeds/paloalto.js` was inventing a 0 for "no score".
+**That was wrong.** Checked against the source records: Palo Alto’s own advisory genuinely
+contains `"baseScore": 0` inside a real `cvssV3_1` / `cvssV4_0` block, with a matching
+zero-impact vector (`AV:P/AC:H/.../C:N/I:N/A:N`) — a vendor placeholder for third-party CVEs it
+republishes without scoring. There is nothing in the feed to fix.
+
+⛔ The real question is a SCORING decision, not a parsing one: **should a vendor-published
+placeholder 0.0 be stored as a score at all?** Today CVE-2022-22963 sits at 0.0 in SecVault
+against a published 9.8, and 46 `paloalto` rows are in this shape. Storing it means the priority
+tree reads a real 0 and files a 9.8 as `monitor`; discarding it means treating a number the vendor
+did publish as absent. Either way it needs deciding deliberately.
+
+⛔ `lib/feeds/cveorg.js` surfaces these as `suspicious_zero_scores`, but its predicate is
+`cvss_score = 0 AND cvss_source IS NULL` — and those rows now carry `psirt` after the v2.104.0
+writer fix, so **that report will go quiet**. Re-point it before relying on it.
+
+(Original entry below, kept for the CVE ids it names.)
+### 1b. The 0.0 rows, as first found
 Three are real CVE ids that CVE.org scores properly: CVE-2023-44487 → **7.5**, CVE-2023-4863 → **8.8**,
 CVE-2022-22963 → **9.8**. So **CVE-2022-22963 sits in `monitor` on a fabricated 0 when decision-tree rule 3
 (`cvss>=9.0`) should fire.** A real, live mis-prioritisation.

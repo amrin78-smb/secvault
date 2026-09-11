@@ -635,3 +635,251 @@ describe('⛔ source-level rules that must not be edited away', () => {
     assert.match(SRC, /Only Palo Alto reports per-session VPN detail/);
   });
 });
+
+// ── ⛔ SCOPING A REFUSAL TO THE FILTERED SUBJECT ──────────────────────────
+//
+// The bug these pin, seen live: `?utUser=<one person>` rendered the FLEET's
+// unattributed totals (166,892 events) and the FLEET's collision table — a list
+// of other employees' accounts — as the answer to a question about one person.
+// `?utUser=<nobody>` did the same AND claimed the traffic was theirs.
+//
+// Two failure directions to hold apart, and both are represented below:
+//   * OVER-CLAIM — showing a filtered operator somebody else's traffic, or a
+//     denominator that is not their own;
+//   * VANISHING — a bucket that cannot be tied to the subject quietly
+//     disappearing instead of staying in the fleet total. That one turns a
+//     coverage gap into a clean result, which is this codebase's dominant bug.
+
+const { scopeUnattributed } = require('../lib/engines/vpnTrafficAttribution');
+
+describe('⛔ SCOPED REFUSALS — narrowing the view must not narrow the truth', () => {
+  // user-a and user-b share 10.99.0.10 (a recycled pool address, overlapping
+  // for one hour); user-c is a bystander on 10.99.0.20.
+  const sA = session({ id: 's-a', username: 'user-a', assignedIp: '10.99.0.10', tenureStart: H.h00, tenureEnd: H.h05 });
+  const sB = session({ id: 's-b', username: 'user-b', assignedIp: '10.99.0.10', tenureStart: H.h04 + 1800000, tenureEnd: H.h05 + HOUR });
+  const sC = session({ id: 's-c', username: 'user-c', assignedIp: '10.99.0.20', tenureStart: H.h00, tenureEnd: H.h02 + 1800000 });
+
+  const buckets = [
+    bucket({ hourStart: H.h01, ip: '10.99.0.10', events: 100 }),            // -> user-a
+    bucket({ hourStart: H.h04, ip: '10.99.0.10', events: 40 }),             // collision a/b
+    bucket({ hourStart: H.h05, ip: '10.99.0.10', events: 30 }),             // -> user-b
+    bucket({ hourStart: T('2026-09-09T09:00:00Z'), ip: '10.99.0.10', events: 7 }), // gap on .10
+    bucket({ hourStart: H.h00, ip: '10.99.0.20', events: 50 }),             // -> user-c
+    bucket({ hourStart: H.h02, ip: '10.99.0.20', events: 60 }),             // partial, user-c
+    bucket({ hourStart: H.h03, ip: '10.99.0.20', events: 5 }),              // gap on .20
+  ];
+  const out = attributeTraffic({ sessions: [sA, sB, sC], buckets });
+
+  it('the fleet figures are what they always were', () => {
+    assert.equal(out.unattributed.collision.buckets, 1);
+    assert.equal(out.unattributed.partial_hour.buckets, 1);
+    assert.equal(out.unattributed.gap.buckets, 2);
+  });
+
+  it('ties a collision to a subject who was a PARTY to it', () => {
+    const s = scopeUnattributed(out, [sA]);
+    assert.equal(s.unattributed.collision.buckets, 1);
+    assert.equal(s.unattributed.collision.events, 40);
+    assert.equal(s.collisionsTotal, 1);
+    assert.deepEqual(s.collisions[0].usernames.slice().sort(), ['user-a', 'user-b']);
+  });
+
+  it('does NOT tie another person of the fleet’s partial hour to the subject', () => {
+    // user-c's mid-hour departure is user-c's ambiguity, on user-c's address.
+    const s = scopeUnattributed(out, [sA]);
+    assert.equal(s.unattributed.partial_hour.buckets, 0);
+    assert.equal(s.unattributed.partial_hour.events, 0);
+    // …and it has NOT vanished: the fleet total still carries it.
+    assert.equal(out.unattributed.partial_hour.events, 60);
+  });
+
+  it('ties a gap by ADDRESS ONLY, because a gap belongs to nobody', () => {
+    const a = scopeUnattributed(out, [sA]);
+    assert.equal(a.unattributed.gap.buckets, 1, 'the gap on the address user-a held');
+    assert.equal(a.unattributed.gap.events, 7);
+    const c = scopeUnattributed(out, [sC]);
+    assert.equal(c.unattributed.gap.events, 5, 'a different address, a different gap');
+  });
+
+  it('⛔ two subjects may both carry the same gap hour — never add them up', () => {
+    // user-a and user-b both held 10.99.0.10, so the 09:00 gap on it ties to
+    // both. Each statement is true on its own; their sum is not a quantity.
+    const a = scopeUnattributed(out, [sA]);
+    const b = scopeUnattributed(out, [sB]);
+    assert.equal(a.unattributed.gap.events, 7);
+    assert.equal(b.unattributed.gap.events, 7);
+    assert.equal(out.unattributed.gap.events, 12, 'the fleet counts each bucket ONCE');
+  });
+
+  it('⛔ scope never exceeds fleet, for any subject', () => {
+    for (const subject of [[sA], [sB], [sC], [sA, sB, sC]]) {
+      const s = scopeUnattributed(out, subject);
+      for (const k of ['partial_hour', 'collision', 'gap']) {
+        assert.ok(s.unattributed[k].buckets <= out.unattributed[k].buckets, k + ' buckets');
+        assert.ok(s.unattributed[k].events <= out.unattributed[k].events, k + ' events');
+      }
+    }
+  });
+
+  it('gives the subject their OWN denominator, not the fleet’s', () => {
+    const s = scopeUnattributed(out, [sC]);
+    // Only 10.99.0.20's three buckets: 50 + 60 + 5.
+    assert.equal(s.bucketsConsidered, 3);
+    assert.equal(s.eventsConsidered, 115);
+    assert.equal(out.totals.eventsConsidered, 292, 'the fleet denominator is untouched');
+  });
+
+  it('an empty subject scopes to nothing rather than to everything', () => {
+    const s = scopeUnattributed(out, []);
+    assert.equal(s.unattributed.gap.events, 0);
+    assert.equal(s.collisionsTotal, 0);
+    assert.equal(s.eventsConsidered, 0);
+    assert.equal(s.addresses, 0);
+  });
+});
+
+describe('⛔ getVpnUserTraffic — a filter scopes the panel, never the attribution', () => {
+  const plan = {
+    coverage: COVERAGE_FULL,
+    deviceCoverage: [],
+    sessions: [
+      {
+        id: 's-a', device_id: 'dev-1', username: 'user-a', assigned_ip: '10.99.0.10',
+        login_time: '2026-09-09T00:00:00Z', ended_at: '2026-09-09T05:00:00Z',
+        last_seen_at: '2026-09-09T05:00:00Z', poll_interval_seconds: 1800, is_open: false,
+        device_name: 'gw-alpha', device_vendor: 'paloalto',
+      },
+      {
+        id: 's-b', device_id: 'dev-2', username: 'user-b', assigned_ip: '10.99.0.10',
+        login_time: '2026-09-09T04:30:00Z', ended_at: '2026-09-09T06:00:00Z',
+        last_seen_at: '2026-09-09T06:00:00Z', poll_interval_seconds: 1800, is_open: false,
+        device_name: 'gw-beta', device_vendor: 'paloalto',
+      },
+      {
+        id: 's-c', device_id: 'dev-1', username: 'user-c', assigned_ip: '10.99.0.20',
+        login_time: '2026-09-09T00:00:00Z', ended_at: '2026-09-09T02:30:00Z',
+        last_seen_at: '2026-09-09T02:30:00Z', poll_interval_seconds: 1800, is_open: false,
+        device_name: 'gw-alpha', device_vendor: 'paloalto',
+      },
+    ],
+    buckets: [
+      { bucket_hour: '2026-09-09T01:00:00Z', src_ip: '10.99.0.10/32', device_id: 'dev-1', event_count: '100', denied_count: '0', bytes_sent: '10', bytes_received: '10', device_name: 'gw-alpha' },
+      { bucket_hour: '2026-09-09T04:00:00Z', src_ip: '10.99.0.10/32', device_id: 'dev-1', event_count: '40', denied_count: '0', bytes_sent: null, bytes_received: null, device_name: 'gw-alpha' },
+      { bucket_hour: '2026-09-09T09:00:00Z', src_ip: '10.99.0.10/32', device_id: 'dev-1', event_count: '7', denied_count: '0', bytes_sent: null, bytes_received: null, device_name: 'gw-alpha' },
+      { bucket_hour: '2026-09-09T00:00:00Z', src_ip: '10.99.0.20/32', device_id: 'dev-1', event_count: '50', denied_count: '0', bytes_sent: '5', bytes_received: '5', device_name: 'gw-alpha' },
+      { bucket_hour: '2026-09-09T02:00:00Z', src_ip: '10.99.0.20/32', device_id: 'dev-1', event_count: '60', denied_count: '0', bytes_sent: null, bytes_received: null, device_name: 'gw-alpha' },
+    ],
+  };
+  const at = { days: 7, until: '2026-09-09T12:00:00Z' };
+
+  it('no filter means no scope object at all — null, never an empty one', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), at);
+    assert.equal(out.scope, null);
+    assert.equal(out.unattributed.collision.buckets, 1);
+  });
+
+  it('⛔ THE BUG: a user filter no longer reprints the fleet’s refusals', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, username: 'user-a' });
+    // Fleet figures are still available and still complete…
+    assert.equal(out.unattributed.partial_hour.events, 60);
+    assert.equal(out.unattributed.gap.events, 7);
+    assert.equal(out.collisionsTotal, 1);
+    // …and the SCOPED ones are genuinely narrower.
+    assert.equal(out.scope.active, true);
+    assert.equal(out.scope.unattributed.partial_hour.events, 0, 'user-c’s partial hour is not user-a’s');
+    assert.equal(out.scope.unattributed.collision.events, 40);
+    assert.equal(out.scope.unattributed.gap.events, 7);
+    assert.equal(out.scope.eventsConsidered, 147, 'only traffic on 10.99.0.10');
+    assert.ok(out.scope.eventsConsidered < out.totals.eventsConsidered);
+  });
+
+  it('names another employee ONLY as the counterparty to the subject’s own collision', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, username: 'user-a' });
+    assert.equal(out.scope.collisionsTotal, 1);
+    assert.deepEqual(out.scope.collisions[0].usernames.slice().sort(), ['user-a', 'user-b']);
+    // user-c is a real user with real unattributed traffic and must NOT appear.
+    const namesShown = out.scope.collisions.flatMap((c) => c.usernames);
+    assert.ok(!namesShown.includes('user-c'));
+  });
+
+  it('a subject with nothing unattributed says SO, and says it is measured', async () => {
+    const clean = {
+      ...plan,
+      sessions: [plan.sessions[2]],
+      buckets: [plan.buckets[3]],
+    };
+    const out = await getVpnUserTraffic(stubPool(clean), { ...at, username: 'user-c' });
+    assert.equal(out.scope.unattributedBuckets, 0);
+    assert.equal(out.scope.reason, 'nothing_unattributed_for_subject');
+    assert.ok(out.scope.bucketsConsidered > 0, 'a measured zero, not an unmeasured one');
+  });
+
+  it('a subject whose addresses produced no traffic at all is NOT MEASURED', async () => {
+    const quiet = { ...plan, buckets: [plan.buckets[3]] }; // only 10.99.0.20
+    const out = await getVpnUserTraffic(stubPool(quiet), { ...at, username: 'user-a' });
+    assert.equal(out.scope.reason, 'no_traffic_on_subject_addresses');
+    assert.equal(out.scope.bucketsConsidered, 0);
+    assert.equal(out.scope.unattributedEvents, 0);
+  });
+
+  it('a subject seen only in ambiguous hours reports THAT, not silence', async () => {
+    // Every bucket on user-a's address is the collision hour: traffic exists,
+    // none of it is attributable to them.
+    const murky = { ...plan, buckets: [plan.buckets[1]] };
+    const out = await getVpnUserTraffic(stubPool(murky), { ...at, username: 'user-a' });
+    assert.equal(out.scope.hoursAttributed, 0);
+    assert.equal(out.scope.reason, 'no_attributable_traffic_for_subject');
+    assert.match(out.scope.reasonText, /Traffic was seen/);
+  });
+
+  it('⛔ an unknown username says the filter matched nothing — not "no traffic"', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, username: 'nosuchuser' });
+    assert.equal(out.users.length, 0);
+    assert.equal(out.scope.reason, 'filter_matched_no_sessions');
+    assert.equal(out.scope.matchedSessions, 0);
+    assert.equal(out.scope.addresses, 0);
+    assert.equal(out.scope.unattributedEvents, 0);
+    assert.equal(out.scope.collisionsTotal, 0, 'no employee names under a filter that matched nobody');
+    assert.equal(out.scope.requestedUsername, 'nosuchuser');
+    assert.equal(out.scope.username, null, 'nothing canonical to echo back');
+    // The fleet answer still exists on the object — the UI labels it fleet-wide.
+    assert.equal(out.unattributed.collision.buckets, 1);
+  });
+
+  it('⛔ an unknown gateway id says so too, rather than rendering zeros', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, deviceId: 'dev-nope' });
+    assert.equal(out.scope.reason, 'filter_matched_no_sessions');
+    assert.equal(out.scope.requestedDeviceId, 'dev-nope');
+    assert.match(out.scope.reasonText, /NOT MEASURED/);
+  });
+
+  it('a gateway filter scopes to that gateway’s own sessions', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, deviceId: 'dev-2' });
+    assert.equal(out.scope.matchedSessions, 1, 'only user-b is on gw-beta');
+    assert.equal(out.scope.deviceName, 'gw-beta');
+    assert.equal(out.scope.unattributed.collision.events, 40);
+    assert.equal(out.scope.unattributed.partial_hour.events, 0);
+  });
+
+  it('a username filter does not claim a gateway the person may not be limited to', async () => {
+    const out = await getVpnUserTraffic(stubPool(plan), { ...at, username: 'user-a' });
+    assert.equal(out.scope.deviceName, null);
+    assert.deepEqual(out.scope.gateways, ['gw-alpha']);
+  });
+
+  it('⛔ the filter is STILL applied after attribution — nothing is pushed into SQL', async () => {
+    const pool = stubPool(plan);
+    await getVpnUserTraffic(pool, { ...at, username: 'user-a', deviceId: 'dev-1' });
+    const sessionQuery = pool.seen.find((q) => /FROM vpn_sessions v/.test(q.sql) && /ORDER BY v\.login_time/.test(q.sql));
+    assert.ok(sessionQuery, 'the session set was queried');
+    assert.equal(sessionQuery.params.length, 3, 'window start, window end and a row ceiling — no filter');
+    assert.ok(!/username/i.test(sessionQuery.sql.replace(/v\.username,/, '')), 'the username is never a SQL predicate');
+    assert.ok(!/device_id\s*=/.test(sessionQuery.sql), 'the device id never reaches the SQL');
+    const bucketQuery = pool.seen.find((q) => /FROM syslog_talker_hourly t/.test(q.sql));
+    assert.deepEqual(
+      bucketQuery.params[2].slice().sort(),
+      ['10.99.0.10', '10.99.0.20'],
+      'EVERY pool address is still fetched, so a collision on a filtered-out session is still seen'
+    );
+  });
+});
