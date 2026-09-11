@@ -34,12 +34,24 @@ export default function StatCard({
   // "stack" (default, unchanged everywhere) or "row" -- number to the RIGHT of
   // the label rather than above it. See the layout note below.
   layout = 'stack',
+  // ⛔ The accent BORDER and the value TEXT are different jobs with different
+  // contrast requirements, and `color` was doing both. A raw severity hue is fine
+  // as a 4px border or a dot; as 17px text it measured 3.64:1 on white for
+  // --yellow and --orange, under WCAG 1.4.3’s 4.5:1 minimum. The old justification
+  // ("32px/800 clears the large-text threshold") stopped holding when the compact
+  // tiles shrank the value. Pass the text-safe counterpart here —
+  // components/analysis/severityRamp.js’s SEVERITY_TEXT_COLOR already maps the
+  // whole ramp to the --tint-*-fg tokens that exist for exactly this.
+  // Omitted => falls back to `color`, so every existing call site is unchanged.
+  textColor,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
-  const valueColor = color === 'var(--border)' ? 'var(--text-primary)' : color;
+  const accentColor = color;
+  const valueColor = textColor
+    || (color === 'var(--border)' ? 'var(--text-primary)' : color);
 
   // ⛔ ROW LAYOUT. The value moves out of the vertical stack and sits beside the
   // label, which removes one block of height. Measured on the dashboard headline

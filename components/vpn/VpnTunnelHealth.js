@@ -434,6 +434,27 @@ function unrecognisedPanel(rows, devicesById) {
 export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = null }) {
   const health = await getVpnTunnelHealth(pool, { staleAfterMinutes, deviceId });
   const { fleet, devices, down, notes } = health;
+
+  // ⛔ AN UNKNOWN FILTER MUST SAY SO, NOT RENDER CONFIDENT ZEROS. A bogus
+  // ?thDevice=<uuid> scoped every query to nothing and the page answered
+  // "TUNNELS DOWN 0 · TUNNELS UP 0 · UNMEASURED 0 · No active firewalls" with
+  // HTTP 200 — four measurements SecVault never made, presented as facts.
+  // components/vpn/VpnUserHeatmap.js already refuses to silently scope its grid
+  // to nothing; this is the same rule.
+  if (deviceId && devices.length === 0) {
+    return (
+      <Card>
+        <CardBody>
+          <EmptyState
+            message={
+              'That firewall filter matched no active device, so nothing here was measured. '
+              + 'Clear the filter to see the fleet.'
+            }
+          />
+        </CardBody>
+      </Card>
+    );
+  }
   const devicesById = new Map(devices.map((d) => [d.deviceId, d.name]));
 
   const uncovered =

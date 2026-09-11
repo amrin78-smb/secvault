@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.103.5': [
+    "Severity numbers and feed status words now use a readable shade. The yellow and orange headline figures measured below the accessibility minimum for text; the coloured bars, dots and badges are unchanged.",
+    "Filtering Tunnel Health to a firewall that does not exist now says so, instead of showing a page of zeros that were never measured.",
+  ],
+  '2.103.4': [
+    "Corrected a second copy of the tunnel-coverage message that still claimed a firewall most likely has no tunnels configured when SecVault could not actually tell.",
+  ],
   '2.103.3': [
     "Fixed on Tunnel Health: the caveat explaining that Palo Alto firewalls only report tunnels that are UP was never displayed, so 143 of 152 tunnels showed a flat Down: 0 with nothing qualifying it.",
     "Fixed a sentence on the Detections page that the production build was silently truncating.",

@@ -56,6 +56,26 @@ const BAND_COLOR = {
   poor: 'var(--red)',
 };
 
+// ⛔ TEXT-SAFE counterparts of BAND_COLOR. The band hue stays on the tile’s left
+// border (not text, no contrast floor); the headline NUMBER uses these. Measured
+// before this split: "320" on --orange and "51" on --yellow both sat at 3.64:1.
+const BAND_TEXT_COLOR = {
+  excellent: 'var(--tint-success-fg)',
+  good: 'var(--tint-success-fg)',
+  fair: 'var(--tint-warn-fg)',
+  poor: 'var(--tint-danger-fg)',
+};
+
+// The same mapping for the tiles that pass a fixed hue rather than a band.
+const TEXT_SAFE = {
+  'var(--red)': 'var(--tint-danger-fg)',
+  'var(--yellow)': 'var(--tint-warn-fg)',
+  'var(--orange)': 'var(--tint-orange-fg)',
+  'var(--green)': 'var(--tint-success-fg)',
+  'var(--blue)': 'var(--tint-info-fg)',
+  'var(--accent-teal)': 'var(--tint-teal-fg)',
+};
+
 const BAND_LABEL = {
   excellent: 'Excellent',
   good: 'Good',
@@ -121,6 +141,7 @@ export default async function HeadlineStats() {
         value={h.deviceCount}
         sub={`Online ${h.devicesOnline}`}
         color="var(--accent-teal)"
+        textColor={TEXT_SAFE['var(--accent-teal)']}
         icon={IconDevices}
         iconColor="var(--tint-info-fg)"
         iconBg="var(--tint-info)"
@@ -145,6 +166,7 @@ export default async function HeadlineStats() {
             : `${BAND_LABEL[secBand]} · ${secSub}${coverageNote ? ` · ${coverageNote}` : ''}`
         }
         color={BAND_COLOR[secBand] || UNMEASURED}
+        textColor={BAND_TEXT_COLOR[secBand] || UNMEASURED}
         icon={IconShield}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
@@ -157,6 +179,7 @@ export default async function HeadlineStats() {
         value={h.patchNowCount}
         sub="Patch now"
         color="var(--red)"
+        textColor={TEXT_SAFE['var(--red)']}
         icon={IconAlertTriangle}
         iconColor="var(--tint-danger-fg)"
         iconBg="var(--tint-danger)"
@@ -169,6 +192,7 @@ export default async function HeadlineStats() {
         value={h.highRiskCount}
         sub="Critical + high findings"
         color="var(--yellow)"
+        textColor={TEXT_SAFE['var(--yellow)']}
         icon={IconTrendingUp}
         iconColor="var(--tint-warn-fg)"
         iconBg="var(--tint-warn)"
@@ -181,6 +205,7 @@ export default async function HeadlineStats() {
         value={h.rulesTotal.toLocaleString()}
         sub={`${h.rulesEnabled.toLocaleString()} enabled`}
         color="var(--blue)"
+        textColor={TEXT_SAFE['var(--blue)']}
         icon={IconActivity}
         iconColor="var(--tint-info-fg)"
         iconBg="var(--tint-info)"
@@ -193,6 +218,7 @@ export default async function HeadlineStats() {
         value={<>{scoreValue(h.complianceScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
         color={BAND_COLOR[compBand] || UNMEASURED}
+        textColor={BAND_TEXT_COLOR[compBand] || UNMEASURED}
         icon={IconChart}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
