@@ -924,6 +924,16 @@ async function main() {
   } else {
     log('archive   : DISABLED');
   }
+  // ⛔ REPORT THE BUFFER. The startup banner named retention, archive and rollup
+  // cadence but NOT the one parameter that decides whether events are lost — so
+  // after raising it there was no way to confirm from the log which value was
+  // actually in force. A config line that omits the risky setting is the least
+  // useful line in the banner.
+  log(
+    `buffer    : ${MAX_BUFFER.toLocaleString()} datagrams; wide rollup sweeps defer above ` +
+    `${Math.floor(MAX_BUFFER * ROLLUP_DEFER_AT_FRACTION).toLocaleString()} ` +
+    `(max ${ROLLUP_MAX_CONSECUTIVE_DEFERS} consecutive defers, then it runs anyway)`
+  );
   log(`rollups   : recent ${ROLLUP_RECENT_HOURS}h every ${ROLLUP_INTERVAL_MIN}min, wide ${ROLLUP_LOOKBACK_HOURS}h hourly`);
   log(
     `threat    : ${ROLLUP_LOOKBACK_HOURS}h now, then ${ROLLUP_RECENT_HOURS + 1}h every ` +

@@ -949,3 +949,19 @@ minify(require('fs').readFileSync(f, 'utf8'), { compress: true, mangle: false })
 
 A whole-repo scan found this as the only user-visible loss, but the hazard is live wherever a
 module-level numeric const is interpolated into concatenated template literals.
+
+### ⛔ A new step in Update-SecVault.ps1 does not run on the deploy that adds it
+
+Found 2026-09-12. `lib/pg-server-settings.sql` and its installer step were committed, pushed and
+deployed; the deploy log showed the file arriving in the `git pull`, and the DEPLOYED script
+contained the step — but only the older `schema-grants` step executed, and `log_lock_waits` stayed
+`off`.
+
+The reason: **`Update-SecVault.ps1` updates itself.** PowerShell has already parsed the running
+script by the time step 3 (`git pull`) replaces it on disk, so a newly added step first executes on
+the NEXT deploy. A second, no-op deploy applied it (`ALTER SYSTEM` in the log, setting `on`).
+
+⛔ So when adding a step to the update script, expect to deploy TWICE, and verify the step's EFFECT
+rather than the deploy's exit code — this one reported "completed successfully" both times. The same
+trap applies to any change in the update script itself: new service handling, changed ordering, a
+new migration invocation.
