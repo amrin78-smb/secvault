@@ -31,11 +31,17 @@ const CHANNEL_TYPE_LABEL = {
 // 'use client' component bundled by Next's webpack/ESM pipeline; same
 // dual-registry-kept-in-sync-by-hand convention CLAUDE.md documents for
 // components/devices/vendorMeta.js <-> lib/adapters/index.js.
-const ALERT_TYPES = ['patch_now_cve', 'compliance_critical', 'config_diff', 'compliance_report'];
+const ALERT_TYPES = [
+  'patch_now_cve', 'compliance_critical', 'config_diff', 'ingest_drop', 'compliance_report',
+];
 const ALERT_TYPE_LABEL = {
   patch_now_cve: 'Patch Now CVEs',
   compliance_critical: 'Critical Compliance Failures',
   config_diff: 'Config Changes',
+  // ⛔ Reads as an operational alert, not a security one, and it is worded that
+  // way on purpose: dropped datagrams are UNRECOVERABLE, so the channel owner
+  // needs to know evidence was lost, not that a threat was seen.
+  ingest_drop: 'Syslog Events Dropped',
   compliance_report: 'Monthly Compliance Report',
 };
 // 'compliance_report' only ever means anything for an email channel (a PDF
