@@ -108,7 +108,20 @@ function intEnv(name, def, min, max) {
 const UDP_PORTS = parsePortList(process.env.SYSLOG_UDP_PORT, [514, 1514]);
 const TCP_PORTS = parsePortList(process.env.SYSLOG_TCP_PORT, [514, 1514]);
 const FLUSH_MS      = intEnv('SYSLOG_FLUSH_MS', 2000, 250, 60000);
-const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 200000, 1000, 5000000);
+// ⛔ 400k, not 200k, and the arithmetic matters. Measured 2026-09-12: ingest runs
+// ~1,000 datagrams/sec, so 200k was 200 SECONDS of headroom — against a wide rollup
+// sweep measured at 199-501 seconds. The buffer was guaranteed to overflow, twice,
+// and did: 324,875 datagrams dropped.
+//
+// Cost, measured rather than guessed: the average raw line is 749 bytes, so 400k
+// items is ~300 MB of strings and ~480 MB with JS object overhead — and only when
+// actually full. The server has 16 GB with 7.9 GB free (PostgreSQL holds 9.5 GB) and
+// the collector idles at ~109 MB. ⛔ Do not raise this much further without
+// re-measuring free RAM: PostgreSQL grows as partitions do, and an OOM kill of the
+// collector loses the in-memory buffer entirely — strictly worse than a bounded drop.
+//
+// ⛔ THIS IS A SAFETY MARGIN, NOT THE FIX. The fix is deferWideSweep() below.
+const MAX_BUFFER    = intEnv('SYSLOG_MAX_BUFFER', 400000, 1000, 5000000);
 // 30, not 7. Dropping the raw line for ordinary allowed traffic (see
 // SYSLOG_RAW_MESSAGE below) took the row from 1,122 bytes to 367, which is
 // what makes a 30-day window affordable: ~37 GB/day, ~1.1 TB for 30 days.
@@ -163,6 +176,27 @@ const SPOOL_RETRY_MINUTES = intEnv('SYSLOG_SPOOL_RETRY_MINUTES', 30, 1, 10080);
 // sliced wide sweep, so nothing is dropped by narrowing this one.
 const ROLLUP_RECENT_HOURS   = intEnv('SYSLOG_ROLLUP_RECENT_HOURS', 1, 1, 48);
 const ROLLUP_LOOKBACK_HOURS = intEnv('SYSLOG_ROLLUP_LOOKBACK_HOURS', 24, 2, 168);
+
+// ⛔ INGEST WINS OVER AGGREGATION. A dropped datagram is gone forever; a deferred
+// rollup is not — the wide sweep exists precisely to re-aggregate a 24h window and
+// pick up whatever landed late, so running it five minutes from now costs nothing.
+//
+// Root cause it fixes, measured 2026-09-12: the wide sweep runs IN THIS PROCESS and
+// took 199-501 seconds (one slice reported `build 131,218ms`), saturating the same E:
+// volume the partitions and the spool live on. The flush immediately before each
+// overflow reported batch_ms of 290,208 and 228,298 while storing barely 2,000 rows
+// — it was starved, not busy. So the collector must not START a multi-minute sweep
+// while it is already holding a meaningful share of its buffer.
+//
+// Only the WIDE tier is gated. The recent pass measures 17-31s, which fits inside the
+// headroom; gating it too would stall aggregation for no benefit.
+const ROLLUP_DEFER_AT_FRACTION = 0.25;
+
+// ⛔ AND IT MUST NOT DEFER FOREVER. rollups.js’s header records the LogVault incident
+// where a skipped wide sweep left buckets permanently under-counted with no error
+// anywhere. So after this many consecutive defers the sweep RUNS regardless, and says
+// loudly that it is doing so. A silently-never-running sweep is the worse failure.
+const ROLLUP_MAX_CONSECUTIVE_DEFERS = 4;
 const ROLLUP_INTERVAL_MIN   = intEnv('SYSLOG_ROLLUP_INTERVAL_MINUTES', 5, 1, 60);
 
 // --- state -----------------------------------------------------------------
@@ -701,6 +735,28 @@ let archiveGz = 0;
 let archiveFailures = 0;
 
 let rollupRunning = false;
+let wideDefers = 0;        // consecutive wide-sweep defers (rollup)
+let threatWideDefers = 0;  // consecutive wide-sweep defers (threat rollup)
+
+/**
+ * Should a WIDE sweep stand aside right now?
+ *
+ * Returns null to proceed, or a reason string to defer. Never defers more than
+ * ROLLUP_MAX_CONSECUTIVE_DEFERS times in a row — see the constant’s note.
+ */
+function deferWideSweep(label, defers) {
+  const limit = Math.floor(MAX_BUFFER * ROLLUP_DEFER_AT_FRACTION);
+  if (buffer.length <= limit) return null;
+  if (defers >= ROLLUP_MAX_CONSECUTIVE_DEFERS) {
+    log(
+      `WARN ${label} wide sweep running DESPITE a ${buffer.length}-deep buffer - `
+      + `already deferred ${defers} time(s) consecutively, and a sweep that never runs `
+      + `leaves buckets permanently under-counted`
+    );
+    return null;
+  }
+  return `buffer at ${buffer.length}/${MAX_BUFFER} (over the ${limit} watermark)`;
+}
 
 // `wide` sweeps further back to pick up events that landed LATE. Skipping it
 // would leave those buckets permanently under-counted with no error anywhere
@@ -708,6 +764,15 @@ let rollupRunning = false;
 // prevents. Never overlap two sweeps: they would fight over the same buckets.
 async function rollupCycle(wide) {
   if (rollupRunning) { log('rollup skipped - previous sweep still running'); return; }
+  if (wide) {
+    const why = deferWideSweep('rollup', wideDefers);
+    if (why) {
+      wideDefers += 1;
+      log(`rollup wide sweep DEFERRED (${wideDefers}/${ROLLUP_MAX_CONSECUTIVE_DEFERS}) - ${why}`);
+      return;
+    }
+    wideDefers = 0;
+  }
   rollupRunning = true;
   // ⛔ This function is invoked from bare setInterval callbacks whose promises
   // nobody awaits, so a throw here becomes an unhandled rejection — which under
@@ -938,6 +1003,15 @@ async function main() {
     // aborts its bucket — turning a slow wide pass into an every-cycle error
     // rather than a queued one.
     if (threatRunning) { log(`threat rollup (${tier}) skipped - previous pass still running`); return; }
+    if (tier === 'wide') {
+      const why = deferWideSweep('threat rollup', threatWideDefers);
+      if (why) {
+        threatWideDefers += 1;
+        log(`threat rollup wide DEFERRED (${threatWideDefers}/${ROLLUP_MAX_CONSECUTIVE_DEFERS}) - ${why}`);
+        return;
+      }
+      threatWideDefers = 0;
+    }
     threatRunning = true;
     try {
       const r = await refreshThreatRollup(pool, hours);
