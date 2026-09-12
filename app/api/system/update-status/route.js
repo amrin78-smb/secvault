@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.106.0': [
+    "Fixed the cause of 324,875 dropped syslog events. The hourly rollup sweep runs inside the collector and was taking up to eight minutes, starving the ingest path until its buffer overflowed.",
+    "The collector now postpones that sweep while it is holding a large backlog — a dropped event is gone forever, a delayed summary is not — and runs it anyway if postponed too many times in a row.",
+    "The ingest buffer is larger, giving about 400 seconds of headroom instead of 200.",
+    "New notification type: you are now told when syslog events are dropped. The loss was invisible on every chart — the hour that lost 51,669 events was the busiest hour of that day.",
+    "PostgreSQL now logs lock waits, so the next time something stalls the database can say why.",
+  ],
   '2.105.3': [
     "The Exposure page is now paginated, with a page-size choice. It was rendering every internet-facing path on one endlessly scrolling page.",
     "The summary tiles and the 'why the top paths scored as they did' panel still describe the whole fleet, not just the page you are on.",

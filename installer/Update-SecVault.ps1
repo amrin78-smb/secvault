@@ -562,6 +562,50 @@ $migrateSucceeded = Invoke-Step 'node lib\migrate.js' {
 # overall update -- these roles are diagnostic-only and not required for the
 # app to function. Everything in this step is wrapped so it can only ever
 # warn, never throw, regardless of what goes wrong.
+# PostgreSQL SERVER settings (lib\pg-server-settings.sql).
+#
+# Same privilege level, same best-effort tolerance and the same
+# PG_ADMIN_PASSWORD source as the readonly-grants step below -- ALTER SYSTEM is
+# superuser-only, so it cannot live in schema.sql (run as secvault_user).
+#
+# Must NEVER fail the update: these are diagnostic settings, and the app runs
+# fine without them. A missing password, a missing file or a psql failure warns
+# and moves on.
+Invoke-Step 'lib\pg-server-settings.sql (server diagnostics)' {
+    try {
+        $envLocalPath = Join-Path $repoRoot '.env.local'
+        if (-not (Test-Path $envLocalPath)) {
+            Write-Log '  [WARN] .env.local not found -- skipping server settings (not fatal).'
+            return
+        }
+        $envContent = Get-Content -Path $envLocalPath -Raw
+        $pgAdminPassword = $null
+        if ($envContent -match '(?m)^PG_ADMIN_PASSWORD=(.*)$') {
+            $pgAdminPassword = $matches[1].Trim()
+        }
+        if ([string]::IsNullOrEmpty($pgAdminPassword)) {
+            Write-Log '  [WARN] PG_ADMIN_PASSWORD not set -- skipping server settings (not fatal).'
+            return
+        }
+        $PgBin = 'C:\Program Files\PostgreSQL\16\bin'
+        $settingsPath = Join-Path $repoRoot 'lib\pg-server-settings.sql'
+        if (-not (Test-Path $settingsPath)) {
+            Write-Log "  [WARN] $settingsPath not found -- skipping (not fatal)."
+            return
+        }
+        $env:PGPASSWORD = $pgAdminPassword
+        $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -f $settingsPath 2>&1 }
+        Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+        $out | Write-Host
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
+            Write-Log "  [WARN] pg-server-settings.sql exited with code $LASTEXITCODE -- diagnostic settings may be stale. This does not affect application function."
+        }
+    } catch {
+        Write-Log "  [WARN] server settings step failed: $($_.Exception.Message) -- continuing."
+    }
+}
+
 Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
     try {
         $envLocalPath = Join-Path $repoRoot '.env.local'
