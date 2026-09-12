@@ -1122,7 +1122,14 @@ NOTIFICATIONS_POLL_INTERVAL_MINUTES=15     # 5-59
 SYSLOG_UDP_PORT=514,1514                   # comma-separated; FWA held 514 during migration
 SYSLOG_TCP_PORT=514,1514
 SYSLOG_FLUSH_MS=2000                       # spool+insert cycle
-SYSLOG_MAX_BUFFER=200000                   # in-memory datagrams; overflow is COUNTED, not hidden
+SYSLOG_MAX_BUFFER=400000                   # in-memory datagrams; overflow is COUNTED, not hidden.
+                                           # Raised from 200000 on 2026-09-12: at the measured
+                                           # ~1,000 datagrams/sec this is ~400s of headroom, and
+                                           # the incident that dropped 324,875 events stalled for
+                                           # ~290s. NOT the fix (see the rollup deferral below) --
+                                           # margin, so the next unknown stall is survivable.
+                                           # ~340 bytes/datagram => ~136 MB worst case, on a box
+                                           # where the collector normally holds well under 200 MB.
 SYSLOG_RETENTION_DAYS=30                   # raw events; enforced by DROPPING partitions
 SYSLOG_RAW_MESSAGE=security                # all|security|none -- which events keep the raw text.
                                            # `security` is what makes 30 days fit: it drops the
@@ -1140,7 +1147,12 @@ SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the D
 SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)
 SYSLOG_ARCHIVE_ENABLED=true                # compressed raw-log archive (FWA storage model)
 SYSLOG_ARCHIVE_DIR=                        # blank = <install dir>archive
-SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ~500 GB at 8.4 GB/day measured
+SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ~500 GB at 8.4 GB/day measured.
+                                           # ⛔ The reference deployment actually runs 45, set
+                                           # explicitly in its own .env.local. This 60 is the CODE
+                                           # default, which that box never uses -- see gotchas.md
+                                           # ("Raising a CODE DEFAULT does nothing...") before
+                                           # assuming any value in this list is what is running.
 SYSLOG_ROLLUP_RECENT_HOURS=1               # frequent narrow re-aggregation (+1h; was 3, overran the cycle)
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep, SLICED 6h/pass; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5

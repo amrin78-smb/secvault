@@ -965,3 +965,57 @@ the NEXT deploy. A second, no-op deploy applied it (`ALTER SYSTEM` in the log, s
 rather than the deploy's exit code — this one reported "completed successfully" both times. The same
 trap applies to any change in the update script itself: new service handling, changed ordering, a
 new migration invocation.
+
+### ⛔ Raising a CODE DEFAULT does nothing when the deployed `.env.local` sets that key
+
+Found 2026-09-12, immediately after the entry above, and by the same class of mistake: a fix that
+was committed, deployed, and WRONG in production while every check said otherwise.
+
+`SYSLOG_MAX_BUFFER`'s default was raised 200000 -> 400000 in `services/collector.js`, and
+`.env.local.example` was updated to match. Both correct, both useless: the deployed
+`C:AppsSecVault.env.local` carried an explicit `SYSLOG_MAX_BUFFER=200000`, which wins. The
+collector kept running with the old buffer across the deploy that "raised" it.
+
+⛔ **`.env.local.example` IS NOT THE DEPLOYED FILE.** It is a template, gitignored-sibling
+documentation, and nothing reads it at runtime. `Update-SecVault.ps1` never copies it over a live
+`.env.local` (correctly -- that would destroy `CREDENTIAL_KEY` and orphan every stored
+credential). So for any key ALREADY PRESENT in a deployment's `.env.local`, changing the code
+default changes nothing there, forever.
+
+What caught it was a startup banner line, added in the same commit, that reports the value the
+process actually resolved:
+
+```
+[collector] buffer    : 400,000 datagrams; wide rollup sweeps defer above 100,000
+```
+
+⛔ **This is why an effective-configuration banner is worth the four lines it costs.** Without it
+the deploy log, the service state, the version number and the test suite were all green and the
+fix was simply absent. A config value is not applied because you changed its default -- it is
+applied when the running process says it resolved to the new one.
+
+Same shape as the self-update trap above, and the same rule: **verify the EFFECT, never the
+deploy.**
+
+Measured on the reference deployment 2026-09-12, its `.env.local` sets 13 `SYSLOG_*` keys, and
+they fall into three groups worth telling apart before changing any default:
+
+- **Genuinely divergent** — `SYSLOG_ARCHIVE_RETENTION_DAYS=45` against a code default of 60
+  (⛔ and against the 60 this repo's own env list documents). Changing the default here is a
+  no-op on this box, and the documented number is not the number running.
+- **Present but IDENTICAL to the default** — `SYSLOG_UDP_PORT`/`SYSLOG_TCP_PORT` (`514,1514`),
+  `SYSLOG_FLUSH_MS`, `SYSLOG_RETENTION_DAYS`, `SYSLOG_RAW_MESSAGE`, the three rollup keys.
+  ⛔ These are the dangerous ones: they behave exactly like an unset key TODAY, so nothing hints
+  they are pinned, and a future default change silently does not apply. `SYSLOG_MAX_BUFFER` was
+  in this group until it was edited.
+- **Absent, so the code default genuinely governs** — `SYSLOG_DETAIL_RETENTION_DAYS`,
+  `SYSLOG_SPOOL_RETRY_MINUTES`. Only for these does editing the default change production.
+
+So: before "raising a default" as a fix, read the deployed `.env.local` for that key. If it is
+present at all — even at the same value — the default is decoration and the file is what runs.
+
+⚠️ Fixing it means editing a production file that holds `CREDENTIAL_KEY`, `NEXTAUTH_SECRET` and
+`PG_ADMIN_PASSWORD`: back it up first, edit the ONE line by anchored regex (never rewrite the
+file), never print its contents, and confirm the other keys survived by COUNT. The collector then
+needs a restart, which costs whatever UDP arrives while it is down -- the spool protects what was
+already received, not what is still in flight.
