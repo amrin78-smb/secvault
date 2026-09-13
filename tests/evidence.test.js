@@ -49,6 +49,7 @@ const FULL = {
   rulesTotal: 1716,
   rulesEnabled: 1600,
   patchNowCount: 0,
+  devicesWithPatchNow: 0,
   highRiskCount: 0,
   complianceScore: 51,
   complianceCounts: {
@@ -221,10 +222,31 @@ describe('builders never fabricate', () => {
 });
 
 describe('the answer sentence may not claim more than was measured', () => {
-  it('leads with an exploitable vulnerability when there is one', () => {
-    const a = buildFleetAnswer({ ...FULL, patchNowCount: 1 });
+  it('leads with an exploitable finding when there is one', () => {
+    const a = buildFleetAnswer({ ...FULL, patchNowCount: 1, devicesWithPatchNow: 1 });
     assert.equal(a.tone, 'critical');
-    assert.match(a.lead, /1 vulnerability/);
+    assert.match(a.lead, /1 firewall/);
+    assert.match(a.sentence, /needs patching now/);
+  });
+
+  it('⛔ COUNTS FIREWALLS, NOT VULNERABILITIES — an assessment is not a CVE', () => {
+    // Measured live on the reference fleet: patch_now held 3 assessments across
+    // 3 devices for exactly ONE advisory (CVE-2026-24858). The first draft read
+    // "3 vulnerabilities need patching now", which is false — there is one
+    // vulnerability, on three firewalls. device_cve_assessments has one row per
+    // (device, advisory) pair, so COUNT(*) can never be a vulnerability count.
+    const a = buildFleetAnswer({ ...FULL, patchNowCount: 3, devicesWithPatchNow: 3 });
+    assert.match(a.lead, /3 firewalls/);
+    assert.doesNotMatch(a.lead, /vulnerabilit/i);
+    assert.doesNotMatch(a.sentence, /3 vulnerabilities/i);
+  });
+
+  it('falls back to naming the assessment count for what it is', () => {
+    // ⛔ Without the device count, the sentence must NOT promote assessments to
+    // "vulnerabilities" — it says "vulnerability findings", which is true of a
+    // (device, advisory) row whichever way the rows fall.
+    const a = buildFleetAnswer({ ...FULL, patchNowCount: 3, devicesWithPatchNow: null });
+    assert.match(a.lead, /3 vulnerability findings/);
   });
 
   it('falls back to high-risk findings when nothing is exploitable', () => {
@@ -250,10 +272,20 @@ describe('the answer sentence may not claim more than was measured', () => {
     assert.match(full.sentence, /every one of them was assessed/);
   });
 
+  it('the evidence drawer separates assessments from affected firewalls', () => {
+    const ev = patchNowEvidence({ ...FULL, patchNowCount: 3, devicesWithPatchNow: 3 });
+    const byLabel = Object.fromEntries(ev.inputs.map((r) => [r.label, r.value]));
+    assert.equal(byLabel['Assessments in patch_now'], '3');
+    assert.equal(byLabel['Firewalls affected'], '3');
+    assert.match(ev.title, /3 firewalls/);
+    // and it says WHY the two can differ
+    assert.ok(ev.inputs[0].note.includes('one row per device + advisory'));
+  });
+
   it('a critical finding still carries the coverage caveat', () => {
     // ⛔ A gap does not stop mattering because something worse was found —
     // the real number may be HIGHER than the one displayed.
-    const a = buildFleetAnswer({ ...PARTIAL, patchNowCount: 2 });
+    const a = buildFleetAnswer({ ...PARTIAL, patchNowCount: 2, devicesWithPatchNow: 2 });
     assert.equal(a.tone, 'critical');
     assert.ok(a.coverage, 'coverage must survive the critical branch');
   });
