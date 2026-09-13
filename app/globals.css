@@ -1596,3 +1596,45 @@ tbody tr td { transition: background 0.12s ease; }
 @media (prefers-reduced-motion: reduce) {
   .ev-drawer, .ev-scrim, .ev-mark { transition: none; }
 }
+
+/* ── EvidenceMark on a StatCard: BOTTOM-RIGHT CORNER, not inline ──────────
+   ⛔ SETTLED BY MEASUREMENT, NOT TASTE, and the measurement is worth keeping
+   because the intuitive placement is the wrong one.
+
+   The mark was first put inline beside the label. On the dashboard's compact
+   row tiles that pushed "Security Score" onto a second line, which — because
+   the grid stretches every tile to the tallest — added 9px to ALL SIX tiles
+   (96px -> 105px, measured live on the fleet dashboard). Exactly the failure
+   mode StatCard's own layout comments already warn about: one wrap re-inflates
+   the whole row.
+
+   ⛔ Shrinking the mark does NOT fix it. Probed live at 15/13/12/11px with
+   margins down to 2px: every size still wrapped, because at the compact row
+   width the label has essentially zero headroom once the value sits beside it.
+   Inline placement is structurally impossible there, not merely tight.
+
+   The corner costs zero layout, is free on every tile (sub/delta text is
+   left-aligned and short), and keeps the affordance in the SAME relative place
+   on every StatCard in the product, which is what makes it learnable once.
+   The padding-right is what stops a long sub/delta running under it. */
+.kpi-card,
+.kpi-card-compact { position: relative; }
+
+.kpi-card > .ev-mark,
+.kpi-card-compact > .ev-mark,
+.kpi-card .stat-label > .ev-mark,
+.kpi-card .stat-label-compact > .ev-mark,
+.kpi-card-compact .stat-label > .ev-mark,
+.kpi-card-compact .stat-label-compact > .ev-mark,
+.kpi-card .kpi-head-left > .ev-mark,
+.kpi-card-compact .kpi-head-left > .ev-mark {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  margin-left: 0;
+}
+
+.kpi-card .stat-sub,
+.kpi-card .stat-delta,
+.kpi-card-compact .stat-sub-compact,
+.kpi-card-compact .stat-delta { padding-right: 26px; }

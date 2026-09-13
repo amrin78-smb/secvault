@@ -64,13 +64,18 @@ export default function StatCard({
   // Omitted => falls back to `color`, so every existing call site is unchanged.
   textColor,
   // Optional evidence descriptor (lib/evidence.js). When present, a violet
-  // mark sits beside the LABEL and opens the global drawer.
+  // mark opens the global drawer.
   //
-  // ⛔ Beside the label, never beside the value, and never in the tile's
-  // top-right corner. The corner is already the IconChip in stack layout and
-  // the NUMBER in row layout — two things cannot own it. The label is the one
-  // anchor both layouts share, so the affordance lands in the same relative
-  // place on every tile in the product.
+  // ⛔ Authored inside the label element but positioned into the card's
+  // BOTTOM-RIGHT CORNER by app/globals.css — settled by measurement, not taste.
+  // Inline beside the label wrapped "Security Score" onto a second line, which
+  // added 9px to ALL SIX dashboard tiles (96 -> 105, measured live) because the
+  // grid stretches every tile to the tallest — the same failure this file's own
+  // layout comments already warn about. Shrinking the mark does NOT fix it:
+  // probed live at 15/13/12/11px and every size still wrapped, because the
+  // compact row label has zero headroom once the value sits beside it. The
+  // top-right corner is taken in both layouts (IconChip in stack, the NUMBER in
+  // row), so the bottom-right corner is where it goes.
   evidence,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
