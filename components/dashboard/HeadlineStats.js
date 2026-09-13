@@ -2,6 +2,16 @@ import { pool } from '../../lib/db';
 import StatCard from '../ui/StatCard';
 import { getFleetHeadline, getPreviousHeadline } from '../../lib/engines/fleetHeadline';
 import { securityScoreBand } from '../../lib/engines/securityScore';
+import AnswerHeader from '../ui/AnswerHeader';
+import { buildFleetAnswer } from '../../lib/answers';
+import {
+  deviceCountEvidence,
+  securityScoreEvidence,
+  patchNowEvidence,
+  highRiskEvidence,
+  rulesEvidence,
+  complianceScoreEvidence,
+} from '../../lib/evidence';
 import {
   IconDevices,
   IconShield,
@@ -104,6 +114,23 @@ export default async function HeadlineStats() {
   const secBand = securityScoreBand(h.securityScore);
   const compBand = securityScoreBand(h.complianceScore);
 
+  // ⛔ ANSWER FIRST. The sentence is built in lib/answers.js, not assembled
+  // here, because the rule that governs it — an all-clear is forbidden while
+  // coverage is incomplete — is a correctness rule and belongs somewhere a
+  // test can reach it. See tests/answers.test.js.
+  const answer = buildFleetAnswer(h);
+
+  // Every headline figure gets a descriptor. These are plain serializable
+  // objects built from data already in `h` — no queries, nothing async.
+  const ev = {
+    devices: deviceCountEvidence(h),
+    security: securityScoreEvidence(h),
+    patchNow: patchNowEvidence(h),
+    highRisk: highRiskEvidence(h),
+    rules: rulesEvidence(h),
+    compliance: complianceScoreEvidence(h),
+  };
+
   // Shown under the Security Score tile so the number is decomposable at a
   // glance — an opaque composite nobody can explain gets ignored.
   // ⛔ Short forms exist ONLY to fit one line at the tile width. Every component
@@ -133,11 +160,18 @@ export default async function HeadlineStats() {
     : null;
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
+    <>
+      <AnswerHeader
+        answer={answer}
+        evidence={ev.patchNow || ev.security}
+        context={`Fleet of ${h.deviceCount} · ${h.devicesOnline} reachable`}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
       <StatCard
         compact
         layout="row"
         label="Devices"
+        evidence={ev.devices}
         value={h.deviceCount}
         sub={`Online ${h.devicesOnline}`}
         color="var(--accent-teal)"
@@ -151,6 +185,7 @@ export default async function HeadlineStats() {
         compact
         layout="row"
         label="Security Score"
+        evidence={ev.security}
         value={<>{scoreValue(h.securityScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={
           h.securityScore === null
@@ -176,6 +211,7 @@ export default async function HeadlineStats() {
         compact
         layout="row"
         label="Critical Alerts"
+        evidence={ev.patchNow}
         value={h.patchNowCount}
         sub="Patch now"
         color="var(--red)"
@@ -189,6 +225,7 @@ export default async function HeadlineStats() {
         compact
         layout="row"
         label="High Risks"
+        evidence={ev.highRisk}
         value={h.highRiskCount}
         sub="Critical + high findings"
         color="var(--yellow)"
@@ -202,6 +239,7 @@ export default async function HeadlineStats() {
         compact
         layout="row"
         label="Total Rules"
+        evidence={ev.rules}
         value={h.rulesTotal.toLocaleString()}
         sub={`${h.rulesEnabled.toLocaleString()} enabled`}
         color="var(--blue)"
@@ -215,6 +253,7 @@ export default async function HeadlineStats() {
         compact
         layout="row"
         label="Compliance Score"
+        evidence={ev.compliance}
         value={<>{scoreValue(h.complianceScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
         color={BAND_COLOR[compBand] || UNMEASURED}
@@ -230,6 +269,7 @@ export default async function HeadlineStats() {
           />
         }
       />
-    </div>
+      </div>
+    </>
   );
 }

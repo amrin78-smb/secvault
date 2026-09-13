@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.107.0': [
+    "Every headline number can now be asked how it knows. A small violet mark beside a figure opens an evidence panel showing the formula that produced it, the inputs that went in, and — the point of the whole thing — what could not be measured.",
+    "The dashboard now opens with a plain-English sentence answering 'is anything wrong right now', above the tiles rather than instead of them.",
+    "That sentence will never tell you everything is fine while any firewall went unassessed. A clear result over incomplete coverage is reported as incomplete, not as good news.",
+    "The compliance evidence panel shows why checks marked 'not applicable' are excluded from the score rather than counted as failures — worth about 5 points on the current fleet, and previously impossible to discover from the UI.",
+    "Evidence panels are violet, and nothing else in the product is. Red stays reserved for danger.",
+  ],
   '2.106.0': [
     "Fixed the cause of 324,875 dropped syslog events. The hourly rollup sweep runs inside the collector and was taking up to eight minutes, starving the ingest path until its buffer overflowed.",
     "The collector now postpones that sweep while it is holding a large backlog — a dropped event is gone forever, a delayed summary is not — and runs it anyway if postponed too many times in a row.",

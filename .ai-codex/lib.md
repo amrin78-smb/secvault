@@ -74,6 +74,37 @@ Named filter/column/sort states per user per table (`saved_views`). All function
 `getDefaultView(pool, userId, scope)`.
 `normalizeScope/Name/Query` — ⛔ the stored query string is REPLAYED into the address bar, so it is untrusted input: leading `?` stripped, length capped, anything with whitespace, quotes, a scheme or a path separator rejected.
 
+## lib/evidence.js
+
+(v2.107.0) Pure, dependency-free CommonJS builders that turn data a caller ALREADY HAS into a
+serializable evidence descriptor `{title, claim, formula, inputs[], unmeasured[], source, rule?}`
+for components/ui/Evidence.js. Runs no queries and imports no pool, which is what lets a React
+SERVER component build one and pass it to the client drawer as a prop.
+
+Exports: `isRenderableEvidence` (the guard — a mark never renders without it),
+`deviceCountEvidence`, `securityScoreEvidence`, `patchNowEvidence`, `highRiskEvidence`,
+`rulesEvidence`, `complianceScoreEvidence`, `cveCoverageGap`.
+
+⛔ `unmeasured: []` IS A CLAIM — the drawer renders it as "everything this number depends on was
+measured". Never leave it empty to mean "I did not look". ⛔ Never fabricate an input: if the caller
+does not have the number, the row does not appear and the builder returns null, because a plausible
+0 inside an evidence panel is worse than the same 0 on a tile — the panel is where the operator went
+specifically to check. ⛔ `securityScoreEvidence` DERIVES its formula from the components the engine
+returned rather than restating 40/30/30, so a weight change in securityScore.js cannot leave the
+drawer confidently explaining arithmetic that no longer runs. Pinned by tests/evidence.test.js.
+
+## lib/answers.js
+
+(v2.107.0) `buildFleetAnswer(headline)` -> `{sentence, lead, tone, coverage}`. The one-sentence
+plain-English answer above the dashboard grid. Pure CommonJS.
+
+⛔ FOUR tones, not three: `critical`/`warn`/`ok`/`unknown`. An ALL-CLEAR IS FORBIDDEN WHILE COVERAGE
+IS INCOMPLETE — "nothing outstanding" over a fleet where three firewalls were never assessed returns
+`unknown` (hueless), never `ok` (green). That is the failed-read-as-a-fact rule in prose, and it is
+the whole reason this is a module with tests rather than a template string in a component. ⛔ The
+coverage caveat SURVIVES the critical branch too: a gap does not stop mattering because something
+worse was found — the real number may be higher than the one displayed.
+
 ## lib/rbac.js
 [SENSITIVE] — entire file (auth/authorization guard)
 

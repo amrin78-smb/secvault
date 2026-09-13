@@ -1,4 +1,5 @@
 import IconChip from './IconChip';
+import { EvidenceMark } from './Evidence';
 
 // Suite `.kpi-card` colored-left-border tile — the standard stat-grid unit
 // used across every dashboard/summary page. `color` is any CSS color value
@@ -62,6 +63,15 @@ export default function StatCard({
   // whole ramp to the --tint-*-fg tokens that exist for exactly this.
   // Omitted => falls back to `color`, so every existing call site is unchanged.
   textColor,
+  // Optional evidence descriptor (lib/evidence.js). When present, a violet
+  // mark sits beside the LABEL and opens the global drawer.
+  //
+  // ⛔ Beside the label, never beside the value, and never in the tile's
+  // top-right corner. The corner is already the IconChip in stack layout and
+  // the NUMBER in row layout — two things cannot own it. The label is the one
+  // anchor both layouts share, so the affordance lands in the same relative
+  // place on every tile in the product.
+  evidence,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
@@ -101,7 +111,10 @@ export default function StatCard({
         <div className="kpi-head-row">
           <div className="kpi-head-left">
             {icon && <IconChip icon={icon} color={iconColor} bg={iconBg} />}
-            <div className={labelClass}>{label}</div>
+            <div className={labelClass}>
+              {label}
+              <EvidenceMark evidence={evidence} subject={typeof label === 'string' ? label : undefined} />
+            </div>
           </div>
           <div className={valueClass} style={{ color: valueColor }}>
             {value}
@@ -130,7 +143,10 @@ export default function StatCard({
       <div className={valueClass} style={{ color: valueColor }}>
         {value}
       </div>
-      <div className={labelClass}>{label}</div>
+      <div className={labelClass}>
+        {label}
+        <EvidenceMark evidence={evidence} subject={typeof label === 'string' ? label : undefined} />
+      </div>
       {sub && <div className={subClass}>{sub}</div>}
       {/* Optional day-over-day change, rendered by DeltaBadge. Undefined by
           default, so every pre-existing call site is pixel-identical. ⛔ The

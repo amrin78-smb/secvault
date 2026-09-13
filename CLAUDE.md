@@ -1194,6 +1194,13 @@ which is SecVault's own teal.
 severity ramp is what keeps the brand hue unambiguous. Putting blue back into severity collapses
 the whole scheme — do not.
 
+⛔ **EVIDENCE IS A SEPARATE AXIS AND OWNS VIOLET** (`--evidence` / `--evidence-wash`, aliased
+onto the purple tints, v2.107.0). Severity answers "how bad is this"; evidence answers "how well do
+we know it", and a fully-proven critical and a poorly-evidenced one are both critical. So the proof
+affordance may not borrow from the severity ramp at all. **Nothing else in the app is violet** — the
+moment a second thing uses it, the mark stops being learnable at a glance and the operator has to
+read every one to find out what it does. Used only by `.ev-*` and `EvidenceMark`.
+
 ⛔ **NOT MEASURED is a first-class visual state with NO HUE**: `--unmeasured` for the text/em-dash,
 `--hatch` for a bar segment or swatch. This is CLAUDE.md's own failed-read-as-a-fact rule made
 visible on screen. A null hit count, a device with no ruleset, a compliance check SecVault cannot
@@ -1312,6 +1319,13 @@ dependency.
 Full component-level detail is in `.ai-codex/components.md` / `pages.md` — kept short here since
 none of these carry Critical-Rules-level footguns.
 
+- **Evidence drawer + answer-first headers** (v2.107.0, Phase 1 of the evidence-grade rework):
+  every headline figure carries a violet mark that opens one global drawer showing the formula, the
+  inputs, and **what could not be measured**. Descriptors are built by the pure `lib/evidence.js`;
+  the dashboard sentence by the pure `lib/answers.js`. ⛔ The rule that makes it honest rather than
+  decorative: **an all-clear is forbidden while coverage is incomplete** — a clean result over a
+  partially-assessed fleet renders hueless as `unknown`, never green as `ok`. Pinned by
+  `tests/evidence.test.js`. Full detail in `.ai-codex/lib.md` / `components.md`.
 - **Fleet Alerts** (`/alerts`): cross-entity feed of finding/CVE/diff alerts, filterable via query params (`AlertsFilters`), per-row ack (`AlertAckControl`).
 - **Outbound Alerting** (`Settings` → `Notifications`, admin-only): Slack/Teams/email/generic-webhook
   notifications for patch_now CVEs, critical compliance failures, and unacknowledged config diffs.

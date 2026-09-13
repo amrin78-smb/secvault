@@ -201,6 +201,22 @@
   --unmeasured: #6D7784;
   --hatch: repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 7px);
 
+  /* ⛔ EVIDENCE IS ITS OWN AXIS, so it gets its own hue and nothing else uses it.
+     Severity owns red->green and this file already reserves red for danger
+     alone, precisely so the most urgent signal stays unambiguous. "How well do
+     we know this" is not a severity — a fully-proven critical and a poorly-
+     evidenced one are both critical — so the proof affordance must not borrow
+     from that ramp at all.
+
+     Aliased onto the existing purple tints rather than introducing a new raw
+     hue: those are already re-picked per theme (and --tint-purple-fg is the
+     contrast-checked text form), so this alias follows the theme for free.
+     Used ONLY by .ev-* and the EvidenceMark. Do not reach for it for anything
+     decorative — the moment a second thing is violet, the affordance stops
+     being learnable at a glance. */
+  --evidence:      var(--tint-purple-fg);
+  --evidence-wash: var(--tint-purple);
+
   /* SecVault's own brand/logo/active-nav hue. Now the SAME value as
      --primary: since --primary moved off the suite red onto SecVault's own
      teal, the two no longer name different things. Kept as a token because
@@ -1373,4 +1389,210 @@ tbody tr td { transition: background 0.12s ease; }
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EVIDENCE (components/ui/Evidence.js) + ANSWER-FIRST HEADER (ui/AnswerHeader.js)
+   Phase 1 of the evidence-grade rework: every headline figure can be asked how
+   it knows, and every page opens with a sentence rather than a grid.
+
+   ⛔ Everything here is violet and NOTHING ELSE IN THE APP IS. See --evidence.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the affordance ──────────────────────────────────────────────────────── */
+.ev-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: var(--s2);
+  padding: 0;
+  flex: none;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--evidence-wash);
+  color: var(--evidence);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .12s ease, transform .12s ease;
+}
+.ev-mark:hover { border-color: var(--evidence); transform: translateY(-1px); }
+.ev-mark:focus-visible { outline: 2px solid var(--evidence); outline-offset: 2px; }
+
+/* ── drawer ──────────────────────────────────────────────────────────────── */
+.ev-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: rgba(8, 12, 18, 0.46);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.ev-scrim[data-open="1"] { opacity: 1; pointer-events: auto; }
+
+.ev-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  z-index: 1401;
+  width: min(460px, 94vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  box-shadow: -20px 0 50px -30px rgba(0,0,0,.55);
+  transform: translateX(100%);
+  transition: transform .24s cubic-bezier(.3,.8,.3,1);
+}
+.ev-drawer[data-open="1"] { transform: none; }
+
+.ev-head { padding: var(--s5) var(--s5) var(--s4); border-bottom: 1px solid var(--border-light); }
+.ev-kick {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+  color: var(--evidence);
+}
+.ev-close {
+  background: none; border: none; cursor: pointer; padding: 4px 6px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  color: var(--text-muted);
+}
+.ev-close:hover { color: var(--text-primary); }
+.ev-title {
+  margin-top: var(--s3);
+  font-size: var(--text-xl); font-weight: 700; letter-spacing: -.01em;
+  line-height: 1.25; color: var(--text-primary);
+}
+.ev-claim { margin: var(--s2) 0 0; font-size: var(--text-base); color: var(--text-secondary); line-height: 1.5; }
+
+.ev-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s5); }
+.ev-sec { margin-bottom: var(--s5); }
+.ev-sec > b {
+  display: block; margin-bottom: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* The computation, verbatim. Monospace because it IS code/arithmetic, and
+   pre-wrap so a long line wraps rather than forcing the drawer to scroll
+   sideways. */
+.ev-formula {
+  margin: 0;
+  padding: var(--s4);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ev-kv {
+  display: flex; justify-content: space-between; gap: var(--s4);
+  padding: var(--s2) 0;
+  border-bottom: 1px dashed var(--border-light);
+  font-size: var(--text-base);
+}
+.ev-kv:last-child { border-bottom: none; }
+.ev-kv > span:first-child { color: var(--text-secondary); }
+.ev-kv > span:last-child {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  text-align: right; color: var(--text-primary); white-space: nowrap;
+}
+.ev-note { color: var(--text-muted); font-style: normal; font-size: var(--text-sm); }
+
+/* "Everything was measured" — an earned claim, styled as a positive statement
+   rather than as an empty state. */
+.ev-complete {
+  margin: 0; padding: var(--s3) var(--s4);
+  border-left: 2px solid var(--sev-ok);
+  background: var(--tint-success);
+  color: var(--tint-success-fg);
+  font-size: var(--text-base); line-height: 1.5;
+}
+
+/* ⛔ A measurement gap is HATCHED and HUELESS — never red (it is not a
+   failure), never grey-flat (that reads as a real but muted category). */
+.ev-gap {
+  padding: var(--s3) var(--s4);
+  border-left: 2px solid var(--unmeasured);
+  background-image: var(--hatch);
+  background-color: var(--surface-subtle);
+}
+.ev-gap + .ev-gap { margin-top: var(--s3); }
+.ev-gap > b { display: block; font-size: var(--text-base); color: var(--text-primary); }
+.ev-gap > p { margin: var(--s1) 0 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.55; }
+
+/* Where the number came from — the operator can go and read it. */
+.ev-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  padding-top: var(--s4); border-top: 1px solid var(--border-light);
+  font-size: var(--text-xs); color: var(--text-muted);
+}
+.ev-foot code {
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  padding: 3px 6px; border-radius: var(--radius-sm);
+  background: var(--surface-subtle); color: var(--text-secondary);
+}
+
+/* ── answer-first header ─────────────────────────────────────────────────── */
+.answer-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--s5);
+  margin-bottom: var(--s4);
+  padding: var(--s5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.answer-main { min-width: 0; }
+.answer-context {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs); letter-spacing: .09em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: var(--s3);
+}
+.answer-sentence {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -.01em;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+.answer-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: var(--s3); vertical-align: middle;
+  flex: none;
+}
+.answer-coverage {
+  display: flex; align-items: flex-start; gap: var(--s2);
+  margin-top: var(--s3);
+  font-size: var(--text-base);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.answer-hatch {
+  width: 14px; height: 9px; flex: none; margin-top: 4px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background-image: var(--hatch); background-color: var(--surface-subtle);
+}
+.answer-actions { display: flex; align-items: center; gap: var(--s2); flex: none; }
+
+@media (max-width: 700px) {
+  .answer-header { flex-direction: column; gap: var(--s4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ev-drawer, .ev-scrim, .ev-mark { transition: none; }
 }
