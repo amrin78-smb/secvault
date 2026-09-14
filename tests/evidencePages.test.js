@@ -370,3 +370,58 @@ describe('exposure — not seen is not closed', () => {
     assert.equal(exposureEvidence({}), null);
   });
 });
+
+describe('sentences agree with their own counts', () => {
+  // ⛔ THESE READ WRONG PRECISELY WHEN THE FLEET IS NEARLY CLEAN. A single
+  // outstanding item is the common case in production and the rare case in a
+  // test fixture, so "1 of 16 firewall report no licence data" survived every
+  // multi-item example until it was read on a live page.
+  //
+  // Two rules: an "N of M" construction takes a PLURAL noun regardless of N,
+  // and the verb agrees with N.
+  it('N-of-M uses a plural noun and a verb agreeing with N', () => {
+    const one = buildDeviceInventoryAnswer({
+      total: 16, online: 16, neverChecked: 0, cveNotAssessed: 0, patchNowDevices: 1,
+    });
+    assert.match(one.lead, /1 of 16 firewalls$/);
+    assert.match(one.sentence, /^needs patching now/);
+
+    const many = buildDeviceInventoryAnswer({
+      total: 16, online: 16, neverChecked: 0, cveNotAssessed: 0, patchNowDevices: 3,
+    });
+    assert.match(many.lead, /3 of 16 firewalls$/);
+    assert.match(many.sentence, /^need patching now/);
+  });
+
+  it('a single unmeasured rule reads "1 of N rules has ... it can never"', () => {
+    const a = buildRuleHygieneAnswer({ critical: 1, high: 0, total: 5 }, { total: 1756, not_measured: 1 });
+    assert.match(a.coverage, /1 of 1,756 rules has no usage data at all, so it can never be judged unused\./);
+  });
+
+  it('a single silent firewall reads "1 firewall sends no syslog"', () => {
+    const a = buildExposureAnswer({ paths: 9, observed: 1, unmeasured: 0, devicesWithoutSyslog: 1 }, 0);
+    assert.match(a.coverage, /1 firewall sends no syslog/);
+  });
+
+  it('a single uncollected licence reads "1 of 16 firewalls reports"', () => {
+    const a = buildLifecycleAnswer({
+      expired: 0, expiring: 0, unknown: 0, devicesWithoutLicenceData: 1, activeDevices: 16,
+    });
+    assert.match(a.coverage, /1 of 16 firewalls reports no licence data/);
+  });
+
+  it('no sentence ever contains a singular noun straight after "of N"', () => {
+    // A broad net: scan a spread of shapes for the specific broken form.
+    const samples = [
+      buildDeviceInventoryAnswer({ total: 16, online: 15, neverChecked: 0, cveNotAssessed: 1, patchNowDevices: 0 }),
+      buildLifecycleAnswer({ expired: 0, expiring: 0, unknown: 0, devicesWithoutLicenceData: 1, activeDevices: 16 }),
+      buildRuleHygieneAnswer({ critical: 0, high: 0, total: 0 }, { total: 100, not_measured: 1 }),
+      buildExposureAnswer({ paths: 5, observed: 0, unmeasured: 1, devicesWithoutSyslog: 1 }, 1),
+    ];
+    for (const s of samples) {
+      const text = [s.lead, s.sentence, s.coverage].filter(Boolean).join(' ');
+      assert.doesNotMatch(text, /of \d[\d,]* (firewall|rule|check|path|entitlement)\b(?!s)/,
+        'singular noun after "of N": ' + text);
+    }
+  });
+});
