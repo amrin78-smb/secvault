@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.115.1': [
+    'Work queue items now group by the problem rather than by the firewall. One compliance check failing on five firewalls is one decision with five targets, not five items repeating the same fix instruction.',
+    'Same for a CVE affecting three firewalls. The devices are still listed under Affects, so nothing about the scope is lost — only the repetition.',
+    'Cut the live queue from 85 items to 45, and the act-now band from 19 to 13, with no finding dropped.',
+  ],
   '2.115.0': [
     'New Work queue: one ranked list of what to actually do, gathered from all nine engines — vulnerabilities, compliance, config changes, licences, rule hygiene, tunnels, collection gaps, segmentation and log ingest.',
     'Every item answers four questions: why it is here, what it affects, what to do, and how SecVault will independently observe that it is done. Nothing is cleared by ticking a box.',

@@ -198,7 +198,10 @@ refreshes destroys the one thing a queue is for. ⛔ `summarise` reports `source
 than contributing zero items. ⛔ The ack join in `gatherRuleCleanup` MUST go through
 `firewall_rules` — `rule_analysis_results.rule_id` is a UUID FK, `finding_acknowledgements.
 rule_id_vendor` is the vendor text id; joining them directly is `text = uuid` and Postgres
-refuses it. ⛔ `withCap` discloses shown-of-total when `PER_SOURCE_CAP` bites, at the cost of one
+refuses it. ⛔ `groupBy` collapses CVE and compliance to ONE ITEM PER PROBLEM (not per device) — devices survive
+as `affects`/`deviceIds`. ⛔ Grouping sources fetch `ROW_FETCH_LIMIT` rows and cap AFTER grouping:
+capping rows first would silently drop devices from an item that still looked complete, a truncation
+the truncation banner itself could not see. ⛔ `withCap` discloses shown-of-total when `PER_SOURCE_CAP` bites, at the cost of one
 COUNT only in that case. ⛔ Licences produce TWO item kinds: a parsed expiry (`reported`) and an
 UNPARSEABLE one (`unmeasured` -> verify band) — `expires_at IS NULL` with raw `Never` is
 perpetual and is NOT listed.

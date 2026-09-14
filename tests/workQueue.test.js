@@ -229,3 +229,33 @@ describe('⛔ a cap that bit is disclosed', () => {
     assert.equal(s.sourcesTruncated, 0);
   });
 });
+
+describe('⛔ grouping — an item is a decision, not a fact', () => {
+  // These assert the SHAPE the gathers must produce, because the rule is easy
+  // to state and was missed on the first pass: one compliance check failing on
+  // five firewalls shipped as five items repeating an identical remediation,
+  // which is precisely the wall of duplicated prose a queue exists to replace.
+  it('a grouped item keeps every affected device in deviceIds', () => {
+    const grouped = item({
+      key: 'compliance:any-any',
+      count: 5,
+      deviceIds: ['d1', 'd2', 'd3', 'd4', 'd5'],
+      urgency: 'now',
+      evidence: 'measured',
+      severity: 'critical',
+    });
+    const s = summarise(rankItems([grouped]), []);
+    assert.equal(s.total, 1, 'one decision, not five');
+    assert.equal(s.deviceCount, 5, 'but the scope is not lost');
+  });
+
+  it('a grouped item outranks a smaller one of the same severity', () => {
+    // The count is what makes breadth visible after aggregation, so it has to
+    // participate in the ordering.
+    const ranked = rankItems([
+      item({ key: 'one', count: 1, urgency: 'now', evidence: 'measured', severity: 'critical' }),
+      item({ key: 'five', count: 5, urgency: 'now', evidence: 'measured', severity: 'critical' }),
+    ]);
+    assert.equal(ranked[0].key, 'five');
+  });
+});
