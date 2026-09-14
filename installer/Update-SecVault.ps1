@@ -792,7 +792,15 @@ if ($buildSucceeded -and $migrateSucceeded) {
 
             # ⛔ Record what we are changing BEFORE changing it. These two values
             # are what the rollback after the service start restores.
-            $previousAppParameters = & $NssmExe get SecVault-App AppParameters
+            # ⛔ `nssm get` RETURNS UTF-16 WITH EMBEDDED NULs. Feeding that value
+            # straight back into `nssm set` truncates it at the first NUL: the
+            # rollback wrote "n" instead of
+            # "node_modules\next\dist\bin\next start -p 3010", the service could
+            # not start at all, and a SAFETY NET became the outage it existed to
+            # prevent. That is the worst possible failure for a rollback path.
+            #
+            # So: strip the NULs, and never trust the result on its own.
+            $previousAppParameters = ((& $NssmExe get SecVault-App AppParameters) -replace "`0", '').Trim()
             $previousNextAuthUrl = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL'
             $script:previousAppParameters = $previousAppParameters
             $script:previousNextAuthUrl = $previousNextAuthUrl
@@ -878,9 +886,20 @@ if ($tlsEnabled -and -not $appStartSkipped) {
         } else {
             Write-Log '  [ERROR] The console did NOT answer over HTTPS within 90s. Rolling back to plain HTTP.'
             try {
-                if ($script:previousAppParameters) {
-                    & $NssmExe set SecVault-App AppParameters $script:previousAppParameters | Out-Null
+                # ⛔ NEVER WRITE A SUSPECT VALUE BACK. The captured value goes
+                # through `nssm get`, which can return UTF-16/NUL-laden output or
+                # nothing at all; writing that verbatim is what produced an
+                # AppParameters of "n" and a service that could not start. If the
+                # captured value does not look like the real entry point, fall
+                # back to the literal from CLAUDE.md. A rollback must be the one
+                # path that cannot fail.
+                $restore = $script:previousAppParameters
+                if ([string]::IsNullOrWhiteSpace($restore) -or $restore.Length -lt 10 -or $restore -notmatch 'next') {
+                    Write-Log "  [WARN] Captured entry point looked wrong ('$restore') -- restoring the documented default instead."
+                    $restore = 'node_modules\next\dist\bin\next start -p 3010'
                 }
+                & $NssmExe set SecVault-App AppParameters $restore | Out-Null
+                Write-Log "  Entry point restored to: $restore"
                 Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_CERT_PATH' -Value '' | Out-Null
                 Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_KEY_PATH'  -Value '' | Out-Null
                 if ($script:previousNextAuthUrl) {

@@ -1061,3 +1061,36 @@ which is unavoidable — it is already parsed and running.
 logs made it look like both had run. Wait for the task to leave `Running` before
 triggering it again — and wait for it to ENTER `Running` before concluding it
 has finished, or the check returns instantly against the previous run.
+
+### ⛔ A custom Next server must load .env.local ITSELF (2026-09-14, caused an outage)
+
+`next start` calls `loadEnvConfig()` for you. A CUSTOM server does not get that
+for free, and `server.js` reads `TLS_CERT_PATH` at its top level — before
+`next()` is even constructed.
+
+On the server those paths live in `.env.local`, so `resolveTlsConfig()` saw an
+empty `process.env`, reported **"TLS: not configured"**, and served plain HTTP.
+Everything else worked, because Next loads the env for the APP's code — only
+this file's own top-level read was empty, which is what made it hard to see.
+
+The consequence was not a quiet mis-report. The updater's HTTPS probe correctly
+found nothing listening on TLS, fired its rollback, and the rollback then wrote
+a corrupt `AppParameters` (see below) — so the console went DOWN. A missing
+`require('@next/env').loadEnvConfig(process.cwd())` cost a production outage.
+
+⛔ **AND IT IS WHY THE LOCAL TEST PASSED.** The local run exported `TLS_CERT_PATH`
+in the shell, so `process.env` already held it and the missing load was
+invisible. **A local test that supplies configuration differently from
+production is not testing the path production takes.** Re-run with the values in
+`.env.local` and nothing exported — that reproduced it immediately.
+
+### ⛔ `nssm get` returns UTF-16 with NULs — never round-trip it into `nssm set`
+
+The TLS rollback captured the old entry point with `& $NssmExe get SecVault-App
+AppParameters` and wrote it back on failure. That output carries embedded NULs,
+so `nssm set` truncated it to **`n`**: the service could not start at all, and
+the SAFETY NET became the outage it existed to prevent.
+
+Strip NULs on capture (`-replace "`0", ''`), and — more importantly — never
+trust the captured value: if it does not look like the real entry point, write
+the documented literal instead. A rollback is the one path that must not fail.

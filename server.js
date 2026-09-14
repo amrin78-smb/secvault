@@ -36,6 +36,24 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const next = require('next');
+const { loadEnvConfig } = require('@next/env');
+
+// ⛔ LOAD .env.local BEFORE READING ANY OF IT. `next start` does this itself, but
+// a CUSTOM SERVER must do it explicitly — and this file reads TLS_CERT_PATH at
+// its top level, before next() is even constructed.
+//
+// This cost a production outage. On the server the TLS paths live in .env.local,
+// so resolveTlsConfig() saw an empty process.env and reported "TLS: not
+// configured" — the console came up on plain HTTP, the updater's HTTPS probe
+// correctly found nothing, and the rollback fired. Everything else worked
+// throughout, because Next loads the env for the APP's code; only this file's
+// own top-level read was empty.
+//
+// ⛔ AND IT IS WHY THE LOCAL TEST PASSED. I exported TLS_CERT_PATH in the shell
+// before running server.js, so process.env already had it and the missing load
+// was invisible. A local test that supplies configuration differently from
+// production is not testing the path production takes.
+loadEnvConfig(process.cwd());
 
 const {
   resolveTlsConfig,
