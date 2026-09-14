@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, MANAGE_CREDENTIAL_PROFILES, forbiddenResponse } from '../../../../lib/rbac';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import { getProfileMeta, updateProfile, deleteProfile, buildProfilePlaintext } from '../../../../lib/credentialProfiles';
 
@@ -18,8 +18,8 @@ export const dynamic = 'force-dynamic';
 // updateProfile comment. A shape change means creating a new profile.
 export async function PUT(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_CREDENTIAL_PROFILES)) {
+    return forbiddenResponse(MANAGE_CREDENTIAL_PROFILES);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid profile id' }, { status: 400 });
@@ -112,8 +112,8 @@ export async function PUT(request, { params }) {
 // never affects any device that already used it.
 export async function DELETE(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_CREDENTIAL_PROFILES)) {
+    return forbiddenResponse(MANAGE_CREDENTIAL_PROFILES);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid profile id' }, { status: 400 });

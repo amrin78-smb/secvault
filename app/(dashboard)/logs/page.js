@@ -1,3 +1,7 @@
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../api/auth/[...nextauth]/route';
+import { can, roleOf, VIEW_LOG_SEARCH } from '../../../lib/rbac';
+import NoAccess from '../../../components/ui/NoAccess';
 import PageHeader from '../../../components/ui/PageHeader';
 import LogSearchForm from '../../../components/logs/LogSearchForm';
 import LogResults from '../../../components/logs/LogResults';
@@ -21,7 +25,30 @@ function first(v) {
   return Array.isArray(v) ? v[0] : v;
 }
 
+// ⛔ A CAPABILITY-GATED READ, which is new in this codebase. Every other GET
+// in this app is ungated, on the documented principle that read access is not
+// where the risk is. Raw log search is the deliberate exception: it returns
+// unredacted syslog, which carries usernames, internal addresses and URLs —
+// the most personally identifying data SecVault holds. The Operator role does
+// not include it.
+//
+// ⛔ The guard is HERE, not only in the sidebar. Hiding the nav entry stops
+// discovery; it does nothing about a bookmark, a pasted link, or a URL typed
+// from memory.
 export default async function LogsPage({ searchParams }) {
+  const session = await getServerSession(authOptions);
+  if (!can(session, VIEW_LOG_SEARCH)) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <PageHeader title="Log search" />
+        <NoAccess
+          role={roleOf(session)}
+          what="Log search"
+          detail="Raw log search returns unredacted syslog, including usernames, internal addresses and visited URLs. It is limited to Admin and Super Admin."
+        />
+      </div>
+    );
+  }
   const sp = searchParams || {};
   const params = {};
   for (const k of [

@@ -2,7 +2,7 @@ import { pool } from '../../../../lib/db';
 import { runAnalysisForAllDevices } from '../../../../lib/engines/ruleAnalysis';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +13,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, OPERATE)) {
+      return forbiddenResponse(OPERATE);
     }
 
     const result = await runAnalysisForAllDevices(pool);

@@ -6,17 +6,26 @@ import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Ca
 import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
+import { capabilitiesOf } from '../../../lib/rbac';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
 import AppearancePanel from '../../../components/settings/AppearancePanel';
 import pkg from '../../../package.json';
 
+// ⛔ `requires` is the capability needed to SEE the tab at all. A tab with no
+// requirement is open to every authenticated role — today that is General
+// (which holds per-user appearance and your own password, both self-service)
+// and About.
+//
+// ⛔ Hiding a tab is NOT the security boundary. Every panel behind these tabs
+// is backed by a route that checks the same capability server-side; this list
+// exists so an Operator is not shown five doors that all refuse to open.
 const TABS = [
   { key: 'general', label: 'General' },
-  { key: 'users', label: 'Users' },
-  { key: 'profiles', label: 'Credential Profiles' },
-  { key: 'notifications', label: 'Notifications' },
-  { key: 'updates', label: 'Updates' },
+  { key: 'users', label: 'Users', requires: 'manage_users' },
+  { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
+  { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
+  { key: 'updates', label: 'Updates', requires: 'run_update' },
   { key: 'about', label: 'About' },
 ];
 
@@ -45,7 +54,25 @@ export default function SettingsPage() {
   // NextAuth's own built-in GET /api/auth/session endpoint. Defaults to
   // false (fail closed) until resolved, same "hidden until proven admin"
   // posture as UsersPanel's own self-gating `visible` state below.
-  const [isAdminUser, setIsAdminUser] = useState(false);
+  // ⛔ CAPABILITIES, NOT A ROLE COMPARISON. This was `role === 'admin'`, which
+  // the three-role change would have quietly broken in the most confusing
+  // direction possible: a SUPER ADMIN — the most privileged account — would have
+  // failed that equality and lost the Updates, Notifications and Credential
+  // Profile panels, while an ordinary admin kept them.
+  //
+  // Starts as an all-false object so the page fails CLOSED while the session is
+  // still resolving, same posture as before.
+  const [caps, setCaps] = useState(() => ({}));
+
+  // ⛔ Derived, not stored. If the session resolves to fewer capabilities than
+  // the tab currently open (a deep link to ?tab=users as an Operator), the
+  // active tab must fall back to one that exists — otherwise the page renders
+  // a tab bar with nothing under it, which looks like a broken page rather
+  // than a restriction.
+  const visibleTabs = TABS.filter((t) => !t.requires || caps[t.requires]);
+  const effectiveTab = visibleTabs.some((t) => t.key === activeTab)
+    ? activeTab
+    : (visibleTabs[0] ? visibleTabs[0].key : 'general');
 
   useEffect(() => {
     let cancelled = false;
@@ -54,9 +81,11 @@ export default function SettingsPage() {
       try {
         const res = await fetch('/api/auth/session');
         const data = await res.json();
-        if (!cancelled) setIsAdminUser(data?.user?.role === 'admin');
+        // capabilitiesOf() takes a session-shaped object, which is exactly what
+        // /api/auth/session returns.
+        if (!cancelled) setCaps(capabilitiesOf(data));
       } catch {
-        // Fail closed -- stay non-admin if the session check itself errors.
+        // Fail closed -- no capabilities if the session check itself errors.
       }
     }
 
@@ -158,18 +187,18 @@ export default function SettingsPage() {
           background: 'var(--bg-primary)',
         }}
       >
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             style={{
               padding: '9px 16px',
               fontSize: 'var(--text-md)',
-              fontWeight: activeTab === tab.key ? 600 : 400,
-              color: activeTab === tab.key ? 'var(--primary)' : 'var(--text-muted)',
+              fontWeight: effectiveTab === tab.key ? 600 : 400,
+              color: effectiveTab === tab.key ? 'var(--primary)' : 'var(--text-muted)',
               background: 'none',
               border: 'none',
-              borderBottom: activeTab === tab.key ? '2px solid var(--primary)' : '2px solid transparent',
+              borderBottom: effectiveTab === tab.key ? '2px solid var(--primary)' : '2px solid transparent',
               cursor: 'pointer',
               marginBottom: '-1px',
             }}
@@ -179,7 +208,7 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {activeTab === 'general' && (
+      {effectiveTab === 'general' && (
         <div
           style={{
             display: 'grid',
@@ -191,6 +220,11 @@ export default function SettingsPage() {
         >
           <AppearancePanel />
 
+          {/* ⛔ A GLOBAL app setting, so it is gated even though the tab that
+              holds it is open to everyone. The General tab also carries the
+              per-user Appearance controls and your own password, both of which
+              are self-service and stay available to every role. */}
+          {caps.manage_settings && (
           <Card>
             <CardHeader>
               <CardTitle>Feed Sync</CardTitle>
@@ -203,7 +237,7 @@ export default function SettingsPage() {
                     id="feed_poll_interval_hours"
                     type="number"
                     min="1"
-                    disabled={loading || !isAdminUser}
+                    disabled={loading || !caps.manage_settings}
                     value={feedPollIntervalHours}
                     onChange={(e) => setFeedPollIntervalHours(e.target.value)}
                     className="input"
@@ -214,7 +248,7 @@ export default function SettingsPage() {
                   <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{generalStatus}</p>
                 )}
 
-                {isAdminUser && (
+                {caps.manage_settings && (
                   <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
                     Save
                   </Button>
@@ -222,6 +256,7 @@ export default function SettingsPage() {
               </form>
             </CardBody>
           </Card>
+          )}
 
           <Card>
             <CardHeader>
@@ -269,13 +304,13 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {activeTab === 'users' && <UsersPanel />}
+      {effectiveTab === 'users' && <UsersPanel />}
 
-      {activeTab === 'profiles' && isAdminUser && <CredentialProfilesPanel />}
+      {effectiveTab === 'profiles' && caps.manage_credential_profiles && <CredentialProfilesPanel />}
 
-      {activeTab === 'notifications' && isAdminUser && <NotificationsPanel />}
+      {effectiveTab === 'notifications' && caps.manage_settings && <NotificationsPanel />}
 
-      {activeTab === 'updates' && isAdminUser && (
+      {effectiveTab === 'updates' && caps.run_update && (
         <div style={{ maxWidth: 576 }}>
           <Card>
             <CardHeader>
@@ -288,7 +323,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {activeTab === 'about' && (
+      {effectiveTab === 'about' && (
         <div style={{ maxWidth: 576 }}>
           <Card>
             <CardHeader>

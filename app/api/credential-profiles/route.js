@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
+import { can, MANAGE_CREDENTIAL_PROFILES, forbiddenResponse } from '../../../lib/rbac';
 import { listProfiles, createProfile, buildProfilePlaintext } from '../../../lib/credentialProfiles';
 import { CREDENTIAL_TYPES } from '../../../components/devices/vendorMeta';
 
@@ -17,8 +17,8 @@ export const dynamic = 'force-dynamic';
 // management surface in this app.
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_CREDENTIAL_PROFILES)) {
+    return forbiddenResponse(MANAGE_CREDENTIAL_PROFILES);
   }
   try {
     const profiles = await listProfiles(pool);
@@ -55,8 +55,8 @@ export async function GET() {
 // UI checkbox, so a direct API call can't silently bypass the warning.
 export async function POST(request) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_CREDENTIAL_PROFILES)) {
+    return forbiddenResponse(MANAGE_CREDENTIAL_PROFILES);
   }
 
   const body = await request.json().catch(() => ({}));

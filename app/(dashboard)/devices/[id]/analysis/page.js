@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../../api/auth/[...nextauth]/route';
-import { isAdmin } from '../../../../../lib/rbac';
+import { can, OPERATE } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
 import Table from '../../../../../components/ui/Table';
 import Badge from '../../../../../components/ui/Badge';
@@ -222,7 +222,11 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
   // already server-side admin-only (lib/rbac.js). Hiding the button here
   // just avoids a viewer clicking it and getting a 403.
   const session = await getServerSession(authOptions);
-  const canWrite = isAdmin(session);
+  // ⛔ OPERATE, not isAdmin(). The button this gates calls a route that now
+  // accepts the Operator role, and a UI gate STRICTER than its API is its own
+  // kind of bug: the action is permitted, the control is invisible, and the
+  // operator concludes the product is broken rather than that they lack access.
+  const canWrite = can(session, OPERATE);
 
   const device = await getDevice(pool, params.id);
 

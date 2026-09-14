@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../api/auth/[...nextauth]/route';
+import { capabilitiesOf } from '../../lib/rbac';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
@@ -10,12 +11,18 @@ import pkg from '../../package.json';
 
 export default async function DashboardLayout({ children }) {
   const session = await getServerSession(authOptions);
+  // ⛔ Resolved SERVER-side and passed down, rather than re-fetched by the
+  // client sidebar. The nav is defence in depth only — every page it links to
+  // guards itself — but a nav derived from a client fetch would briefly show
+  // entries the role cannot open, which reads as a broken link rather than a
+  // boundary.
+  const capabilities = capabilitiesOf(session);
 
   return (
     <div className="sv-shell">
       <Header session={session} />
       <div className="sv-body">
-        <Sidebar version={pkg.version} />
+        <Sidebar version={pkg.version} capabilities={capabilities} />
         <div className="sv-content-col">
           {/* ⛔ Suspense is REQUIRED: NavProgress calls useSearchParams(), which
               without a boundary opts the whole subtree into client rendering.

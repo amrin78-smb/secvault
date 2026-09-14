@@ -72,7 +72,11 @@ const NAV_GROUPS = [
   { group: 'Monitor', items: [
     { href: '/', label: 'Overview', Icon: IconDashboard, exact: true },
     { href: '/alerts', label: 'Alerts', Icon: IconBell },
-    { href: '/logs', label: 'Log search', Icon: IconDocument },
+    // ⛔ The only nav entry with a capability requirement today. Log search
+    // returns unredacted syslog; the Operator role does not include it. Hiding
+    // it here stops discovery — app/(dashboard)/logs/page.js is what actually
+    // refuses the request.
+    { href: '/logs', label: 'Log search', Icon: IconDocument, requires: 'view_log_search' },
   ] },
   { group: 'Inventory', items: [
     { href: '/devices', label: 'Firewalls', Icon: IconDevices },
@@ -107,7 +111,7 @@ function isActive(pathname, href, exact) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export default function Sidebar({ version }) {
+export default function Sidebar({ version, capabilities }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -134,7 +138,13 @@ export default function Sidebar({ version }) {
   return (
     <aside className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}>
       <nav className="sv-nav">
-        {NAV_GROUPS.map(({ group, items }) => (
+        {NAV_GROUPS.map(({ group, items: allItems }) => {
+          // A group whose every entry is hidden must not leave its label behind.
+          const items = allItems.filter(
+            (it) => !it.requires || !capabilities || capabilities[it.requires]
+          );
+          if (items.length === 0) return null;
+          return (
           <div key={group} className="sv-nav-group">
             {/* Hidden when collapsed: at 64px there is no room for a heading,
                 and the grouping still reads from the gap between clusters. */}
@@ -156,7 +166,8 @@ export default function Sidebar({ version }) {
               );
             })}
           </div>
-        ))}
+          );
+        })}
         <div className="sv-nav-group sv-nav-group-pinned">
           <Link
             href={SETTINGS_ITEM.href}

@@ -5,7 +5,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../lib/apiUtils';
-import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -144,8 +144,8 @@ export async function POST(request, { params }) {
     }
 
     const session = await getServerSession(authOptions);
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, OPERATE)) {
+      return forbiddenResponse(OPERATE);
     }
 
     const result = await runAnalysisForDevice(id, pool);

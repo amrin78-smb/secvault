@@ -217,8 +217,12 @@ describe('a request is never completed by hand', () => {
   it('both mutating routes are admin-gated', () => {
     // These write shared state another operator acts on at the firewall —
     // unlike the ungated non-mutating POSTs (access-path, path-query).
-    assert.match(DEVICE_ROUTE, /if \(!isAdmin\(session\)\) \{ return forbiddenResponse\(\); \}/);
-    assert.match(ITEM_ROUTE, /if \(!isAdmin\(session\)\) \{ return forbiddenResponse\(\); \}/);
+    // v2.110.0: gated on the OPERATE capability rather than the isAdmin()
+    // boolean. Raising and verifying a rule change request is operational work
+    // the Operator role covers; the requirement that BOTH mutating routes refuse
+    // an unauthorised caller is unchanged.
+    assert.match(DEVICE_ROUTE, /if \(!can\(session, OPERATE\)\) \{ return forbiddenResponse\(OPERATE\); \}/);
+    assert.match(ITEM_ROUTE, /if \(!can\(session, OPERATE\)\) \{ return forbiddenResponse\(OPERATE\); \}/);
   });
 });
 

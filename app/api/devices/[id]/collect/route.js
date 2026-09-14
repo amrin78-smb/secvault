@@ -2,7 +2,7 @@ import { pool } from '../../../../../lib/db';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../../lib/rbac';
 import { enqueueJob } from '../../../../../lib/engines/backgroundJobs';
 
 export const dynamic = 'force-dynamic';
@@ -31,8 +31,8 @@ export const dynamic = 'force-dynamic';
 // truthful facts available here are the job id and its status.
 export async function POST(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, OPERATE)) {
+    return forbiddenResponse(OPERATE);
   }
 
   const { id } = params;

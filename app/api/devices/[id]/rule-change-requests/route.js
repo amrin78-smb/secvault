@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../../../lib/db';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { isValidUuid } from '../../../../../lib/apiUtils';
-import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../../lib/rbac';
 import { logActivity } from '../../../../../lib/activityLog';
 import {
   getCleanupCandidates,
@@ -28,7 +28,7 @@ export const dynamic = 'force-dynamic';
 // ⛔ POST is admin-gated. Unlike /api/saved-views (per-user preference) or
 // /api/devices/[id]/access-path (a pure computation that persists nothing),
 // this WRITES shared state that another operator will act on at the firewall.
-// It is a mutation in every sense that matters, so isAdmin() applies.
+// It is a mutation in every sense that matters, so the OPERATE capability
 //
 // ⛔ There is deliberately NO endpoint here that marks a request done. A
 // request becomes `verified` only because verifyRequestsForDevice() found the
@@ -70,8 +70,8 @@ export async function POST(request, { params }) {
     }
 
     const session = await getServerSession(authOptions);
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, OPERATE)) {
+      return forbiddenResponse(OPERATE);
     }
 
     const deviceResult = await pool.query('SELECT id, name FROM devices WHERE id = $1', [id]);

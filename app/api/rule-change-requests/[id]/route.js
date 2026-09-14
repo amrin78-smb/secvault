@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../../lib/db';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { isValidUuid } from '../../../../lib/apiUtils';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../lib/rbac';
 import { logActivity } from '../../../../lib/activityLog';
 import { submitRequest, abandonRequest, getRequest } from '../../../../lib/engines/ruleChangeRequests';
 
@@ -53,8 +53,8 @@ export async function PATCH(request, { params }) {
     }
 
     const session = await getServerSession(authOptions);
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, OPERATE)) {
+      return forbiddenResponse(OPERATE);
     }
 
     const body = await request.json().catch(() => ({}));

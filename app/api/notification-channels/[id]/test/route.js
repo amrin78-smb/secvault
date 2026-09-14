@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+import { can, MANAGE_SETTINGS, forbiddenResponse } from '../../../../../lib/rbac';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { getChannelPlaintext, recordChannelSuccess, recordChannelError } from '../../../../../lib/notificationChannels';
 import { dispatchNotification } from '../../../../../lib/notify';
@@ -17,8 +17,8 @@ export const dynamic = 'force-dynamic';
 // real alert, or manually triggering a real patch_now/compliance condition.
 export async function POST(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_SETTINGS)) {
+    return forbiddenResponse(MANAGE_SETTINGS);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid channel id' }, { status: 400 });

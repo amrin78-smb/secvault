@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
+import { can, MANAGE_SETTINGS, forbiddenResponse } from '../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +42,8 @@ export async function PUT(request) {
   // reporting 403 for the whole call. Feed poll interval is a global app
   // setting, admin-only.
   if (feedPollIntervalHours !== undefined && feedPollIntervalHours !== null) {
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, MANAGE_SETTINGS)) {
+      return forbiddenResponse(MANAGE_SETTINGS);
     }
     // ⛔ VALIDATE. Confirmed live: settings.feed_poll_interval_hours holds an
     // EMPTY STRING in production, because a blank form field arrives as '' —
@@ -62,8 +62,9 @@ export async function PUT(request) {
   }
 
   // Handle password change first, if requested. Changing YOUR OWN password
-  // is allowed for any authenticated user (admin or viewer), not gated on
-  // isAdmin() — this is self-service account management, not an
+  // is allowed for ANY authenticated user regardless of role — including an
+  // operator — and is deliberately not gated on a capability: this is
+  // self-service account management, not an
   // administrative action. RBAC: identity now lives in the `users` table,
   // not the old global settings.admin_password_hash single-identity row —
   // see lib/schema.sql / lib/migrate.js's seedUsers().

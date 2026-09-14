@@ -901,9 +901,74 @@ fleet-wide VPN history.
 
 ## Role-Based Access Control
 
-Two roles only, `admin` and `viewer` — no granular permission system (a coarse boundary is safer than a fine-grained one). `viewer` is strictly read-only (cannot acknowledge, run analyses, sync, rotate credentials, manage devices/users/settings); changing your own password is the one exception. `users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app code); `password_hash` is `REVOKE`d from base grants, exposed only via a `users_readonly` view.
+**THREE roles** (v2.110.0, was two): `super_admin`, `admin`, `operator`. `viewer` is retired and
+is no longer assignable.
 
-`lib/rbac.js` — pure, dependency-free CommonJS: `isAdmin(session)`, `forbiddenResponse()` (403 JSON). Does NOT resolve its own session — every route calls `getServerSession(authOptions)` itself, then checks `if (!isAdmin(session)) return forbiddenResponse();`. Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated. **A non-mutating POST that only computes over already-collected data and persists nothing is treated like a GET, not gated** — e.g. `POST /api/devices/[id]/access-path` (query-only, no DB write) — the "mutating" test is about persistence, not HTTP verb; don't read the rule as "every POST needs isAdmin." **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
+| Capability | super_admin | admin | operator |
+|---|:--:|:--:|:--:|
+| `manage_users` | ✓ | — | — |
+| `manage_credential_profiles` | ✓ | — | — |
+| `manage_devices` | ✓ | ✓ | — |
+| `manage_settings` | ✓ | ✓ | — |
+| `run_update` | ✓ | ✓ | — |
+| `operate` | ✓ | ✓ | ✓ |
+| `view_identity` | ✓ | ✓ | — |
+| `view_log_search` | ✓ | ✓ | — |
+
+`operate` = acknowledge findings/alerts/diffs, run analyses and collections, raise and verify rule
+change requests. Changing YOUR OWN password is open to every role and is not a capability.
+
+⛔ **`admin` cannot manage users AT ALL — not merely "cannot create" them.** The requirement was
+phrased as create-only; that would be a hole rather than a boundary, because editing another
+user's role or password achieves exactly what creating one does, and editing a credential profile
+lets you replace and therefore control its stored secret. The capability covers create, update and
+delete together.
+
+⛔ **Grants are listed EXPLICITLY per role in `ROLE_CAPABILITIES`, never derived by subtraction.**
+"Everything except X" computed at runtime means the next capability added leaks into `admin` by
+default. `tests/rbac.test.js` asserts the matrix as a complete literal table.
+
+⛔ **Fails closed everywhere.** No session, no user, a null role (what `jwt()` sets when the
+database is unreachable), an unknown role, or a legacy `viewer` row all resolve to NO capabilities.
+An unrecognised capability STRING also denies — a typo must never match.
+
+⛔ **The last `super_admin` cannot be deleted or demoted.** Only that role holds `manage_users`, so
+losing the last one leaves an installation where nobody can ever create or change an account again,
+recoverable only by a direct database edit. The guard in `app/api/users/[id]/route.js` counts
+super_admins, not the word "admin".
+
+⛔ **Migration promotes the OLDEST admin to super_admin, once.** `migrateRolesToThreeTier()` in
+`lib/migrate.js` runs only when NO super_admin exists, so it never re-promotes an account a Super
+Admin deliberately demoted. It promotes ONE account, not every admin — granting user-management
+authority to every existing admin would be a silent privilege escalation. ⛔ `viewer` rows are NOT
+mapped to `operator` (operator can write, viewer could not); they are counted and reported instead.
+
+`users` table holds `username`, `password_hash`, `role` (no CHECK constraint, validated in app
+code against `ASSIGNABLE_ROLES`); `password_hash` is `REVOKE`d from base grants, exposed only via a
+`users_readonly` view.
+
+`lib/rbac.js` — pure, dependency-free CommonJS. The one check is `can(session, CAPABILITY)`;
+`capabilitiesOf(session)` returns the whole object for handing to the UI. Does NOT resolve its own
+session — every route calls `getServerSession(authOptions)` itself, then
+`if (!can(session, X)) return forbiddenResponse(X);`. The 403 body names the missing capability,
+because "admin role required" became actively misleading with three roles.
+
+⛔ **`isAdmin(session)` survives as a LEGACY ALIAS meaning `manage_devices`**, and roughly twenty
+routes still use it. That is deliberate: it makes introducing `operator` a pure restriction —
+every un-migrated route denies operators by default and is opened up only by a deliberate edit.
+Prefer `can()` in new code.
+
+⛔ **A UI gate must never be STRICTER than the API it fronts.** If a button is hidden while its
+route would have accepted the call, the operator concludes the product is broken rather than that
+they lack access. `/alerts`, `/compliance/[deviceId]`, `/devices/[id]/analysis` and
+`/vulnerability` therefore gate on `OPERATE`, matching their routes.
+
+Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated **with two
+documented exceptions, both about personal data rather than mutation**: `/api/logs/search`
+(`view_log_search` — raw syslog carries usernames, internal addresses and URLs) and the VPN
+identity tabs (`view_identity`). ⛔ The VPN guard is TWO-PART: `visibleVpnTabs()` hides the tab so
+it cannot be discovered, AND `app/(dashboard)/vpn/page.js` refuses to render an identity tab body
+however the URL was reached. A hidden tab whose URL still works is decoration, not a boundary. **A non-mutating POST that only computes over already-collected data and persists nothing is treated like a GET, not gated** — e.g. `POST /api/devices/[id]/access-path` (query-only, no DB write) — the "mutating" test is about persistence, not HTTP verb; don't read the rule as "every POST needs isAdmin." **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
 
 **Saved views are the second documented exception to the mutating-route rule** (after "change your
 own password"). `POST`/`DELETE /api/saved-views` are NOT admin-gated: a saved view is this user’s
@@ -918,7 +983,7 @@ return the same kind of id — local gives a UUID with a `users` row, LDAP gives
 with no row at all — so per-user storage works only for local accounts, and callers check the
 SHAPE of the id rather than trusting the provider name.
 
-**LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
+**LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping. ⛔ Since v2.110.0 that is no longer the TOP role — an LDAP user cannot manage accounts or credential profiles, which is a deliberate tightening given there is still no group mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
 
 ---
 

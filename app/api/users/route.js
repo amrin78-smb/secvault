@@ -3,16 +3,20 @@ import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse, ADMIN_ROLE, VIEWER_ROLE } from '../../../lib/rbac';
+import { can, MANAGE_USERS, forbiddenResponse, ASSIGNABLE_ROLES, OPERATOR_ROLE, SUPER_ADMIN_ROLE, isAssignableRole } from '../../../lib/rbac';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_ROLES = new Set([ADMIN_ROLE, VIEWER_ROLE]);
+// ⛔ Sourced from lib/rbac.js rather than re-listed here. A role this file
+// accepted but the capability matrix did not recognise would be stored on a
+// real account and then grant nothing, which reads as a broken login rather
+// than a rejected input.
+const VALID_ROLES = new Set(ASSIGNABLE_ROLES);
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_USERS)) {
+    return forbiddenResponse(MANAGE_USERS);
   }
 
   const result = await pool.query(
@@ -23,14 +27,16 @@ export async function GET() {
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_USERS)) {
+    return forbiddenResponse(MANAGE_USERS);
   }
 
   const body = await request.json().catch(() => ({}));
   const username = typeof body?.username === 'string' ? body.username.trim() : '';
   const password = typeof body?.password === 'string' ? body.password : '';
-  const role = VALID_ROLES.has(body?.role) ? body.role : VIEWER_ROLE;
+  // ⛔ Defaults to the LEAST privileged role. An unrecognised or absent role in
+  // the request must never fall through to something powerful.
+  const role = isAssignableRole(body?.role) ? body.role : OPERATOR_ROLE;
 
   if (!username) {
     return NextResponse.json({ error: 'username is required' }, { status: 400 });

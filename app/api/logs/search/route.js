@@ -1,3 +1,6 @@
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../auth/[...nextauth]/route';
+import { can, forbiddenResponse, VIEW_LOG_SEARCH } from '../../../../lib/rbac';
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { searchEvents } from '../../../../lib/syslog/logSearch';
@@ -10,7 +13,12 @@ export const dynamic = 'force-dynamic';
 // like a GET and NOT admin-gated, same as every other analysis read in this
 // app. Unauthenticated callers are already turned away with a 401 by
 // middleware.js. A viewer investigating an incident is the intended user.
+// ⛔ GATED GET — the documented exception to "GET routes are never gated".
+// The page guard alone would be theatre: this route returns the same raw
+// syslog and is callable directly with a session cookie.
 export async function GET(request) {
+  const session = await getServerSession(authOptions);
+  if (!can(session, VIEW_LOG_SEARCH)) return forbiddenResponse(VIEW_LOG_SEARCH);
   const sp = request.nextUrl.searchParams;
   const filters = {};
   for (const k of [

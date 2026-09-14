@@ -3,12 +3,16 @@ import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../../lib/db';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse, ADMIN_ROLE, VIEWER_ROLE } from '../../../../lib/rbac';
+import { can, MANAGE_USERS, forbiddenResponse, ASSIGNABLE_ROLES, OPERATOR_ROLE, SUPER_ADMIN_ROLE, isAssignableRole } from '../../../../lib/rbac';
 import { isValidUuid } from '../../../../lib/apiUtils';
 
 export const dynamic = 'force-dynamic';
 
-const VALID_ROLES = new Set([ADMIN_ROLE, VIEWER_ROLE]);
+// ⛔ Sourced from lib/rbac.js rather than re-listed here. A role this file
+// accepted but the capability matrix did not recognise would be stored on a
+// real account and then grant nothing, which reads as a broken login rather
+// than a rejected input.
+const VALID_ROLES = new Set(ASSIGNABLE_ROLES);
 
 // Shared guard: the app must never end up with zero admin users (would
 // lock every session out of every write action with no recovery path
@@ -16,7 +20,11 @@ const VALID_ROLES = new Set([ADMIN_ROLE, VIEWER_ROLE]);
 // paths below.
 async function wouldRemoveLastAdmin(pool, userId, { targetRole } = {}) {
   const { rows } = await pool.query(
-    "SELECT id, role FROM users WHERE role = 'admin'"
+    // ⛔ SUPER_ADMIN, not admin. Only super_admin holds MANAGE_USERS, so
+    // deleting or demoting the last one leaves an installation in which NOBODY
+    // can ever create or change a user account again — recoverable only by a
+    // direct database edit. The guard follows the capability, not the word.
+    "SELECT id, role FROM users WHERE role = 'super_admin'"
   );
   const remainingAdmins = rows.filter((r) => {
     if (r.id !== userId) return true;
@@ -29,8 +37,8 @@ async function wouldRemoveLastAdmin(pool, userId, { targetRole } = {}) {
 
 export async function PUT(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_USERS)) {
+    return forbiddenResponse(MANAGE_USERS);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid user id' }, { status: 400 });
@@ -66,7 +74,7 @@ export async function PUT(request, { params }) {
   if (nextRole !== undefined && nextRole !== ADMIN_ROLE) {
     if (await wouldRemoveLastAdmin(pool, params.id, { targetRole: nextRole })) {
       return NextResponse.json(
-        { error: 'Cannot change role — this is the last remaining admin account' },
+        { error: 'Cannot change role — this is the last remaining Super Admin account' },
         { status: 400 }
       );
     }
@@ -90,8 +98,8 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_USERS)) {
+    return forbiddenResponse(MANAGE_USERS);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid user id' }, { status: 400 });
@@ -108,7 +116,7 @@ export async function DELETE(request, { params }) {
 
   if (await wouldRemoveLastAdmin(pool, params.id, { targetRole: null })) {
     return NextResponse.json(
-      { error: 'Cannot delete — this is the last remaining admin account' },
+      { error: 'Cannot delete — this is the last remaining Super Admin account' },
       { status: 400 }
     );
   }

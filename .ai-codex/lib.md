@@ -124,6 +124,15 @@ coverage caveat SURVIVES the critical branch too: a gap does not stop mattering 
 worse was found — the real number may be higher than the one displayed.
 
 ## lib/rbac.js
+
+⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.
+Exports `can(session, cap)` (the one check), `capabilitiesOf`, `roleOf`, `isSuperAdmin`,
+`isAssignableRole`, `ASSIGNABLE_ROLES`/`ROLE_LABELS`/`ROLE_DESCRIPTIONS`, the eight capability
+constants, and `forbiddenResponse(cap)` which names the missing authority. `isAdmin()` remains as
+a legacy alias for `manage_devices` so un-migrated routes deny operators by default. Fails closed
+on every malformed input including an unrecognised capability string. Matrix pinned exhaustively
+by `tests/rbac.test.js`, which also scans every route file for a missing guard.
+
 [SENSITIVE] — entire file (auth/authorization guard)
 
 `ADMIN_ROLE` -> `string` — `'admin'`. [SENSITIVE]

@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import { runFullSync } from '../../../../lib/feeds';
 
@@ -22,8 +22,8 @@ export const dynamic = 'force-dynamic';
 // unhandled rejection can't warn/crash the process.
 export async function POST(request) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, OPERATE)) {
+    return forbiddenResponse(OPERATE);
   }
 
   runFullSync(pool).catch((err) => {

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, MANAGE_SETTINGS, forbiddenResponse } from '../../../../lib/rbac';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import {
   ALERT_TYPES,
@@ -21,8 +21,8 @@ export const dynamic = 'force-dynamic';
 // means creating a new channel, same reasoning as credential_type there).
 export async function PUT(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_SETTINGS)) {
+    return forbiddenResponse(MANAGE_SETTINGS);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid channel id' }, { status: 400 });
@@ -114,8 +114,8 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_SETTINGS)) {
+    return forbiddenResponse(MANAGE_SETTINGS);
   }
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid channel id' }, { status: 400 });

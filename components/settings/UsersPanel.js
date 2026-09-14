@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+import { ASSIGNABLE_ROLES, ROLE_LABELS, ROLE_DESCRIPTIONS } from '../../lib/rbac';
 import Button from '../ui/Button';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 
@@ -22,7 +23,10 @@ import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 // `patch_now` — on the normal, intended state of the account the reader is
 // most likely logged in as. A role is an attribute, not an alarm: purple is
 // the palette's non-ramp identity hue and carries no severity reading.
-const ROLE_BADGE = { admin: 'purple', viewer: 'muted' };
+// ⛔ Three roles, and none of them red — red is reserved for danger and a role
+// is an attribute, not an alarm. Super Admin is the strongest tint so the
+// account that can create other accounts is identifiable at a glance.
+const ROLE_BADGE = { super_admin: 'purple', admin: 'info', operator: 'muted' };
 
 export default function UsersPanel() {
   const [users, setUsers] = useState(null); // null = loading/forbidden, [] = loaded
@@ -31,7 +35,10 @@ export default function UsersPanel() {
   const [status, setStatus] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState('viewer');
+  // ⛔ Defaults to the LEAST privileged role, matching the server default in
+// app/api/users/route.js. A create form that defaults to a powerful role
+// makes over-granting the path of least resistance.
+  const [newRole, setNewRole] = useState('operator');
 
   async function loadUsers() {
     try {
@@ -73,7 +80,7 @@ export default function UsersPanel() {
       setStatus('User created.');
       setNewUsername('');
       setNewPassword('');
-      setNewRole('viewer');
+      setNewRole('operator');
       loadUsers();
     } else {
       setStatus(data.error || 'Failed to create user.');
@@ -165,7 +172,9 @@ export default function UsersPanel() {
               <tr key={u.id}>
                 <td>{u.username}</td>
                 <td>
-                  <Badge color={ROLE_BADGE[u.role] || 'muted'}>{u.role}</Badge>
+                  <Badge color={ROLE_BADGE[u.role] || 'muted'} title={ROLE_DESCRIPTIONS[u.role]}>
+                    {ROLE_LABELS[u.role] || u.role}
+                  </Badge>
                 </td>
                 <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <select
@@ -174,8 +183,9 @@ export default function UsersPanel() {
                     onChange={(e) => handleRoleChange(u.id, e.target.value)}
                     style={{ width: 'auto' }}
                   >
-                    <option value="admin">admin</option>
-                    <option value="viewer">viewer</option>
+                    {ASSIGNABLE_ROLES.map((r) => (
+                      <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                    ))}
                   </select>
                   <Button variant="secondary" onClick={() => handleResetPassword(u.id)}>
                     Reset Password

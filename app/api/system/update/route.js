@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../lib/rbac';
+import { can, RUN_UPDATE, forbiddenResponse } from '../../../../lib/rbac';
 import { execSync } from 'child_process';
 import path from 'path';
 import { pool } from '../../../../lib/db';
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
 // waiting for the update to finish (the script stops this app's own service
 // partway through). Pattern copied from netvault's app/api/system/update/route.ts.
 //
-// Auth: gated on the `admin` role via lib/rbac.js's isAdmin(session) -- a
+// Auth: gated on the `admin` role via lib/rbac.js's can(session, RUN_UPDATE) -- a
 // `viewer`-role session (or no session at all) is rejected with a 403. This
 // route used to only require ANY authenticated session (no role/RBAC split
 // existed anywhere in this app at the time). That has since changed: a
@@ -26,8 +26,8 @@ export const dynamic = 'force-dynamic';
 // "viewer = strictly read-only, no actions" rule used everywhere else.
 export async function POST() {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, RUN_UPDATE)) {
+    return forbiddenResponse(RUN_UPDATE);
   }
 
   const serverIp = process.env.SERVER_IP || '';

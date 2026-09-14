@@ -3,7 +3,6 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
-import { VIEWER_ROLE } from '../../../../lib/rbac';
 
 // A real bcrypt hash (of a random string) used so a login attempt for an
 // UNKNOWN username still pays the bcrypt cost and cannot be distinguished by
@@ -114,6 +113,11 @@ export const authOptions = {
           // mapping is a feature addition, not part of "read-only vs full
           // admin, at minimum" RBAC. Revisit if viewer-role LDAP users are
           // ever needed.
+          // ⛔ LDAP binds still map to `admin`, which since the three-role
+          // change is NO LONGER the top role: an LDAP user cannot manage user
+          // accounts or credential profiles. That is a deliberate tightening —
+          // there is still no group-to-role mapping, so the role every LDAP
+          // user receives should not be the one that can create accounts.
           return { id: username, name: username, role: 'admin' };
         } catch (err) {
           return null;
@@ -132,7 +136,11 @@ export const authOptions = {
       if (user) {
         token.id = user.id;
         token.provider = account?.provider;
-        token.role = user.role || VIEWER_ROLE;
+        // ⛔ Fails closed to NULL, not to a default role. The two-role era
+        // defaulted to `viewer`, which was safe only because viewer could do
+        // nothing. With three roles there is no safe default to invent, so an
+        // absent role becomes null and lib/rbac.js grants it no capabilities.
+        token.role = user.role || null;
       }
 
       // Re-validate role against the live `users` table on every request
@@ -149,7 +157,7 @@ export const authOptions = {
           const result = await pool.query('SELECT role FROM users WHERE id = $1', [token.id]);
           const storedUser = result.rows[0];
           // null => the user row is gone (deleted); session() below fails
-          // this closed to VIEWER_ROLE rather than re-granting admin.
+          // this closed to null (no capabilities) rather than re-granting admin.
           token.role = storedUser ? storedUser.role : null;
         } catch (err) {
           // DB unreachable — fail closed rather than trust a stale role.
@@ -161,7 +169,7 @@ export const authOptions = {
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.role = token.role || VIEWER_ROLE;
+        session.user.role = token.role || null;
         // ⛔ id and provider are exposed for per-user data (saved_views, added
         // 2026-09-09), and the two providers do NOT return the same kind of id:
         //

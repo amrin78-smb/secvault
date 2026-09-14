@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../../lib/rbac';
 import { dispatchMonthlyReport } from '../../../../../lib/engines/complianceReport';
 
 export const dynamic = 'force-dynamic';
@@ -16,8 +16,8 @@ export const dynamic = 'force-dynamic';
 // "test the pipeline" tool, not a way to force a second send this month.
 export async function POST() {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, OPERATE)) {
+    return forbiddenResponse(OPERATE);
   }
 
   try {

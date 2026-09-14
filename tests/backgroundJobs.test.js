@@ -370,9 +370,13 @@ describe('POST /api/devices/[id]/collect only enqueues', () => {
     assert.match(src, /enqueueJob\(/);
   });
 
-  it('is admin-gated and force-dynamic', () => {
-    assert.match(src, /isAdmin\(session\)/);
-    assert.match(src, /forbiddenResponse\(\)/);
+  // v2.110.0: the guard moved from the isAdmin() boolean to the OPERATE
+  // capability — collection is day-to-day operational work and the Operator
+  // role includes it. The INTENT here is unchanged: a mutating route must
+  // refuse an unauthorised caller before it enqueues anything.
+  it('is capability-gated and force-dynamic', () => {
+    assert.match(src, /can\(session, OPERATE\)/);
+    assert.match(src, /forbiddenResponse\(OPERATE\)/);
     assert.match(src, /export const dynamic = 'force-dynamic'/);
   });
 

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.110.0': [
+    "Three user roles instead of two: Super Admin, Admin and Operator.",
+    "Super Admin has full access. Admin has everything except creating or changing user accounts and credential profiles. Operator handles day-to-day work — acknowledging findings, running analyses and collections, raising rule change requests.",
+    "Operators do not see log search or the VPN views that name individual people, and their Settings is limited to appearance and their own password.",
+    "Your existing administrator account was promoted to Super Admin automatically. Without that, nobody would have been able to create a user after upgrading.",
+    "The last Super Admin account can no longer be deleted or demoted — that would leave nobody able to manage users at all.",
+  ],
   '2.109.0': [
     "Phase 1 is complete: every main page now opens with a plain-English answer, and every headline figure can be asked how it knows.",
     "Lifecycle now separates a perpetual licence from one whose expiry SecVault could not read. The second is reported as unknown, never as current — an unread expiry treated as fine is how a support contract lapses with nothing on screen to warn you.",

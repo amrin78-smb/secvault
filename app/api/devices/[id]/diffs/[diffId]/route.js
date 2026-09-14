@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../../lib/apiUtils';
-import { isAdmin, forbiddenResponse } from '../../../../../../lib/rbac';
+import { can, OPERATE, forbiddenResponse } from '../../../../../../lib/rbac';
 import { classifyDiff } from '../../../../../../lib/engines/configDiff';
 
 export const dynamic = 'force-dynamic';
@@ -75,8 +75,8 @@ export async function PUT(request, { params }) {
       console.warn(`[diffs route] Failed to resolve session actor: ${sessionErr.message}`);
     }
 
-    if (!isAdmin(session)) {
-      return forbiddenResponse();
+    if (!can(session, OPERATE)) {
+      return forbiddenResponse(OPERATE);
     }
 
     const body = await request.json().catch(() => ({}));

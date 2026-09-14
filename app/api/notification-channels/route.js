@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
+import { can, MANAGE_SETTINGS, forbiddenResponse } from '../../../lib/rbac';
 import {
   NOTIFICATION_CHANNEL_TYPES,
   ALERT_TYPES,
@@ -18,8 +18,8 @@ export const dynamic = 'force-dynamic';
 // as GET /api/credential-profiles, there is no viewer-facing use for this.
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_SETTINGS)) {
+    return forbiddenResponse(MANAGE_SETTINGS);
   }
   try {
     const channels = await listChannels(pool);
@@ -39,8 +39,8 @@ export async function GET() {
 // smtp.host + smtp.to are required for email (see lib/notify.js's sendEmail).
 export async function POST(request) {
   const session = await getServerSession(authOptions);
-  if (!isAdmin(session)) {
-    return forbiddenResponse();
+  if (!can(session, MANAGE_SETTINGS)) {
+    return forbiddenResponse(MANAGE_SETTINGS);
   }
 
   const body = await request.json().catch(() => ({}));

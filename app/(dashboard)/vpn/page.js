@@ -10,7 +10,11 @@ import { resolvePage, pageWindow, DEFAULT_PAGE_SIZE } from '../../../lib/paginat
 import { summarizeVpnConfig } from '../../../lib/engines/vpnSummary';
 import VpnSyslogActivity from '../../../components/vpn/VpnSyslogActivity';
 import TabBar from '../../../components/ui/TabBar';
-import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs } from '../../../lib/vpnTabs';
+import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs, visibleVpnTabs } from '../../../lib/vpnTabs';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../api/auth/[...nextauth]/route';
+import { can, roleOf, VIEW_IDENTITY } from '../../../lib/rbac';
+import NoAccess from '../../../components/ui/NoAccess';
 import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
 import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/syslog/vpnPresence';
@@ -153,11 +157,20 @@ function statusBadge(summary) {
 export default async function VpnFleetPage({ searchParams }) {
   const sp = searchParams || {};
   const tab = resolveFleetVpnTab(sp.vtab);
+
+  // ⛔ TWO-PART GUARD, and both parts are required. visibleVpnTabs() removes
+  // the tab from the bar so it cannot be discovered; this check refuses to
+  // RENDER an identity tab body however the URL was arrived at. Doing only the
+  // first would leave every identity view one typed ?vtab= away.
+  const session = await getServerSession(authOptions);
+  const canViewIdentity = can(session, VIEW_IDENTITY);
+  const requestedTab = FLEET_VPN_TABS.find((t) => t.key === tab);
+  const identityBlocked = !canViewIdentity && !!(requestedTab && requestedTab.identity);
   const { tabs, activeHref } = buildVpnTabHrefs(
     // `hmDevice`/`hmDays`/`hmTop` are the heatmap's own filter and are dropped
     // when switching tabs, for the same reason the page params are: a filter
     // from a view you are leaving means nothing in the view you are entering.
-    '/vpn', FLEET_VPN_TABS, sp, tab, [
+    '/vpn', visibleVpnTabs(FLEET_VPN_TABS, canViewIdentity), sp, tab, [
       'page', 'evPage', 'hmDevice', 'hmDays', 'hmTop',
       'utDevice', 'utDays', 'utTop', 'utUser', 'thDevice',
     ]
@@ -190,6 +203,18 @@ export default async function VpnFleetPage({ searchParams }) {
 
       <TabBar tabs={tabs} activeHref={activeHref} ariaLabel="VPN views" />
 
+      {/* ⛔ Rendered INSTEAD of the tab body when an identity tab is reached
+          by URL. The four tabs above are gated on canViewIdentity rather than
+          on identityBlocked, so removing this block fails CLOSED (a blank
+          panel) rather than open. */}
+      {identityBlocked && (
+        <NoAccess
+          role={roleOf(session)}
+          what={(requestedTab && requestedTab.label) || 'This view'}
+          detail="This view names individual VPN users and ties them to locations, hours and traffic. The Operator role covers fleet VPN status and tunnel health, but not personal identity data."
+        />
+      )}
+
       {tab === 'activity' && (
         /* Log-observed activity: the only VPN view that reflects what
            actually happened, and the only one covering Palo Alto. It pages on
@@ -198,7 +223,7 @@ export default async function VpnFleetPage({ searchParams }) {
         <VpnSyslogActivity searchParams={sp} page={sp.evPage} />
       )}
 
-      {tab === 'presence' && (
+      {canViewIdentity && tab === 'presence' && (
         /* Per-user activity heatmap. ⛔ Reads the syslog_vpn_auth_hourly
            ROLLUP, never syslog_events — and it measures HOURS IN WHICH A USER
            AUTHENTICATED, not connected time. See the component's header. */
@@ -218,7 +243,7 @@ export default async function VpnFleetPage({ searchParams }) {
         <VpnTunnelHealth deviceId={firstParam(sp.thDevice) || null} />
       )}
 
-      {tab === 'traffic' && (
+      {canViewIdentity && tab === 'traffic' && (
         /* Traffic attributed to named VPN users by joining vpn_sessions'
            assigned_ip against the syslog_talker_hourly rollup.
            ⛔ An hour counts only if it falls ENTIRELY inside exactly one
@@ -236,7 +261,7 @@ export default async function VpnFleetPage({ searchParams }) {
         />
       )}
 
-      {tab === 'detections' && (
+      {canViewIdentity && tab === 'detections' && (
         /* Named VPN threat detections. ⛔ Two of the six are baseline-gated
            and currently report INSUFFICIENT BASELINE rather than "no
            anomaly" — VPN auth history began 2026-09-08 and new-country needs
@@ -247,7 +272,7 @@ export default async function VpnFleetPage({ searchParams }) {
         <VpnDetections data={await getVpnDetections(pool, { hours: 24 })} />
       )}
 
-      {tab === 'locations' && (
+      {canViewIdentity && tab === 'locations' && (
         /* Where VPN logins come from, and which are failing. Reads the
            syslog_vpn_auth_hourly rollup, never the raw table -- the equivalent
            raw query was measured at 85.6 SECONDS over a 24h window. */
