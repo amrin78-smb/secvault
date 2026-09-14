@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.116.0': [
+    'Updates are much faster. Schema migration was taking 10-14 minutes of every update — 84% of the total — re-running seven one-time data repairs that had finished their work months ago.',
+    'Those repairs now record that they completed and are skipped thereafter. Each is keyed on a revision, so a corrected repair still re-runs everywhere it is needed.',
+    'A repair that FAILS is never recorded as done, so the next update retries it.',
+    'The in-app updater no longer reports failure on an update that is still succeeding — its health-check window was 10 minutes against updates that ran longer than that.',
+    'Migration now prints how long it took, so this cost can never become invisible again.',
+  ],
   '2.115.2': [
     'Work queue items collapse. Each row shows what it is, how many firewalls it covers and which ones; the why/what-to-do/how-you-will-know detail is one click away.',
     'Collapsed, not truncated. Showing only a top handful would hide the rest behind nothing, and an operator would reach the bottom of a short list believing they were finished. No item, count or band total is removed.',

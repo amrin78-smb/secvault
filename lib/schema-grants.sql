@@ -76,6 +76,10 @@ GRANT SELECT ON TABLE device_risk_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE fleet_dashboard_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_connectivity_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE activity_log TO claude_readonly, nocvault_readonly;
+-- One-shot data-backfill ledger (v2.116.0). Holds no device data and no secrets:
+-- a backfill name, a revision and a completion time. Readable so an operator can
+-- answer "did that repair actually run here, and when?" without a superuser.
+GRANT SELECT ON TABLE data_backfills TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_session_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_active_sessions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE vpn_ipsec_tunnels TO claude_readonly, nocvault_readonly;

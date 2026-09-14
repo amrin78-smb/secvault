@@ -21,7 +21,15 @@ import { PRODUCT_NAME } from '../../lib/branding';
 
 const HEALTH_POLL_MS = 2000;
 const HEALTH_ABORT_MS = 1800;
-const HEALTH_TIMEOUT_MS = 600000; // 10 minutes
+// ⛔ MUST EXCEED THE SLOWEST REAL UPDATE, WITH HEADROOM. This was 600000 (10
+// minutes) while measured deploys ran 740-980 SECONDS, so the panel reported
+// “taking longer than expected” on updates that were still running and about to
+// succeed. A false negative in a health check is worse than no health check —
+// the same defect that rolled back two working TLS deployments. Gating the
+// one-shot backfills (lib/backfillLedger.js) brought a normal update back under
+// ~3 minutes, but a FIRST update on an install that still has to run every
+// backfill will legitimately take the full old duration, so this stays generous.
+const HEALTH_TIMEOUT_MS = 2400000; // 40 minutes
 const RELOAD_COUNTDOWN_SECONDS = 15;
 const REQUIRED_CONSECUTIVE_HEALTHY = 3;
 

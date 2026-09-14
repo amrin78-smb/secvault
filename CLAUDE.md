@@ -1290,6 +1290,40 @@ section.
 
 Step 5b re-runs `schema-grants.sql` unconditionally (idempotent) using `PG_ADMIN_PASSWORD` read back out of the deployed `.env.local`; missing/empty value or a `psql` failure only logs a warning, never fails the update.
 
+### One-shot backfill ledger (v2.116.0) — why updates are no longer 15 minutes
+
+Measured: `node lib/migrate.js` was **601-823s of a 740-980s deploy (84%)**, and almost none of it
+was schema work. It was seven retroactive DATA REPAIRS re-scanning converged tables on every deploy
+forever — their own logs read `rewrote 0`, `0 labels written`, `deleted 0, updated 0`.
+`device_configs` is **776 MB**; one candidate scan measured 39s, and the PAN-OS redaction pass runs
+two regexes plus a `config_parsed::text LIKE` across it AND `config_backups`, then fetches 423
+multi-MB rows one at a time.
+
+`lib/backfillLedger.js` records each completed repair in `data_backfills` and skips it thereafter.
+
+⛔ **THE SCHEMA MIGRATION IS NEVER GATED.** `schema.sql` runs unconditionally every deploy — that is
+how a new table or column reaches an existing install. Only retroactive DATA repairs pass the gate.
+Pinned by `tests/backfillLedger.test.js`.
+
+⛔ **THE REVISION IS THE SAFETY MECHANISM.** Markers are keyed `(name, revision)`. If a repair's
+LOGIC is corrected, BUMP ITS REVISION IN THE SAME COMMIT or every install still holding the broken
+data will never run the fix. Precedent: the PAN-OS re-redaction shipped TWICE (the first pass was
+XML-only and missed 343 rows in CLI brace grammar) — it is gated at revision 2 for that reason.
+
+⛔ **ONLY A CLEAN RUN IS RECORDED.** These repairs are deliberately non-fatal, so silent failure is
+possible; marking a failed repair complete is the failed-read-as-a-fact bug applied to this file's
+own maintenance. ⛔ An UNREADABLE ledger **fails OPEN** — the one place in this codebase where that
+is right, because re-running is idempotent and costs minutes while skipping wrongly leaves
+plaintext secrets in the database.
+
+⛔ **The FIRST update after this change still runs everything** (empty ledger) and is slow; the one
+after it is fast.
+
+⛔ Unexplained, left gated but flagged: `backfillPaloAltoVersionRanges` reported `cleaned up 302` on
+EVERY run and 351 advisory rows share one `updated_at` — it was rewriting rows to identical values,
+which also explains 18.6% dead tuples on `advisories`. Stored ranges look correct. First place to
+look if advisory version matching ever regresses.
+
 ### NSSM registration
 
 ```powershell
