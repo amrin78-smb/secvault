@@ -780,6 +780,28 @@ if ($buildSucceeded -and $migrateSucceeded) {
                 return
             }
 
+            # ⛔ OPT-IN ON AN EXISTING INSTALL. An upgrade must not change how
+            # the product is REACHED without being asked to. The first version
+            # of this flipped every upgrade to HTTPS automatically, which is how
+            # a routine update turned into a transport change, a failed probe
+            # and an outage — on a console whose whole job is to be available
+            # when something is wrong.
+            #
+            # It runs when EITHER:
+            #   ENABLE_TLS=true   the operator asked for it (fresh installs set
+            #                     this, so new deployments are HTTPS by default)
+            #   TLS_CERT_PATH set TLS is already on; keep it working across
+            #                     upgrades without needing the flag as well
+            #
+            # Otherwise the step is a deliberate no-op and the console keeps
+            # whatever transport it already had.
+            $enableFlag = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'ENABLE_TLS'
+            $alreadyOn = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_CERT_PATH'
+            if (($enableFlag -notmatch '^(true|1|yes)$') -and [string]::IsNullOrWhiteSpace($alreadyOn)) {
+                Write-Log '  TLS: not requested on this installation (set ENABLE_TLS=true in .env.local to turn it on). Leaving the console exactly as it is.'
+                return
+            }
+
             $serverIp = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'SERVER_IP'
             $certDir  = Join-Path $repoRoot 'certs'
             $cert = New-SecVaultCertificate -CertDir $certDir -ServerIp $serverIp -LogFile $LogFile
