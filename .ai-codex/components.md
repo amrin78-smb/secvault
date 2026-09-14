@@ -376,6 +376,12 @@ render `NotMeasured`, never `0`.
 
 ## work/WorkQueueBoard.js
 
+(v2.115.2) Each item is a native `<details>` (`.wq-item` in globals.css) so the board stays a SERVER
+component — no client JS. ⛔ COLLAPSED, NOT TRUNCATED: a top-N view was rejected because it hides the
+remainder behind nothing, which is the truncation lie without the disclosure. The collapsed row keeps
+the IDENTITY (type, count, title, affects, `not measurable`); only the four explanatory fields hide.
+First item per band opens by default so the depth is discoverable.
+
 (v2.115.0) Renders the three bands as three ALWAYS-PRESENT sections. ⛔ `verify` is hueless
 (`--unmeasured`) and is never collapsed or appended to `scheduled`. ⛔ Failed sources and
 truncated caps each get their own banner, both hueless: the source did not find a problem, it

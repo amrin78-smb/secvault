@@ -1668,3 +1668,39 @@ tbody tr td { transition: background 0.12s ease; }
 .kpi-card .stat-delta,
 .kpi-card-compact .stat-sub-compact,
 .kpi-card-compact .stat-delta { padding-right: 26px; }
+
+/* ── Work queue items (v2.115.2) ───────────────────────────────────────────
+   Each item is a native <details>: the IDENTITY row (type, count, title,
+   affected firewalls) is always visible, and the four detail fields are one
+   click away.
+
+   ⛔ COLLAPSED, NOT TRUNCATED, and the difference is the whole point. Showing
+   only the top N would hide the rest behind nothing — the operator reaches the
+   bottom of a short list and believes they are finished. That is the same lie
+   the truncation banner exists to prevent, and it would be worse here because
+   nothing would disclose it. Collapsing removes no item and no count; it
+   removes only the repetition of prose nobody re-reads on the fortieth row. */
+.wq-item > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--row-pad-y, 10px) var(--s3);
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  border-radius: var(--radius);
+}
+.wq-item > summary::-webkit-details-marker { display: none; }
+.wq-item > summary:hover { background: var(--surface-subtle); }
+.wq-item > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* The chevron is the only thing that moves. ⛔ Rotation only — no colour
+   change, so the marker never competes with the severity badge beside it. */
+.wq-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) { .wq-chevron { transition: none; } }
+.wq-item[open] > summary .wq-chevron { transform: rotate(180deg); }
+.wq-item[open] > summary { border-bottom: 1px solid var(--border-light); border-radius: var(--radius) var(--radius) 0 0; }

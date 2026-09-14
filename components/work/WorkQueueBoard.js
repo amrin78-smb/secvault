@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { IconChevronDown } from '../icons';
 import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import AnswerHeader from '../ui/AnswerHeader';
@@ -93,71 +94,108 @@ function Field({ label, children }) {
   );
 }
 
-function WorkItem({ item }) {
+/**
+ * One item. Native <details>, so this stays a SERVER component — no client JS,
+ * no state, no hydration, and it survives AutoRefresh's router.refresh().
+ *
+ * ⛔ COLLAPSED IS NOT TRUNCATED. The obvious alternative — render only the top
+ * five — was rejected: it hides the rest behind nothing, so an operator reaches
+ * the bottom of a short list and believes they are finished. That is precisely
+ * the lie the truncation banner on this page exists to prevent, and it would be
+ * worse, because nothing would disclose it. Collapsing removes no item, no
+ * count and no band total.
+ *
+ * ⛔ WHAT STAYS VISIBLE IS THE IDENTITY, and it is chosen by the same test used
+ * for the tunnel-page disclosure: could a reader who never expands this draw a
+ * WRONG conclusion? Type, count, title, affected firewalls and the
+ * "not measurable" marker all stay out — they are what the item IS. The four
+ * explanatory fields go behind the click, because not knowing WHY yet is not
+ * the same as being misled.
+ *
+ * @param {boolean} defaultOpen  the first item of each band opens by default,
+ *   so the depth is discoverable rather than hidden behind a row that looks
+ *   inert. A page of uniformly closed rows teaches nobody that there is
+ *   anything underneath them.
+ */
+function WorkItem({ item, defaultOpen = false }) {
   const unmeasured = item.evidence === 'unmeasured';
   return (
-    <div
+    <details
+      className="wq-item"
+      open={defaultOpen}
       style={{
         border: '1px solid var(--border)',
         borderLeft: `3px solid ${unmeasured ? 'var(--unmeasured)' : 'var(--border)'}`,
         borderRadius: 'var(--radius)',
-        padding: 'var(--s3) var(--s4)',
         background: 'var(--bg-card)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--s3)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--s3)', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 380px', minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', flexWrap: 'wrap' }}>
-            <Badge color={SEVERITY_BADGE_COLOR[item.severity] || 'neutral'}>{TYPE_LABEL[item.type] || item.type}</Badge>
-            {item.count > 1 ? (
-              <span style={{ ...LABEL, color: 'var(--text-secondary)' }}>×{item.count}</span>
-            ) : null}
-            {/* ⛔ Says what KIND of claim this is, on every row. */}
-            {unmeasured ? (
-              <span
-                className="badge"
-                style={{
-                  background: 'var(--surface-subtle)',
-                  color: 'var(--unmeasured)',
-                  border: '1px solid var(--border)',
-                }}
-                title="SecVault could not measure this. It is listed so that the gap is visible, not because it was observed."
-              >
-                not measurable
-              </span>
-            ) : null}
-          </div>
-          <h3
+      <summary>
+        <Badge color={SEVERITY_BADGE_COLOR[item.severity] || 'neutral'}>
+          {TYPE_LABEL[item.type] || item.type}
+        </Badge>
+        {item.count > 1 ? (
+          <span style={{ ...LABEL, color: 'var(--text-secondary)', flex: 'none' }}>×{item.count}</span>
+        ) : null}
+
+        <span
+          style={{
+            fontSize: 'var(--text-base)',
+            fontWeight: 600,
+            color: 'var(--text-primary)',
+            minWidth: 0,
+          }}
+        >
+          {item.title}
+        </span>
+
+        {/* ⛔ Says what KIND of claim this is, and stays on the collapsed row —
+            a reader scanning without expanding must still see that this one is
+            not a measurement. */}
+        {unmeasured ? (
+          <span
+            className="badge"
             style={{
-              margin: 'var(--s2) 0 0',
-              fontSize: 'var(--text-base)',
-              fontWeight: 600,
-              color: 'var(--text-primary)',
+              flex: 'none',
+              background: 'var(--surface-subtle)',
+              color: 'var(--unmeasured)',
+              border: '1px solid var(--border)',
+            }}
+            title="SecVault could not measure this. It is listed so that the gap is visible, not because it was observed."
+          >
+            not measurable
+          </span>
+        ) : null}
+
+        {/* The scope, on the closed row. Which firewalls are involved is how an
+            operator decides whether this is theirs before opening anything. */}
+        {item.affects && item.affects.length ? (
+          <span
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-muted)',
+              marginLeft: 'auto',
+              textAlign: 'right',
+              flex: '0 1 auto',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
           >
-            {item.title}
-          </h3>
-        </div>
-
-        {item.href ? (
-          <Link
-            href={item.href}
-            className="btn btn-secondary"
-            style={{ flex: 'none', fontSize: 'var(--text-sm)' }}
-          >
-            Open
-          </Link>
+            {item.affects.join(', ')}
+          </span>
         ) : null}
-      </div>
+
+        <IconChevronDown className="wq-chevron" width={16} height={16} aria-hidden="true" />
+      </summary>
 
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
           gap: 'var(--s3) var(--s4)',
+          padding: 'var(--s3) var(--s4) var(--s4)',
         }}
       >
         <Field label="Why it is here">{item.why}</Field>
@@ -166,8 +204,16 @@ function WorkItem({ item }) {
         {item.affects && item.affects.length ? (
           <Field label="Affects">{item.affects.join(', ')}</Field>
         ) : null}
+
+        {item.href ? (
+          <div>
+            <Link href={item.href} className="btn btn-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+              Open
+            </Link>
+          </div>
+        ) : null}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -207,8 +253,8 @@ function Band({ band, items }) {
             </p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-            {items.map((it) => (
-              <WorkItem key={it.key} item={it} />
+            {items.map((it, i) => (
+              <WorkItem key={it.key} item={it} defaultOpen={i === 0} />
             ))}
           </div>
         </div>
