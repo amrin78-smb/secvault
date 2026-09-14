@@ -165,6 +165,14 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $tlsHelpers = Join-Path $PSScriptRoot 'SecVault-Tls.ps1'
 if (Test-Path -LiteralPath $tlsHelpers) { . $tlsHelpers }
 
+# ⛔ NSSM lives at ONE exact path and is never on PATH — CLAUDE.md says so, and
+# this script had never needed it before the TLS step did. Referencing an
+# undefined $NssmExe produced "The expression after '&' in a pipeline element
+# produced an object that was not valid", which reads like a PowerShell parsing
+# problem rather than "that variable does not exist", and cost a deploy cycle to
+# recognise. Defined here, next to the thing that uses it.
+$NssmExe = Join-Path $repoRoot 'nssm\nssm-2.24\win64\nssm.exe'
+
 # The in-app updater (POST /api/system/update) now sometimes launches this
 # script via a Windows Scheduled Task running as SYSTEM, and SYSTEM has never
 # run git in this repo's working copy before (only whichever interactive
@@ -764,6 +772,11 @@ if ($buildSucceeded -and $migrateSucceeded) {
             $envLocal = Join-Path $repoRoot '.env.local'
             if (-not (Test-Path -LiteralPath $envLocal)) {
                 Write-Log '  [WARN] .env.local not found -- leaving the console on plain HTTP.'
+                return
+            }
+
+            if (-not (Test-Path -LiteralPath $NssmExe)) {
+                Write-Log "  [WARN] nssm not found at $NssmExe -- leaving the console on plain HTTP."
                 return
             }
 

@@ -1019,3 +1019,45 @@ present at all — even at the same value — the default is decoration and the 
 file), never print its contents, and confirm the other keys survived by COUNT. The collector then
 needs a restart, which costs whatever UDP arrives while it is down -- the spool protects what was
 already received, not what is still in flight.
+
+### ⛔ The TLS step: three self-inflicted failures in one PowerShell block (2026-09-14)
+
+v2.112.0 shipped a working TLS implementation that did not turn on, three
+deploys running. Each failure was a different shape and all three are worth
+knowing, because none of them produced an error that named the real cause.
+
+**1. `2>&1` on a native executable.** OpenSSL writes key-generation progress
+(`+++++...`) to stderr. With `$ErrorActionPreference = 'Stop'` — which
+`Update-SecVault.ps1` sets deliberately — PS 5.1 wraps each stderr line in an
+ErrorRecord, so a *successful* keygen threw and was reported as
+"OpenSSL failed: +++++...". ⛔ This is documented in CLAUDE.md's PowerShell
+section AND in this script's own header comment, which explains the trap at
+length; the script even carries an `Invoke-Native` helper built to avoid it. A
+shared helper dot-sourced by both installers cannot use that helper, so it
+relaxes the preference itself and judges success by EXIT CODE and files on disk.
+
+**2. A step that reported success while doing nothing.** `Invoke-Step` logs
+"succeeded" when the block does not THROW, and every failure path inside the TLS
+step returns early with a `[WARN]`. The log therefore read `[WARN] OpenSSL
+failed` immediately followed by `Step succeeded: Enable TLS`. ⛔ A step whose
+failure modes are early returns must state its own outcome — it now logs
+`TLS: ENABLED` or `TLS: NOT ENABLED` explicitly.
+
+**3. An undefined variable that looked like a syntax error.** `$NssmExe` was
+never defined in this script (it exists in `Install-SecVault.ps1`). PowerShell
+reported *"The expression after '&' in a pipeline element produced an object
+that was not valid"*, which reads as a parsing problem rather than "that
+variable does not exist". ⛔ Before shipping a block that touches variables from
+elsewhere in a long script, grep that every one is actually DEFINED there — a
+ten-second check that would have saved two deploy cycles.
+
+⛔ **And the helper was dot-sourced BEFORE `git pull`**, so a fix to it could
+never take effect on the deploy that delivered it. It is re-sourced after the
+pull now. The update script itself still self-updates and needs two deploys,
+which is unavoidable — it is already parsed and running.
+
+⛔ **`schtasks /run` on an already-running task is a SILENT NO-OP.** Firing the
+"second" deploy while the first was still going did nothing at all, and the
+logs made it look like both had run. Wait for the task to leave `Running` before
+triggering it again — and wait for it to ENTER `Running` before concluding it
+has finished, or the check returns instantly against the previous run.
