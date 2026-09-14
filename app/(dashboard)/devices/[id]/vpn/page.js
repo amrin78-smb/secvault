@@ -6,7 +6,11 @@ import Card, { CardBody } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import VpnSessionTrendChart from '../../../../../components/vpn/VpnSessionTrendChart';
 import TabBar from '../../../../../components/ui/TabBar';
-import { DEVICE_VPN_TABS, resolveDeviceVpnTab, buildVpnTabHrefs } from '../../../../../lib/vpnTabs';
+import { DEVICE_VPN_TABS, resolveDeviceVpnTab, buildVpnTabHrefs, visibleVpnTabs } from '../../../../../lib/vpnTabs';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '../../../../api/auth/[...nextauth]/route';
+import { can, VIEW_IDENTITY } from '../../../../../lib/rbac';
+import NoAccess from '../../../../../components/ui/NoAccess';
 import ActiveVpnUsersTable from '../../../../../components/vpn/ActiveVpnUsersTable';
 import IpsecTunnelsTable from '../../../../../components/vpn/IpsecTunnelsTable';
 import { summarizeVpnConfig } from '../../../../../lib/engines/vpnSummary';
@@ -122,8 +126,27 @@ export default async function DeviceVpnPage({ params, searchParams }) {
   }
 
   const tab = resolveDeviceVpnTab(sp.vtab);
+
+  // ⛔ TWO-PART IDENTITY GUARD, both halves required — the same one the fleet
+  // /vpn page has had since v2.110.0, and which this page was missing
+  // ENTIRELY. DEVICE_VPN_TABS marks its "Active Users" tab identity:true
+  // because it names the individual people connected to this firewall, and
+  // this page imported the raw tab list, never resolved a session and never
+  // called can(). An Operator could read it simply by opening the page, or by
+  // typing ?vtab=users.
+  //
+  // A hidden tab whose URL still works is decoration, not a boundary — hence
+  // both halves: visibleVpnTabs() stops it being discovered, and
+  // identityBlocked stops it being rendered however the URL was arrived at.
+  const session = await getServerSession(authOptions);
+  const canViewIdentity = can(session, VIEW_IDENTITY);
+  const requestedTab = DEVICE_VPN_TABS.find((t) => t.key === tab);
+  const identityBlocked = !canViewIdentity && !!(requestedTab && requestedTab.identity);
+
   const { tabs, activeHref } = buildVpnTabHrefs(
-    `/devices/${device.id}/vpn`, DEVICE_VPN_TABS, sp, tab, ['page', 'tunnelPage', 'vpnq']
+    `/devices/${device.id}/vpn`,
+    visibleVpnTabs(DEVICE_VPN_TABS, canViewIdentity),
+    sp, tab, ['page', 'tunnelPage', 'vpnq']
   );
 
   // ⛔ Only the ACTIVE tab queries. getVpnSessions() and getStoredVpnTunnels()

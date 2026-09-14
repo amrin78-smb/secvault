@@ -42,9 +42,56 @@ function fsWith(files) {
   };
 }
 
+// ⛔ REAL KEY MATERIAL, and it has to be. This fixture used to be the literal
+// strings '-----BEGIN CERTIFICATE-----' / '-----BEGIN PRIVATE KEY-----' and
+// asserted status ACTIVE — material OpenSSL cannot parse, blessed as a working
+// TLS configuration. That is precisely why the crash-loop shipped: `active`
+// only ever meant "two non-empty files exist", and the test agreed with it.
+// A fixture that cannot fail the way production fails is not a fixture.
+const { cert: REAL_CERT, key: REAL_KEY } = require('./fixtures/testCert');
+
+// The env both new tests use: both paths set, so resolution reaches the point
+// where the material is actually loaded.
+const BOTH_PATHS = { TLS_CERT_PATH: 'C:/certs/secvault.crt', TLS_KEY_PATH: 'C:/certs/secvault.key' };
+
 const GOOD = fsWith({
-  'C:/certs/secvault.crt': Buffer.from('-----BEGIN CERTIFICATE-----'),
-  'C:/certs/secvault.key': Buffer.from('-----BEGIN PRIVATE KEY-----'),
+  'C:/certs/secvault.crt': Buffer.from(REAL_CERT),
+  'C:/certs/secvault.key': Buffer.from(REAL_KEY),
+});
+
+describe('⛔ unloadable material is FAILED, never active', () => {
+  // These are the corruption classes that actually happen: a DER .cer saved
+  // over the .crt, a truncated download, a restored .bak pair whose halves do
+  // not match. Before this, each of them returned ACTIVE here and then threw
+  // synchronously inside https.createServer(), exiting the process — which
+  // NSSM restarts, forever, with no rollback in the path because a reboot
+  // never runs the updater.
+  it('unparseable certificate material is FAILED', () => {
+    const c = resolveTlsConfig(BOTH_PATHS, fsWith({
+      'C:/certs/secvault.crt': Buffer.from('definitely not a certificate'),
+      'C:/certs/secvault.key': Buffer.from('definitely not a key'),
+    }));
+    assert.equal(c.status, 'failed');
+    assert.match(c.error, /could not be loaded/);
+  });
+
+  it('⛔ a VALID certificate with the WRONG key is FAILED', () => {
+    // Both halves parse perfectly and only the pairing is wrong — the failure
+    // mode the certificate-install route validates against, reproduced here at
+    // the point where the server actually loads them.
+    const { generateKeyPairSync } = require('crypto');
+    const other = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const c = resolveTlsConfig(BOTH_PATHS, fsWith({
+      'C:/certs/secvault.crt': Buffer.from(REAL_CERT),
+      'C:/certs/secvault.key': Buffer.from(other.privateKey),
+    }));
+    assert.equal(c.status, 'failed');
+    assert.match(c.error, /MISMATCH/i);
+  });
 });
 
 describe('the three transport states', () => {

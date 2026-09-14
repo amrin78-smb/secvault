@@ -846,7 +846,12 @@ if ($buildSucceeded -and $migrateSucceeded) {
             # the same Next handler in https.createServer. Rollback is one command:
             #   nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"
             & $NssmExe set SecVault-App AppParameters 'server.js' | Out-Null
-            Write-Log '  SecVault-App entry point set to server.js (was: ' + $previousAppParameters + ')'
+            # ⛔ ONE interpolated string, not 'a' + $b + 'c'. In COMMAND mode
+            # PowerShell parses that as five positional arguments; Write-Log has a
+            # single [string]$Message and no [CmdletBinding()], so the other four
+            # land in $args and vanish. The value silently dropped is the one
+            # needed to rebuild the service by hand after a botched rollback.
+            Write-Log "  SecVault-App entry point set to server.js (was: $previousAppParameters)"
 
             $script:tlsEnabled = $true
         } catch {
@@ -924,9 +929,38 @@ if ($tlsEnabled -and -not $appStartSkipped) {
                 Write-Log "  Entry point restored to: $restore"
                 Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_CERT_PATH' -Value '' | Out-Null
                 Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_KEY_PATH'  -Value '' | Out-Null
-                if ($script:previousNextAuthUrl) {
-                    Set-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL' -Value $script:previousNextAuthUrl | Out-Null
-                }
+
+                # ⛔ ALSO CLEAR ENABLE_TLS. Without this the next update re-enters
+                # the TLS step (the flag is what gates it), reuses the already-minted
+                # certificate, fails the same probe, and rolls back again -- an
+                # outage window every single deploy, with nothing in the state
+                # recording that it already failed once.
+                Set-SecVaultEnvValue -EnvPath $envLocal -Key 'ENABLE_TLS' -Value 'false' | Out-Null
+
+                # ⛔ FORCE http://, NEVER RESTORE THE CAPTURED VALUE.
+                #
+                # On the FIRST TLS update the captured "previous" value is
+                # http:// and restoring it is right. On every update AFTER that,
+                # TLS is already on, so the captured value is already https://
+                # -- and restoring it here writes an https:// NEXTAUTH_URL onto a
+                # server that this rollback has just put back on plain HTTP.
+                #
+                # NextAuth then issues its cookie for an origin the browser is
+                # not on, and every sign-in bounces silently back to the login
+                # page with no error anywhere. Meanwhile /api/health answers over
+                # HTTP, so the verification probe below counts the box as healthy
+                # and the log declares the rollback a success. The safety net
+                # would have produced exactly the silent-sign-in-failure it
+                # exists to prevent.
+                # ⛔ Read the host from .env.local, the same way the TLS step does
+                # at line ~805. An earlier draft of this fix referenced $ServerIp
+                # and $appPort, neither of which exists in this scope — the exact
+                # undefined-variable class that broke the TLS deploy twice today.
+                # $port IS in scope (resolved above from APP_PORT).
+                $rollbackHost = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'SERVER_IP'
+                if ([string]::IsNullOrWhiteSpace($rollbackHost)) { $rollbackHost = '127.0.0.1' }
+                Set-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL' `
+                    -Value ("http://{0}:{1}" -f $rollbackHost, $port) | Out-Null
                 $out = sc.exe stop SecVault-App
                 Add-Content -Path $LogFile -Value ($out -join "`n")
                 Start-Sleep -Seconds 4

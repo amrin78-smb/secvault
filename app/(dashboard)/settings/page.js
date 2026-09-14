@@ -372,7 +372,7 @@ export default function SettingsPage() {
                   SecVault v{pkg.version}
                 </p>
                 <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-                  Standalone firewall security and management platform.
+                  Standalone firewall intelligence and management platform.
                 </p>
               </div>
             </CardBody>

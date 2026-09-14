@@ -151,10 +151,31 @@ describe('⛔ migrate gates DATA repairs only, never the schema', () => {
     );
   });
 
+  it('⛔ advisory-matchability must NOT be gated — it is not a one-shot repair', () => {
+    // It is the ONLY writer of advisories.matchability for the paloalto vendor:
+    // nvd.js and fortinet.js set the column at ingest, paloalto.js never
+    // mentions it. Gating it (as v2.116.0 briefly did) means every new PSIRT
+    // advisory lands with matchability NULL forever and a
+    // declared-affected-but-unextractable advisory is silently assessed as
+    // "not affected" instead of reaching the curation worklist. It costs 0.2s.
+    const src = require('fs').readFileSync(require.resolve('../lib/migrate.js'), 'utf8');
+    assert.ok(src.includes('backfillAdvisoryMatchability(pool)'), 'the pass must still run');
+    assert.equal(
+      src.includes("isDone(pool, 'advisory-matchability'"), false,
+      'advisory-matchability must not be behind the one-shot ledger'
+    );
+    const pa = require('fs').readFileSync(require.resolve('../lib/feeds/paloalto.js'), 'utf8');
+    assert.equal(
+      pa.includes('matchability'), false,
+      'if paloalto.js now writes matchability at ingest, this pass MAY be gated — '
+      + 'update this test deliberately rather than deleting it'
+    );
+  });
+
   it('every gated backfill passes a numeric revision', () => {
     const src = require('fs').readFileSync(require.resolve('../lib/migrate.js'), 'utf8');
     const gates = [...src.matchAll(/isDone\(pool, '([a-z0-9-]+)', (\d+)\)/g)];
-    assert.ok(gates.length >= 7, `expected the expensive backfills to be gated, found ${gates.length}`);
+    assert.ok(gates.length >= 6, `expected the expensive backfills to be gated, found ${gates.length}`);
     for (const [, name, rev] of gates) {
       assert.ok(Number(rev) >= 1, `${name} needs a revision >= 1`);
     }

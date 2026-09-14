@@ -389,8 +389,21 @@ describe('fleet counts never borrow a number from a device that could not be mea
     assert.deepEqual(out.fleet.tunnels, {
       // ⛔ Lives HERE, beside the counts it qualifies — it was briefly a sibling of
       // , so the component read undefined and the caveat never rendered.
+      // ⛔ blindAndFresh / unknownAndFresh are SEPARATE from their fleet-wide
+      // counterparts and a coverage bar must use these. `blindDevices` spans
+      // stale and no-rows devices too, so subtracting it from reportingFresh
+      // mixes populations and double-counts — live, that drew "1 fully readable
+      // / 11 cannot show a tunnel as down" when the truth was 2 and 10, and the
+      // segments still summed correctly because the two errors cancelled.
+      // Here the single fresh device IS the blind Palo Alto, so blindAndFresh
+      // equals reportingFresh (1) and a coverage bar's "fully readable" segment
+      // is correctly ZERO — nothing in this fleet can both be read and report a
+      // tunnel as down. The fleet-wide unknownDevices is 1 (the Sangfor) while
+      // unknownAndFresh is 0, since that device is unsupported rather than
+      // fresh: the two pairs diverging is the whole point of carrying both.
       downObservability: {
         blindDevices: 1, blindTunnels: 2, unknownDevices: 1, blindVendors: ['paloalto'],
+        blindAndFresh: 1, unknownAndFresh: 0,
       },
       total: 3, up: 1, down: 1, unknownStatus: 0, unmeasured: 1 });
     assert.equal(out.fleet.devices.total, 3);

@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.117.0': [
+    'Security: the guard protecting the last Super Admin account referenced a name that was never imported, so it threw instead of running — and once repaired, it skipped the check on exactly the demotion most likely to be attempted. Both halves fixed.',
+    'Security: the per-firewall VPN page had neither half of the guard that hides named remote-access users from Operators. The fleet page had it; its per-device twin did not.',
+    'Security: resetting a user’s MFA silently removed a mandatory-MFA requirement, while the tool printed that the requirement still stood.',
+    'A corrupt or mismatched certificate crash-looped the console instead of degrading to HTTP. TLS state now means the material actually loads, not that two files exist.',
+    'Licence counts on the work queue reported the 60-day total as the expired total — 49 claimed expired against 21 real.',
+    'Segmentation counted every correctly-blocked path as unmeasurable, so a fleet enforcing its policy perfectly was told its paths could not be measured.',
+  ],
   '2.116.1': [
     'Fixed a guard that could never fire: two advisory repairs compared a value read back from the database against the same value rebuilt in memory, using plain string comparison.',
     'PostgreSQL stores JSON with keys sorted by length, so the two strings never matched even when the data was identical. The repairs rewrote the same 302 rows on every update for months.',

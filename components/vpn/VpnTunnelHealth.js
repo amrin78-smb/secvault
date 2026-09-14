@@ -452,12 +452,6 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
   }
   const devicesById = new Map(devices.map((d) => [d.deviceId, d.name]));
 
-  const uncovered =
-    fleet.devices.unsupported
-    + fleet.devices.supportUnknown
-    + fleet.devices.noRowsUnconfirmed
-    + fleet.devices.reportingStale
-    + fleet.devices.reportingUnknownAge;
 
   // ⛔ ANSWER FIRST, MECHANISM LAST. This panel used to open with eight
   // paragraphs of qualification before the first number — every one of them
@@ -477,15 +471,24 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
   // The bar carries in FORM what four of those paragraphs carried in prose.
   // ⛔ Only a firewall that is both readable AND able to report a tunnel as down
   // gets the solid segment. Everything else is hatched and hueless.
-  const blindFresh = Math.min(
-    fleet.tunnels.downObservability ? fleet.tunnels.downObservability.blindDevices : 0,
-    fleet.devices.reportingFresh
-  );
+  // ⛔ blindAndFresh, NOT min(blindDevices, reportingFresh). `blindDevices`
+  // counts blind devices across the WHOLE fleet — including stale ones and ones
+  // that returned no rows — so clamping it against the fresh count mixed two
+  // populations and double-counted any device that was both blind and
+  // stale/empty. Live, that drew "1 fully readable / 11 cannot show a tunnel as
+  // down" when the truth was 2 and 10, and the segments still summed to 16
+  // because the two errors cancelled. The engine now computes the fresh subsets.
+  const obs = fleet.tunnels.downObservability || {};
+  const blindFresh = Number(obs.blindAndFresh) || 0;
+  // A fresh device whose down-observability is UNKNOWN is not "fully readable"
+  // either — we do not know whether it could show a down tunnel. It gets the
+  // same partial treatment rather than being drawn solid.
+  const unknownFresh = Number(obs.unknownAndFresh) || 0;
   const coverageSegments = [
     {
       key: 'full',
       label: 'fully readable',
-      count: Math.max(0, fleet.devices.reportingFresh - blindFresh),
+      count: Math.max(0, fleet.devices.reportingFresh - blindFresh - unknownFresh),
       tone: 'measured',
       title:
         'A current snapshot, from a vendor and access method that can report a tunnel as down. '
@@ -494,7 +497,7 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
     {
       key: 'blind',
       label: 'cannot show a tunnel as down',
-      count: blindFresh,
+      count: blindFresh + unknownFresh,
       tone: 'partial',
       title:
         'A current snapshot, but this vendor lists only ESTABLISHED tunnels — a down tunnel is '

@@ -28,9 +28,17 @@ async function wouldRemoveLastAdmin(pool, userId, { targetRole } = {}) {
   );
   const remainingAdmins = rows.filter((r) => {
     if (r.id !== userId) return true;
-    // If this IS the target user, they still count as admin only if the
-    // requested change keeps them admin.
-    return targetRole === ADMIN_ROLE;
+    // If this IS the target user, they still count only if the requested change
+    // LEAVES THEM A SUPER ADMIN.
+    //
+    // ⛔ This read `targetRole === ADMIN_ROLE`, which was wrong twice over: the
+    // identifier was never imported (so every role change and every
+    // super_admin deletion threw ReferenceError and 500'd — the guard has never
+    // once executed), and the comparison itself named the wrong role. Demoting
+    // the last super_admin to `admin` would have counted them as still holding
+    // the role. The comment directly above already stated the correct rule; the
+    // code did the opposite.
+    return targetRole === SUPER_ADMIN_ROLE;
   });
   return remainingAdmins.length === 0;
 }
@@ -71,7 +79,12 @@ export async function PUT(request, { params }) {
   }
   // Last-admin check is a DB read, so it stays with the other validations but
   // must run after the cheap ones.
-  if (nextRole !== undefined && nextRole !== ADMIN_ROLE) {
+  // ⛔ Runs whenever the new role is anything OTHER than super_admin — which
+  // includes `admin`. Reading `!== ADMIN_ROLE` here skipped the check on
+  // exactly the demotion most likely to be attempted, leaving an installation
+  // where nobody holds MANAGE_USERS and no account can ever be changed again
+  // without a direct database edit.
+  if (nextRole !== undefined && nextRole !== SUPER_ADMIN_ROLE) {
     if (await wouldRemoveLastAdmin(pool, params.id, { targetRole: nextRole })) {
       return NextResponse.json(
         { error: 'Cannot change role — this is the last remaining Super Admin account' },

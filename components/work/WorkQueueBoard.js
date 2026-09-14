@@ -144,6 +144,13 @@ function WorkItem({ item, defaultOpen = false }) {
             fontWeight: 600,
             color: 'var(--text-primary)',
             minWidth: 0,
+            // ⛔ ONE auto-sizing element in this row. The title absorbs the free
+            // space so the scope text and chevron sit hard right on EVERY row,
+            // including items with no affects list. Two competing
+            // `margin-left: auto` (here and on the chevron) made flexbox split
+            // the slack between them, so the scope column drifted with each
+            // row's title length.
+            flex: 1,
           }}
         >
           {item.title}
@@ -174,7 +181,6 @@ function WorkItem({ item, defaultOpen = false }) {
             style={{
               fontSize: 'var(--text-xs)',
               color: 'var(--text-muted)',
-              marginLeft: 'auto',
               textAlign: 'right',
               flex: '0 1 auto',
               minWidth: 0,
