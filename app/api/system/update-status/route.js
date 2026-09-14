@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.116.1': [
+    'Fixed a guard that could never fire: two advisory repairs compared a value read back from the database against the same value rebuilt in memory, using plain string comparison.',
+    'PostgreSQL stores JSON with keys sorted by length, so the two strings never matched even when the data was identical. The repairs rewrote the same 302 rows on every update for months.',
+    'Nothing in the data was ever wrong, which is why it went unnoticed — the only symptom was a number that never went down.',
+  ],
   '2.116.0': [
     'Updates are much faster. Schema migration was taking 10-14 minutes of every update — 84% of the total — re-running seven one-time data repairs that had finished their work months ago.',
     'Those repairs now record that they completed and are skipped thereafter. Each is keyed on a revision, so a corrected repair still re-runs everywhere it is needed.',

@@ -1338,6 +1338,20 @@ EVERY run and 351 advisory rows share one `updated_at` — it was rewriting rows
 which also explains 18.6% dead tuples on `advisories`. Stored ranges look correct. First place to
 look if advisory version matching ever regresses.
 
+### ⛔ jsonb DOES NOT PRESERVE KEY ORDER — never compare it with JSON.stringify
+
+`jsonb` is a parsed binary form: keys come back sorted by LENGTH then bytes, not as written. So
+`JSON.stringify(valueFromDb) === JSON.stringify(valueBuiltInJs)` is **false for identical data**,
+always. Live cost: `backfillPaloAltoVersionRanges` used exactly that as its "already clean" guard,
+so the guard could never fire once — it rewrote the same 302 advisory rows with byte-identical data
+every deploy for months, logged `cleaned up 302` each time, and left `advisories` at 18.6% dead
+tuples. ⛔ **The data was never wrong; the comparison was** — which is why nobody looked. A guard
+that cannot fire is worse than no guard: the code reads as handled and the log reads as success.
+
+Use `lib/canonicalJson.js` (`jsonEquivalent`) for any has-this-changed check against a jsonb column.
+⛔ Object keys are order-insensitive, ARRAYS ARE NOT — array order carries meaning and sorting one
+would make genuinely different rangesets compare equal, suppressing a real repair.
+
 ### NSSM registration
 
 ```powershell
