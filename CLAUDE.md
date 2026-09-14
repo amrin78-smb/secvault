@@ -1295,9 +1295,23 @@ Step 5b re-runs `schema-grants.sql` unconditionally (idempotent) using `PG_ADMIN
 Measured: `node lib/migrate.js` was **601-823s of a 740-980s deploy (84%)**, and almost none of it
 was schema work. It was seven retroactive DATA REPAIRS re-scanning converged tables on every deploy
 forever — their own logs read `rewrote 0`, `0 labels written`, `deleted 0, updated 0`.
-`device_configs` is **776 MB**; one candidate scan measured 39s, and the PAN-OS redaction pass runs
-two regexes plus a `config_parsed::text LIKE` across it AND `config_backups`, then fetches 423
-multi-MB rows one at a time.
+
+⛔ **THE COST WAS NOT WHERE IT LOOKED.** The obvious suspect was the PAN-OS config redaction, since
+`device_configs` is 776 MB and a candidate scan over it measures 39s. Instrumenting the run showed
+otherwise:
+
+| backfill | first run |
+|---|---|
+| `fortinet-ipsec-auth-repair` | **283.1s (89%)** |
+| `palo-alto-config-redaction` | 35.3s |
+| the other five combined | <1s |
+
+The FortiOS repair issues `UPDATE syslog_events ... WHERE message LIKE %tunneltype=%ipsec%` with
+**no `received_at` bound**, so it scans every daily partition across the whole retention window
+(~28M rows/day) to reclassify zero rows. ⛔ That violates this files own rule — never touch
+`syslog_events` without a narrow `received_at` window. Do not reinstate it unbounded; if it ever
+needs a rerun, bound it and bump its revision. Guess-then-optimise would have fixed the wrong
+thing here: measure first, which is why migrate now prints per-step durations.
 
 `lib/backfillLedger.js` records each completed repair in `data_backfills` and skips it thereafter.
 
