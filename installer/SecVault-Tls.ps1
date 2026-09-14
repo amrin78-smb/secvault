@@ -238,8 +238,37 @@ function Test-SecVaultResponding {
 
     # A self-signed certificate must not fail this probe: we are checking that
     # the app answers, not that a browser would trust it.
-    $originalCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    #
+    # ⛔ DO NOT USE `ServerCertificateValidationCallback = { $true }`. It looks
+    # right, it is the answer in every search result, and in PowerShell 5.1 it
+    # DOES NOT WORK: .NET invokes that delegate on a background thread with no
+    # PowerShell runspace, so the scriptblock throws
+    #   "There is no Runspace available to run scripts in this thread"
+    # and the connection dies with "The underlying connection was closed: An
+    # unexpected error occurred on a send."
+    #
+    # This cost two production outages. The probe ALWAYS returned false over
+    # HTTPS, so the updater concluded the console had not come back and rolled
+    # back a deployment that had in fact worked — the app log said
+    # "TLS: ACTIVE ... listening on https://0.0.0.0:3010" at the very moment the
+    # updater decided it was dead. A false negative in a health check is worse
+    # than no health check, because it actively destroys a good deployment.
+    #
+    # ICertificatePolicy is the PS 5.1-compatible route: a real .NET type, whose
+    # method runs on the calling thread and needs no runspace.
+    if (-not ('SecVaultTrustAllCerts' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class SecVaultTrustAllCerts : ICertificatePolicy {
+    public bool CheckValidationResult(ServicePoint sp, X509Certificate cert, WebRequest req, int problem) {
+        return true;
+    }
+}
+'@
+    }
+    $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object SecVaultTrustAllCerts
     try {
         [System.Net.ServicePointManager]::SecurityProtocol =
             [System.Net.SecurityProtocolType]::Tls12
@@ -262,6 +291,6 @@ function Test-SecVaultResponding {
         Start-Sleep -Seconds 3
     }
 
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $originalCallback
+    [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
     return $alive
 }

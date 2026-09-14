@@ -1094,3 +1094,44 @@ the SAFETY NET became the outage it existed to prevent.
 Strip NULs on capture (`-replace "`0", ''`), and — more importantly — never
 trust the captured value: if it does not look like the real entry point, write
 the documented literal instead. A rollback is the one path that must not fail.
+
+### ⛔ `ServerCertificateValidationCallback = { $true }` DOES NOT WORK in PS 5.1 (2026-09-14, two outages)
+
+This is the answer in every search result for "PowerShell ignore self-signed
+certificate", and in Windows PowerShell 5.1 it is wrong. .NET invokes that
+delegate on a BACKGROUND THREAD with no PowerShell runspace, so the scriptblock
+throws:
+
+    There is no Runspace available to run scripts in this thread.
+    The script block you attempted to invoke was:  $true
+
+…and the request dies with the far less helpful *"The underlying connection was
+closed: An unexpected error occurred on a send."* The inner exception is the
+only place the real reason appears.
+
+⛔ **WHAT IT COST.** `Update-SecVault.ps1` probes the console over HTTPS after
+enabling TLS and rolls back if it does not answer. The probe could never
+succeed, so it returned a FALSE NEGATIVE every time — the app log read
+`[secvault] TLS: ACTIVE … listening on https://0.0.0.0:3010` at the exact moment
+the updater concluded the console was dead and tore a working deployment down.
+Twice.
+
+**A false negative in a health check is worse than having no health check**, because
+it actively destroys a good deployment. Two separate bugs were blamed and fixed
+before the probe itself was suspected — it was the one component never tested,
+precisely because it was the thing doing the testing.
+
+Use `ICertificatePolicy` instead: a real .NET type whose method runs on the
+calling thread.
+
+    if (-not ('SecVaultTrustAllCerts' -as [type])) { Add-Type -TypeDefinition @'
+    using System.Net; using System.Security.Cryptography.X509Certificates;
+    public class SecVaultTrustAllCerts : ICertificatePolicy {
+      public bool CheckValidationResult(ServicePoint sp, X509Certificate c, WebRequest r, int p) { return true; }
+    }
+    '@ }
+    [System.Net.ServicePointManager]::CertificatePolicy = New-Object SecVaultTrustAllCerts
+
+⛔ **TEST THE TEST.** Verify a health check returns TRUE against a known-good
+server before trusting it to condemn one — and check it still returns FALSE for a
+genuinely dead port, or "fixing" it by making it always true is the next bug.
