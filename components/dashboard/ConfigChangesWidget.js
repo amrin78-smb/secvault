@@ -91,8 +91,18 @@ export default async function ConfigChangesWidget({ days = 7 }) {
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconRefresh} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
+        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
+          {/* ⛔ NOT --tint-purple. app/globals.css aliases exactly that pair as
+              --evidence / --evidence-wash, and violet is reserved for the
+              EVIDENCE axis and nothing else -- this chip was pixel-identical to
+              an EvidenceMark, so the one mark in the product that means "here is
+              how we know this" stopped being learnable at a glance the moment a
+              decorative widget header wore it too. --tint-info is the app's
+              neutral informational pair (DeviceStatusSummary already uses it for
+              the same kind of factual, non-risk widget). Blue is barred from the
+              SEVERITY RAMP, not from the palette: a config change is an event,
+              not a severity, so nothing here reads as a risk level. */}
+          <IconChip icon={IconRefresh} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Config Changes ({days}d)
         </div>
       </div>
@@ -100,39 +110,64 @@ export default async function ConfigChangesWidget({ days = 7 }) {
         {totalCount === 0 ? (
           <EmptyState message={`No configuration changes in the last ${days} days.`} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
+            <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {totalCount}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                {/* ⛔ --text-xs, not 10px. The type scale starts at --text-xs
+                    (11.5px) and a hardcoded 10 sits BELOW its smallest step --
+                    it opts itself out of every future scale change silently, the
+                    same way a hardcoded hex opts out of the palette, and it does
+                    so in the direction that hurts: smaller than anything the
+                    scale allows. */}
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
                   Change{totalCount === 1 ? '' : 's'}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', fontSize: 'var(--text-xs)' }}>
+              <div style={{ display: 'flex', gap: 'var(--s2)', alignItems: 'flex-end', fontSize: 'var(--text-xs)' }}>
                 {totals.measured === 0 ? (
                   // Every row in the window lacked a structured diff — there is
                   // no added/removed/modified count to report at all. Three
                   // zeros here would be three fabricated measurements.
                   <NotMeasured reason="None of these changes stored a structured added/removed/modified diff, so the line counts are unknown." />
                 ) : (
+                  // ⛔ THE TEXT-SAFE TINT FOREGROUNDS, NOT THE RAW RAMP HUES.
+                  // The raw hues are GRAPHICS tokens: globals.css measures
+                  // --yellow at 3.64:1 on a card in light theme, which clears
+                  // WCAG 1.4.11's 3:1 for a bar or a dot and FAILS 1.4.3's
+                  // 4.5:1 for text. --green and --red were 4.80:1, i.e. passing
+                  // by 0.3 and one palette tweak away from not. These three
+                  // were text.
+                  //
+                  // ⛔ AND THIS IS NOT THE SEVERITY RAMP, which is why the
+                  // colours stay at all. "removed" here means LINES REMOVED
+                  // from a config, not danger -- red is reserved for danger in
+                  // this product and a deletion is not one. What these three
+                  // are is the DIFF vocabulary, which components/config/
+                  // DiffViewer.js already fixes as added/removed/modified ->
+                  // success/danger/warning, on the same --tint-*-fg tokens.
+                  // This widget links straight into that viewer, so inventing
+                  // a private hueless treatment here would mean the summary and
+                  // the page it opens spoke different languages about the same
+                  // three numbers. One vocabulary, in its readable form.
                   <>
-                    <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added} added</span>
-                    <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed} removed</span>
-                    <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified} modified</span>
+                    <span style={{ color: 'var(--tint-success-fg)', fontWeight: 600 }}>{totals.added} added</span>
+                    <span style={{ color: 'var(--tint-danger-fg)', fontWeight: 600 }}>{totals.removed} removed</span>
+                    <span style={{ color: 'var(--tint-warn-fg)', fontWeight: 600 }}>{totals.modified} modified</span>
                   </>
                 )}
               </div>
             </div>
             {totals.unstructured > 0 && totals.measured > 0 && (
-              <div style={{ fontSize: 10, color: 'var(--unmeasured)' }}>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--unmeasured)' }}>
                 Counts cover {totals.measured} of {totalCount} changes — {totals.unstructured} stored no structured
                 diff.
               </div>
             )}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
               {recent.map((r) => (
                 <Link
                   key={r.id}
@@ -140,8 +175,8 @@ export default async function ConfigChangesWidget({ days = 7 }) {
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 1,
-                    padding: '6px 8px',
+                    gap: 'var(--s1)',
+                    padding: 'var(--s2)',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--border)',
                     color: 'inherit',
@@ -153,7 +188,7 @@ export default async function ConfigChangesWidget({ days = 7 }) {
                   </span>
                   <span
                     style={{
-                      fontSize: 10,
+                      fontSize: 'var(--text-xs)',
                       color: 'var(--text-secondary)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',

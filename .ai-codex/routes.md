@@ -294,3 +294,14 @@ Returns **202 + a job id**; the work runs in the engine worker (see `lib/engines
 ⛔ On `42P01` (`background_jobs` not migrated) it returns **503 naming `lib/migrate.js`** rather than
 falling back to the old inline DELETE — the inline path is the one that could never succeed, and
 silently taking it would reintroduce the outage.
+
+## GET/POST /api/system/tls  (v2.118.0)
+
+GET returns `certPath` AND `keyPath`. POST writes to `config.certPath`/`config.keyPath` when
+`TLS_CERT_PATH`/`TLS_KEY_PATH` are set, falling back to `<cwd>/certs/` — it previously ALWAYS wrote
+the hardcoded path, so an operator with a corporate cert elsewhere installed a renewal, restarted,
+and still saw the old certificate with nothing saying why. Backups are written beside each
+original (the two may live in different directories). Response gained `tlsEnabled`/`certPath`/
+`keyPath`, and `restartRequired` is now CONDITIONAL: on a `disabled` install, writing the pair
+cannot turn TLS on by itself, and the message says so rather than promising a restart will work.
+Both verbs gated on `manage_settings`.

@@ -228,7 +228,7 @@ export async function TopThreatsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconBell} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
+          <IconChip icon={IconBell} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Top Threats (24h)
         </CardTitle>
       </CardHeader>

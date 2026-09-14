@@ -82,7 +82,6 @@ export default function StatCard({
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
-  const accentColor = color;
   // ⛔ THE VALUE IS ALWAYS TEXT, so it always takes the text-safe form of the ramp.
   // Passing a raw severity hue is correct for the 4px accent border and wrong for
   // the number: measured on the live dashboard, --orange and --yellow both sat at

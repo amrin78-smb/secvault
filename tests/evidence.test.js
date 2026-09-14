@@ -183,9 +183,61 @@ describe('compliance evidence states the na exclusion', () => {
   });
 
   it('renders a null score as an em-dash, never 0', () => {
-    const ev = complianceScoreEvidence({ complianceScore: null, complianceCounts: {} });
+    const ev = complianceScoreEvidence({
+      complianceScore: null,
+      complianceCounts: { 'PCI DSS': { pass: 0, fail: 0, warning: 0 } },
+    });
     assert.match(ev.title, /nothing measurable/i);
     assert.equal(ev.inputs.find((r) => r.label === 'Score').value, '—');
+  });
+
+  it('⛔ an EMPTY counts object produces no counts at all, never four zeros', () => {
+    // THE BUG THIS REPLACED A WEAK TEST FOR. The builder read
+    //   if (counts && typeof counts === 'object') { pass = 0; fail = 0; warning = 0; … }
+    // and `{}` is truthy — so the accumulators were initialised, the loop body
+    // never ran, and three fabricated zeros reached the drawer. It rendered
+    // "Passing 0 · Failing 0 · Warning 0 · Measurable total 0" beside a Score
+    // of "—": four confident numbers invented from an object that carried
+    // none, in the one place an operator opens specifically to check a figure.
+    //
+    // The old test asserted only that Score was '—' and walked straight past
+    // all four fabricated rows, which is why it passed throughout. Assert the
+    // ROWS, not just the score.
+    const withScore = complianceScoreEvidence({ complianceScore: 51, complianceCounts: {} });
+    const labels = withScore.inputs.map((r) => r.label);
+    for (const fabricated of ['Passing', 'Failing', 'Warning', 'Measurable total']) {
+      assert.ok(!labels.includes(fabricated), `${fabricated} must not appear with no counts`);
+    }
+    assert.equal(withScore.inputs.find((r) => r.label === 'Score').value, '51%');
+    assert.match(withScore.formula, /counts unavailable at this level/);
+    assert.doesNotMatch(withScore.formula, /pass\s+0/);
+  });
+
+  it('a standard carrying no numbers cannot promote the totals to zero', () => {
+    // The same fabrication one level down: a key exists, so the loop runs, but
+    // it contributes nothing. `(null || 0)` three times must not add up to a
+    // measured zero.
+    const ev = complianceScoreEvidence({ complianceScore: 51, complianceCounts: { 'PCI DSS': {} } });
+    assert.ok(!ev.inputs.some((r) => r.label === 'Measurable total'));
+  });
+
+  it('nothing measurable AND no score renders no mark at all', () => {
+    // ⛔ null, not an empty-looking drawer. A mark that opens onto invented
+    // zeros is worse than no mark — see isRenderableEvidence's own comment.
+    assert.equal(complianceScoreEvidence({ complianceScore: null, complianceCounts: {} }), null);
+    assert.equal(complianceScoreEvidence({}), null);
+  });
+
+  it('a genuine zero count still reports, because 0 is a measurement', () => {
+    // The mirror of the rule above, and the reason the fix is a null check
+    // rather than a truthiness check: a fleet really measured at zero passes
+    // must still show its arithmetic.
+    const ev = complianceScoreEvidence({
+      complianceScore: 0,
+      complianceCounts: { 'PCI DSS': { pass: 0, fail: 3, warning: 0 } },
+    });
+    assert.equal(ev.inputs.find((r) => r.label === 'Passing').value, '0');
+    assert.equal(ev.inputs.find((r) => r.label === 'Measurable total').value, '3');
   });
 });
 
@@ -294,6 +346,42 @@ describe('the answer sentence may not claim more than was measured', () => {
     const never = buildFleetAnswer({ ...FULL, patchNowCount: null, highRiskCount: null });
     assert.equal(never.tone, 'unknown');
     assert.match(never.sentence, /Nothing has been assessed yet/);
+  });
+
+  it('⛔ EITHER engine being silent is enough — not both', () => {
+    // The guard read `patchNow === null && highRisk === null`, so it only
+    // admitted a gap when EVERYTHING was missing. One null and one zero — the
+    // shape a real install has while one of the two engines has yet to run —
+    // matched no `> 0` branch and no guard, and landed on the terminal green
+    // "No urgent exposure … and every one of them was assessed", asserting
+    // full coverage on the strength of a number that does not exist.
+    const noCve = buildFleetAnswer({ ...FULL, patchNowCount: null, highRiskCount: 0 });
+    assert.equal(noCve.tone, 'unknown');
+    assert.match(noCve.sentence, /No vulnerability assessment has run/);
+
+    const noAnalysis = buildFleetAnswer({ ...FULL, patchNowCount: 0, highRiskCount: null });
+    assert.equal(noAnalysis.tone, 'unknown');
+    assert.match(noAnalysis.sentence, /No rule analysis has run/);
+  });
+
+  it('a measured finding still leads, even with the other engine silent', () => {
+    // ⛔ The guard sits BELOW the measured-positive branches on purpose:
+    // reporting evidence we do have is never the dishonest direction, and a
+    // real finding must not be buried because a neighbouring count is missing.
+    const a = buildFleetAnswer({ ...FULL, patchNowCount: 2, devicesWithPatchNow: 2, highRiskCount: null });
+    assert.equal(a.tone, 'critical');
+    assert.match(a.lead, /2 firewalls/);
+  });
+
+  it('⛔ a high-risk finding does not get to claim nothing is exploitable', () => {
+    // The clause "but nothing is currently exploitable" belongs to patchNow,
+    // not to highRisk. With no CVE assessment on record it reassures the reader
+    // about a question never asked — so the finding keeps its sentence and
+    // loses only the claim.
+    const a = buildFleetAnswer({ ...FULL, patchNowCount: null, highRiskCount: 12 });
+    assert.equal(a.tone, 'warn');
+    assert.doesNotMatch(a.sentence, /nothing is currently exploitable/);
+    assert.match(a.sentence, /exploitable is unknown/);
   });
 
   it('handles an empty install without claiming health', () => {

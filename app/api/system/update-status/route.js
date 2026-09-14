@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.118.0': [
+    'Security: signing in through LDAP skipped multi-factor authentication entirely. Any account existing both in the directory and locally could use the other door and arrive as an administrator with no second factor.',
+    'Security: a captured authenticator code could be used twice if both attempts arrived together, and two recovery codes used at once restored one another. Both are now settled by the database rather than by a stale read.',
+    'Every page headline now refuses to report an all-clear over a measurement it never read. Ten builders could previously return a green result from a missing number.',
+    'The evidence drawer no longer invents zeroes. Six places showed a confident 0 where nothing had been measured.',
+    'Fresh installations now set up HTTPS. The installer had no certificate wiring at all, so a new deployment shipped in plaintext with no path to enable it.',
+    'Work queue caps, tunnel states, segmentation coverage and CVE lists all now disclose what they could not show, instead of presenting a truncated list as complete.',
+    'Not-measured text now meets the contrast floor in both light and dark themes.',
+  ],
   '2.117.0': [
     'Security: the guard protecting the last Super Admin account referenced a name that was never imported, so it threw instead of running — and once repaired, it skipped the check on exactly the demotion most likely to be attempted. Both halves fixed.',
     'Security: the per-firewall VPN page had neither half of the guard that hides named remote-access users from Operators. The fleet page had it; its per-device twin did not.',

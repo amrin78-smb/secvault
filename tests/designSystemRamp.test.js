@@ -253,6 +253,57 @@ test('the unmeasured band has NO hue and is never a point on the ramp', () => {
   );
 });
 
+// ⛔ Resolves a surface token to a measurable hex. --surface-subtle is an
+// opaque hex in light theme and an rgba() white wash in dark, so the dark value
+// has to be composited over the card it actually sits on before it can be
+// measured. Treating the dark wash as opaque white would flatter every result
+// here by several points.
+function surfaceHex(t, name) {
+  const value = t[name];
+  if (HEX.test(value)) return value;
+  const { hex, alpha } = rgbaToHexAlpha(value);
+  const card = t['--bg-card'];
+  assert.ok(HEX.test(card), 'expected --bg-card to be a hex wherever a wash surface is used');
+  return composite(hex, alpha, card);
+}
+
+// ⛔ THE PAIRING NOBODY WAS CHECKING, and the reason this case exists.
+// Every --tint-*/-fg pair is pinned at 4.5:1 below, and --unmeasured was checked
+// only for NEUTRALITY (no hue) above — so nothing measured whether the hueless
+// state could actually be READ. It could not: #6D7784 on the light
+// --surface-subtle was 4.12:1 and #7A8BA1 on the dark one was 4.48:1. Both under
+// WCAG 1.4.3's 4.5:1, in opposite themes, for the same reason — the token had
+// been eyeballed against --bg-card (4.54:1, a pass) while the chips that use it
+// sit on the SUBTLE surface.
+//
+// That is the worst thing in this product to render unreadable. A number that is
+// hard to read is still obviously a number; a faded "Not measured" chip or
+// em-dash is indistinguishable from an EMPTY CELL, and an empty cell reads as
+// "nothing to report". The whole point of the unmeasured vocabulary is that a
+// gap announces itself, so this state needs MORE legibility than a measured one,
+// not less.
+//
+// Both surfaces are checked because both are live call sites: --surface-subtle
+// (the .ev-unmeasured strip, the no-status chips, NotMeasuredBar's swatch) and
+// --bg-card (a bare NotMeasured em-dash in a table cell).
+test('--unmeasured is READABLE on every surface it is used on, in BOTH themes', () => {
+  const { light, dark } = tokens();
+  for (const [theme, t] of [['light', light], ['dark', dark]]) {
+    const fg = t['--unmeasured'];
+    for (const surface of ['--surface-subtle', '--bg-card']) {
+      const bg = surfaceHex(t, surface);
+      const ratio = contrast(fg, bg);
+      assert.ok(
+        ratio >= 4.5,
+        `--unmeasured (${fg}) on ${surface} is ${ratio.toFixed(2)}:1 in ${theme} theme, below ` +
+          'WCAG 1.4.3’s 4.5:1. An unreadable "not measured" chip is worse than an unreadable ' +
+          'number: it reads as an empty cell, i.e. as nothing to report, which is exactly the ' +
+          'failed-read-as-a-fact error this state exists to prevent.'
+      );
+    }
+  }
+});
+
 test('--unmeasured is a neutral, and --hatch exists for unmeasured graphics', () => {
   const { light, dark } = tokens();
   for (const [theme, t] of [['light', light], ['dark', dark]]) {
@@ -333,7 +384,9 @@ test('white on a raw --blue fails in dark theme — the reason UpdateNotifier mo
 // 5. No seventh local map.
 // ─────────────────────────────────────────────────────────────────────────
 
-test('no page or component redeclares the ramp with blue on a severity', () => {
+// Every .js source file under the app. Shared by the two scans below so they
+// cannot drift apart on which directories they look at.
+function sourceFiles() {
   const SKIP = new Set(['node_modules', '.next', '.git', 'tests', 'installer', 'public', 'docs']);
   const files = [];
   (function walk(dir) {
@@ -344,6 +397,11 @@ test('no page or component redeclares the ramp with blue on a severity', () => {
       else if (e.name.endsWith('.js')) files.push(p);
     }
   })(REPO);
+  return files;
+}
+
+test('no page or component redeclares the ramp with blue on a severity', () => {
+  const files = sourceFiles();
 
   // The exact shapes the six stale copies had. Comments are stripped first so
   // a file DOCUMENTING the old mapping (several deliberately do, to explain
@@ -368,6 +426,83 @@ test('no page or component redeclares the ramp with blue on a severity', () => {
     [],
     'a local severity/band map has reintroduced the pre-v2.87.0 ramp. Import from ' +
       'components/analysis/severityRamp.js instead of declaring a new one:\n' +
+      offenders.join('\n')
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 6. ⛔ THE SAME RAMP, WEARING A PROP INSTEAD OF A MAP.
+// ─────────────────────────────────────────────────────────────────────────
+//
+// The scan above only ever matched the SHAPES the six stale copies had —
+// `medium: 'info'`, `medium: var(--blue)`, `high: var(--yellow)`. A severity
+// expressed as a JSX attribute instead of a map entry walked straight past it,
+// which is exactly how components/analysis/ObjectsTab.js kept rendering its two
+// findings tiles as `color="var(--yellow)"` and `color="var(--blue)"` for a full
+// palette rewrite: amber beside blue, side by side, reading as a two-step ramp
+// on findings that lib/engines/objectUsage.js assigns NO SEVERITY to at all.
+//
+// ⛔ SCOPED TO FINDING LABELS ON PURPOSE, and the scope is the whole design of
+// this case. --blue and --yellow are legitimate accents for a NEUTRAL COUNT —
+// "NAT Enabled", "Memory", "Total Rules", "Sessions" are all raw-hue tiles today
+// and all of them are fine, because none of them is a risk level. What is
+// forbidden is a raw ramp hue on a tile that counts a NAMED FINDING TYPE, where
+// the colour is read as a severity whether or not one was measured. A blanket
+// ban on the tokens would flag every metric tile in the app, everyone would
+// learn to ignore the failure, and the one real offender would go back to being
+// invisible.
+//
+// Two hues, two different reasons:
+//   --blue    v2.87.0 pulled it off findings entirely: it sits one step from
+//             --primary teal, and a finding drawn in the brand hue destroys the
+//             separation the whole palette is built on.
+//   --yellow  the raw graphics form. As the value TEXT of a tile it measures
+//             3.64:1 on a card in light theme (StatCard maps the known raw hues
+//             to their --tint-*-fg counterparts, but the semantic alias
+//             --sev-med is what says what the colour MEANS).
+//
+// The fix for a hit is never to pick a different raw hue. It is either the
+// semantic alias (--sev-med / --sev-high / ...) or, if the engine behind the
+// tile does not produce a severity, one accent shared by every tile of that
+// kind so no ranking is implied.
+
+// A tile label naming a FINDING TYPE this product's engines actually emit,
+// rather than a population or a metric.
+const FINDING_TILE_LABEL =
+  /^(unused|duplicate|shadow(ed)?|redundant|overly[\s-]?permissive|any[\s-]?any|reorder|risky|violations?|findings?)\b/i;
+
+const RAW_RAMP_PROP = /\bcolor=(?:"(var\(--(?:blue|yellow)\))"|\{\s*'(var\(--(?:blue|yellow)\))'\s*\})/;
+
+test('no tile counting a named FINDING TYPE wears a raw --blue or --yellow', () => {
+  const offenders = [];
+  for (const file of sourceFiles()) {
+    const code = fs
+      .readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+    // Each <StatCard ... /> element, props-chunk only. Self-closing is the only
+    // form this component is ever used in; the 900-char bound keeps a runaway
+    // match from swallowing the rest of the file if that ever changes.
+    const elements = code.match(/<StatCard\b[\s\S]{0,900}?\/>/g) || [];
+    for (const el of elements) {
+      const label = /\blabel="([^"]*)"/.exec(el);
+      const hue = RAW_RAMP_PROP.exec(el);
+      if (!label || !hue) continue;
+      if (!FINDING_TILE_LABEL.test(label[1].trim())) continue;
+      offenders.push(
+        `${path.relative(REPO, file)}: <StatCard label="${label[1]}" color="${hue[1] || hue[2]}">`
+      );
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'a findings tile is painted with a raw ramp hue. Blue is off the findings ' +
+      'vocabulary entirely (it sits one step from --primary teal); --yellow as a ' +
+      'value colour measures 3.64:1 on a card. Use the semantic alias (--sev-med), ' +
+      'or one shared accent for every tile of a kind whose engine produces no ' +
+      'severity at all:\n' +
       offenders.join('\n')
   );
 });

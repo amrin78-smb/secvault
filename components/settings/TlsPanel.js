@@ -46,12 +46,43 @@ function Row({ label, children }) {
   );
 }
 
+// ⛔ ONE ERROR REGION PER FORM, NOT ONE PER PANEL. The file upload and the
+// pasted-PEM textarea are two separate paths, and the PEM form lives inside a
+// COLLAPSED <details>. A single shared error slot rendered in there meant every
+// failure from the PRIMARY (.pfx/.cer) path — a mistyped .pfx password, most
+// of all — was written into a disclosure the operator had never opened: the
+// button flipped back to "Validate and install" and NOTHING on the page said
+// why. The operator retries the same password, concludes the feature is broken,
+// and the console stays on its self-signed certificate — the exact outcome this
+// panel exists to end. Each path now reports where its own button is.
+function ErrorNote({ children }) {
+  if (!children) return null;
+  return (
+    <p
+      role="alert"
+      style={{
+        margin: 0,
+        padding: 'var(--s3)',
+        border: '1px solid var(--sev-crit)',
+        background: 'var(--tint-danger)',
+        color: 'var(--tint-danger-fg)',
+        borderRadius: 'var(--radius-sm)',
+        fontSize: 'var(--text-base)',
+      }}
+    >
+      {children}
+    </p>
+  );
+}
+
 export default function TlsPanel() {
   const [state, setState] = useState(null);
   const [cert, setCert] = useState('');
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [fileError, setFileError] = useState('');
+  const [pemError, setPemError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [installed, setInstalled] = useState(null);
   const [certFile, setCertFile] = useState(null);
   const [keyFile, setKeyFile] = useState(null);
@@ -60,10 +91,20 @@ export default function TlsPanel() {
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/system/tls');
-      if (res.ok) setState(await res.json());
-      else setState({ status: 'unknown', forbidden: res.status === 403 });
-    } catch {
-      setError('Could not read the current TLS status.');
+      if (res.ok) {
+        setState(await res.json());
+        setLoadError('');
+      } else {
+        setState({ status: 'unknown', forbidden: res.status === 403 });
+      }
+    } catch (err) {
+      // ⛔ STILL RENDER. This used to set an error and leave `state` null, and
+      // the `if (!state) return null` below then removed the whole panel from
+      // the page — so the message could never be seen by anyone. A read failure
+      // is reported, not hidden: not knowing the transport state is itself
+      // something an administrator has to be told.
+      setLoadError(`Could not read the current TLS status: ${err.message}`);
+      setState({ status: 'unknown', unreadable: true });
     }
   }, []);
 
@@ -89,7 +130,7 @@ export default function TlsPanel() {
 
   async function installFiles(e) {
     e.preventDefault();
-    setBusy(true); setError(''); setInstalled(null);
+    setBusy(true); setFileError(''); setPemError(''); setInstalled(null);
     try {
       const payload = { certificateB64: await readAsBase64(certFile) };
       if (keyFile) payload.privateKeyB64 = await readAsBase64(keyFile);
@@ -100,33 +141,40 @@ export default function TlsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'The certificate could not be installed.'); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setFileError(data.error || 'The certificate could not be installed.'); return; }
       setInstalled(data);
       setCertFile(null);
       setKeyFile(null);
       setPassphrase('');  // ⛔ cleared immediately; it unlocks the private key
       await load();
     } catch (err) {
-      setError(err.message);
+      setFileError(err.message);
     } finally { setBusy(false); }
   }
 
   async function install(e) {
     e.preventDefault();
-    setBusy(true); setError(''); setInstalled(null);
+    setBusy(true); setFileError(''); setPemError(''); setInstalled(null);
     try {
       const res = await fetch('/api/system/tls', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ certificate: cert, privateKey: key }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'The certificate could not be installed.'); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setPemError(data.error || 'The certificate could not be installed.'); return; }
       setInstalled(data);
       setCert('');
       setKey('');   // ⛔ cleared immediately; it is a secret sitting in a textarea
       await load();
+    } catch (err) {
+      // ⛔ THIS CATCH IS NOT OPTIONAL. try/finally with no catch turns a dropped
+      // connection (the service restarting under the operator, which is exactly
+      // what this panel tells them to do) into an unhandled rejection: the
+      // button un-busies and the page says nothing at all. Silence after a
+      // submit reads as success.
+      setPemError(err.message);
     } finally { setBusy(false); }
   }
 
@@ -147,6 +195,10 @@ export default function TlsPanel() {
 
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s5)' }}>
+          {/* The status read itself failed. Say so — an unknown transport state
+              is a fact the administrator needs, not a reason to show nothing. */}
+          <ErrorNote>{loadError}</ErrorNote>
+
           {state.status === 'failed' && (
             <div
               style={{
@@ -198,14 +250,49 @@ export default function TlsPanel() {
             </div>
           ) : (
             <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
-              {state.status === 'disabled'
-                ? 'No certificate is configured. SecVault is serving plain HTTP.'
-                : 'A certificate is configured but could not be read.'}
+              {state.status === 'disabled' && 'No certificate is configured. SecVault is serving plain HTTP.'}
+              {state.status === 'unknown' && 'The current TLS status could not be read.'}
+              {state.status !== 'disabled' && state.status !== 'unknown'
+                && 'A certificate is configured but could not be read.'}
             </p>
           )}
 
           {/* ── install a new one ────────────────────────────────────────── */}
-          {installed && (
+
+          {/* ⛔ A CERTIFICATE ALONE DOES NOT TURN TLS ON, and the restart advice
+              below is actively misleading when it does not. With TLS_CERT_PATH /
+              TLS_KEY_PATH unset the server starts on plain HTTP no matter what
+              is on disk, so an operator who installs a certificate here, sees
+              "restart to begin serving it", restarts — and gets http:// — has
+              been told the wrong thing by their own console. Said before they
+              upload, and again after (below), because it is the one fact that
+              makes the difference between this working and not. */}
+          {installed && installed.tlsEnabled === false && (
+            <div
+              style={{
+                border: '1px solid var(--sev-crit)',
+                background: 'var(--tint-danger)',
+                borderRadius: 'var(--radius)',
+                padding: 'var(--s4)',
+              }}
+            >
+              <strong style={{ color: 'var(--tint-danger-fg)' }}>
+                Written to disk — but restarting will NOT turn HTTPS on
+              </strong>
+              <p style={{ margin: '6px 0 0', fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
+                TLS is not configured on this installation, so SecVault will keep serving plain HTTP
+                whatever is in the certificate files. To switch the console over, set these in
+                <span style={MONO}> .env.local</span> and re-run the updater:
+              </p>
+              <pre style={{ ...MONO, margin: '8px 0 0', padding: 'var(--s3)', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', whiteSpace: 'pre-wrap' }}>
+{`ENABLE_TLS=true
+TLS_CERT_PATH=${installed.certPath || ''}
+TLS_KEY_PATH=${installed.keyPath || ''}`}
+              </pre>
+            </div>
+          )}
+
+          {installed && installed.tlsEnabled !== false && (
             <div
               style={{
                 border: '1px solid var(--sev-med)',
@@ -246,6 +333,15 @@ sc.exe start SecVault-App
               together with its key file. The pair is checked before anything is written — a key
               that does not match its certificate is refused rather than installed.
             </p>
+
+            {state.status === 'disabled' && (
+              <p style={{ margin: 0, color: 'var(--tint-warn-fg)', fontSize: 'var(--text-base)' }}>
+                Note: TLS is not switched on for this installation, so installing a certificate here
+                writes the files but will not by itself make the console serve HTTPS —
+                <span style={MONO}> TLS_CERT_PATH</span> and <span style={MONO}>TLS_KEY_PATH</span>{' '}
+                also have to be set in <span style={MONO}>.env.local</span>.
+              </p>
+            )}
 
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="tls_file">Certificate file</label>
@@ -289,6 +385,11 @@ sc.exe start SecVault-App
               </div>
             )}
 
+            {/* ⛔ Immediately above this path's OWN button. A wrong .pfx password
+                is the single most likely failure here and it must be readable
+                without opening anything. */}
+            <ErrorNote>{fileError}</ErrorNote>
+
             <Button type="submit" variant="primary" disabled={busy || !certFile} style={{ alignSelf: 'flex-start' }}>
               {busy ? 'Checking…' : 'Validate and install'}
             </Button>
@@ -328,9 +429,7 @@ sc.exe start SecVault-App
               />
             </div>
 
-            {error && (
-              <p style={{ margin: 0, color: 'var(--tint-danger-fg)', fontSize: 'var(--text-base)' }}>{error}</p>
-            )}
+            <ErrorNote>{pemError}</ErrorNote>
 
               <Button type="submit" variant="primary" disabled={busy || !cert || !key} style={{ alignSelf: 'flex-start' }}>
                 {busy ? 'Checking…' : 'Validate and install'}

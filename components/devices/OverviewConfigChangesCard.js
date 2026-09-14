@@ -180,9 +180,9 @@ export default async function OverviewConfigChangesCard({ deviceId, days = 7 }) 
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', fontSize: 'var(--text-xs)' }}>
-                <span style={{ color: 'var(--green)', fontWeight: 600 }}>{totals.added} added</span>
-                <span style={{ color: 'var(--red)', fontWeight: 600 }}>{totals.removed} removed</span>
-                <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{totals.modified} modified</span>
+                <span style={{ color: 'var(--tint-success-fg)', fontWeight: 600 }}>{totals.added} added</span>
+                <span style={{ color: 'var(--tint-danger-fg)', fontWeight: 600 }}>{totals.removed} removed</span>
+                <span style={{ color: 'var(--tint-warn-fg)', fontWeight: 600 }}>{totals.modified} modified</span>
               </div>
             </div>
 

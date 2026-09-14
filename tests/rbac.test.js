@@ -374,3 +374,82 @@ describe('the UI never hardcodes a role list', () => {
     assert.deepEqual(offenders, [], 'raw role string rendered:\n  ' + offenders.join('\n  '));
   });
 });
+
+describe('⛔ capabilitiesOf fails CLOSED like can()', () => {
+  // The single asymmetry in an otherwise uniformly fail-closed module:
+  // ROLE_CAPABILITIES[role] reaches the prototype chain, so a role string of
+  // 'constructor' returned a truthy non-array and .includes threw TypeError —
+  // a 500 while building the UI's capability object, rather than a denial.
+  for (const role of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+    it(`a role named '${role}' grants nothing and does not throw`, () => {
+      const session = { user: { role } };
+      const caps = capabilitiesOf(session);
+      assert.equal(Object.values(caps).some(Boolean), false, 'no capability may be granted');
+      assert.equal(can(session, OPERATE), false);
+    });
+  }
+
+  it('agrees with can() for every assignable role', () => {
+    // The two must never disagree: one gates the API, the other draws the UI,
+    // and a UI gate stricter than its route reads to the operator as a broken
+    // product rather than as a permission boundary.
+    for (const role of ASSIGNABLE_ROLES) {
+      const session = { user: { role } };
+      const caps = capabilitiesOf(session);
+      for (const cap of ALL_CAPABILITIES) {
+        assert.equal(caps[cap], can(session, cap), `${role}/${cap} disagrees`);
+      }
+    }
+  });
+});
+
+describe('⛔ the last Super Admin cannot be removed OR demoted', () => {
+  // This guard had NO test, and shipped broken in both halves: it referenced an
+  // identifier that was never imported (so it threw and 500'd, never once
+  // executing), and underneath that it compared against the wrong role — so the
+  // obvious one-line fix would have OPENED the hole rather than closing it.
+  // Demoting the last super_admin to `admin` skipped the check entirely and
+  // left an installation where nobody holds MANAGE_USERS, recoverable only by
+  // a direct database edit.
+  // ⛔ COMMENTS STRIPPED FIRST. The fix for this guard documents the old broken
+  // comparison verbatim in a comment, so a naive source scan matches the
+  // explanation rather than the code and reports a bug that was already fixed.
+  // A source-scanning test has to read what RUNS, not what is written about it.
+  const rawRouteSrc = require('fs').readFileSync(
+    require.resolve('../app/api/users/[id]/route.js'), 'utf8'
+  );
+  const routeSrc = rawRouteSrc
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n');
+
+  it('compares against SUPER_ADMIN_ROLE, never ADMIN_ROLE', () => {
+    assert.equal(
+      /targetRole === ADMIN_ROLE/.test(routeSrc), false,
+      'a target being set to `admin` must NOT count as still holding super_admin'
+    );
+    assert.ok(
+      routeSrc.includes('targetRole === SUPER_ADMIN_ROLE'),
+      'the survivor test must follow the capability, not the word "admin"'
+    );
+  });
+
+  it('runs the guard for ANY role change away from super_admin, including to admin', () => {
+    assert.equal(
+      /nextRole !== ADMIN_ROLE/.test(routeSrc), false,
+      'skipping the check when the new role is `admin` is the demotion hole'
+    );
+    assert.ok(routeSrc.includes('nextRole !== SUPER_ADMIN_ROLE'));
+  });
+
+  it('every role identifier it uses is actually imported', () => {
+    // The defect that made this unexecutable. ESM is strict mode, so a free
+    // variable is a ReferenceError at call time, not a load-time failure —
+    // which is why it passed every static check and every build.
+    const importLine = routeSrc.split('\n').find((l) => l.includes("from '../../../../lib/rbac'"));
+    assert.ok(importLine, 'the rbac import must exist');
+    for (const ident of routeSrc.match(/\b[A-Z][A-Z_]*_ROLE\b/g) || []) {
+      assert.ok(importLine.includes(ident), `${ident} is used but never imported`);
+    }
+  });
+});

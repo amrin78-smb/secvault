@@ -47,6 +47,20 @@
 .PARAMETER AppPort
     Port for the SecVault-App (Next.js) service.
 
+.PARAMETER EnableTls
+    Mint a self-signed certificate and bring the console up on HTTPS (default
+    $true). The PORT DOES NOT CHANGE -- the console is still reached on
+    -AppPort, it is simply TLS there -- so nothing an operator has written down
+    stops working. Pass -EnableTls $false to install on plain HTTP.
+
+    Note this is a FRESH-INSTALL default only. Update-SecVault.ps1 deliberately
+    never switches an existing installation's transport on its own; it acts on
+    the ENABLE_TLS=true this script writes.
+
+.PARAMETER HttpRedirectPort
+    Plain-HTTP listener that answers with a 301 to the https console. Only used
+    when -EnableTls is on.
+
 .PARAMETER NetVaultUrl
     Optional. If set, NETVAULT_URL is written to .env.local for optional SSO
     federation (disabled by default -- see CLAUDE.md "Optional Suite Integration").
@@ -80,6 +94,12 @@ param(
     # collector bound only to 514 receives almost nothing and reports itself
     # perfectly healthy while doing so.
     [string]$SyslogPorts = '514,1514',
+
+    # TLS on by default for NEW installations. See the .PARAMETER block above:
+    # the port is unchanged, so this is a transport upgrade, not a move.
+    [bool]$EnableTls = $true,
+
+    [int]$HttpRedirectPort = 3080,
 
     [string]$NetVaultUrl = ''
 )
@@ -853,6 +873,97 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 
 # -----------------------------------------------------------------------
+# 14b. TLS -- certificate, .env.local keys, service entry point
+# -----------------------------------------------------------------------
+# ⛔ THIS STEP USED NOT TO EXIST, AND ITS ABSENCE WAS INVISIBLE. Every other
+# piece of the TLS feature was written and shipped -- installer\SecVault-Tls.ps1
+# described itself as "dot-sourced by BOTH installer scripts" (it had one
+# caller), and Update-SecVault.ps1's opt-in comment said "fresh installs set
+# this, so new deployments are HTTPS by default" (nothing set it). So a new
+# customer got plain HTTP, on a firewall-management console, with no route to
+# HTTPS except hand-editing .env.local -- while both scripts' comments asserted
+# the opposite. Two true-sounding sentences and no code.
+#
+# ⛔ THE PORT DOES NOT CHANGE. HTTPS is served on -AppPort, the same port the
+# banner, the firewall rule and every future bookmark use. server.js answers a
+# plaintext request on that port with a redirect rather than a protocol error,
+# so an http:// URL typed out of habit still lands.
+#
+# ⛔ EVERY FAILURE HERE LEAVES A PLAIN-HTTP INSTALL, NOT A BROKEN ONE. TLS is
+# an upgrade to a working console; a half-applied switch is an outage on a
+# product whose whole job is to be reachable when something is wrong.
+# -----------------------------------------------------------------------
+Write-Step 'Configuring TLS...'
+
+# ⛔ The entry point is a VARIABLE from here down. Step 15 registers whatever
+# this holds, so the TLS decision is taken in exactly ONE place -- a second
+# nssm set somewhere below is how the two halves of this would drift.
+$appEntryPoint = "node_modules\next\dist\bin\next start -p $AppPort"
+$tlsEnabled = $false
+
+if (-not $EnableTls) {
+    Write-Step "TLS: skipped (-EnableTls was `$false). The console will serve plain HTTP on port $AppPort."
+} else {
+    # Prefer the CLONED copy over the one next to this script: this installer
+    # may be run from a distribution package that is older than the repo it just
+    # checked out, and the helpers are the half that touches certificates.
+    $tlsHelpers = Join-Path $repoRoot 'installer\SecVault-Tls.ps1'
+    if (-not (Test-Path -LiteralPath $tlsHelpers)) {
+        $tlsHelpers = Join-Path $PSScriptRoot 'SecVault-Tls.ps1'
+    }
+
+    try {
+        if (-not (Test-Path -LiteralPath $tlsHelpers)) {
+            throw "SecVault-Tls.ps1 was not found (looked in $repoRoot\installer and $PSScriptRoot)."
+        }
+        . $tlsHelpers
+
+        # ⛔ NEVER OVERWRITES AN EXISTING PAIR -- New-SecVaultCertificate returns
+        # the existing one untouched. Re-running this installer over a deployment
+        # that already has a real corporate certificate must not replace it with a
+        # self-signed one. SANs are minted by the helper and are mandatory:
+        # browsers ignore the CN entirely, so a certificate without them is
+        # REJECTED, not merely untrusted.
+        $cert = New-SecVaultCertificate `
+            -CertDir (Join-Path $repoRoot 'certs') `
+            -ServerIp $ServerIp `
+            -LogFile (Join-Path $LogDir 'tls-openssl.log')
+
+        if (-not $cert.Success) { throw $cert.Message }
+        Write-Step "TLS: $($cert.Message)"
+
+        # ⛔ Upserted one key at a time via Set-SecVaultEnvValue, never by
+        # rewriting .env.local from the template. CREDENTIAL_KEY, NEXTAUTH_SECRET
+        # and PG_ADMIN_PASSWORD were generated minutes ago and exist nowhere else;
+        # losing any of them orphans every credential this box will ever store.
+        Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'ENABLE_TLS' -Value 'true' | Out-Null
+        Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'TLS_CERT_PATH' -Value $cert.CertPath | Out-Null
+        Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'TLS_KEY_PATH' -Value $cert.KeyPath | Out-Null
+        Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'HTTP_REDIRECT_PORT' -Value "$HttpRedirectPort" | Out-Null
+
+        # ⛔ NEXTAUTH_URL MUST FOLLOW THE SCHEME. NextAuth builds its callback
+        # from it; left on http:// while the server speaks https, the cookie is
+        # issued for an origin the browser is not on and EVERY sign-in bounces
+        # back to the login page with no error in any log. A brand-new install
+        # where nobody can log in reads as "the product does not work".
+        Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'NEXTAUTH_URL' `
+            -Value ("https://{0}:{1}" -f $ServerIp, $AppPort) | Out-Null
+
+        # ⛔ next start CANNOT SERVE TLS. There is no flag for it, in any
+        # version, so the service entry point becomes server.js -- the same Next
+        # request handler wrapped in https.createServer.
+        $appEntryPoint = 'server.js'
+        $tlsEnabled = $true
+        Write-Step "TLS: enabled. SecVault-App will run server.js and serve HTTPS on port $AppPort."
+    } catch {
+        Write-Host "[WARN] TLS setup failed: $($_.Exception.Message) -- installing on plain HTTP instead." -ForegroundColor Yellow
+        Write-Host "[WARN] .env.local keeps ENABLE_TLS=false; fix the cause and re-run installer\Update-SecVault.ps1 with ENABLE_TLS=true to turn TLS on later." -ForegroundColor Yellow
+        $appEntryPoint = "node_modules\next\dist\bin\next start -p $AppPort"
+        $tlsEnabled = $false
+    }
+}
+
+# -----------------------------------------------------------------------
 # 15. Register NSSM services
 # -----------------------------------------------------------------------
 Write-Step 'Registering NSSM services...'
@@ -874,7 +985,14 @@ $out | Write-Host
 # rapid failures). node_modules\next\dist\bin\next is the real Next.js CLI
 # entry point -- an actual JS file with a #!/usr/bin/env node shebang --
 # safe to run directly with node, bypassing the wrapper entirely.
-$out = Invoke-Native { & $NssmExe set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p $AppPort" 2>&1 }
+#
+# ⛔ Set from $appEntryPoint (step 14b), which holds either that same next
+# CLI path or 'server.js' when TLS was enabled. DO NOT HARDCODE IT HERE. Two
+# places deciding the entry point is how an install ends up with a certificate
+# on disk, ENABLE_TLS=true in .env.local, and a service still running
+# `next start` that cannot serve it -- a configuration that reads as correct in
+# every single file and is plain HTTP in the browser.
+$out = Invoke-Native { & $NssmExe set SecVault-App AppParameters $appEntryPoint 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault" 2>&1 }
 $out | Write-Host
@@ -986,6 +1104,19 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
 }
 Write-Step "Firewall rule added for port $AppPort"
 
+# ⛔ The redirect listener needs its OWN rule. Without it an operator who
+# reaches the plain-HTTP port gets a dropped connection rather than a redirect,
+# and Windows drops those packets before anything in SecVault can see or log
+# them -- every health signal green, and the door quietly bricked up. Same
+# failure shape as the syslog ports below.
+if ($tlsEnabled) {
+    $redirectRuleName = "SecVault HTTP redirect $HttpRedirectPort"
+    if (-not (Get-NetFirewallRule -DisplayName $redirectRuleName -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $redirectRuleName -Direction Inbound -Protocol TCP -LocalPort $HttpRedirectPort -Action Allow | Out-Null
+    }
+    Write-Step "Firewall rule added for the HTTP-to-HTTPS redirect on port $HttpRedirectPort"
+}
+
 # Inbound syslog. Without these the collector binds successfully, reports
 # itself healthy, and receives nothing -- Windows drops the datagrams before
 # they ever reach the socket, with no error anywhere to notice.
@@ -1030,13 +1161,104 @@ $engineRunning = Wait-ServiceStatus -ServiceName 'SecVault-Engine' -Status 'Runn
 $collectorRunning = Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15
 
 # -----------------------------------------------------------------------
+# 18b. Prove the console answers OVER HTTPS -- and roll back if it does not
+# -----------------------------------------------------------------------
+# ⛔ "SERVICE RUNNING" IS NOT "APP SERVING". NSSM restarts a crashing
+# process, so step 18 above can report Running while node crash-loops forever.
+# Only a real HTTP response proves the console came back, and this is the safety
+# net for the entry-point change made in step 14b: a fresh install that ends
+# with a dark console and a green banner is the worst outcome available here,
+# because nobody is watching a machine they have just finished installing.
+#
+# ⛔ A FALSE NEGATIVE HERE WOULD BE WORSE THAN NO CHECK AT ALL -- it
+# would tear down a working HTTPS install. Test-SecVaultResponding is the shared
+# helper precisely so this probe cannot drift from Update-SecVault.ps1's: it
+# trusts any certificate (a self-signed one MUST pass -- we are asking whether
+# the app answers, not whether a browser would trust it) via ICertificatePolicy
+# rather than ServerCertificateValidationCallback, which silently never works
+# under PowerShell 5.1 and cost two production outages.
+#
+# ⛔ The rollback value is a LITERAL, never read back from nssm.
+# `nssm get` returns UTF-16 with embedded NULs; feeding that back into
+# `nssm set` truncated AppParameters to "n" and left a service that could not
+# start at all -- a safety net becoming the outage it exists to prevent. On a
+# fresh install the correct value is known here without asking anyone.
+if ($tlsEnabled -and $appRunning) {
+    Write-Step 'Verifying the console answers over HTTPS...'
+    if (Test-SecVaultResponding -Port $AppPort -UseHttps -TimeoutSeconds 90) {
+        Write-Step "Console is answering on https://$($ServerIp):$($AppPort)"
+    } else {
+        Write-Host '[ERROR] The console did NOT answer over HTTPS within 90s. Rolling back to plain HTTP.' -ForegroundColor Yellow
+        try {
+            $out = Invoke-Native { & $NssmExe set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p $AppPort" 2>&1 }
+            $out | Write-Host
+
+            # Clear the whole TLS configuration, not just the entry point. A
+            # half-cleared state would send the next Update-SecVault.ps1 run
+            # straight back into the TLS step (ENABLE_TLS / TLS_CERT_PATH are
+            # what gate it), to fail the same probe and roll back again -- an
+            # outage window on every deploy, with nothing recording that it has
+            # already failed once.
+            Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'ENABLE_TLS' -Value 'false' | Out-Null
+            Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'TLS_CERT_PATH' -Value '' | Out-Null
+            Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'TLS_KEY_PATH' -Value '' | Out-Null
+
+            # ⛔ NEXTAUTH_URL BACK TO http://, or sign-in fails silently on
+            # a console that is otherwise working perfectly.
+            Set-SecVaultEnvValue -EnvPath $envLocalPath -Key 'NEXTAUTH_URL' `
+                -Value ("http://{0}:{1}" -f $ServerIp, $AppPort) | Out-Null
+
+            $out = sc.exe stop SecVault-App
+            $out | Write-Host
+            Start-Sleep -Seconds 4
+            $out = sc.exe start SecVault-App
+            $out | Write-Host
+
+            $tlsEnabled = $false
+            $appRunning = Wait-ServiceStatus -ServiceName 'SecVault-App' -Status 'Running' -TimeoutSeconds 15
+
+            if (Test-SecVaultResponding -Port $AppPort -TimeoutSeconds 90) {
+                Write-Step 'Rolled back. The console is answering over plain HTTP; TLS is OFF.'
+            } else {
+                Write-Host "[ERROR] The console is not answering after the rollback either -- check $LogDir\app-error.log." -ForegroundColor Red
+            }
+        } catch {
+            # ⛔ Never rethrow out of a rollback. $ErrorActionPreference is
+            # 'Stop' in this script, and an exception here would abort before the
+            # banner, leaving the operator with no summary of what state the
+            # machine was actually left in.
+            Write-Host "[ERROR] TLS rollback failed: $($_.Exception.Message)" -ForegroundColor Red
+            $tlsEnabled = $false
+        }
+    }
+}
+
+# -----------------------------------------------------------------------
 # 19. Success banner
 # -----------------------------------------------------------------------
 Write-Host ''
 Write-Host '=================================================='
+# ⛔ PRINT THE SCHEME THE CONSOLE IS ACTUALLY ON. This line said
+# http:// unconditionally. Once the installer can enable TLS, a hardcoded
+# scheme is a URL that fails in the operator's browser on the very first
+# click -- and, worse, a plaintext request into a TLS listener is a protocol
+# error, not a redirect, so it fails with no explanation at all. (server.js
+# handles that case on the app port; the banner should still be right.)
+$consoleScheme = 'http'
+if ($tlsEnabled) { $consoleScheme = 'https' }
+
 if ($appRunning -and $engineRunning -and $collectorRunning) {
     Write-Host ' SecVault installed successfully.'
-    Write-Host " URL: http://$($ServerIp):$($AppPort)"
+    Write-Host " URL: $($consoleScheme)://$($ServerIp):$($AppPort)"
+    if ($tlsEnabled) {
+        # ⛔ SAY THAT IT IS SELF-SIGNED. The first visit shows a browser
+        # warning, and an operator meeting an unexplained security warning on a
+        # brand-new security product reasonably concludes the install is broken.
+        Write-Host ' TLS: ON (self-signed certificate -- your browser will warn until you install your own via Settings -> Certificate).'
+        Write-Host " Plain HTTP on port $HttpRedirectPort redirects here."
+    } else {
+        Write-Host ' TLS: OFF -- the console is serving PLAIN HTTP. Set ENABLE_TLS=true in .env.local and run installer\Update-SecVault.ps1 to turn it on.'
+    }
     Write-Host ' Default login: admin / changeme (change immediately via Settings)'
 } else {
     Write-Host ' SecVault installed, but one or more services did not stay running.' -ForegroundColor Yellow

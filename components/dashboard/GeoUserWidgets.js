@@ -179,7 +179,7 @@ export async function UrlCategoriesWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
+          <IconChip icon={IconGrid} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Web / Application Categories (24h)
         </CardTitle>
       </CardHeader>

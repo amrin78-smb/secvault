@@ -105,6 +105,50 @@ describe('⛔ a gap never becomes good news', () => {
     assert.match(a.coverage, /139 tunnels on 11 firewalls cannot report a down tunnel at all/);
   });
 
+  it('⛔ a tunnel whose STATE cannot be read blocks the all-clear', () => {
+    // `tunnels.unknownStatus` was ignored by this builder entirely. It counts
+    // tunnels on a FRESH snapshot — the device answered — whose status verb the
+    // engine does not recognise, or which reported none at all. None of the
+    // device-level clauses covers them (the device is not blind, not stale, not
+    // unsupported) and `down` does not count them either, so a fleet at
+    // {total: 20, up: 19, down: 0, unknownStatus: 1} produced tone `ok` and
+    // "Every tunnel is up … and every one was measurable" — false twice in one
+    // sentence, about a tunnel that may well be down.
+    const a = buildTunnelAnswer(withDevices({}, { up: 19, down: 0, unknownStatus: 1 }));
+    assert.notEqual(a.tone, 'ok');
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.coverage, /1 tunnel reports a state SecVault cannot read as up or down/);
+    assert.doesNotMatch(a.sentence, /every one was measurable/);
+  });
+
+  it('several unreadable tunnels read as a plural clause', () => {
+    const a = buildTunnelAnswer(withDevices({}, { up: 16, down: 0, unknownStatus: 4 }));
+    assert.match(a.coverage, /4 tunnels report a state/);
+  });
+
+  it('a down count still wins over an unreadable-state clause', () => {
+    // Same rule as every other gap here: it qualifies the number, it does not
+    // bury a real outage.
+    const a = buildTunnelAnswer(withDevices({}, { up: 17, down: 2, unknownStatus: 1 }));
+    assert.equal(a.tone, 'critical');
+    assert.match(a.lead, /2 tunnels are down/);
+    assert.match(a.coverage, /cannot read as up or down/);
+  });
+
+  it('⛔ a snapshot with NO down count is not a snapshot showing zero down', () => {
+    // `claimable` proves firewalls were polled recently; it says nothing about
+    // whether the down tally reached this object. With `tunnels.down` absent,
+    // `down > 0` is false against null and the builder fell through to the
+    // green "Every tunnel is up" — an all-clear derived from the ABSENCE of the
+    // only number that could have contradicted it.
+    const base = clean();
+    delete base.fleet.tunnels.down;
+    const a = buildTunnelAnswer(base);
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.lead, /No down-tunnel count could be read/);
+    assert.doesNotMatch(a.sentence, /Every tunnel is up/);
+  });
+
   it('⛔ nothing measured is not "no tunnels are down"', () => {
     const a = buildTunnelAnswer(withDevices({ claimable: 0, reportingFresh: 0, unsupported: 4 }));
     assert.equal(a.tone, 'unknown');

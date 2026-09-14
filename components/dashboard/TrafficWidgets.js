@@ -159,7 +159,7 @@ export async function TopApplicationsWidget() {
     <Card>
       <CardHeader>
         <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="var(--tint-purple-fg)" bg="var(--tint-purple)" />
+          <IconChip icon={IconGrid} color="var(--tint-info-fg)" bg="var(--tint-info)" />
           Top Applications (24h)
         </CardTitle>
       </CardHeader>

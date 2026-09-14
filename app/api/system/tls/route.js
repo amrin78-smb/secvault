@@ -23,9 +23,33 @@ export const dynamic = 'force-dynamic';
 // IS (subject, names, expiry) and nothing about the key beyond whether one is
 // present.
 
-const CERT_DIR = path.join(process.cwd(), 'certs');
-const CERT_PATH = path.join(CERT_DIR, 'secvault.crt');
-const KEY_PATH = path.join(CERT_DIR, 'secvault.key');
+// Where a certificate goes when TLS has never been configured on this
+// installation — the same 'certs' folder installer/SecVault-Tls.ps1 mints into,
+// so a later `ENABLE_TLS=true` update finds the operator's certificate already
+// in place and (per its own rule) leaves it untouched.
+const DEFAULT_CERT_DIR = path.join(process.cwd(), 'certs');
+const DEFAULT_CERT_PATH = path.join(DEFAULT_CERT_DIR, 'secvault.crt');
+const DEFAULT_KEY_PATH = path.join(DEFAULT_CERT_DIR, 'secvault.key');
+
+/**
+ * The files this install actually loads at startup.
+ *
+ * ⛔ WRITE WHERE THE SERVER READS. This route used to report config.certPath in
+ * its GET and then write, unconditionally, to <cwd>\certs\secvault.crt. On an
+ * install with TLS_CERT_PATH=C:\PKI\secvault.crt — a shape lib/tlsConfig.js
+ * explicitly supports — installing a renewal through this panel wrote it to a
+ * path nothing ever reads, told the operator to restart, and after the restart
+ * the console served the OLD certificate with nothing anywhere explaining why.
+ * That is a certificate expiring in production while the console insists it was
+ * replaced. The configured path wins; the default is only for an installation
+ * that has no configured path at all.
+ */
+function targetPaths(config) {
+  return {
+    certPath: (config && config.certPath) || DEFAULT_CERT_PATH,
+    keyPath: (config && config.keyPath) || DEFAULT_KEY_PATH,
+  };
+}
 
 /** Describe whatever certificate is currently on disk, without the key. */
 function currentCertificate() {
@@ -36,6 +60,9 @@ function currentCertificate() {
     httpsPort: config.httpsPort,
     httpPort: config.httpPort,
     certPath: config.certPath,
+    // The key PATH, never the key. A filename is not key material, and the
+    // operator needs to know which file an install would replace.
+    keyPath: config.keyPath,
     certificate: null,
   };
 
@@ -107,16 +134,26 @@ export async function POST(request) {
     return NextResponse.json({ error: info.error, certificate: null }, { status: 400 });
   }
 
-  try {
-    if (!fs.existsSync(CERT_DIR)) fs.mkdirSync(CERT_DIR, { recursive: true });
+  // Resolved ONCE, and used for the backup, the write and the response, so the
+  // path the operator is told about cannot drift from the path written.
+  const tlsConfig = resolveTlsConfig(process.env);
+  const { certPath: CERT_PATH, keyPath: KEY_PATH } = targetPaths(tlsConfig);
 
-    // ⛔ Timestamped backup of whatever is there now. An operator who pastes the
-    // wrong certificate must be able to get back to a working console without
-    // going to their CA.
+  try {
+    for (const dir of [path.dirname(CERT_PATH), path.dirname(KEY_PATH)]) {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // ⛔ Timestamped backup of whatever is there now, NEXT TO EACH FILE. The
+    // certificate and the key can legitimately live in different directories,
+    // so the backup follows its own original rather than assuming one folder.
+    // An operator who installs the wrong certificate must be able to get back to
+    // a working console without going to their CA.
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     for (const [src, label] of [[CERT_PATH, 'crt'], [KEY_PATH, 'key']]) {
       if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(CERT_DIR, `secvault.${stamp}.bak.${label}`));
+        const base = path.basename(src).replace(/\.[^.]*$/, '');
+        fs.copyFileSync(src, path.join(path.dirname(src), `${base}.${stamp}.bak.${label}`));
       }
     }
 
@@ -146,6 +183,14 @@ export async function POST(request) {
     console.warn(`[tls route] activity log failed: ${err.message}`);
   }
 
+  // ⛔ A CERTIFICATE ON DISK IS NOT TLS. On a 'disabled' install TLS_CERT_PATH
+  // and TLS_KEY_PATH are unset, so lib/tlsConfig.js resolves 'disabled' and the
+  // server serves plain HTTP however good the files are. Telling that operator
+  // "restart to begin serving it" is simply false, and they would restart the
+  // console — a real interruption — to get exactly the transport they had.
+  // Reported, so the UI can say what is actually still needed.
+  const tlsEnabled = tlsConfig.status !== 'disabled';
+
   return NextResponse.json({
     ok: true,
     // ⛔ SAID PLAINLY. The files on disk have changed but the running process is
@@ -153,8 +198,15 @@ export async function POST(request) {
     // startup. Without this sentence an operator reasonably concludes the new
     // certificate is live, and is then baffled when the browser keeps showing
     // the old one.
-    restartRequired: true,
-    message: 'Certificate installed. Restart the SecVault-App service to begin serving it.',
+    restartRequired: tlsEnabled,
+    tlsEnabled,
+    certPath: CERT_PATH,
+    keyPath: KEY_PATH,
+    message: tlsEnabled
+      ? `Certificate installed to ${CERT_PATH}. Restart the SecVault-App service to begin serving it.`
+      : `Certificate written to ${CERT_PATH}, but TLS is not configured on this installation — `
+        + 'set ENABLE_TLS=true, TLS_CERT_PATH and TLS_KEY_PATH in .env.local, then re-run the '
+        + 'updater. Restarting alone will not enable HTTPS.',
     certificate: {
       subject: info.subject,
       issuer: info.issuer,

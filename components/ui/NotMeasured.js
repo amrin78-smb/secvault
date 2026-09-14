@@ -18,6 +18,23 @@
 // "We could not measure it" is not good news and not bad news; it is an absence
 // of news, and colouring it either way is the same lie in a different direction.
 //
+// ⛔ CONTRAST IS PART OF THE CONTRACT, NOT POLISH. --unmeasured is the ONE
+// token in this file's vocabulary, and it was being checked against a white
+// card (4.54:1, a pass) while the chips that carry it — the .ev-unmeasured
+// strip, the "No status"/"dial-up peer"/"not matched" chips, NotMeasuredBar's
+// own swatch below — sit on --surface-subtle, where it measured 4.12:1 in light
+// and 4.48:1 in dark. Both under WCAG 1.4.3's 4.5:1.
+//
+// That failure is worse here than anywhere else in the product. An unreadable
+// NUMBER is still visibly a number; an em-dash or a "Not measured" chip that
+// fades into its own background is indistinguishable from an EMPTY CELL, and an
+// empty cell reads as "nothing to report" — which turns the one component built
+// to announce a gap into the component that hides it. The token was re-picked
+// per theme (app/globals.css) rather than giving these chips a special surface,
+// because the surface is not what was wrong. tests/designSystemRamp.test.js now
+// measures --unmeasured against BOTH surfaces in BOTH themes, so this cannot
+// silently drift back.
+//
 // ⛔ ALWAYS pass `reason`. The whole point is that the operator can find out WHY
 // the answer is missing — "this vendor does not report HA state", "no ruleset
 // collected", "no syslog coverage in this window". A bare em-dash with no

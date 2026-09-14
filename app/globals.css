@@ -197,8 +197,23 @@
      ask — these are not "zero" and not "pass", and the UI must never colour
      them as either (CLAUDE.md's failed-read-as-a-fact rule, made visible).
      Use --unmeasured for the text/em-dash and --hatch for any bar segment or
-     swatch standing in for the missing measurement. */
-  --unmeasured: #6D7784;
+     swatch standing in for the missing measurement.
+
+     ⛔ CONTRAST IS MEASURED AGAINST --surface-subtle, NOT --bg-card. This was
+     #6D7784, which clears 4.5:1 on a white card (4.54:1) and FAILS on the subtle
+     surface (4.12:1) -- and the subtle surface is where this token actually
+     lands: the .ev-unmeasured strip, the "No status"/"not matched" chips and the
+     NotMeasuredBar swatch all sit on it. So every "Not measured" chip in the app
+     was the one thing on screen that could not be read, which is the
+     failed-read-as-a-fact rule turned inside out: the absence of a measurement
+     must be MORE legible than a number, never less, because a reader who skims
+     past an unreadable em-dash concludes there was nothing there to read.
+     #666F7B measures 4.62:1 on --surface-subtle, 5.09:1 on --bg-card and 4.82:1
+     on --bg-primary. The dark value is re-picked for its own ground below --
+     never invert one of these arithmetically. Both pairings are now pinned by
+     tests/designSystemRamp.test.js, which measures them rather than trusting
+     this comment. */
+  --unmeasured: #666F7B;
   --hatch: repeating-linear-gradient(45deg, var(--border) 0 3px, transparent 3px 7px);
 
   /* ⛔ EVIDENCE IS ITS OWN AXIS, so it gets its own hue and nothing else uses it.
@@ -359,7 +374,14 @@
   --teal:    #22C1D6;
   --sev-low: #8B9BB0;
 
-  --unmeasured: #7A8BA1;
+  /* ⛔ Re-picked for the dark ground, not lightened from the light value.
+     #7A8BA1 measured 4.48:1 on the dark --surface-subtle (white at 4.5% over
+     --bg-card composites to #1E242F) -- the same sub-4.5:1 failure as the light
+     token, reached from the other direction. #8592A3 is 4.92:1 there and 5.52:1
+     on --bg-card, and its channel spread is 30 rather than 39, which leaves real
+     headroom under the neutrality assertion in tests/designSystemRamp.test.js.
+     A hue here would let "we could not measure this" read as good or bad news. */
+  --unmeasured: #8592A3;
 
   --accent-teal-bg: rgba(34,193,214,0.22);
 
@@ -979,12 +1001,31 @@ select.input {
   position: relative;
 }
 .sv-topbar-divider { width: 1px; height: 28px; background: rgba(255,255,255,0.12); flex-shrink: 0; }
+/* ⛔ TWO FIXES HERE AND THEY PULL IN OPPOSITE DIRECTIONS -- both are needed.
+   1. CONTRAST. This was rgba(255,255,255,0.4) on --navy: 3.80:1, under WCAG
+      1.4.3's 4.5:1 for small text (it renders at --text-sm). 0.6 measures
+      7.01:1 on the light-theme --navy and 7.09:1 on the dark-theme one, so it
+      clears the bar on BOTH grounds. It stays a white alpha rather than becoming
+      a --tint-*-fg because the shell is dark in both themes and a --tint-*-fg
+      flips -- in light mode that would be a dark colour on a dark bar.
+   2. WIDTH. It was `white-space: nowrap` with the flex default min-width:auto,
+      so it could not shrink at all and took a fixed, unshrinkable bite out of
+      the centred search box at narrow viewports -- and the current tagline is
+      five characters longer than the one it replaced, so that bite grew.
+      min-width:0 plus an ellipsis lets the tagline give way instead of the
+      search field, which is the interactive control and therefore the one that
+      must survive. This text is decorative and the wordmark beside it already
+      names the product, so truncating it costs nothing. */
 .sv-topbar-subtitle {
   font-size: var(--text-sm);
-  color: rgba(255,255,255,0.4);
+  color: rgba(255,255,255,0.6);
   letter-spacing: 0.05em;
   font-weight: 500;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sv-topbar-left { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; }
 .sv-topbar-right { display: flex; align-items: center; gap: 10px; flex: none; }
@@ -1683,7 +1724,12 @@ tbody tr td { transition: background 0.12s ease; }
 .wq-item > summary {
   list-style: none;
   cursor: pointer;
-  padding: var(--row-pad-y, 10px) var(--s3);
+  /* ⛔ BOTH axes resolve through the density tokens. This hardcoded --s3
+     horizontally while reading --row-pad-y vertically, so a work-queue row was
+     half density-aware: switching to dense shortened it but left its inset
+     alone, and it sat visibly wider than every table row around it. Density
+     changes row GEOMETRY, and geometry has two axes. */
+  padding: var(--row-pad-y, 10px) var(--row-pad-x, var(--s3));
   display: flex;
   align-items: center;
   gap: var(--s3);

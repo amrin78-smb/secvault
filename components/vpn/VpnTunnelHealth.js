@@ -68,6 +68,37 @@ const UNMEASURED_CHIP = {
 };
 
 
+/**
+ * A hueless chip whose REASON is available to everyone, not only to a mouse.
+ *
+ * ⛔ `title` ALONE IS NOT A LABEL. It needs a hover to appear, never appears on
+ * a touch device, is skipped by keyboard navigation entirely, and is read
+ * inconsistently by screen readers. On this screen the reason IS the content —
+ * "Not measured" without "because this vendor lists established tunnels only"
+ * is exactly the bare em-dash ui/NotMeasured.js says is "only marginally better
+ * than a fabricated zero". So every hand-rolled chip here carries both, the
+ * same way ui/NotMeasured.js already does.
+ *
+ * ⛔ The aria-label REPLACES the visible text for assistive tech, so it must
+ * repeat the label as well as the reason — an aria-label of just the reason
+ * loses the state the chip is showing.
+ *
+ * Defined at module top level, never inside another component (CLAUDE.md's
+ * first Critical Rule).
+ */
+function UnmeasuredChip({ label, reason }) {
+  return (
+    <span
+      className="badge"
+      style={UNMEASURED_CHIP}
+      title={reason}
+      aria-label={reason ? `${label}. ${reason}` : label}
+    >
+      {label}
+    </span>
+  );
+}
+
 const COVERAGE_LABEL = {
   reporting: 'Reporting',
   no_rows_polled: 'No tunnels reported',
@@ -97,34 +128,28 @@ function HealthBadge({ tunnel }) {
   if (tunnel.health === 'unknown') {
     const raw = tunnel.rawStatus;
     return (
-      <span
-        className="badge"
-        style={UNMEASURED_CHIP}
-        title={
+      <UnmeasuredChip
+        label={raw ? `“${raw}”` : 'No status'}
+        reason={
           raw
             ? `The device reported "${raw}", which SecVault does not recognise as either up or down. `
               + 'An unrecognised word is never mapped onto a state — that would raise an alarm no '
               + 'device raised, or hide one it did.'
             : 'The device returned this tunnel without any status — neither up nor down was reported.'
         }
-      >
-        {raw ? `“${raw}”` : 'No status'}
-      </span>
+      />
     );
   }
   const known = tunnel.lastKnownStatus === 'unknown' ? 'an unrecognised status' : tunnel.lastKnownStatus;
   return (
-    <span
-      className="badge"
-      style={UNMEASURED_CHIP}
-      title={
+    <UnmeasuredChip
+      label="Not measured"
+      reason={
         `Last measured ${tunnel.ageMinutes === null ? 'at an unknown time' : `${formatCount(tunnel.ageMinutes)} minutes ago`}`
         + `, when the device reported ${known}. That is a fact about the past: this tunnel’s current `
         + 'state is unmeasured.'
       }
-    >
-      Not measured
-    </span>
+    />
   );
 }
 
@@ -165,15 +190,12 @@ function PeerCell({ tunnel, note }) {
         </Badge>
       ) : null}
       {tunnel.peerKind === 'dialup' ? (
-        <span className="badge" style={UNMEASURED_CHIP} title="0.0.0.0 — a dial-up or unnumbered peer. There is no fixed far end to identify.">
-          dial-up peer
-        </span>
+        <UnmeasuredChip
+          label="dial-up peer"
+          reason="0.0.0.0 — a dial-up or unnumbered peer. There is no fixed far end to identify."
+        />
       ) : null}
-      {tunnel.peerKind === 'unmatched' ? (
-        <span className="badge" style={UNMEASURED_CHIP} title={note}>
-          not matched
-        </span>
-      ) : null}
+      {tunnel.peerKind === 'unmatched' ? <UnmeasuredChip label="not matched" reason={note} /> : null}
     </div>
   );
 }
@@ -187,23 +209,16 @@ function CoverageBadge({ device }) {
   }
   if (device.coverage === 'reporting') {
     return (
-      <span
-        className="badge"
-        style={UNMEASURED_CHIP}
-        title={
+      <UnmeasuredChip
+        label="Stale snapshot"
+        reason={
           'Tunnel rows exist for this device, but the snapshot they came from is older than the '
           + 'staleness window, so none of their states can be treated as current.'
         }
-      >
-        Stale snapshot
-      </span>
+      />
     );
   }
-  return (
-    <span className="badge" style={UNMEASURED_CHIP} title={device.coverageReason}>
-      {label}
-    </span>
-  );
+  return <UnmeasuredChip label={label} reason={device.coverageReason} />;
 }
 
 // Plain functions returning JSX, called imperatively — NOT nested component
@@ -238,9 +253,23 @@ function statTile(label, value, hint, color) {
   );
 }
 
+// ⛔ PERCENTAGE COLUMNS NEED A `minWidth` OR THEY COMPRESS INSTEAD OF SCROLLING.
+// ui/Table wraps every table in `overflowX: auto`, but that wrapper can never
+// engage while the table itself is `width: 100%` — there is nothing to overflow.
+// With `tableLayout: fixed` (which CLAUDE.md requires alongside percentage
+// widths) the columns then resolve to whatever the viewport allows: at 768px the
+// 8%-wide Up and Down columns are ~40px, and the CELLS overflow and ellipsise
+// instead of the TABLE offering the horizontal scroll the wrapper exists for.
+// Density makes it worse, not better — `dense` shrinks the padding, not the
+// content. These two floors are the natural widths of the narrowest readable
+// version of each table; below them the reader scrolls, which is the behaviour
+// that keeps every value legible rather than truncating a firewall name.
+const DOWN_TABLE_MIN_WIDTH = 880;
+const COVERAGE_TABLE_MIN_WIDTH = 980;
+
 function downTable(rows, peerNote) {
   return (
-    <Table>
+    <Table minWidth={DOWN_TABLE_MIN_WIDTH}>
       <colgroup>
         <col style={{ width: '20%' }} />
         <col style={{ width: '22%' }} />
@@ -295,7 +324,7 @@ function downTable(rows, peerNote) {
 
 function coverageTable(devices) {
   return (
-    <Table>
+    <Table minWidth={COVERAGE_TABLE_MIN_WIDTH}>
       <colgroup>
         <col style={{ width: '22%' }} />
         <col style={{ width: '16%' }} />
@@ -342,13 +371,26 @@ function coverageTable(devices) {
                 <NotMeasured reason={d.coverageReason} />
               )}
             </td>
+            {/* ⛔ FRESHNESS IS NOT ENOUGH FOR THIS COLUMN, and gating on it alone
+                was a bug that survived the fleet-level fix. A Palo Alto answers
+                the tunnel query with ESTABLISHED tunnels only, so a down tunnel
+                is absent from the response rather than reported down: the
+                snapshot is current, the badge beside it says "Reporting" in
+                teal, and the cell printed a hard "0". Live on 2026-09-14 that
+                was 10 of 16 firewalls and 127 tunnels, IDC FW alone holding 101.
+                The bar at the top of the page already said so — but a reader
+                scanning a column reads the column, not the bar, so the caveat
+                has to be IN the cell. The engine decides (downCountMeasured);
+                this only draws it, and it draws a REAL reported down even from a
+                firewall we believe cannot report one, because evidence outranks
+                the map. */}
             <td style={NUM}>
-              {d.snapshotFreshness === 'fresh' ? (
+              {d.downCountMeasured ? (
                 <span style={d.counts.down > 0 ? { color: SEVERITY_TEXT_COLOR.critical, fontWeight: 600 } : undefined}>
                   {formatCount(d.counts.down)}
                 </span>
               ) : (
-                <NotMeasured reason={d.coverageReason} />
+                <NotMeasured reason={d.downCountReason || d.coverageReason} />
               )}
             </td>
             <td>
@@ -381,12 +423,22 @@ function unrecognisedPanel(rows, devicesById) {
             <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>
               Status values SecVault does not recognise
             </h3>
+            {/* ⛔ CUSTOMER-FACING PROSE NAMES NO SOURCE FILE. This sentence used
+                to end "add it to the enumeration in
+                lib/engines/vpnTunnelHealth.js", which is an instruction the
+                reader cannot carry out: an operator has no repository, and the
+                only actionable step available to them is to report the value.
+                CLAUDE.md's rule for this text is that it names a PRODUCT
+                behaviour and a SecVault POLICY — never a path, never a table.
+                The path belongs in a comment like this one, for whoever widens
+                the recognised set. */}
             <p style={{ margin: 'var(--s1) 0 0', ...SUBTLE, maxWidth: '90ch' }}>
               These tunnels came back with a word that is neither <code>up</code> nor{' '}
               <code>down</code>. They are counted as unknown and shown verbatim — mapping an
-              unfamiliar vendor verb onto a state would either invent an outage or hide one. If a
-              value here is genuinely an up or down state, add it to the enumeration in{' '}
-              <code>lib/engines/vpnTunnelHealth.js</code> on this evidence.
+              unfamiliar vendor verb onto a state would either invent an outage or hide one.
+              SecVault recognises a new state only on evidence, so if a value here is genuinely an
+              up or down state, report it and it will be added to the recognised set in a future
+              release.
             </p>
           </div>
           <Table>
@@ -479,11 +531,19 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
   // down" when the truth was 2 and 10, and the segments still summed to 16
   // because the two errors cancelled. The engine now computes the fresh subsets.
   const obs = fleet.tunnels.downObservability || {};
-  const blindFresh = Number(obs.blindAndFresh) || 0;
+  // ⛔ NO `|| 0` FALLBACK HERE, DELIBERATELY. These used to read
+  // `Number(obs.blindAndFresh) || 0`, which turns a MISSING field into a
+  // confident zero — and a missing field is exactly what happened once already
+  // on this screen, when downObservability moved and every read of it became
+  // undefined. A zero there says "no firewall is down-blind", which is the
+  // reassuring answer, produced by a read that failed. Left as NaN, the missing
+  // value propagates into the segment counts and CoverageBar refuses to draw a
+  // proportion at all, which is the honest outcome.
+  const blindFresh = Number(obs.blindAndFresh);
   // A fresh device whose down-observability is UNKNOWN is not "fully readable"
   // either — we do not know whether it could show a down tunnel. It gets the
   // same partial treatment rather than being drawn solid.
-  const unknownFresh = Number(obs.unknownAndFresh) || 0;
+  const unknownFresh = Number(obs.unknownAndFresh);
   const coverageSegments = [
     {
       key: 'full',

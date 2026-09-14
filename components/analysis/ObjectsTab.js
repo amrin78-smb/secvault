@@ -107,7 +107,7 @@ const COLLAPSE_CSS = `
   cursor: pointer;
   user-select: none;
   display: inline-block;
-  padding: 4px 0;
+  padding: var(--s1) 0;
   color: var(--primary);
   font-size: var(--text-sm);
   font-weight: 600;
@@ -200,12 +200,12 @@ function CollapsibleObjectTable({ rows, headers, valueMode, detailType, limit = 
         </tbody>
       </Table>
       {rest.length > 0 && (
-        <details className="sv-obj-overflow" style={{ marginTop: 8 }}>
+        <details className="sv-obj-overflow" style={{ marginTop: 'var(--s2)' }}>
           <summary>
             <span className="sv-obj-more">Show all ({rows.length})</span>
             <span className="sv-obj-less">Show fewer</span>
           </summary>
-          <div style={{ marginTop: 8 }}>
+          <div style={{ marginTop: 'var(--s2)' }}>
             <Table>
               <ObjectColgroup />
               <tbody>
@@ -241,7 +241,7 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
   const pageParams = { ...(searchParams || {}), tab: 'objects' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
       {/* ⛔ dangerouslySetInnerHTML, not a JSX child.
                     <style> is a RAW TEXT element, but React SSR HTML-escapes a string
                     child — so the `>` child combinator shipped to the browser as `&gt;`
@@ -253,10 +253,34 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
                     whole route on the client. dangerouslySetInnerHTML injects the CSS
                     verbatim, which is what a raw-text element needs. */}
           <style dangerouslySetInnerHTML={{ __html: COLLAPSE_CSS }} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+      {/* ⛔ THESE TWO FINDING TILES SHARE ONE ACCENT, DELIBERATELY. They were
+          --yellow and --blue, side by side, which reads as a two-step severity
+          ramp — Unused "worse" than Duplicate, or the other way round depending
+          on which hue the reader learned first. lib/engines/objectUsage.js
+          assigns NO SEVERITY to either finding type (analyzeObjectUsage() emits
+          finding_type and detail and nothing else), so a ramp here is a ranking
+          the engine never produced: a colour asserting a measurement that does
+          not exist, which is this codebase's most-repeated bug class wearing a
+          different hat.
+
+          ⛔ And the second hue was BLUE specifically, which v2.87.0 pulled out
+          of the findings vocabulary because it sits one step from --primary teal
+          and a finding drawn in the brand hue destroys the one separation the
+          palette is built on. SeverityBadge and FindingsBarChart were corrected
+          then; a color= PROP was not a shape
+          tests/designSystemRamp.test.js's scan could see, so this survived. The
+          scan now reads StatCard labels too.
+
+          --sev-med is the semantic alias, not the raw --yellow: it says what the
+          colour MEANS, and StatCard maps it to --tint-warn-fg for the VALUE,
+          which is the text-safe form. Unused and Duplicate are the same class of
+          catalog-hygiene finding at the same weight, so they look alike and the
+          labels carry the difference. Total Objects stays neutral — it is a
+          population count, not a finding. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 'var(--s4)' }}>
         <StatCard label="Total Objects" value={objects.length} color="var(--text-muted)" />
-        <StatCard label="Unused" value={unused.length} color="var(--yellow)" />
-        <StatCard label="Duplicate" value={duplicates.length} color="var(--blue)" />
+        <StatCard label="Unused" value={unused.length} color="var(--sev-med)" />
+        <StatCard label="Duplicate" value={duplicates.length} color="var(--sev-med)" />
       </div>
 
       {lastCollectedAt && (
@@ -266,7 +290,7 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
       )}
 
       <div>
-        <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 8 }}>Unused Objects</h3>
+        <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--s2)' }}>Unused Objects</h3>
         {unused.length === 0 ? (
           <EmptyState message="No unused objects found." />
         ) : (
@@ -290,7 +314,7 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
       </div>
 
       <div>
-        <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 8 }}>Duplicate Objects</h3>
+        <h3 style={{ fontSize: 'var(--text-md)', marginBottom: 'var(--s2)' }}>Duplicate Objects</h3>
         {duplicates.length === 0 ? (
           <EmptyState message="No duplicate objects found." />
         ) : (
@@ -299,7 +323,7 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
                 true total is stated in words here — the <details> toggle below
                 repeats it, but the count must be visible while collapsed too,
                 or ten rows read as the whole set. */}
-            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 0, marginBottom: 8 }}>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 0, marginBottom: 'var(--s2)' }}>
               {duplicates.length.toLocaleString()} duplicate object{duplicates.length === 1 ? '' : 's'}
               {duplicates.length > OBJECT_ROW_LIMIT ? ` — showing the first ${OBJECT_ROW_LIMIT}` : ''}
             </p>

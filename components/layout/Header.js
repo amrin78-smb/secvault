@@ -64,8 +64,18 @@ function SecVaultLogo() {
 // There is no --shell-fg-warn, so the DEGRADED row carries its hue in the dot
 // and the ring (--sev-med, the amber the severity ramp already uses for
 // medium) and keeps --shell-fg for the words, which is legible on navy in both
-// themes by construction. SYNCING is --unmeasured: an in-flight sync is not a
-// verdict, and per the design system an unmeasured state gets no hue.
+// themes by construction.
+//
+// SYNCING is the design system's NOT-MEASURED state — an in-flight sync is not
+// a verdict, and an unmeasured state gets NO HUE. ⛔ But it is written here as a
+// white alpha, NOT as var(--unmeasured), for the same reason the words are not
+// a --tint-*-fg: --unmeasured FLIPS between themes because it is picked for a
+// light card and a dark card respectively, and this bar is dark in BOTH. The
+// light-theme value measures 2.83:1 against the pill's own wash here — under
+// even WCAG 1.4.11's 3:1 for a graphical object — while the dark-theme value
+// reads 4.64:1, so the same "syncing" dot would be crisp for half the users and
+// nearly invisible for the other half. A white alpha is hueless (which is the
+// property that actually matters) and does not flip: 6.5:1 on both grounds.
 const PILL_TONE = {
   ok: {
     dot: 'var(--green)',
@@ -89,7 +99,7 @@ const PILL_TONE = {
     pulse: false,
   },
   running: {
-    dot: 'var(--unmeasured)',
+    dot: 'rgba(255,255,255,0.65)',
     fg: 'var(--shell-fg)',
     bg: 'rgba(255,255,255,0.08)',
     ring: 'rgba(255,255,255,0.18)',
@@ -131,36 +141,71 @@ export default async function Header({ session }) {
       </div>
 
       <div className="sv-topbar-right">
+        {/* ⛔ EVERY BRANCH HERE READS `tone`, NEVER `syncStatus.ok`. PILL_TONE
+            above has four entries and getSyncPillStatus() returns five states,
+            but this JSX branched on the BOOLEAN — and `ok` is true for exactly
+            one of those states, so `degraded`, `running`, `error` and `none`
+            all collapsed into the same full-red pill. The tri-state the block
+            at the top of this file describes, and that lib/feedStatus.js goes to
+            real trouble to compute, was dead code: `tone` was assigned and
+            never referenced.
+
+            Two concrete wrongs that fixed:
+              - FEEDS SYNCING painted DANGER RED. A sync that is merely IN
+                FLIGHT is not a verdict at all, and this file's own palette
+                reserves red for danger; alarming an operator about a job that
+                is still running is exactly the fabricated-fact pattern, in
+                pixels. It is now the hueless --unmeasured treatment, which is
+                what the design system says an unmeasured state gets.
+              - FEEDS DEGRADED was indistinguishable from FEED ERROR. Those
+                demand different responses — a partial advisory set still
+                produces numbers (which are understated), a hard failure
+                produces none — and a reader who cannot tell them apart learns
+                to treat both as noise.
+
+            ⛔ The foregrounds stay --shell-fg*: this pill sits on --navy, which
+            is dark in BOTH themes, so a --tint-*-fg would flip and become a dark
+            colour on a dark bar in light mode. There is no --shell-fg-warn, so
+            `degraded` carries its amber in the DOT and the ring and keeps plain
+            --shell-fg for the words. */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
+            gap: 'var(--s2)',
             padding: '5px 12px',
-            background: syncStatus.ok ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.15)',
+            background: tone.bg,
             borderRadius: 'var(--radius-pill)',
-            border: `1px solid ${syncStatus.ok ? 'rgba(22,163,74,0.3)' : 'rgba(220,38,38,0.3)'}`,
+            border: `1px solid ${tone.ring}`,
+            flex: 'none',
           }}
-          title="Feed sync status (NVD + KEV)"
+          // The explanatory sentence getSyncPillStatus() already composes —
+          // which feed, what shape of failure, and what it means for the CVE
+          // numbers under this bar. It was being discarded in favour of a
+          // static "Feed sync status (NVD + KEV)" that said nothing the label
+          // beside it did not already say.
+          title={syncStatus.title}
         >
           <div
             style={{
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: syncStatus.ok ? 'var(--green)' : 'var(--red)',
-              boxShadow: syncStatus.ok ? '0 0 6px var(--green)' : 'none',
-              animation: syncStatus.ok ? 'pulse 2s infinite' : 'none',
+              flex: 'none',
+              background: tone.dot,
+              // ⛔ The glow and the pulse are reserved for `ok` — they are the
+              // "live and healthy" affordance. A pulsing red would read as an
+              // active incident and a pulsing grey as a spinner, and neither is
+              // what this pill is saying.
+              boxShadow: tone.pulse ? `0 0 6px ${tone.dot}` : 'none',
+              animation: tone.pulse ? 'pulse 2s infinite' : 'none',
             }}
           />
           <span
             style={{
               fontSize: 'var(--text-xs)',
               fontWeight: 600,
-              // ⛔ --shell-fg-ok/bad, NOT --tint-success-fg: this pill sits on the
-              // always-dark header, and a theme-flipping fg goes invisible there
-              // in light mode.
-              color: syncStatus.ok ? 'var(--shell-fg-ok)' : 'var(--shell-fg-bad)',
+              color: tone.fg,
               letterSpacing: '0.03em',
             }}
           >

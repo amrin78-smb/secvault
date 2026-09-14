@@ -147,6 +147,7 @@ export const authOptions = {
       credentials: {
         username: { label: 'Username', type: 'text' },
         password: { label: 'Password', type: 'password' },
+        totp: { label: 'Authenticator code', type: 'text' },
       },
       async authorize(credentials) {
         if (!process.env.LDAP_URL) {
@@ -171,6 +172,66 @@ export const authOptions = {
           // accounts or credential profiles. That is a deliberate tightening —
           // there is still no group-to-role mapping, so the role every LDAP
           // user receives should not be the one that can create accounts.
+          // ⛔ ═══ THE LDAP PATH MUST NOT BE AN MFA BYPASS ══════════════════
+          //
+          // This provider had no MFA check at all. The app's own login form
+          // only ever calls signIn('local'), but NextAuth publishes EVERY
+          // provider — a direct POST to /api/auth/callback/ldap reaches this
+          // function. So any account that exists BOTH in the directory and
+          // locally could skip its second factor entirely by choosing the other
+          // door, and arrive holding `admin`: manage_devices, manage_settings,
+          // run_update, view_identity, view_log_search.
+          //
+          // CLAUDE.md's rule that "MFA is unavailable for LDAP accounts" is
+          // about accounts that exist ONLY in the directory — they have no
+          // users row to hang a secret on, and their second factor belongs in
+          // the directory. It is NOT a licence to ignore a factor that a local
+          // account demonstrably has.
+          //
+          // So: if a LOCAL account with this username has MFA enabled, the same
+          // factor is demanded here. Directory-only users are unaffected.
+          //
+          // ⛔ FAILS CLOSED, identically to the local provider. If the lookup
+          // throws the login is refused — a check that degrades to "skip it"
+          // under failure is not a second factor, and a database outage is
+          // exactly when someone would want one.
+          let localRow = null;
+          try {
+            const { rows } = await pool.query(
+              'SELECT id, username FROM users WHERE lower(username) = lower($1) LIMIT 1',
+              [username]
+            );
+            localRow = rows[0] || null;
+          } catch (err) {
+            console.error('[auth] LDAP: local-account lookup failed, refusing login:', err.message);
+            return null;
+          }
+
+          if (localRow) {
+            let mfaEnabled = false;
+            try {
+              mfaEnabled = await mfa.isEnabledFor(pool, localRow.id);
+            } catch (err) {
+              console.error('[auth] LDAP: MFA status check failed, refusing login:', err.message);
+              return null;
+            }
+            if (mfaEnabled) {
+              const submitted = (credentials.totp || '').trim();
+              if (submitted === '') return null;
+              try {
+                const verdict = await mfa.verifyForLogin(pool, localRow.id, submitted);
+                if (!verdict.ok) {
+                  // Reason logged, never returned — same oracle rule as local.
+                  console.warn(`[auth] LDAP MFA rejected for '${username}': ${verdict.reason}`);
+                  return null;
+                }
+              } catch (err) {
+                console.error('[auth] LDAP: MFA verification failed, refusing login:', err.message);
+                return null;
+              }
+            }
+          }
+
           return { id: username, name: username, role: 'admin' };
         } catch (err) {
           return null;

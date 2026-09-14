@@ -500,3 +500,163 @@ describe('the vendor support map matches the adapters it claims to describe', ()
     }
   });
 });
+
+// --------------------------------------------------------------------------
+describe('a firewall that CANNOT report a down tunnel never shows a Down count', () => {
+  // ⛔ WHY THIS BLOCK EXISTS, and why the fleet-level caveat was not enough.
+  // The fleet-wide `downObservability` numbers already existed and were already
+  // rendered — in the answer sentence and in the coverage bar. The PER-DEVICE
+  // table underneath them still printed a bare "0" in its Down column for every
+  // down-blind firewall, gating only on snapshot freshness. Measured live on
+  // 2026-09-14: 10 of 16 active firewalls (all Palo Alto, 127 tunnels between
+  // them, IDC FW alone holding 101) had a fresh snapshot, a teal "Reporting"
+  // badge and a confident "Down: 0" beside it. A reader scanning a column reads
+  // the column, not the bar above it, so these three fields let that cell be
+  // drawn as the gap it actually is.
+  const UNKNOWN_VENDOR = { id: 'dev-x', name: 'Mystery', vendor: 'some_new_vendor', mgmt_method: 'api' };
+
+  it('a fresh Palo Alto is down-BLIND: the count is refused, with a reason, even though the snapshot is current', () => {
+    const out = assemble({
+      deviceRows: [
+        joinRow(PA, { id: 't1', name: 'a', peer: '192.0.2.1', status: 'up', collected_at: minutesAgo(2) }),
+        joinRow(PA, { id: 't2', name: 'b', peer: '192.0.2.2', status: 'up', collected_at: minutesAgo(2) }),
+      ],
+    });
+    const d = out.devices[0];
+    assert.equal(d.snapshotFreshness, 'fresh', 'the snapshot itself is perfectly current');
+    assert.equal(d.canReportDown, false);
+    assert.equal(d.downCountMeasured, false, 'a 0 here would be a reading SecVault never took');
+    assert.match(d.downCountReason, /ESTABLISHED tunnels/i);
+    // ⛔ The UP count is still a real measurement — those tunnels were
+    // established when we looked. Blanking the whole row would throw away a
+    // fact we do have.
+    assert.equal(d.counts.up, 2);
+  });
+
+  it('a fresh Fortinet IS down-observable, so its 0 is an earned zero and stays a number', () => {
+    const out = assemble({
+      deviceRows: [
+        joinRow(FORTI, { id: 't1', name: 'a', peer: '192.0.2.1', status: 'up', collected_at: minutesAgo(2) }),
+      ],
+    });
+    const d = out.devices[0];
+    assert.equal(d.canReportDown, true);
+    assert.equal(d.downCountMeasured, true);
+    assert.equal(d.downCountReason, null, 'no reason to show — the number is the answer');
+    assert.equal(d.counts.down, 0);
+  });
+
+  it('a down tunnel REPORTED by a supposedly down-blind vendor is still shown — evidence outranks the map', () => {
+    // ⛔ If a Palo Alto ever does report a "down" state, suppressing it because a
+    // hard-coded table says that is impossible would hide the exact fact this
+    // screen exists to surface — and would hide the drift in the table too.
+    const out = assemble({
+      deviceRows: [
+        joinRow(PA, { id: 't1', name: 'a', peer: '192.0.2.1', status: 'down', collected_at: minutesAgo(2) }),
+      ],
+    });
+    const d = out.devices[0];
+    assert.equal(d.canReportDown, false, 'the map still says this vendor cannot');
+    assert.equal(d.downCountMeasured, true, 'but it just did, so the count is shown');
+    assert.equal(d.counts.down, 1);
+    assert.equal(out.down.length, 1);
+  });
+
+  it('an unrecognised vendor is down-count UNKNOWN, which is neither zero nor blind', () => {
+    const out = assemble({
+      deviceRows: [
+        joinRow(UNKNOWN_VENDOR, { id: 't1', name: 'a', peer: '192.0.2.1', status: 'up', collected_at: minutesAgo(2) }),
+      ],
+    });
+    const d = out.devices[0];
+    assert.equal(d.canReportDown, null, '`false` would be a claim about a product we do not recognise');
+    assert.equal(d.downCountMeasured, false);
+    assert.match(d.downCountReason, /Unknown is not zero/i);
+  });
+
+  it('a stale snapshot refuses the down count too, and explains it as staleness rather than as blindness', () => {
+    const out = assemble({
+      deviceRows: [
+        joinRow(FORTI, { id: 't1', name: 'a', peer: '192.0.2.1', status: 'up', collected_at: minutesAgo(5000) }),
+      ],
+    });
+    const d = out.devices[0];
+    assert.equal(d.canReportDown, true, 'the vendor could have answered — the reading is just old');
+    assert.equal(d.downCountMeasured, false);
+    assert.equal(d.downCountReason, d.coverageReason);
+  });
+
+  it('a device with no rows at all has no down count either', () => {
+    const out = assemble({ deviceRows: [joinRow(SANGFOR, null)] });
+    const d = out.devices[0];
+    assert.equal(d.downCountMeasured, false);
+    assert.equal(d.downCountReason, d.coverageReason);
+    assert.match(d.downCountReason, /limitation of SecVault/i);
+  });
+});
+
+// --------------------------------------------------------------------------
+describe('customer-facing strings name a product behaviour, never a source file or a table', () => {
+  // ⛔ Every string in NOTES, COVERAGE_REASON and DOWN_COUNT_REASON is RENDERED
+  // TO THE CUSTOMER on the fleet tunnel view. Two of them used to read
+  // "vpn_ipsec_tunnels holds only the latest snapshot per device" and
+  // "collected device_interfaces addresses", and the panel above them told the
+  // operator to "add it to the enumeration in lib/engines/vpnTunnelHealth.js".
+  // A firewall administrator has no repository and no database login: an
+  // internal identifier answers a question they did not ask while failing the
+  // one they did. CLAUDE.md's rule for this text is that it names a PRODUCT
+  // engine and a SecVault POLICY.
+  //
+  // NOTE: tests/noInternalRefs.test.js scans app/, components/ and lib/ but bans
+  // only the literal string "CLAUDE.md", so it caught none of these. Widening it
+  // to source paths and table names belongs there, not here — this block pins
+  // only the strings this engine owns.
+  const {
+    COVERAGE_REASON, DOWN_COUNT_REASON, NOTES,
+  } = require('../lib/engines/vpnTunnelHealth');
+
+  // Source paths, module names, and the table names this engine actually reads.
+  // Kept as an explicit list rather than a generic snake_case pattern so it
+  // cannot fire on ordinary prose.
+  const BANNED = [
+    /lib\/engines/i,
+    /\.js\b/,
+    /vpn_ipsec_tunnels/i,
+    /device_interfaces/i,
+    /device_connectivity_history/i,
+    /syslog_events/i,
+    /CLAUDE\.md/i,
+  ];
+
+  function assertClean(label, value) {
+    for (const re of BANNED) {
+      assert.doesNotMatch(value, re, `${label} exposes an internal identifier: ${value}`);
+    }
+  }
+
+  it('NOTES, COVERAGE_REASON and DOWN_COUNT_REASON are clean', () => {
+    for (const [k, v] of Object.entries(NOTES)) assertClean(`NOTES.${k}`, v);
+    for (const [k, v] of Object.entries(COVERAGE_REASON)) assertClean(`COVERAGE_REASON.${k}`, v);
+    for (const [k, v] of Object.entries(DOWN_COUNT_REASON)) assertClean(`DOWN_COUNT_REASON.${k}`, v);
+  });
+
+  it('the per-tunnel downSince reason is clean, and still says what it is', () => {
+    const out = assemble({
+      deviceRows: [
+        joinRow(FORTI, { id: 't1', name: 'x', peer: '198.51.100.1', status: 'down', collected_at: minutesAgo(4) }),
+      ],
+    });
+    const reason = out.down[0].downSinceReason;
+    assertClean('downSinceReason', reason);
+    assert.match(reason, /latest snapshot/i, 'the explanation survived the rewording');
+  });
+
+  it('the notes still name the vendor commands, which are the CUSTOMER’s own', () => {
+    // ⛔ Not everything that looks technical is internal. `show vpn ipsec-sa` is
+    // a command the operator can run on their own firewall — naming it is the
+    // most useful thing this note does, and the ban above must never be widened
+    // until it swallows that too.
+    const out = assemble({ deviceRows: [] });
+    assert.match(out.notes.scope, /show vpn ipsec-sa/);
+  });
+});

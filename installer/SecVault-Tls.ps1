@@ -101,7 +101,12 @@ function New-SecVaultCertificate {
     # console into a browser wall on a date nobody has written down, and there is
     # no renewal process on an air-gapped box. An operator replacing this with a
     # real certificate chooses their own lifetime.
-    $args = @(
+    # ⛔ NOT $args. That is PowerShell's AUTOMATIC arguments variable. Assigning
+    # to it happens to work in a plain function today and becomes a hard error
+    # the moment anyone adds [CmdletBinding()] to this function — a failure that
+    # would land on whoever touches it next, in the middle of the TLS path, for a
+    # reason that has nothing to do with what they changed.
+    $opensslArgs = @(
         'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
         '-keyout', $result.KeyPath,
         '-out', $result.CertPath,
@@ -127,7 +132,7 @@ function New-SecVaultCertificate {
     $prevEap = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $out = & $openssl @args 2>&1
+        $out = & $openssl @opensslArgs 2>&1
         $code = $LASTEXITCODE
     } catch {
         $result.Message = "OpenSSL could not be run: $($_.Exception.Message)"
@@ -152,9 +157,26 @@ function New-SecVaultCertificate {
         try {
             $acl = Get-Acl -Path $result.KeyPath
             $acl.SetAccessRuleProtection($true, $false)
-            foreach ($who in @('SYSTEM', 'Administrators')) {
+            # ⛔ WELL-KNOWN SIDs, NEVER THE ENGLISH ACCOUNT NAMES. 'SYSTEM' and
+            # 'Administrators' are LOCALISED account names: on a German, French or
+            # Japanese Windows they do not resolve, New-Object throws
+            # IdentityNotMappedException, and the catch below downgrades that to a
+            # cheerful "(NOTE: could not tighten ACL on the key)".
+            #
+            # ⛔ That is worse than it sounds, because SetAccessRuleProtection has
+            # ALREADY stripped inheritance by then. The failure mode is not "a bit
+            # looser than intended" -- it is a PRIVATE KEY whose ACL carries no
+            # usable grants at all, produced silently, on a host whose language
+            # nobody here chose.
+            #   S-1-5-18      Local System -- the account the NSSM services run as
+            #   S-1-5-32-544  the local Administrators group
+            # Both are identical on every Windows installation in every language.
+            foreach ($sidValue in @('S-1-5-18', 'S-1-5-32-544')) {
+                $sid = New-Object System.Security.Principal.SecurityIdentifier($sidValue)
                 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                    $who, 'FullControl', 'Allow')
+                    $sid,
+                    [System.Security.AccessControl.FileSystemRights]::FullControl,
+                    [System.Security.AccessControl.AccessControlType]::Allow)
                 $acl.AddAccessRule($rule)
             }
             Set-Acl -Path $result.KeyPath -AclObject $acl
@@ -267,30 +289,52 @@ public class SecVaultTrustAllCerts : ICertificatePolicy {
 }
 '@
     }
+    # ⛔ CertificatePolicy IS PROCESS-GLOBAL, AND MUST BE RESTORED IN A finally.
+    #
+    # Setting it disables certificate validation for EVERY outbound .NET web
+    # request in this PowerShell process, not just this probe. Restoring it on
+    # the last line -- which is what this did -- only works when nothing in
+    # between throws. Update-SecVault.ps1 runs with $ErrorActionPreference =
+    # 'Stop', so an Invoke-WebRequest failure that is NOT a WebException (a DNS
+    # failure, a malformed URL, an Add-Type problem) escapes this function and
+    # leaves the REST of the update -- every later HTTPS call it or anything it
+    # dot-sources makes -- silently trusting any certificate presented to it, on
+    # a security product, with no trace in the log.
+    #
+    # The probe is bounded, so the window is short. A leak is not.
     $originalPolicy = [System.Net.ServicePointManager]::CertificatePolicy
-    [System.Net.ServicePointManager]::CertificatePolicy = New-Object SecVaultTrustAllCerts
-    try {
-        [System.Net.ServicePointManager]::SecurityProtocol =
-            [System.Net.SecurityProtocolType]::Tls12
-    } catch {
-        # Older .NET on this host; the default protocol list will have to do.
-    }
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $originalProtocol = [System.Net.ServicePointManager]::SecurityProtocol
     $alive = $false
-    while ((Get-Date) -lt $deadline) {
+    try {
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object SecVaultTrustAllCerts
         try {
-            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10
-            if ($resp.StatusCode) { $alive = $true; break }
+            [System.Net.ServicePointManager]::SecurityProtocol =
+                [System.Net.SecurityProtocolType]::Tls12
         } catch {
-            # An HTTP error response still proves the app is serving.
-            $webResp = $null
-            if ($_.Exception -and $_.Exception.Response) { $webResp = $_.Exception.Response }
-            if ($webResp) { $alive = $true; break }
+            # Older .NET on this host; the default protocol list will have to do.
         }
-        Start-Sleep -Seconds 3
-    }
 
-    [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10
+                if ($resp.StatusCode) { $alive = $true; break }
+            } catch {
+                # An HTTP error response still proves the app is serving.
+                $webResp = $null
+                if ($_.Exception -and $_.Exception.Response) { $webResp = $_.Exception.Response }
+                if ($webResp) { $alive = $true; break }
+            }
+            Start-Sleep -Seconds 3
+        }
+    } finally {
+        [System.Net.ServicePointManager]::CertificatePolicy = $originalPolicy
+        try {
+            [System.Net.ServicePointManager]::SecurityProtocol = $originalProtocol
+        } catch {
+            # Nothing useful to do here, and a restore failure must not be
+            # allowed to mask whatever threw out of the try block above.
+        }
+    }
     return $alive
 }

@@ -1135,3 +1135,27 @@ calling thread.
 ⛔ **TEST THE TEST.** Verify a health check returns TRUE against a known-good
 server before trusting it to condemn one — and check it still returns FALSE for a
 genuinely dead port, or "fixing" it by making it always true is the next bug.
+
+## Git-for-Windows OpenSSL has NO legacy provider (v2.118.0)
+
+⛔ `pfxToPem`'s `-legacy` retry masked the real error. The bundled OpenSSL has no legacy provider
+module, so `-legacy` ALWAYS dies with `unable to load provider legacy` — and the retry read only
+the SECOND stderr, overwriting the first attempt's `Mac verify error: invalid password?`. A
+mistyped .pfx password therefore produced a vague catch-all. Both stderrs are now scanned,
+password failures detected first, and a genuinely legacy-encrypted .pfx gets a message saying the
+password is NOT the problem.
+
+## Install-SecVault.ps1 now wires TLS (v2.118.0)
+
+It previously had NO TLS wiring at all, while `SecVault-Tls.ps1` claimed to be "dot-sourced by
+BOTH installer scripts" and `Update-SecVault.ps1` claimed "fresh installs set this" — both false.
+A new customer got plaintext with no path to HTTPS. New step 14b mints the cert, sets the env keys
+and registers `server.js`; new `-EnableTls` / `-HttpRedirectPort` params. ⛔ Its rollback restores a
+LITERAL entry point and never reads `nssm get` back, so the UTF-16/NUL corruption cannot recur there.
+
+## ACLs on the private key use well-known SIDs, not English names (v2.118.0)
+
+⛔ `SetAccessRuleProtection($true,$false)` followed by grants to the STRINGS "SYSTEM"/"Administrators"
+does not resolve on a non-English Windows: inheritance is stripped and then no grant is added,
+leaving the private key with an EMPTY ACL and only a friendly note in the log. Now `S-1-5-18` /
+`S-1-5-32-544`.

@@ -44,6 +44,20 @@ function makePool() {
         return { rows: state.row ? [{ ...state.row }] : [] };
       }
       if (/^\s*INSERT INTO user_mfa/i.test(s)) {
+        // ⛔ resetFor's re-assertion: a single-parameter INSERT with the values
+        // inline, re-creating a requirement-only placeholder after the DELETE.
+        // Modelled explicitly because the row it produces — required true,
+        // enabled false, EMPTY secret — is precisely the state the reset is
+        // supposed to leave behind, and the state confirmEnrolment must refuse
+        // rather than 500 on.
+        if (params.length === 1 && /required\s*\)\s*VALUES|,\s*true\s*\)/i.test(s)) {
+          state.row = {
+            user_id: params[0], secret_encrypted: '', secret_iv: '',
+            enabled: false, confirmed_at: null, last_counter: null,
+            required: true, recovery_codes: [],
+          };
+          return { rows: [], rowCount: 1 };
+        }
         // startEnrolment: (userId, encrypted, iv) | setRequired: (userId, required)
         if (params.length === 3) {
           state.row = {
@@ -62,16 +76,42 @@ function makePool() {
         }
         return { rows: [], rowCount: 1 };
       }
+      // ⛔ THE STUB MUST HONOUR THE WHERE CLAUSES, or the single-use tests below
+      // prove nothing. Both consuming writes are now CONDITIONAL — that is what
+      // makes them atomic against a concurrent duplicate — and a stub that
+      // returns rowCount 1 unconditionally would report every race as won by
+      // both parties, which is exactly the bug being pinned.
       if (/UPDATE user_mfa/i.test(s)) {
         if (/enabled = true/.test(s)) {
           state.row = {
             ...state.row, enabled: true, confirmed_at: new Date(),
             last_counter: params[1], recovery_codes: JSON.parse(params[2]),
           };
-        } else if (/last_counter = \$2/.test(s)) {
+          return { rows: [], rowCount: 1 };
+        }
+
+        if (/last_counter = \$2/.test(s)) {
+          // WHERE last_counter IS NULL OR last_counter < $2
+          const current = state.row ? state.row.last_counter : null;
+          const wins = current === null || current === undefined
+            || Number(params[1]) > Number(current);
+          if (!wins) return { rows: [], rowCount: 0 };
           state.row = { ...state.row, last_counter: params[1] };
-        } else if (/recovery_codes = \$2/.test(s)) {
-          state.row = { ...state.row, recovery_codes: JSON.parse(params[1]) };
+          return { rows: [], rowCount: 1 };
+        }
+
+        if (/recovery_codes = COALESCE/i.test(s)) {
+          // WHERE recovery_codes @> jsonb_build_array($2::text)
+          const hashes = (state.row && Array.isArray(state.row.recovery_codes))
+            ? state.row.recovery_codes : [];
+          if (!hashes.includes(params[1])) return { rows: [], rowCount: 0 };
+          state.row = { ...state.row, recovery_codes: hashes.filter((h) => h !== params[1]) };
+          return { rows: [], rowCount: 1 };
+        }
+
+        if (/required = true/i.test(s)) {
+          state.row = { ...state.row, required: true };
+          return { rows: [], rowCount: 1 };
         }
         return { rows: [], rowCount: 1 };
       }
@@ -363,5 +403,125 @@ describe('lib/mfa — administration and lockout recovery', () => {
       Object.keys(status).sort(),
       ['confirmedAt', 'enabled', 'enrolled', 'recoveryRemaining', 'required']
     );
+  });
+});
+
+// Shared by the concurrency and requirement blocks below: a fully enrolled
+// account with its recovery codes in hand.
+async function enrolAndConfirm(pool) {
+  const { secret } = await mfa.startEnrolment(pool, USER, 'alice');
+  const { recoveryCodes } = await mfa.confirmEnrolment(pool, USER, totp.generateCode(secret));
+  return { secret, codes: recoveryCodes };
+}
+
+describe('⛔ single use survives CONCURRENCY, not just repetition', () => {
+  // The previous tests prove a code cannot be replayed SERIALLY. That was the
+  // whole guarantee, and it was not enough: the reuse check was a READ and the
+  // write that followed was unconditional, so two requests carrying the same
+  // captured code and arriving together both read the stale counter, both
+  // passed the `<=` test, and both authenticated.
+  //
+  // A replay is by definition not a serial event — it is an attacker firing a
+  // captured code as fast as they can, which is exactly the concurrent case the
+  // old guard did not cover. Both consuming writes are now conditional, so the
+  // DATABASE picks the winner and the loser gets rowCount 0.
+
+  it('two simultaneous logins with the SAME TOTP code: exactly one succeeds', async () => {
+    const pool = makePool();
+    const { secret } = await enrolAndConfirm(pool);
+    // A step later than the one confirmEnrolment already consumed.
+    const later = Math.floor(Date.now() / 1000) + 30;
+    const code = totp.generateCode(secret, later);
+
+    const [a, b] = await Promise.all([
+      mfa.verifyForLogin(pool, USER, code),
+      mfa.verifyForLogin(pool, USER, code),
+    ]);
+
+    const wins = [a, b].filter((r) => r.ok).length;
+    assert.equal(wins, 1, 'exactly one of two racing duplicates may authenticate');
+    const loser = [a, b].find((r) => !r.ok);
+    assert.equal(loser.reason, 'code_reused');
+  });
+
+  it('two simultaneous logins with DIFFERENT recovery codes do not restore each other', async () => {
+    // The worse of the two races. Each request computed `remaining` from the
+    // same stale read and wrote the WHOLE array back, so the second write
+    // RESTORED the code the first had just consumed — a single-use recovery
+    // code silently became live again. That does not merely admit a replay; it
+    // manufactures a fresh credential.
+    const pool = makePool();
+    const { codes } = await enrolAndConfirm(pool);
+    assert.ok(codes.length >= 2, 'need two distinct recovery codes');
+
+    const [a, b] = await Promise.all([
+      mfa.verifyForLogin(pool, USER, codes[0]),
+      mfa.verifyForLogin(pool, USER, codes[1]),
+    ]);
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true, 'two DIFFERENT codes are both legitimate');
+
+    // Both must now be gone. Before the fix, one of them survived.
+    assert.equal((await mfa.verifyForLogin(pool, USER, codes[0])).ok, false);
+    assert.equal((await mfa.verifyForLogin(pool, USER, codes[1])).ok, false);
+    assert.equal(pool.state.row.recovery_codes.length, codes.length - 2);
+  });
+
+  it('spending the LAST recovery code leaves an empty list rather than throwing', async () => {
+    // jsonb_agg over zero rows is NULL and the column is NOT NULL, so the
+    // removal has to COALESCE to '[]'.
+    const pool = makePool();
+    const { codes } = await enrolAndConfirm(pool);
+    for (const c of codes) {
+      // eslint-disable-next-line no-await-in-loop
+      assert.equal((await mfa.verifyForLogin(pool, USER, c)).ok, true);
+    }
+    assert.deepEqual(pool.state.row.recovery_codes, []);
+  });
+});
+
+describe('⛔ an admin MFA reset must not silently lift a REQUIREMENT', () => {
+  it('preserves user_mfa.required across a reset', async () => {
+    // resetFor() was a plain DELETE, which destroyed the `required` flag along
+    // with the secret — so unlocking a user on a mandatory-MFA account returned
+    // it to password-only, permanently, with no re-enrolment prompt. The CLI
+    // printed the opposite in the same breath ("that flag was deliberately left
+    // alone"), which is how it would have gone unnoticed: the tool told the
+    // operator the enforcement held.
+    //
+    // The secret is still destroyed — that is what a reset IS. The POLICY is
+    // not a credential, and an admin unlocking an account is not deciding to
+    // exempt it.
+    const pool = makePool();
+    await enrolAndConfirm(pool);
+    await mfa.setRequired(pool, USER, true);
+    assert.equal(pool.state.row.required, true);
+
+    const out = await mfa.resetFor(pool, USER);
+    assert.equal(out.reset, true);
+    assert.equal(out.requirementPreserved, true);
+    assert.equal(pool.state.row.required, true, 'the requirement must survive');
+    assert.equal(pool.state.row.enabled, false, 'but the account is no longer enrolled');
+    assert.equal(pool.state.row.secret_encrypted, '', 'and the secret is gone');
+  });
+
+  it('a reset on a NON-required account leaves no row behind', async () => {
+    const pool = makePool();
+    await enrolAndConfirm(pool);
+    const out = await mfa.resetFor(pool, USER);
+    assert.equal(out.requirementPreserved, false);
+    assert.equal(pool.state.row, null);
+  });
+
+  it('⛔ confirming before starting enrolment is refused, not a 500', async () => {
+    // setRequired() and the reset above both create a placeholder carrying only
+    // the requirement, with an EMPTY secret. confirmEnrolment reached
+    // decrypt('', '') and credStore threw — an unhandled 500 where the honest
+    // answer is "you have not started enrolling yet".
+    const pool = makePool();
+    await mfa.setRequired(pool, USER, true);
+    const r = await mfa.confirmEnrolment(pool, USER, '123456');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'not_enrolled');
   });
 });

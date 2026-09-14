@@ -8,6 +8,7 @@ import {
   listFleetZones,
   upsertIntent,
   deleteIntent,
+  parseWindowDaysParam,
 } from '../../../lib/engines/segmentationData';
 import { logActivity } from '../../../lib/activityLog';
 
@@ -21,13 +22,31 @@ export const dynamic = 'force-dynamic';
 // rule and no score, and an operator who cannot record the policy they are
 // working to cannot do the job the role exists for.
 
+// ⛔ `days` IS VALIDATED HERE AND RESOLVED EXACTLY ONCE.
+//
+// `Number.parseInt` + `Number.isFinite` accepted `-5`, `0`, `1e9` and `7abc`.
+// A negative or absurd window is not a request this route can honour, and the
+// old code did not reject it — it forwarded it, the evidence layer silently
+// clamped it to something sane, and the page then printed the number that was
+// ASKED FOR next to a measurement taken over a different span: "Evaluated over
+// -5 days against 1,757 rules". Garbage in, confident-looking prose out.
+//
+// So: nonsense is REFUSED with a 400 (the caller gets told, rather than getting
+// a plausible page built on a request nobody honoured), and a merely
+// out-of-range value is clamped by resolveWindowDays with the ACTUAL window
+// returned in `windowDays` and the request echoed in `requestedWindowDays`.
+// The response never states a span the evidence does not cover.
+//
+// The validator itself lives in segmentationData.js: a Next.js route module may
+// only export HTTP handlers, so a rule that has to be tested cannot live here.
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const days = Number.parseInt(searchParams.get('days') || '', 10);
+  const parsed = parseWindowDaysParam(searchParams.get('days'));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   try {
     const [result, zones] = await Promise.all([
-      evaluateSegmentation(pool, { windowDays: Number.isFinite(days) ? days : undefined }),
+      evaluateSegmentation(pool, { windowDays: parsed.days }),
       listFleetZones(pool),
     ]);
     return NextResponse.json({ ...result, zones });
