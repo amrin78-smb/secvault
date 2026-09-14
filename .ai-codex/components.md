@@ -373,3 +373,11 @@ render `NotMeasured`, never `0`.
 ## segmentation/
 
 (c) SegmentationBoard  — the declared matrix plus the findings it produces (v2.113.0). ⛔ The FINDINGS LIST comes first and the matrix second: a grid is how you EDIT policy, a ranked list is how you ACT on it. ⛔ `violation_permitted` (safe to close) and `violation_unverified` (assume live) must never share a colour, and the two unmeasurable verdicts carry NO HUE plus `--hatch`. ⛔ Coverage is stated under the matrix, never as a footnote — a matrix whose verdicts rest on rules that cannot report usage is not the same as one that can.
+
+## work/WorkQueueBoard.js
+
+(v2.115.0) Renders the three bands as three ALWAYS-PRESENT sections. ⛔ `verify` is hueless
+(`--unmeasured`) and is never collapsed or appended to `scheduled`. ⛔ Failed sources and
+truncated caps each get their own banner, both hueless: the source did not find a problem, it
+failed to answer. ⛔ Imports SEVERITY_BADGE_COLOR from analysis/severityRamp — a local map here
+reintroduced `medium: info` (blue) and tests/designSystemRamp caught it.

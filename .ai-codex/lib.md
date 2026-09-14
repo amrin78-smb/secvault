@@ -184,6 +184,25 @@ implementations of measured-zero vs no-coverage would eventually disagree and th
 be recommending rule deletions. ⛔ Returns `rulesCollected:false` so an uncollected fleet reports
 UNKNOWN instead of a perfect score built from missing data.
 
+## lib/engines/workQueue.js
+
+(v2.115.0) PURE. `bandFor` / `rankItems` / `summarise` / `WORK_BANDS`. ⛔ `evidence` decides the
+BAND: `unmeasured` can never reach `act_now`, and an unknown value fails CLOSED to `verify`.
+⛔ `rankItems` is STABLE (band -> severity -> count -> title) — a queue that reorders between
+refreshes destroys the one thing a queue is for. ⛔ `summarise` reports `sourcesFailed` AND
+`sourcesTruncated`; both block the all-clear in `buildWorkQueueAnswer`.
+
+## lib/engines/workQueueData.js
+
+(v2.115.0) Nine gathers, each isolated in `runSource` so a throw reports `{ok:false,error}` rather
+than contributing zero items. ⛔ The ack join in `gatherRuleCleanup` MUST go through
+`firewall_rules` — `rule_analysis_results.rule_id` is a UUID FK, `finding_acknowledgements.
+rule_id_vendor` is the vendor text id; joining them directly is `text = uuid` and Postgres
+refuses it. ⛔ `withCap` discloses shown-of-total when `PER_SOURCE_CAP` bites, at the cost of one
+COUNT only in that case. ⛔ Licences produce TWO item kinds: a parsed expiry (`reported`) and an
+UNPARSEABLE one (`unmeasured` -> verify band) — `expires_at IS NULL` with raw `Never` is
+perpetual and is NOT listed.
+
 ## lib/rbac.js
 
 ⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.

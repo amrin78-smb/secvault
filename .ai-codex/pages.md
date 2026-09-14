@@ -135,3 +135,12 @@ comment saying so.
 entries in `lib/vpnTabs.js`'s `FLEET_VPN_TABS` — the temporary local shim in `page.js` is gone.
 ⛔ APPENDED, never inserted: `status` stays first so a bare `/vpn` bookmark still lands on it, and
 `key` is a URL contract — add and deprecate, never rename.
+
+## app/(dashboard)/work/page.js  -> `/work`  (v2.115.0)
+
+The Work queue. Fully SERVER-rendered, no client fetch — the page IS the headline, so there is
+nothing to read while a fetch resolves. Computes segmentation itself and passes it into
+`gatherWorkQueue` (most expensive source, kept visible rather than hidden behind the gather list);
+a segmentation failure is injected as a failed SOURCE so the queue reports itself incomplete.
+⛔ A structural failure renders an explicit "this is not a statement that nothing is outstanding"
+empty state, never a reassuring blank page.

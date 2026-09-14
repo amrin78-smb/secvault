@@ -30,6 +30,11 @@ Every number below is measured, not estimated. Where something is uncertain it s
 | Device discovery from unmatched senders | `discovered_devices` |
 | Log search (forensic) | 25/50/100/200 per page, index-backed |
 | Design system, density, saved views, ⌘K | v2.87–v2.90 |
+| Answer-first headline sentences on every major page | `lib/answers.js`, 9 builders, v2.106+ |
+| RBAC (3 roles, capability grants), MFA (TOTP), HTTPS | v2.107–v2.112 |
+| **Segmentation intent — CAN it, and DID it** | v2.113.0; live: `untrust -> private` permitted by 2 rules, 0 hits |
+| Tunnel health answer-first + coverage bar | v2.114.0 |
+| **Work queue, one ranked list across all 9 engines** | v2.115.0; live: 19 act-now / 60 scheduled / 6 needs-a-human |
 
 ---
 

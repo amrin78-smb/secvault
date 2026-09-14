@@ -1009,6 +1009,52 @@ per-session array; Fortinet returns a count with no per-user detail and the othe
 VPN capability wired. Nothing in the engine assumes otherwise — but a UI must not present it as
 fleet-wide VPN history.
 
+## Work Queue (`/work`, Phase 3, v2.115.0)
+
+ONE ranked list of outstanding work, gathered from nine sources at READ time. `lib/engines/workQueue.js`
+is pure (banding + ranking, no pool); `lib/engines/workQueueData.js` is the nine gathers. No table, no
+cron job — a stored queue goes stale against the data it indexes, and people WORK a stale to-do list.
+
+⛔ **AN ITEM IS A DECISION, NOT A FINDING.** 1,132 rule-analysis findings exist on this fleet. They
+appear as ONE item per firewall, with the count travelling alongside, linking to the tab where that
+work is done. A list whose length grows with the fleet rather than with the outstanding work is a
+database dump, not a queue.
+
+⛔ **URGENCY IS A CLAIM ABOUT EVIDENCE.** Each item carries `evidence: measured | reported |
+unmeasured`, and that field — not the source's opinion — decides the band. **`unmeasured` can NEVER
+reach `act_now`**, and an unrecognised/missing value fails CLOSED to `verify`. This is the
+`log_hit` lesson applied structurally: a queue where everything is urgent has no prioritisation left.
+
+⛔ **THE THIRD BAND IS THE POINT.** `verify` ("Needs a human") holds what SecVault cannot measure —
+the 44 licences whose expiry string will not parse, the firewall that cannot be collected from. It is
+a VISIBLE, COUNTED, HUELESS band, never a collapsed footer and never the tail of `scheduled`. A
+firewall nothing can be collected from contributes no CVEs, no failing checks and no rule findings,
+which makes it look like the healthiest device on the fleet everywhere else in this product.
+
+⛔ **A SHORT QUEUE MUST NEVER READ AS A CLEAN ONE.** Two separate mechanisms, both pinned by tests:
+1. Every source is isolated; a throw reports `{ok:false, error}` and is banner'd. It must never
+   contribute zero items silently — the page would look best when least trustworthy. (Caught
+   `rule_cleanup` on the first live run: the ack join must route through `firewall_rules`, because
+   `rule_analysis_results.rule_id` is a UUID FK while `finding_acknowledgements.rule_id_vendor` is
+   the vendor's own text id.)
+2. `PER_SOURCE_CAP` (50) discloses `shown of total` when it bites. A truncated list looks COMPLETE,
+   which is the more insidious failure — the operator works to the bottom and believes they are
+   finished. Live: compliance returned 50 of 74.
+   `buildWorkQueueAnswer` refuses `tone:'ok'` while ANY of failed / truncated / verify is non-zero.
+
+⛔ **Deliberately excluded**: compliance `warning`/`na`, and CVEs banded `scheduled`/`monitor`.
+Neither is confirmed work a person can action, and padding the queue with items whose first step is
+"find out whether this is even a problem" is how a queue stops being used.
+
+⛔ Every item states **how SecVault will independently observe that it is done** — a re-assessed
+version, a re-collected ruleset, a re-evaluated check. There is no "mark as done" (the unreviewed
+config diff is the one exception, where acknowledgement IS the action). Same rule as the rule-cleanup
+loop: listing the work is what the competition does; confirming it happened is what they cannot.
+
+Segmentation is computed by the PAGE and passed in, not gathered inside `workQueueData.js` — it loads
+the whole fleet's rules with traffic evidence and is by far the most expensive source; hiding that
+cost behind the gather list would misrepresent what the page does.
+
 ## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
 
 Declared zone-to-zone policy, tested TWO WAYS: **CAN** (the rulebase) and **DID** (the traffic).
