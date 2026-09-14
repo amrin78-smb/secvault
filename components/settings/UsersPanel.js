@@ -233,8 +233,13 @@ export default function UsersPanel() {
             value={newRole}
             onChange={(e) => setNewRole(e.target.value)}
           >
-            <option value="viewer">viewer (read-only)</option>
-            <option value="admin">admin (full access)</option>
+            {/* ⛔ Sourced from ASSIGNABLE_ROLES, like the per-row select above.
+                This list was hardcoded and still offered `viewer`, a role the
+                server no longer accepts — the form would have looked fine and
+                then silently created an Operator instead. */}
+            {ASSIGNABLE_ROLES.map((r) => (
+              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+            ))}
           </select>
         </div>
 

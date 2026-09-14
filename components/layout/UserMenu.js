@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { signOut } from 'next-auth/react';
 import { IconChevronDown, IconSettings, IconLogout } from '../icons';
+import { ROLE_LABELS } from '../../lib/rbac';
 
 // Header avatar + name/role dropdown (Settings link, Sign Out). Reuses the
 // session already resolved server-side by app/(dashboard)/layout.js and
@@ -21,7 +22,13 @@ export default function UserMenu({ session }) {
   }, []);
 
   const userName = session?.user?.name || 'User';
-  const role = session?.user?.role || 'admin';
+  // ⛔ FAILS CLOSED. This was `|| 'admin'`, which DISPLAYED "admin" to a user
+  // whose session carried no role at all — including the fail-closed null the
+  // auth layer sets when the database is unreachable. A label is not a
+  // permission, but telling someone they are an admin when the server thinks
+  // they are nobody is the wrong direction to be wrong in.
+  const role = session?.user?.role || null;
+  const roleLabel = (role && ROLE_LABELS[role]) || 'No role';
   const userInitial = userName[0]?.toUpperCase() || 'U';
 
   return (
@@ -68,7 +75,7 @@ export default function UserMenu({ session }) {
             {userName.split(' ')[0]}
           </div>
           <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 'var(--text-xs)', lineHeight: 1.2, textTransform: 'capitalize' }}>
-            {role}
+            {roleLabel}
           </div>
         </div>
         <IconChevronDown
@@ -101,7 +108,7 @@ export default function UserMenu({ session }) {
         >
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-light)' }}>
             <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--text-primary)' }}>{userName}</div>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 2, textTransform: 'capitalize' }}>{role}</div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 2, }}>{roleLabel}</div>
           </div>
 
           <div style={{ padding: '6px 0' }}>

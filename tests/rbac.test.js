@@ -302,3 +302,67 @@ describe('every mutating API route is guarded', () => {
     }
   });
 });
+
+describe('the UI never hardcodes a role list', () => {
+  // ⛔ FOUND LIVE AT v2.110.0. UsersPanel had TWO role dropdowns — the per-row
+  // one and the create-user form — and only the first was migrated. The second
+  // still offered `viewer`, so the form looked correct and would have silently
+  // created an Operator instead (the server coerces an unassignable role to the
+  // least-privileged one). A hardcoded list drifts; ASSIGNABLE_ROLES cannot.
+  const UI_DIRS = ['components', 'app'];
+
+  function walk(dir, out) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === '.next') continue;
+        walk(full, out);
+      } else if (e.name.endsWith('.js')) out.push(full);
+    }
+    return out;
+  }
+
+  const FILES = UI_DIRS.flatMap((d) => walk(path.join(__dirname, '..', d), []));
+
+  it('scans a meaningful number of UI files', () => {
+    assert.ok(FILES.length > 150, 'expected >150 files, got ' + FILES.length);
+  });
+
+  it('⛔ no <option> hardcodes a role value', () => {
+    const offenders = [];
+    for (const file of FILES) {
+      const src = fs.readFileSync(file, 'utf8');
+      for (const m of src.matchAll(/<option value="(super_admin|admin|operator|viewer)"/g)) {
+        offenders.push(path.relative(path.join(__dirname, '..'), file) + ' -> ' + m[1]);
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'role <option> values must come from ASSIGNABLE_ROLES:\n  ' + offenders.join('\n  '));
+  });
+
+  it('⛔ no UI file still references the retired viewer role', () => {
+    const offenders = [];
+    for (const file of FILES) {
+      const src = fs.readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+      if (/['"]viewer['"]/.test(src)) {
+        offenders.push(path.relative(path.join(__dirname, '..'), file));
+      }
+    }
+    assert.deepEqual(offenders, [], 'viewer role still referenced in UI code:\n  ' + offenders.join('\n  '));
+  });
+
+  it('⛔ a role is never displayed by raw string transform', () => {
+    // `textTransform: capitalize` turned `super_admin` into "Super_admin" in the
+    // header. Roles are shown through ROLE_LABELS or not at all.
+    const offenders = [];
+    for (const file of FILES) {
+      const src = fs.readFileSync(file, 'utf8');
+      if (/textTransform:\s*'capitalize'[^}]*\}\}>\{role\}/.test(src)) {
+        offenders.push(path.relative(path.join(__dirname, '..'), file));
+      }
+    }
+    assert.deepEqual(offenders, [], 'raw role string rendered:\n  ' + offenders.join('\n  '));
+  });
+});
