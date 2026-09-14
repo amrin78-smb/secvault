@@ -249,3 +249,25 @@ export function IconLifecycle(p) {
     </svg>
   );
 }
+
+// Work queue. A checklist: two ticked lines and one still open.
+//
+// ⛔ A NEW GLYPH RATHER THAN A REUSED ONE, deliberately. The sidebar's
+// invariant is that every entry keeps a DISTINCT glyph — that, not colour, is
+// the per-item wayfinding cue (see the note at the top of Sidebar.js). The
+// nearest existing candidates were IconDocument (already Log search) and
+// IconChart (already Rule hygiene). Hand-rolled here in the existing
+// Feather-compatible convention; the standing rule bans an icon LIBRARY, not a
+// fifteen-line path.
+export function IconChecklist(p) {
+  return (
+    <svg {...base(p)}>
+      <polyline points="3 6 4.5 7.5 7.5 4.5" />
+      <polyline points="3 12 4.5 13.5 7.5 10.5" />
+      <line x1="11" y1="6" x2="21" y2="6" />
+      <line x1="11" y1="12" x2="21" y2="12" />
+      <line x1="11" y1="18" x2="21" y2="18" />
+      <circle cx="5" cy="18" r="2" />
+    </svg>
+  );
+}

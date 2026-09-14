@@ -19,6 +19,7 @@ import {
   IconDocument,
   IconAlertTriangle,
   IconGrid,
+  IconChecklist,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -72,6 +73,11 @@ import {
 const NAV_GROUPS = [
   { group: 'Monitor', items: [
     { href: '/', label: 'Overview', Icon: IconDashboard, exact: true },
+    // ⛔ SECOND, not first. The Overview answers "how is the fleet"; this
+    // answers "what do I do about it", and it reads as the follow-on rather
+    // than the front door. Placing it above the dashboard would also make the
+    // first thing a new evaluator sees a to-do list rather than a posture.
+    { href: '/work', label: 'Work queue', Icon: IconChecklist },
     { href: '/alerts', label: 'Alerts', Icon: IconBell },
     // ⛔ The only nav entry with a capability requirement today. Log search
     // returns unredacted syslog; the Operator role does not include it. Hiding

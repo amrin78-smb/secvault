@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.115.0': [
+    'New Work queue: one ranked list of what to actually do, gathered from all nine engines — vulnerabilities, compliance, config changes, licences, rule hygiene, tunnels, collection gaps, segmentation and log ingest.',
+    'Every item answers four questions: why it is here, what it affects, what to do, and how SecVault will independently observe that it is done. Nothing is cleared by ticking a box.',
+    'Three bands, and the third is the point. Work SecVault CANNOT measure — a licence expiry that would not parse, a firewall it cannot reach — gets its own visible band instead of being dropped. A firewall nothing can be collected from otherwise looks like the healthiest device on the fleet.',
+    'An item SecVault could not measure can never be ranked urgent, however loudly its source claims it. Urgency is a statement about evidence.',
+    'If a source fails or a cap truncates it, the page says so and refuses to report an all-clear. A short queue must never be mistaken for a clean one.',
+  ],
   '2.114.0': [
     'The tunnel health view now answers the question before it explains itself. It opened with eight paragraphs of caveat — all true, and by every indication unread — above the first number.',
     'A coverage bar replaces four of those paragraphs: every active firewall is a segment, and only one that is both readable and able to report a tunnel as down is drawn solid. Gaps stay hatched and hueless.',

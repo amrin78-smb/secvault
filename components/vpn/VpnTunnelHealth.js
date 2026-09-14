@@ -3,7 +3,7 @@ import Card, { CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
-import NotMeasured, { CoverageNote } from '../ui/NotMeasured';
+import NotMeasured from '../ui/NotMeasured';
 import TimeAgo from '../ui/TimeAgo';
 import { SEVERITY_TEXT_COLOR } from '../analysis/severityRamp';
 import { vendorLabel } from '../devices/vendorMeta';
@@ -67,15 +67,6 @@ const UNMEASURED_CHIP = {
   border: '1px solid var(--border)',
 };
 
-const CALLOUT = {
-  fontSize: 'var(--text-sm)',
-  color: 'var(--text-secondary)',
-  border: '1px solid var(--border)',
-  borderLeft: '3px solid var(--unmeasured)',
-  borderRadius: 'var(--radius-sm)',
-  padding: 'var(--s2) var(--s3)',
-  background: 'var(--surface-subtle)',
-};
 
 const COVERAGE_LABEL = {
   reporting: 'Reporting',
@@ -664,11 +655,19 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
             <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>
               Tunnels currently reported down ({formatCount(down.length)})
             </h3>
-            {/* ⛔ THE DURATION QUESTION, answered honestly and up front. The
-                operator's next question after "which are down" is always "since
-                when", and the collection time is sitting right there in the
-                table looking like an answer. It is not one. */}
-            <p style={{ margin: 'var(--s1) 0 0', ...SUBTLE, maxWidth: '90ch' }}>{notes.downSince}</p>
+            {/* ⛔ THE DURATION QUESTION STAYS ABOVE THE TABLE, because “Last
+                measured” is sitting in that table looking exactly like an
+                answer to it. It is not one, and a reader who assumed it was
+                would be wrong about how long an outage has run — so this is a
+                caveat that changes how a number reads, not a mechanism, and it
+                does not go behind the disclosure.
+                What DID move down is the two paragraphs explaining what it
+                would take to derive it. That is the reason, and the reason can
+                wait until someone asks. */}
+            <p style={{ margin: 'var(--s1) 0 0', ...SUBTLE, maxWidth: '90ch' }}>
+              <strong>“Last measured” is not “down since.”</strong> How long a tunnel has been
+              down is not derivable today — see the note at the foot of this page for why.
+            </p>
           </div>
           {down.length === 0 ? (
             // ⛔ Not "all tunnels healthy". The statement is scoped to the
