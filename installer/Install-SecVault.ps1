@@ -880,7 +880,7 @@ $out = Invoke-Native { & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVaul
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production" 2>&1 }
 $out | Write-Host
-$out = Invoke-Native { & $NssmExe set SecVault-App DisplayName "SecVault - Firewall Security Platform" 2>&1 }
+$out = Invoke-Native { & $NssmExe set SecVault-App DisplayName "SecVault - Firewall Intelligence Platform" 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-App Start SERVICE_AUTO_START 2>&1 }
 $out | Write-Host

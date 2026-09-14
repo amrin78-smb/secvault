@@ -8,6 +8,10 @@ import TimeAgo from '../ui/TimeAgo';
 import { SEVERITY_TEXT_COLOR } from '../analysis/severityRamp';
 import { vendorLabel } from '../devices/vendorMeta';
 import { getVpnTunnelHealth } from '../../lib/engines/vpnTunnelHealth';
+import AnswerHeader from '../ui/AnswerHeader';
+import CoverageBar from '../ui/CoverageBar';
+import Disclosure from '../ui/Disclosure';
+import { buildTunnelAnswer } from '../../lib/answers';
 
 // Fleet-wide SITE-TO-SITE IPSEC TUNNEL HEALTH — "which tunnels are down, and
 // how much of the fleet can SecVault actually answer that for?"
@@ -464,31 +468,95 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
     + fleet.devices.reportingStale
     + fleet.devices.reportingUnknownAge;
 
+  // ⛔ ANSWER FIRST, MECHANISM LAST. This panel used to open with eight
+  // paragraphs of qualification before the first number — every one of them
+  // true, and by all appearances none of them read. The rule applied here, and
+  // the one to apply to anything added later:
+  //
+  //   A caveat that CHANGES HOW YOU READ THE NUMBER goes in the sentence or the
+  //   coverage line. A caveat that EXPLAINS THE MECHANISM goes in the
+  //   disclosure at the bottom.
+  //
+  // Nothing was deleted. The down-blind COUNT stayed at the top, because
+  // without it "Tunnels down: 2" reads as a fleet all-clear and is not one; the
+  // PAN-OS command that causes it moved down, because that is the reason rather
+  // than the warning.
+  const answer = buildTunnelAnswer(health);
+
+  // The bar carries in FORM what four of those paragraphs carried in prose.
+  // ⛔ Only a firewall that is both readable AND able to report a tunnel as down
+  // gets the solid segment. Everything else is hatched and hueless.
+  const blindFresh = Math.min(
+    fleet.tunnels.downObservability ? fleet.tunnels.downObservability.blindDevices : 0,
+    fleet.devices.reportingFresh
+  );
+  const coverageSegments = [
+    {
+      key: 'full',
+      label: 'fully readable',
+      count: Math.max(0, fleet.devices.reportingFresh - blindFresh),
+      tone: 'measured',
+      title:
+        'A current snapshot, from a vendor and access method that can report a tunnel as down. '
+        + 'These are the only firewalls the headline is a measurement for.',
+    },
+    {
+      key: 'blind',
+      label: 'cannot show a tunnel as down',
+      count: blindFresh,
+      tone: 'partial',
+      title:
+        'A current snapshot, but this vendor lists only ESTABLISHED tunnels — a down tunnel is '
+        + 'simply absent from the response, so it is neither counted down nor counted up.',
+    },
+    {
+      key: 'stale',
+      label: 'stale snapshot',
+      count: fleet.devices.reportingStale + fleet.devices.reportingUnknownAge,
+      tone: 'gap',
+      title:
+        'The newest tunnel snapshot is older than the staleness window, so its states have '
+        + 'expired. A tunnel that was up when we last looked is not evidence that it is up now.',
+    },
+    {
+      key: 'norows',
+      label: 'reported no tunnels',
+      count: fleet.devices.noRowsPolled + fleet.devices.noRowsUnconfirmed,
+      tone: 'gap',
+      title:
+        'No tunnel rows are stored. SecVault cannot tell whether the device has none configured '
+        + 'or the tunnel command failed on a reachable device — both look identical here.',
+    },
+    {
+      key: 'unsupported',
+      label: 'cannot be asked',
+      count: fleet.devices.unsupported + fleet.devices.supportUnknown,
+      tone: 'gap',
+      title:
+        'No tunnel collection exists for this vendor and access method, or its support is '
+        + 'unknown. Nothing about this firewall’s tunnels is known either way.',
+    },
+  ];
+
   const header = (
     <Card>
       <CardBody>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-              Site-to-site tunnel health
-            </h2>
-            <p style={{ margin: 'var(--s2) 0 0', ...SUBTLE, maxWidth: '95ch' }}>
-              {notes.scope} {notes.staleness}
-            </p>
-          </div>
-          <div style={CALLOUT}>{notes.vendorCoverage}</div>
-        </div>
-      </CardBody>
-    </Card>
-  );
-
-  // ⛔ The whole fleet is never the denominator. Percentages and "all clear"
-  // statements are only ever made over the firewalls that both CAN be asked and
-  // have a current answer.
-  const summary = (
-    <Card>
-      <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
+          <AnswerHeader
+            answer={answer}
+            context={
+              `Site-to-site IPsec · ${formatCount(fleet.tunnels.total)} collected tunnel`
+              + `${fleet.tunnels.total === 1 ? '' : 's'} across `
+              + `${formatCount(fleet.devices.total)} active firewall`
+              + `${fleet.devices.total === 1 ? '' : 's'}`
+            }
+          />
+
+          <CoverageBar
+            segments={coverageSegments}
+            caption="Every active firewall is in this bar. Hover a segment for what it means."
+          />
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--s3)' }}>
             {statTile(
               'Tunnels down',
@@ -508,71 +576,82 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
               `Snapshot older than ${formatCount(health.staleAfterMinutes)} min`
             )}
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
-            <span style={SUBTLE}>
-              Measured across <strong>{formatCount(fleet.devices.claimable)}</strong> of{' '}
-              <strong>{formatCount(fleet.devices.total)}</strong> active firewalls, holding{' '}
-              <strong>{formatCount(fleet.tunnels.total)}</strong> collected tunnel
-              {fleet.tunnels.total === 1 ? '' : 's'}.
-            </span>
-            <CoverageNote covered={fleet.devices.claimable} total={fleet.devices.total} />
-            {/* ⛔ REPORTING TUNNELS AND REPORTING *DOWN* TUNNELS ARE DIFFERENT
-                CAPABILITIES. Palo Alto's `show vpn ipsec-sa` lists ESTABLISHED
-                SAs only, so a down tunnel is simply ABSENT — never a row with
-                status "down". Measured live: that is 141 of 151 tunnels. Without
-                this sentence the "Tunnels down" tile reads as an all-clear for
-                firewalls whose down-ness SecVault structurally cannot see. */}
-            {fleet.tunnels.downObservability
-              && fleet.tunnels.downObservability.blindDevices > 0 ? (
-              <span style={SUBTLE}>
-                <strong>{formatCount(fleet.tunnels.downObservability.blindTunnels)}</strong>{' '}
-                of these tunnels are on{' '}
-                <strong>{formatCount(fleet.tunnels.downObservability.blindDevices)}</strong>{' '}
-                firewall{fleet.tunnels.downObservability.blindDevices === 1 ? '' : 's'}{' '}
-                ({fleet.tunnels.downObservability.blindVendors.join(', ')}) whose tunnel
-                command reports only ESTABLISHED tunnels. A tunnel that is down there
-                is invisible — not counted down, not counted up — so the count above is
-                currently-established tunnels, not configured ones, and a zero in
-                “Tunnels down” is not a measurement for them.
-              </span>
-            ) : null}
-            {uncovered > 0 ? (
-              <span style={SUBTLE}>
-                {fleet.devices.unsupported > 0
-                  ? `${fleet.devices.unsupported} cannot be asked at all (no tunnel collection for that vendor and access method). `
-                  : ''}
-                {fleet.devices.reportingStale + fleet.devices.reportingUnknownAge > 0
-                  ? `${fleet.devices.reportingStale + fleet.devices.reportingUnknownAge} have only a stale snapshot. `
-                  : ''}
-                {fleet.devices.noRowsUnconfirmed > 0
-                  ? `${fleet.devices.noRowsUnconfirmed} returned no tunnels and had no successful VPN poll to confirm it. `
-                  : ''}
-                {fleet.devices.supportUnknown > 0
-                  ? `${fleet.devices.supportUnknown} use a vendor or access method whose tunnel support is unknown. `
-                  : ''}
-                Each is listed below.
-              </span>
-            ) : null}
-            {fleet.devices.noRowsPolled > 0 ? (
-              <span style={SUBTLE}>
-                {/* ⛔ DO NOT RANK ONE BRANCH OF THIS AMBIGUITY. This said "most likely means
-                    none are configured" and was demonstrably wrong live: OKF(F2) is counted
-                    here while its own syslog, in this same database, carries IPsec
-                    tunnel-stats and SA-installed events. Saying "most likely" turned a
-                    per-device collection failure into a claim about the customer's network.
-                    ⛔ The engine's COVERAGE_REASON says the same thing; this is a SECOND copy
-                    of that wording and both had to be fixed. Keep them in step. */}
-                {fleet.devices.noRowsPolled} firewall
-                {fleet.devices.noRowsPolled === 1 ? '' : 's'} returned no tunnels on a recent
-                successful poll. SecVault cannot tell whether they have none configured or the
-                tunnel command failed on a reachable device — nothing records a successful tunnel
-                pull, so both look identical. An IPsec event from one of them in the firewall logs
-                means it has tunnels this view is missing.
-              </span>
-            ) : null}
-          </div>
         </div>
+      </CardBody>
+    </Card>
+  );
+
+  // ⛔ THE MECHANISM, NOT THE WARNING. Everything in here explains WHY a gap
+  // exists. The test for what is allowed to live behind a disclosure: a reader
+  // who never opens it must still be unable to draw a WRONG CONCLUSION from the
+  // numbers on screen. That is why the down-blind COUNT stayed in the coverage
+  // line at the top while the PAN-OS command that causes it sits down here.
+  const methodPanel = (
+    <Card>
+      <CardBody>
+        <Disclosure summary="How this is measured, and what SecVault cannot see">
+          <p style={{ margin: 0 }}>
+            {notes.scope} {notes.staleness}
+          </p>
+          <p style={{ margin: 0 }}>{notes.vendorCoverage}</p>
+
+          <p style={{ margin: 0 }}>
+            Measured across <strong>{formatCount(fleet.devices.claimable)}</strong> of{' '}
+            <strong>{formatCount(fleet.devices.total)}</strong> active firewalls, holding{' '}
+            <strong>{formatCount(fleet.tunnels.total)}</strong> collected tunnel
+            {fleet.tunnels.total === 1 ? '' : 's'}.
+          </p>
+
+          {/* ⛔ REPORTING TUNNELS AND REPORTING *DOWN* TUNNELS ARE DIFFERENT
+              CAPABILITIES. Palo Alto's `show vpn ipsec-sa` lists ESTABLISHED
+              SAs only, so a down tunnel is simply ABSENT — never a row with
+              status "down". Measured live: that is 139 of 150 tunnels. The
+              COUNT is in the coverage line at the top of the panel, where it
+              qualifies the headline; this is the explanation of why. */}
+          {fleet.tunnels.downObservability
+            && fleet.tunnels.downObservability.blindDevices > 0 ? (
+            <p style={{ margin: 0 }}>
+              <strong>
+                Why {formatCount(fleet.tunnels.downObservability.blindTunnels)} of these tunnels
+                cannot show as down.
+              </strong>{' '}
+              {formatCount(fleet.tunnels.downObservability.blindDevices)} firewall
+              {fleet.tunnels.downObservability.blindDevices === 1 ? '' : 's'} (
+              {fleet.tunnels.downObservability.blindVendors.join(', ')}) answer the tunnel query
+              with established tunnels only. A tunnel that is down is absent from the response
+              rather than present with a &ldquo;down&rdquo; status, so it is neither counted down
+              nor counted up. For those firewalls the tile above is a count of
+              currently-established tunnels, not of configured ones.
+            </p>
+          ) : null}
+
+          {fleet.devices.noRowsPolled > 0 ? (
+            <p style={{ margin: 0 }}>
+              {/* ⛔ DO NOT RANK ONE BRANCH OF THIS AMBIGUITY. This said "most likely means
+                  none are configured" and was demonstrably wrong live: OKF(F2) is counted
+                  here while its own syslog, in this same database, carries IPsec
+                  tunnel-stats and SA-installed events. Saying "most likely" turned a
+                  per-device collection failure into a claim about the customer's network.
+                  ⛔ The engine's COVERAGE_REASON says the same thing; this is a SECOND copy
+                  of that wording and both had to be fixed. Keep them in step. */}
+              <strong>
+                {fleet.devices.noRowsPolled} firewall
+                {fleet.devices.noRowsPolled === 1 ? '' : 's'} returned no tunnels at all.
+              </strong>{' '}
+              The poll reached them recently and succeeded. SecVault cannot tell whether they
+              have none configured or the tunnel command failed on a device that was otherwise
+              reachable — nothing records a successful tunnel pull, so both look identical. An
+              IPsec event from one of them in the firewall logs means it has tunnels this view is
+              missing.
+            </p>
+          ) : null}
+
+          {/* ⛔ THE DURATION QUESTION, answered rather than implied. The
+              operator's next question after "which are down" is always "since
+              when", and the collection time is sitting in the table looking
+              like an answer. It is not one. */}
+          <p style={{ margin: 0 }}>{notes.downSince}</p>
+        </Disclosure>
       </CardBody>
     </Card>
   );
@@ -677,13 +756,13 @@ export default async function VpnTunnelHealth({ staleAfterMinutes, deviceId = nu
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
       {header}
-      {summary}
       {downPanel}
       {health.unrecognisedStatuses.length > 0
         ? unrecognisedPanel(health.unrecognisedStatuses, devicesById)
         : null}
       {coveragePanel}
       {peeringPanel}
+      {methodPanel}
     </div>
   );
 }

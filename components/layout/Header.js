@@ -9,7 +9,7 @@ import HeaderSearch from './HeaderSearch';
 import ThemeToggle from './ThemeToggle';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
-import { PRODUCT_NAME_PARTS } from '../../lib/branding';
+import { PRODUCT_NAME_PARTS, PRODUCT_TAGLINE } from '../../lib/branding';
 
 function SecVaultLogo() {
   return (
@@ -124,7 +124,7 @@ export default async function Header({ session }) {
 
       <div className="sv-topbar-divider" />
 
-      <div className="sv-topbar-subtitle">FIREWALL SECURITY PLATFORM</div>
+      <div className="sv-topbar-subtitle">{PRODUCT_TAGLINE.toUpperCase()}</div>
 
       <div className="sv-topbar-left">
         <HeaderSearch />

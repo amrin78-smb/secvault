@@ -9,6 +9,7 @@ import UsersPanel from '../../../components/settings/UsersPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from '../../../lib/branding';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
 import AppearancePanel from '../../../components/settings/AppearancePanel';
@@ -34,7 +35,7 @@ const TABS = [
 ];
 
 const ABOUT_ROWS = [
-  ['Product', 'SecVault — Firewall Security Platform'],
+  ['Product', `${PRODUCT_NAME} — ${PRODUCT_TAGLINE}`],
   ['Version', `v${pkg.version}`],
   ['Port', '3010'],
   ['Runtime', 'Node.js v20 · Next.js 14.2.35 · React 18.3'],

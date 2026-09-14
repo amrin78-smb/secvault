@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.114.0': [
+    'The tunnel health view now answers the question before it explains itself. It opened with eight paragraphs of caveat — all true, and by every indication unread — above the first number.',
+    'A coverage bar replaces four of those paragraphs: every active firewall is a segment, and only one that is both readable and able to report a tunnel as down is drawn solid. Gaps stay hatched and hueless.',
+    'Nothing was deleted or softened. The caveat that changes how you read a number stayed at the top; the vendor command that causes it moved into a disclosure below the data.',
+    'A test now enforces that split: no all-clear may be issued while any firewall cannot report a down tunnel.',
+    'SecVault is now a Firewall Intelligence Platform.',
+  ],
   '2.113.0': [
     "New Segmentation page. Declare what must not connect to what, and SecVault checks it two ways: whether a rule permits it, and whether any traffic actually used it.",
     "The valuable answer is the one nothing else produces — a path that is permitted and has carried no traffic at all. A standing hole with no demonstrated purpose, and the safest kind to close.",
