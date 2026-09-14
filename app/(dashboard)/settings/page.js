@@ -6,6 +6,7 @@ import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Ca
 import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
+import SecurityPanel from '../../../components/settings/SecurityPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
@@ -22,6 +23,7 @@ import pkg from '../../../package.json';
 // exists so an Operator is not shown five doors that all refuse to open.
 const TABS = [
   { key: 'general', label: 'General' },
+  { key: 'security', label: 'Security' },
   { key: 'users', label: 'Users', requires: 'manage_users' },
   { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
   { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
@@ -303,6 +305,8 @@ export default function SettingsPage() {
           </Card>
         </div>
       )}
+
+      {effectiveTab === 'security' && <SecurityPanel />}
 
       {effectiveTab === 'users' && <UsersPanel />}
 

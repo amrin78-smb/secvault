@@ -34,6 +34,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [totp, setTotp] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,11 +47,19 @@ export default function LoginPage() {
       const result = await signIn('local', {
         username,
         password,
+        // Empty for accounts without MFA; the server ignores it in that case.
+        totp,
         redirect: false,
       });
 
       if (!result || result.error) {
-        setError('Invalid username or password.');
+        // ⛔ ONE MESSAGE FOR EVERY FAILURE, and it deliberately does not
+        // mention the code. Distinguishing "wrong password" from "wrong code"
+        // would confirm to an attacker that a captured password was correct and
+        // that only the second factor stands in the way — which is precisely
+        // the thing the second factor exists to keep uncertain. The specific
+        // reason is written to the server log, where the operator can see it.
+        setError('Sign-in failed. Check your username, password and authenticator code.');
         setSubmitting(false);
         return;
       }
@@ -194,6 +203,32 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 className="input"
+              />
+            </div>
+
+            {/* ⛔ ALWAYS VISIBLE, never revealed conditionally. Showing this field
+                only for accounts that have MFA would turn the login form into an
+                oracle: type a username, watch whether the box appears, and you
+                know which accounts are protected and which are worth attacking.
+                It is optional for everyone and ignored for accounts without
+                MFA. */}
+            <div className="form-field">
+              <label htmlFor="totp">
+                Authenticator code
+                <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> — if enabled</span>
+              </label>
+              <input
+                id="totp"
+                name="totp"
+                type="text"
+                /* one-time-code lets a phone offer the SMS/authenticator code */
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                placeholder="123456"
+                value={totp}
+                onChange={(e) => setTotp(e.target.value)}
+                className="input"
+                style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.12em' }}
               />
             </div>
 

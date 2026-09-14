@@ -30,11 +30,57 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'viewer', -- 'admin' | 'viewer'
+  -- ⛔ Three roles since v2.110.0. The default was 'viewer', a role that no
+  -- longer exists and now grants NOTHING — see lib/rbac.js. The app always
+  -- passes a role explicitly, so this default is a safety net for a manual
+  -- INSERT; it names the least-privileged ASSIGNABLE role.
+  role TEXT NOT NULL DEFAULT 'operator', -- 'super_admin' | 'admin' | 'operator'
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+
+-- ─────────────────────────────────────────
+-- MULTI-FACTOR AUTHENTICATION (v2.111.0)
+-- ─────────────────────────────────────────
+
+-- ⛔ ONE ROW PER USER, and it is a SECRET-BEARING TABLE. It holds the TOTP
+-- shared secret (encrypted with the same AES-256-GCM as device_credentials,
+-- via lib/credStore.js) and bcrypt hashes of the recovery codes. It must NEVER
+-- be granted to claude_readonly / nocvault_readonly — same rule as
+-- device_credentials, credential_profiles and notification_channels. There is
+-- deliberately no GRANT for it in lib/schema-grants.sql.
+CREATE TABLE IF NOT EXISTS user_mfa (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret_encrypted TEXT NOT NULL,
+  secret_iv TEXT NOT NULL,
+  -- false while enrolment is in progress: a secret exists and has been shown,
+  -- but the user has not yet proved they can generate a code from it.
+  -- ⛔ Login must require a code only when this is TRUE, or a half-finished
+  -- enrolment locks the account out.
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  confirmed_at TIMESTAMPTZ,
+  -- ⛔ SINGLE-USE ENFORCEMENT. The last time-step successfully accepted for this
+  -- user. A code is valid for up to 90s (±1 step); without this, anyone who
+  -- observes a code can replay it inside that window. NULL means NEVER USED —
+  -- not step 0, which is a real counter from 1970.
+  last_counter BIGINT,
+  -- Set by a Super Admin: this account must use MFA. Enforcement is a forced
+  -- enrolment, never a refused login — flagging a user must not lock out
+  -- someone who has not enrolled yet.
+  required BOOLEAN NOT NULL DEFAULT false,
+  -- bcrypt hashes, one per unused recovery code. A used code is REMOVED from
+  -- the array rather than marked, so the count is always the number that still
+  -- work.
+  recovery_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ⛔ COLUMN ADDITIONS NEED THEIR OWN ALTER. CREATE TABLE IF NOT EXISTS guards
+-- table creation only and silently leaves an already-deployed server on the old
+-- shape — this file documents that rule and it applies to itself.
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'operator';
 -- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT
 -- ─────────────────────────────────────────

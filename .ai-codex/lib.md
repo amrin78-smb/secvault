@@ -123,6 +123,32 @@ the whole reason this is a module with tests rather than a template string in a 
 coverage caveat SURVIVES the critical branch too: a gap does not stop mattering because something
 worse was found — the real number may be higher than the one displayed.
 
+## lib/totp.js
+
+(v2.111.0) Pure RFC 6238 TOTP + RFC 4648 base32 on node `crypto`. Zero dependencies. Exports
+`generateSecret`, `generateCode`, `verifyCode` (returns `{valid, counter}` so the caller can
+enforce single use), `buildOtpauthUri`, `base32Encode/Decode`, `hotp`, `counterFor`.
+⛔ HMAC-SHA1 is the RFC default and what every authenticator implements — not a defect.
+⛔ ±1 step window only; each extra step widens the replay window by 30s.
+Pinned against RFC 6238's published vectors in `tests/mfa.test.js`.
+
+## lib/mfa.js
+
+(v2.111.0) Stateful MFA over `lib/totp.js`: `startEnrolment`, `confirmEnrolment`,
+`verifyForLogin`, `getStatus`, `isEnabledFor`, `resetFor`, `setRequired`. Secret encrypted with
+credStore's AES-256-GCM; recovery codes bcrypt-hashed.
+⛔ `verifyForLogin` enforces SINGLE USE via `last_counter` (`<=`, not `!==`) and consumes a used
+recovery code by deleting it. ⛔ A short code never reaches the bcrypt loop — otherwise every
+failed 6-digit attempt runs ten compares and the form becomes a CPU-exhaustion target.
+⛔ `getStatus` never returns the secret or the hashes. ⛔ A placeholder row created by
+`setRequired` is NOT an enrolment (`enrolled` checks for a secret).
+
+## lib/mfa-reset.js
+
+(v2.111.0) Offline CLI: `node lib/mfa-reset.js <username>` / `--list`. The third lockout path.
+⛔ Guarded by `require.main === module` — without it, merely requiring the file runs `main()` and
+sets a non-zero exit code, which is exactly what `tests/moduleLoad.test.js` caught.
+
 ## lib/rbac.js
 
 ⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.

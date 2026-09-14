@@ -1,5 +1,6 @@
 import NextAuth from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import * as mfa from '../../../../lib/mfa';
 import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
@@ -48,6 +49,14 @@ export const authOptions = {
       credentials: {
         username: { label: 'Username', type: 'text' },
         password: { label: 'Password', type: 'password' },
+        // ⛔ SINGLE-FORM MFA. NextAuth v4's authorize() is ONE call, so a
+        // two-step "password, then code" flow needs a short-lived pre-auth token
+        // table and custom session wiring. Submitting all three together needs
+        // none of that, and there is a lot to be said for having less custom
+        // machinery on the login path of a security product.
+        //
+        // Optional: sent as an empty string by users who have not enrolled.
+        totp: { label: 'Authenticator code', type: 'text' },
       },
       async authorize(credentials) {
         if (!credentials || !credentials.username || !credentials.password) {
@@ -83,6 +92,50 @@ export const authOptions = {
         const valid = await bcrypt.compare(credentials.password, hashToCheck);
         if (!storedUser || !valid) {
           return null;
+        }
+
+        // ── second factor ────────────────────────────────────────────────
+        //
+        // ⛔ CHECKED ONLY WHEN THE USER HAS A CONFIRMED ENROLMENT. A secret that
+        // was issued but never proved (the user closed the tab before scanning)
+        // must NOT demand a code, or starting enrolment would lock someone out
+        // of their own account. lib/mfa.js's isEnabledFor() is the gate.
+        //
+        // ⛔ FAILS CLOSED ON AN ERROR. If the MFA lookup throws — database
+        // unreachable, CREDENTIAL_KEY missing — the login is REFUSED rather than
+        // allowed through without a second factor. An MFA check that degrades to
+        // "skip it" under failure is not a second factor at all, and a database
+        // outage is exactly when an attacker would like one.
+        let mfaEnabled = false;
+        try {
+          mfaEnabled = await mfa.isEnabledFor(pool, storedUser.id);
+        } catch (err) {
+          console.error('[auth] MFA status check failed, refusing login:', err.message);
+          return null;
+        }
+
+        if (mfaEnabled) {
+          const submitted = (credentials.totp || '').trim();
+          if (submitted === '') return null;
+          try {
+            const verdict = await mfa.verifyForLogin(pool, storedUser.id, submitted);
+            if (!verdict.ok) {
+              // ⛔ The reason is logged, never returned. "invalid_code" and
+              // "code_reused" must be indistinguishable at the form, or it
+              // becomes an oracle confirming a captured code was genuine.
+              console.warn(`[auth] MFA rejected for '${storedUser.username}': ${verdict.reason}`);
+              return null;
+            }
+            if (verdict.method === 'recovery') {
+              console.warn(
+                `[auth] '${storedUser.username}' signed in with a RECOVERY CODE; `
+                + `${verdict.recoveryRemaining} remaining.`
+              );
+            }
+          } catch (err) {
+            console.error('[auth] MFA verification failed, refusing login:', err.message);
+            return null;
+          }
         }
 
         return { id: storedUser.id, name: storedUser.username, role: storedUser.role };

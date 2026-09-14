@@ -252,6 +252,58 @@ a default code path.
 `middleware.js`: protects all `/(dashboard)` routes (redirect to `/login`), allows `/login` +
 `/api/auth/*` unauthenticated, API routes return `401` (not redirect) when unauthenticated.
 
+### Multi-factor authentication (TOTP, v2.111.0)
+
+`lib/totp.js` (pure RFC 6238/4226 + RFC 4648 base32, **zero dependencies** — node's own
+`crypto`) + `lib/mfa.js` (enrolment, verification, recovery; takes a `pool`). Optional per user;
+a Super Admin can REQUIRE it on an account (`user_mfa.required`).
+
+⛔ **No library, deliberately.** `Update-SecVault.ps1` runs `npm ci` on a firewall-management
+box and this repo carries no devDependencies. TOTP is an HMAC over a counter; `tests/mfa.test.js`
+asserts it against **RFC 6238's own published test vectors**, including the one that exercises
+the high 32 bits of the counter. A hand-rolled TOTP that is subtly wrong does not crash — it
+emits six plausible digits no authenticator agrees with.
+
+⛔ **SHA-1 is correct here and is not a defect.** RFC 6238's default, and what every
+authenticator implements. TOTP's security rests on the secret, not on collision resistance;
+changing it silently breaks every enrolled device.
+
+⛔ **Single-form login** (username + password + code together). NextAuth v4's `authorize()` is
+ONE call, so a two-step flow needs a pre-auth token table and custom session wiring — more
+machinery on the login path of a security product, for no security gain.
+
+⛔ **A code is SINGLE USE.** `user_mfa.last_counter` records the accepted step and is compared
+with `<=`, not `!==` — rejecting only an exact repeat would still allow replaying the previous
+step, which is also still live. NULL means never used, not step 0.
+
+⛔ **The dominant risk is LOCKOUT, not bypass**, so there are THREE independent ways back in:
+recovery codes (10, single-use, bcrypt-hashed, shown once); a Super Admin resetting **another**
+account (`DELETE /api/users/[id]/mfa`, `MANAGE_USERS`); and `node lib/mfa-reset.js <username>`
+on the server. The last is not a backdoor — it needs a shell on the host, which is strictly
+more access than any SecVault account confers, and it removes only the second factor.
+
+⛔ **A started-but-unconfirmed enrolment must NOT demand a code.** `enabled` stays false until
+the user proves a code; otherwise closing the tab mid-enrolment locks them out.
+
+⛔ **Fails closed at login**: if the MFA lookup throws (DB down, `CREDENTIAL_KEY` missing) the
+login is REFUSED. An MFA check that degrades to 'skip it' is not a second factor.
+
+⛔ **The login form is not an oracle**: the code field is always visible (revealing it per-account
+would disclose which accounts are protected), and every failure returns one message. The specific
+reason goes to the server log.
+
+⛔ `user_mfa` holds the encrypted secret and the recovery hashes, so it is **excluded from the
+readonly grants** — same rule as `device_credentials`. `POST/PUT/DELETE /api/mfa` is the THIRD
+documented exception to the mutating-route rule (after own-password and saved views): it acts on
+`session.user.id` and never on a body parameter, so the authorisation is structural.
+
+**Known gap:** no QR code yet — enrolment shows the setup key for manual entry plus an
+`otpauth://` link. A QR needs either a dependency or a hand-written encoder (Reed-Solomon +
+masking); worth adding, not worth adding badly.
+
+**MFA is unavailable for LDAP accounts** — they have no `users` row to attach a secret to, and
+their MFA belongs in the directory.
+
 ---
 
 ## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch

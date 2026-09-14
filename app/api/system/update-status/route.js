@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.111.0': [
+    "Multi-factor authentication using any authenticator app (Microsoft Authenticator, Google Authenticator, 1Password, Aegis). Turn it on yourself under Settings → Security.",
+    "Optional for everyone; a Super Admin can require it on a specific account, and can reset it for someone who has lost their phone.",
+    "Ten single-use recovery codes are issued when you enrol, and shown only once.",
+    "An authenticator code cannot be used twice — a code stays valid for up to 90 seconds, and replaying one is refused.",
+    "Works entirely offline: no external service is contacted, so it functions on an air-gapped install.",
+  ],
   '2.110.2': [
     "KPI tiles are shorter and now the same height on every page. The same component was rendering at five different sizes, and the Internet Exposure page was drawing its own tiles at a sixth.",
     "A tile without a caption no longer gets stretched to match one that has a caption, which is what made some rows unnecessarily tall.",

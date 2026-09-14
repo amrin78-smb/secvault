@@ -553,8 +553,13 @@ tbody tr:hover td { background: var(--bg-primary); }
   border-left-width: 4px;
   border-radius: var(--radius);
   padding: 12px 14px;
-  /* The one uniform height for every standard KPI tile in the product. */
-  min-height: 86px;
+  /* The one uniform height for every standard KPI tile in the product.
+     ⛔ Measured: 94px is what a tile with a ONE-LINE caption occupies. Tiles
+     with no caption are padded up to it; captions are written short enough not
+     to wrap past it. It is a min-height rather than a fixed height so a very
+     narrow viewport grows the tile instead of clipping the text — uniform in
+     practice, never truncated. */
+  min-height: 94px;
   display: flex;
   flex-direction: column;
   justify-content: center;

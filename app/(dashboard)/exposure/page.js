@@ -279,20 +279,20 @@ export default async function ExposurePage({ searchParams }) {
             {kpi(
               String(totals.critical + totals.high),
               'critical or high',
-              'broad source or service scope',
+              'broad source or service',
               totals.critical + totals.high > 0 ? 'bad' : null
             )}
             {kpi(
               String(totals.observed),
               'reached',
-              'allowed traffic seen from a public source',
+              'allowed, from the internet',
               totals.observed > 0 ? 'bad' : null
             )}
-            {kpi(String(totals.notObserved), 'not seen', 'watched, no traffic — still open', 'muted')}
+            {kpi(String(totals.notObserved), 'not seen', 'no traffic — still open', 'muted')}
             {kpi(
               String(totals.unmeasured),
               'unmeasured',
-              'cannot be measured — NOT "clean"',
+              'not measured — not "clean"',
               totals.unmeasured > 0 ? 'warn' : null
             )}
             {kpi(String(totals.publicIps), 'public addresses', 'on device interfaces')}

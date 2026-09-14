@@ -248,6 +248,14 @@ describe('every mutating API route is guarded', () => {
     'access-path',     // documented in CLAUDE.md: computes, persists nothing
     'path-query',      // documented: computes, persists nothing
     'saved-views',     // documented: a user's OWN bookmark, owner-scoped in SQL
+    // ⛔ SELF-SERVICE MFA. Acts on session.user.id and NEVER on a body
+    // parameter, so there is no user id in any request shape it accepts — the
+    // authorisation is structural rather than a check that could be forgotten.
+    // An Operator must be able to protect their own account; requiring an
+    // administrative capability would leave the least privileged users the
+    // least able to secure themselves. The ADMIN path over another account
+    // (app/api/users/[id]/mfa) is separately gated on MANAGE_USERS.
+    ['api','mfa','route.js'].join(path.sep),
   ];
 
   it('scans a meaningful number of routes', () => {
