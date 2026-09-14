@@ -523,16 +523,41 @@ tbody tr:hover td { background: var(--bg-primary); }
   transition: box-shadow 0.2s, transform 0.2s;
 }
 .stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.stat-value { font-size: var(--text-2xl); font-weight: 800; line-height: 1; letter-spacing: -1px; }
-.stat-label { font-size: var(--text-base); font-weight: 500; color: var(--text-secondary); margin-top: 6px; }
-.stat-sub   { font-size: var(--text-sm); color: var(--text-muted); margin-top: 3px; }
+/* ⛔ KPI CARD GEOMETRY, SIZED BY MEASUREMENT. The same component rendered at
+   five different heights across the product: 115px on /lifecycle and
+   /vulnerability, 93px on /analysis, 71px and 96px for the compact variant, and
+   /exposure hand-rolled its own tile at a sixth size. Two causes, and the second
+   is what produced the INCONSISTENCY rather than merely the height:
+
+     1. The headline number was --text-2xl (32px) with 16/18 padding. At that
+        size it competes with the page title for the top of the visual
+        hierarchy, in a tile that is a summary and not the content.
+     2. A card WITHOUT a `sub` line was still stretched to the height of one
+        that had it, by the surrounding grid. So a row's height was a function
+        of whichever tile happened to carry the longest caption.
+
+   The fix for (2) is the fixed min-height with centred content: a tile with a
+   caption and a tile without now occupy exactly the same space, on every page.
+
+   ⛔ Do not "simplify" the min-height away, and do not let a call site set its
+   own padding or font-size — that is how /exposure ended up at a sixth height,
+   and it is the same class of mistake as a component inventing its own 7px gap
+   (see the spacing note at the top of this file). */
+.stat-value { font-size: var(--text-xl); font-weight: 800; line-height: 1.1; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: var(--text-base); font-weight: 500; color: var(--text-secondary); margin-top: 4px; }
+.stat-sub   { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; line-height: 1.35; }
 
 .kpi-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-left-width: 4px;
   border-radius: var(--radius);
-  padding: 16px 18px;
+  padding: 12px 14px;
+  /* The one uniform height for every standard KPI tile in the product. */
+  min-height: 86px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
 }

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
+import StatCard from '../../../components/ui/StatCard';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
 import { buildExposureAnswer } from '../../../lib/answers';
 import { exposureEvidence } from '../../../lib/evidence';
@@ -58,14 +59,16 @@ const TH = {
   whiteSpace: 'nowrap',
 };
 
+// ⛔ A PLAIN GAPPED GRID, matching every other KPI row in the product. This
+// used to fake a joined row — gap:1 over a border-coloured background, clipped
+// by overflow:hidden — which was the only place in SecVault that drew KPI tiles
+// that way. Uniformity is the point: the same fact should not change appearance
+// because of which page it is on. It also could not host the shared StatCard,
+// whose own border, radius and 4px accent would have double-drawn inside it.
 const KPI_GRID = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-  gap: 1,
-  background: 'var(--border)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius)',
-  overflow: 'hidden',
+  gap: 12,
   marginBottom: 18,
 };
 
@@ -74,38 +77,40 @@ const MONO = {
   fontSize: 'var(--text-sm)',
 };
 
+// ⛔ A THIN WRAPPER OVER StatCard, not a hand-rolled tile. This used to set its
+// own `fontSize: 26` and `padding: 14px 16px`, which is exactly why this page
+// rendered its KPI row at a different height from every other page: a component
+// that invents its own geometry opts itself out of every future change to the
+// shared geometry, silently and permanently.
+//
+// The tone -> hue mapping is KEPT, because it is this page's own vocabulary
+// (`bad` means "reached from the internet"). The geometry is not this page's to
+// choose.
+//
+// ⛔ The accent BORDER and the VALUE TEXT take different tokens. A raw ramp hue
+// is correct as a 4px border and fails contrast as text — the split StatCard
+// documents at length, and the reason --yellow measured 3.64:1 before it.
+const TONE_BORDER = {
+  bad: 'var(--sev-crit)',
+  warn: 'var(--sev-med)',
+  muted: 'var(--border)',
+};
+const TONE_TEXT = {
+  bad: 'var(--tint-danger-fg)',
+  warn: 'var(--tint-warn-fg)',
+  muted: 'var(--text-muted)',
+};
+
 function kpi(value, label, sub, tone) {
-  const color =
-    tone === 'bad'
-      ? 'var(--red)'
-      : tone === 'warn'
-        ? 'var(--yellow)'
-        : tone === 'muted'
-          ? 'var(--text-muted)'
-          : 'var(--text-primary)';
   return (
-    <div key={label} style={{ background: 'var(--bg-card)', padding: '14px 16px' }}>
-      <div
-        style={{
-          fontSize: 26,
-          fontWeight: 700,
-          lineHeight: 1.1,
-          letterSpacing: '-0.02em',
-          fontVariantNumeric: 'tabular-nums',
-          color,
-        }}
-      >
-        {value}
-      </div>
-      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginTop: 4 }}>
-        {label}
-      </div>
-      {sub ? (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-          {sub}
-        </div>
-      ) : null}
-    </div>
+    <StatCard
+      key={label}
+      label={label}
+      value={value}
+      sub={sub}
+      color={TONE_BORDER[tone] || 'var(--border)'}
+      textColor={TONE_TEXT[tone] || 'var(--text-primary)'}
+    />
   );
 }
 

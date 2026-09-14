@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.110.2': [
+    "KPI tiles are shorter and now the same height on every page. The same component was rendering at five different sizes, and the Internet Exposure page was drawing its own tiles at a sixth.",
+    "A tile without a caption no longer gets stretched to match one that has a caption, which is what made some rows unnecessarily tall.",
+    "The headline number is smaller: at its old size it competed with the page title, in a tile that is a summary rather than the content.",
+    "Fixed three role-display defects found after the RBAC release, including a create-user form that still offered the retired viewer role.",
+  ],
   '2.110.0': [
     "Three user roles instead of two: Super Admin, Admin and Operator.",
     "Super Admin has full access. Admin has everything except creating or changing user accounts and credential profiles. Operator handles day-to-day work — acknowledging findings, running analyses and collections, raising rule change requests.",
