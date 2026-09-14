@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.109.0': [
+    "Phase 1 is complete: every main page now opens with a plain-English answer, and every headline figure can be asked how it knows.",
+    "Lifecycle now separates a perpetual licence from one whose expiry SecVault could not read. The second is reported as unknown, never as current — an unread expiry treated as fine is how a support contract lapses with nothing on screen to warn you.",
+    "Firewalls states how many devices have never been CVE-assessed, because those add zero to the fleet counts exactly like a device that was assessed and found clean.",
+    "Internet Exposure distinguishes a path that was watched and saw no traffic from one that was never watched at all. Neither means closed.",
+    "Devices excluded from exposure analysis by an error are now named, rather than silently missing from the totals.",
+  ],
   '2.108.0': [
     "The evidence panel and the plain-English answer now cover Vulnerabilities, Compliance and Rule hygiene as well as the dashboard.",
     "Rule hygiene states, above everything else, how many rules have no usage data at all — 164 on the current fleet. Those rules can never be judged unused, and are refused from cleanup exports rather than merely flagged.",

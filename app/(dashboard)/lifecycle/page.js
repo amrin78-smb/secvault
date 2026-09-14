@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
+import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { buildLifecycleAnswer } from '../../../lib/answers';
+import { lifecycleEvidence } from '../../../lib/evidence';
 import Card, { CardBody } from '../../../components/ui/Card';
 import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
@@ -440,6 +443,23 @@ export default async function LifecyclePage({ searchParams }) {
   const expiredCount = renewalGroups.filter((g) => g.status === 'expired').length;
   const expiringCount = renewalGroups.filter((g) => g.status === 'expiring').length;
   const degradedCount = haEntries.filter((e) => e.ha.status === 'degraded').length;
+
+  // ⛔ EXPIRY IS TRI-STATE and the unknown bucket is the one that bites.
+  // groupLicenseRenewals already ranks 'unknown' and 'perpetual' separately
+  // from expired/expiring; the tiles just never surfaced either. An entitlement
+  // whose expiry string did not parse is NOT current — it is unread — and the
+  // sentence below refuses to call the fleet clean while any exist.
+  const lifecycleCounts = {
+    expired: expiredCount,
+    expiring: expiringCount,
+    unknown: renewalGroups.filter((g) => g.status === 'unknown').length,
+    perpetual: renewalGroups.filter((g) => g.status === 'perpetual').length,
+    devicesWithoutLicenceData: licenseGapDevices.length,
+    activeDevices: devices.length,
+    devicesWithHaData: haEntries.length,
+  };
+  const lifecycleAnswer = buildLifecycleAnswer(lifecycleCounts);
+  const lifecycleEv = lifecycleEvidence(lifecycleCounts);
   const staleSigDevices = sigEntries.filter((e) =>
     Array.from(e.byComponent.values()).some((c) => c.st.status === 'stale')
   ).length;
@@ -482,9 +502,12 @@ export default async function LifecyclePage({ searchParams }) {
         subtitle="Support contracts, HA state and signature freshness across the fleet."
       />
 
+      <AnswerHeader answer={lifecycleAnswer} evidence={lifecycleEv} />
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
         <StatCard
           label="Expired"
+          evidence={lifecycleEv}
           value={expiredCount}
           sub="renewal events"
           color={expiredCount > 0 ? 'var(--red)' : 'var(--text-muted)'}

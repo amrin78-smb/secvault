@@ -1,6 +1,7 @@
 'use strict';
-// Pins the page-level evidence builders and answer sentences added in Phase 1
-// (v2.108.0): CVE posture, per-device compliance, and fleet rule hygiene.
+// Pins the page-level evidence builders and answer sentences added in Phase 1:
+// CVE posture, per-device compliance and fleet rule hygiene (v2.108.0), then
+// lifecycle, device inventory and internet exposure (v2.109.0).
 //
 // The companion file tests/evidence.test.js covers the dashboard. This one
 // exists because each of these three pages has its OWN way of being quietly
@@ -28,6 +29,9 @@ const {
   cvePostureEvidence,
   deviceComplianceEvidence,
   ruleHygieneEvidence,
+  lifecycleEvidence,
+  deviceInventoryEvidence,
+  exposureEvidence,
   isRenderableEvidence,
 } = require('../lib/evidence');
 
@@ -35,6 +39,9 @@ const {
   buildCveAnswer,
   buildDeviceComplianceAnswer,
   buildRuleHygieneAnswer,
+  buildLifecycleAnswer,
+  buildDeviceInventoryAnswer,
+  buildExposureAnswer,
 } = require('../lib/answers');
 
 // Shapes mirror the live queries: components/vulnerability/CvePostureTab.js's
@@ -212,5 +219,154 @@ describe('rule hygiene — the canonical tri-state', () => {
     assert.equal(cvePostureEvidence({}, {}), null);
     assert.equal(deviceComplianceEvidence({}, 'x'), null);
     assert.equal(ruleHygieneEvidence({}, {}), null);
+  });
+});
+
+describe('lifecycle — an unparsed expiry is unknown, never current', () => {
+  it('⛔ nothing expired + an unreadable expiry is UNKNOWN, not ok', () => {
+    // The failure this page exists to prevent is a support contract lapsing
+    // unnoticed. An expiry SecVault could not parse is exactly that risk, so it
+    // may never be absorbed into a clean result.
+    const a = buildLifecycleAnswer({
+      expired: 0, expiring: 0, unknown: 3,
+      devicesWithoutLicenceData: 0, activeDevices: 16,
+    });
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.sentence, /not every contract could be/);
+    assert.match(a.coverage, /could not read/);
+  });
+
+  it('⛔ perpetual is NOT a problem and NOT a gap', () => {
+    // A NULL expiry reported verbatim as 'Never' is a real, healthy answer.
+    // Only the OTHER kind of NULL is unknown.
+    const a = buildLifecycleAnswer({
+      expired: 0, expiring: 0, unknown: 0, perpetual: 12,
+      devicesWithoutLicenceData: 0, activeDevices: 16,
+    });
+    assert.equal(a.tone, 'ok');
+    assert.equal(a.coverage, null);
+  });
+
+  it('a vendor that reports no licences at all is a coverage gap', () => {
+    const a = buildLifecycleAnswer({
+      expired: 0, expiring: 0, unknown: 0,
+      devicesWithoutLicenceData: 9, activeDevices: 16,
+    });
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.coverage, /9 of 16/);
+  });
+
+  it('an expired contract still carries the coverage caveat', () => {
+    const a = buildLifecycleAnswer({
+      expired: 4, expiring: 2, unknown: 3,
+      devicesWithoutLicenceData: 9, activeDevices: 16,
+    });
+    assert.equal(a.tone, 'critical');
+    assert.ok(a.coverage);
+  });
+
+  it('the drawer separates unknown from perpetual', () => {
+    const ev = lifecycleEvidence({
+      expired: 4, expiring: 2, unknown: 3, perpetual: 12,
+      devicesWithoutLicenceData: 9, activeDevices: 16, devicesWithHaData: 4,
+    });
+    assert.match(ev.formula, /unknown\s+3\s+no parseable expiry date/);
+    assert.match(ev.formula, /perpetual\s+12/);
+    assert.match(ev.formula, /never read as healthy/);
+    assert.match(ev.unmeasured.map((u) => u.label).join(' | '), /no parseable expiry/);
+  });
+});
+
+describe('device inventory — a never-assessed firewall is not a clean one', () => {
+  it('⛔ zero findings over an unassessed fleet is UNKNOWN, not ok', () => {
+    const a = buildDeviceInventoryAnswer({
+      total: 16, online: 16, neverChecked: 0, cveNotAssessed: 3, patchNowDevices: 0,
+    });
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.coverage, /never been CVE-assessed/);
+  });
+
+  it('allows the all-clear only at full coverage', () => {
+    const a = buildDeviceInventoryAnswer({
+      total: 16, online: 16, neverChecked: 0, cveNotAssessed: 0, patchNowDevices: 0,
+    });
+    assert.equal(a.tone, 'ok');
+    assert.equal(a.coverage, null);
+  });
+
+  it('says a never-probed device is neither online nor offline', () => {
+    const ev = deviceInventoryEvidence({
+      total: 16, online: 13, neverChecked: 3, criticalCves: 0, criticalCveDevices: 0,
+      patchNow: 0, patchNowDevices: 0, cveNotAssessed: 0,
+    });
+    assert.match(ev.unmeasured.map((u) => u.reason).join(' '), /neither online nor offline/);
+  });
+
+  it('states that an unassessed device adds 0 exactly like a clean one', () => {
+    const ev = deviceInventoryEvidence({
+      total: 16, online: 16, neverChecked: 0, criticalCves: 4, criticalCveDevices: 2,
+      patchNow: 3, patchNowDevices: 3, cveNotAssessed: 3,
+    });
+    assert.match(ev.formula, /adds 0 to the CVE sums/);
+    assert.match(ev.unmeasured.map((u) => u.reason).join(' '), /only one of them is good news/);
+  });
+});
+
+describe('exposure — not seen is not closed', () => {
+  it('⛔ an unreached path is never described as closed', () => {
+    const a = buildExposureAnswer(
+      { paths: 40, observed: 0, unmeasured: 0, devicesWithoutSyslog: 0 }, 0
+    );
+    assert.equal(a.tone, 'warn');
+    assert.match(a.sentence, /not the same as closed/);
+    // ⛔ never 'ok': 40 open paths is not an all-clear just because no traffic
+    // was seen on them.
+    assert.notEqual(a.tone, 'ok');
+  });
+
+  it('leads with paths actually reached when any were', () => {
+    const a = buildExposureAnswer(
+      { paths: 40, observed: 12, unmeasured: 0, devicesWithoutSyslog: 0 }, 0
+    );
+    assert.equal(a.tone, 'critical');
+    assert.match(a.sentence, /actually reached from a public source/);
+  });
+
+  it('⛔ counts devices excluded by an analysis ERROR as a gap', () => {
+    // These devices are absent from every total, so a sentence built from
+    // totals alone would describe a smaller fleet without saying so.
+    const a = buildExposureAnswer({ paths: 0, observed: 0 }, 2);
+    assert.equal(a.tone, 'unknown');
+    assert.match(a.coverage, /could not be analysed/);
+  });
+
+  it('lists three gaps as a sentence, not "A, and B, and C"', () => {
+    const a = buildExposureAnswer(
+      { paths: 40, observed: 5, unmeasured: 8, devicesWithoutSyslog: 2 }, 1
+    );
+    assert.doesNotMatch(a.coverage, /, and .*, and /);
+    assert.match(a.coverage, /, and /);
+  });
+
+  it('separates never-watched paths from watched-but-quiet ones', () => {
+    const ev = exposureEvidence(
+      { paths: 40, observed: 5, notObserved: 27, unmeasured: 8, devicesWithoutSyslog: 2, publicIps: 9, devicesWithExposure: 6 },
+      0
+    );
+    assert.match(ev.formula, /not seen\s+27\s+watched, no traffic — still OPEN/);
+    assert.match(ev.formula, /NOT MEASURED\s+8\s+never watched/);
+    assert.match(ev.unmeasured.map((u) => u.reason).join(' '), /absence of evidence, not evidence of absence/);
+  });
+
+  it('an empty fleet with no gaps is genuinely ok', () => {
+    const a = buildExposureAnswer({ paths: 0, observed: 0 }, 0);
+    assert.equal(a.tone, 'ok');
+    assert.equal(a.coverage, null);
+  });
+
+  it('all three builders return null rather than half-built descriptors', () => {
+    assert.equal(lifecycleEvidence({}), null);
+    assert.equal(deviceInventoryEvidence({}), null);
+    assert.equal(exposureEvidence({}), null);
   });
 });

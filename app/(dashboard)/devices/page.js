@@ -13,6 +13,9 @@ import Button from '../../../components/ui/Button';
 import EmptyState from '../../../components/ui/EmptyState';
 import Modal from '../../../components/ui/Modal';
 import PageHeader from '../../../components/ui/PageHeader';
+import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { buildDeviceInventoryAnswer } from '../../../lib/answers';
+import { deviceInventoryEvidence } from '../../../lib/evidence';
 import DeviceRowActions from '../../../components/devices/DeviceRowActions';
 import DeviceInventoryTiles from '../../../components/devices/DeviceInventoryTiles';
 import DeviceFilters from '../../../components/devices/DeviceFilters';
@@ -177,6 +180,13 @@ export default async function DevicesPage({ searchParams }) {
   // have to mean; unfiltered they are the whole fleet.
   const tiles = devices.length === allRows.length ? fleetTiles : computeTiles(devices);
 
+  // ⛔ Built from fleetTiles, NOT `tiles`. `tiles` follows the active filter,
+  // and a sentence that silently described the filtered subset while claiming
+  // to describe the fleet would be the same class of error as a score averaged
+  // over fewer devices than the operator can see.
+  const inventoryAnswer = buildDeviceInventoryAnswer(fleetTiles);
+  const inventoryEvidence = deviceInventoryEvidence(fleetTiles);
+
   const confirmDeleteId = searchParams?.confirmDelete || null;
   const confirmDevice = confirmDeleteId ? devices.find((d) => d.id === confirmDeleteId) : null;
 
@@ -228,6 +238,8 @@ export default async function DevicesPage({ searchParams }) {
           </div>
         }
       />
+
+      <AnswerHeader answer={inventoryAnswer} evidence={inventoryEvidence} />
 
       {searchParams?.error === 'forbidden' && (
         <div

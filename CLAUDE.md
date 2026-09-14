@@ -1325,8 +1325,12 @@ none of these carry Critical-Rules-level footguns.
   the dashboard sentence by the pure `lib/answers.js`. ⛔ The rule that makes it honest rather than
   decorative: **an all-clear is forbidden while coverage is incomplete** — a clean result over a
   partially-assessed fleet renders hueless as `unknown`, never green as `ok`. Pinned by
-  `tests/evidence.test.js` + `tests/evidencePages.test.js`. Wired on the dashboard,
-  `/vulnerability`, `/compliance` and `/analysis` (v2.108.0); `/analysis` adds one read-time
+  `tests/evidence.test.js` + `tests/evidencePages.test.js`. **Phase 1 complete at v2.109.0** —
+  wired on the dashboard, `/vulnerability`, `/compliance`, `/analysis`, `/lifecycle`, `/devices`
+  and `/exposure`. ⛔ The drawer footer is CUSTOMER-FACING: it names a PRODUCT engine and a
+  SecVault POLICY, never a source path and never this file — `tests/noInternalRefs.test.js`
+  fails the build if `CLAUDE.md` appears in any string literal under `app/`, `components/` or
+  `lib/` (comments are fine and encouraged). `/analysis` adds one read-time
   grouped count of `firewall_rules.hit_count`'s three states so the page can lead with how many
   rules have NO usage data — no schema change and no new job. Full detail in
   `.ai-codex/lib.md` / `components.md`.

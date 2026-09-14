@@ -83,8 +83,13 @@ SERVER component build one and pass it to the client drawer as a prop.
 
 Exports: `isRenderableEvidence` (the guard — a mark never renders without it),
 `deviceCountEvidence`, `securityScoreEvidence`, `patchNowEvidence`, `highRiskEvidence`,
-`rulesEvidence`, `complianceScoreEvidence`, `cveCoverageGap`, and (v2.108.0)
-`cvePostureEvidence`, `deviceComplianceEvidence`, `ruleHygieneEvidence`.
+`rulesEvidence`, `complianceScoreEvidence`, `cveCoverageGap`, (v2.108.0)
+`cvePostureEvidence`, `deviceComplianceEvidence`, `ruleHygieneEvidence`, and (v2.109.0)
+`lifecycleEvidence`, `deviceInventoryEvidence`, `exposureEvidence`.
+
+⛔ `source` and `rule` are CUSTOMER-FACING PROSE rendered verbatim in the drawer footer: a
+PRODUCT name ("CVE prioritisation engine") and a SecVault POLICY name, never a source path and
+never CLAUDE.md. Pinned by `tests/noInternalRefs.test.js`.
 
 ⛔ `cvePostureEvidence` shows BOTH units side by side and labels them — `*_cves` is
 COUNT(DISTINCT advisory_id), `*_count` is device-CVE PAIRS. They never sum together, and the
@@ -106,9 +111,10 @@ drawer confidently explaining arithmetic that no longer runs. Pinned by tests/ev
 (v2.107.0) `buildFleetAnswer(headline)` -> `{sentence, lead, tone, coverage}`. The one-sentence
 plain-English answer above the dashboard grid. Pure CommonJS.
 
-(v2.108.0) also `buildCveAnswer`, `buildDeviceComplianceAnswer`, `buildRuleHygieneAnswer` — one per
-wired page, each with its own coverage question (unassessed devices / `na` checks / rules with no
-usage data).
+(v2.108.0) also `buildCveAnswer`, `buildDeviceComplianceAnswer`, `buildRuleHygieneAnswer`, and
+(v2.109.0) `buildLifecycleAnswer`, `buildDeviceInventoryAnswer`, `buildExposureAnswer` — one per
+wired page, each with its OWN coverage question: unassessed devices / `na` checks / rules with no
+usage data / an unparseable licence expiry / never-probed devices / never-watched exposure paths.
 
 ⛔ FOUR tones, not three: `critical`/`warn`/`ok`/`unknown`. An ALL-CLEAR IS FORBIDDEN WHILE COVERAGE
 IS INCOMPLETE — "nothing outstanding" over a fleet where three firewalls were never assessed returns

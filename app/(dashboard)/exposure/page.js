@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
+import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { buildExposureAnswer } from '../../../lib/answers';
+import { exposureEvidence } from '../../../lib/evidence';
 import Card, { CardBody } from '../../../components/ui/Card';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -222,6 +225,12 @@ export default async function ExposurePage({ searchParams }) {
   const fleet = await computeFleetExposure(pool, { lookbackDays: 7 });
   const { totals } = fleet;
 
+  // ⛔ fleet.errors is passed in: those devices are NOT represented in any
+  // total, so a sentence built from totals alone would describe a smaller
+  // fleet than the one on screen without saying so.
+  const exposureAnswer = buildExposureAnswer(totals, fleet.errors.length);
+  const exposureEv = exposureEvidence(totals, fleet.errors.length);
+
   // ⛔ `allRows` IS THE FLEET, and several things below must keep using it
   // rather than the current page: the KPI tiles, the unmeasured caveat, and the
   // "why the top paths scored as they did" panel, which is about the highest-
@@ -249,6 +258,8 @@ export default async function ExposurePage({ searchParams }) {
           'and whether traffic was actually observed arriving.'
         }
       />
+
+      <AnswerHeader answer={exposureAnswer} evidence={exposureEv} />
 
       {totals.devices === 0 ? (
         <Card>
