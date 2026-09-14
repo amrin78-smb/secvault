@@ -4,15 +4,22 @@
 //
 // Self-service multi-factor authentication, for the signed-in user.
 //
-// ⛔ NO QR CODE IN v1, AND THAT IS A DELIBERATE TRADE RATHER THAN AN OVERSIGHT.
-// Rendering one needs either a new npm dependency — on a product whose installer
-// runs `npm ci` on a firewall-management server, and which carries no
-// devDependencies precisely so that what ships is what was tested — or a
-// hand-written QR encoder (Reed-Solomon plus mask selection, several hundred
-// lines of code whose bugs present as "my phone will not scan it"). Manual key
-// entry is supported by every authenticator app, and the otpauth:// URI is
-// offered too, so a user on the same machine can click straight through. QR is
-// worth adding; it is not worth adding badly or at the cost of a dependency.
+// ⛔ THE QR IS RENDERED SERVER-SIDE into a data: URI, so nothing is fetched when
+// this panel displays and it works on an air-gapped install — the same reason the
+// fonts are vendored rather than loaded from a CDN. The `qrcode` package does the
+// encoding.
+//
+// ⛔ REUSED FROM NETVAULT RATHER THAN RE-DECIDED HERE. NetVault has had TOTP MFA
+// with exactly this approach since before SecVault had any: TOTP hand-written on
+// node:crypto (the same conclusion this repo reached independently, for the same
+// reason) and `qrcode` for the picture. Checking the sibling apps first is the
+// convention this codebase already follows for the compliance PDF, which was
+// ported from SpanVault. It should have been the first move here too.
+//
+// ⛔ The setup key stays ON SCREEN beside the QR rather than behind a toggle.
+// Someone enrolling on the same machine that is displaying the QR cannot scan it
+// with that machine, a desktop password manager wants the key rather than a
+// picture, and it is the fallback if QR rendering ever fails.
 //
 // ⛔ THE SECRET AND THE RECOVERY CODES ARE SHOWN EXACTLY ONCE. Neither can be
 // read back afterwards — the secret is encrypted and the codes are bcrypt-hashed
@@ -172,14 +179,36 @@ export default function SecurityPanel() {
           {enrolment && (
             <div>
               <p style={{ marginTop: 0, color: 'var(--text-secondary)' }}>
-                Add this key to your authenticator app (Microsoft Authenticator, Google
-                Authenticator, 1Password, Aegis — any of them), then enter the six-digit code it
-                shows to confirm.
+                Scan this with your authenticator app (Microsoft Authenticator, Google
+                Authenticator, 1Password, Aegis — any of them), or enter the setup key by hand,
+                then type the six-digit code it shows to confirm.
               </p>
+
+              {enrolment.qrDataUri && (
+                <div style={{ marginBottom: 'var(--s4)' }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={enrolment.qrDataUri}
+                    alt="QR code for enrolling this account in an authenticator app"
+                    width={220}
+                    height={220}
+                    style={{
+                      display: 'block',
+                      /* ⛔ A QR needs a WHITE quiet zone to scan reliably. In dark
+                         mode the card behind it is near-black, so the white is
+                         painted in here rather than inherited from the surface. */
+                      background: '#fff',
+                      padding: 8,
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border)',
+                    }}
+                  />
+                </div>
+              )}
 
               <div style={{ marginBottom: 'var(--s4)' }}>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>
-                  Setup key
+                  Setup key — if you cannot scan
                 </div>
                 <div
                   style={{

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.111.1': [
+    "MFA enrolment now shows a QR code to scan, with the setup key still displayed underneath for anyone enrolling on the same machine that is showing the QR.",
+  ],
   '2.111.0': [
     "Multi-factor authentication using any authenticator app (Microsoft Authenticator, Google Authenticator, 1Password, Aegis). Turn it on yourself under Settings → Security.",
     "Optional for everyone; a Super Admin can require it on a specific account, and can reset it for someone who has lost their phone.",

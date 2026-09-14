@@ -297,9 +297,12 @@ readonly grants** — same rule as `device_credentials`. `POST/PUT/DELETE /api/m
 documented exception to the mutating-route rule (after own-password and saved views): it acts on
 `session.user.id` and never on a body parameter, so the authorisation is structural.
 
-**Known gap:** no QR code yet — enrolment shows the setup key for manual entry plus an
-`otpauth://` link. A QR needs either a dependency or a hand-written encoder (Reed-Solomon +
-masking); worth adding, not worth adding badly.
+Enrolment shows a QR (rendered SERVER-SIDE by `qrcode` into a data: URI, so nothing is fetched
+at display time and it works air-gapped) alongside the setup key for manual entry. ⛔ Both are
+shown: someone enrolling on the machine that is displaying the QR cannot scan it with that
+machine. ⛔ This approach was taken from NetVault, which has had the same TOTP-on-node:crypto +
+`qrcode` combination for longer — check the sibling apps before deciding an approach here, the way
+the compliance PDF was ported from SpanVault.
 
 **MFA is unavailable for LDAP accounts** — they have no `users` row to attach a secret to, and
 their MFA belongs in the directory.

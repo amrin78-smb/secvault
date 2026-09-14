@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { pool } from '../../../lib/db';
+import QRCode from 'qrcode';
 import * as mfa from '../../../lib/mfa';
 import { logActivity } from '../../../lib/activityLog';
 
@@ -66,7 +67,23 @@ export async function POST() {
   }
 
   const { secret, otpauthUri } = await mfa.startEnrolment(pool, userId, session.user.name || 'user');
-  return NextResponse.json({ secret, otpauthUri });
+
+  // ⛔ RENDERED SERVER-SIDE into a data: URI, the same way NetVault does it.
+  // Nothing is fetched at display time, so this works on an air-gapped install
+  // — the same reason the fonts are vendored rather than loaded from a CDN —
+  // and the QR never enters the client bundle.
+  //
+  // ⛔ If rendering fails the enrolment still proceeds: the setup key below it
+  // is sufficient on its own, and failing the whole request over a picture
+  // would block a user from protecting their account.
+  let qrDataUri = null;
+  try {
+    qrDataUri = await QRCode.toDataURL(otpauthUri, { width: 220, margin: 1 });
+  } catch (err) {
+    console.warn('[mfa route] QR render failed, falling back to the setup key:', err.message);
+  }
+
+  return NextResponse.json({ secret, otpauthUri, qrDataUri });
 }
 
 /** Confirm enrolment with a code. Returns the recovery codes ONCE. */
