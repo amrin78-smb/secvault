@@ -7,6 +7,7 @@ import { pool } from '../../../../lib/db';
 import { can, forbiddenResponse, MANAGE_SETTINGS } from '../../../../lib/rbac';
 import { resolveTlsConfig } from '../../../../lib/tlsConfig';
 import { validateCertificatePair, describeCertificate } from '../../../../lib/certValidate';
+import { importCertificate } from '../../../../lib/certImport';
 import { logActivity } from '../../../../lib/activityLog';
 
 export const dynamic = 'force-dynamic';
@@ -73,7 +74,32 @@ export async function POST(request) {
   if (!can(session, MANAGE_SETTINGS)) return forbiddenResponse(MANAGE_SETTINGS);
 
   const body = await request.json().catch(() => ({}));
-  const info = validateCertificatePair(body && body.certificate, body && body.privateKey);
+
+  // ⛔ ACCEPT WHAT A WINDOWS ADMINISTRATOR ACTUALLY HAS. A Microsoft CA issues
+  // .pfx; exporting from the Windows certificate store offers .cer; almost
+  // nothing on Windows produces the PEM pair node wants. Requiring three OpenSSL
+  // commands before a certificate can be installed is how this feature would go
+  // unused and the console would stay self-signed forever.
+  //
+  // Files arrive base64-encoded (a .pfx is binary and cannot survive JSON any
+  // other way); pasted PEM still arrives as plain text.
+  let certInput = body && body.certificate;
+  let keyInput = body && body.privateKey;
+
+  if (body && body.certificateB64) {
+    const certBuf = Buffer.from(String(body.certificateB64), 'base64');
+    const keyBuf = body.privateKeyB64
+      ? Buffer.from(String(body.privateKeyB64), 'base64')
+      : null;
+    const imported = importCertificate(certBuf, keyBuf, body.passphrase);
+    if (imported.error && !imported.keyPem) {
+      return NextResponse.json({ error: imported.error, certificate: null }, { status: 400 });
+    }
+    certInput = imported.certPem;
+    keyInput = imported.keyPem;
+  }
+
+  const info = validateCertificatePair(certInput, keyInput);
 
   if (!info.valid) {
     // ⛔ Nothing has been written at this point, and the message is the one the
@@ -94,10 +120,14 @@ export async function POST(request) {
       }
     }
 
-    fs.writeFileSync(CERT_PATH, String(body.certificate).trim() + '\n', 'utf8');
+    // ⛔ The NORMALISED PEM, not the raw request body. A .pfx or .cer upload has
+    // already been converted above, and writing body.certificate here would
+    // store the binary container as though it were a certificate — producing a
+    // file that passes every check in this route and breaks the next restart.
+    fs.writeFileSync(CERT_PATH, String(certInput).trim() + '\n', 'utf8');
     // ⛔ 0600 where the platform honours it. On Windows the installer's ACL is
     // what actually protects this; the mode is belt and braces for any other host.
-    fs.writeFileSync(KEY_PATH, String(body.privateKey).trim() + '\n', { encoding: 'utf8', mode: 0o600 });
+    fs.writeFileSync(KEY_PATH, String(keyInput).trim() + '\n', { encoding: 'utf8', mode: 0o600 });
   } catch (err) {
     return NextResponse.json(
       { error: `The certificate could not be written: ${err.message}` },

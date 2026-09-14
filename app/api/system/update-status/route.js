@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.112.1': [
+    "Certificates can now be uploaded as .pfx/.p12 (password-protected, containing both halves), or .cer/.crt/.der alongside a key file, as well as pasted PEM — which is what a Microsoft CA and the Windows certificate store actually produce.",
+    "Fixed the upgrade failing to create its self-signed certificate: OpenSSL writes its progress to the error stream, which PowerShell was turning into a failure even though the command succeeded.",
+    "The upgrade log now states plainly whether TLS was enabled or not, instead of reporting a successful step that did nothing.",
+  ],
   '2.112.0': [
     "SecVault now serves HTTPS. The installer mints a self-signed certificate on upgrade, and the console keeps the same address — https://<server>:3010.",
     "Old http:// bookmarks still work: a plaintext request on 3010 is detected and redirected to HTTPS, and port 3080 redirects too.",

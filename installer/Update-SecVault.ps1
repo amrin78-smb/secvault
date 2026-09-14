@@ -745,6 +745,14 @@ $tlsEnabled = $false
 $previousAppParameters = $null
 $previousNextAuthUrl = $null
 
+# ⛔ RE-SOURCE THE HELPERS, AFTER THE PULL. They are dot-sourced at the top of
+# this script for availability, which happens BEFORE git pull -- so that copy is
+# always one release stale. Re-sourcing here means a fix to SecVault-Tls.ps1
+# takes effect on the deploy that delivers it, instead of the one after. (This
+# script itself still self-updates and needs two, which is unavoidable: it is
+# already parsed and running.)
+if (Test-Path -LiteralPath $tlsHelpers) { . $tlsHelpers }
+
 if ($buildSucceeded -and $migrateSucceeded) {
     Invoke-Step 'Enable TLS (certificate + service entry point)' {
         try {
@@ -801,6 +809,18 @@ if ($buildSucceeded -and $migrateSucceeded) {
         } catch {
             Write-Log "  [WARN] TLS setup failed: $($_.Exception.Message) -- leaving the console on plain HTTP."
         }
+    }
+
+    # ⛔ STATE THE OUTCOME, because "Step succeeded" does not mean TLS is on.
+    # Invoke-Step reports success when the block did not THROW, and every failure
+    # path inside it returns early with a [WARN] instead of throwing -- so the
+    # first run of this logged "Step succeeded: Enable TLS" immediately after
+    # "[WARN] OpenSSL failed", having written no certificate at all. One line
+    # that names the real result removes the contradiction.
+    if ($tlsEnabled) {
+        Write-Log "  TLS: ENABLED -- the console will serve HTTPS after this restart."
+    } else {
+        Write-Log "  TLS: NOT ENABLED -- the console remains on plain HTTP (see the [WARN] above for why)."
     }
 }
 $appStartSkipped = $false

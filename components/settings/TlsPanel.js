@@ -53,6 +53,9 @@ export default function TlsPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [installed, setInstalled] = useState(null);
+  const [certFile, setCertFile] = useState(null);
+  const [keyFile, setKeyFile] = useState(null);
+  const [passphrase, setPassphrase] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -65,6 +68,49 @@ export default function TlsPanel() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * ⛔ base64, because a .pfx is BINARY. Reading it as text would silently
+   * mangle it into something that is no longer a valid container, and the
+   * failure would surface as an unexplained "could not be read".
+   */
+  function readAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        const comma = result.indexOf(',');
+        resolve(comma === -1 ? '' : result.slice(comma + 1));
+      };
+      reader.onerror = () => reject(new Error('Could not read that file.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function installFiles(e) {
+    e.preventDefault();
+    setBusy(true); setError(''); setInstalled(null);
+    try {
+      const payload = { certificateB64: await readAsBase64(certFile) };
+      if (keyFile) payload.privateKeyB64 = await readAsBase64(keyFile);
+      if (passphrase) payload.passphrase = passphrase;
+
+      const res = await fetch('/api/system/tls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'The certificate could not be installed.'); return; }
+      setInstalled(data);
+      setCertFile(null);
+      setKeyFile(null);
+      setPassphrase('');  // ⛔ cleared immediately; it unlocks the private key
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally { setBusy(false); }
+  }
 
   async function install(e) {
     e.preventDefault();
@@ -186,13 +232,73 @@ sc.exe start SecVault-App
             </div>
           )}
 
-          <form onSubmit={install} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+          {/* ── upload ─────────────────────────────────────────────────────
+              ⛔ THE PRIMARY PATH, because it is what a Windows administrator
+              actually has. A Microsoft CA issues .pfx; exporting from the
+              certificate store offers .cer; almost nothing on Windows produces
+              the PEM pair node wants. Making them convert by hand first is how
+              this feature would go unused. */}
+          <form onSubmit={installFiles} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
             <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Install a certificate</div>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--text-base)' }}>
-              Paste a PEM certificate and its unencrypted private key. The pair is checked before
-              anything is written — a key that does not match its certificate is refused rather than
-              installed.
+              Upload <strong>.pfx</strong> or <strong>.p12</strong> (contains both halves),
+              or a <strong>.cer</strong>/<strong>.crt</strong>/<strong>.pem</strong> certificate
+              together with its key file. The pair is checked before anything is written — a key
+              that does not match its certificate is refused rather than installed.
             </p>
+
+            <div className="form-field" style={{ margin: 0 }}>
+              <label htmlFor="tls_file">Certificate file</label>
+              <input
+                id="tls_file"
+                type="file"
+                className="input"
+                accept=".pfx,.p12,.cer,.crt,.pem,.der"
+                onChange={(e) => setCertFile(e.target.files && e.target.files[0])}
+              />
+            </div>
+
+            {/* ⛔ Shown only when it is actually needed. A .pfx already carries
+                the key, and asking for one alongside it invites the operator to
+                supply a mismatched pair. */}
+            {certFile && !/\.(pfx|p12)$/i.test(certFile.name) && (
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="tls_keyfile">Private key file</label>
+                <input
+                  id="tls_keyfile"
+                  type="file"
+                  className="input"
+                  accept=".key,.pem"
+                  onChange={(e) => setKeyFile(e.target.files && e.target.files[0])}
+                />
+              </div>
+            )}
+
+            {certFile && /\.(pfx|p12)$/i.test(certFile.name) && (
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="tls_pass">Password for the .pfx file</label>
+                <input
+                  id="tls_pass"
+                  type="password"
+                  className="input"
+                  autoComplete="off"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  style={{ maxWidth: 320 }}
+                />
+              </div>
+            )}
+
+            <Button type="submit" variant="primary" disabled={busy || !certFile} style={{ alignSelf: 'flex-start' }}>
+              {busy ? 'Checking…' : 'Validate and install'}
+            </Button>
+          </form>
+
+          <details>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 'var(--text-base)' }}>
+              Or paste PEM text instead
+            </summary>
+            <form onSubmit={install} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)', marginTop: 'var(--s3)' }}>
 
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="tls_cert">Certificate (PEM)</label>
@@ -226,10 +332,11 @@ sc.exe start SecVault-App
               <p style={{ margin: 0, color: 'var(--tint-danger-fg)', fontSize: 'var(--text-base)' }}>{error}</p>
             )}
 
-            <Button type="submit" variant="primary" disabled={busy || !cert || !key} style={{ alignSelf: 'flex-start' }}>
-              {busy ? 'Checking…' : 'Validate and install'}
-            </Button>
-          </form>
+              <Button type="submit" variant="primary" disabled={busy || !cert || !key} style={{ alignSelf: 'flex-start' }}>
+                {busy ? 'Checking…' : 'Validate and install'}
+              </Button>
+            </form>
+          </details>
         </div>
       </CardBody>
     </Card>

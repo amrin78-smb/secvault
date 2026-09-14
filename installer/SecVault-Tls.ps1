@@ -110,15 +110,38 @@ function New-SecVaultCertificate {
         '-addext', $san
     )
 
+    # ⛔ DO NOT USE `2>&1` ON A NATIVE EXECUTABLE HERE. CLAUDE.md documents this
+    # and it still caught me: in PowerShell 5.1, redirecting a native command's
+    # stderr into the pipeline wraps every line in an ErrorRecord and sets $? to
+    # $false even when the exe exits 0. OpenSSL writes its key-generation
+    # PROGRESS ('+++++...') to stderr, so with $ErrorActionPreference = 'Stop'
+    # — which Update-SecVault.ps1 sets deliberately — a perfectly successful
+    # keygen threw into the catch below and was reported as "OpenSSL failed",
+    # with the progress dots as the error message. No certificate was written
+    # and the step still logged "succeeded".
+    #
+    # So: stderr is captured with the preference relaxed, and success is judged
+    # by the EXIT CODE and the FILES ON DISK, never by $? or by an exception.
     $out = ''
+    $code = 0
+    $prevEap = $ErrorActionPreference
     try {
+        $ErrorActionPreference = 'Continue'
         $out = & $openssl @args 2>&1
+        $code = $LASTEXITCODE
     } catch {
-        $result.Message = "OpenSSL failed: $($_.Exception.Message)"
+        $result.Message = "OpenSSL could not be run: $($_.Exception.Message)"
+        $ErrorActionPreference = $prevEap
         return [pscustomobject]$result
     }
+    $ErrorActionPreference = $prevEap
 
     if ($LogFile) { Add-Content -Path $LogFile -Value ($out -join "`n") }
+
+    if ($code -ne 0) {
+        $result.Message = "OpenSSL exited with code $code; no certificate was created."
+        return [pscustomobject]$result
+    }
 
     if ((Test-Path -LiteralPath $result.CertPath) -and (Test-Path -LiteralPath $result.KeyPath)) {
         $result.Success = $true
