@@ -83,7 +83,15 @@ SERVER component build one and pass it to the client drawer as a prop.
 
 Exports: `isRenderableEvidence` (the guard — a mark never renders without it),
 `deviceCountEvidence`, `securityScoreEvidence`, `patchNowEvidence`, `highRiskEvidence`,
-`rulesEvidence`, `complianceScoreEvidence`, `cveCoverageGap`.
+`rulesEvidence`, `complianceScoreEvidence`, `cveCoverageGap`, and (v2.108.0)
+`cvePostureEvidence`, `deviceComplianceEvidence`, `ruleHygieneEvidence`.
+
+⛔ `cvePostureEvidence` shows BOTH units side by side and labels them — `*_cves` is
+COUNT(DISTINCT advisory_id), `*_count` is device-CVE PAIRS. They never sum together, and the
+dashboard shipped that exact conflation once (v2.107.0: "3 vulnerabilities" for one CVE on three
+firewalls). ⛔ `ruleHygieneEvidence` renders hit_count's three buckets explicitly (with-hits /
+measured-zero / NOT MEASURED) and states that unmeasured rules are REFUSED from cleanup requests
+server-side, not merely flagged.
 
 ⛔ `unmeasured: []` IS A CLAIM — the drawer renders it as "everything this number depends on was
 measured". Never leave it empty to mean "I did not look". ⛔ Never fabricate an input: if the caller
@@ -97,6 +105,10 @@ drawer confidently explaining arithmetic that no longer runs. Pinned by tests/ev
 
 (v2.107.0) `buildFleetAnswer(headline)` -> `{sentence, lead, tone, coverage}`. The one-sentence
 plain-English answer above the dashboard grid. Pure CommonJS.
+
+(v2.108.0) also `buildCveAnswer`, `buildDeviceComplianceAnswer`, `buildRuleHygieneAnswer` — one per
+wired page, each with its own coverage question (unassessed devices / `na` checks / rules with no
+usage data).
 
 ⛔ FOUR tones, not three: `critical`/`warn`/`ok`/`unknown`. An ALL-CLEAR IS FORBIDDEN WHILE COVERAGE
 IS INCOMPLETE — "nothing outstanding" over a fleet where three firewalls were never assessed returns

@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
+import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { buildDeviceComplianceAnswer } from '../../../lib/answers';
+import { deviceComplianceEvidence } from '../../../lib/evidence';
 import Badge from '../../../components/ui/Badge';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -276,6 +279,21 @@ export default async function CompliancePage({ searchParams }) {
   const zones = await getDeviceZones(pool, selected.id);
 
   const standards = aggregateStandards(findings);
+
+  // ⛔ Counted straight off the findings already fetched — no second query.
+  // All four statuses are tallied, INCLUDING `na`, because the answer sentence
+  // and the evidence drawer both need to say how many checks could not be asked
+  // of this firewall at all. Dropping `na` here would silently rebuild the bug
+  // the score already avoids: our inability to measure, invisible to the reader.
+  const statusCounts = findings.reduce(
+    (acc, f) => {
+      if (Object.prototype.hasOwnProperty.call(acc, f.status)) acc[f.status] += 1;
+      return acc;
+    },
+    { pass: 0, fail: 0, warning: 0, na: 0 }
+  );
+  const complianceAnswer = buildDeviceComplianceAnswer(statusCounts, selected.name);
+  const complianceEvidence = deviceComplianceEvidence(statusCounts, selected.name);
   const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
   const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
   const lastRunAt = findings.reduce((latest, f) => {
@@ -317,6 +335,8 @@ export default async function CompliancePage({ searchParams }) {
           </a>
         }
       />
+
+      <AnswerHeader answer={complianceAnswer} evidence={complianceEvidence} />
 
       {viewToggle(view)}
 

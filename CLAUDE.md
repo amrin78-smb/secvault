@@ -1325,7 +1325,11 @@ none of these carry Critical-Rules-level footguns.
   the dashboard sentence by the pure `lib/answers.js`. ⛔ The rule that makes it honest rather than
   decorative: **an all-clear is forbidden while coverage is incomplete** — a clean result over a
   partially-assessed fleet renders hueless as `unknown`, never green as `ok`. Pinned by
-  `tests/evidence.test.js`. Full detail in `.ai-codex/lib.md` / `components.md`.
+  `tests/evidence.test.js` + `tests/evidencePages.test.js`. Wired on the dashboard,
+  `/vulnerability`, `/compliance` and `/analysis` (v2.108.0); `/analysis` adds one read-time
+  grouped count of `firewall_rules.hit_count`'s three states so the page can lead with how many
+  rules have NO usage data — no schema change and no new job. Full detail in
+  `.ai-codex/lib.md` / `components.md`.
 - **Fleet Alerts** (`/alerts`): cross-entity feed of finding/CVE/diff alerts, filterable via query params (`AlertsFilters`), per-row ack (`AlertAckControl`).
 - **Outbound Alerting** (`Settings` → `Notifications`, admin-only): Slack/Teams/email/generic-webhook
   notifications for patch_now CVEs, critical compliance failures, and unacknowledged config diffs.

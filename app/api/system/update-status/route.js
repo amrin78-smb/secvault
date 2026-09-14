@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.108.0': [
+    "The evidence panel and the plain-English answer now cover Vulnerabilities, Compliance and Rule hygiene as well as the dashboard.",
+    "Rule hygiene states, above everything else, how many rules have no usage data at all — 164 on the current fleet. Those rules can never be judged unused, and are refused from cleanup exports rather than merely flagged.",
+    "Compliance now says per firewall how many checks could not be asked of it, separately from how many it failed. The two mean different things and only one counts against the score.",
+    "The Vulnerabilities sentence counts distinct CVEs, matching the tiles beneath it — a CVE on three firewalls is one CVE, not three.",
+    "None of these pages will report an all-clear while any part of the fleet went unmeasured.",
+  ],
   '2.107.0': [
     "Every headline number can now be asked how it knows. A small violet mark beside a figure opens an evidence panel showing the formula that produced it, the inputs that went in, and — the point of the whole thing — what could not be measured.",
     "The dashboard now opens with a plain-English sentence answering 'is anything wrong right now', above the tiles rather than instead of them.",

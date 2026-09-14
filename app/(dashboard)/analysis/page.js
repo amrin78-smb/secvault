@@ -6,6 +6,9 @@ import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import StatCard from '../../../components/ui/StatCard';
 import PageHeader from '../../../components/ui/PageHeader';
+import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { buildRuleHygieneAnswer } from '../../../lib/answers';
+import { ruleHygieneEvidence } from '../../../lib/evidence';
 import { computeRiskScoreFromCounts } from '../../../lib/engines/riskScore';
 import {
   BAND_BADGE_COLOR,
@@ -47,8 +50,32 @@ async function getFleetRows(dbPool) {
   return result.rows;
 }
 
+// ⛔ THE TRI-STATE, COUNTED. hit_count is a real count, a MEASURED zero, or
+// NULL meaning the vendor/transport cannot report it at all (Fortinet over
+// SSH, Palo Alto over SSH, Sangfor). Only a MEASURED zero can produce an
+// `unused` finding, so the NULL bucket is the honest limit on this page's
+// most actionable output — and the one number every competing product
+// renders as a zero before recommending you delete those rules.
+//
+// Read-time only: one grouped count, no schema change, no new job.
+async function getHitCountCoverage(dbPool) {
+  const { rows } = await dbPool.query(
+    `SELECT COUNT(*)::int                                        AS total,
+            COUNT(*) FILTER (WHERE fr.hit_count IS NULL)::int     AS not_measured,
+            COUNT(*) FILTER (WHERE fr.hit_count = 0)::int         AS measured_zero,
+            COUNT(*) FILTER (WHERE fr.hit_count > 0)::int         AS with_hits
+       FROM firewall_rules fr
+       JOIN devices d ON d.id = fr.device_id
+      WHERE d.active = true`
+  );
+  return rows[0] || { total: 0, not_measured: 0, measured_zero: 0, with_hits: 0 };
+}
+
 export default async function FleetAnalysisPage() {
-  const rawRows = await getFleetRows(pool);
+  const [rawRows, hitCoverage] = await Promise.all([
+    getFleetRows(pool),
+    getHitCountCoverage(pool),
+  ]);
   const rows = rawRows.map((r) => ({ ...r, risk: computeRiskScoreFromCounts(r) }));
 
   const totals = rows.reduce(
@@ -62,12 +89,19 @@ export default async function FleetAnalysisPage() {
     { critical: 0, high: 0, medium: 0, info: 0, total: 0 }
   );
 
+  const answer = buildRuleHygieneAnswer(totals, hitCoverage);
+  const evidence = ruleHygieneEvidence(totals, hitCoverage);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         title="Rule hygiene — Fleet"
         subtitle="Rule findings across every active firewall. Open a firewall to see its cleanup, optimization and reorder detail."
       />
+
+      {/* ⛔ The coverage line under this sentence is the page's most important
+          claim: rules with no usage data can never be judged unused. */}
+      <AnswerHeader answer={answer} evidence={evidence} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
         {/* Tile accents are GRAPHICS (a 4px left border), so they take the raw
@@ -77,7 +111,12 @@ export default async function FleetAnalysisPage() {
         <StatCard label="High" value={totals.high} color={totals.high > 0 ? SEVERITY_FILL.high : 'var(--text-muted)'} />
         <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? SEVERITY_FILL.medium : 'var(--text-muted)'} />
         <StatCard label="Info" value={totals.info} color={totals.info > 0 ? SEVERITY_FILL.info : 'var(--text-muted)'} />
-        <StatCard label="Total Findings" value={totals.total} color="var(--text-primary)" />
+        <StatCard
+          label="Total Findings"
+          value={totals.total}
+          color="var(--text-primary)"
+          evidence={evidence}
+        />
       </div>
 
       {rows.length === 0 ? (
