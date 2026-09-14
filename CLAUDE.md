@@ -151,6 +151,61 @@ query, a renderer, or an engine; sort with `NULLS LAST`.
 | `SecVault-Engine` | `node services/engine-worker.js` | None | Scheduled jobs (feeds, CVE match, config pull) |
 | `SecVault-Collector` | `node services/collector.js` | 514 UDP/TCP | Syslog listener (Phase 8a — BUILT 2026-09-08) |
 
+### TLS (v2.112.0)
+
+⛔ **`next start` CANNOT SERVE TLS** — there is no flag for it, in any version. So the
+`SecVault-App` service's NSSM `AppParameters` points at **`server.js`**, which wraps the same Next
+request handler in `https.createServer`. **Rollback is one command:**
+`nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"`.
+
+Three listeners, and the second is the non-obvious one:
+
+| port | what |
+|---|---|
+| 3010 | HTTPS — **the port is deliberately unchanged**, so every bookmark, ticket link and firewall rule still resolves |
+| 3010 | …and plaintext HTTP on the SAME port, answered with a 301 to https |
+| 3080 | plain HTTP, redirect only |
+
+⛔ **The same-port plaintext redirect is not a nicety.** A plaintext request into a TLS listener is
+not a redirect, it is a protocol failure — an old `http://host:3010` bookmark would get an
+unexplained connection error. A TLS handshake begins with byte `0x16`; `server.js` peeks the first
+byte and routes the connection to either the TLS server or a redirect server. ⛔ The `socket.unshift`
+is load-bearing: the byte has already been consumed, and without pushing it back every request loses
+its first character.
+
+⛔ **THREE transport states, never two** (`lib/tlsConfig.js`): `active` / `disabled` (no certs — how
+this product shipped for its whole life, not an error) / `failed` (certs configured, could not be
+loaded). **`failed` must never look like `disabled`** — the operator asked for TLS and is not getting
+it, and a reader concluding "we're encrypted" when they are not is the failed-read-as-a-fact rule at
+its most dangerous. It logs a banner at error level every start and is reported in Settings.
+
+⛔ **A broken certificate DEGRADES to HTTP rather than refusing to start.** On a firewall-management
+platform an outage means nobody can see the fleet, which has its own security cost. That is only
+safe BECAUSE `failed` is never silent — do not make it quiet.
+
+⛔ **`NEXTAUTH_URL` must follow the scheme.** NextAuth builds its callback from it; left on `http://`
+while the server speaks https, the cookie is issued for an origin the browser is not on and every
+sign-in silently bounces back to the login page with no error anywhere. The updater flips it, and
+`server.js` logs loudly if the two disagree.
+
+⛔ **The upgrade verifies and ROLLS BACK.** "Service Running" is not "app serving" — NSSM restarts a
+crashing process, so `sc.exe` reports Running while node crash-loops. `Update-SecVault.ps1` probes
+`https://127.0.0.1:<port>/api/health` after starting, and on no answer restores the previous
+`AppParameters` and `NEXTAUTH_URL`, clears the cert paths and restarts on plain HTTP.
+
+⛔ **Certificates are minted with OpenSSL, not `New-SelfSignedCertificate`** — on PS 5.1 the latter
+can only export PFX (.NET Framework has no PKCS#8 private-key export) and node is being handed PEM.
+Git for Windows is already a hard dependency and bundles OpenSSL; `installer/SecVault-Tls.ps1` is
+shared by both installer scripts so they cannot drift. ⛔ **SANs are mandatory** — browsers ignore the
+CN entirely — and an existing certificate is **never overwritten**, so an operator's real corporate
+certificate survives every upgrade.
+
+**Settings → Certificate** (`manage_settings`) shows subject/names/expiry and installs a replacement.
+⛔ It validates the pair with `X509Certificate.checkPrivateKey()` BEFORE writing: a mismatched
+certificate and key both parse perfectly and fail only at the next restart, weeks later, during an
+unrelated upgrade. It backs up the previous pair, and states that a service restart is required —
+node reads the certificate once, at startup.
+
 ### Stack
 
 | Layer | Technology |

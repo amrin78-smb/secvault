@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.112.0': [
+    "SecVault now serves HTTPS. The installer mints a self-signed certificate on upgrade, and the console keeps the same address — https://<server>:3010.",
+    "Old http:// bookmarks still work: a plaintext request on 3010 is detected and redirected to HTTPS, and port 3080 redirects too.",
+    "Settings → Certificate shows what certificate is being served, which names it covers and when it expires, and lets you install your own. The key is checked against the certificate before anything is written.",
+    "If the certificate cannot be loaded, SecVault keeps serving and says so loudly rather than going dark — but it never pretends to be encrypted.",
+    "The upgrade verifies the console actually answers over HTTPS and rolls itself back to plain HTTP if it does not.",
+  ],
   '2.111.1': [
     "MFA enrolment now shows a QR code to scan, with the setup key still displayed underneath for anyone enrolling on the same machine that is showing the QR.",
   ],

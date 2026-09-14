@@ -7,6 +7,7 @@ import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
+import TlsPanel from '../../../components/settings/TlsPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
@@ -27,6 +28,7 @@ const TABS = [
   { key: 'users', label: 'Users', requires: 'manage_users' },
   { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
   { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
+  { key: 'certificate', label: 'Certificate', requires: 'manage_settings' },
   { key: 'updates', label: 'Updates', requires: 'run_update' },
   { key: 'about', label: 'About' },
 ];
@@ -307,6 +309,8 @@ export default function SettingsPage() {
       )}
 
       {effectiveTab === 'security' && <SecurityPanel />}
+
+      {effectiveTab === 'certificate' && caps.manage_settings && <TlsPanel />}
 
       {effectiveTab === 'users' && <UsersPanel />}
 

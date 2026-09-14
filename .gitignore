@@ -49,3 +49,11 @@ installer/dependencies/*
 /bump.js
 /audit*.js
 /probe-*.js
+
+# ⛔ TLS material (v2.112.0). certs/secvault.key is the server's private key —
+# committing it would publish the credential that protects every session, in a
+# repository, permanently, for every installation that ever pulls this branch.
+# The installer mints these per machine; they are never portable and never
+# belong in git. The .bak.* files are the timestamped backups the Settings ->
+# Certificate page writes before replacing a pair.
+certs/

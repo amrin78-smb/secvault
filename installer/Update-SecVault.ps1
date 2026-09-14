@@ -161,6 +161,10 @@ Write-Log '=================================================='
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+# Shared TLS helpers, used by both installer scripts (one copy, two callers).
+$tlsHelpers = Join-Path $PSScriptRoot 'SecVault-Tls.ps1'
+if (Test-Path -LiteralPath $tlsHelpers) { . $tlsHelpers }
+
 # The in-app updater (POST /api/system/update) now sometimes launches this
 # script via a Windows Scheduled Task running as SYSTEM, and SYSTEM has never
 # run git in this repo's working copy before (only whichever interactive
@@ -725,6 +729,80 @@ if ($buildSucceeded -and $migrateSucceeded) {
 # service against a failed migration or a failed build is worse than leaving
 # it stopped.
 # -----------------------------------------------------------------------
+# -----------------------------------------------------------------------
+# TLS (v2.112.0)
+#
+# ⛔ ORDERED BEFORE THE APP STARTS AND AFTER THE BUILD, deliberately. The
+# certificate must exist and .env.local must agree with it BEFORE node reads
+# either, and none of this is worth doing if the build failed.
+#
+# ⛔ EVERY FAILURE HERE LEAVES THE INSTALL ON PLAIN HTTP, UNCHANGED. TLS is an
+# upgrade to a working console; a half-applied TLS switch would be an outage on
+# a firewall-management platform, which has its own security cost. Nothing is
+# flipped until the certificate is actually on disk.
+# -----------------------------------------------------------------------
+$tlsEnabled = $false
+$previousAppParameters = $null
+$previousNextAuthUrl = $null
+
+if ($buildSucceeded -and $migrateSucceeded) {
+    Invoke-Step 'Enable TLS (certificate + service entry point)' {
+        try {
+            if (-not (Get-Command New-SecVaultCertificate -ErrorAction SilentlyContinue)) {
+                Write-Log '  [WARN] installer\SecVault-Tls.ps1 not found -- leaving the console on plain HTTP.'
+                return
+            }
+
+            $envLocal = Join-Path $repoRoot '.env.local'
+            if (-not (Test-Path -LiteralPath $envLocal)) {
+                Write-Log '  [WARN] .env.local not found -- leaving the console on plain HTTP.'
+                return
+            }
+
+            $serverIp = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'SERVER_IP'
+            $certDir  = Join-Path $repoRoot 'certs'
+            $cert = New-SecVaultCertificate -CertDir $certDir -ServerIp $serverIp -LogFile $LogFile
+
+            if (-not $cert.Success) {
+                Write-Log "  [WARN] $($cert.Message) -- leaving the console on plain HTTP."
+                return
+            }
+            Write-Log "  $($cert.Message)"
+
+            # ⛔ Record what we are changing BEFORE changing it. These two values
+            # are what the rollback after the service start restores.
+            $previousAppParameters = & $NssmExe get SecVault-App AppParameters
+            $previousNextAuthUrl = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL'
+            $script:previousAppParameters = $previousAppParameters
+            $script:previousNextAuthUrl = $previousNextAuthUrl
+
+            Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_CERT_PATH' -Value $cert.CertPath | Out-Null
+            Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_KEY_PATH'  -Value $cert.KeyPath  | Out-Null
+            Set-SecVaultEnvValue -EnvPath $envLocal -Key 'HTTP_REDIRECT_PORT' -Value '3080' | Out-Null
+
+            # ⛔ NEXTAUTH_URL MUST FOLLOW THE SCHEME. NextAuth builds its callback
+            # from this; left on http:// while the server speaks https, the cookie
+            # is issued for an origin the browser is not on and every sign-in
+            # silently bounces back to the login page with no error anywhere.
+            if ($previousNextAuthUrl -and $previousNextAuthUrl -like 'http://*') {
+                $httpsUrl = $previousNextAuthUrl -replace '^http://', 'https://'
+                Set-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL' -Value $httpsUrl | Out-Null
+                Write-Log "  NEXTAUTH_URL updated to $httpsUrl"
+            }
+
+            # ⛔ next start CANNOT serve TLS -- there is no flag for it in any
+            # version -- so the service entry point moves to server.js, which wraps
+            # the same Next handler in https.createServer. Rollback is one command:
+            #   nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"
+            & $NssmExe set SecVault-App AppParameters 'server.js' | Out-Null
+            Write-Log '  SecVault-App entry point set to server.js (was: ' + $previousAppParameters + ')'
+
+            $script:tlsEnabled = $true
+        } catch {
+            Write-Log "  [WARN] TLS setup failed: $($_.Exception.Message) -- leaving the console on plain HTTP."
+        }
+    }
+}
 $appStartSkipped = $false
 if ($buildSucceeded -and $migrateSucceeded) {
     Invoke-Step 'sc.exe start SecVault-App' {
@@ -742,6 +820,58 @@ if ($buildSucceeded -and $migrateSucceeded) {
     Write-Log "  [SKIP] sc.exe start SecVault-App -- $skipReason. Refusing to (re)start the app against a broken/stale build or an incomplete schema. Fix the error, then either re-run this script or start the service manually: sc.exe start SecVault-App"
 }
 
+
+# -----------------------------------------------------------------------
+# ⛔ VERIFY THE CONSOLE ACTUALLY ANSWERS, AND ROLL BACK IF IT DOES NOT.
+#
+# "Service Running" is NOT "app serving": NSSM restarts a crashing process, so
+# sc.exe reports Running while node crash-loops forever. Only an HTTP response
+# proves the console came back. This is the safety net for the entry-point
+# change above -- without it, a bad server.js would leave a firewall-management
+# console dark with a green update log.
+# -----------------------------------------------------------------------
+if ($tlsEnabled -and -not $appStartSkipped) {
+    Invoke-Step 'Verify the console responds over HTTPS' {
+        $port = 3010
+        $envLocal = Join-Path $repoRoot '.env.local'
+        $configured = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'APP_PORT'
+        if ($configured) {
+            $parsed = 0
+            if ([int]::TryParse($configured, [ref]$parsed) -and $parsed -gt 0) { $port = $parsed }
+        }
+
+        if (Test-SecVaultResponding -Port $port -UseHttps -TimeoutSeconds 90) {
+            Write-Log "  Console is answering on https://<server>:$port"
+        } else {
+            Write-Log '  [ERROR] The console did NOT answer over HTTPS within 90s. Rolling back to plain HTTP.'
+            try {
+                if ($script:previousAppParameters) {
+                    & $NssmExe set SecVault-App AppParameters $script:previousAppParameters | Out-Null
+                }
+                Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_CERT_PATH' -Value '' | Out-Null
+                Set-SecVaultEnvValue -EnvPath $envLocal -Key 'TLS_KEY_PATH'  -Value '' | Out-Null
+                if ($script:previousNextAuthUrl) {
+                    Set-SecVaultEnvValue -EnvPath $envLocal -Key 'NEXTAUTH_URL' -Value $script:previousNextAuthUrl | Out-Null
+                }
+                $out = sc.exe stop SecVault-App
+                Add-Content -Path $LogFile -Value ($out -join "`n")
+                Start-Sleep -Seconds 4
+                $out = sc.exe start SecVault-App
+                Add-Content -Path $LogFile -Value ($out -join "`n")
+
+                if (Test-SecVaultResponding -Port $port -TimeoutSeconds 90) {
+                    Write-Log '  Rolled back. The console is answering over plain HTTP again; TLS is OFF.'
+                } else {
+                    Write-Log '  [ERROR] The console is not answering after rollback either. Check logs\app-error.log.'
+                }
+                $script:hadFailure = $true
+            } catch {
+                Write-Log "  [ERROR] Rollback failed: $($_.Exception.Message)"
+                $script:hadFailure = $true
+            }
+        }
+    }
+}
 Write-Log '=================================================='
 if ($script:hadFailure) {
     # ⛔ Bug fixed 2026-07-19: this line used to unconditionally claim "Both

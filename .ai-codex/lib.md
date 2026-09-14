@@ -149,6 +149,22 @@ failed 6-digit attempt runs ten compares and the form becomes a CPU-exhaustion t
 ⛔ Guarded by `require.main === module` — without it, merely requiring the file runs `main()` and
 sets a non-zero exit code, which is exactly what `tests/moduleLoad.test.js` caught.
 
+## lib/tlsConfig.js
+
+(v2.112.0) `resolveTlsConfig(env, fsImpl)` -> THREE states: `active` / `disabled` / `failed`.
+⛔ `failed` (certs configured but unreadable, or half-configured — one path set alone) must
+never be reported as `disabled`. Also `describeTlsStatus`, `nextAuthUrlMismatch` (catches the
+scheme mismatch that breaks sign-in silently) and `portFrom` (junk never yields NaN or 0 — a
+port of 0 binds a RANDOM port and presents as "started but unreachable").
+
+## lib/certValidate.js
+
+(v2.112.0) `validateCertificatePair(certPem, keyPem, now)` and `describeCertificate(certPem)`.
+⛔ The pair check uses `X509Certificate.checkPrivateKey()` — a mismatched certificate and key
+both parse fine and fail only at the TLS handshake, i.e. at the next restart. Refuses an
+expired certificate and one with no SANs (browsers ignore the CN). ⛔ `describeCertificate` is
+separate because `validateCertificatePair` refuses a missing key BEFORE parsing anything.
+
 ## lib/rbac.js
 
 ⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.
