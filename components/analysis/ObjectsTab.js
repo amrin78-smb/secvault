@@ -224,7 +224,7 @@ export default async function ObjectsTab({ deviceId, searchParams }) {
 
   if (objects.length === 0) {
     return (
-      <EmptyState message="No object catalog collected for this device yet — this vendor's adapter may not support object collection yet, or a collect hasn't run since it was added. See CLAUDE.md's Network Object Catalog section for per-vendor status." />
+      <EmptyState message="No object catalog collected for this device yet — object collection is not supported for every vendor, or no collection has run since this device was added." />
     );
   }
 

@@ -565,7 +565,7 @@ const releaseNotes = {
   '2.50.3': [
     'Device metric poll and VPN session poll are now mutually exclusive — since v2.50.0 the metric poll opens real SSH/REST management sessions, and at the default 15/30-minute intervals both jobs hit the whole fleet at :00 and :30, contending for the same admin sessions.',
     'Corrected the metric poll\'s summary log, which still described every active device as "SNMP-enabled" and every skip as "no SNMP capability".',
-    'Documented getPerformanceMetrics() and the changed job gating in CLAUDE.md, .env.local.example, lib.md and connectors.md.',
+    'Documented the new device-metric collection and the changed job scheduling.',
   ],
   '2.50.2': [
     'IMPORTANT FIX: a single failed licence or disk read could wipe that firewall’s stored licence data and report success, making the Lifecycle page fall back to "not collected". A failure now leaves the previous values untouched and is recorded as an error.',
@@ -1044,7 +1044,7 @@ const releaseNotes = {
     'Compliance: clicking a failed check now opens a dedicated page instead of scrolling to a shared table on the same page.',
     'Fixed the Alerts page and notification bell counting alerts for decommissioned devices forever, and a rule-analysis engine bug that could leave findings in a corrupted partial state if a database error happened mid-save.',
     'Fixed the Objects tab occasionally showing the wrong explanation next to a flagged object, and a bug where an address object and a service object sharing the same name (e.g. both named "DNS") could hide a real unused-object finding.',
-    'A dozen smaller correctness fixes across this week\'s compliance and object-catalog work, found in a full review pass — see CLAUDE.md for details.',
+    'A dozen smaller correctness fixes across this week\'s compliance and object-catalog work, found in a full review pass.',
   ],
   '2.8.0': [
     'Added an Objects tab on each device\'s Rule Analysis page: unused and duplicate address/service objects, collected from Fortinet, Palo Alto, Check Point, Cisco ASA, and Forcepoint (Sangfor intentionally not included — no reliable basis to parse its object syntax yet).',

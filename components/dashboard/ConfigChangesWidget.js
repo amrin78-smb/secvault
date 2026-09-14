@@ -36,7 +36,7 @@ async function getConfigChanges(dbPool, days) {
             -- structured added/removed/modified payload" indistinguishable from
             -- "this change added, removed and modified exactly nothing" — a
             -- fabricated zero standing in for an absent read, the exact class
-            -- CLAUDE.md names as a Critical Rule. NULL now means the key was
+            -- this codebase treats as a Critical Rule. NULL now means the key was
             -- absent or was not an array, and the render below reports that
             -- separately instead of summing it in as zero.
             --

@@ -263,7 +263,7 @@ export default async function DeviceVpnPage({ params, searchParams }) {
       {isOverview && (sessionHistory.length > 0 ? (
         <VpnSessionTrendChart points={sessionHistory} />
       ) : (
-        <EmptyState message="No VPN session-count polling data yet. Session polling covers Fortinet, Palo Alto (GlobalProtect), and Cisco ASA — see CLAUDE.md's VPN Session Polling notes." />
+        <EmptyState message="No VPN session-count polling data yet. Session polling covers Fortinet, Palo Alto (GlobalProtect) and Cisco ASA; other vendors are not yet supported." />
       ))}
     </div>
   );
