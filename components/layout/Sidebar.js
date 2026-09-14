@@ -18,6 +18,7 @@ import {
   IconLifecycle,
   IconDocument,
   IconAlertTriangle,
+  IconGrid,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -86,6 +87,7 @@ const NAV_GROUPS = [
   { group: 'Risk', items: [
     { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
     { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
+    { href: '/segmentation', label: 'Segmentation', Icon: IconGrid },
     { href: '/analysis', label: 'Rule hygiene', Icon: IconChart },
     { href: '/compliance', label: 'Compliance', Icon: IconSearch },
   ] },

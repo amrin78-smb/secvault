@@ -1009,6 +1009,48 @@ per-session array; Fortinet returns a count with no per-user detail and the othe
 VPN capability wired. Nothing in the engine assumes otherwise — but a UI must not present it as
 fleet-wide VPN history.
 
+## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
+
+Declared zone-to-zone policy, tested TWO WAYS: **CAN** (the rulebase) and **DID** (the traffic).
+`lib/engines/segmentation.js` is pure (zone matching + verdicts, no pool);
+`lib/engines/segmentationData.js` is the plumbing. The split is what makes the judgement testable.
+
+⛔ **WHAT "CAN" CLAIMS, PRECISELY:** at least one ENABLED allow rule matches the zone pair. It does
+NOT claim a packet would pass — addresses, services, profiles and rule order all still apply and are
+deliberately NOT modelled. The UI says "a rule permits this", never "this is reachable". Overclaiming
+here would be worse than useless: an operator who trusts "reachable" and finds it was a guess stops
+trusting the honest answers too.
+
+⛔ **`any` IS A WILDCARD** (114 occurrences on the live fleet) and an EMPTY zone list is
+unconstrained. Matching either literally would UNDERSTATE reachability — and on a segmentation
+report that is the dangerous direction: a hole reported as closed is a false assurance, not a missed
+finding.
+
+⛔ **"DID" IS TRI-STATE AND `null` WINS OVER `false`.** If even ONE permitting rule cannot report
+usage, the whole pair is UNKNOWN — that one rule might be the one carrying the traffic. Fortinet over
+SSH reports no hit counts at all (0 of 180 rules live), so this is the common case, not a corner.
+Evidence comes from `ruleHitCorrelation.js` UNCHANGED (it already separates `measured-zero` from
+`no-coverage`); two implementations of that distinction would eventually disagree and the wrong one
+would be recommending rule deletions.
+
+⛔ **NO RULES COLLECTED IS `unknown`, NOT "blocked".** Otherwise a fleet whose rulesets were never
+pulled reports every deny-intent as satisfied — a perfect segmentation score computed entirely from
+missing data.
+
+⛔ **Zones are DERIVED from the rules**, never hand-entered: a typed axis drifts the moment someone
+renames a zone, and every cell referencing the old name would silently evaluate against nothing.
+
+⛔ **No stored verdict column.** A verdict is a function of the current rulebase and traffic window;
+storing one lets it go stale and be read as fact.
+
+Verdicts (`VERDICTS` in segmentation.js): `violation_active` / `violation_permitted` /
+`violation_unverified` / `ok_blocked` / `ok_in_use` / `unused_permission` / `ok_unverified` /
+`expected_allow_missing` / `unknown`. ⛔ `violation_permitted` and `violation_unverified` must never
+share a colour — the first is a safe deletion candidate, the second must be assumed live.
+
+Mutating routes are gated on `OPERATE`, not `MANAGE_DEVICES`: declaring intent changes no device, no
+rule and no score. Pinned by `tests/segmentation.test.js` (28 cases).
+
 ## Role-Based Access Control
 
 **THREE roles** (v2.110.0, was two): `super_admin`, `admin`, `operator`. `viewer` is retired and

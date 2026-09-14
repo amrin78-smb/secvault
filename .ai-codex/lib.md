@@ -165,6 +165,25 @@ both parse fine and fail only at the TLS handshake, i.e. at the next restart. Re
 expired certificate and one with no SANs (browsers ignore the CN). ⛔ `describeCertificate` is
 separate because `validateCertificatePair` refuses a missing key BEFORE parsing anything.
 
+## lib/engines/segmentation.js
+
+(v2.113.0) PURE. `evaluateIntent(intent, rules, ctx)` -> a verdict; `summarise`, `zoneListMatches`,
+`trafficEvidence`, `isAllowAction`/`isDenyAction`, `VERDICTS`.
+⛔ `any` and an EMPTY zone list are both WILDCARDS — matching literally understates reachability,
+which on a segmentation report is a false assurance. ⛔ `trafficEvidence` is tri-state and `null`
+WINS OVER `false`: one unmeasured permitting rule makes the pair UNKNOWN, because that rule might
+be the one carrying the traffic. ⛔ CAN means "an enabled allow rule matches", NOT "a packet would
+pass" — addresses/services/rule order are deliberately not modelled.
+
+## lib/engines/segmentationData.js
+
+(v2.113.0) The pool half: `listFleetZones` (derived from rules, never typed), `listIntents`,
+`loadFleetRulesWithEvidence`, `evaluateSegmentation`, `upsertIntent`, `deleteIntent`.
+⛔ Traffic evidence is NOT re-derived — it reuses `ruleHitCorrelation.js` unchanged, because two
+implementations of measured-zero vs no-coverage would eventually disagree and the wrong one would
+be recommending rule deletions. ⛔ Returns `rulesCollected:false` so an uncollected fleet reports
+UNKNOWN instead of a perfect score built from missing data.
+
 ## lib/rbac.js
 
 ⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.

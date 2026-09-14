@@ -173,3 +173,7 @@ GRANT SELECT ON TABLE vpn_sessions TO nocvault_readonly;
 -- "who can read what", per CLAUDE.md's per-table (never ON ALL TABLES) rule.
 GRANT SELECT ON TABLE advisories TO claude_readonly;
 GRANT SELECT ON TABLE advisories TO nocvault_readonly;
+
+-- Segmentation intent (v2.113.0). Declared policy only, no secrets.
+GRANT SELECT ON TABLE segmentation_intents TO claude_readonly;
+GRANT SELECT ON TABLE segmentation_intents TO nocvault_readonly;

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.113.0': [
+    "New Segmentation page. Declare what must not connect to what, and SecVault checks it two ways: whether a rule permits it, and whether any traffic actually used it.",
+    "The valuable answer is the one nothing else produces — a path that is permitted and has carried no traffic at all. A standing hole with no demonstrated purpose, and the safest kind to close.",
+    "A path permitted only by rules that cannot report usage is shown as unmeasurable, never as unused. Recommending the removal of a rule that may be carrying production traffic is the mistake this deliberately refuses to make.",
+    "Zones are read from your actual rules, so the matrix cannot drift from the firewalls.",
+    "An empty matrix reports as unknown, not as a pass — nobody has said what should be segmented yet.",
+  ],
   '2.112.1': [
     "Certificates can now be uploaded as .pfx/.p12 (password-protected, containing both halves), or .cer/.crt/.der alongside a key file, as well as pasted PEM — which is what a Microsoft CA and the Windows certificate store actually produce.",
     "Fixed the upgrade failing to create its self-signed certificate: OpenSSL writes its progress to the error stream, which PowerShell was turning into a failure even though the command succeeded.",

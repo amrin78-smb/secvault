@@ -81,6 +81,41 @@ CREATE TABLE IF NOT EXISTS user_mfa (
 -- table creation only and silently leaves an already-deployed server on the old
 -- shape — this file documents that rule and it applies to itself.
 ALTER TABLE users ALTER COLUMN role SET DEFAULT 'operator';
+
+-- ─────────────────────────────────────────
+-- SEGMENTATION INTENT (Phase 3, v2.113.0)
+-- ─────────────────────────────────────────
+
+-- What the operator SAYS should be true between two zones. The declared half
+-- of the matrix; the measured half is computed at read time from
+-- firewall_rules + the syslog rollups by lib/engines/segmentation.js.
+--
+-- ⛔ FLEET-LEVEL, NOT PER-DEVICE. zone_classifications is (device_id, zone_name)
+-- because a zone name means something different on each firewall. An intent is
+-- a statement about the NETWORK ("branch must not reach cardholder"), so it is
+-- keyed on the zone names alone and evaluated against every device that has a
+-- rule touching them.
+--
+-- ⛔ There is deliberately no stored VERDICT column. A verdict is a function of
+-- the current rulebase and the current traffic window; storing one would let it
+-- go stale and be read as fact — the same reason rule analysis is recomputed
+-- rather than cached.
+CREATE TABLE IF NOT EXISTS segmentation_intents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_zone TEXT NOT NULL,
+  dest_zone TEXT NOT NULL,
+  -- 'deny' = must not be able to reach; 'allow' = is expected to work.
+  -- ⛔ Both directions matter: an allow-intent that nothing permits is a broken
+  -- expectation, and that is a finding too.
+  expectation TEXT NOT NULL DEFAULT 'deny',
+  note TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (source_zone, dest_zone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_segmentation_intents_src ON segmentation_intents(source_zone);
 -- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT
 -- ─────────────────────────────────────────

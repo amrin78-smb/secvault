@@ -351,3 +351,7 @@ established tunnels. Without that sentence the "Tunnels down" tile reads as an a
 firewalls whose down-ness SecVault structurally cannot see (live: 141 of 151 tunnels).
 ⛔ Coverage gaps render as a hueless `--unmeasured` chip with the reason in `title`; Up/Down cells
 render `NotMeasured`, never `0`.
+
+## segmentation/
+
+(c) SegmentationBoard  — the declared matrix plus the findings it produces (v2.113.0). ⛔ The FINDINGS LIST comes first and the matrix second: a grid is how you EDIT policy, a ranked list is how you ACT on it. ⛔ `violation_permitted` (safe to close) and `violation_unverified` (assume live) must never share a colour, and the two unmeasurable verdicts carry NO HUE plus `--hatch`. ⛔ Coverage is stated under the matrix, never as a footnote — a matrix whose verdicts rest on rules that cannot report usage is not the same as one that can.
