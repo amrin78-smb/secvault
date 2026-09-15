@@ -18,6 +18,7 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/gotchas.md`        — footguns and redaction rules
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 - `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
+- `.ai-codex/application-view-plan.md` — PROPOSAL ONLY (not built): the application-centric view
 
 ### Maintaining the index — MANDATORY
 

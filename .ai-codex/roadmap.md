@@ -299,3 +299,31 @@ Still deferred, deliberately:
 - **A render/page-load smoke harness.** There is still none. v2.120.0 shipped a blank `/reports`
   with every test passing and a clean build; the gap is covered today only by shape guards on what
   crosses into client components.
+
+## Application-centric view — PROPOSED, not built (2026-09-15)
+
+Full proposal: `.ai-codex/application-view-plan.md`. The one capability where both Tufin
+(SecureApp) and AlgoSec (AppViz/BusinessFlow) ship a real product and SecVault has nothing.
+
+The thesis, and the reason it is worth building here: **their application map is DECLARED and never
+re-verified** — accurate the day it is typed, decaying silently after, with no statement of what it
+could not check. Ours would be a declaration re-evaluated against the collected rulebase on every
+pull. That is `/segmentation`'s pattern moved from zone granularity to flow granularity, so most of
+it is assembly: `objectResolver.queryAccessPath()` already takes exactly the (src, dst, proto, port)
+tuple a flow is, and is already reused unchanged by `topology.js` and `exposure.js`.
+
+⛔ **Three hard limits established by measurement, not assumption** (detail in section 4 of the
+plan):
+1. **No syslog rollup carries both flow endpoints** — every one is source-keyed or
+   destination-keyed. So "did this FLOW carry traffic" is unanswerable today; only "did the RULE
+   permitting it see traffic" is, and Phase 1 must use the weaker words. `syslog_events` is refused
+   as a fallback for the same reasons VPN traffic attribution refuses it.
+2. **`syslog_rule_hits_hourly.source_ip` is the FIREWALL, not the session source** — 20 distinct
+   values over 7 days against `syslog_talker_hourly`'s 77,416. Nothing consuming it today is wrong;
+   the name is the trap. Documented in `lib/schema.sql` in the same commit as this plan.
+3. **Topology collection covers 2 of 6 vendors**, so a flow crossing the others is UNVERIFIED —
+   ⛔ never "broken".
+
+Recommendation: **Phase 1 only** (declared applications + rulebase verification + orphan-rule
+coverage), then reassess against the live fleet. Phase 3 (a `syslog_flow_hourly` rollup) is a
+storage decision dressed as a feature and must be argued on its own measured cardinality.

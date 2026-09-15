@@ -1713,6 +1713,23 @@ CREATE TABLE IF NOT EXISTS syslog_rule_hits_hourly (
   id             BIGSERIAL PRIMARY KEY,
   bucket_hour    TIMESTAMPTZ NOT NULL,
   device_id      UUID REFERENCES devices(id) ON DELETE CASCADE,
+  -- ⛔ source_ip HERE IS THE FIREWALL THAT SENT THE LOG, NOT THE SESSION SOURCE.
+  --
+  -- rollup_src (lib/syslog/rollups.js) carries BOTH columns and they are
+  -- different facts: `source_ip` is the syslog frame's sender, `src_ip` is the
+  -- parsed traffic source. TALKER_INSERT groups by src_ip; RULE_INSERT groups
+  -- by source_ip. Measured over 7 days on the live fleet:
+  --
+  --     syslog_talker_hourly      77,416 distinct src_ip
+  --     syslog_rule_hits_hourly       20 distinct source_ip  (~one per device)
+  --
+  -- So this column is effectively redundant with device_id, and the name is the
+  -- trap: it reads like the host that used the rule. Nothing consuming this
+  -- table today is wrong -- ruleHitCorrelation.js groups by RULE identity, so
+  -- hit totals are correct -- but any future feature asking "which hosts used
+  -- this rule" will find 20 gateway addresses and believe them. There is no
+  -- per-session source in this rollup, and no rollup carries both flow
+  -- endpoints at all (see .ai-codex/application-view-plan.md section 4).
   source_ip      INET NOT NULL,
   vendor         TEXT,
   rule_id        TEXT,
