@@ -220,7 +220,42 @@ describe('the catalogue is the single source of truth', () => {
     // It stops an operator being shown a report they cannot fetch. It does not
     // stop them fetching it — the route must call can() itself.
     assert.equal(visibleReports({}).length, 0, 'no capabilities, nothing listed');
-    assert.equal(visibleReports({ operate: true }).length, REPORTS.length);
     assert.equal(visibleReports(null).length, 0, 'a null capability set grants nothing');
+
+    // ⛔ NOT "operate sees everything" any more, and the change is the point.
+    // This asserted `visibleReports({operate:true}).length === REPORTS.length`,
+    // which was true only while every report carried the same capability. The
+    // VPN Access Review names individual people, their source countries and
+    // their connection times, so it carries `view_identity` — and an equality
+    // against the total would have gone on passing the moment someone dropped
+    // that report back to `operate`, quietly re-exposing it to every role.
+    // Assert the RELATIONSHIP instead.
+    const operateOnly = visibleReports({ operate: true }).map((r) => r.id);
+    const identityToo = visibleReports({ operate: true, view_identity: true }).map((r) => r.id);
+
+    const gated = REPORTS.filter((r) => r.capability !== 'operate');
+    assert.ok(gated.length > 0, 'no report is gated above operate — has the VPN review lost its guard?');
+    for (const r of gated) {
+      assert.equal(operateOnly.includes(r.id), false,
+        `${r.id} requires ${r.capability} but an operate-only session can see it`);
+    }
+    assert.equal(identityToo.length, REPORTS.length,
+      'a session holding every capability must still see the whole catalogue');
+    assert.equal(operateOnly.length, REPORTS.length - gated.length);
+  });
+
+  it('⛔ the VPN review specifically is not reachable on operate alone', () => {
+    // Named by id rather than by "whatever is gated", so deleting the guard
+    // fails here even if some other report happens to be gated that day.
+    const vpn = REPORTS.find((r) => r.id === 'vpn-access-review');
+    assert.ok(vpn, 'the VPN Access Review is not registered');
+    assert.equal(vpn.capability, 'view_identity',
+      'this report names individual people; operate is every role in the product');
+    assert.equal(
+      visibleReports({ operate: true }).some((r) => r.id === 'vpn-access-review'), false
+    );
+    assert.ok(
+      visibleReports({ operate: true, view_identity: true }).some((r) => r.id === 'vpn-access-review')
+    );
   });
 });

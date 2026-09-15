@@ -10,6 +10,10 @@ import {
   IconShield,
   IconDocument,
   IconReport,
+  IconTopology,
+  IconLifecycle,
+  IconClock,
+  IconUser,
 } from '../icons';
 
 // The Reports page: a catalogue rail on the left, the selected report on the
@@ -47,6 +51,10 @@ const GLYPHS = {
   IconShield,
   IconDocument,
   IconReport,
+  IconTopology,
+  IconLifecycle,
+  IconClock,
+  IconUser,
 };
 
 const SCOPE_LABEL = {

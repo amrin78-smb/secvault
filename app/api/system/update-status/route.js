@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.123.0': [
+    'Four new reports: Segmentation Posture, Lifecycle & Support, Configuration Change Audit and VPN Access Review — nine in total on the Reports page.',
+    'Segmentation Posture checks every declared boundary two ways — whether a rule permits it, and whether traffic was actually recorded — and reports a boundary it cannot measure as unverified rather than clean.',
+    'Lifecycle & Support distinguishes a perpetual licence from one whose expiry could not be read, because treating an unreadable date as fine is how a support contract lapses.',
+    'The Change Audit counts firewalls it could not collect from separately, so “no changes this month” is never printed over a collection outage.',
+    'The VPN Access Review requires the identity permission, and now states how far back the session records actually go — a 90-day review over five days of history no longer reads as ninety.',
+  ],
   '2.122.0': [
     'The Compliance Report can now be produced for a single standard — PCI DSS, ISO 27001, CIS v8, NIST or SANS — from a dropdown on the Reports page.',
     'A single-standard report states how much of the check library that standard covers, because narrowing changes the denominator: a PCI score and an overall score are both right and are answers to different questions.',

@@ -2036,3 +2036,48 @@ record does not exist), each split into a `buildXData` / `renderXPdf` pair so th
 testable against a stub pool: `executiveSummary.js` (R1), `ruleHygiene.js` (R3),
 `vulnerabilityPosture.js` (R5). `lib/engines/complianceReport.js` and
 `lib/engines/ruleChangeRequestReport.js` predate the platform and are registered from where they are.
+
+### The Phase D builders (added 2026-09-15, v2.123.0)
+
+Four more, same contract as above (`generateXPdf(pool, options) -> Promise<Buffer|null>`,
+`buildXData`/`renderXPdf` split, chassis-only drawing, engines reused UNCHANGED — none of them
+re-implements a verdict, a duration or a status threshold).
+
+`segmentationPosture.js` (R6) — declared zone-to-zone boundaries checked two ways. Reuses
+`segmentationData.evaluateSegmentation` + `segmentation.summarise` so the PDF cannot disagree with
+the on-screen board. ⛔ Colours the three violations `active > unverified > permitted`, matching
+`ACTION_ORDER` rather than the board's old tints — which were ranked backwards and were corrected
+in the same release (see CLAUDE.md's Segmentation Intent section). ⛔ `deviceId` narrows WHICH PAIRS
+ARE LISTED, never how one was decided: segmentation is an estate-wide judgement and the document
+says so, so a narrowed copy cannot be mistaken for the whole policy.
+
+`fleetLifecycle.js` (R7) — renewal planning. ⛔ Derives per-vendor capability from the ADAPTER
+REGISTRY (`typeof adapter.getX === 'function'`, nothing connected, nothing called) rather than from
+a hardcoded vendor matrix, because CLAUDE.md's prose on Fortinet coverage has now been wrong twice.
+⛔ Expiry is FOUR states: a date, perpetual (`expires_raw = 'Never'`), unknown, and `not_licensed`
+(FortiOS `'n/a'`, 44 of 305 live rows) which is excluded from the renewal table and counted
+separately. ⛔ "No licence rows" is split into `not_supported` (a product limit, hueless) vs
+`not_collected` (the device can answer and we have nothing — a failure to chase); identical-looking
+in an empty table, completely different owners.
+
+`changeAudit.js` (R8) — what changed, when, and whether anyone reviewed it. ⛔ **Sanitises diff
+paths at EXTRACTION**, using `configDiff.js`'s own `PATH_SHAPE_VIOLATION` shape test: a live PAN-OS
+`config_diffs` row can carry ~10 KB of raw brace-grammar config *in the path field* (a parser
+mis-segmentation `configDiff.js` already documents), which is a config excerpt wearing a key's
+clothes. That file names THREE independent render surfaces that each needed fixing; this report was
+the FOURTH. Such an entry is reported as **corrupted, never as a credential field** — labelling it
+one because the blob happens to contain `phash` would be a confident false claim. ⛔ Separates
+"collected, and nothing changed" from "we did not successfully collect" and counts the second;
+silence on a change-audit reads as calm. Deliberately does NOT use `finding_acknowledgements` (that
+is R3's rule-hygiene review workflow, a different question) or `change_summary` (a cached string
+that can be stale or oversized; counts are recomputed from the payload).
+
+`vpnAccessReview.js` (R9) — ⛔ the only entry carrying `VIEW_IDENTITY`; it names individual people,
+their source countries and their connection times. ⛔ **States how deep the session record actually
+is, directly under the review window on the cover** — `vpn_sessions` began 2026-09-10 and ages on
+`VPN_SESSION_RETENTION_DAYS`, so a 365-day review can run over five days of data; the cover
+previously asserted "Session history covers <window start> to now" above 411 distinct users.
+`historyCoversWindow` is TRI-STATE (`true` / `false` / `null` = could not be read) and `null` never
+renders as coverage. ⛔ `getVpnDetections` has no per-device filter, so a device-scoped review
+carries FLEET-WIDE detections and says so; and the detection window is clamped at 192h by the
+engine, so it is read back from the engine's own answer rather than from what was asked for.

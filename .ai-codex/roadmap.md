@@ -279,3 +279,23 @@ evidence-based (an authoritative source publishing a different score), in the pr
 ### 2. `nvd.js` never asks CIRCL for the score it actually has
 CIRCL’s legacy per-CVE endpoint returns NVD’s own CVSS and is reachable while NVD itself is blocked; the
 search endpoint SecVault uses does not carry it. This is the concrete path to filling the 255 missing scores.
+
+## Reporting platform — Phase D complete (2026-09-15, v2.123.0)
+
+Nine reports registered in `lib/reports/catalogue.js`: Executive Security Posture, Rule Hygiene,
+Vulnerability & Patch Posture, Compliance (fleet or one standard), Segmentation Posture, Lifecycle &
+Support, Configuration Change Audit, VPN Access Review, Rule Change Request. All nine verified
+building against the live fleet through the route's own dispatch shape.
+
+Still deferred, deliberately:
+- **Scheduling and delivery** (Phase C). Only the monthly compliance report is scheduled today, via
+  its own `compliance_report_log` + `notification_channels` path. Generalising that to any report
+  means a schedule table, a run history, and surfacing failures in the work queue.
+- **Per-device VPN detections.** `getVpnDetections` has no device filter, so a device-scoped access
+  review carries fleet-wide detections. Closing this is an engine change, not a report change.
+- **Per-user destinations in the VPN review.** Not possible without a rollup schema change —
+  `syslog_app_hourly`/`syslog_blocked_dst_hourly` carry no `src_ip`, and `syslog_events` is refused
+  (no `src_ip` index, ~28M rows/day).
+- **A render/page-load smoke harness.** There is still none. v2.120.0 shipped a blank `/reports`
+  with every test passing and a clean build; the gap is covered today only by shape guards on what
+  crosses into client components.
