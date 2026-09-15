@@ -181,3 +181,13 @@ GRANT SELECT ON TABLE advisories TO nocvault_readonly;
 -- Segmentation intent (v2.113.0). Declared policy only, no secrets.
 GRANT SELECT ON TABLE segmentation_intents TO claude_readonly;
 GRANT SELECT ON TABLE segmentation_intents TO nocvault_readonly;
+
+-- Application-centric view (v2.124.0). Declared intent only — application
+-- names, business owners, and the address/port tuples an application is
+-- expected to use. No secret material: nothing here is a credential, and the
+-- addresses are the operator's own declarations rather than anything read off
+-- a device. Same treatment as segmentation_intents above.
+GRANT SELECT ON TABLE applications TO claude_readonly;
+GRANT SELECT ON TABLE applications TO nocvault_readonly;
+GRANT SELECT ON TABLE application_flows TO claude_readonly;
+GRANT SELECT ON TABLE application_flows TO nocvault_readonly;

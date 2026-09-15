@@ -116,6 +116,78 @@ CREATE TABLE IF NOT EXISTS segmentation_intents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_segmentation_intents_src ON segmentation_intents(source_zone);
+
+-- ─────────────────────────────────────────
+-- APPLICATION-CENTRIC VIEW (Phase 1, v2.124.0)
+-- ─────────────────────────────────────────
+--
+-- A business application is a named set of FLOWS — (source, destination,
+-- service). The competitive point of this feature is NOT the map; both Tufin
+-- (SecureApp) and AlgoSec (AppViz) ship one. It is that theirs is DECLARED and
+-- never re-verified — accurate the day it is typed, decaying silently after,
+-- with no statement of what it could not check. This one is re-evaluated
+-- against the collected rulebase on every read.
+--
+-- ⛔ SAME SHAPE AS segmentation_intents, DELIBERATELY: declared intent,
+-- evaluated two ways, honest about coverage — moved from ZONE granularity to
+-- FLOW granularity. Segmentation is the proof the pattern works here.
+--
+-- ⛔ NO STORED VERDICT COLUMN, and no cached list of matching rules. A verdict
+-- is a function of the current rulebase and traffic window. Storing one lets it
+-- go stale and be read as fact, which is precisely the defect this feature
+-- exists to beat the competition on.
+--
+-- ⛔ NOT TO BE CONFUSED WITH syslog_app_hourly.application, which is the VENDOR
+-- L7 APP-ID (live top values: 'ssl', 'dns-base', 'ping', 'quic-base'). That is
+-- a protocol fingerprint, not a business application, and the two must never
+-- share a label in the UI.
+CREATE TABLE IF NOT EXISTS applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  -- The BUSINESS owner, free text. Deliberately NOT a users(id) FK: the person
+  -- accountable for an application is usually not a SecVault account holder,
+  -- and making it one would force the wrong people into the user table.
+  owner TEXT,
+  criticality TEXT NOT NULL DEFAULT 'normal',   -- 'critical' | 'normal'
+  status TEXT NOT NULL DEFAULT 'active',        -- 'active' | 'retiring' | 'retired'
+  note TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (name)
+);
+
+-- ⛔ src/dst ARE LITERAL ADDRESSES (CIDR or a single IP), NEVER VENDOR OBJECT
+-- NAMES. network_objects is keyed BY DEVICE, so the same object name means
+-- different things on different firewalls — a flow declared against one would
+-- silently evaluate against nothing on the others. That is exactly the failure
+-- zone_classifications had when it was briefly built as a single global table
+-- and had to be rebuilt per-device the same day. The resolver already turns
+-- each rule's object names into real ranges; the flow declares its range
+-- directly and meets them there.
+CREATE TABLE IF NOT EXISTS application_flows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  src TEXT NOT NULL,
+  dst TEXT NOT NULL,
+  protocol TEXT NOT NULL DEFAULT 'tcp',
+  -- NULL/NULL means "every port of this protocol". Stored as an inclusive
+  -- range so a single port is just start = end.
+  port_start INTEGER,
+  port_end INTEGER,
+  -- ⛔ BOTH DIRECTIONS MATTER, same as segmentation_intents.expectation.
+  -- An 'allow' flow that nothing permits is a BROKEN APPLICATION. A 'deny'
+  -- flow that a rule permits is a VIOLATION. Neither is the absence of the
+  -- other, and a schema with only one of them could express only half the
+  -- question.
+  expectation TEXT NOT NULL DEFAULT 'allow',
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_application_flows_app ON application_flows(application_id);
+
 -- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT
 -- ─────────────────────────────────────────
