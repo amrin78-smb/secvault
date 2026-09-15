@@ -136,6 +136,23 @@ entries in `lib/vpnTabs.js`'s `FLEET_VPN_TABS` — the temporary local shim in `
 ⛔ APPENDED, never inserted: `status` stays first so a bare `/vpn` bookmark still lands on it, and
 `key` is a URL contract — add and deprecate, never rename.
 
+## app/(dashboard)/applications/page.js  -> `/applications`  (v2.124.0)
+
+`server` — `ApplicationsPage` — declared business applications, each flow re-checked against the
+collected rulebase. Server-renders `evaluateAllApplications(pool)` into
+`components/applications/ApplicationBoard.js`; `?days=N` sets the traffic window.
+
+⛔ PERMITTED and USED are SEPARATE COLUMNS and must never be collapsed into one status. PERMITTED
+claims "at least one enabled allow rule matches" — never "a packet would pass". USED speaks about the
+permitting RULES, never about the flow: no stored rollup carries both flow endpoints, so per-flow
+traffic is not answerable at all.
+⛔ The orphan figure renders as COVERAGE ("N of M allow rules are claimed by a declared
+application"), never as a to-do list, and never using the word "unused" — that is
+`ruleAnalysis.js`'s word and it requires a measured zero.
+⛔ An all-clear is forbidden while any flow is unverified; the page's answer sentence
+(`components/applications/applicationsAnswer.js`) enforces it, the same rule `lib/evidence.js`
+applies product-wide.
+
 ## app/(dashboard)/work/page.js  -> `/work`  (v2.115.0)
 
 The Work queue. Fully SERVER-rendered, no client fetch — the page IS the headline, so there is
@@ -144,6 +161,11 @@ nothing to read while a fetch resolves. Computes segmentation itself and passes 
 a segmentation failure is injected as a failed SOURCE so the queue reports itself incomplete.
 ⛔ A structural failure renders an explicit "this is not a statement that nothing is outstanding"
 empty state, never a reassuring blank page.
+
+⛔ The TENTH source, `application` (v2.124.0), is NOT computed here — unlike segmentation it guards
+its own cost inside `gatherApplications`, with a COUNT on `application_flows` standing in front of
+the whole-fleet load. If this page ever gains an `evaluateAllApplications()` call of its own, pass
+the result in as `opts.applications` rather than letting both run.
 
 ## app/(dashboard)/reports/page.js  -> `/reports`  (v2.120.0, rebuilt v2.121.0)
 

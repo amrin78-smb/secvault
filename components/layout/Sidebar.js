@@ -21,6 +21,7 @@ import {
   IconGrid,
   IconChecklist,
   IconReport,
+  IconApplications,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -99,6 +100,18 @@ const NAV_GROUPS = [
     { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
     { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
     { href: '/segmentation', label: 'Segmentation', Icon: IconGrid },
+    // ⛔ FILED UNDER RISK, BESIDE SEGMENTATION, AND NOT UNDER INVENTORY.
+    // It is tempting to read "applications" as a list of things you have.
+    // What this page actually produces is VERDICTS: a declared flow that a
+    // rule permits but should not, and a flow the application needs that a
+    // rule blocks. That is the SAME MECHANIC as Segmentation, one grain
+    // finer — declared intent re-checked against the collected rulebase,
+    // honest about what it could not verify — and sitting the two together
+    // is what makes the pair legible: zone-to-zone policy, then
+    // application-to-flow. Inventory holds what SecVault COLLECTED
+    // (firewalls, links, licences); everything here is something the
+    // operator DECLARED and SecVault then judged.
+    { href: '/applications', label: 'Applications', Icon: IconApplications },
     { href: '/analysis', label: 'Rule hygiene', Icon: IconChart },
     { href: '/compliance', label: 'Compliance', Icon: IconSearch },
   ] },

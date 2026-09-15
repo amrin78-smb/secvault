@@ -291,3 +291,24 @@ export function IconReport(p) {
     </svg>
   );
 }
+
+// Applications. A closed box seen in three-quarter view — the standard
+// "a packaged thing the business owns" mark, and the one silhouette in this
+// file that is neither a rectangle, a shield, nor a node graph.
+//
+// ⛔ A NEW GLYPH RATHER THAN A REUSED ONE. The sidebar's invariant is that
+// every entry keeps a DISTINCT glyph — that, not colour, is the per-item
+// wayfinding cue (see the note at the top of Sidebar.js). The near candidates
+// were all already taken and all already confusable at 16px: IconGrid is
+// Segmentation (and sits directly above this entry), IconDevices is Firewalls,
+// IconTopology is Topology. Hand-rolled in the existing Feather-compatible
+// convention — the standing rule bans an icon LIBRARY, not a four-line path.
+export function IconApplications(p) {
+  return (
+    <svg {...base(p)}>
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.3 7 12 12 20.7 7" />
+      <line x1="12" y1="22" x2="12" y2="12" />
+    </svg>
+  );
+}

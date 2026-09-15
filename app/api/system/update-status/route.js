@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.124.0': [
+    'New Applications page. Declare what an application actually needs — which addresses talk to which, on which ports — and SecVault checks it against the collected rulebase every time you look, rather than taking the declaration on trust.',
+    'Each declared flow is answered two ways and they are kept apart: whether a rule permits it, and whether the permitting rule has seen traffic. A flow whose usage cannot be measured says so rather than guessing.',
+    'A flow declared over a subnet is answered for the whole subnet, not by sampling one address — so "254 of 256 addresses are permitted" reads as partly permitted, not as blocked.',
+    'Nothing permits a flow is never reported as blocked. SecVault holds no default-policy data for any vendor, so those are different answers.',
+    'Rules not claimed by any declared application are shown as a coverage figure, never as a to-do list, and never called unused.',
+  ],
   '2.123.0': [
     'Four new reports: Segmentation Posture, Lifecycle & Support, Configuration Change Audit and VPN Access Review — nine in total on the Reports page.',
     'Segmentation Posture checks every declared boundary two ways — whether a rule permits it, and whether traffic was actually recorded — and reports a boundary it cannot measure as unverified rather than clean.',

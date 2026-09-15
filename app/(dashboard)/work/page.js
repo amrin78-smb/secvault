@@ -6,6 +6,7 @@ import { pool } from '../../../lib/db';
 import { gatherWorkQueue } from '../../../lib/engines/workQueueData';
 import { rankItems, summarise } from '../../../lib/engines/workQueue';
 import { evaluateSegmentation } from '../../../lib/engines/segmentationData';
+import { evaluateAllApplications } from '../../../lib/engines/applicationViewData';
 import { buildWorkQueueAnswer } from '../../../lib/answers';
 
 export const dynamic = 'force-dynamic';
@@ -36,10 +37,36 @@ export default async function WorkQueuePage() {
     segmentationError = err.message;
   }
 
+  // ⛔ THE APPLICATION VIEW IS COMPUTED HERE FOR THE SAME REASON AS SEGMENTATION
+  // ABOVE, and the reason is visibility of cost, not convenience. It loads the
+  // whole fleet's rules AND every network object (measured: ~740ms, 1,757 rules
+  // and 10,044 objects live), which makes it the second most expensive source in
+  // this file. Doing that behind the queue's own gather list would hide it from
+  // anyone reading what the queue costs.
+  //
+  // gatherApplications() can still reach it on its own — it has to, or a caller
+  // that does not pass one would contribute a silent zero forever — but it puts
+  // a cheap COUNT in front of the load and skips it entirely while nothing is
+  // declared. Passing it here means the work that IS needed happens exactly once.
+  //
+  // ⛔ AND THERE IS DELIBERATELY NO SECOND ERROR CHANNEL HERE, unlike
+  // segmentation above. gatherSegmentation() only ever reads what it is handed,
+  // so a failure on this page would vanish without that variable. This source
+  // does its own evaluation when handed nothing, and runSource() banners
+  // whatever that throws — so recording the error here as well could mark the
+  // source failed on a page where the retry actually succeeded, which is a
+  // worse lie than the cost of retrying.
+  let applications = null;
+  try {
+    applications = await evaluateAllApplications(pool);
+  } catch (_err) {
+    // Left null on purpose: the gather re-attempts and reports it properly.
+  }
+
   let gathered = null;
   let fatal = null;
   try {
-    gathered = await gatherWorkQueue(pool, { segmentation });
+    gathered = await gatherWorkQueue(pool, { segmentation, applications });
   } catch (err) {
     // gatherWorkQueue catches per source, so reaching here means something
     // structural failed. Say so — never render an empty, reassuring page.

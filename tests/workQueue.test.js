@@ -44,6 +44,7 @@ const {
   gatherCollectionGaps,
   gatherSegmentation,
   gatherIngestDrops,
+  gatherApplications,
   PER_SOURCE_CAP,
   TUNNEL_STATE_FRESH_HOURS,
 } = require('../lib/engines/workQueueData');
@@ -862,5 +863,206 @@ describe('the ingest source', () => {
     assert.equal(out[0].type, 'ingest_silent');
     assert.equal(bandFor(out[0]), 'verify');
     assert.equal(out[0].magnitude, 1);
+  });
+});
+
+describe('⛔ the application source — a decision per application, not a row per flow', () => {
+  // The evaluator's own output shape (lib/engines/applicationViewData.js's
+  // evaluateAllApplications), hand-built so the queue's judgement can be pinned
+  // without a fleet, a database or a rulebase.
+  const flow = (state, over) => ({
+    flow: { id: 'f1' },
+    finding: { state, label: state },
+    unverified: false,
+    invalid: false,
+    permittedBy: [],
+    blockedBy: [],
+    ...over,
+  });
+  const app = (flows, over) => ({
+    application: { id: 'a1', name: 'SAP', criticality: 'normal', ...(over || {}).application },
+    flows,
+    summary: null,
+  });
+  const result = (applications, over) => ({
+    applications, errors: [], orphans: null, coverage: null, windowDays: 30, ...over,
+  });
+  const run = (applications, over) => gatherApplications(null, result(applications, over));
+
+  const permitted = [{ deviceId: 'd1', deviceName: 'FW-1', rules: [{ ruleId: '7' }] }];
+
+  it('collapses many problem flows into ONE item, with the count travelling alongside', async () => {
+    // A real declaration is exhaustive — thirty flows for one application — so
+    // an item per flow would grow the queue with the SIZE OF THE DECLARATION
+    // rather than with the outstanding work.
+    const out = await run([app([
+      flow('violation', { permittedBy: permitted }),
+      flow('broken'),
+      flow('partial', { permittedBy: permitted }),
+      flow('ok'),
+    ])]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].count, 3, 'three problem flows, one decision');
+    assert.equal(out[0].key, 'app:a1');
+    assert.equal(out[0].href, '/applications');
+    assert.match(out[0].title, /SAP: 3 declared flows are not satisfied/);
+  });
+
+  it('⛔ WE COULD NOT MEASURE THIS: an unverified flow lands in verify, never act_now', async () => {
+    // The case this whole band exists for. A `violation` is the loudest thing
+    // this source can produce — but if the evaluation itself was incomplete (a
+    // rule referencing an object the firewall never reported, a firewall with
+    // no collected ruleset) then the claim rests on a partial read, and
+    // `act_now` is a claim about EVIDENCE rather than about importance.
+    const out = await run([app([
+      flow('violation', { unverified: true, permittedBy: permitted }),
+    ])]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].evidence, 'unmeasured');
+    assert.equal(bandFor(out[0]), 'verify');
+    assert.notEqual(bandFor(out[0]), 'act_now');
+    assert.match(out[0].why, /could not fully verify 1 of 1/);
+    assert.match(out[0].why, /needs a person/);
+  });
+
+  it('⛔ ONE unverified flow is enough — it is not outvoted by verified ones', async () => {
+    const out = await run([app([
+      flow('violation', { permittedBy: permitted }),
+      flow('violation', { permittedBy: permitted }),
+      flow('broken', { unverified: true }),
+    ])]);
+    assert.equal(out[0].evidence, 'unmeasured');
+    assert.equal(bandFor(out[0]), 'verify');
+    // and the confirmed problems are still named, not buried by the demotion
+    assert.match(out[0].why, /2 flows are permitted by a rule but declared off-limits/);
+  });
+
+  it('⛔ a fully verified violation is `reported` AT MOST — never `measured`', async () => {
+    // SecVault read the rulebase. It did not observe a packet, and no stored
+    // rollup carries both ends of a flow, so per-flow usage is not answerable
+    // at all — the item's own words have to say so.
+    const out = await run([app([flow('violation', { permittedBy: permitted })])]);
+    assert.equal(out[0].evidence, 'reported');
+    assert.notEqual(out[0].evidence, 'measured');
+    assert.equal(bandFor(out[0]), 'act_now');
+    assert.match(out[0].why, /read the rules; it did not observe traffic/);
+    assert.match(out[0].why, /per-flow usage is not answerable/);
+  });
+
+  it('⛔ does NOT pad the queue with `unspecified` or `ok_unverified`', async () => {
+    // Neither is confirmed work. An item whose first step is "find out whether
+    // this is even a problem" is how a queue stops being used — the same
+    // exclusion already applied to compliance `warning`/`na`.
+    const out = await run([app([
+      flow('ok'),
+      flow('ok_unverified', { unverified: true }),
+      flow('unspecified'),
+    ])]);
+    assert.deepEqual(out, []);
+  });
+
+  it('counts an unreadable flow as work — it is the operator’s own data to fix', async () => {
+    const out = await run([app([flow('invalid', { unverified: true, invalid: true })])]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].severity, 'low', 'a typo is not an exposure');
+    assert.equal(out[0].evidence, 'unmeasured');
+    assert.equal(bandFor(out[0]), 'verify');
+    assert.match(out[0].why, /could not be read at all/);
+    assert.match(out[0].action, /Correct the flow definition/);
+  });
+
+  it('a critical application raises the severity, not the band', async () => {
+    const out = await run([{
+      application: { id: 'a1', name: 'SAP', criticality: 'critical' },
+      flows: [flow('violation', { permittedBy: permitted })],
+    }]);
+    assert.equal(out[0].severity, 'critical');
+    assert.equal(bandFor(out[0]), 'act_now');
+  });
+
+  it('⛔ ranks on firewalls, not on the flow count it displays', async () => {
+    const out = await run([app([
+      flow('violation', { permittedBy: [
+        { deviceId: 'd1', deviceName: 'FW-1' },
+        { deviceId: 'd2', deviceName: 'FW-2' },
+      ] }),
+      flow('violation', { permittedBy: [{ deviceId: 'd1', deviceName: 'FW-1' }] }),
+      flow('broken', { blockedBy: [{ deviceId: 'd3', deviceName: 'FW-3' }] }),
+    ])]);
+    assert.equal(out[0].count, 3, 'flows');
+    assert.equal(out[0].magnitude, 3, 'distinct firewalls');
+    assert.deepEqual(out[0].affects, ['FW-1', 'FW-2', 'FW-3']);
+  });
+
+  it('a broken flow nothing permits still gets the magnitude floor, not a zero', async () => {
+    const out = await run([app([flow('broken')])]);
+    assert.deepEqual(out[0].deviceIds, []);
+    assert.equal(out[0].magnitude, 1);
+  });
+
+  it('there is no "mark as done" — the item clears off the next collected ruleset', async () => {
+    const out = await run([app([flow('broken')])]);
+    assert.match(out[0].done, /NEXT collected ruleset/);
+    assert.match(out[0].done, /never because\s+someone marked it done|never because someone marked it done/);
+  });
+
+  it('discloses its own cap exactly, since every application is already in memory', async () => {
+    const many = Array.from({ length: 55 }, (_, i) => ({
+      application: { id: `a${i}`, name: `App ${i}`, criticality: 'normal' },
+      flows: [flow('broken')],
+    }));
+    const out = await gatherApplications(null, result(many));
+    assert.equal(out.items.length, PER_SOURCE_CAP);
+    assert.equal(out.truncatedFrom, 55);
+  });
+
+  it('⛔ the orphan COVERAGE figure never becomes a queue item', async () => {
+    // With nothing declared this fleet reports ~1,095 unclaimed allow rules.
+    // That is a statement about the completeness of the declaration, not work —
+    // and as an item it would bury every real one behind an alarming number.
+    const out = await gatherApplications(null, result([], {
+      orphans: {
+        allowRules: 1095, claimedRules: 0, unclaimedRules: 1095, claimedPct: 0,
+        byDevice: [{ deviceId: 'd1', deviceName: 'FW-1', count: 700 }],
+        isCoverageNotFinding: true,
+      },
+    }));
+    assert.deepEqual(out, []);
+  });
+
+  it('⛔ an evaluator that reported an error is RE-RAISED, never a quiet empty list', async () => {
+    // evaluateAllApplications() collects its own failures into `errors` instead
+    // of throwing, so without this the source would contribute zero items and
+    // look like "nothing to do" — this file's oldest bug, one level up.
+    await assert.rejects(
+      () => gatherApplications(null, result([], { errors: [{ source: 'fleet_rules', error: 'boom' }] })),
+      /fleet_rules: boom/
+    );
+    const reported = await runSource('application', () => gatherApplications(
+      null, result([], { errors: [{ source: 'fleet_rules', error: 'boom' }] })
+    ));
+    assert.equal(reported.ok, false);
+    assert.equal(reported.items.length, 0);
+    assert.match(reported.error, /boom/);
+  });
+
+  it('⛔ nothing declared costs ONE count, not a whole-fleet rule load', async () => {
+    // The reason this source may live in this file at all. loadFleet() reads
+    // every active device's rules, objects and traffic evidence; CLAUDE.md
+    // moved segmentation out of here for exactly that cost. With no declaration
+    // there is nothing to evaluate, and the probe says so for the price of one
+    // COUNT on a tiny table.
+    const pool = stubPool([[{ n: 0 }]]);
+    const out = await gatherApplications(pool);
+    assert.deepEqual(out, []);
+    assert.equal(pool.sql.length, 1, 'no fleet load');
+    assert.match(pool.sql[0].text, /count\(\*\)[^]*application_flows/);
+  });
+
+  it('⛔ the probe FAILS OPEN — an unreadable count is not "nothing is declared"', async () => {
+    // Substituting "we could not read the count" for "there is nothing there"
+    // would switch a whole source off in silence.
+    const pool = stubPool([[{ n: null }], new Error('the evaluation was reached')]);
+    await assert.rejects(() => gatherApplications(pool), /the evaluation was reached/);
   });
 });

@@ -184,6 +184,55 @@ implementations of measured-zero vs no-coverage would eventually disagree and th
 be recommending rule deletions. ⛔ Returns `rulesCollected:false` so an uncollected fleet reports
 UNKNOWN instead of a perfect score built from missing data.
 
+## lib/engines/applicationView.js
+
+(v2.124.0) PURE. The application view's judgement: `normaliseFlow`, `evaluateFlowOnDevice`,
+`aggregateFlow`, `usedVerdict`, `flowFinding`, plus the box algebra (`makeBox`/`intersectBox`/
+`subtractBox`/`boxVolume`) and `parseCidr`/`rangeToString`. `VERDICTS` =
+`permitted`/`partially_permitted`/`blocked`/`unspecified`; `USED` =
+`rule-active`/`rule-idle`/`unknown`.
+⛔ **It does NOT reuse `queryAccessPath()`, and cannot.** That function requires src/dst to be
+SINGLE /32 ADDRESSES and throws otherwise; a declared flow is almost never a point. Sampling one
+address out of a /24 and reporting the answer for the whole range is the fabricated-measurement bug.
+The hard part — group expansion, FQDNs, vendor service grammars — IS reused unchanged
+(`resolveAddressField`/`resolveServiceField`/`buildObjectMap` from `objectResolver.js`); only the
+RANGE comparison is new.
+⛔ **Exact decomposition, not "weakest dimension".** Rules are walked in `sequence_number` order
+against a set of undecided (src x dst x port) boxes that split as rules claim parts of them, so the
+permitted/blocked/unspecified VOLUMES are exact. Comparing dimensions separately reports a flow whose
+254 of 255 addresses are permitted as BLOCKED — a hole reported as closed, the dangerous direction.
+⛔ `MAX_UNDECIDED_BOXES` (4000) makes a pathological rulebase `unverified`, never a partial answer
+dressed as a whole one. ⛔ The action vocabulary is BORROWED from `segmentation.js`; an unrecognised
+action decides nothing and is counted. ⛔ A NULL `sequence_number` sorts LAST, same as
+`queryAccessPath` — a rule whose position is unknown must not be assumed to sit at the top.
+⛔ `aggregateFlow` takes the BEST SINGLE DEVICE's answer: **volumes are never unioned across
+devices**, because two firewalls each permitting half a flow does not add up to a permitted flow.
+⛔ `usedVerdict` speaks about the permitting RULES, never about the flow, and one rule with no
+usable hit count makes the whole answer `unknown`. ⛔ `unspecified` is NEVER rendered as denied —
+there is no implicit-policy data in this codebase for any vendor.
+
+## lib/engines/applicationViewData.js
+
+(v2.124.0) The pool half: CRUD (`listApplications`/`getApplication`/`createApplication`/
+`updateApplication`/`deleteApplication`/`addFlow`/`updateFlow`/`deleteFlow`), `loadFleet`,
+`evaluateFlow`, `summariseFlows`, `evaluateApplication`, `orphanCoverage`,
+`evaluateAllApplications`.
+⛔ Nothing is cached and NO VERDICT IS STORED — a verdict is a function of the current rulebase and
+traffic window, and a stored one goes stale and is then read as fact. ⛔ Traffic evidence is NOT
+re-derived: `ruleHitCorrelation.js` unchanged, same as `segmentationData.js`. ⛔ `loadFleet` builds
+each device's object maps ONCE and passes them into every flow evaluation — rebuilding them per flow
+per device (10,044 `network_objects` rows fleet-wide) was the dominant cost. ⛔ A device with no
+collected rules is NAMED in `devicesWithoutRules`, never omitted, and its presence makes every flow
+`unverified` rather than "blocked". ⛔ `addFlow`/`updateFlow` validate with the SAME
+`normaliseFlow` that will later evaluate the row, so an unanswerable flow is never stored.
+⛔ `orphanCoverage()` is a **COVERAGE figure, not a finding** (`isCoverageNotFinding:true`): with
+nothing declared it reports ~1,095 unclaimed allow rules, which is accurate and useless. And
+"unclaimed" is NEVER "unused" — `unused` is `ruleAnalysis.js`'s word and requires a MEASURED zero.
+⛔ `evaluateAllApplications` isolates each stage and returns `errors[]` INSTEAD of throwing; every
+caller must re-raise or banner them (see `gatherApplications`).
+⛔ Per-flow traffic usage is NOT ANSWERABLE at all — no rollup carries both flow endpoints — so only
+rule-level usage is reported, in weaker words.
+
 ## lib/engines/workQueue.js
 
 (v2.115.0) PURE. `bandFor` / `rankItems` / `summarise` / `WORK_BANDS`. ⛔ `evidence` decides the
@@ -194,7 +243,7 @@ refreshes destroys the one thing a queue is for. ⛔ `summarise` reports `source
 
 ## lib/engines/workQueueData.js
 
-(v2.115.0) Nine gathers, each isolated in `runSource` so a throw reports `{ok:false,error}` rather
+(v2.115.0, tenth gather v2.124.0) TEN gathers, each isolated in `runSource` so a throw reports `{ok:false,error}` rather
 than contributing zero items. ⛔ The ack join in `gatherRuleCleanup` MUST go through
 `firewall_rules` — `rule_analysis_results.rule_id` is a UUID FK, `finding_acknowledgements.
 rule_id_vendor` is the vendor text id; joining them directly is `text = uuid` and Postgres
@@ -205,6 +254,17 @@ the truncation banner itself could not see. ⛔ `withCap` discloses shown-of-tot
 COUNT only in that case. ⛔ Licences produce TWO item kinds: a parsed expiry (`reported`) and an
 UNPARSEABLE one (`unmeasured` -> verify band) — `expires_at IS NULL` with raw `Never` is
 perpetual and is NOT listed.
+⛔ `gatherApplications` (v2.124.0) emits **ONE ITEM PER APPLICATION**, never per flow — a
+declaration is exhaustive, so an item per flow would grow the queue with the SIZE OF THE DECLARATION.
+Work states are `violation`/`broken`/`partial`/`invalid`; `unspecified` and `ok_unverified` are
+deliberately EXCLUDED (not confirmed work), and the orphan COVERAGE figure is never an item.
+⛔ ONE unverified flow makes the whole item `unmeasured` -> `verify`; a fully-verified violation is
+`reported` AT MOST, never `measured` — SecVault read the rulebase, it did not observe a packet.
+⛔ It is the only gather that RUNS AN ENGINE rather than a query, so its cost is guarded twice: an
+already-computed `opts.applications` is used as-is (the `opts.segmentation` pattern), otherwise a
+single COUNT on `application_flows` decides whether the whole-fleet load happens at all. ⛔ That
+probe FAILS OPEN — an unreadable count falls through to the evaluation, because "we could not read
+the count" is not "nothing is declared".
 
 ## lib/rbac.js
 

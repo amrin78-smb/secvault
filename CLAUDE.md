@@ -1024,8 +1024,9 @@ fleet-wide VPN history.
 
 ## Work Queue (`/work`, Phase 3, v2.115.0)
 
-ONE ranked list of outstanding work, gathered from nine sources at READ time. `lib/engines/workQueue.js`
-is pure (banding + ranking, no pool); `lib/engines/workQueueData.js` is the nine gathers. No table, no
+ONE ranked list of outstanding work, gathered from TEN sources at READ time (the tenth,
+`application`, landed with the application view in v2.124.0). `lib/engines/workQueue.js`
+is pure (banding + ranking, no pool); `lib/engines/workQueueData.js` is the ten gathers. No table, no
 cron job — a stored queue goes stale against the data it indexes, and people WORK a stale to-do list.
 
 ⛔ **AN ITEM IS A DECISION, NOT A FINDING.** 1,132 rule-analysis findings exist on this fleet. They
@@ -1067,6 +1068,14 @@ loop: listing the work is what the competition does; confirming it happened is w
 Segmentation is computed by the PAGE and passed in, not gathered inside `workQueueData.js` — it loads
 the whole fleet's rules with traffic evidence and is by far the most expensive source; hiding that
 cost behind the gather list would misrepresent what the page does.
+
+⛔ The `application` source (v2.124.0) carries the SAME cost and resolves it differently, because
+it must also work when no caller has pre-computed anything: it accepts an already-computed
+`opts.applications` exactly as segmentation does, and otherwise puts a single COUNT on
+`application_flows` in front of the whole-fleet load — nothing declared, no load. ⛔ That probe
+FAILS OPEN: an unreadable count falls THROUGH to the evaluation, because "we could not read the
+count" is not "nothing is declared", and that substitution would switch a whole source off in
+silence.
 
 ## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
 
@@ -1123,6 +1132,97 @@ disagree again.
 
 Mutating routes are gated on `OPERATE`, not `MANAGE_DEVICES`: declaring intent changes no device, no
 rule and no score. Pinned by `tests/segmentation.test.js` (28 cases).
+
+## Application Intent (`/applications`, Phase 1, v2.124.0)
+
+A business application declared as a set of FLOWS — (src, dst, protocol, ports, `allow`|`deny`) —
+and every flow re-checked against the COLLECTED rulebase. `lib/engines/applicationView.js` is pure
+(flow -> verdict, given rules and objects); `applicationViewData.js` is the plumbing. Same split,
+same reason, as segmentation: the judgement is the value, so the judgement has to be testable.
+
+This is `/segmentation` moved from ZONE grain to FLOW grain. The competitive claim is the same one
+this product makes everywhere: **Tufin's and AlgoSec's application maps are declared and never
+re-verified — accurate the day they are typed, decaying silently after, with no statement of what
+could not be checked.** Everything below exists to keep our half of that claim true.
+
+⛔ **WHAT "PERMITTED" CLAIMS, PRECISELY:** at least one ENABLED allow rule on one device matches the
+flow. It does NOT claim a packet would pass — rule order ACROSS devices, routing, NAT and security
+profiles are deliberately not modelled, and no multi-hop path is simulated. The UI says "a rule
+permits this", never "this is reachable". Overclaiming here would be worse than useless: an operator
+who trusts "reachable" and finds it was a guess stops trusting the honest answers too. ⛔ And
+`unspecified` is NEVER rendered as denied — no default/implicit-policy data exists in this codebase,
+for any vendor.
+
+⛔ **EXACT RANGE DECOMPOSITION, NOT A SAMPLED ADDRESS AND NOT PER-DIMENSION COMPARISON.**
+`objectResolver.queryAccessPath()` — the evaluator `topology.js` and `exposure.js` both reuse
+unchanged — requires `srcIp`/`dstIp` to be SINGLE /32 ADDRESSES and throws otherwise. A declared
+flow is almost never a point ("the app subnet reaches the database subnet on 1521"), and answering
+it by picking one address out of each /24 is the fabricated-measurement bug: the sample might be the
+one address a rule covers, or the one it misses, and nothing in the output would show which. The
+cheap alternative — compare src, dst and port separately and report the worst — is wrong in a way
+that matters: given `deny 10.1.0.5 -> any:443` above `allow 10.1.0.0/24 -> any:443`, it reports the
+flow BLOCKED when 254 of its 255 addresses are permitted. On a segmentation-shaped report that is a
+hole reported as CLOSED, the dangerous direction. So the engine walks the rules in
+`sequence_number` order carrying a set of undecided (src x dst x port) boxes, splitting each box as
+rules claim parts of it, and reports exact permitted/blocked/unspecified volumes. ⛔ The genuinely
+hard part is NOT reimplemented: group expansion, FQDNs and vendor service grammars come from
+`objectResolver`'s own `buildObjectMap`/`resolveAddressField`/`resolveServiceField`, unchanged.
+⛔ `MAX_UNDECIDED_BOXES` makes a pathological rulebase `unverified` — a refusal to answer, never a
+partial answer dressed as a whole one.
+
+⛔ **VOLUMES ARE NEVER UNIONED ACROSS DEVICES.** Two firewalls each permitting half a flow do not add
+up to a permitted flow: they are different firewalls on (probably) different paths, and summing them
+invents a reachability that exists on neither. The fleet answer is the BEST SINGLE DEVICE's answer.
+⛔ A device with NO collected ruleset makes every flow `unverified`, never "blocked" — otherwise a
+fleet whose rulesets were never pulled reports every application as safely contained, a perfect
+result computed entirely from missing data.
+
+⛔ **PER-FLOW TRAFFIC USAGE IS NOT ANSWERABLE, AND MAY NOT BE APPROXIMATED.** Every syslog rollup in
+this product is source-keyed or destination-keyed; **none carries both ends of a flow**. So "did this
+src -> dst:port carry traffic" cannot be asked of stored data at all. What IS answerable is whether
+the RULE permitting it has seen traffic, which is strictly weaker and must be worded as one — the UI
+prints "a rule permitting this flow is in use", never "this flow is in use". ⛔ `syslog_events` is
+REFUSED as the fallback, for the same reasons VPN traffic attribution refuses it (no `src_ip` index,
+~28M rows/day, and adding one puts the write cost on the collector). ⛔ The tri-state comes from
+`ruleHitCorrelation.js` UNCHANGED, and one permitting rule with no usable hit count makes the whole
+answer `unknown` — that rule might be the one carrying the traffic. Fortinet over SSH reports no hit
+counts at all, so this is the COMMON case, not a corner. ⛔ Closing this gap needs a
+`syslog_flow_hourly` rollup — a schema change argued on measured cardinality, not a query change.
+
+⛔ **ORPHAN RULES ARE COVERAGE, NEVER A FINDING, AND NEVER "UNUSED".** `orphanCoverage()` reports how
+much of the fleet's enabled allow rulebase no declared application claims. With nothing declared that
+is ~1,095 of 1,095 rules on this fleet — accurate, and completely useless as a to-do list; as a
+"finding" it would be an alarming number that means nothing on the feature's first screenshot, and
+it is excluded from the work queue for exactly that reason. ⛔ And "unclaimed" is not "unused":
+`unused` is `ruleAnalysis.js`'s word and it requires a MEASURED zero hit count. A rule nobody has
+declared an application for is a gap in the DECLARATION, not evidence about the rule. Conflating them
+manufactures deletion candidates out of an incomplete map — this codebase's signature bug wearing a
+new hat.
+
+⛔ **NO STORED VERDICT, NO CACHED RULE LIST**, same rule as segmentation: a verdict is a function of
+the current rulebase and traffic window, and a stored one goes stale and is then read as fact —
+precisely the defect this feature exists to beat the competition on. ⛔ `src`/`dst` are LITERAL
+addresses, never vendor object names: `network_objects` is per-device, so a flow declared against one
+device's object name would silently evaluate against nothing on every other device.
+
+⛔ **AN APPLICATION IS AS UNVERIFIED AS ITS LEAST-VERIFIED FLOW**, and an all-clear is forbidden while
+anything is unverified — the rule `lib/evidence.js` already enforces product-wide.
+
+**Work queue (source #10).** ⛔ ONE ITEM PER APPLICATION, never per flow: a declaration is written to
+be exhaustive, so an item per flow would grow the queue with the SIZE OF THE DECLARATION rather than
+with the outstanding work. Work states are `violation`/`broken`/`partial`/`invalid`;
+`unspecified` and `ok_unverified` are EXCLUDED as unconfirmed work. ⛔ ONE unverified flow makes the
+whole item `unmeasured` and therefore `verify` — `act_now` is a claim about evidence, not about
+importance — and a fully-verified violation is `reported` AT MOST, never `measured`, because
+SecVault read the rulebase and did not observe a packet. ⛔ It is the only gather that runs an ENGINE
+rather than a query, so a COUNT on `application_flows` stands in front of the whole-fleet load, and
+that probe FAILS OPEN.
+
+Mutating routes are gated on `OPERATE`, not `MANAGE_DEVICES`: declaring intent changes no device, no
+rule and no score — the same call segmentation makes. ⛔ `applications.name` is a BUSINESS
+application and must never share a label, column or table name with `syslog_app_hourly.application`
+or `firewall_rules.applications`, which are the vendor L7 app-ID (`ssl`, `dns-base`) — a protocol
+fingerprint, not an application.
 
 ## Role-Based Access Control
 

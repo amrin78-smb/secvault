@@ -35,6 +35,8 @@ Every number below is measured, not estimated. Where something is uncertain it s
 | **Segmentation intent — CAN it, and DID it** | v2.113.0; live: `untrust -> private` permitted by 2 rules, 0 hits |
 | Tunnel health answer-first + coverage bar | v2.114.0 |
 | **Work queue, one ranked list across all 9 engines** | v2.115.0; live: 19 act-now / 60 scheduled / 6 needs-a-human |
+| Reporting platform, catalogue + 10 reports | Phase D, v2.123.0 |
+| **Application-centric view, Phase 1** | v2.124.0; `applications`/`application_flows`, two engines, `/applications`, work-queue source #10 |
 
 ---
 
@@ -300,7 +302,7 @@ Still deferred, deliberately:
   with every test passing and a clean build; the gap is covered today only by shape guards on what
   crosses into client components.
 
-## Application-centric view — PROPOSED, not built (2026-09-15)
+## Application-centric view — ⛔ PHASE 1 **BUILT** (v2.124.0); phases 2-4 still proposed
 
 Full proposal: `.ai-codex/application-view-plan.md`. The one capability where both Tufin
 (SecureApp) and AlgoSec (AppViz/BusinessFlow) ship a real product and SecVault has nothing.
@@ -324,6 +326,20 @@ plan):
 3. **Topology collection covers 2 of 6 vendors**, so a flow crossing the others is UNVERIFIED —
    ⛔ never "broken".
 
-Recommendation: **Phase 1 only** (declared applications + rulebase verification + orphan-rule
-coverage), then reassess against the live fleet. Phase 3 (a `syslog_flow_hourly` rollup) is a
-storage decision dressed as a feature and must be argued on its own measured cardinality.
+Recommendation was **Phase 1 only** (declared applications + rulebase verification + orphan-rule
+coverage), then reassess against the live fleet. **That is now shipped** — `applications` /
+`application_flows`, `lib/engines/applicationView.js` (pure) + `applicationViewData.js`,
+`/api/applications/**` gated on `OPERATE`, the `/applications` page, and a tenth work-queue
+source. Two departures from the plan, both deliberate and both written up in CLAUDE.md:
+
+1. **`queryAccessPath()` could NOT be reused.** The plan called it "the load-bearing one"; it
+   requires src/dst to be SINGLE /32 addresses and throws otherwise, and a declared flow is almost
+   never a point. The engine does exact range decomposition instead, reusing that file's
+   `resolveAddressField`/`resolveServiceField` — the genuinely hard part — unchanged.
+2. **Multi-hop is not modelled.** Each device is evaluated independently and volumes are NEVER
+   unioned across devices, so §4.3's "topology covers 2 of 6 vendors" does not bite Phase 1 at all.
+
+Still open, unchanged: Phase 2 (impact/decommissioning), Phase 3 (a `syslog_flow_hourly` rollup —
+a storage decision dressed as a feature, to be argued on its own measured cardinality), Phase 4
+(discovery). Phase 1 is now the live thing to reassess against the fleet — note that with nothing
+declared the honest answer is "no items", which is what the work-queue source returns.

@@ -1,8 +1,13 @@
-# Application-Centric View — proposal (drafted 2026-09-15, NOT BUILT)
+# Application-Centric View — Phase 1 BUILT (v2.124.0); phases 2-4 still proposed
 
-Status: **proposal only.** Nothing in this file exists in code yet. It is the plan for the one
-capability where the competitive table has SecVault at "None" and both leaders shipping: Tufin's
-SecureApp and AlgoSec's AppViz/BusinessFlow.
+Status: **Phase 1 is BUILT and shipped** (see §7). Phases 2, 3 and 4 remain proposals and nothing in
+them exists in code. This was the plan for the one capability where the competitive table had
+SecVault at "None" and both leaders shipping: Tufin's SecureApp and AlgoSec's AppViz/BusinessFlow.
+
+⛔ **Two things in this document turned out to be WRONG and are corrected in place below** — §3's
+claim that `queryAccessPath()` was reusable (it requires single /32 addresses), and §7's Phase 1
+bullet describing the work-queue source. Both are marked. The durable rules for what shipped live in
+CLAUDE.md's "Application Intent" section; this file stays the PLAN, including the parts not built.
 
 ---
 
@@ -54,9 +59,19 @@ proof that the pattern works here, and it means most of this is assembly, not in
 | Propose removals and VERIFY they happened | `ruleChangeRequests.js` | — |
 | A branded PDF of any of it | the report chassis + catalogue | `lib/reports/` |
 
-`queryAccessPath` is the load-bearing one. It already takes exactly the tuple a flow is, and it is
+⛔ **This paragraph was WRONG, and finding out cost the first hour of Phase 1.** It said:
+"`queryAccessPath` is the load-bearing one. It already takes exactly the tuple a flow is, and it is
 already reused unchanged by two other engines (`topology.js`, `exposure.js`) — so a third reuse is
-the established pattern, not a new dependency.
+the established pattern, not a new dependency."
+
+It takes `{srcIp, dstIp}` as SINGLE /32 ADDRESSES and THROWS on anything else. A declared flow is
+almost never a point — it is "the app subnet reaches the database subnet on 1521" — and answering
+that by sampling one address out of each /24 is the fabricated-measurement bug this codebase keeps
+finding. `applicationView.js` therefore reuses this file's `buildObjectMap` /
+`resolveAddressField` / `resolveServiceField` (the genuinely hard part: group expansion, FQDNs,
+vendor service grammars) UNCHANGED, and does the comparison at RANGE granularity, which those
+helpers deliberately do not do. The lesson generalises: "already reused twice" is evidence about the
+CALLERS, not about the signature.
 
 ## 4. ⛔ What SecVault genuinely CANNOT answer today
 
@@ -202,7 +217,7 @@ is forbidden while any flow is `unverified` or `unknown` — the rule already en
 
 ## 7. Phasing
 
-### Phase 1 — Declared applications, verified against the rulebase *(the whole differentiator)*
+### Phase 1 — Declared applications, verified against the rulebase — ⛔ **BUILT, v2.124.0**
 - `applications` / `application_flows` + CRUD, gated on `OPERATE` (declaring intent changes no
   device — same reasoning as segmentation).
 - `lib/engines/applicationView.js` — **pure**: flow → verdict, given rules/objects. No pool.
@@ -213,7 +228,15 @@ is forbidden while any flow is `unverified` or `unknown` — the rule already en
   any declared application", never "unused" — `unused` is `ruleAnalysis.js`'s word and requires a
   measured zero. Conflating them would manufacture deletion candidates out of an incomplete
   declaration, which is this codebase's signature bug wearing a new hat.
-- Work-queue source: broken `allow` flows (evidence `reported`), permitted `deny` flows.
+- Work-queue source: ⛔ **as built this is ONE ITEM PER APPLICATION, not per flow** — a declaration
+  is exhaustive, so an item per flow would grow the queue with the size of the declaration rather
+  than with the outstanding work. Work states are `violation` / `broken` / `partial` / `invalid`;
+  `unspecified` and `ok_unverified` are excluded as unconfirmed, and the orphan coverage figure is
+  never an item. ⛔ One unverified flow makes the whole item `unmeasured` -> `verify`; a
+  fully-verified violation is `reported` at most.
+- ⛔ **Not in the plan, needed in practice:** the source guards its own cost. It is the only work-queue
+  gather that runs an ENGINE rather than a query, so a COUNT on `application_flows` stands in front
+  of the whole-fleet load — and that probe fails OPEN.
 
 ### Phase 2 — Impact and decommissioning
 - Reverse index: rule → applications whose flows it serves. Shown on the rule row in

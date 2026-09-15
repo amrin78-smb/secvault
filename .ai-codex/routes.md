@@ -231,6 +231,36 @@ GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one ro
 GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
 Deliberately NOT admin-gated — read-only, persists nothing, same reasoning as `access-path`/`path-query`. ⛔ A query error returns **500**, never an empty `rows` array: "0 results" from a failed query reads as "that traffic never happened". Added 2026-09-08.
 
+## /api/applications (v2.124.0)
+
+GET  /api/applications[?days=N] [auth] [db] -> `evaluateAllApplications(pool, {windowDays})` — every
+declared application with every flow evaluated against the current fleet rulebase, plus
+`orphans` (COVERAGE, not findings) and `coverage`. ⛔ Returns `errors[]` per failed stage rather
+than a clean empty body; a caller that ignores it renders a page that looks best when it is least
+trustworthy.
+POST /api/applications [auth] [db] — declare an application. **Gated on `OPERATE`, not
+`MANAGE_DEVICES`** — declaring intent changes no device, no rule and no score, the same reasoning
+`/api/segmentation` uses.
+
+## /api/applications/[id] (v2.124.0)
+
+GET    /api/applications/[id][?days=N] [auth] [db] -> `evaluateApplication()` — one application,
+its flows, their verdicts, and the coverage the verdicts rest on. 404 when the id is unknown.
+PUT    /api/applications/[id] [auth] [db] [OPERATE] — update name/owner/criticality/status/note.
+DELETE /api/applications/[id] [auth] [db] [OPERATE] — cascades to its flows.
+
+## /api/applications/[id]/flows (v2.124.0)
+
+POST /api/applications/[id]/flows [auth] [db] [OPERATE] -> `addFlow()`. ⛔ Validated by the SAME
+`normaliseFlow()` that will later evaluate it, and a 400 names the field — a flow that cannot be
+parsed can never produce a verdict, so accepting it would put a permanently unanswerable row in the
+operator's own list.
+
+## /api/applications/[id]/flows/[flowId] (v2.124.0)
+
+PUT    /api/applications/[id]/flows/[flowId] [auth] [db] [OPERATE] — same validation as POST.
+DELETE /api/applications/[id]/flows/[flowId] [auth] [db] [OPERATE].
+
 ## /api/topology/path-query
 
 POST /api/topology/path-query [auth] [db] — `{srcIp, dstIp, protocol?, port?}` -> `simulateMultiHopPath()` (`lib/engines/topology.js`), fleet-wide (no `[id]` param — loads every active device's rules/objects/interfaces/routes/nat_rules). Deliberately NOT admin-gated, same reasoning as `access-path`. Added 2026-08-02.

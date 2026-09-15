@@ -6,13 +6,87 @@ an already-deployed table) + `lib/schema-grants.sql` (readonly roles, applied se
 PostgreSQL 16. All PKs are `UUID DEFAULT gen_random_uuid()` except `settings` (TEXT key-value PK).
 No `SERIAL` anywhere — a deliberate choice, see "Known schema debt" below.
 
-36 tables total (this count was stale at 28 before 2026-08-02 — several prior features' tables were
-never reflected here; corrected while adding this session's 3 new tables). Dense format per table:
+65 tables total in `lib/schema.sql` (`grep -c "^CREATE TABLE IF NOT EXISTS"` — recount rather than
+trusting this line; it read 36 for a long stretch while the file held far more, and `segmentation_intents`
+is still not written up below). Dense format per table:
 ```
 col_name          TYPE  CONSTRAINTS                    -- notes / FK target
 ```
 
 ---
+
+## Application intent (v2.124.0)
+
+### applications
+```
+id                UUID PK
+name              TEXT NOT NULL                   -- UNIQUE
+owner             TEXT                            -- BUSINESS owner, free text
+criticality       TEXT NOT NULL DEFAULT 'normal'  -- 'critical' | 'normal'
+status            TEXT NOT NULL DEFAULT 'active'  -- 'active' | 'retiring' | 'retired'
+note              TEXT
+created_by        TEXT
+created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+⛔ `owner` is deliberately NOT a `users(id)` FK — the person accountable for an application is
+usually not a SecVault account holder, and making it one would force the wrong people into the user
+table. ⛔ NOT to be confused with `syslog_app_hourly.application`, which is the VENDOR L7 APP-ID
+(`ssl`, `dns-base`, `ping`) — a protocol fingerprint, not a business application. The two must
+never share a label in the UI. Same trap as `firewall_rules.applications`.
+
+### application_flows
+```
+id                UUID PK
+application_id    UUID NOT NULL                   -- FK -> applications(id) ON DELETE CASCADE
+src               TEXT NOT NULL                   -- LITERAL CIDR/IP, never a vendor object name
+dst               TEXT NOT NULL
+protocol          TEXT NOT NULL DEFAULT 'tcp'
+port_start        INTEGER                         -- NULL/NULL = every port of this protocol
+port_end          INTEGER
+expectation       TEXT NOT NULL DEFAULT 'allow'   -- 'allow' | 'deny'
+note              TEXT
+created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Index: `idx_application_flows_app(application_id)`.
+⛔ `src`/`dst` are LITERAL addresses, NOT object names. `network_objects` is keyed BY DEVICE, so the
+same object name means different things on different firewalls and a flow declared against one would
+silently evaluate against nothing on the others — the failure `zone_classifications` had when it was
+briefly global. ⛔ `expectation` is both-ways, exactly like `segmentation_intents`: a declared
+`allow` nothing permits is a BROKEN APPLICATION, a declared `deny` something permits is a VIOLATION,
+and neither is the absence of the other. ⛔ **NO STORED VERDICT COLUMN and no cached rule list** — a
+verdict is a function of the current rulebase and traffic window, computed at read time by
+`lib/engines/applicationViewData.js`. Storing one lets it go stale and be read as fact, which is
+precisely the defect this feature exists to beat the competition on.
+
+Readonly grants: both tables carry `GRANT SELECT` to `claude_readonly`/`nocvault_readonly` — they
+hold no secrets, only the operator's declaration.
+
+### segmentation_intents (v2.113.0)
+```
+id            UUID PK
+source_zone   TEXT NOT NULL
+dest_zone     TEXT NOT NULL
+expectation   TEXT NOT NULL DEFAULT 'deny'   -- 'deny' | 'allow'
+note          TEXT
+created_by    TEXT
+created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+UNIQUE (source_zone, dest_zone)
+```
+Index: `idx_segmentation_intents_src(source_zone)`. Readonly grants: both roles.
+
+⛔ **Documented here 2026-09-15, having shipped in v2.113.0 without an entry** — found while adding
+the two tables above, which is exactly how a stale index compounds: the application tables were
+written up against a neighbour that was not itself described. The same table-count line above read
+36 for months while the file held 65.
+
+The ZONE-granularity predecessor of `application_flows`, and the proof the declared-intent pattern
+works. ⛔ Keyed on zone NAMES alone, not on a device: an intent is a statement about the NETWORK
+("branch must not reach cardholder") and is evaluated against every device with a rule touching
+those zones. ⛔ No stored verdict column, same rule as the application tables. ⛔ `expectation` is
+both-ways for the same reason.
 
 ## Core / device management
 
