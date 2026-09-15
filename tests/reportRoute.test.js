@@ -167,3 +167,71 @@ describe('the registry stays honest about what exists', () => {
     assert.equal(visibleReports({}).length, 0);
   });
 });
+
+describe('⛔ nothing non-serialisable crosses into a client component', () => {
+  // THE BUG THIS EXISTS FOR, because nothing in this suite could see it.
+  //
+  // The page passed whole catalogue entries to <ReportCard>, which is a client
+  // component. An entry carries `builder` — a lazy `() => require(...)` so the
+  // registry can be read without pulling pdfkit and the entire engine graph in
+  // behind it. React refuses to send a function across that boundary, and in a
+  // PRODUCTION build the failure is a bare digest on an empty page with the
+  // message deliberately withheld "to avoid leaking sensitive details".
+  //
+  // Every test passed. The build was clean. The page was blank. There is no
+  // render harness in this repo, so the only thing that can catch this class is
+  // a check on the shape of what gets handed over.
+
+  it('clientSafe strips the builder', () => {
+    const { clientSafe, REPORTS } = require('../lib/reports/catalogue');
+    for (const entry of REPORTS) {
+      const safe = clientSafe(entry);
+      assert.equal(safe.builder, undefined, `${entry.id} still carries its builder`);
+      assert.equal(safe.capability, undefined, 'the capability is a server concern');
+    }
+  });
+
+  it('⛔ every clientSafe entry survives JSON, which is what React requires', () => {
+    const { clientSafe, REPORTS } = require('../lib/reports/catalogue');
+    for (const entry of REPORTS) {
+      const safe = clientSafe(entry);
+      for (const [k, v] of Object.entries(safe)) {
+        assert.notEqual(typeof v, 'function', `${entry.id}.${k} is a function`);
+      }
+      assert.deepEqual(JSON.parse(JSON.stringify(safe)), safe, `${entry.id} does not round-trip`);
+    }
+  });
+
+  it('⛔ it is an ALLOW-LIST, so a new function field cannot leak through', () => {
+    // Written as "pick these fields" rather than "delete builder", because the
+    // next field added might also be a function — a formatter, a predicate —
+    // and a deny-list silently starts passing it.
+    const { clientSafe } = require('../lib/reports/catalogue');
+    const safe = clientSafe({
+      id: 'x', name: 'X', summary: 's', scope: 'fleet', formats: ['pdf'],
+      builder: () => {},
+      validate: () => {},          // a plausible future addition
+      capability: 'operate',
+      pool: { query: () => {} },   // something genuinely dangerous
+    });
+    assert.equal(safe.validate, undefined);
+    assert.equal(safe.pool, undefined);
+    assert.equal(safe.builder, undefined);
+    assert.deepEqual(Object.keys(safe).sort(),
+      ['formats', 'id', 'name', 'optionalDevice', 'scope', 'summary']);
+  });
+
+  it('the page serialises before rendering the client component', () => {
+    assert.match(PAGE, /clientSafe/, 'the page must serialise catalogue entries');
+    assert.match(
+      PAGE, /visibleReports\([^)]*\)\s*\.map\(clientSafe\)/,
+      'serialise ONCE where the list is built, not at each call site'
+    );
+  });
+
+  it('clientSafe tolerates a null entry rather than throwing', () => {
+    const { clientSafe } = require('../lib/reports/catalogue');
+    assert.equal(clientSafe(null), null);
+    assert.equal(clientSafe(undefined), null);
+  });
+});

@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { pool } from '../../../lib/db';
 import { capabilitiesOf } from '../../../lib/rbac';
-import { visibleReports, SCOPES } from '../../../lib/reports/catalogue';
+import { visibleReports, clientSafe, SCOPES } from '../../../lib/reports/catalogue';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -44,7 +44,12 @@ async function activeDevices() {
 export default async function ReportsPage() {
   const session = await getServerSession(authOptions);
   const caps = capabilitiesOf(session);
-  const reports = visibleReports(caps);
+  // ⛔ clientSafe() at the boundary. A catalogue entry carries a lazy `builder`
+  // function so the registry stays cheap to require; React refuses to send a
+  // function to a client component, and in a production build that failure is a
+  // bare digest on an empty page. Serialise ONCE here rather than at each call
+  // site, so a future section cannot forget.
+  const reports = visibleReports(caps).map(clientSafe);
   const devices = await activeDevices();
 
   const fleet = reports.filter((r) => r.scope === SCOPES.FLEET);

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.120.1': [
+    'Fixed the Reports page failing to load. It was handing the report catalogue straight to the browser, and one field in each entry is a function, which React refuses to send.',
+  ],
   '2.120.0': [
     'New Reports page with five downloadable PDFs, generated fresh on request.',
     'Executive Security Posture — the fleet in one page for someone who will not read page two, including an explicit account of what could not be measured.',
