@@ -2,11 +2,12 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { pool } from '../../../lib/db';
 import { capabilitiesOf } from '../../../lib/rbac';
-import { visibleReports, clientSafe, SCOPES } from '../../../lib/reports/catalogue';
+import { visibleReports, clientSafe } from '../../../lib/reports/catalogue';
+import { getReportStats, tilesFor } from '../../../lib/reports/reportStats';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
-import ReportCard from '../../../components/reports/ReportCard';
+import ReportWorkspace from '../../../components/reports/ReportWorkspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,12 @@ export const dynamic = 'force-dynamic';
 // picker rather than asking an operator to paste a UUID. Only ACTIVE devices —
 // a report about a decommissioned firewall is a document nobody wants and the
 // picker should not imply it is available.
+//
+// ⛔ THE HEADLINE FIGURES ARE FETCHED HERE TOO, in ONE query for all five
+// reports rather than per report. The page previously described each report and
+// showed nothing of it; the tiles are what make it a place you can decide from
+// instead of a list of download links. See lib/reports/reportStats.js for why
+// they are cheap counts and not the engines' own numbers.
 
 async function activeDevices() {
   try {
@@ -44,21 +51,24 @@ async function activeDevices() {
 export default async function ReportsPage() {
   const session = await getServerSession(authOptions);
   const caps = capabilitiesOf(session);
+
+  // ⛔ Both reads are independent and neither gates the other, so they run
+  // together — a page that costs two serial round trips to show five static
+  // descriptions would have been slower than the document it offers.
+  const [devices, stats] = await Promise.all([activeDevices(), getReportStats(pool)]);
+
   // ⛔ clientSafe() at the boundary. A catalogue entry carries a lazy `builder`
   // function so the registry stays cheap to require; React refuses to send a
   // function to a client component, and in a production build that failure is a
   // bare digest on an empty page. Serialise ONCE here rather than at each call
   // site, so a future section cannot forget.
-  const reports = visibleReports(caps).map(clientSafe);
-  const devices = await activeDevices();
-
-  const fleet = reports.filter((r) => r.scope === SCOPES.FLEET);
-  const perDevice = reports.filter((r) => r.scope === SCOPES.DEVICE);
-  // ⛔ Entity-scoped reports (a specific change request) are deliberately NOT
-  // listed here. They are reached from the record they describe, because this
-  // page cannot offer a meaningful picker for "which of your change requests" —
-  // and a catalogue entry that leads to a dead form is worse than its absence.
-  const entity = reports.filter((r) => r.scope === SCOPES.ENTITY);
+  //
+  // ⛔ `tiles` is null, NOT an empty array, when the counts could not be read —
+  // the panel renders those two cases differently, and an empty array would
+  // collapse "we could not measure this" into "there is nothing to show".
+  const reports = visibleReports(caps)
+    .map(clientSafe)
+    .map((r) => ({ ...r, tiles: tilesFor(r.id, stats) }));
 
   return (
     <div>
@@ -73,73 +83,9 @@ export default async function ReportsPage() {
             <EmptyState message="Your role does not include access to any report." />
           </CardBody>
         </Card>
-      ) : null}
-
-      {fleet.length > 0 ? (
-        <section style={{ marginBottom: 'var(--s5)' }}>
-          <h2
-            style={{
-              fontSize: 'var(--text-xs)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              color: 'var(--text-muted)',
-              fontWeight: 600,
-              margin: '0 0 var(--s3)',
-            }}
-          >
-            Fleet-wide
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-            {fleet.map((r) => (
-              <ReportCard key={r.id} report={r} devices={devices} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {perDevice.length > 0 ? (
-        <section style={{ marginBottom: 'var(--s5)' }}>
-          <h2
-            style={{
-              fontSize: 'var(--text-xs)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              color: 'var(--text-muted)',
-              fontWeight: 600,
-              margin: '0 0 var(--s3)',
-            }}
-          >
-            Per firewall
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-            {perDevice.map((r) => (
-              <ReportCard key={r.id} report={r} devices={devices} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {entity.length > 0 ? (
-        <Card>
-          <CardBody>
-            <div
-              style={{
-                fontSize: 'var(--text-sm)',
-                color: 'var(--text-secondary)',
-                borderLeft: '3px solid var(--border)',
-                paddingLeft: 'var(--s3)',
-              }}
-            >
-              <strong>
-                {entity.map((r) => r.name).join(', ')}
-              </strong>{' '}
-              {entity.length === 1 ? 'is' : 'are'} produced from a specific record rather than
-              from this page — open the change request itself and export it there, so the
-              document is always tied to the request it describes.
-            </div>
-          </CardBody>
-        </Card>
-      ) : null}
+      ) : (
+        <ReportWorkspace reports={reports} devices={devices} />
+      )}
     </div>
   );
 }

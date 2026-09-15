@@ -116,17 +116,38 @@ describe('the page and the registry cannot drift', () => {
     assert.match(ROUTE, /can\(session, entry\.capability\)/);
   });
 
-  it('every registered scope is handled by the page', () => {
-    const handled = new Set();
-    if (/SCOPES\.FLEET/.test(PAGE)) handled.add(SCOPES.FLEET);
-    if (/SCOPES\.DEVICE/.test(PAGE)) handled.add(SCOPES.DEVICE);
-    if (/SCOPES\.ENTITY/.test(PAGE)) handled.add(SCOPES.ENTITY);
+  it('every registered scope is reachable, none is silently invisible', () => {
+    // ⛔ THE CLAIM IS UNCHANGED; ONLY WHERE IT IS ENFORCED MOVED. This used to
+    // check the PAGE for a branch per scope, because the page rendered one
+    // section per scope and a report whose scope had no section was registered
+    // and invisible. The page is now a rail plus a panel and does no scope
+    // filtering at all — it hands every visible report to the workspace — so
+    // the place a scope can now go unhandled is the workspace's own labels and
+    // its entity branch. Checking the old location would have kept passing
+    // while testing nothing, which is worse than deleting it.
+    const ws = fs.readFileSync(
+      path.join(ROOT, 'components', 'reports', 'ReportWorkspace.js'), 'utf8');
+
+    assert.equal(
+      /SCOPES\.FLEET/.test(PAGE), false,
+      'the page must not filter by scope — the workspace shows the whole catalogue'
+    );
+
+    const block = ws.match(/const SCOPE_LABEL = \{([\s\S]*?)\};/);
+    assert.ok(block, 'SCOPE_LABEL not found in ReportWorkspace.js');
     for (const r of REPORTS) {
-      assert.ok(
-        handled.has(r.scope),
-        `${r.id} is scope '${r.scope}' and the page renders no branch for it — `
-        + 'it would be registered and invisible'
+      assert.match(
+        block[1], new RegExp('\\b' + r.scope + '\\s*:'),
+        `${r.id} is scope '${r.scope}' and the workspace has no label for it — `
+        + 'the rail would print the raw enum value'
       );
+    }
+
+    // Entity-scoped reports cannot be run from this page and the panel must say
+    // so. Without this branch the download button would 404 with no explanation.
+    if (REPORTS.some((r) => r.scope === SCOPES.ENTITY)) {
+      assert.match(ws, /isEntity/,
+        'an entity-scoped report is registered but the panel has no branch for it');
     }
   });
 
@@ -218,7 +239,7 @@ describe('⛔ nothing non-serialisable crosses into a client component', () => {
     assert.equal(safe.pool, undefined);
     assert.equal(safe.builder, undefined);
     assert.deepEqual(Object.keys(safe).sort(),
-      ['formats', 'id', 'name', 'optionalDevice', 'scope', 'summary']);
+      ['contents', 'formats', 'icon', 'id', 'name', 'optionalDevice', 'scope', 'summary']);
   });
 
   it('the page serialises before rendering the client component', () => {
@@ -233,5 +254,121 @@ describe('⛔ nothing non-serialisable crosses into a client component', () => {
     const { clientSafe } = require('../lib/reports/catalogue');
     assert.equal(clientSafe(null), null);
     assert.equal(clientSafe(undefined), null);
+  });
+
+  // ── The rail and panel need two more fields per entry ──────────────────
+  // Both are OPTIONAL in clientSafe (they default to null / []) so a new
+  // report cannot crash the page by omitting them — but a report that reaches
+  // the catalogue without them renders as a generic glyph and an empty
+  // "what is in the document" block, which looks like a bug in the page rather
+  // than a gap in the entry. So the catalogue itself is held to having them.
+
+  it('every report declares a glyph and what the document contains', () => {
+    const { REPORTS } = require('../lib/reports/catalogue');
+    for (const r of REPORTS) {
+      assert.ok(r.icon, `${r.id} has no icon`);
+      assert.ok(Array.isArray(r.contents) && r.contents.length >= 3,
+        `${r.id} should list at least three things the document contains`);
+    }
+  });
+
+  it('⛔ the glyphs are DISTINCT — that, not colour, is the rail wayfinding cue', () => {
+    const { REPORTS } = require('../lib/reports/catalogue');
+    const icons = REPORTS.map((r) => r.icon);
+    assert.equal(new Set(icons).size, icons.length, `duplicate glyph: ${icons.join(', ')}`);
+  });
+
+  it('⛔ every declared glyph is one the workspace can actually resolve', () => {
+    // The catalogue names its glyph as a STRING (it is required from a server
+    // component, where a React element cannot cross the boundary). So the name
+    // and the lookup live in different files and can drift silently — the
+    // fallback would quietly give two reports the same icon, defeating the
+    // distinctness above without failing anything.
+    const ws = fs.readFileSync(
+      path.join(__dirname, '..', 'components', 'reports', 'ReportWorkspace.js'), 'utf8');
+    const block = ws.match(/const GLYPHS = \{([\s\S]*?)\}/);
+    assert.ok(block, 'GLYPHS map not found in ReportWorkspace.js');
+    const known = new Set(block[1].split(',').map((x) => x.trim()).filter(Boolean));
+    const { REPORTS } = require('../lib/reports/catalogue');
+    for (const r of REPORTS) {
+      assert.ok(known.has(r.icon), `${r.id} names ${r.icon}, which GLYPHS does not carry`);
+    }
+  });
+
+  it('the page hands the client component its tiles', () => {
+    assert.match(PAGE, /tilesFor\(/, 'the page must attach per-report tiles');
+    assert.match(PAGE, /ReportWorkspace/, 'the page must render the workspace');
+  });
+});
+
+describe('report stats — the figures shown before you download', () => {
+  const { getReportStats, tilesFor } = require('../lib/reports/reportStats');
+
+  // ⛔ THE POINT OF THESE TESTS. Every tile is a number an operator may act on,
+  // and the failure that matters is not a wrong count — it is a count rendered
+  // confidently when nothing was read. That is this codebase's most-repeated
+  // bug, and a Reports page showing a tidy row of zeros would be it in its most
+  // reassuring form: "nothing to report" is what a clean fleet looks like.
+
+  it('⛔ returns null when the query fails — NEVER a zero-filled object', async () => {
+    const pool = { query: async () => { throw new Error('connection refused'); } };
+    assert.equal(await getReportStats(pool), null);
+  });
+
+  it('⛔ a null stats object yields NO tiles, not tiles reading zero', () => {
+    for (const id of ['executive-summary', 'rule-hygiene', 'vulnerability-posture',
+                      'compliance-fleet']) {
+      assert.equal(tilesFor(id, null), null, `${id} fabricated tiles from nothing`);
+    }
+  });
+
+  it('an unknown report id has no tiles rather than guessing a set', () => {
+    assert.equal(tilesFor('not-a-report', { devices: 3 }), null);
+  });
+
+  it('one round trip — a page must not cost one query per report', async () => {
+    let calls = 0;
+    const pool = { query: async () => { calls++; return { rows: [{ devices: 16 }] }; } };
+    await getReportStats(pool);
+    assert.equal(calls, 1);
+  });
+
+  it('⛔ the unmeasured tiles carry the hueless tone, not a colour', () => {
+    const stats = {
+      devices: 16, cve_patch_now: 1, cve_patch_now_devices: 3, cve_scheduled: 32,
+      rule_findings: 1132, rules_unmeasured: 233, rules_total: 1757,
+      compliance_fails: 74, compliance_devices: 16,
+    };
+    const hygiene = tilesFor('rule-hygiene', stats);
+    const unmeasured = hygiene.filter((t) => /usage data|Of the ruleset/.test(t.label));
+    assert.equal(unmeasured.length, 2);
+    for (const t of unmeasured) {
+      assert.equal(t.tone, 'unmeasured',
+        `"${t.label}" is a coverage gap and must not be drawn as good or bad news`);
+    }
+  });
+
+  it('a zero count still renders as 0 — measured-zero is a real answer', () => {
+    // The counterpart to the rule above: the hueless treatment is for what was
+    // NOT measured. A genuine zero is evidence and is shown as a number.
+    const stats = {
+      devices: 16, cve_patch_now: 0, cve_patch_now_devices: 0, cve_scheduled: 0,
+      rule_findings: 0, rules_unmeasured: 0, rules_total: 0,
+      compliance_fails: 0, compliance_devices: 16,
+    };
+    const vuln = tilesFor('vulnerability-posture', stats);
+    const patchNow = vuln.find((t) => t.label === 'Patch now');
+    assert.equal(patchNow.value, '0');
+    assert.equal(patchNow.tone, 'ok');
+  });
+
+  it('a percentage over a zero denominator is an em-dash, not NaN% or 0%', () => {
+    const stats = {
+      devices: 0, cve_patch_now: 0, cve_patch_now_devices: 0, cve_scheduled: 0,
+      rule_findings: 0, rules_unmeasured: 0, rules_total: 0,
+      compliance_fails: 0, compliance_devices: 0,
+    };
+    const hygiene = tilesFor('rule-hygiene', stats);
+    assert.equal(hygiene.find((t) => t.label === 'Of the ruleset').value, '—');
   });
 });
