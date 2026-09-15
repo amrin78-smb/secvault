@@ -448,3 +448,26 @@ rather than a styling one.
   the page no event when the bytes arrive.
 
 CSS lives in `app/globals.css` under `.rpt-*` (workspace grid, rail, tiles, section label).
+
+## components/applications/CloudServices.js (added 2026-09-15, v2.126.0)
+
+SERVER component — pure display, so nothing crosses a client boundary and there is nothing to
+serialise. Rendered by `app/(dashboard)/applications/page.js` ABOVE the declaration board, because
+with nothing declared yet it is the only part of that page with anything to say.
+
+Props: `summary` from `lib/engines/cloudAppsData.summariseCloudUsage()`.
+
+- ⛔ `status.usable === false` renders a HATCHED, HUELESS card saying nothing here should be read as
+  "no cloud services are in use". On an air-gapped install that is the only state this section will
+  ever have, and an empty table there would look like a clean result.
+- ⛔ A zero in "Reached by rules" renders as **"defined, not referenced"**, not as `0`. It is a
+  statement about the OBJECTS — they exist on the firewall but no enabled rule names them, directly
+  or through a group — and explicitly NOT a claim that the service is blocked; a broader rule naming
+  no hostname may well permit it. Live: Teams, Exchange and SharePoint are all in this state.
+- ⛔ The pinned-address finding is its own section with an amber rail, and the drill-down discloses
+  a 200-row cap when it bites. Ambiguous matches ("also claimed by another provider") are shown, not
+  hidden.
+- ⛔ The footer states COVERAGE: how many objects were checked, how many named, how many are in no
+  published list, and how many use a shape SecVault does not read at all (451 live, mostly
+  `start-end` ranges). A naming feature that shows its hits and hides its misses reads as far more
+  complete than it is.

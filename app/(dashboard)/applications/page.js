@@ -1,10 +1,12 @@
 import PageHeader from '../../../components/ui/PageHeader';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
 import ApplicationBoard from '../../../components/applications/ApplicationBoard';
+import CloudServices from '../../../components/applications/CloudServices';
 import { pool } from '../../../lib/db';
 import { evaluateAllApplications } from '../../../lib/engines/applicationViewData';
 import { buildApplicationsAnswer } from '../../../lib/answers';
 import { applicationsEvidence } from '../../../lib/evidence';
+import { summariseCloudUsage } from '../../../lib/engines/cloudAppsData';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +30,11 @@ export const dynamic = 'force-dynamic';
 // boundary is what shipped a blank page once before — React refuses it, and the
 // build does not notice.
 export default async function ApplicationsPage() {
+  // ⛔ The two reads are INDEPENDENT and neither gates the other. Naming a rule
+  // against the cloud catalogue has nothing to do with evaluating a declared
+  // flow, and one failing must not blank the other — the catalogue half is the
+  // only useful thing on this page while nothing is declared yet.
+  let cloud = null;
   let result = null;
   let initialError = '';
   try {
@@ -42,6 +49,15 @@ export default async function ApplicationsPage() {
       : 'Could not evaluate applications.';
   }
 
+  try {
+    cloud = await summariseCloudUsage(pool);
+  } catch (_err) {
+    // summariseCloudUsage reports its own failures in `status` rather than
+    // throwing; reaching here means something outside it broke, and the section
+    // is simply omitted rather than taking the page down.
+    cloud = null;
+  }
+
   const answer = buildApplicationsAnswer(result, initialError);
   const evidence = applicationsEvidence(result);
 
@@ -53,6 +69,11 @@ export default async function ApplicationsPage() {
       />
 
       <AnswerHeader answer={answer} evidence={evidence} />
+
+      {/* ⛔ ABOVE the declaration board on purpose. With nothing declared yet
+          this is the only part of the page with anything to say, and it is what
+          tells an operator what there is to declare. */}
+      <CloudServices summary={cloud} />
 
       <ApplicationBoard initial={result} initialError={initialError} />
     </div>

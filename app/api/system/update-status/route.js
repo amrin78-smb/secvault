@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.126.0': [
+    'The Applications page now shows which cloud services your rules actually reference, named from each provider’s own published list.',
+    'It flags addresses pinned to a literal IP inside a provider’s range — these work until the provider moves that range, then stop silently, because nothing on the firewall changed.',
+    'A service whose objects exist but that no enabled rule references is labelled “defined, not referenced” — which is a statement about the objects, not a claim that the service is blocked.',
+    'The page states what it checked and what it could not read, so a short list is never mistaken for a clean one.',
+  ],
   '2.125.0': [
     'SecVault now recognises well-known cloud services. Rules that reference Microsoft 365, AWS, Google Cloud or Cloudflare addresses are named instead of sitting in the rulebase as opaque strings.',
     'Names come from each provider’s own published list, refreshed on the existing feed cycle — so the label is whatever Microsoft or AWS actually publish, never a guess.',

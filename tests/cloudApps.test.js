@@ -385,3 +385,129 @@ describe('⛔ storeProvider refuses to prune on an implausible result', () => {
     assert.equal(r.inserted + r.updated, 1, 'ten identical rows must collapse to one');
   });
 });
+
+// ── Range containment and the address index ───────────────────────────────
+
+describe('⛔ matchRange requires FULL containment, never overlap', () => {
+  const cat = [ip('microsoft_365', 'Exchange Online', '13.107.18.0/24')];
+
+  it('a range wholly inside published space matches', () => {
+    assert.equal(eng.matchRange('13.107.18.10/31', cat).service, 'Exchange Online');
+    assert.equal(eng.matchRange('13.107.18.0/24', cat).service, 'Exchange Online');
+  });
+
+  it('⛔ a range that merely OVERLAPS does not match', () => {
+    // A /16 clipping the edge of a provider /24 is a big internal supernet that
+    // happens to touch one — calling it "Exchange Online" would put a confident
+    // wrong label on somebody's own address space.
+    assert.equal(eng.matchRange('13.107.0.0/16', cat).state, STATES.NO_MATCH);
+    assert.equal(eng.matchRange('0.0.0.0/0', cat).state, STATES.NO_MATCH);
+  });
+
+  it('a range entirely outside does not match', () => {
+    assert.equal(eng.matchRange('10.0.0.0/8', cat).state, STATES.NO_MATCH);
+  });
+
+  it('an empty catalogue is UNAVAILABLE here too, not NO_MATCH', () => {
+    assert.equal(eng.matchRange('13.107.18.0/24', []).state, STATES.UNAVAILABLE);
+  });
+
+  it('unparseable input is refused rather than throwing', () => {
+    assert.equal(eng.matchRange('not-a-cidr', cat).state, STATES.NO_MATCH);
+  });
+});
+
+describe('buildIpIndex', () => {
+  // ⛔ The index exists for speed ONLY. Checking the reference fleet's 7,122
+  // address objects against 11,766 entries took 18.4s unindexed and 976ms with
+  // it — but a faster wrong answer is still a wrong answer, so what these
+  // pin is that it changes nothing except the time.
+
+  it('⛔ gives byte-identical answers to a linear scan', () => {
+    const cat = [
+      ip('aws', 'AMAZON', '52.0.0.0/8'),
+      ip('microsoft_365', 'Microsoft Teams', '52.112.0.0/14'),
+      ip('cloudflare', null, '104.16.0.0/13'),
+      ip('google_cloud', 'Google Cloud', '34.1.208.0/20'),
+    ];
+    const idx = eng.buildIpIndex(cat);
+    for (const probe of ['52.112.0.5', '52.5.0.1', '104.17.217.6', '34.1.208.1', '8.8.8.8', '1.1.1.1']) {
+      const a = matchIp(probe, cat);
+      const b = matchIp(probe, idx);
+      assert.equal(b.state, a.state, probe);
+      assert.equal(b.label, a.label, probe);
+    }
+  });
+
+  it('⛔ a range spanning several /8s is findable from EVERY octet it covers', () => {
+    // Filing it only under its start octet would make addresses in its tail
+    // invisible — a silent under-match, which on a naming feature means quietly
+    // reporting "not a cloud service" for something that is one.
+    const wide = [ip('aws', 'AMAZON', '10.0.0.0/7')]; // spans 10.x and 11.x
+    const idx = eng.buildIpIndex(wide);
+    assert.equal(matchIp('10.1.2.3', idx).provider, 'aws');
+    assert.equal(matchIp('11.1.2.3', idx).provider, 'aws', 'the tail octet must be indexed too');
+  });
+
+  it('an index built from nothing reports zero and reads as UNAVAILABLE', () => {
+    const idx = eng.buildIpIndex([]);
+    assert.equal(eng.entryCount(idx), 0);
+    assert.equal(matchIp('1.1.1.1', idx).state, STATES.UNAVAILABLE);
+  });
+
+  it('skips rows with unusable bounds rather than indexing garbage', () => {
+    const idx = eng.buildIpIndex([{ provider: 'x', range_start: null, range_end: null }]);
+    assert.equal(eng.entryCount(idx), 0);
+  });
+
+  it('entryCount works for a plain array as well as an index', () => {
+    assert.equal(eng.entryCount([1, 2, 3]), 3);
+    assert.equal(eng.entryCount(null), 0);
+  });
+});
+
+describe('⛔ a row with no bounds never claims 0.0.0.0/8', () => {
+  // THE BUG THIS PINS, found by a test probing the awkward octet rather than a
+  // convenient one: `Number(null)` is 0, and 0 is finite. So
+  // `Number.isFinite(Number(row.range_start))` ACCEPTED an unpopulated row and
+  // filed it at address zero, where it would answer for anything in 0.0.0.0/8.
+  // Both match loops had it; the existing guard test passed only because it
+  // happened to probe 1.1.1.1.
+  const broken = [
+    { provider: 'ghost', service: null, kind: 'ip', value: 'junk', range_start: null, range_end: null },
+    { provider: 'ghost2', service: null, kind: 'ip', value: 'junk2', range_start: undefined, range_end: undefined },
+    { provider: 'ghost3', service: null, kind: 'ip', value: 'junk3', range_start: '', range_end: '' },
+  ];
+
+  it('matchIp does not match 0.0.0.0 against unpopulated bounds', () => {
+    assert.equal(matchIp('0.0.0.0', broken).state, STATES.NO_MATCH);
+    assert.equal(matchIp('0.1.2.3', broken).state, STATES.NO_MATCH);
+  });
+
+  it('matchRange does not match 0.0.0.0/8 against unpopulated bounds', () => {
+    assert.equal(eng.matchRange('0.0.0.0/8', broken).state, STATES.NO_MATCH);
+  });
+
+  it('the index refuses to file them at all', () => {
+    assert.equal(eng.entryCount(eng.buildIpIndex(broken)), 0);
+    assert.equal(matchIp('0.0.0.0', eng.buildIpIndex(broken)).state, STATES.UNAVAILABLE);
+  });
+
+  it('boundOrNull tells a real zero from an absent value', () => {
+    // 0 IS a legitimate bound — 0.0.0.0 is a real address. The distinction is
+    // between "the value is zero" and "there is no value".
+    assert.equal(eng.boundOrNull(0), 0);
+    assert.equal(eng.boundOrNull('0'), 0);
+    assert.equal(eng.boundOrNull(null), null);
+    assert.equal(eng.boundOrNull(undefined), null);
+    assert.equal(eng.boundOrNull(''), null);
+    assert.equal(eng.boundOrNull('abc'), null);
+  });
+
+  it('a genuinely published 0.0.0.0-based range still works', () => {
+    // The fix must not break the legitimate case it resembles.
+    const real = [ip('aws', 'AMAZON', '0.0.0.0/8')];
+    assert.equal(matchIp('0.1.2.3', real).provider, 'aws');
+    assert.equal(matchIp('0.1.2.3', eng.buildIpIndex(real)).provider, 'aws');
+  });
+});
