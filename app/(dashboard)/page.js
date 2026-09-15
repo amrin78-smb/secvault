@@ -123,6 +123,14 @@ function formatDateTime(value) {
 function syncBadgeColor(status) {
   if (status === 'success') return 'success';
   if (status === 'error') return 'danger';
+  // ⛔ 'skipped' IS NOT A PROBLEM AND MUST NOT BE AMBER. A vendor PSIRT that was
+  // deliberately not fetched — because no device of that vendor is in the
+  // inventory — is the system working, not degrading. Falling through to the
+  // warning colour would put a permanent amber chip on the dashboard for a
+  // correct decision, and an operator who learns to ignore an amber chip will
+  // ignore the one that matters. Muted, which is this product's colour for
+  // "nothing to say".
+  if (status === 'skipped') return 'muted';
   return 'warning';
 }
 

@@ -1369,6 +1369,29 @@ fetched at all. `unavailable` is a distinct state from `no_match` and a test pin
 catalogue; below it nothing is written or deleted and the sync reports failed. Full rules and the
 measured wildcard/apex trade-off: `.ai-codex/lib.md`.
 
+⛔ **A VENDOR PSIRT RUNS ONLY IF THAT VENDOR IS IN THE INVENTORY** (v2.130.0,
+`lib/feeds/vendorPsirt.js`). A vendor's own feed is a bespoke integration whose advisories can only
+ever match that vendor's devices, so carrying one for a vendor nobody owns is pure cost. ⛔ The
+GENERAL databases are deliberately NOT gated — NVD and CIRCL are queried for every supported vendor
+whether or not one is deployed, so a firewall added next month already has history behind it.
+
+⛔ **THE GATE FAILS OPEN.** An inventory read that FAILS runs every feed, because a database hiccup
+that silently switched off CVE discovery would leave the product not doing its main job while every
+signal still looked healthy. ⛔ An EMPTY inventory and an UNREADABLE one are opposite instructions
+and must never be collapsed: the first says "skip every vendor feed", the second says "we do not
+know". ⛔ A skip is WRITTEN to `feed_sync_log` with status `skipped` and a reason — a feed that simply
+stops appearing is indistinguishable from one that silently broke — and `skipped` renders MUTED, not
+amber: a permanent warning chip for the system working correctly teaches an operator to ignore the
+chip that matters. ⛔ Nothing is deleted; advisories already collected for a departed vendor are
+history and stay.
+
+⛔ **Registering a vendor requires a VERIFIED machine-readable source**, same rule as a device parser.
+Probed 2026-09-15 and both obvious additions were REFUSED: **Check Point** has no feed —
+`advisories.checkpoint.com`, its `/feed/` and its `/wp-json/` paths all answer **202 text/html**, a bot
+challenge, which is the ground `fortinet_psirt` is already stuck on; **Cisco** has a working PSIRT RSS
+(200, 8 items, 19 CVE ids) but it is a rolling window with no history and the real openVuln API
+answers **403** without registered credentials.
+
 Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV → CVE.org → EPSS → cloud catalogue (last, so a slow publisher can never delay the advisory feeds).
 
 ⛔ **The last two are ENRICHMENT-ONLY and run LAST for that reason** — they add facts to advisories the

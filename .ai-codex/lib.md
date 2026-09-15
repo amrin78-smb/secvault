@@ -2227,3 +2227,25 @@ The case the impact feature exists for does already appear: on `TUM(TUTH1)`, `Sa
 offered as an `unused` removal candidate with a MEASURED zero hit count — and the declared
 application's flows run through it. It renders `2 flows — cannot tell`, naming the application,
 above the checkbox that would propose its removal.
+
+## lib/feeds/vendorPsirt.js — the inventory gate (v2.130.0)
+
+`registerVendorPsirt` / `inventoryVendors` / `planVendorPsirts` / `SKIPPED`. Decides which vendor
+PSIRT feeds this installation should fetch. See CLAUDE.md's Feed Sources section for the durable
+rules; the mechanics:
+
+- `inventoryVendors(pool)` returns `{ok:true, vendors:Set}` or `{ok:false, error}`. ⛔ It NEVER
+  returns an empty set on failure — an empty set is an instruction ("skip everything") and a failure
+  is not, and a caller cannot tell them apart once that distinction is lost.
+- `planVendorPsirts(inventory, registry)` returns one entry per registered feed with `shouldRun` and,
+  when skipped, a `reason` that names what still covers the vendor (NVD/CIRCL) and states that
+  existing advisories are kept. ⛔ A bare "skipped" reads as "this vendor is no longer watched".
+- ⛔ Fails OPEN on `{ok:false}`, `null`, `undefined` or a malformed result. Pinned four ways.
+- Registration is keyed by the `devices.vendor` slug EXACTLY, and a test asserts every key exists in
+  `VENDOR_META` — a near-miss spelling would compare against the inventory forever without matching,
+  i.e. silently mean "never run", which looks identical to the gate working when you own none of that
+  vendor.
+
+Live: 11 Palo Alto and 5 Fortinet devices, so both registered feeds run. The four unowned Tier-1
+vendors were never PSIRT feeds to begin with; what this changes for them is nothing, and what it
+changes the day one is decommissioned is that its feed stops rather than failing quietly forever.

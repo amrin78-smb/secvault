@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.130.0': [
+    'A firewall vendor’s own advisory feed is now fetched only when you actually have that vendor’s devices. Its advisories could never match anything else, so running it otherwise was pure cost.',
+    'The general CVE databases are deliberately unchanged and still cover every supported vendor, so a firewall added next month already has history behind it.',
+    'If the device inventory cannot be read, every feed runs anyway — a database hiccup must never quietly switch off vulnerability collection.',
+    'A skipped feed is recorded with its reason and shown in grey, not as a warning. Nothing already collected is deleted, and a vendor added later starts collecting on the next cycle with no configuration.',
+  ],
   '2.129.1': [
     'A cloud service you have already declared now says so, instead of offering to declare it again and failing with an error you had to read and dismiss.',
     'Long applications no longer make the page endless — the flow table collapses behind a line that states the verdicts. Anything needing attention stays open.',
