@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.129.1': [
+    'A cloud service you have already declared now says so, instead of offering to declare it again and failing with an error you had to read and dismiss.',
+    'Long applications no longer make the page endless — the flow table collapses behind a line that states the verdicts. Anything needing attention stays open.',
+    'Fixed two words running together in the cloud section, and an error message that escaped its column and was cut mid-sentence.',
+  ],
   '2.129.0': [
     'Rule cleanup now shows which declared applications depend on a rule, above the checkbox that proposes removing it.',
     'It says “cannot tell” rather than a number wherever the evidence does not support one — and a rule no application declares is shown as undeclared, never as safe to remove.',

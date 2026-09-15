@@ -28,7 +28,8 @@ const HINT = {
   fontSize: 'var(--text-xs)',
   color: 'var(--text-muted)',
   lineHeight: 1.5,
-  maxWidth: '46ch',
+  maxWidth: '100%',
+  overflowWrap: 'anywhere',
 };
 
 // ⛔ HUELESS, not green. A declaration built from a partial published list is
@@ -42,7 +43,8 @@ const RESULT = {
   fontSize: 'var(--text-xs)',
   lineHeight: 1.55,
   color: 'var(--text-secondary)',
-  maxWidth: '52ch',
+  maxWidth: '100%',
+  overflowWrap: 'anywhere',
 };
 
 const CAVEAT = {
@@ -66,10 +68,11 @@ const ERROR = {
   fontSize: 'var(--text-xs)',
   lineHeight: 1.55,
   color: 'var(--text-secondary)',
-  maxWidth: '52ch',
+  maxWidth: '100%',
+  overflowWrap: 'anywhere',
 };
 
-export default function DeclareCloudApp({ provider, service, label, plan }) {
+export default function DeclareCloudApp({ provider, service, label, plan, alreadyDeclared = false }) {
   const router = useRouter();
   const [state, setState] = useState('idle'); // idle | working | done | error
   const [result, setResult] = useState(null);
@@ -78,6 +81,30 @@ export default function DeclareCloudApp({ provider, service, label, plan }) {
   // No plan means the catalogue does not carry this pair - the control is
   // omitted rather than offering an action that would be refused with a 400.
   if (!plan) return null;
+
+  // ⛔ ALREADY DECLARED IS A STATE, NOT AN ERROR TO DISCOVER ON CLICK. This
+  // rendered "Declare with 49 flows" for a service that already existed and
+  // answered the press with a 409 the operator then had to read and dismiss.
+  // The page knows before they touch it, so it says so.
+  //
+  // ⛔ It reports the fact WITHOUT claiming the declaration is complete or
+  // correct — flows may have been edited, narrowed or removed since. "Already
+  // declared" is all this component can honestly know.
+  if (alreadyDeclared && state === 'idle') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s1)' }}>
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+          Already declared
+        </span>
+        <a
+          href="#declared-applications"
+          style={{ fontSize: 'var(--text-xs)', color: 'var(--primary)' }}
+        >
+          See it below
+        </a>
+      </div>
+    );
+  }
 
   async function declare() {
     setState('working');

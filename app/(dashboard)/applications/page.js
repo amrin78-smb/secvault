@@ -73,7 +73,17 @@ export default async function ApplicationsPage() {
       {/* ⛔ ABOVE the declaration board on purpose. With nothing declared yet
           this is the only part of the page with anything to say, and it is what
           tells an operator what there is to declare. */}
-      <CloudServices summary={cloud} />
+      {/* ⛔ The declared names travel WITH the cloud summary. Without them the
+          Declare control offers to create an application that already exists
+          and the click comes back a 409 — the page knew before the operator
+          pressed it. Taken from the SAME evaluation the cards below render, so
+          the two halves of the page cannot disagree about what exists. */}
+      <CloudServices
+        summary={cloud}
+        declaredNames={(result && result.applications ? result.applications : [])
+          .map((a) => (a && a.application ? a.application.name : null))
+          .filter(Boolean)}
+      />
 
       <ApplicationBoard initial={result} initialError={initialError} />
     </div>

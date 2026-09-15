@@ -167,6 +167,47 @@ function FlowEvidence({ evaluated }) {
  * Used column said something, and hiding it mid-correction is how the wrong
  * field gets changed.
  */
+/**
+ * Should this application's flow table start open?
+ *
+ * ⛔ COLLAPSING MUST NEVER HIDE A PROBLEM. The page reached 92 flow rows across
+ * five cards and was unreadable, but a shorter page that buries a broken flow
+ * behind a click is worse than a long one. So anything that needs attention —
+ * a broken flow, a partial one, a violation, a flow that could not be read —
+ * forces the table open, and only an application whose flows are ALL fine can
+ * be collapsed. A small application stays open regardless, because collapsing
+ * two rows saves nothing and costs a click.
+ */
+function shouldOpenFlows(summary, flowCount) {
+  if (!summary) return true;
+  const problems = (summary.broken || 0) + (summary.partial || 0)
+    + (summary.violation || 0) + (summary.invalid || 0) + (summary.unspecified || 0);
+  if (problems > 0) return true;
+  return flowCount <= COLLAPSE_ABOVE;
+}
+
+// Below this many flows there is nothing to gain by collapsing.
+const COLLAPSE_ABOVE = 8;
+
+/**
+ * The one line a reader sees when the table is closed.
+ *
+ * ⛔ IT STATES THE VERDICTS, not just a count. "49 flows" tells a reader
+ * nothing about whether to open it; "49 flows · all permitted · 49 not fully
+ * verified" is the answer they came for, and the unverified half is exactly
+ * what a collapsed summary is most likely to drop.
+ */
+function flowSummaryLine(summary, flowCount) {
+  if (!summary) return `${flowCount} declared flow${flowCount === 1 ? '' : 's'}`;
+  const bits = [`${flowCount} declared flow${flowCount === 1 ? '' : 's'}`];
+  if (summary.ok) bits.push(`${summary.ok} as declared`);
+  const problems = (summary.broken || 0) + (summary.partial || 0) + (summary.violation || 0);
+  if (problems > 0) bits.push(`${problems} needing attention`);
+  if (summary.unverified) bits.push(`${summary.unverified} not fully verified`);
+  if (summary.invalid) bits.push(`${summary.invalid} unreadable`);
+  return bits.join(' · ');
+}
+
 function FlowRows({ evaluated, busy, editing, error, onEdit, onCancelEdit, onSaveFlow, onRemoveFlow }) {
   const flow = evaluated.flow || {};
   const showEvidence = hasFlowEvidence(evaluated);
@@ -721,6 +762,21 @@ export default function ApplicationCard({
                 unpredictably on overflow. The last column carries two controls
                 now, so it is wide enough for both — a column narrower than its
                 buttons wraps them into a ragged stack. */}
+            {/* ⛔ NATIVE <details>, not a JS toggle — it works before hydration
+                and matches the collapsible idiom already used on the work
+                queue. `open` is computed, not remembered: an application that
+                develops a problem must not stay collapsed because someone once
+                closed it. */}
+            <details open={shouldOpenFlows(entry.summary, flows.length)}>
+              <summary style={{
+                cursor: 'pointer',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-secondary)',
+                padding: 'var(--s2) 0',
+              }}
+              >
+                {flowSummaryLine(entry.summary, flows.length)}
+              </summary>
             <Table minWidth={920}>
               <colgroup>
                 <col style={{ width: '24%' }} />
@@ -763,6 +819,7 @@ export default function ApplicationCard({
                 })}
               </tbody>
             </Table>
+            </details>
 
             {/* ⛔ OUTSIDE ANY DISCLOSURE. A reader who never opens a collapsed
                 block must still not draw a wrong conclusion from the column

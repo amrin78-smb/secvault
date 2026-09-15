@@ -87,8 +87,17 @@ async function loadPlans() {
   }
 }
 
-export default async function CloudServices({ summary }) {
+export default async function CloudServices({ summary, declaredNames = [] }) {
   if (!summary) return null;
+  // ⛔ WHAT IS ALREADY DECLARED IS AN INPUT, NOT SOMETHING THE BUTTON DISCOVERS
+  // BY FAILING. Offering "Declare with 49 flows" for a service that already
+  // exists, and answering the click with a 409, teaches an operator the control
+  // is unreliable — the page knew the answer before they pressed it. Matched on
+  // the exact name the route composes, so this cannot drift from what a second
+  // click would actually collide with.
+  const declaredSet = new Set(
+    (declaredNames || []).map((x) => String(x).trim().toLowerCase())
+  );
   const { status, services, hardcoded, totals } = summary;
 
   // ── Nothing to check against ────────────────────────────────────────────
@@ -127,19 +136,20 @@ export default async function CloudServices({ summary }) {
 
         <div>
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.55, maxWidth: '82ch' }}>
-            Hostnames and addresses in your rulebase, matched against each provider&rsquo;s own
-            {/* ⛔ NO STOP-SIGN GLYPH IN BODY PROSE. This paragraph shipped with
-                one mid-sentence and it read as an error icon attached to text
-                that is merely explaining something.
+            {/* ⛔ THE COMMENT LIVES ABOVE THIS SENTENCE, NOT INSIDE IT. It was
+                between "own" and "published list", and JSX strips a comment
+                WITHOUT leaving whitespace — so two text nodes were welded into
+                "ownpublished" on screen. A comment is invisible in source and
+                load-bearing in output; never put one mid-sentence.
 
-                It is NOT banned product-wide, and a repo-wide test asserting
-                that was written and then deleted on the evidence: lib/evidence.js
-                carries 38 of them inside the drawer's monospace FORMULA block
-                (`<code>{payload.rule}</code>`), where it reads as a marginal note
-                in a technical listing rather than as an icon. That is deliberate
-                and established. The distinction is prose versus formula, which is
-                a judgement a mechanical guard cannot make — so this is a comment,
-                not a test. */}
+                (What it said, and still applies: no stop-sign glyph in body
+                prose. It is a comment convention, not UI language — mid-sentence
+                it reads as an error icon on text that is merely explaining
+                something. It is NOT banned product-wide: lib/evidence.js carries
+                38 inside the drawer's monospace FORMULA block, which is
+                deliberate. A repo-wide test asserting otherwise was written and
+                deleted on that evidence.) */}
+            Hostnames and addresses in your rulebase, matched against each provider&rsquo;s own
             published list. A match names the <strong>provider and the service they publish</strong>
             {' '}— never an application. An address inside AWS&rsquo;s ranges is AWS, not whatever runs there.
           </p>
@@ -213,6 +223,7 @@ export default async function CloudServices({ summary }) {
                             service={s.service}
                             label={s.label}
                             plan={(plans.get(planKey(s.provider, s.service)) || {}).derivation || null}
+                            alreadyDeclared={declaredSet.has(String(s.label || '').trim().toLowerCase())}
                           />
                         ) : (
                           <span style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-xs)' }}>
