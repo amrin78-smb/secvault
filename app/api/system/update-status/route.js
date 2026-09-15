@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.120.0': [
+    'New Reports page with five downloadable PDFs, generated fresh on request.',
+    'Executive Security Posture — the fleet in one page for someone who will not read page two, including an explicit account of what could not be measured.',
+    'Rule Hygiene — unused, shadowed and over-permissive rules, with every “never used” backed by a measured zero and rules whose usage cannot be measured counted separately rather than listed for deletion.',
+    'Vulnerability & Patch Posture — states the priority rule that fired for each finding, not just the band, and lists advisories it could not match rather than omitting them.',
+    'Every report states its own coverage on the cover, and discloses when a list was capped.',
+  ],
   '2.119.0': [
     'Groundwork for the reporting platform: the PDF drawing code both existing reports relied on now lives in one place instead of two diverging copies.',
     'Fixed a latent defect in the monthly compliance PDF. A page-break guard had been written for the rule-change report and never reached the compliance one, which could have scattered a table header across several near-empty pages.',

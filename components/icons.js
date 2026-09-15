@@ -271,3 +271,23 @@ export function IconChecklist(p) {
     </svg>
   );
 }
+
+// Reports. A document with a bar chart on it — the deliverable, not the data.
+//
+// ⛔ A NEW GLYPH, because every sidebar entry must keep a DISTINCT one; that,
+// not colour, is the per-item wayfinding cue (see the note at the top of
+// Sidebar.js). IconDocument was the obvious reuse and is already Log search,
+// and IconChart is already Rule hygiene. Hand-rolled in the existing
+// Feather-compatible convention — the standing rule bans an icon LIBRARY, not
+// a twelve-line path.
+export function IconReport(p) {
+  return (
+    <svg {...base(p)}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <polyline points="14 3 14 9 20 9" />
+      <line x1="8" y1="17" x2="8" y2="13" />
+      <line x1="12" y1="17" x2="12" y2="11" />
+      <line x1="16" y1="17" x2="16" y2="15" />
+    </svg>
+  );
+}

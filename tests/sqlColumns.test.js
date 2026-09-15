@@ -109,6 +109,19 @@ function walk(dir, out = []) {
 // so anything it contributes is unknowable from here).
 function normalize(lit) {
   return lit
+    // ⛔ BLOCK COMMENTS TOO, not just `--` lines. A `/* ... */` inside a query
+    // is never an identifier, and leaving it in made the parser read the
+    // comment's own words as column names: lib/reports/vulnerabilityPosture.js
+    // tags each statement `SELECT /* vp:assessments */ ...` so a test stub can
+    // route on it, and this test reported "assessments — not a column of
+    // device_cve_assessments" for three of them.
+    //
+    // Worth noting WHICH WAY that failed. It produced a false POSITIVE — a
+    // loud complaint about correct SQL — which is the safe direction and gets
+    // fixed immediately. The dangerous direction is the one the LATERAL note
+    // below records: a parse failure that silently marks a query unverifiable
+    // and skips it, leaving a real wrong column name undetected.
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/--[^\n]*/g, ' ')
     .replace(/'(?:[^']|'')*'/g, " '' ")
     .replace(/\$\{[^{}]*\}/g, ' ');

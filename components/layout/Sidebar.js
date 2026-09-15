@@ -20,6 +20,7 @@ import {
   IconAlertTriangle,
   IconGrid,
   IconChecklist,
+  IconReport,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -84,6 +85,10 @@ const NAV_GROUPS = [
     // it here stops discovery — app/(dashboard)/logs/page.js is what actually
     // refuses the request.
     { href: '/logs', label: 'Log search', Icon: IconDocument, requires: 'view_log_search' },
+    // Sits with Overview and Work queue because it answers the same question
+    // one step further on: what do I hand to someone else. Not filed under
+    // Risk — a compliance PDF and a lifecycle PDF are not risk views.
+    { href: '/reports', label: 'Reports', Icon: IconReport },
   ] },
   { group: 'Inventory', items: [
     { href: '/devices', label: 'Firewalls', Icon: IconDevices },

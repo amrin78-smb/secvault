@@ -179,8 +179,15 @@ describe('the catalogue is the single source of truth', () => {
     // ⛔ An entry is a promise the UI will render and the route will serve. A
     // catalogue listing reports that return nothing is the same "looks
     // complete, is not" failure this codebase keeps finding.
-    assert.equal(REPORTS.length, 2);
-    assert.deepEqual(REPORTS.map((r) => r.id).sort(), ['compliance-fleet', 'rule-change-request']);
+    // ⛔ Asserts the registry is NON-EMPTY and every entry resolves, not an
+    // exact count — a count assertion turns "added a report" into a failing
+    // build, which trains whoever adds the next one to edit the test without
+    // reading it. What must not regress is that nothing is registered without
+    // a working builder behind it.
+    assert.ok(REPORTS.length >= 2, 'the two original reports must stay registered');
+    const ids = REPORTS.map((r) => r.id);
+    assert.ok(ids.includes('compliance-fleet'));
+    assert.ok(ids.includes('rule-change-request'));
   });
 
   it('every entry is fully specified', () => {
@@ -213,7 +220,7 @@ describe('the catalogue is the single source of truth', () => {
     // It stops an operator being shown a report they cannot fetch. It does not
     // stop them fetching it — the route must call can() itself.
     assert.equal(visibleReports({}).length, 0, 'no capabilities, nothing listed');
-    assert.equal(visibleReports({ operate: true }).length, 2);
+    assert.equal(visibleReports({ operate: true }).length, REPORTS.length);
     assert.equal(visibleReports(null).length, 0, 'a null capability set grants nothing');
   });
 });

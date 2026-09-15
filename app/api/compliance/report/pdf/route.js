@@ -12,9 +12,16 @@ export const dynamic = 'force-dynamic';
 // log" precedent as /api/notification-channels/[id]/test) — that write/send
 // path belongs only to the scheduled job and POST /generate below.
 //
-// Accepted cost: one headless-Chromium render per request, same tradeoff
-// class this app already accepts elsewhere for O(n²) rule-shadow analysis
-// with no enforced throttle.
+// ⛔ STALE COMMENT CORRECTED. This said "one headless-Chromium render per
+// request", which has not been true since the puppeteer-core implementation was
+// replaced by pdfkit — precisely because Chromium would not launch under the
+// NSSM service account. There is NO browser in this path. The cost is a
+// synchronous pdfkit render.
+//
+// This route predates lib/reports/catalogue.js and is kept so the existing
+// /compliance download link keeps working. /api/reports/compliance-fleet/pdf
+// serves the same report through the registry.
+
 export async function GET() {
   try {
     const pdfBuffer = await generateReportPdf(pool);
