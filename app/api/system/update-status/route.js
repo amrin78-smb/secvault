@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.126.1': [
+    'Removed a stray “no entry” symbol from the middle of a sentence on the Applications page, where it read as an error rather than as the note it was.',
+  ],
   '2.126.0': [
     'The Applications page now shows which cloud services your rules actually reference, named from each provider’s own published list.',
     'It flags addresses pinned to a literal IP inside a provider’s range — these work until the provider moves that range, then stop silently, because nothing on the firewall changed.',

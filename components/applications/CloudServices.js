@@ -88,7 +88,19 @@ export default function CloudServices({ summary }) {
         <div>
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.55, maxWidth: '82ch' }}>
             Hostnames and addresses in your rulebase, matched against each provider&rsquo;s own
-            published list. ⛔ A match names the <strong>provider and the service they publish</strong>
+            {/* ⛔ NO STOP-SIGN GLYPH IN BODY PROSE. This paragraph shipped with
+                one mid-sentence and it read as an error icon attached to text
+                that is merely explaining something.
+
+                It is NOT banned product-wide, and a repo-wide test asserting
+                that was written and then deleted on the evidence: lib/evidence.js
+                carries 38 of them inside the drawer's monospace FORMULA block
+                (`<code>{payload.rule}</code>`), where it reads as a marginal note
+                in a technical listing rather than as an icon. That is deliberate
+                and established. The distinction is prose versus formula, which is
+                a judgement a mechanical guard cannot make — so this is a comment,
+                not a test. */}
+            published list. A match names the <strong>provider and the service they publish</strong>
             {' '}— never an application. An address inside AWS&rsquo;s ranges is AWS, not whatever runs there.
           </p>
           <StatusLine status={status} />
