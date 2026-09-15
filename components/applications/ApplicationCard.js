@@ -100,11 +100,28 @@ function RuleLine({ rule, deviceName }) {
   );
 }
 
+/**
+ * Is there anything to disclose under this flow at all?
+ *
+ * ⛔ ASKED BEFORE THE ROW IS BUILT, not inside the component. `<FlowEvidence/>`
+ * is a React element and a React element is ALWAYS truthy, so `{el && <tr>…}`
+ * emitted an empty `<tr><td colSpan="6"></td></tr>` under every flow the
+ * evaluator had nothing to say about — a blank bordered row that reads as a
+ * second, empty flow.
+ */
+function hasFlowEvidence(evaluated) {
+  if (!evaluated) return false;
+  const len = (v) => (Array.isArray(v) ? v.length : 0);
+  return len(evaluated.permittedBy) > 0
+    || len(evaluated.blockedBy) > 0
+    || len(evaluated.unverifiedReasons) > 0;
+}
+
 function FlowEvidence({ evaluated }) {
   const permittedBy = Array.isArray(evaluated.permittedBy) ? evaluated.permittedBy : [];
   const blockedBy = Array.isArray(evaluated.blockedBy) ? evaluated.blockedBy : [];
   const reasons = Array.isArray(evaluated.unverifiedReasons) ? evaluated.unverifiedReasons : [];
-  if (permittedBy.length === 0 && blockedBy.length === 0 && reasons.length === 0) return null;
+  if (!hasFlowEvidence(evaluated)) return null;
 
   return (
     <Disclosure summary="Show the rules behind this answer">
@@ -152,7 +169,7 @@ function FlowEvidence({ evaluated }) {
  */
 function FlowRows({ evaluated, busy, editing, error, onEdit, onCancelEdit, onSaveFlow, onRemoveFlow }) {
   const flow = evaluated.flow || {};
-  const evidence = <FlowEvidence evaluated={evaluated} />;
+  const showEvidence = hasFlowEvidence(evaluated);
   return (
     <>
       <tr>
@@ -207,12 +224,59 @@ function FlowRows({ evaluated, busy, editing, error, onEdit, onCancelEdit, onSav
           </td>
         </tr>
       )}
-      {evidence && (
+      {showEvidence && (
         <tr>
-          <td colSpan={6}>{evidence}</td>
+          <td colSpan={6}><FlowEvidence evaluated={evaluated} /></td>
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * ⛔ A FAILED READ OF THE DECLARED FLOWS IS NOT "NO FLOWS DECLARED".
+ *
+ * Both of the evaluator's failure paths hand this card an application with an
+ * EMPTY flow list: `loadFleet` throwing returns `{application, unevaluated:true}`
+ * with no flows at all, and a failed `application_flows` query leaves every
+ * application with zero rows and a `summary.state` of `undeclared`. Rendered the
+ * ordinary way, both printed "No flows declared yet, so nothing about this
+ * application has been checked" — a confident, false statement about the
+ * operator's OWN declaration, produced entirely by a read that failed. The
+ * banner above the board says a source broke; this said the declaration is
+ * empty, and the second is the one an operator believes, because it is written
+ * on the application itself.
+ *
+ * `flow_count` comes from the applications query (a `count(f.id)` join), which
+ * SUCCEEDED in both paths — so the honest answer is available and is stated.
+ */
+function UnreadableFlows({ application, fleetFailed }) {
+  const count = Number(application && application.flow_count);
+  return (
+    <div style={{
+      backgroundImage: 'var(--hatch)',
+      backgroundColor: 'var(--surface-subtle)',
+      border: '1px dashed var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: 'var(--s4)',
+      color: 'var(--unmeasured)',
+      fontSize: 'var(--text-base)',
+      lineHeight: 1.55,
+    }}>
+      <strong style={{ color: 'var(--unmeasured)' }}>
+        {Number.isFinite(count) && count > 0
+          ? `${count} declared flow${count === 1 ? '' : 's'} could not be read.`
+          : 'This application’s declared flows could not be read.'}
+      </strong>
+      <div style={{ marginTop: 'var(--s2)' }}>
+        {fleetFailed
+          ? 'The fleet rulebase could not be loaded, so nothing was evaluated against it.'
+          : 'The declared flows could not be loaded from the database.'}
+        {' '}
+        Nothing here says this application has no flows, and nothing here says it is in order —
+        it has not been checked at all.
+      </div>
+    </div>
   );
 }
 
@@ -221,6 +285,7 @@ export default function ApplicationCard({
   busy,
   error = '',
   errorAt = '',
+  flowsUnreadable = false,
   onAddFlow,
   onUpdateApp,
   onUpdateFlow,
@@ -235,6 +300,9 @@ export default function ApplicationCard({
   const [editingFlowId, setEditingFlowId] = useState(null);
   const app = entry.application || {};
   const flows = Array.isArray(entry.flows) ? entry.flows : [];
+  // ⛔ Either failure means the flow list on screen is a read that failed, not a
+  // measurement. See UnreadableFlows above.
+  const unreadable = flows.length === 0 && (!!entry.unevaluated || !!flowsUnreadable);
 
   return (
     <Card>
@@ -243,9 +311,15 @@ export default function ApplicationCard({
           {app.name}
           {app.criticality === 'critical' && <Badge color="danger">Critical</Badge>}
           <StatusBadge status={app.status} />
-          {entry.unevaluated ? (
+          {unreadable ? (
+            // ⛔ NEVER AppStateChip HERE. With no flows readable the engine's
+            // summary state is `undeclared`, which the chip renders as the
+            // flat assertion "No flows declared" — a fact manufactured out of
+            // a failed read.
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)', fontWeight: 400 }}>
-              not evaluated — the fleet rulebase could not be loaded
+              {entry.unevaluated
+                ? 'not evaluated — the fleet rulebase could not be loaded'
+                : 'not evaluated — the declared flows could not be read'}
             </span>
           ) : (
             <AppStateChip summary={entry.summary} />
@@ -291,7 +365,9 @@ export default function ApplicationCard({
           <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{app.note}</p>
         )}
 
-        {flows.length === 0 ? (
+        {unreadable ? (
+          <UnreadableFlows application={app} fleetFailed={!!entry.unevaluated} />
+        ) : flows.length === 0 ? (
           <p style={{ margin: 0, color: 'var(--unmeasured)', fontSize: 'var(--text-base)' }}>
             No flows declared yet, so nothing about this application has been checked. Add the
             connections it needs — and the ones it must never make — below.

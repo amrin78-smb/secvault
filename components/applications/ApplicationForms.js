@@ -82,6 +82,29 @@ function withCurrent(options, current) {
 }
 
 /**
+ * A port field, exactly as it was typed.
+ *
+ * ⛔ NEVER `Number()`. `Number('152l')` is NaN, and `JSON.stringify` turns NaN
+ * into **null** — which this product defines as "every port of this protocol".
+ * So one mistyped character in a port box silently widened a narrow declaration
+ * into a protocol-wide one, with no error anywhere: the engine's own
+ * "Ports must be whole numbers." guard could never fire, because the unreadable
+ * value never survived the wire to reach it. That is this codebase's
+ * failed-read-as-a-fact rule in the one field where the wrong answer is an
+ * extra hole rather than a missing one.
+ *
+ * Blank still means null, because blank is a REAL declaration ("every port of
+ * this protocol") and not an unreadable value. Anything else travels as the
+ * operator's own text, so normaliseFlow — the same parser that will later
+ * evaluate the flow — decides whether it is a port, and names the field when it
+ * is not.
+ */
+function portValue(raw) {
+  const s = String(raw === null || raw === undefined ? '' : raw).trim();
+  return s === '' ? null : s;
+}
+
+/**
  * ⛔ ONE DEFINITION OF A FAILURE, shared by the board and the cards. A message
  * that looks different depending on where it was raised reads as a different
  * kind of problem. It lives here rather than in the board because the card
@@ -344,8 +367,8 @@ export function AddFlowForm({ busy, onSubmit, idPrefix = 'flow' }) {
       src: form.src.trim(),
       dst: form.dst.trim(),
       protocol: form.protocol,
-      port_start: form.port_start === '' ? null : Number(form.port_start),
-      port_end: form.port_end === '' ? null : Number(form.port_end),
+      port_start: portValue(form.port_start),
+      port_end: portValue(form.port_end),
       expectation: form.expectation,
       note: form.note.trim() || null,
     });
@@ -454,8 +477,8 @@ export function EditFlowForm({ busy, flow, onSubmit, onClose }) {
       src: form.src.trim(),
       dst: form.dst.trim(),
       protocol: form.protocol,
-      port_start: form.port_start === '' ? null : Number(form.port_start),
-      port_end: form.port_end === '' ? null : Number(form.port_end),
+      port_start: portValue(form.port_start),
+      port_end: portValue(form.port_end),
       expectation: form.expectation,
       note: form.note.trim() || null,
     });

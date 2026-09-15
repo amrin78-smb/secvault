@@ -67,7 +67,7 @@ function glyphOf(name) {
   return GLYPHS[name] || IconReport;
 }
 
-export default function ReportWorkspace({ reports, devices }) {
+export default function ReportWorkspace({ reports, devices, devicesOk = true, statsOk = true }) {
   const [selectedId, setSelectedId] = useState(reports[0]?.id || null);
   const [deviceId, setDeviceId] = useState('');
   // ⛔ Declared parameters, keyed by parameter key. Held in ONE object rather
@@ -90,6 +90,12 @@ export default function ReportWorkspace({ reports, devices }) {
   const canNarrow = Boolean(report.optionalDevice);
   const showPicker = !isEntity && (needsDevice || canNarrow);
   const disabled = needsDevice && !deviceId;
+
+  // ⛔ THREE STATES FOR THE FIGURES BLOCK, NOT TWO: real tiles, a read that
+  // failed, and a report that simply has none. Collapsing the last two is how
+  // the panel came to report a query failure that had never happened.
+  const hasTiles = Array.isArray(report.tiles) && report.tiles.length > 0;
+  const figuresUnreadable = !hasTiles && !statsOk;
 
   const declared = report.params || [];
   const query = new URLSearchParams();
@@ -203,7 +209,7 @@ export default function ReportWorkspace({ reports, devices }) {
               </div>
             </header>
 
-            {report.tiles && report.tiles.length > 0 ? (
+            {hasTiles ? (
               <section>
                 <h3 className="rpt-section-label">In your fleet right now</h3>
                 <div className="rpt-tiles">
@@ -214,10 +220,7 @@ export default function ReportWorkspace({ reports, devices }) {
                         t.tone === 'unmeasured' ? 'rpt-tile rpt-tile-unmeasured' : 'rpt-tile'
                       }
                     >
-                      <div
-                        className="rpt-tile-value"
-                        style={{ color: TONE_COLOR[t.tone] || 'var(--text-primary)' }}
-                      >
+                      <div className="rpt-tile-value" style={tileValueStyle(t.tone)}>
                         {t.value}
                       </div>
                       <div className="rpt-tile-label">{t.label}</div>
@@ -236,10 +239,19 @@ export default function ReportWorkspace({ reports, devices }) {
                   itself applies acknowledgements and coverage rules, so its figures can differ.
                 </p>
               </section>
-            ) : (
+            ) : null}
+
+            {figuresUnreadable ? (
               /* ⛔ NOT ZEROS. If the counts could not be read the panel says so
                  rather than rendering a clean, confident set of noughts that
-                 would read as "your fleet is fine". */
+                 would read as "your fleet is fine".
+
+                 ⛔ AND ONLY WHEN THEY ACTUALLY COULD NOT BE READ. This branch
+                 used to catch every report with no tiles, so the change-request
+                 report — which has none by design, being produced from a record
+                 rather than from the fleet — reported a query failure that had
+                 not happened. An invented failure is the mirror of an invented
+                 measurement and costs the same trust. */
               <section>
                 <h3 className="rpt-section-label">In your fleet right now</h3>
                 <div
@@ -256,7 +268,7 @@ export default function ReportWorkspace({ reports, devices }) {
                   queries independently when you run it.
                 </div>
               </section>
-            )}
+            ) : null}
 
             {report.contents.length > 0 ? (
               <section>
@@ -389,9 +401,16 @@ export default function ReportWorkspace({ reports, devices }) {
                       : 'Generated fresh each time, from the data as it stands now.'}
                   </span>
 
+                  {/* ⛔ AN EMPTY LIST AND AN UNREADABLE ONE ARE DIFFERENT
+                      FACTS. "No active firewalls" is a statement about the
+                      customer's estate; the page may only make it when the
+                      query that would have listed them actually ran. */}
                   {showPicker && devices.length === 0 ? (
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--unmeasured)' }}>
-                      No active firewalls are available to report on.
+                      {devicesOk
+                        ? 'No active firewalls are available to report on.'
+                        : 'The firewall list could not be read, so this picker is empty — '
+                          + 'that is not a statement about your fleet.'}
                     </span>
                   ) : null}
                 </>
@@ -412,3 +431,16 @@ const TONE_COLOR = {
   warn: 'var(--tint-warn-fg)',
   ok: 'var(--tint-success-fg)',
 };
+
+// ⛔ NO INLINE COLOUR FOR 'unmeasured', AND THAT IS THE WHOLE POINT OF THIS
+// FUNCTION. An inline style beats a stylesheet rule, so the previous
+// `style={{ color: TONE_COLOR[t.tone] || 'var(--text-primary)' }}` fell through
+// to the ordinary text colour for exactly the tone whose colour the class owns
+// — .rpt-tile-unmeasured .rpt-tile-value's var(--unmeasured) was overridden on
+// every one of those tiles, and a coverage gap was drawn in the same ink as a
+// measured figure. The comment above said the class handled it; the code took
+// it back. Returning undefined leaves the cascade alone.
+function tileValueStyle(tone) {
+  if (tone === 'unmeasured') return undefined;
+  return { color: TONE_COLOR[tone] || 'var(--text-primary)' };
+}

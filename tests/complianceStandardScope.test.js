@@ -17,9 +17,12 @@ const {
   resolveStandard,
   standardCoverage,
   fleetForStandard,
+  unassessedDevices,
   buildFleetSummaryTable,
   buildPerDeviceTable,
+  generateReportPdf,
 } = require('../lib/engines/complianceReport');
+const { contentStreams } = require('../lib/reports/pdfCompare');
 
 const { REPORTS } = require('../lib/reports/catalogue');
 
@@ -227,5 +230,121 @@ describe('⛔ the catalogue and the engine cannot drift on which standards exist
       const s = STANDARDS.find((x) => x.key === c.value);
       assert.equal(c.label, s.label, `${c.value} is labelled differently in the catalogue`);
     }
+  });
+});
+
+// ── The sentence that must never be an unqualified all-clear ─────────────
+
+describe('unassessedDevices', () => {
+  it('counts a device with no findings at all in the scope', () => {
+    const fleet = [
+      device('assessed', { PCI_DSS: { pass: 1, fail: 0, warning: 0, na: 0 } }),
+      device('never-collected', {}),
+    ];
+    assert.deepEqual(unassessedDevices(fleet, 'PCI_DSS').map((d) => d.deviceName),
+      ['never-collected']);
+    assert.deepEqual(unassessedDevices(fleet).map((d) => d.deviceName), ['never-collected']);
+  });
+
+  it('⛔ an ‘na’ row means ASSESSED — the device was asked and we could not answer', () => {
+    // That is a fact about SecVault's reach, already reported as "not
+    // assessable". Counting it as uncollected would double-report one gap and
+    // overstate the caveat.
+    const fleet = [device('asked', { PCI_DSS: { pass: 0, fail: 0, warning: 0, na: 4 } })];
+    assert.equal(unassessedDevices(fleet, 'PCI_DSS').length, 0);
+  });
+
+  it('a device assessed against ANOTHER standard is still unassessed for this one', () => {
+    const fleet = [device('iso-only', { ISO_27001: { pass: 3, fail: 1, warning: 0, na: 0 } })];
+    assert.equal(unassessedDevices(fleet, 'NIST').length, 1);
+    assert.equal(unassessedDevices(fleet).length, 0, 'unscoped, it HAS been assessed');
+  });
+
+  it('tolerates a malformed row rather than throwing mid-render', () => {
+    assert.equal(unassessedDevices([{}, null], 'SANS').length, 2);
+    assert.equal(unassessedDevices(null).length, 0);
+  });
+});
+
+describe('⛔ the report never prints a bare all-clear over incomplete coverage', () => {
+  // THE FAILURE THIS PINS. "No failing or warning findings across the fleet" is
+  // the most reassuring sentence this document can print, and on a fleet
+  // nothing has been collected from it is also the most wrong: a firewall with
+  // no findings contributes no failures, so a total collection outage renders
+  // identically to a clean estate. CLAUDE.md forbids an all-clear while
+  // coverage is incomplete.
+  //
+  // Driven through the real pdfkit render and read back out of the PDF's own
+  // content streams, because the sentence is chosen inside renderReportBody(),
+  // which is not exported — and a test that read the source instead would pass
+  // on a branch that never executes.
+
+  function stubPool({ devices, findings }) {
+    return {
+      query: async (sql) => {
+        if (sql.includes('FROM devices WHERE active')) return { rows: devices };
+        if (sql.includes('FROM audit_checks')) return { rows: [{ total: 45, mapped: 21 }] };
+        if (sql.includes('remediation_guidance')) {
+          return { rows: findings.filter((f) => f.status === 'fail' || f.status === 'warning') };
+        }
+        return { rows: findings };
+      },
+    };
+  }
+
+  // pdfkit writes every glyph run as a hex string inside a TJ array, so the
+  // rendered words are invisible to a plain search of the buffer.
+  function pdfText(buf) {
+    return contentStreams(buf).map((stream) => {
+      let out = '';
+      stream.replace(/<([0-9a-fA-F]+)>/g, (whole, hex) => {
+        for (let i = 0; i < hex.length; i += 2) {
+          out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+        }
+        return whole;
+      });
+      return out;
+    }).join('');
+  }
+
+  const threeDevices = [
+    { id: 'd1', name: 'fw-a', vendor: 'fortinet' },
+    { id: 'd2', name: 'fw-b', vendor: 'paloalto' },
+    { id: 'd3', name: 'fw-c', vendor: 'paloalto' },
+  ];
+
+  it('⛔ a fleet with NO findings at all says so, instead of reading as clean', async () => {
+    const pdf = await generateReportPdf(stubPool({ devices: threeDevices, findings: [] }));
+    const text = pdfText(pdf);
+    assert.match(text, /No failing or warning findings/, 'the base sentence is still printed');
+    assert.match(text, /NOT an all-clear/,
+      'a fleet nothing has been assessed against must not read as a fleet with nothing wrong');
+    assert.match(text, /3 of 3/, 'the caveat must state how much of the fleet it covers');
+  });
+
+  it('a genuinely clean, fully assessed fleet still gets the plain sentence', async () => {
+    // The counterpart: the caveat must not fire when coverage IS complete, or
+    // it becomes noise and stops being read.
+    const findings = threeDevices.map((d) => ({
+      device_id: d.id, status: 'pass', standards: ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST', 'SANS'],
+    }));
+    const pdf = await generateReportPdf(stubPool({ devices: threeDevices, findings }));
+    const text = pdfText(pdf);
+    assert.match(text, /No failing or warning findings/);
+    assert.equal(/NOT an all-clear/.test(text), false, 'nothing was uncollected here');
+  });
+
+  it('scoped, the caveat counts devices unassessed AGAINST THAT STANDARD', async () => {
+    // Every device is assessed — but none of it maps to NIST, so a NIST
+    // document has nothing behind its silence.
+    const findings = threeDevices.map((d) => ({
+      device_id: d.id, status: 'pass', standards: ['ISO_27001'],
+    }));
+    const pdf = await generateReportPdf(
+      stubPool({ devices: threeDevices, findings }), { standard: 'NIST' }
+    );
+    const text = pdfText(pdf);
+    assert.match(text, /NOT an all-clear/);
+    assert.match(text, /3 of 3/);
   });
 });

@@ -24,7 +24,7 @@
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import CoverageBar from '../ui/CoverageBar';
 
-export default function CoverageSummary({ orphans, coverage, windowDays }) {
+export default function CoverageSummary({ orphans, coverage, windowDays, flowsUnreadable = false }) {
   // ⛔ Nothing measured is not zero coverage — say nothing rather than draw an
   // empty bar that reads as a real, complete measurement.
   if (!orphans && !coverage) return null;
@@ -36,7 +36,12 @@ export default function CoverageSummary({ orphans, coverage, windowDays }) {
     ? coverage.devicesWithoutRules
     : [];
 
-  const hasRuleFigures = Number.isFinite(allowRules) && allowRules > 0;
+  // ⛔ THE CLAIMED/UNCLAIMED SPLIT IS COMPUTED FROM THE DECLARED FLOWS. If that
+  // read failed, every rule comes back unclaimed and the bar states a confident
+  // "0 of 1,097 accounted for (0%)" that measures nothing but the outage. A
+  // percentage derived from a failed read is this codebase's signature bug, and
+  // it is worse here than elsewhere because the figure is the page's headline.
+  const hasRuleFigures = !flowsUnreadable && Number.isFinite(allowRules) && allowRules > 0;
 
   return (
     <Card>
@@ -81,8 +86,11 @@ export default function CoverageSummary({ orphans, coverage, windowDays }) {
           </>
         ) : (
           <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--unmeasured)' }}>
-            No enabled allow rules have been collected from the fleet, so there is no rulebase to
-            measure the declaration map against.
+            {flowsUnreadable
+              ? 'The declared flows could not be read, so how much of the rulebase they account for'
+                + ' has not been measured. This is not a coverage of zero.'
+              : 'No enabled allow rules have been collected from the fleet, so there is no rulebase to'
+                + ' measure the declaration map against.'}
           </p>
         )}
 
@@ -115,7 +123,9 @@ export default function CoverageSummary({ orphans, coverage, windowDays }) {
           </p>
         )}
 
-        {orphans && Array.isArray(orphans.byDevice) && orphans.byDevice.length > 0 && (
+        {/* Same read, same rule: the per-device breakdown is the unclaimed
+            split by another name, so it goes with it. */}
+        {!flowsUnreadable && orphans && Array.isArray(orphans.byDevice) && orphans.byDevice.length > 0 && (
           <details className="sv-disclosure">
             <summary
               style={{

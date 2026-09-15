@@ -402,3 +402,170 @@ describe('report stats — the figures shown before you download', () => {
     assert.equal(hygiene.find((t) => t.label === 'Of the ruleset').value, '—');
   });
 });
+
+// ── The guards found by the 2026-09-15 sweep ─────────────────────────────────
+
+describe('⛔ the capability check cannot be switched off by an omission', () => {
+  it('calls can() UNCONDITIONALLY, not only when the entry declared a capability', () => {
+    // It used to read `entry.capability && !can(session, entry.capability)`, so
+    // an entry that simply forgot its `capability:` line was served to every
+    // authenticated session — a boundary disabled by a missing line of DATA,
+    // with nothing anywhere reporting it. lib/rbac.js denies an undefined
+    // capability, so calling can() always turns that omission into a 403.
+    assert.equal(
+      /entry\.capability\s*&&\s*!can\(/.test(ROUTE), false,
+      'a short-circuit on entry.capability makes a registry omission fail OPEN'
+    );
+    assert.match(ROUTE, /if \(!can\(session, entry\.capability\)\)/);
+  });
+
+  it('and rbac really does deny an undefined capability, which is what makes that safe', () => {
+    const { can } = require('../lib/rbac');
+    const superAdmin = { user: { role: 'super_admin' } };
+    assert.equal(can(superAdmin, undefined), false);
+    assert.equal(can(superAdmin, null), false);
+    assert.equal(can(superAdmin, ''), false);
+  });
+});
+
+describe('⛔ a scope parameter is refused, never silently dropped', () => {
+  it('allow-lists every declared parameter against the catalogue own choices', () => {
+    // Dropping an unrecognised value answers a request for the PCI document
+    // with the whole-fleet document, under a filename saying PCI.
+    assert.match(ROUTE, /entry\.params/);
+    assert.match(ROUTE, /p\.choices/);
+    assert.match(ROUTE, /allowed\.some\(/);
+    assert.match(ROUTE, /is not a valid/);
+  });
+
+  it('⛔ refuses a deviceId given to a report that cannot narrow', () => {
+    // Only a device-scoped report, or one declaring optionalDevice, reads the
+    // filter. Every other builder ignores it — so accepting it answered "the
+    // compliance posture of THIS firewall" with the whole-fleet document. The
+    // same mislabelled artefact as an unrecognised parameter, arriving through
+    // a different query key.
+    assert.match(ROUTE, /entry\.optionalDevice/,
+      'the route must consult the flag that says whether a device filter is read at all');
+    assert.match(ROUTE, /not scoped to a single firewall/);
+  });
+
+  it('the guard is reachable — reports exist on both sides of it', () => {
+    // If every report took a device the branch would be dead code; if none did,
+    // the picker would be. Asserted from the registry so it stays true of
+    // whatever is registered rather than of today list.
+    const takes = REPORTS.filter((r) => r.scope === SCOPES.DEVICE || r.optionalDevice);
+    const refuses = REPORTS.filter((r) => r.scope !== SCOPES.DEVICE && !r.optionalDevice);
+    assert.ok(takes.length > 0, 'no report accepts a device filter');
+    assert.ok(refuses.length > 0, 'no report refuses one');
+  });
+
+  it('optionalDevice only ever appears on a fleet-scoped report', () => {
+    // On a device-scoped entry it would be contradictory, and the route
+    // takesDevice test would read as though the two were alternatives when one
+    // is really a special case of the other.
+    for (const r of REPORTS.filter((x) => x.optionalDevice)) {
+      assert.equal(r.scope, SCOPES.FLEET, `${r.id} is ${r.scope} AND optionalDevice`);
+    }
+  });
+});
+
+describe('⛔ the panel may not invent a failure it did not have', () => {
+  // Comments in the component quote the very expressions these checks forbid,
+  // so the scan has to read what RUNS — same reason the ROUTE/PAGE constants at
+  // the top of this file are stripped.
+  const WS_SRC = code(fs.readFileSync(
+    path.join(ROOT, 'components', 'reports', 'ReportWorkspace.js'), 'utf8'
+  ));
+
+  it('the page tells the panel whether the counts were actually read', () => {
+    // tilesFor() returns null for TWO reasons: the shared query failed, or this
+    // report has no tiles (the change-request report has none by design, being
+    // produced from a record rather than from the fleet). The panel was
+    // printing "Current figures could not be read" for the second — a read
+    // failure the page had invented. Only the page knows which happened.
+    assert.match(PAGE, /statsOk/);
+    assert.match(PAGE, /statsOk=\{/, 'the flag must actually be handed over');
+    assert.match(WS_SRC, /statsOk/);
+    assert.match(WS_SRC, /figuresUnreadable/);
+  });
+
+  it('⛔ and whether the firewall list was readable, before claiming there are none', () => {
+    // activeDevices() degrades to an empty list on a query failure, which is
+    // correct. But the panel then said "No active firewalls are available to
+    // report on" — a confident claim about the customer estate, produced by a
+    // read that failed.
+    assert.match(PAGE, /devicesOk/);
+    assert.match(WS_SRC, /devicesOk/);
+    assert.match(WS_SRC, /could not be read/);
+    assert.equal(
+      /return \[\];/.test(PAGE), false,
+      'the device read must report its own failure, not return a bare empty list'
+    );
+  });
+});
+
+describe('⛔ the unmeasured tile keeps its hueless colour', () => {
+  // An inline style beats a stylesheet rule. The tile value was rendered with
+  // `style={{ color: TONE_COLOR[t.tone] || 'var(--text-primary)' }}`, and
+  // 'unmeasured' is deliberately absent from TONE_COLOR — so every unmeasured
+  // tile fell through to the ORDINARY TEXT COLOUR, overriding
+  // `.rpt-tile-unmeasured .rpt-tile-value { color: var(--unmeasured); }`. The
+  // comment in the component said the class handled it; the code took it back,
+  // and a coverage gap was drawn in the same ink as a measured figure.
+  // Comments in the component quote the very expressions these checks forbid,
+  // so the scan has to read what RUNS — same reason the ROUTE/PAGE constants at
+  // the top of this file are stripped.
+  const WS_SRC = code(fs.readFileSync(
+    path.join(ROOT, 'components', 'reports', 'ReportWorkspace.js'), 'utf8'
+  ));
+
+  // The helper is plain JS inside a JSX module this runner cannot require
+  // (there is no transform here, deliberately), so it is lifted out with its
+  // one dependency and RUN. That is the difference between pinning the
+  // behaviour and pinning the spelling of a line.
+  function loadHelper() {
+    const tones = WS_SRC.match(/const TONE_COLOR = \{[\s\S]*?\};/);
+    const fn = WS_SRC.match(/function tileValueStyle\(tone\) \{[\s\S]*?\n\}/);
+    assert.ok(tones, 'TONE_COLOR not found');
+    assert.ok(fn, 'tileValueStyle not found — the inline fallback is back');
+    return new Function(tones[0] + '\n' + fn[0] + '\nreturn tileValueStyle;')();
+  }
+
+  it('⛔ returns NO inline colour for an unmeasured tile, so the class can win', () => {
+    assert.equal(loadHelper()('unmeasured'), undefined);
+  });
+
+  it('still colours the hued tones inline', () => {
+    const style = loadHelper();
+    assert.deepEqual(style('bad'), { color: 'var(--tint-danger-fg)' });
+    assert.deepEqual(style('warn'), { color: 'var(--tint-warn-fg)' });
+    assert.deepEqual(style('ok'), { color: 'var(--tint-success-fg)' });
+    assert.deepEqual(style(undefined), { color: 'var(--text-primary)' },
+      'an untoned tile still gets the ordinary text colour');
+  });
+
+  it('the tile actually uses the helper rather than an inline expression', () => {
+    assert.match(WS_SRC, /style=\{tileValueStyle\(t\.tone\)\}/);
+    assert.equal(
+      /TONE_COLOR\[t\.tone\] \|\|/.test(WS_SRC), false,
+      'the inline fallback is what overrode the class'
+    );
+  });
+
+  it('and the stylesheet is the thing that owns that colour', () => {
+    const css = fs.readFileSync(path.join(ROOT, 'app', 'globals.css'), 'utf8');
+    assert.match(
+      css, /\.rpt-tile-unmeasured \.rpt-tile-value \{ color: var\(--unmeasured\); \}/,
+      'nothing else draws the hueless state — if this rule goes, so does it'
+    );
+  });
+
+  it('⛔ no report tile may be tinted with a severity hue it has not earned', () => {
+    // Severity colour means RISK in this product. The tones that carry one are
+    // bad/warn/ok; 'unmeasured' must not acquire one by being added to the map,
+    // which is the other direction this could regress.
+    const tones = WS_SRC.match(/const TONE_COLOR = \{([\s\S]*?)\};/)[1];
+    assert.equal(/unmeasured/.test(tones), false,
+      'a coverage gap is neither good news nor bad and must stay hueless');
+  });
+});

@@ -253,6 +253,13 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
   }
 
   const applications = Array.isArray(data.applications) ? data.applications : [];
+  // ⛔ A FAILED `application_flows` READ LEAVES EVERY APPLICATION WITH ZERO
+  // FLOWS, and zero flows is indistinguishable from "nothing declared" unless
+  // something carries the distinction down. Without it the cards printed "No
+  // flows declared yet" and the coverage bar printed a confident 0% — both
+  // computed entirely from a read that failed, which is the one shape of wrong
+  // answer this whole page exists to remove.
+  const flowsUnreadable = errors.some((e) => e && e.source === 'application_flows');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
@@ -263,6 +270,7 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
         orphans={data.orphans}
         coverage={data.coverage}
         windowDays={data.windowDays}
+        flowsUnreadable={flowsUnreadable}
       />
 
       {applications.length === 0 ? (
@@ -278,6 +286,7 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
             // on the page.
             error={error}
             errorAt={errorAt}
+            flowsUnreadable={flowsUnreadable}
             onAddFlow={addFlow}
             onUpdateApp={updateApplicationById}
             onUpdateFlow={(flowId, body) => updateFlowById(entry.application.id, flowId, body)}

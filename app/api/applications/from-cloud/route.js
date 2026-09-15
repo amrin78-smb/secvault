@@ -131,7 +131,16 @@ export async function POST(request) {
           createdFlowCount: created.length,
           failedFlowCount: failed.length,
           failedFlows: failed,
-          partial: failed.length > 0 || plan.derivation.capped,
+          // ⛔ AN UNREADABLE PUBLISHED PORT MAKES THIS PARTIAL TOO. Those
+          // prefixes produced NO flow — correctly, since an unreadable value is
+          // not licence to widen — so the declaration is missing pieces for the
+          // same reason a capped one is. Counting only `capped` and `failed`
+          // reported a declaration as complete while whole prefixes had been
+          // dropped from it, which is the "looks more complete than the data
+          // behind it" failure derive.js exists to prevent.
+          partial: failed.length > 0
+            || plan.derivation.capped
+            || plan.derivation.unreadablePortCount > 0,
         },
       },
       { status: 201 }

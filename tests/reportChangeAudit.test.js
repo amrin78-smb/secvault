@@ -248,7 +248,15 @@ function makePool(f) {
       }
       if (/FROM activity_log/.test(text)) {
         if (f.activityThrows) throw new Error(f.activityThrows);
-        return { rows: f.activity };
+        // ⛔ The stub HONOURS THE LIMIT and reports the uncapped total the way
+        // `count(*) OVER ()` does, for the same reason as the diffs branch
+        // below: the report must keep the real population when the LISTING is
+        // shortened. A stub that returned every row would make the disclosure
+        // test pass whatever the code did.
+        const limit = params && params[3];
+        const total = f.activity.length;
+        const rows = limit ? f.activity.slice(0, limit) : f.activity;
+        return { rows: rows.map((r) => Object.assign({}, r, { total_in_window: total })) };
       }
       if (/FROM device_configs/.test(text)) return { rows: f.snapshots };
       if (/FROM config_diffs/.test(text) && /FILTER/.test(text)) return { rows: f.changeCounts };
@@ -600,6 +608,66 @@ describe('the statements the report issues', () => {
 
     const buf = await generateChangeAuditPdf(makePool(fixture()), { now: NOW, maxChangeRows: 2 });
     assert.ok(says(pdfText(buf), 'Showing 2 of 5 changes'));
+  });
+
+  // ⛔ THE OPERATOR REVIEW TRAIL IS CAPPED, AND THE CAP MUST BE DISCLOSED.
+  //
+  // This table is the evidence about the REVIEWERS on a change-control audit,
+  // and it is the one table in this document that was capped in silence: the
+  // "total" it compared against was `activityRows.length`, i.e. the cap itself,
+  // so the shown count and the total were the same number by construction and
+  // no disclosure could ever fire. Measured on the live fleet at the
+  // catalogue's own 365-day window the heading read "(120)" over 120 rows where
+  // 208 operator actions exist.
+  //
+  // A truncated list looks COMPLETE, which is the more insidious failure: the
+  // reader works to the bottom and believes they are finished.
+  it('⛔ discloses a capped operator review trail rather than shortening it in silence', async () => {
+    const many = Array.from({ length: 5 }, (_, i) => ({
+      actor: 'admin',
+      action: 'acknowledge_config_diff',
+      device_id: DEV_BUSY,
+      detail: `action number ${i}`,
+      occurred_at: new Date(Date.UTC(2026, 8, 14, 0, i, 0)),
+    }));
+    const opts = { now: NOW, maxActivityRows: 2 };
+
+    const data = await buildChangeAuditData(makePool(fixture({ activity: many })), opts);
+    assert.equal(data.activity.length, 2, 'the listing is capped');
+    assert.equal(
+      data.totals.activityRows, 5,
+      'the TOTAL must be the population, not the cap - otherwise nothing can ever be disclosed'
+    );
+
+    const text = pdfText(await generateChangeAuditPdf(makePool(fixture({ activity: many })), opts));
+    assert.ok(
+      says(text, 'Operator actions recorded against these firewalls (5)'),
+      'the heading must count every operator action in the window, not the rows it printed'
+    );
+    assert.ok(
+      says(text, 'Showing 2 of 5 operator actions'),
+      'and the truncation must be stated on the page, as every other table here does'
+    );
+  });
+
+  it('⛔ an unreadable total can only ever be the rows read, never fewer', async () => {
+    // A stub that omits the window-function column stands in for a future
+    // schema/driver surprise. The fallback must not be able to UNDERSTATE the
+    // population and so manufacture the "nothing was dropped" case.
+    const f = fixture();
+    const pool = {
+      async query(text, params) {
+        const inner = makePool(f);
+        const res = await inner.query(text, params);
+        if (/FROM activity_log/.test(text)) {
+          return { rows: res.rows.map((r) => { const c = Object.assign({}, r); delete c.total_in_window; return c; }) };
+        }
+        return res;
+      },
+    };
+    const data = await buildChangeAuditData(pool, { now: NOW });
+    assert.equal(data.totals.activityRows, data.activity.length);
+    assert.ok(data.totals.activityRows >= data.activity.length);
   });
 
   it('⛔ a failed review-trail read is reported, never presented as no activity', async () => {

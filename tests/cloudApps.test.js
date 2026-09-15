@@ -375,14 +375,23 @@ describe('⛔ storeProvider refuses to prune on an implausible result', () => {
   it('⛔ dedupes on the unique key so ON CONFLICT cannot hit a row twice', async () => {
     // Postgres aborts the whole statement with "cannot affect row a second
     // time", so a publisher listing one value twice would fail the entire sync.
+    //
+    // ⛔ THE FIXTURE MATTERS AND USED TO BE WRONG. This was ten copies of ONE
+    // row — which collapsed to a single write and was then allowed to prune
+    // the provider, because the floor was still being tested on the raw row
+    // count. That is the exact bypass now pinned by "the plausibility floor
+    // counts what will be WRITTEN" below, so the fixture here has to stay
+    // above the floor on its DEDUPED count while still exercising the dedupe.
     const pool = stubPool();
-    const dupe = {
+    const row = (i) => ({
       provider: 'cloudflare', service: null, service_display: null, kind: 'ip',
-      value: '1.1.1.0/24', range_start: 1, range_end: 2, category: null, source_version: null,
-    };
-    const rows = Array.from({ length: 10 }, () => ({ ...dupe }));
+      value: `1.1.${i}.0/24`, range_start: i, range_end: i + 2, category: null, source_version: null,
+    });
+    const rows = [];
+    for (let i = 0; i < 10; i += 1) { rows.push(row(i)); rows.push(row(i)); }
     const r = await feed.storeProvider(pool, 'cloudflare', rows, new Date());
-    assert.equal(r.inserted + r.updated, 1, 'ten identical rows must collapse to one');
+    assert.equal(rows.length, 20);
+    assert.equal(r.inserted + r.updated, 10, 'each value listed twice must collapse to one row');
   });
 });
 
@@ -557,5 +566,213 @@ describe('⛔ loadCatalogue returns `kind` on every row', () => {
     assert.equal(merged.filter((r) => r.kind === 'ip').length, 0);
     assert.equal(merged.filter((r) => r.kind === 'host').length, 0);
     assert.equal(merged.length, 2, 'the rows are there — only their identity is missing');
+  });
+});
+
+// ── Ties between two claims by the SAME publisher ──────────────────────────
+
+describe('⛔ one provider can be ambiguous with ITSELF', () => {
+  // THE BUG THIS PINS, measured on the live catalogue on 2026-09-15:
+  //   · 2,297 distinct AWS ranges are published under more than one `service`
+  //     (1.178.4.0/24 is listed under AMAZON, EC2 and S3);
+  //   · `*.sharepointonline.com` and `officeclient.microsoft.com` are published
+  //     by Microsoft under BOTH 'Common' and 'SharePoint'.
+  // Those rows tie on size/specificity, and the tie-break only recorded a rival
+  // when `e.provider !== best.provider` — so a same-provider tie was resolved
+  // SILENTLY, and resolved to whichever row the database happened to return
+  // first from a SELECT with no ORDER BY, over a heap that every 6-hourly sync
+  // rewrites. The label flipped between page loads while `ambiguous` reported
+  // false and `alternatives` was empty.
+
+  const awsPrefix = (service) => ({
+    provider: 'aws', service, service_display: service, kind: 'ip',
+    value: '1.178.4.0/24', range_start: '28443648', range_end: '28443903',
+  });
+  const AWS_ROWS = [awsPrefix('AMAZON'), awsPrefix('EC2'), awsPrefix('S3')];
+
+  const msHost = (service, display) => ({
+    provider: 'microsoft_365', service, service_display: display,
+    kind: 'host', value: '*.sharepointonline.com',
+  });
+  const MS_ROWS = [
+    msHost('Common', 'Microsoft 365 Common and Office Online'),
+    msHost('SharePoint', 'SharePoint Online and OneDrive for Business'),
+  ];
+
+  it('⛔ reports the rival SERVICES of one provider, not only rival providers', () => {
+    const r = matchIp('1.178.4.10', eng.buildIpIndex(AWS_ROWS), { count: 11766 });
+    assert.equal(r.state, STATES.MATCHED);
+    assert.equal(r.ambiguous, true, 'three published services is an ambiguity, not a fact');
+    assert.equal(r.alternatives.length, 2);
+    assert.deepEqual(
+      r.alternatives.map((a) => a.service).sort(),
+      ['EC2', 'S3'],
+      'both other published services must be named'
+    );
+  });
+
+  it('⛔ the chosen label does not depend on the row order the database returned', () => {
+    // The observable symptom: the same address renamed between two refreshes,
+    // with neither name wrong and no way for the reader to tell which.
+    const labels = new Set();
+    for (const order of [AWS_ROWS, [...AWS_ROWS].reverse(), [AWS_ROWS[1], AWS_ROWS[2], AWS_ROWS[0]]]) {
+      labels.add(matchIp('1.178.4.10', eng.buildIpIndex(order), { count: 11766 }).label);
+    }
+    assert.equal(labels.size, 1, `the label flipped with row order: ${[...labels].join(' / ')}`);
+  });
+
+  it('⛔ matchHost has the same tie, and it is live on Microsoft 365', () => {
+    const labels = new Set();
+    for (const order of [MS_ROWS, [...MS_ROWS].reverse()]) {
+      const r = matchHost('files.sharepointonline.com', order, { count: 11766 });
+      assert.equal(r.ambiguous, true, 'Common and SharePoint both publish this name');
+      assert.equal(r.alternatives.length, 1);
+      labels.add(r.label);
+    }
+    assert.equal(labels.size, 1, `the label flipped with row order: ${[...labels].join(' / ')}`);
+  });
+
+  it('⛔ matchRange has it too', () => {
+    const r = eng.matchRange('1.178.4.0/25', eng.buildIpIndex(AWS_ROWS), { count: 11766 });
+    assert.equal(r.ambiguous, true);
+    assert.equal(r.alternatives.length, 2);
+  });
+
+  it('the same claim listed twice is ONE statement, not an ambiguity', () => {
+    // A duplicate row is not a rival. Only a DIFFERENT (provider, service) is.
+    const twice = [awsPrefix('AMAZON'), awsPrefix('AMAZON')];
+    const r = matchIp('1.178.4.10', eng.buildIpIndex(twice), { count: 11766 });
+    assert.equal(r.ambiguous, false);
+    assert.equal(r.alternatives.length, 0);
+  });
+
+  it('a more specific range still wins outright and is not called ambiguous', () => {
+    // The tie-break must not start reporting rivals that lost on rank.
+    const rows = [
+      ...AWS_ROWS,
+      {
+        provider: 'microsoft_365', service: 'Skype', service_display: 'Microsoft Teams',
+        kind: 'ip', value: '1.178.4.8/29',
+        range_start: String(28443648 + 8), range_end: String(28443648 + 15),
+      },
+    ];
+    const r = matchIp('1.178.4.10', eng.buildIpIndex(rows), { count: 11766 });
+    assert.equal(r.service, 'Microsoft Teams');
+    assert.equal(r.ambiguous, false);
+  });
+});
+
+describe('⛔ the plausibility floor counts what will be WRITTEN', () => {
+  // THE BUG THIS PINS. The floor was tested on `rows.length`, before the
+  // dedupe — so a response that was LONG but REPETITIVE cleared it and then
+  // pruned everything it had not refreshed. Repetition is normal here, not
+  // hypothetical: AWS publishes the same prefix once per service, so a
+  // degraded response can be thousands of rows carrying a handful of distinct
+  // keys. The prune is driven by what was written, so that is what the floor
+  // has to measure.
+  function stubPool() {
+    const calls = [];
+    return {
+      calls,
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        if (/^\s*DELETE/i.test(sql)) return { rowCount: 0 };
+        const n = params && params[0] ? params[0].length : 0;
+        return { rows: Array.from({ length: n }, () => ({ was_insert: true })), rowCount: n };
+      },
+    };
+  }
+
+  const awsRow = (service) => ({
+    provider: 'aws', service, service_display: service, kind: 'ip',
+    value: '52.0.0.0/24', range_start: 1, range_end: 255, category: null, source_version: null,
+  });
+
+  it('⛔ 2,500 rows collapsing to 3 distinct keys must NOT prune AWS', async () => {
+    const pool = stubPool();
+    const rows = [];
+    for (let i = 0; i < 2500; i += 1) rows.push(awsRow(['AMAZON', 'EC2', 'S3'][i % 3]));
+    assert.ok(rows.length > feed.MIN_PLAUSIBLE.aws, 'the raw length clears the floor — that was the trap');
+    await assert.rejects(() => feed.storeProvider(pool, 'aws', rows, new Date()), /plausibility floor/);
+    assert.equal(pool.calls.length, 0, 'nothing may be written or deleted below the floor');
+  });
+
+  it('⛔ a source with no declared floor is refused, not given a floor of 1', async () => {
+    // `MIN_PLAUSIBLE[provider] || 1` meant a fifth feed added to SOURCES
+    // without an entry here shipped with the protection silently off.
+    const pool = stubPool();
+    await assert.rejects(
+      () => feed.storeProvider(pool, 'oracle_cloud', [awsRow('X')], new Date()),
+      /no declared plausibility floor/
+    );
+    assert.equal(pool.calls.length, 0);
+  });
+
+  it('a genuinely plausible result still writes and prunes', async () => {
+    // The guard must not break the case it exists inside.
+    const pool = stubPool();
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      provider: 'cloudflare', service: null, service_display: null, kind: 'ip',
+      value: `10.0.${i}.0/24`, range_start: i, range_end: i + 255, category: null, source_version: null,
+    }));
+    const r = await feed.storeProvider(pool, 'cloudflare', rows, new Date());
+    assert.equal(r.inserted, 12);
+    assert.ok(pool.calls.some((c) => /^\s*DELETE/i.test(c.sql)));
+  });
+});
+
+// ── The plumbing: a failed FLEET read is not a measurement ─────────────────
+
+describe('⛔ summariseCloudUsage: a failed fleet read is never "nothing matched"', () => {
+  // THE BUG THIS PINS. loadFleetObjects()'s catch recorded the failure in
+  // `error` and then fell through with `objects = []`, so the result looked
+  // entirely healthy: `status` still usable, with its "11,766 catalogue
+  // entries, refreshed today" line, both tables empty and every total zero.
+  // NOTHING on the page reads `error` — CloudServices keys its "we could not
+  // check" panel off `status.usable` — so a database failure rendered as a
+  // MEASUREMENT: this rulebase reaches no cloud service at all.
+  const data = require('../lib/engines/cloudAppsData');
+
+  function poolWhere(fleetFails) {
+    return {
+      query: async (sql) => {
+        if (/count\(\*\)/i.test(sql)) {
+          return { rows: [{ count: 11766, last_seen_at: new Date().toISOString() }] };
+        }
+        if (/FROM cloud_app_ranges/.test(sql)) return { rows: [] };
+        if (fleetFails) throw new Error('connection terminated unexpectedly');
+        return { rows: [] };
+      },
+    };
+  }
+
+  it('⛔ the status stops being usable, so the page cannot render zeros as an answer', async () => {
+    const s = await data.summariseCloudUsage(poolWhere(true));
+    assert.equal(s.error, 'connection terminated unexpectedly');
+    assert.equal(s.status.usable, false, 'a fleet SecVault could not read has not been checked');
+    assert.equal(s.status.state, 'error');
+    assert.match(s.status.message, /could not be/);
+    // The catalogue really was read, so its size is still stated honestly.
+    assert.equal(s.status.count, 11766);
+    // And no total may imply a measurement that never happened.
+    for (const [k, v] of Object.entries(s.totals)) assert.equal(v, 0, `${k} must not assert a count`);
+  });
+
+  it('⛔ and the headline sentence refuses to claim anything', async () => {
+    const s = await data.summariseCloudUsage(poolWhere(true));
+    const a = data.buildCloudAnswer(s);
+    assert.equal(a.tone, 'unknown');
+    assert.doesNotMatch(
+      a.sentence,
+      /None of the/,
+      'the pre-fix sentence was "None of the 0 hostname objects ... appear in the published lists"'
+    );
+  });
+
+  it('a fleet that reads fine still produces a usable, measured answer', async () => {
+    // The guard must not swallow the working case.
+    const s = await data.summariseCloudUsage(poolWhere(false));
+    assert.equal(s.error, null);
+    assert.equal(s.status.usable, true);
   });
 });

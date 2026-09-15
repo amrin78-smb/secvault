@@ -289,6 +289,10 @@ function fixture(overrides = {}) {
     },
     // Set to a message to make the detections engine throw.
     detectionsThrow: null,
+    // The earliest retained session, as the depth probe reads it. Set
+    // `historyThrows` to a message to make that probe fail.
+    historyStart: null,
+    historyThrows: null,
   }, overrides);
 }
 
@@ -310,6 +314,12 @@ function makePool(f) {
       }
       // getVpnSessionHistory's own SELECT — identified by its LEFT JOIN devices.
       if (/FROM vpn_sessions v/.test(text)) return { rows: f.sessions };
+      // The history-depth probe. Matched BEFORE the window-totals branch below,
+      // which would otherwise swallow it and hand back a row with no `earliest`.
+      if (/AS earliest/.test(text)) {
+        if (f.historyThrows) throw new Error(f.historyThrows);
+        return { rows: [{ earliest: f.historyStart }] };
+      }
       if (/FROM vpn_sessions/.test(text) && /GROUP BY device_id/.test(text)) {
         return { rows: f.perDevice };
       }
@@ -920,6 +930,79 @@ describe('⛔ the review window and the record that exists to answer it', () => 
     assert.ok(hist > 0, 'the cover does not state how deep the record is');
     assert.ok(hist > win && hist - win < 400,
       'the retention line must sit immediately after the review window on the cover');
+  });
+
+  // ⛔ A FAILED GATHER MUST SAY WHY, NOT JUST SAY ITS NAME.
+  //
+  // renderSectionErrors() draws `e.section` as the label and `e.message` as the
+  // body. The history-depth probe pushed `{section, reason}`, so a failure there
+  // rendered the heading "History depth" with an EMPTY explanation underneath —
+  // a section announcing that something could not be gathered and then declining
+  // to say what, which is indistinguishable from a rendering bug and is exactly
+  // the silence this whole section exists to prevent. Every other push in this
+  // file, and in every sibling report, uses `message`.
+  it('⛔ a failed history-depth read is EXPLAINED on the page, not merely named', async () => {
+    const data = await buildWith(fixture({ historyThrows: 'statement timeout' }));
+
+    assert.equal(data.historyCoversWindow, null, 'an unreadable depth is unknown, never coverage');
+    const err = data.sectionErrors.find((e) => e.section === 'History depth');
+    assert.ok(err, 'the failure must be a first-class row in the document');
+    assert.ok(
+      err.message && /review window is actually covered/.test(err.message),
+      'the explanation must be under the key the renderer draws (`message`), got: '
+        + JSON.stringify(Object.keys(err))
+    );
+
+    const text = pdfText(await renderVpnAccessReviewPdf(data));
+    assert.ok(says(text, 'Parts of this report could not be gathered'));
+    assert.ok(
+      says(text, 'The earliest retained session could not be read'),
+      'the reason must reach the page - a labelled heading with no body is not a disclosure'
+    );
+  });
+
+  // ⛔ THE USER COUNT IS TRUNCATED TOO.
+  //
+  // `users` is the distinct usernames inside the sessions that could be READ;
+  // `usersInWindow` is how many actually connected. Live those are 413 and 424,
+  // and `usersInWindow` was computed, carried into totals, and then rendered
+  // nowhere — so the cover chip and the headline both stated 413 as "distinct
+  // users" while eleven people who connected in the window appear in no row and
+  // no total. Disclosing the SESSION cap does not disclose that: there is no
+  // route from "2,000 of 2,155 sessions" to "and eleven users are missing".
+  it('⛔ a truncated read discloses the USERS it lost, not only the sessions', async () => {
+    const f = fixture({ windowTotals: { sessions_in_window: 9000, users_in_window: 800 } });
+    const data = await buildWith(f);
+    assert.equal(data.totals.sessionsTruncated, true);
+    assert.ok(
+      data.totals.usersInWindow > data.totals.users,
+      'fixture must model a read that lost whole users, not only sessions'
+    );
+
+    const text = pdfText(await renderVpnAccessReviewPdf(data));
+    const named = data.totals.users;
+    assert.ok(
+      says(text, 'Users named of those who connected') && says(text, named + ' of 800'),
+      'the cover must state how many of the users who connected are named here'
+    );
+    assert.ok(
+      says(text, 'users who connected in the window are named here'),
+      'and the headline must carry the same qualification'
+    );
+    assert.ok(
+      says(text, 'ABSENT from this table'),
+      'the per-user table must say that some users are missing from it entirely'
+    );
+  });
+
+  it('a complete read makes no claim about missing users', async () => {
+    // The disclosure must be conditional: an untruncated review must not print
+    // a coverage caveat it has not earned.
+    const data = await buildWith(fixture());
+    assert.equal(data.totals.sessionsTruncated, false);
+    const text = pdfText(await renderVpnAccessReviewPdf(data));
+    assert.equal(says(text, 'Users named of those who connected'), false);
+    assert.equal(says(text, 'ABSENT from this table'), false);
   });
 
   it('⛔ the old unconditional "history covers <window> to now" sentence is gone', () => {

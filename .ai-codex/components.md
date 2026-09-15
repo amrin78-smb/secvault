@@ -503,3 +503,25 @@ retired is not an all-clear, and in this product colour means risk.
 
 ⛔ Editing goes through the board's existing `mutate` → `router.refresh()`. No local copy of the
 server evaluation is introduced — read the comment in `ApplicationBoard.js` before changing this.
+
+## Props added by the 2026-09-15 bug sweep (v2.128.0)
+
+`ReportWorkspace` gains **`statsOk`** and **`devicesOk`**. Both exist because a `null`/empty value had
+two meanings and the panel was reporting the wrong one:
+- ⛔ `tiles === null` means EITHER "the counts query failed" OR "this report has no tiles"
+  (`rule-change-request` hits `tilesFor`'s `default:`). The entity panel was printing
+  "Current figures could not be read" about a query that never ran.
+- ⛔ `devices === []` means EITHER "no active firewalls" OR "the device query failed and degraded".
+  The panel was printing "No active firewalls are available to report on" — a confident claim about
+  the customer's estate — after a failed read.
+
+`ApplicationCard` and `CoverageSummary` gain **`flowsUnreadable`**. ⛔ `evaluateAllApplications` has
+TWO failure paths that both hand a card an application with zero flows, and both rendered
+"No flows declared yet" plus a "No flows declared" chip — a confident false statement about the
+operator's own declaration, manufactured from a read that failed. The banner above says a source
+broke; this said the declaration is empty, and that is the one an operator believes because it is
+written on the application itself. `CoverageSummary` had the same shape: it computed
+"0 of 1,097 allow rules accounted for (0%)" from flows it could not read.
+
+⛔ The guard in `CoverageSummary` is LOAD-BEARING: `evaluateAllApplications` still computes
+`orphans` from an empty flow list when that gather fails, so removing it restores the 0% claim.

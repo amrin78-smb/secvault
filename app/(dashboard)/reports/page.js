@@ -39,12 +39,18 @@ async function activeDevices() {
         WHERE active
         ORDER BY name ASC`
     );
-    return rows;
+    return { rows, ok: true };
   } catch (_err) {
     // ⛔ The picker degrades to empty; it does not take the page down. A
     // catalogue that cannot be browsed because one dropdown failed to populate
     // is a worse outcome than a fleet report the operator can still run.
-    return [];
+    //
+    // ⛔ BUT THE FAILURE TRAVELS WITH IT. This used to return a bare `[]`, and
+    // an empty list makes the panel say "No active firewalls are available to
+    // report on." — a confident claim about the customer's estate, produced by
+    // a query that failed. That is this codebase's most-repeated bug wearing a
+    // reassuring sentence: a failed read recorded as a fact.
+    return { rows: [], ok: false };
   }
 }
 
@@ -70,6 +76,16 @@ export default async function ReportsPage() {
     .map(clientSafe)
     .map((r) => ({ ...r, tiles: tilesFor(r.id, stats) }));
 
+  // ⛔ WHY THE PANEL IS TOLD WHETHER THE COUNTS WERE READ, rather than
+  // inferring it from `tiles`. tilesFor() returns null for TWO different
+  // reasons — the shared query failed, or this particular report has no tiles
+  // defined (the change-request report has none, and never will: it is produced
+  // from a record, not from the fleet). Those are not the same fact, and the
+  // panel was printing "Current figures could not be read" for the second one,
+  // which is a read failure the page had invented. Only the page knows which
+  // happened, so only the page can say.
+  const statsOk = stats !== null && stats !== undefined;
+
   return (
     <div>
       <PageHeader
@@ -84,7 +100,12 @@ export default async function ReportsPage() {
           </CardBody>
         </Card>
       ) : (
-        <ReportWorkspace reports={reports} devices={devices} />
+        <ReportWorkspace
+          reports={reports}
+          devices={devices.rows}
+          devicesOk={devices.ok}
+          statsOk={statsOk}
+        />
       )}
     </div>
   );

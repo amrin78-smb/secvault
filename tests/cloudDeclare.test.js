@@ -558,3 +558,25 @@ describe('⛔ the control states its effect before it is clicked', () => {
     assert.equal(inner.test(DECLARE), false);
   });
 });
+
+describe('⛔ `partial` counts every way the declaration is missing pieces', () => {
+  // The three ways a written declaration is smaller than the published data:
+  // a flow the engine refused, the cap biting, and a prefix whose published
+  // port string could not be read (which correctly produces no flow at all).
+  // Reporting only the first two calls a declaration complete while whole
+  // prefixes have been dropped from it.
+  it('a prefix whose ports could not be read is one of them', () => {
+    const rows = [ipRow('13.107.6.152/31', { tcp_ports: 'https' })];
+    const { derivation } = deriveFlows(rows);
+    assert.equal(derivation.case, CASES.PORTS_UNREADABLE);
+    assert.equal(derivation.unreadablePortCount, 1);
+    assert.equal(derivation.plannedFlowCount, 0);
+    assert.equal(derivation.capped, false);
+
+    // …and the route's own `partial` reflects it, not just cap/refusal.
+    const expr = /partial:\s*failed\.length > 0[\s\S]{0,200}?,\n/.exec(ROUTE_SRC);
+    assert.ok(expr, 'the route no longer computes `partial` the way this pins');
+    assert.match(expr[0], /unreadablePortCount/,
+      'an unreadable published port value does not mark the declaration partial');
+  });
+});

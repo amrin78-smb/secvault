@@ -262,6 +262,45 @@ describe('perpetual and unknown expiry are not the same thing', () => {
     );
   });
 
+  // ⛔ THE COVER MUST NOT CONTRADICT ITSELF.
+  //
+  // The renewal-workload chip carries expired + expiring (the whole of the work
+  // an operator has to do), and it was labelled "Expiring within 60d" — which
+  // names only half of what it counts. Measured on the live fleet that chip read
+  // 49 on a cover whose own meta row said "Already expired 21" and whose
+  // headline said "21 have already expired; 28 expire within 60 days". A reader
+  // adding the cover's two figures got 70 renewals where there are 49.
+  //
+  // A mislabelled figure is worse than a missing one: it is plausible, it is on
+  // the one page guaranteed to be read, and nobody re-derives a cover.
+  it('⛔ the renewal chip NAMES both states, because its value contains both', async () => {
+    const data = await buildFleetLifecycleData(makePool(fixture()), { now: NOW });
+    // 1 already lapsed + 2 due inside the window; the chip carries the sum.
+    assert.equal(data.totals.licensesExpired, 1);
+    assert.equal(data.totals.licensesExpiring, 2);
+
+    const text = pdfText(await renderFleetLifecyclePdf(data));
+    assert.ok(
+      says(text, 'Expired or expiring in 60d'),
+      'the chip label must name BOTH states it counts'
+    );
+    assert.ok(
+      !says(text, 'Expiring within 60d'),
+      'a label naming only the future must not sit over a value that includes the past'
+    );
+    // And the two figures the cover/headline state alongside it must still be
+    // the separate ones, so the sum can be reconstructed rather than guessed.
+    assert.ok(says(text, 'Already expired'), 'the expired count keeps its own cover row');
+    assert.ok(
+      says(text, '1 entitlement has already expired'),
+      'the headline states the expired count on its own'
+    );
+    assert.ok(
+      says(text, '2 expire within 60 days'),
+      'the headline states the expiring count on its own'
+    );
+  });
+
   it('counts the four expiry states separately and never folds unknown into expiring', async () => {
     const data = await buildFleetLifecycleData(makePool(fixture()), { now: NOW });
     const t = data.totals;

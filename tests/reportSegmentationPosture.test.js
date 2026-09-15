@@ -33,6 +33,7 @@ const { UNMEASURED, GREEN, STATUS_RED } = require('../lib/reports/chassis');
 const {
   NOT_MEASURED_MARK,
   verdictColor,
+  violationChipColor,
   verdictLabel,
   verdictRank,
   isViolation,
@@ -242,6 +243,45 @@ describe('verdict colours', () => {
     assert.equal(verdictColor('unknown'), UNMEASURED);
     assert.notEqual(verdictColor('unknown'), GREEN);
     assert.notEqual(verdictColor('ok_unverified'), GREEN);
+  });
+
+  // ⛔ THE COVER MUST NOT PAINT AN ALL-CLEAR OVER A VIOLATION IT DOES NOT SHOW.
+  //
+  // There are THREE violation verdicts and the cover has room for two chips
+  // (`permitted AND in use`, `usage not measurable`). Each was green whenever
+  // its own bucket was zero — so a fleet whose only breaches are
+  // `violation_permitted` got a cover carrying two green zeros and no mention
+  // of a violation anywhere on it, while page two led with one. That is exactly
+  // what the live reference fleet produces: one `violation_permitted` breach.
+  //
+  // `violation_permitted` is the bucket an operator should go and CLOSE — the
+  // measured-quiet standing hole — so hiding it behind green is the wrong
+  // direction twice over.
+  it('⛔ a violation chip is GREEN only when NO boundary is crossed at all', () => {
+    // Nothing crossed anywhere: green is earned.
+    assert.equal(violationChipColor(0, 0, STATUS_RED), GREEN);
+
+    // This bucket is empty but ANOTHER violation verdict fired. Hueless, never
+    // green — a zero in one bucket is not a clean estate.
+    assert.equal(violationChipColor(0, 1, STATUS_RED), UNMEASURED);
+    assert.notEqual(violationChipColor(0, 1, STATUS_RED), GREEN);
+    assert.notEqual(violationChipColor(0, 3, UNMEASURED), GREEN);
+
+    // This bucket fired: its own hot colour, whatever else is going on.
+    assert.equal(violationChipColor(2, 2, STATUS_RED), STATUS_RED);
+    assert.equal(violationChipColor(1, 5, STATUS_RED), STATUS_RED);
+  });
+
+  it('⛔ the cover states the violation total, not only the two chip buckets', async () => {
+    // The live shape: one `violation_permitted`, zero in both chip buckets. The
+    // cover must still say a declared boundary is permitted.
+    const data = await buildSegmentationPostureData(makePool(fixture()), { now: NOW });
+    assert.ok(data.totals.violations > 0, 'fixture must carry at least one violation');
+    const text = pdfText(await renderSegmentationPosturePdf(data));
+    assert.ok(
+      says(text, 'Declared boundaries a rule permits'),
+      'the cover must carry the total across all three violation verdicts'
+    );
   });
 
   it('⛔ a verdict this file has never heard of is hueless, not green', () => {

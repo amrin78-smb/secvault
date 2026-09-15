@@ -463,3 +463,302 @@ describe('Next.js route-module hygiene', () => {
     }
   });
 });
+
+// ── The board these routes feed ─────────────────────────────────────────────
+//
+// ⛔ WHY THIS HALF IS SERVER-RENDERED AND NOT SOURCE-SCANNED. Every defect
+// below produced a CONFIDENT, PLAUSIBLE SENTENCE on screen — "No flows declared
+// yet", "0 of 1,097 accounted for (0%)" — out of a read that had failed. None of
+// them is visible as a missing guard in one line of source; each is only visible
+// in what the component actually prints. So these tests mount the real tree with
+// react-dom/server, exactly as /applications does, and read the words.
+//
+// The JSX is compiled with the parser tests/jsxSyntax.test.js already uses
+// (`next/dist/build/swc`, a runtime dependency), so this adds no devDependency —
+// package.json deliberately has none. `next/navigation` has no router outside a
+// Next render and is stubbed; nothing else is.
+
+const Module = require('node:module');
+
+/** Compile-on-require for the app's own ESM+JSX, plus a useRouter stub. */
+function installRenderHooks() {
+  const swc = require('next/dist/build/swc');
+  const origExt = Module._extensions['.js'];
+  Module._extensions['.js'] = function (mod, filename) {
+    if (filename.split(path.sep).join('/').includes('/node_modules/')) {
+      return origExt(mod, filename);
+    }
+    const out = swc.transformSync(fs.readFileSync(filename, 'utf8'), {
+      filename,
+      jsc: {
+        parser: { syntax: 'ecmascript', jsx: true },
+        target: 'es2020',
+        transform: { react: { runtime: 'automatic' } },
+      },
+      module: { type: 'commonjs' },
+    });
+    return mod._compile(out.code, filename);
+  };
+
+  const stub = path.join(__dirname, 'fixtures', 'nextNavigationStub.js');
+  const origResolve = Module._resolveFilename;
+  Module._resolveFilename = function (request, ...rest) {
+    if (request === 'next/navigation') return stub;
+    return origResolve.call(this, request, ...rest);
+  };
+}
+
+let React = null;
+let renderToStaticMarkup = null;
+let ApplicationBoard = null;
+let loadError = null;
+try {
+  installRenderHooks();
+  React = require('react');
+  ({ renderToStaticMarkup } = require('react-dom/server'));
+  ApplicationBoard = require('../components/applications/ApplicationBoard').default;
+} catch (err) {
+  // Reported as a failure rather than skipped: a suite that quietly stops
+  // checking is the same shape of problem as the bugs it covers.
+  ApplicationBoard = null;
+  loadError = err;
+}
+
+const boardHtml = (initial, initialError = '') => {
+  assert.ok(ApplicationBoard, 'could not load the board for rendering: '
+    + (loadError ? loadError.message : 'unknown'));
+  return renderToStaticMarkup(
+    React.createElement(ApplicationBoard, { initial, initialError })
+  );
+};
+
+const boardText = (initial, initialError = '') =>
+  boardHtml(initial, initialError).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+
+const anApplication = (over = {}) => ({
+  id: 'aaaaaaaa-0000-0000-0000-000000000001',
+  name: 'SAP Fiori',
+  owner: null,
+  criticality: 'normal',
+  status: 'active',
+  note: null,
+  flow_count: 2,
+  ...over,
+});
+
+const UNDECLARED_SUMMARY = {
+  total: 0, ok: 0, broken: 0, partial: 0, violation: 0,
+  unspecified: 0, invalid: 0, unverified: 0, state: 'undeclared',
+};
+
+// The EXACT shape lib/engines/applicationViewData.evaluateAllApplications
+// returns when loadFleet throws: no `flows` key at all, summary null.
+const FLEET_FAILED = {
+  applications: [{ application: anApplication(), summary: null, unevaluated: true }],
+  summary: null,
+  coverage: null,
+  orphans: null,
+  errors: [{ source: 'fleet_rules', error: 'connection terminated' }],
+  windowDays: null,
+};
+
+// …and when the application_flows query throws: every application keeps its
+// row, loses its flows, and its summary state becomes `undeclared`.
+const FLOWS_FAILED = {
+  applications: [{ application: anApplication(), flows: [], summary: UNDECLARED_SUMMARY }],
+  orphans: {
+    allowRules: 1097, claimedRules: 0, unclaimedRules: 1097, claimedPct: 0,
+    byDevice: [{ deviceId: 'd1', deviceName: 'FW1', count: 1097 }],
+    isCoverageNotFinding: true,
+  },
+  coverage: { windowDays: 30, activeDeviceCount: 16, devicesWithRules: 16, devicesWithoutRules: [] },
+  errors: [{ source: 'application_flows', error: 'permission denied' }],
+  windowDays: 30,
+};
+
+const GENUINELY_EMPTY = {
+  applications: [{
+    application: anApplication({ flow_count: 0 }),
+    flows: [],
+    summary: UNDECLARED_SUMMARY,
+  }],
+  orphans: {
+    allowRules: 1097, claimedRules: 0, unclaimedRules: 1097, claimedPct: 0,
+    byDevice: [], isCoverageNotFinding: true,
+  },
+  coverage: { windowDays: 30, activeDeviceCount: 16, devicesWithRules: 16, devicesWithoutRules: [] },
+  errors: [],
+  windowDays: 30,
+};
+
+describe('⛔ a failed read of the declared flows is never printed as "no flows declared"', () => {
+  it('the fleet-load failure does not claim the application has no flows', () => {
+    const text = boardText(FLEET_FAILED);
+    assert.equal(/No flows declared yet/.test(text), false,
+      'an application whose flows were never loaded was reported as having none');
+    assert.match(text, /could not be read/);
+    // The count is known — the applications query succeeded — so it is stated.
+    assert.match(text, /2 declared flows could not be read/);
+  });
+
+  it('the application_flows failure does not claim the application has no flows', () => {
+    const text = boardText(FLOWS_FAILED);
+    // ⛔ BOTH halves of the card. The body said "No flows declared yet"; the
+    // state chip beside the heading said "No flows declared", because the
+    // engine's summary state for an empty list is `undeclared` however the
+    // list came to be empty. Either sentence on its own is the fabricated fact.
+    assert.equal(/No flows declared/.test(text), false,
+      'a failed flow query was reported as an empty declaration');
+    assert.match(text, /not evaluated — the declared flows could not be read/);
+    assert.match(text, /2 declared flows could not be read/);
+  });
+
+  it('⛔ and the coverage headline is not computed from the flows it could not read', () => {
+    const text = boardText(FLOWS_FAILED);
+    assert.equal(/accounted for by a declared application flow/.test(text), false,
+      'a claimed/unclaimed percentage was stated over a failed flow read');
+    assert.equal(/\(0%\)/.test(text), false, 'a 0% coverage figure was manufactured');
+    assert.match(text, /has not been measured/);
+  });
+
+  it('a genuinely empty declaration still says so plainly', () => {
+    // The guard must not swallow the real empty state — that would replace one
+    // wrong answer with another.
+    const text = boardText(GENUINELY_EMPTY);
+    assert.match(text, /No flows declared yet/);
+    assert.equal(/could not be read/.test(text), false);
+    assert.match(text, /accounted for by a declared application flow/);
+  });
+});
+
+describe('the evaluated flow table renders only the rows it has content for', () => {
+  const flow = (over = {}) => ({
+    flow: {
+      id: 'ffffffff-0000-0000-0000-000000000001',
+      src: '10.1.0.0/24', dst: '10.2.0.10', protocol: 'tcp',
+      port_start: 1521, port_end: 1521, expectation: 'allow', note: null,
+    },
+    invalid: false,
+    verdict: 'unspecified',
+    permittedPct: null,
+    used: null,
+    finding: { state: 'unspecified', label: 'No rule decides it' },
+    unverified: true,
+    unverifiedReasons: [],
+    permittedBy: [],
+    blockedBy: [],
+    evaluatedDeviceCount: 1,
+    ...over,
+  });
+
+  const withFlows = (flows) => ({
+    applications: [{
+      application: anApplication(),
+      flows,
+      summary: {
+        total: flows.length, ok: 0, broken: 0, partial: 0, violation: 0,
+        unspecified: flows.length, invalid: 0, unverified: flows.length, state: 'unverified',
+      },
+    }],
+    orphans: null,
+    coverage: null,
+    errors: [],
+    windowDays: 30,
+  });
+
+  it('⛔ a flow with nothing to disclose emits no blank row', () => {
+    // `<FlowEvidence/>` is a React ELEMENT and an element is always truthy, so
+    // `{evidence && <tr>…}` printed an empty <tr><td colSpan="6"></td></tr>
+    // under every flow the evaluator had nothing to say about — a blank
+    // bordered row that reads as a second, empty flow.
+    const html = boardHtml(withFlows([flow()]));
+    assert.equal(/colSpan="6"><\/td>/i.test(html), false,
+      'an empty evidence row was rendered under a flow with no evidence');
+  });
+
+  it('a flow that HAS evidence still gets its disclosure row', () => {
+    const html = boardHtml(withFlows([flow({
+      unverifiedReasons: ['1 firewall has no collected ruleset, so what it permits is unknown.'],
+    })]));
+    assert.match(html, /Show the rules behind this answer/);
+  });
+
+  it('⛔ `unspecified` is never rendered as denied', () => {
+    // No default/implicit-policy data exists in this codebase, for any vendor.
+    const text = boardText(withFlows([flow()]));
+    assert.equal(/ denied /i.test(text), false);
+    assert.match(text, /No rule decides it/);
+  });
+});
+
+describe('⛔ every id in the rendered board is unique', () => {
+  it('two application cards do not share a field id', () => {
+    // A fixed id inside a per-application component makes a <label> focus the
+    // FIRST card's input, and a screen reader read every card's fields as one
+    // form.
+    const app = (id, name) => ({
+      application: anApplication({ id, name, flow_count: 0 }),
+      flows: [],
+      summary: UNDECLARED_SUMMARY,
+    });
+    const html = boardHtml({
+      applications: [
+        app('aaaaaaaa-0000-0000-0000-000000000001', 'One'),
+        app('aaaaaaaa-0000-0000-0000-000000000002', 'Two'),
+        app('aaaaaaaa-0000-0000-0000-000000000003', 'Three'),
+      ],
+      orphans: null, coverage: null, errors: [], windowDays: 30,
+    });
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(ids.length > 10, 'no ids were rendered at all — the check proved nothing');
+    assert.deepEqual(
+      ids.filter((v, i) => ids.indexOf(v) !== i),
+      [],
+      'the same DOM id is rendered more than once'
+    );
+  });
+});
+
+// ── Ports ───────────────────────────────────────────────────────────────────
+
+describe('⛔ an unreadable port never becomes "every port of the protocol"', () => {
+  const FORMS = fs.readFileSync(
+    path.join(ROOT, 'components', 'applications', 'ApplicationForms.js'), 'utf8'
+  );
+  const { normaliseFlow } = require('../lib/engines/applicationView');
+  const base = { src: '10.1.0.0/24', dst: '10.2.0.10', protocol: 'tcp' };
+
+  it('the mechanism: JSON turns NaN into null, which this product reads as every port', () => {
+    // Not a hypothetical. `Number('152l')` is NaN, JSON.stringify writes null,
+    // and normaliseFlow reads a null port_start as the whole port dimension.
+    const overTheWire = JSON.parse(JSON.stringify({ port_start: Number('152l') }));
+    assert.equal(overTheWire.port_start, null);
+    const widened = normaliseFlow({ ...base, ...overTheWire, port_end: null });
+    assert.equal(widened.ok, true);
+    assert.equal(widened.box.p1, 65535, 'a mistyped port did not widen — recheck this test');
+  });
+
+  it('the engine refuses the same value when it arrives as text', () => {
+    const refused = normaliseFlow({ ...base, port_start: '152l', port_end: null });
+    assert.equal(refused.ok, false);
+    assert.match(refused.reason, /whole numbers/);
+  });
+
+  it('⛔ so neither form calls Number() on a port field', () => {
+    assert.equal(/Number\(\s*form\.port_(start|end)\s*\)/.test(FORMS), false,
+      'a port field is coerced with Number(), which sends NaN as null');
+  });
+
+  it('both submit paths send the port through the shared helper', () => {
+    const uses = FORMS.match(/port_(?:start|end):\s*portValue\(form\.port_(?:start|end)\)/g) || [];
+    assert.equal(uses.length, 4,
+      'the add form and the edit form must each send both port fields verbatim');
+  });
+
+  it('blank still means null — "every port" is a real declaration, not a failed read', () => {
+    assert.match(FORMS, /function portValue\(raw\)[\s\S]{0,400}=== ''/);
+    const blank = normaliseFlow({ ...base, port_start: null, port_end: null });
+    assert.equal(blank.ok, true);
+    assert.equal(blank.box.p1, 65535);
+  });
+});

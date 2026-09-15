@@ -22,6 +22,11 @@ const {
   evaluateFlowOnDevice, aggregateFlow, usedVerdict, flowFinding, rangeToString,
 } = av;
 
+// The plumbing half, for the one thing that cannot be tested without it: the
+// traffic window this engine REPORTS has to be the window it MEASURED, and only
+// the data layer knows what it handed the evidence queries.
+const { loadFleet, resolveWindowDays } = require('../lib/engines/applicationViewData');
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 function rule(o) {
@@ -537,5 +542,363 @@ describe('group expansion comes from objectResolver, unchanged', () => {
     ], objects);
     assert.equal(r.verdict, VERDICTS.PERMITTED);
     assert.equal(r.unverified, false, 'a fully-resolvable group must not read as unverified');
+  });
+});
+
+// ── 11. ⛔ The cap refuses — without manufacturing the opposite claim ──────
+
+describe('⛔ truncation states what was proven and refuses the rest', () => {
+  // ⛔ THE BUG THIS PINS. The cap used to force the verdict to `unspecified`,
+  // and `unspecified` is NOT a neutral "unknown" here — flowFinding renders it
+  // as "Nothing permits this" / "Nothing permits it, and nothing denies it".
+  // So a device that had already matched a rule permitting exactly half the
+  // flow, named that rule, and reported permittedPct 50, printed the headline
+  // "Nothing permits this" above it. On a `deny` expectation that turned a
+  // demonstrated VIOLATION into "nothing permits it" — a hole reported as
+  // closed, which this engine's own header names as the dangerous direction.
+  //
+  // Claimed volume is claimed by rules that really matched, in order, before
+  // the walk stopped. It is proven wherever the walk ended; the REFUSAL is
+  // carried by truncated/unverified/the reason, not by a wrong verdict.
+  function fragmentingRulebase() {
+    const rules = [
+      rule({
+        rule_id: 'allow-half', name: 'allow-half', action: 'allow', seq: 0,
+        src: ['10.0.0.0/17'], dst: ['any'], svc: ['tcp/443'], hit_count: 5,
+      }),
+    ];
+    // Distinct, non-adjacent, and in the half the allow did NOT claim — denies
+    // inside the allowed half are simply shadowed and fragment nothing.
+    for (let i = 0; i < 6000; i++) {
+      const off = i * 2;
+      rules.push(rule({
+        rule_id: 'd' + i, action: 'deny', seq: i + 1,
+        src: ['10.0.' + (128 + Math.floor(off / 256)) + '.' + (off % 256)],
+        dst: ['any'], svc: ['tcp/443'],
+      }));
+    }
+    return rules;
+  }
+
+  const capFlow = flowOf({ src: '10.0.0.0/16', dst: 'any', port: 443 });
+
+  // Walking 6,000 rules to the cap costs ~2s, and nothing here mutates the
+  // result, so each of the two rulebases is evaluated ONCE and shared.
+  let withAllow = null;
+  let denyOnly = null;
+  const truncated = () => {
+    if (!withAllow) withAllow = evaluateFlowOnDevice(capFlow, fragmentingRulebase(), []);
+    return withAllow;
+  };
+  const truncatedDenyOnly = () => {
+    if (!denyOnly) denyOnly = evaluateFlowOnDevice(capFlow, fragmentingRulebase().slice(1), []);
+    return denyOnly;
+  };
+
+  it('still reports itself truncated, unverified, and says why', () => {
+    const r = truncated();
+    assert.equal(r.truncated, true, 'this rulebase must actually hit the cap');
+    assert.equal(r.unverified, true);
+    assert.ok(r.unverifiedReasons.some((x) => /incomplete rather than approximate/.test(x)));
+    assertReconciles(r);
+  });
+
+  it('⛔ does NOT report "nothing permits this" about a rule it just named', () => {
+    const r = truncated();
+    assert.ok(r.allowVolume > 0n, 'the allow rule claimed real volume');
+    assert.equal(r.permittingRules.length, 1);
+    assert.notEqual(r.verdict, VERDICTS.UNSPECIFIED,
+      'a named permitting rule and "nothing permits this" cannot both be true');
+    assert.equal(r.verdict, VERDICTS.PARTIAL);
+  });
+
+  it('⛔ and a deny expectation still sees the VIOLATION', () => {
+    const agg = aggregateFlow([{ device: { id: 'd', name: 'FW' }, result: truncated() }]);
+    assert.equal(agg.permittedBy.length, 1, 'the permitting rule is reported');
+    assert.equal(flowFinding('deny', agg).state, 'violation');
+    assert.equal(flowFinding('allow', agg).state, 'partial');
+  });
+
+  it('⛔ a truncated walk can never be dressed as a WHOLE answer', () => {
+    // The cap only fires while undecided boxes remain, so unspecifiedVolume is
+    // non-zero and neither side can reach `total`. That invariant is what makes
+    // reporting the proven part safe.
+    const r = truncated();
+    assert.ok(r.unspecifiedVolume > 0n);
+    assert.notEqual(r.verdict, VERDICTS.PERMITTED);
+    assert.notEqual(r.verdict, VERDICTS.BLOCKED);
+  });
+
+  it('a cap hit with nothing permitted is still unspecified, not blocked', () => {
+    // All-deny fragmentation: nothing was proven either way, so the refusal is
+    // the whole answer.
+    const r = truncatedDenyOnly();
+    assert.equal(r.truncated, true);
+    assert.equal(r.allowVolume, 0n);
+    assert.equal(r.verdict, VERDICTS.UNSPECIFIED);
+    assert.notEqual(r.verdict, VERDICTS.BLOCKED);
+  });
+});
+
+// ── 12. ⛔ Nothing measured is not a measurement ───────────────────────────
+
+describe('⛔ an answer over zero firewalls is never settled', () => {
+  it('no device evaluated at all is UNVERIFIED, with a reason', () => {
+    // A fresh install has no active devices. `devicesWithoutRules` is 0 and no
+    // device reports itself unverified, so this came back as a SETTLED
+    // "Nothing permits this" computed over nothing at all — the same shape as a
+    // fleet whose rulesets were never pulled reporting perfect segmentation.
+    const agg = aggregateFlow([]);
+    assert.equal(agg.verdict, VERDICTS.UNSPECIFIED);
+    assert.equal(agg.evaluatedDeviceCount, 0);
+    assert.equal(agg.unverified, true);
+    assert.ok(agg.unverifiedReasons.length > 0, 'an unverified answer must say why');
+    assert.ok(agg.unverifiedReasons.some((x) => /No firewall was evaluated/.test(x)));
+  });
+
+  it('and neither expectation reads as a clean pass', () => {
+    const agg = aggregateFlow([]);
+    assert.notEqual(flowFinding('allow', agg).state, 'ok');
+    assert.notEqual(flowFinding('deny', agg).state, 'ok');
+  });
+
+  it('⛔ but one real device still discriminates — the flag is not always on', () => {
+    const f = flowOf({ src: '10.1.0.0/24', dst: '10.2.0.0/24', port: 443 });
+    const r = evaluateFlowOnDevice(f, [
+      rule({ rule_id: '1', action: 'allow', seq: 1, src: ['10.1.0.0/24'], dst: ['10.2.0.0/24'], svc: ['tcp/443'] }),
+    ], []);
+    const agg = aggregateFlow([{ device: { id: 'd', name: 'FW' }, result: r }]);
+    assert.equal(agg.unverified, false);
+    assert.deepEqual(agg.unverifiedReasons, []);
+  });
+});
+
+// ── 13. Randomised property sweep over the box arithmetic ─────────────────
+
+describe('⛔ the box arithmetic, by PROPERTY rather than by example', () => {
+  // ⛔ WHY A GENERATOR AND NOT MORE EXAMPLES. Every other test here is a case
+  // someone thought of. The decomposition's failure modes — a piece counted
+  // twice, a sliver lost, a later rule re-claiming space an earlier one already
+  // took — are invisible in any single example that happens to come out right,
+  // and all produce a plausible number rather than a crash.
+  //
+  // The oracle is deliberately stupid: decide every point in an 8x8x8 universe
+  // individually, first matching enabled rule in sequence order wins, and
+  // compare the three totals. A fixed seed keeps a failure reproducible.
+  let seed = 2026091501;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const ri = (n) => Math.floor(rnd() * n);
+  const N = 8;
+
+  function field(base) {
+    const lits = [];
+    const set = new Set();
+    const k = 1 + ri(3);
+    for (let i = 0; i < k; i++) {
+      if (rnd() < 0.1) {
+        lits.push('any');
+        for (let j = 0; j < N; j++) set.add(j);
+        continue;
+      }
+      const a = ri(N);
+      const b = ri(N);
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      if (base === null) {
+        lits.push(lo === hi ? 'tcp/' + lo : 'tcp/' + lo + '-' + hi);
+      } else {
+        const ip = (o) => '10.0.' + base + '.' + o;
+        lits.push(lo === hi ? ip(lo) : ip(lo) + '-' + ip(hi));
+      }
+      for (let j = lo; j <= hi; j++) set.add(j);
+    }
+    return { lits, set, any: lits.includes('any') };
+  }
+
+  it('matches a point-by-point oracle over 400 generated rulebases', () => {
+    const f = flowOf({ src: '10.0.0.0/29', dst: '10.0.1.0/29', port: 0, portEnd: N - 1 });
+    for (let trial = 0; trial < 400; trial++) {
+      const rules = [];
+      const meta = [];
+      const n = 1 + ri(6);
+      for (let i = 0; i < n; i++) {
+        const s = field(0);
+        const d = field(1);
+        const p = field(null);
+        const roll = rnd();
+        // Includes an unrecognised verb and disabled rules: both must decide
+        // nothing, and "decides nothing" is exactly what quietly leaks volume.
+        const action = roll < 0.45 ? 'allow' : (roll < 0.88 ? 'deny' : 'inspect-and-ponder');
+        const enabled = rnd() > 0.1;
+        const seqNo = rnd() < 0.1 ? null : i;
+        meta.push({ s, d, p, action, enabled, seq: seqNo });
+        rules.push(rule({
+          rule_id: 'r' + i, action, enabled, seq: seqNo,
+          src: s.lits, dst: d.lits, svc: p.lits,
+        }));
+      }
+
+      const r = evaluateFlowOnDevice(f, rules, []);
+      assertReconciles(r);
+
+      const ordered = meta.filter((m) => m.enabled).slice().sort((a, b) => {
+        if (a.seq === null) return b.seq === null ? 0 : 1;
+        if (b.seq === null) return -1;
+        return a.seq - b.seq;
+      });
+      let allow = 0n;
+      let deny = 0n;
+      let unspec = 0n;
+      for (let si = 0; si < N; si++) {
+        for (let di = 0; di < N; di++) {
+          for (let pi = 0; pi < N; pi++) {
+            let decided = null;
+            for (const m of ordered) {
+              if (m.action !== 'allow' && m.action !== 'deny') continue;
+              if (!(m.s.any || m.s.set.has(si))) continue;
+              if (!(m.d.any || m.d.set.has(di))) continue;
+              if (!(m.p.any || m.p.set.has(pi))) continue;
+              decided = m.action;
+              break;
+            }
+            if (decided === 'allow') allow += 1n;
+            else if (decided === 'deny') deny += 1n;
+            else unspec += 1n;
+          }
+        }
+      }
+      const shape = () => JSON.stringify(meta.map(
+        (m) => [m.action, m.enabled, m.seq, m.s.lits, m.d.lits, m.p.lits]
+      ));
+      assert.equal(r.allowVolume, allow, 'allow volume disagrees with the oracle: ' + shape());
+      assert.equal(r.denyVolume, deny, 'deny volume disagrees with the oracle: ' + shape());
+      assert.equal(r.unspecifiedVolume, unspec, 'unspecified volume disagrees with the oracle: ' + shape());
+    }
+  });
+
+  it('⛔ a later rule can never re-claim space an earlier one already took', () => {
+    // Double counting would break reconciliation, so this asserts the stronger
+    // property directly: the second, wider rule adds exactly the remainder.
+    const f = flowOf({ src: '10.0.0.0/24', dst: 'any', port: 443 });
+    const r = evaluateFlowOnDevice(f, [
+      rule({ rule_id: '1', action: 'allow', seq: 1, src: ['10.0.0.0/25'], dst: ['any'], svc: ['tcp/443'] }),
+      rule({ rule_id: '2', action: 'allow', seq: 2, src: ['10.0.0.0/24'], dst: ['any'], svc: ['tcp/443'] }),
+    ], []);
+    assert.equal(r.allowVolume, r.total);
+    assert.equal(r.permittingRules.length, 2);
+    assert.equal(
+      BigInt(r.permittingRules[0].volume) + BigInt(r.permittingRules[1].volume), r.total,
+      'the two rules must partition the flow, not overlap it'
+    );
+    assert.equal(BigInt(r.permittingRules[0].volume), BigInt(r.permittingRules[1].volume));
+  });
+
+  it('the 2^32 and port boundaries survive the arithmetic', () => {
+    // 0.0.0.0, 255.255.255.255, /0 and /32, port 0 and port 65535 — the places
+    // a signed shift or an off-by-one shows up as a whole extra address.
+    assert.equal(
+      boxVolume(av.makeBox(0, 4294967295, 0, 4294967295, 0, 65535)),
+      4294967296n * 4294967296n * 65536n
+    );
+    const whole = flowOf({ src: '0.0.0.0/0', dst: 'any', port: 0, portEnd: 65535 });
+    const r = evaluateFlowOnDevice(whole, [
+      rule({ rule_id: '1', action: 'allow', seq: 1, src: ['any'], dst: ['any'], svc: ['any'] }),
+    ], []);
+    assert.equal(r.allowVolume, r.total);
+    assertReconciles(r);
+
+    const edge = flowOf({ src: '255.255.255.255', dst: '0.0.0.0', port: 65535 });
+    const e = evaluateFlowOnDevice(edge, [
+      rule({ rule_id: '1', action: 'deny', seq: 1, src: ['255.255.255.255'], dst: ['0.0.0.0'], svc: ['tcp/65535'] }),
+    ], []);
+    assert.equal(e.total, 1n);
+    assert.equal(e.denyVolume, 1n);
+    assert.equal(e.verdict, VERDICTS.BLOCKED);
+
+    const portZero = flowOf({ src: '10.0.0.1', dst: '10.0.0.2', port: 0 });
+    const z = evaluateFlowOnDevice(portZero, [
+      rule({ rule_id: '1', action: 'allow', seq: 1, src: ['any'], dst: ['any'], svc: ['tcp/0'] }),
+    ], []);
+    assert.equal(z.verdict, VERDICTS.PERMITTED, 'port 0 is a port, not a missing value');
+  });
+});
+
+// ── 14. ⛔ The window that is REPORTED is the window that was MEASURED ─────
+
+describe('⛔ loadFleet reports the traffic window it actually used', () => {
+  // A stub pool: canned rows, and it RECORDS THE SQL IT WAS HANDED — which is
+  // what lets the window reported be compared with the window measured. Same
+  // shape tests/segmentation.test.js uses to pin the identical rule there.
+  function stubPool(opts) {
+    const o = opts || {};
+    const calls = [];
+    return {
+      calls,
+      find: (re) => calls.find((c) => re.test(c.sql)),
+      async query(sql, params) {
+        calls.push({ sql, params });
+        if (/FROM firewall_rules/.test(sql)) return { rows: o.rules || [] };
+        if (/FROM devices WHERE active/.test(sql)) return { rows: o.devices || [] };
+        if (/FROM network_objects/.test(sql)) return { rows: o.objects || [] };
+        if (/syslog_rollup_hourly/.test(sql)) return { rows: [] };
+        if (/syslog_rule_hits_hourly/.test(sql)) return { rows: [] };
+        throw new Error('unexpected SQL in test: ' + sql.slice(0, 80));
+      },
+    };
+  }
+
+  const dbRule = (over) => Object.assign({
+    id: 'r1', device_id: 'd1', rule_name: 'r1', rule_id_vendor: '1',
+    sequence_number: 1, enabled: true, action: 'allow',
+    src_addresses: ['any'], dst_addresses: ['any'], services: ['any'],
+    hit_count: 5, log_enabled: true, vdom: null,
+  }, over);
+
+  it('clamps to the evidence layer\'s own bounds', () => {
+    assert.equal(resolveWindowDays(undefined), 30);
+    assert.equal(resolveWindowDays('not-a-number'), 30);
+    // ⛔ Number(null) is 0 and 0 IS finite — the trap this guard exists for. A
+    // missing value must not be read as a real one; `?days=` absent arrives as
+    // null from URLSearchParams.get.
+    assert.equal(resolveWindowDays(null), 30);
+    assert.equal(resolveWindowDays(''), 30);
+    assert.equal(resolveWindowDays(-5), 7, 'floor, never a negative window');
+    assert.equal(resolveWindowDays(0), 7);
+    assert.equal(resolveWindowDays(3), 7, 'the floor ruleHitCorrelation enforces');
+    assert.equal(resolveWindowDays(45), 45);
+    assert.equal(resolveWindowDays(99999), 400, 'cap, never a span the evidence cannot cover');
+  });
+
+  it('⛔ pins the reported window against the window the evidence query USED', async () => {
+    // The two were resolved independently and disagreed: loadFleet reported
+    // `days`, ruleHitCorrelation measured clampDays(days). `days=1000` printed
+    // a 1,000-day traffic window over at most 400 days of evidence, and
+    // `days=null` printed a 1-day window over 7. If clampDays' bounds ever
+    // move, this fails rather than the page quietly mislabelling itself.
+    const run = async (asked) => {
+      const pool = stubPool({ rules: [dbRule()], devices: [{ id: 'd1', name: 'fw-1', vendor: 'fortinet' }] });
+      const fleet = await loadFleet(pool, { windowDays: asked, now: new Date('2026-09-14T00:00:00Z') });
+      const coverageCall = pool.find(/syslog_rollup_hourly/);
+      assert.equal(
+        coverageCall.params[1], fleet.windowDays * 24,
+        'reported ' + fleet.windowDays + 'd but measured ' + coverageCall.params[1] + 'h for days=' + asked
+      );
+      const hitsCall = pool.find(/syslog_rule_hits_hourly/);
+      assert.equal(hitsCall.params[2], fleet.windowDays, 'the per-rule query must use the same window');
+      return fleet.windowDays;
+    };
+    const got = await Promise.all([run(3), run(-5), run(45), run(undefined), run(null), run(99999)]);
+    assert.deepEqual(got, [7, 7, 45, 30, 30, 400]);
+  });
+
+  it('a device with no collected rules is NAMED, not omitted', async () => {
+    const pool = stubPool({
+      rules: [dbRule({ device_id: 'd1' })],
+      devices: [{ id: 'd1', name: 'fw-1', vendor: 'fortinet' }, { id: 'd2', name: 'fw-2', vendor: 'paloalto' }],
+    });
+    const fleet = await loadFleet(pool);
+    assert.equal(fleet.activeDeviceCount, 2);
+    assert.equal(fleet.devicesWithRules, 1);
+    assert.deepEqual(fleet.devicesWithoutRules, ['fw-2']);
   });
 });

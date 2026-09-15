@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.128.0': [
+    'Bug sweep over everything built today. The recurring fault: a read that failed being printed as a fact — “no flows declared”, “no active firewalls”, “0 of 1,097 rules accounted for” — each stated confidently from a query that never returned.',
+    'The Configuration Change Audit was capping its operator-review trail in silence, printing 120 actions as the total where the window held far more. Every other table in that report disclosed its cap; this one could not.',
+    'The VPN Access Review named 413 users as the distinct total while 424 had connected. The honest figure was already in hand and rendered nowhere.',
+    'A mistyped port in a declared flow silently widened it from one port to all 65,536. The engine refused the value correctly; the form reached past the check.',
+    'Cloud service names were picked non-deterministically where one provider publishes a range under several services — 2,297 AWS ranges do — so a label could change between syncs without anything changing.',
+    'The report download permission check could be switched off by an omission in the report registry rather than by a code change. No report was exposed; the shape was wrong.',
+  ],
   '2.127.1': [
     'Fixed the one-click declare reporting “no flows can be derived” for every cloud service, including ones that publish plenty. Exchange Online alone declares 49 flows from Microsoft’s published ranges and ports.',
   ],

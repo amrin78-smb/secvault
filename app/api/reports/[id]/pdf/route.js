@@ -39,8 +39,16 @@ export async function GET(request, { params }) {
     return Response.json({ error: `No such report: ${params.id}` }, { status: 404 });
   }
 
+  // ⛔ FAILS CLOSED ON A REGISTRY THAT DID NOT DECLARE ONE. This used to read
+  // `entry.capability && !can(...)`, so an entry that simply forgot its
+  // `capability` line was served to every authenticated session — an omission
+  // in DATA silently disabling the only boundary in the path. lib/rbac.js
+  // denies an undefined capability, so calling can() unconditionally turns that
+  // omission into a visible 403 rather than an invisible hole. Every registered
+  // entry declares one today and a test pins that; this is what happens the day
+  // one does not.
   const session = await getServerSession(authOptions);
-  if (entry.capability && !can(session, entry.capability)) {
+  if (!can(session, entry.capability)) {
     return forbiddenResponse(entry.capability);
   }
 
@@ -70,6 +78,21 @@ export async function GET(request, { params }) {
   // filter is a bad request, not an empty result.
   if (deviceId && !isValidUuid(deviceId)) {
     return Response.json({ error: 'deviceId is not a valid identifier.' }, { status: 400 });
+  }
+
+  // ⛔ AND A REPORT THAT CANNOT NARROW REFUSES A deviceId RATHER THAN IGNORING
+  // IT. Only a `device`-scoped report, or one declaring `optionalDevice`, reads
+  // the filter — every other builder drops it on the floor. Accepting it anyway
+  // answered "the compliance posture of THIS firewall" with the whole-fleet
+  // document, which is the same mislabelled artefact the parameter allow-list
+  // below exists to prevent, arriving through a different query key. An
+  // unusable filter is a bad request, not a silent widening.
+  const takesDevice = entry.scope === 'device' || entry.optionalDevice === true;
+  if (deviceId && !takesDevice) {
+    return Response.json(
+      { error: `${entry.name} is not scoped to a single firewall; remove deviceId.` },
+      { status: 400 }
+    );
   }
   if (entry.scope === 'entity') {
     if (!entityId || !isValidUuid(entityId)) {

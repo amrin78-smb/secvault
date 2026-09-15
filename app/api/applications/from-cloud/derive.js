@@ -27,7 +27,7 @@
 
 'use strict';
 
-const { providerLabel } = require('../../../../lib/engines/cloudApps');
+const { providerLabel, boundOrNull } = require('../../../../lib/engines/cloudApps');
 const { loadCatalogue } = require('../../../../lib/feeds/cloudApps');
 
 // ⛔ THE CAP EXISTS BECAUSE AN UNUSABLE DECLARATION IS NOT A DECLARATION.
@@ -248,7 +248,7 @@ function deriveFlows(ipRows, options = {}) {
     // click twice produces the same 50 flows, and a reader comparing two
     // declarations is comparing like with like.
     flow.sortKey = [
-      Number(row.range_start) || 0,
+      (boundOrNull(row.range_start) === null ? Number.MAX_SAFE_INTEGER : Number(row.range_start)),
       String(row.value),
       protocol,
       portStart === null ? -1 : portStart,
