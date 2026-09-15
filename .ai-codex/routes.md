@@ -305,3 +305,31 @@ original (the two may live in different directories). Response gained `tlsEnable
 `keyPath`, and `restartRequired` is now CONDITIONAL: on a `disabled` install, writing the pair
 cannot turn TLS on by itself, and the message says so rather than promising a restart will work.
 Both verbs gated on `manage_settings`.
+
+## GET /api/reports/[id]/pdf  (v2.120.0, params v2.121.0)
+
+`auth` `db`. The one download endpoint for every catalogued report. Resolves `params.id` through
+`lib/reports/catalogue.js`'s `reportById()`; unknown id -> **404**, never a zero-byte PDF (someone
+would file it). Enforces the entry's own `capability` via `can(session, entry.capability)` —
+⛔ the catalogue's `visibleReports()` filter is DISCOVERY, not a boundary; this route is the only
+thing between a URL and the file.
+
+Scope parameters, all validated BEFORE the builder runs:
+- `deviceId` — required + UUID-checked when `entry.scope === 'device'`; ⛔ UUID-checked **whatever
+  the scope** when supplied, so an `optionalDevice` fleet report cannot render fleet-titled empty
+  sections from a malformed filter.
+- `id` — required + UUID-checked when `entry.scope === 'entity'`.
+- **declared params** (v2.121.0) — for each entry in `entry.params[]`, the query value must appear
+  in that param's own `choices[]` or the route returns **400**. ⛔ An unrecognised value is refused,
+  never dropped: dropping it answers a request for the PCI document with the whole-fleet document
+  under a filename saying PCI, which is a mislabelled audit artefact. The allow-list being a literal
+  in the catalogue also means nothing an operator types can reach a builder or a query.
+
+Dispatch: `entity` scope -> `build(pool, entityId, opts)`, everything else -> `build(pool, opts)`,
+where `opts = { deviceId, ...paramValues }`. A `null` return -> 404 ("that record does not exist").
+
+Filename is `secvault-<id>[-<param values>]-<YYYY-MM-DD>.pdf`. ⛔ The param suffix is not cosmetic —
+without it the PCI and ISO reports downloaded the same day collide and the browser silently suffixes
+one "(1)", leaving two indistinguishable files in a folder meant to be evidence.
+`Cache-Control: no-store` — a report is a point-in-time measurement and a cached copy asserts a
+generation time it does not have. Errors are returned as JSON 500s, never swallowed into an empty 200.

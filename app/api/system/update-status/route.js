@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.122.0': [
+    'The Compliance Report can now be produced for a single standard — PCI DSS, ISO 27001, CIS v8, NIST or SANS — from a dropdown on the Reports page.',
+    'A single-standard report states how much of the check library that standard covers, because narrowing changes the denominator: a PCI score and an overall score are both right and are answers to different questions.',
+    'Downloads now carry the standard in the filename, so the PCI and ISO reports no longer arrive as two files with the same name.',
+    'Fixed the Segmentation board colouring the three violation types in the wrong order — a hole we cannot see into was painted less urgent than one we have measured as unused, which is backwards, and the two most different ones shared a colour.',
+  ],
   '2.121.0': [
     'Rebuilt the Reports page. It listed each report and described it; now it shows the report — pick one from the rail and the panel gives you its live headline figures and what the document contains before you spend the seconds building it.',
     'Each report states how many firewalls, findings or advisories it currently has to talk about, so you can tell whether it is worth running.',

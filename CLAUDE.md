@@ -677,8 +677,20 @@ already talks to. Optional adapter methods `getLicenses()`/`getHaStatus()`/`getD
 `diagnose test update info` (its **System contracts** block is the only CLI source of the
 SPRT/HDWR/ENHN/COMP support entitlements) and `get system fortiguard`. ⛔ An earlier note here said
 Fortinet had no licence surface; that was wrong, and came from probing only `get system status` —
-one command returning nothing does not prove a vendor lacks the data. Fortinet HA/disk remain
-deferred (no HA-enabled FortiGate to verify a peer parser against). Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
+one command returning nothing does not prove a vendor lacks the data. ⛔ A second correction,
+2026-09-15: this file also said **Fortinet HA was deferred**, and that was wrong too —
+`lib/adapters/fortinet/ssh.js` implements `getHaStatus()` and all 5 live Fortinets carry
+`device_ha_status` rows. Only **Fortinet disk** is genuinely still deferred. That is twice the
+same sentence has under-stated a vendor's real coverage; a report that reads it and hardcodes a
+vendor matrix inherits the error, so `lib/reports/fleetLifecycle.js` derives capability from the
+ADAPTER REGISTRY (`typeof adapter.getX === 'function'`, nothing connected, nothing called) rather
+than from prose here.
+
+⛔ **Licence expiry is FOUR states, not three.** Besides a real date, perpetual (`expires_raw`
+= `'Never'`) and unknown, `deviceHealth.licenseStatus()` returns **`not_licensed`** for FortiOS's
+`'n/a'` — live, **44 of 305 entitlement rows**, every one on a Fortinet. It is an entitlement the
+device does not hold, not one whose date failed to parse, and it must never enter a renewal table:
+doing so would manufacture 44 renewals that do not exist. Tables: `device_licenses`, `device_ha_status`, `device_disk_usage`,
 `device_content_versions` — all latest-snapshot, all detailed in `.ai-codex/schema.md`.
 
 - **Licences / support expiry** — the fleet renewal-planning view. ⛔ `expires_at` is TRI-STATE
@@ -1093,6 +1105,20 @@ Verdicts (`VERDICTS` in segmentation.js): `violation_active` / `violation_permit
 `violation_unverified` / `ok_blocked` / `ok_in_use` / `unused_permission` / `ok_unverified` /
 `expected_allow_missing` / `unknown`. ⛔ `violation_permitted` and `violation_unverified` must never
 share a colour — the first is a safe deletion candidate, the second must be assumed live.
+
+⛔ **AND THE THREE VIOLATION COLOURS MUST RANK IN THE SAME ORDER AS THE ACTION LIST**
+(`violation_active` > `violation_unverified` > `violation_permitted`), on screen and in print.
+Corrected 2026-09-15, v2.122.0: `SegmentationBoard.js` had given `violation_permitted` the full
+danger tint and `violation_unverified` only a warning tint — the reverse of its own
+`ACTION_ORDER` and the reverse of its own hover text, which says of unverified "assume it is live"
+and of permitted "the safest kind to close". The rule above was satisfied to the letter (they did
+not share a colour) while the louder of the two was the wrong one. `violation_active` and
+`violation_permitted` ALSO both sat on `--sev-crit`, so "happening now" and "a standing hole" were
+indistinguishable. Since Fortinet over SSH reports no hit counts at all, "cannot tell" is the
+COMMON verdict on this fleet, not a corner — under-colouring it was the expensive half of the
+mistake. Pinned by `tests/segmentation.test.js`, which reads the component source and asserts the
+tint ranking against `ACTION_ORDER` rather than against a hardcoded list, so the two cannot
+disagree again.
 
 Mutating routes are gated on `OPERATE`, not `MANAGE_DEVICES`: declaring intent changes no device, no
 rule and no score. Pinned by `tests/segmentation.test.js` (28 cases).

@@ -1995,3 +1995,44 @@ fabricated.
 Live: `eng_itc_HirunC` scopes to 45 buckets / 10,354 events — **9.9%** of their own traffic, where the
 page previously said "27% of all traffic seen". Of 185 named users, 175 have scoped unattributed
 traffic and 10 hit the clean-zero branch.
+
+## lib/reports/ — the reporting platform (v2.119.0-v2.121.0)
+
+`chassis.js` — the ONE shared pdfkit drawing surface. Exports palette (`ACCENT NAVY MUTED LIGHT
+BORDER GREEN INK STATUS_RED ORANGE YELLOW BLUE UNMEASURED`), text helpers (`pdfSafe`
+`installPdfSafeText` `fmtStamp`), layout (`layoutOf` `ensureSpace`) and blocks (`drawCover`
+`sectionTitle` `paragraph` `labelledNote` `drawTable` `stampHeadersFooters`). ⛔ Extracted in
+v2.119.0 from TWO diverged copies (`complianceReport.js` and `ruleChangeRequestReport.js`) — the
+change-request copy had grown an `ensureSpace` guard against pdfkit orphaning a table header across
+pages and the compliance copy never received it. New report builders MUST use this and must not
+hand-roll a cover, table, heading or footer. `drawCover` is parameterised (`fixedGeometry`,
+`titleSize`, `footerStamp`) purely to reproduce each pre-existing report's exact geometry.
+
+`catalogue.js` — the single registry. `SCOPES` (`fleet`/`device`/`entity`), `REPORTS`, `reportById`,
+`visibleReports(caps)`, `clientSafe(entry)`. Each entry: `id name summary icon contents scope
+capability formats optionalDevice? params? builder`. `builder` is a LAZY thunk
+(`() => require('./x').generateXPdf`) so the registry stays requireable from a client component
+without dragging pdfkit and the engine graph behind it.
+⛔ `clientSafe()` is an **ALLOW-LIST**, written as "pick these fields" not "delete builder" — the
+next field added might also be a function. It strips `builder`/`capability` and deep-copies `params`.
+Passing a raw entry to a client component is what made `/reports` render blank in v2.120.0 with a
+bare digest while every test passed and the build was clean.
+
+`reportStats.js` (v2.121.0) — `getReportStats(pool)` / `tilesFor(reportId, stats)`. ONE query of
+scalar subqueries (172ms live) feeding the `/reports` panel's headline tiles for all five reports.
+⛔ Returns **null** on failure, never a zero-filled object — a Reports page of confident zeros is
+indistinguishable from a clean fleet. ⛔ The tiles are an at-a-glance count, NOT the report's own
+result (the report applies acknowledgements, coverage rules, caps and the priority tree), and the
+panel says so — otherwise every legitimate difference reads as a bug in one of them.
+
+`pdfCompare.js` — `comparePdfs(a, b)` / `contentStreams(buf)`. Decompresses every content stream and
+compares DRAWING OPERATORS, normalising `/CreationDate`, `/ModDate`, `/ID` and the report's own
+rendered timestamp (which is hex inside `TJ` arrays). Returns `{equal, reason, streams,
+firstDifference}` — note the key is `equal`, not `identical`. Used to prove a refactor left an
+existing report's output untouched.
+
+Builders, all `generateXPdf(pool, options = {}) -> Promise<Buffer|null>` (null ONLY when a named
+record does not exist), each split into a `buildXData` / `renderXPdf` pair so the data half is
+testable against a stub pool: `executiveSummary.js` (R1), `ruleHygiene.js` (R3),
+`vulnerabilityPosture.js` (R5). `lib/engines/complianceReport.js` and
+`lib/engines/ruleChangeRequestReport.js` predate the platform and are registered from where they are.

@@ -62,6 +62,11 @@ function glyphOf(name) {
 export default function ReportWorkspace({ reports, devices }) {
   const [selectedId, setSelectedId] = useState(reports[0]?.id || null);
   const [deviceId, setDeviceId] = useState('');
+  // ⛔ Declared parameters, keyed by parameter key. Held in ONE object rather
+  // than a useState per parameter, because the set of parameters is data from
+  // the catalogue — a hook per parameter would mean the hook count changes
+  // with the selected report, which React forbids outright.
+  const [paramValues, setParamValues] = useState({});
   const [busy, setBusy] = useState(false);
 
   const report = reports.find((r) => r.id === selectedId) || reports[0] || null;
@@ -78,9 +83,15 @@ export default function ReportWorkspace({ reports, devices }) {
   const showPicker = !isEntity && (needsDevice || canNarrow);
   const disabled = needsDevice && !deviceId;
 
-  const href = deviceId
-    ? `/api/reports/${report.id}/pdf?deviceId=${encodeURIComponent(deviceId)}`
-    : `/api/reports/${report.id}/pdf`;
+  const declared = report.params || [];
+  const query = new URLSearchParams();
+  if (deviceId) query.set('deviceId', deviceId);
+  for (const p of declared) {
+    const v = paramValues[p.key];
+    if (v) query.set(p.key, v);
+  }
+  const qs = query.toString();
+  const href = `/api/reports/${report.id}/pdf${qs ? `?${qs}` : ''}`;
 
   function select(id) {
     setSelectedId(id);
@@ -89,6 +100,11 @@ export default function ReportWorkspace({ reports, devices }) {
     // the operator selected while looking at something else — and the control
     // would be showing the right name for the wrong reason.
     setDeviceId('');
+    // ⛔ Cleared for the same reason as the firewall: a standard chosen while
+    // looking at the compliance report must not silently scope a different
+    // document. Parameter keys are also not unique across reports, so a
+    // carried-over value could land on an unrelated parameter entirely.
+    setParamValues({});
     setBusy(false);
   }
 
@@ -306,6 +322,34 @@ export default function ReportWorkspace({ reports, devices }) {
                       </select>
                     </label>
                   ) : null}
+
+                  {declared.map((p) => (
+                    <label
+                      key={p.key}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s1)' }}
+                    >
+                      <span className="rpt-section-label" style={{ margin: 0 }}>
+                        {p.label}
+                      </span>
+                      <select
+                        value={paramValues[p.key] || ''}
+                        onChange={(e) => setParamValues((prev) => ({
+                          ...prev, [p.key]: e.target.value,
+                        }))}
+                        style={{ minWidth: 200 }}
+                      >
+                        {/* ⛔ The empty option is a REAL CHOICE with its own
+                            words, not a blank placeholder. "All standards" is
+                            what this report does when given nothing; an empty
+                            row would read as an unmade selection and make the
+                            download look like it was about to misfire. */}
+                        <option value="">{p.allLabel || 'All'}</option>
+                        {p.choices.map((c) => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
 
                   {/* ⛔ An anchor, not a fetch — the browser owns the file
                       dialog and a large report streams instead of being

@@ -387,3 +387,36 @@ First item per band opens by default so the depth is discoverable.
 truncated caps each get their own banner, both hueless: the source did not find a problem, it
 failed to answer. ⛔ Imports SEVERITY_BADGE_COLOR from analysis/severityRamp — a local map here
 reintroduced `medium: info` (blue) and tests/designSystemRamp caught it.
+
+## components/reports/ReportWorkspace.js (added 2026-09-15, v2.121.0)
+
+`'use client'`. The whole `/reports` surface: a catalogue rail (left) plus a panel for the selected
+report (right). Props: `reports` (already `clientSafe`, each with `tiles`), `devices`.
+
+Replaced `components/reports/ReportCard.js`, which was **deleted** in the same commit — a stacked
+list of descriptions with Download buttons. See `pages.md` for why that was a structural problem
+rather than a styling one.
+
+- `GLYPHS` maps the catalogue's `icon` STRING to a component. ⛔ The catalogue must name a glyph as a
+  string because it is required from a server component, where a React element cannot cross the
+  boundary — so the name and the lookup live in different files and can drift silently. The unknown
+  fallback (`IconReport`) would quietly give two reports the same icon; `tests/reportRoute.test.js`
+  pins both distinctness and resolvability.
+- `SCOPE_LABEL` covers every `SCOPES` value; a scope with no label prints the raw enum. Pinned.
+- Entity-scoped reports are LISTED with their scope stated, and the panel explains where they
+  actually come from. ⛔ Hiding them made the product look unable to produce the document; listing
+  them silently made the page look broken.
+- Declared `params` (v2.121.0) render as one `<select>` each, held in ONE `paramValues` object —
+  ⛔ not a `useState` per param, because the param set is catalogue data and a varying hook count is
+  forbidden. The empty option carries its own words (`allLabel`, e.g. "All standards"), never a blank
+  row, so it reads as a real choice rather than an unmade selection.
+- `deviceId` and `paramValues` both RESET on switching reports — a value chosen while looking at one
+  report must not silently scope a different document, and param keys are not unique across reports.
+- Tiles: `tone: 'unmeasured'` gets `.rpt-tile-unmeasured` (hatched, hueless). `tiles === null` (the
+  counts could not be read) renders an explicit "could not be read" block. ⛔ Never a row of zeros —
+  on a Reports page, all-zero is indistinguishable from a clean fleet.
+- The Download control is an `<a>`, not a fetch, so the browser owns the file dialog and a large
+  report streams. Its "Building…" state is ⛔ a TIMER, not a completion signal — a plain anchor gives
+  the page no event when the bytes arrive.
+
+CSS lives in `app/globals.css` under `.rpt-*` (workspace grid, rail, tiles, section label).

@@ -157,3 +157,48 @@ device down for a question we could not pose is the same error as `hit_count`'s 
 
 Live: largest ruleset is IDC FW at **706 rules** against a cap of 1000, so nothing changes today.
 Fixed in code, latent in data.
+
+## Per-standard scoping of the compliance report (added 2026-09-15, v2.121.0)
+
+`generateReportPdf(pool, { standard })` / `buildReportData(pool, { standard })` now produce a report
+scoped to ONE framework. `standard` is one of `PCI_DSS` / `ISO_27001` / `CIS_V8` / `NIST` / `SANS`
+(`STANDARD_KEYS`, exported). Absent / null / `''` = the unchanged fleet-wide report.
+
+⛔ **THIS IS A CHANGE OF DENOMINATOR, NOT A FILTER OVER THE FLEET.** `audit_checks.standards` is a
+`TEXT[]` and most checks carry several — live: 45 checks, mapping to CIS_V8 44 / ISO_27001 35 /
+PCI_DSS 21 / SANS 12 / NIST 7, summing to 119. So a PCI score and an overall score are BOTH correct
+and answer different questions. Printed in two documents with no explanation they read as a bug in
+one of them, and the reader cannot tell which. `standardCoverage(pool, standard)` supplies the
+sentence the scoped report prints under its heading ("21 of 45 checks … carry a PCI DSS mapping …
+not comparable with the overall compliance score"). ⛔ It returns **null** on a read failure, never
+`{mapped: 0}` — "0 of 45 checks map to PCI DSS" is a claim, and a false one; the report then prints
+a shorter caveat rather than the score bare.
+
+⛔ **An unknown standard THROWS** (`resolveStandard`), it does not widen to the fleet. Two independent
+gates: the route allow-lists against the catalogue's own declared `choices`, then the engine refuses
+anything it does not know. A report silently widening while still titled and filed as PCI is the one
+output this product must never produce.
+
+⛔ **`fleetForStandard(perDevice, standard)` sums the already-computed per-device counts** rather
+than being a sixth copy of the scoring formula reaching into the database again — same findings,
+same active devices, identical numerator and denominator. Nothing measurable -> `scorePct: null`,
+**never 0** (same rule as `na` leaving the denominator): a standard no device can be assessed
+against is a gap in what SecVault can ask, not total non-compliance.
+
+**The scoped tables are a different shape, not the same tables with columns hidden.**
+`buildFleetSummaryTable(fleet, standard)` emits one row. `buildPerDeviceTable(perDevice, standard)`
+swaps the five-percentage matrix for `Device / Vendor / Score / Pass / Fail / Warning / Not
+assessable` — with only one score left, the matrix row is mostly whitespace, and showing `na`
+explicitly is what stops a device scoring 100% off two measurable checks looking fully assessed.
+The `na` column is drawn in `UNMEASURED` (`#6D7784`), hueless, because it is a coverage gap.
+
+⛔ **The UNSCOPED output is byte-identical to v2.120.1** — verified with `lib/reports/pdfCompare.js`
+against the live fleet (63,354 bytes, 17 content streams, no operator differences). That matters
+because `services/engine-worker.js`'s monthly `compliance-report` job calls
+`generateReportPdf(pool)` with no options and emails the result to auditors; a silent layout shift
+there is the kind of change nobody notices until two years of filings are compared.
+
+Pinned by `tests/complianceStandardScope.test.js` (22 cases), including a catalogue↔engine drift
+guard: every offered choice must be one the engine accepts, every engine standard must be offerable,
+and the labels must match — a dropdown entry the engine rejects is a 500 on download, i.e. a button
+that visibly does nothing.

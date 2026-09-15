@@ -27,10 +27,30 @@ import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 
+// ⛔ THE THREE VIOLATION TINTS RANK IN THE SAME ORDER AS ACTION_ORDER BELOW,
+// AND THAT AGREEMENT IS THE POINT. Until v2.122.0 they did not: this file gave
+// `violation_permitted` the full danger tint and `violation_unverified` only a
+// warning tint, while ACTION_ORDER — and this file's own VERDICT_DETAIL text —
+// put unverified FIRST. The page was telling an operator two opposite things at
+// once, and the louder of the two was the wrong one.
+//
+// The ordering that is correct, and why:
+//   violation_active      a rule allows it AND traffic was recorded. Happening.
+//   violation_unverified  a rule allows it and usage CANNOT be determined, so
+//                         it must be assumed live. Fortinet over SSH reports no
+//                         hit counts at all, so this is the COMMON case here,
+//                         not a corner — which is exactly why under-colouring
+//                         it was expensive.
+//   violation_permitted   a rule allows it and a MEASURED zero says nothing has
+//                         used it. A standing hole, and the safest to close.
+//
+// So the hole we have evidence is quiet must not outrank the one we cannot see
+// into. ⛔ They still never share a colour — that rule is unchanged; what
+// changed is which of them is louder.
 const VERDICT_STYLE = {
   violation_active: { bg: 'var(--tint-danger)', fg: 'var(--tint-danger-fg)', border: 'var(--sev-crit)', short: 'CAN + DID' },
-  violation_permitted: { bg: 'var(--tint-danger)', fg: 'var(--tint-danger-fg)', border: 'var(--sev-crit)', short: 'CAN' },
-  violation_unverified: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', border: 'var(--sev-med)', short: 'CAN ?' },
+  violation_unverified: { bg: 'var(--tint-orange)', fg: 'var(--tint-orange-fg)', border: 'var(--sev-high)', short: 'CAN ?' },
+  violation_permitted: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', border: 'var(--sev-med)', short: 'CAN' },
   unused_permission: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', border: 'var(--sev-med)', short: 'UNUSED' },
   expected_allow_missing: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)', border: 'var(--sev-med)', short: 'MISSING' },
   ok_in_use: { bg: 'var(--tint-success)', fg: 'var(--tint-success-fg)', border: 'var(--sev-ok)', short: 'IN USE' },

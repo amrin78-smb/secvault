@@ -80,12 +80,38 @@ export async function GET(request, { params }) {
     }
   }
 
+  // ⛔ EVERY DECLARED PARAMETER IS ALLOW-LISTED AGAINST ITS OWN CHOICES, and a
+  // value that is not on the list is a 400 rather than being dropped. Dropping
+  // it would silently widen the report — a request for the PCI document
+  // answered with the whole-fleet document, under a filename saying PCI. That
+  // is a mislabelled audit artefact, which is strictly worse than an error.
+  //
+  // Because the accepted set is a literal in the catalogue, nothing an operator
+  // can type reaches a builder or a query. The engine validates again on its
+  // own, so this is the first of two gates, not the only one.
+  const declared = Array.isArray(entry.params) ? entry.params : [];
+  const paramValues = {};
+  for (const p of declared) {
+    const raw = searchParams.get(p.key);
+    // Absent or empty means "unscoped", which is every report's default and is
+    // not an error — the picker's empty option is a real choice, not a blank.
+    if (raw === null || raw === '') continue;
+    const allowed = Array.isArray(p.choices) ? p.choices : [];
+    if (!allowed.some((c) => c.value === raw)) {
+      return Response.json(
+        { error: `${raw} is not a valid ${p.label || p.key} for this report.` },
+        { status: 400 }
+      );
+    }
+    paramValues[p.key] = raw;
+  }
+
   try {
     const build = entry.builder();
     // The two entity/device builders take their id as the second positional
     // argument; fleet builders take an options object. Both shapes also receive
     // the options object, so a builder can read scope parameters either way.
-    const opts = { deviceId: deviceId || null };
+    const opts = { deviceId: deviceId || null, ...paramValues };
     const buffer = entry.scope === 'entity'
       ? await build(pool, entityId, opts)
       : await build(pool, opts);
@@ -95,7 +121,11 @@ export async function GET(request, { params }) {
     }
 
     const stamp = new Date().toISOString().slice(0, 10);
-    const filename = `secvault-${entry.id}-${stamp}.pdf`;
+    const scopeSuffix = Object.values(paramValues)
+      .map((v) => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+      .filter(Boolean)
+      .join('-');
+    const filename = `secvault-${entry.id}${scopeSuffix ? `-${scopeSuffix}` : ''}-${stamp}.pdf`;
 
     return new Response(buffer, {
       status: 200,

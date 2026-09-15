@@ -144,3 +144,23 @@ nothing to read while a fetch resolves. Computes segmentation itself and passes 
 a segmentation failure is injected as a failed SOURCE so the queue reports itself incomplete.
 ⛔ A structural failure renders an explicit "this is not a statement that nothing is outstanding"
 empty state, never a reassuring blank page.
+
+## app/(dashboard)/reports/page.js  -> `/reports`  (v2.120.0, rebuilt v2.121.0)
+
+`server` — `ReportsPage` — the report catalogue. Lists via `visibleReports(caps).map(clientSafe)`
+(⛔ never its own array — the page, the route and the registry must not drift) and attaches
+`tilesFor(r.id, stats)` per entry, then renders `components/reports/ReportWorkspace.js`.
+
+Two reads in one `Promise.all`: active devices for the firewall picker, and `getReportStats(pool)` —
+ONE query for all five reports' headline figures (172ms live), not one per report.
+
+⛔ **Rebuilt in v2.121.0 and the reason was structural, not cosmetic.** It rendered one card per
+report — name, paragraph, Download button — which DESCRIBED the reports rather than showing them.
+You could not tell whether a report was worth running or whether the fleet had anything for it to
+say. Now: a rail of entries with distinct glyphs, and a panel carrying the selected report's live
+figures, contents, scope controls and download. The old `components/reports/ReportCard.js` was
+deleted, not left in place.
+
+⛔ `clientSafe()` is applied ONCE here, at the list, not per call site. A catalogue entry carries a
+lazy `builder` FUNCTION and React refuses to send a function to a client component — in a production
+build that failure is a bare digest on a blank page, which is exactly how v2.120.0 shipped.

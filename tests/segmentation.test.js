@@ -731,3 +731,72 @@ describe('⛔ the evaluation runs ONCE per page view', () => {
     assert.match(board, /await load\(\);/);
   });
 });
+
+describe('⛔ the board colours the three violations in its own action order', () => {
+  // SegmentationBoard.js is a client ES module and cannot be required from
+  // node:test, so this reads the source. That is weaker than importing it and
+  // is still worth having: the thing being pinned is an ORDERING BETWEEN TWO
+  // TABLES IN ONE FILE, which is exactly the kind of agreement that rots
+  // silently because neither table is wrong on its own.
+  //
+  // It did rot. Until v2.122.0 `violation_permitted` carried the full danger
+  // tint while `violation_unverified` carried only a warning tint — the
+  // reverse of ACTION_ORDER and the reverse of the file's own explanatory text,
+  // which says of unverified "assume it is live" and of permitted "the safest
+  // kind to close". An operator reading the colours was being told the opposite
+  // of what the same page said in words, and the colour is what gets read.
+
+  const SRC = fs.readFileSync(
+    path.join(__dirname, '..', 'components', 'segmentation', 'SegmentationBoard.js'),
+    'utf8'
+  );
+
+  // Loudest first. Matches --sev-crit > --sev-high > --sev-med.
+  const RANK = ['var(--sev-crit)', 'var(--sev-high)', 'var(--sev-med)'];
+  const VIOLATIONS = ['violation_active', 'violation_unverified', 'violation_permitted'];
+
+  function borderOf(verdict) {
+    const line = SRC.split('\n').find((l) => l.trim().startsWith(verdict + ':'));
+    assert.ok(line, verdict + ' has no VERDICT_STYLE entry');
+    const m = line.match(/border:\s*'([^']+)'/);
+    assert.ok(m, verdict + ' has no border colour');
+    return m[1];
+  }
+
+  function actionOrder() {
+    const block = SRC.match(/const ACTION_ORDER = \[([\s\S]*?)\]/);
+    assert.ok(block, 'ACTION_ORDER not found');
+    return block[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  }
+
+  it('every violation verdict still has a distinct colour', () => {
+    const colours = VIOLATIONS.map(borderOf);
+    assert.equal(new Set(colours).size, colours.length,
+      'two violation verdicts share a colour: ' + colours.join(', '));
+  });
+
+  it('⛔ unverified outranks permitted — an unseen hole beats a measured-quiet one', () => {
+    // Fortinet over SSH reports no hit counts at all, so "cannot tell" is the
+    // common case on this fleet, not a corner. Colouring it BELOW a hole we
+    // have positive evidence is unused gets the priority exactly backwards.
+    assert.ok(
+      RANK.indexOf(borderOf('violation_unverified')) < RANK.indexOf(borderOf('violation_permitted')),
+      'violation_unverified must be louder than violation_permitted'
+    );
+  });
+
+  it('the tint ranking agrees with ACTION_ORDER, so colour and list cannot disagree', () => {
+    const order = actionOrder();
+    const listed = VIOLATIONS.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const byColour = VIOLATIONS.slice()
+      .sort((a, b) => RANK.indexOf(borderOf(a)) - RANK.indexOf(borderOf(b)));
+    assert.deepEqual(byColour, listed,
+      'the colour ranking and ACTION_ORDER disagree — the page would say two different things');
+  });
+
+  it('every violation colour comes from the severity ramp, not a literal hex', () => {
+    for (const v of VIOLATIONS) {
+      assert.match(borderOf(v), /^var\(--sev-/, v + ' hardcodes a colour outside the ramp');
+    }
+  });
+});

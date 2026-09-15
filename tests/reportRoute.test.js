@@ -239,7 +239,7 @@ describe('⛔ nothing non-serialisable crosses into a client component', () => {
     assert.equal(safe.pool, undefined);
     assert.equal(safe.builder, undefined);
     assert.deepEqual(Object.keys(safe).sort(),
-      ['contents', 'formats', 'icon', 'id', 'name', 'optionalDevice', 'scope', 'summary']);
+      ['contents', 'formats', 'icon', 'id', 'name', 'optionalDevice', 'params', 'scope', 'summary']);
   });
 
   it('the page serialises before rendering the client component', () => {
@@ -248,6 +248,36 @@ describe('⛔ nothing non-serialisable crosses into a client component', () => {
       PAGE, /visibleReports\([^)]*\)\s*\.map\(clientSafe\)/,
       'serialise ONCE where the list is built, not at each call site'
     );
+  });
+
+  it('⛔ a function nested inside params cannot cross either', () => {
+    // The flat "no function values" check above walks only the top level, and
+    // `params` is the first NESTED structure this boundary carries. A
+    // formatter or predicate added to a choice would sit one level down, where
+    // that check cannot see it — and the failure is the blank page with a bare
+    // digest, all over again.
+    const { clientSafe } = require('../lib/reports/catalogue');
+    const safe = clientSafe({
+      id: 'x', name: 'X', summary: 's', scope: 'fleet', formats: ['pdf'],
+      params: [{
+        key: 'k', label: 'K', allLabel: 'All',
+        choices: [{ value: 'v', label: 'V', render: () => 'nope' }],
+        validate: () => true,
+      }],
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(safe)), safe);
+    assert.equal(safe.params[0].validate, undefined);
+    assert.equal(safe.params[0].choices[0].render, undefined);
+    assert.deepEqual(Object.keys(safe.params[0].choices[0]).sort(), ['label', 'value']);
+  });
+
+  it('a report with no params gets an empty array, not undefined', () => {
+    // The panel maps over this unconditionally; undefined would throw at render
+    // rather than at build, which on this page means a blank screen.
+    const { clientSafe, REPORTS } = require('../lib/reports/catalogue');
+    for (const entry of REPORTS) {
+      assert.ok(Array.isArray(clientSafe(entry).params), `${entry.id}.params is not an array`);
+    }
   });
 
   it('clientSafe tolerates a null entry rather than throwing', () => {
