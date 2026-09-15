@@ -511,3 +511,51 @@ describe('⛔ a row with no bounds never claims 0.0.0.0/8', () => {
     assert.equal(matchIp('0.1.2.3', eng.buildIpIndex(real)).provider, 'aws');
   });
 });
+
+describe('⛔ loadCatalogue returns `kind` on every row', () => {
+  // THE BUG THIS PINS. `kind` separates the two result sets, so SELECTing it
+  // looked redundant and it was left out — every row arrived with
+  // `kind: undefined`. derive.js CONCATENATES hosts and ips and re-splits on
+  // `r.kind` to answer "what does this service publish", so it got zero of each
+  // and the Declare control rendered a confident "no flows can be derived" for
+  // services publishing 49 flows' worth of ranges and ports.
+  //
+  // A plausible, confident, wrong answer from a missing column — and the unit
+  // tests passed throughout, because their fixtures built rows by hand WITH a
+  // kind. Only running it against the real database showed it.
+
+  function recordingPool() {
+    const sql = [];
+    return {
+      sql,
+      query: async (q) => {
+        sql.push(q);
+        if (/count\(\*\)/i.test(q)) return { rows: [{ count: 0, last_seen_at: null }] };
+        return { rows: [] };
+      },
+    };
+  }
+
+  it('both row queries select kind, not merely filter on it', async () => {
+    const pool = recordingPool();
+    await feed.loadCatalogue(pool);
+    const rowQueries = pool.sql.filter((q) => /FROM cloud_app_ranges/.test(q) && !/count\(\*\)/i.test(q));
+    assert.equal(rowQueries.length, 2, 'expected one query per kind');
+    for (const q of rowQueries) {
+      const select = q.slice(0, q.indexOf('FROM'));
+      assert.match(select, /\bkind\b/,
+        'kind must be in the SELECT list, not only the WHERE:\n' + q);
+    }
+  });
+
+  it('a row that cannot say what it is breaks the merge-and-resplit caller', () => {
+    // Demonstrates the failure mode directly, so the reason for the column is
+    // legible without reading derive.js.
+    const hosts = [{ provider: 'p', service: 's', value: 'a.example' }];        // no kind
+    const ips = [{ provider: 'p', service: 's', value: '1.2.3.0/24' }];          // no kind
+    const merged = [...hosts, ...ips];
+    assert.equal(merged.filter((r) => r.kind === 'ip').length, 0);
+    assert.equal(merged.filter((r) => r.kind === 'host').length, 0);
+    assert.equal(merged.length, 2, 'the rows are there — only their identity is missing');
+  });
+});

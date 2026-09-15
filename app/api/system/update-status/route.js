@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.127.1': [
+    'Fixed the one-click declare reporting “no flows can be derived” for every cloud service, including ones that publish plenty. Exchange Online alone declares 49 flows from Microsoft’s published ranges and ports.',
+  ],
   '2.127.0': [
     'Declare a cloud service as an application in one click. SecVault builds the flows from the provider’s own published address ranges and ports — never from a guess, because your name goes on the declaration.',
     'Where a provider publishes an address range but no port, the flow is declared for every port rather than assuming 443. Where the published ports cannot be read, no flow is created and the reason is shown.',
