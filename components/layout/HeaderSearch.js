@@ -33,6 +33,17 @@ const PAGE_KEYWORDS = {
   '/compliance': ['audit', 'pci', 'iso', 'cis', 'nist', 'benchmark'],
   '/vpn': ['vpn', 'remote access', 'tunnel', 'users', 'identity'],
   '/settings': ['config', 'preferences', 'admin', 'notifications', 'appearance'],
+  // Four pages shipped without keywords and were reachable only by typing their
+  // exact label. ⛔ These carry the OLD vocabulary too, on purpose and for the
+  // same reason the comment above the nav gives: someone who has used this for
+  // a year types what they used to call the thing, and a palette that answers
+  // "no results" to the product's own former words is worse than none. So
+  // "cloud"/"office 365" find Applications, and "queue"/"todo" find Work.
+  '/work': ['work queue', 'queue', 'todo', 'to do', 'outstanding', 'backlog'],
+  '/reports': ['report', 'reports', 'pdf', 'export', 'download', 'audit report'],
+  '/segmentation': ['segmentation', 'zones', 'intent', 'east-west', 'boundary'],
+  '/applications': ['applications', 'apps', 'flows', 'declared', 'cloud',
+    'office 365', 'microsoft 365', 'saas'],
 };
 
 function matchPages(q) {

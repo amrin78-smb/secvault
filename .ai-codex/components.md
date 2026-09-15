@@ -525,3 +525,21 @@ written on the application itself. `CoverageSummary` had the same shape: it comp
 
 ⛔ The guard in `CoverageSummary` is LOAD-BEARING: `evaluateAllApplications` still computes
 `orphans` from an empty flow list when that gather fails, so removing it restores the 0% claim.
+
+## components/analysis/CleanupTab.js — Applications column (v2.129.0)
+
+Gains `DependencyCell` / `DependencyNotice` and a re-cut 7-column colgroup summing to 100% with
+`tableLayout:'fixed'` preserved. ⛔ Verified by DOM order, not by eye: the notice renders at index
+251, the first table at 946, the first checkbox at 1552 — **the dependency figure is above the
+checkbox that proposes the removal**, which is the whole point of putting it here.
+
+⛔ **NOT auto-blocking.** A rule with no declared dependants is not proven safe — the declaration may
+simply be incomplete — so the figure is surfaced prominently and the operator decides. Blocking on it
+would turn an empty declaration into a veto.
+
+## components/applications/ApplicationCard.js — retire panel (v2.129.0)
+
+⛔ Shows PROPOSED and WITHHELD together before anything is submitted, with each withholding reason in
+full. A one-click action whose effect is a surprise is worse than two clicks, and this one proposes
+firewall changes. A null hit count renders hueless as "usage not measured", never as "0 hits".
+Submit is disabled at zero proposed. All components at module top level.

@@ -118,10 +118,11 @@ const FILES = walk(API_DIR).map((file) => {
 });
 
 describe('the application routes exist at all', () => {
-  it('found the five declared route files and nothing unexpected', () => {
+  it('found the declared route files and nothing unexpected', () => {
     assert.deepEqual(FILES.map((f) => f.rel).sort(), [
       'app/api/applications/[id]/flows/[flowId]/route.js',
       'app/api/applications/[id]/flows/route.js',
+      'app/api/applications/[id]/retire/route.js',
       'app/api/applications/[id]/route.js',
       // Declares a published cloud service in one action (v2.126.0). Its
       // derivation lives beside it in from-cloud/derive.js, which is NOT a
@@ -129,6 +130,12 @@ describe('the application routes exist at all', () => {
       // only handlers, which is why the logic it shares with the UI sits in a
       // sibling.
       'app/api/applications/from-cloud/route.js',
+      // The reverse index (rule -> dependent applications), Phase 2a. GET only,
+      // and deliberately so: it computes over already-collected data and
+      // persists nothing, so it is treated like any other read. The rules below
+      // are what keep that true — a mutating verb added here tomorrow is gated
+      // by the same per-handler sweep as every other file in this directory.
+      'app/api/applications/impact/route.js',
       'app/api/applications/route.js',
     ]);
   });
@@ -151,7 +158,7 @@ describe('the application routes exist at all', () => {
           `${f.rel} ${method} body contains no response — the wrong text was captured`);
       }
     }
-    assert.equal(handlers, 9, 'expected GET+POST, GET+PUT+DELETE, POST, PUT+DELETE, POST');
+    assert.equal(handlers, 11, 'expected GET+POST, GET+PUT+DELETE, POST, PUT+DELETE, POST, POST, GET');
   });
 
   it('every engine function the routes call really is exported', () => {
@@ -371,8 +378,8 @@ describe('the query-string window', () => {
   // failure the guard exists to prevent, not the presence of a bad parameter.
   const withGet = FILES.filter((f) => handlerBody(f.src, 'GET'));
 
-  it('both read routes accept ?days=', () => {
-    assert.equal(withGet.length, 2);
+  it('every read route accepts ?days=', () => {
+    assert.equal(withGet.length, 3);
     for (const f of withGet) assert.match(f.src, /searchParams\.get\('days'\)/);
   });
 

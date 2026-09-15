@@ -1077,6 +1077,37 @@ FAILS OPEN: an unreadable count falls THROUGH to the evaluation, because "we cou
 count" is not "nothing is declared", and that substitution would switch a whole source off in
 silence.
 
+## Application Intent — Phase 2 (v2.129.0)
+
+Two inversions of the declared-flow model, both reusing `applicationView`'s evaluator UNCHANGED.
+
+⛔ **IMPACT MAKES EXACTLY ONE CLAIM**, exported as `IMPACT_CLAIM` and pinned by a test that rejects
+the words *safe*, *reachable*, *unused* and *guarantee*: "Removing this rule would leave N declared
+flows with nothing permitting them." ⛔ **A rule no declared application uses is NOT proven safe to
+remove** — with nothing declared, every rule serves nothing, and rendering that as safe would turn an
+empty declaration into a fleet-wide deletion licence.
+
+⛔ **UNKNOWN IS NOT ZERO, AND THE THREE ZEROES NEVER LOOK ALIKE.** `breaks` / `shared` / `unknown` /
+`none`, with `null` counts (never 0) on an unavailable index. An unverified walk applies only a
+rule's RESOLVED extent, so other permitters may be invisible — which is why unverified never becomes
+"only support" even at a support count of 1.
+
+⛔ **RETIRING PROPOSES; IT NEVER DELETES.** It produces a request through the existing
+`ruleChangeRequests` loop, which already proves removal against the re-collected ruleset and already
+refuses to verify while collection is failing. There is deliberately no second verifier and no "mark
+as done".
+
+⛔ **"ONLY THIS APPLICATION CLAIMS IT" IS THE SAFETY PROPERTY.** Other claimants include every other
+application's flows in BOTH expectations and **including retired ones** — a status is a label someone
+typed, not evidence traffic stopped. An unmeasured `hit_count` is REFUSED, not warned about. Both
+lists always return together: a response carrying only `proposed` is a shorter list that looks
+complete, with a delete button attached.
+
+⛔ **NEITHER FEATURE CAN CONCLUDE ON THIS FLEET TODAY, AND THAT IS CORRECT.** 14 of 16 firewalls carry
+rules referencing an address or service the device never reported, so impact reads "cannot tell" for
+all 29 touched rules and retirement proposes 0 of 29. The fix is collecting the missing objects, NOT
+loosening either engine — an engine that concluded anyway would be guessing about a firewall change.
+
 ## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
 
 Declared zone-to-zone policy, tested TWO WAYS: **CAN** (the rulebase) and **DID** (the traffic).

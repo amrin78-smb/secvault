@@ -2189,3 +2189,41 @@ never delay the advisory feeds. Live: **11,766 rows in 2.1s.**
 
 ⛔ `suggestApplications()` PROPOSES AND NEVER CREATES. An auto-created application is a declaration
 with nobody behind it, which is worse than the stale-but-owned map the competing products ship.
+
+## lib/engines/applicationImpact.js + applicationRetire.js — Phase 2 (v2.129.0)
+
+Both invert the application view: given the declared flows, which RULES matter, and what happens if
+one goes. Neither re-implements flow evaluation — both consume `applicationView.evaluateFlowOnDevice`
+/ `evaluateAllApplications` unchanged, so "claimed" means exactly what `orphanCoverage` means by it.
+Two implementations of "does this rule permit this flow" would eventually disagree, and the wrong one
+would be authorising a deletion.
+
+**`applicationImpact.js`** — `buildImpactIndex` (pure) / `impactForRule` / `serialiseImpactIndex` /
+`getImpactIndex`. Four states and the three zeroes never look alike (see routes.md). Live: the index
+over 16 firewalls takes ~1,053 ms and serialises to 42.6 KB.
+
+**`applicationRetire.js`** — `buildClaimIndex` / `planRetirement` (pure) / `planApplicationRetirement`
+/ `retireApplication`. Evaluation runs ONCE per plan; only devices this application actually claims a
+rule on are then asked for their cleanup verdict.
+
+### ⛔ What the live fleet does to both, and why it is the RIGHT answer
+
+Neither feature can reach a confident conclusion on this fleet today, and that is the honest outcome
+rather than a defect:
+
+- Impact: **29 rules across 12 firewalls** are touched by the one declared application;
+  `rulesBreakingSomething = 0` and **`rulesUnknown = 29`**. The column reads "cannot tell" everywhere.
+- Retire: **29 claimed, 0 proposed, 29 withheld** — 28 `unverified_evaluation`, 1 `usage_not_measured`.
+
+One root cause, measured: **14 of 16 firewalls carry rules referencing an address or service the
+device never reported** (TUFF and TUM 27 each, ITC-SK 22, TSR_EKC 17, HRIS 10). Where that is true,
+"only this application claims it" is not established, so nothing may be proposed. Only `OKF(F2)` and
+`TUG` evaluate cleanly.
+
+⛔ **Closing that object-collection gap is what makes both features productive here** — not changing
+either engine. An engine that concluded anyway would be guessing about a firewall change.
+
+The case the impact feature exists for does already appear: on `TUM(TUTH1)`, `Salaya_TO_SAPRise` is
+offered as an `unused` removal candidate with a MEASURED zero hit count — and the declared
+application's flows run through it. It renders `2 flows — cannot tell`, naming the application,
+above the checkbox that would propose its removal.

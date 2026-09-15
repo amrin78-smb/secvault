@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.129.0': [
+    'Rule cleanup now shows which declared applications depend on a rule, above the checkbox that proposes removing it.',
+    'It says “cannot tell” rather than a number wherever the evidence does not support one — and a rule no application declares is shown as undeclared, never as safe to remove.',
+    'An application can now be retired into a rule change request: SecVault works out which rules only that application claimed, and holds back everything it cannot be certain about, with a reason for each.',
+    'A rule another application also uses is never proposed — including when that other application is itself already retired.',
+    'On this fleet both features currently hold back everything, because 14 of 16 firewalls have rules pointing at addresses the device never reported. Collecting those objects is what unlocks it; neither feature will guess.',
+    'Four pages were missing from the search palette and are now findable, including by what they used to be called.',
+  ],
   '2.128.0': [
     'Bug sweep over everything built today. The recurring fault: a read that failed being printed as a fact — “no flows declared”, “no active firewalls”, “0 of 1,097 rules accounted for” — each stated confidently from a query that never returned.',
     'The Configuration Change Audit was capping its operator-review trail in silence, printing 120 actions as the total where the window held far more. Every other table in that report disclosed its cap; this one could not.',

@@ -24,7 +24,7 @@
 // so the heading, the table and the sentence above the page cannot disagree
 // about what was saved. See the note at the top of ApplicationBoard.js.
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import Button from '../ui/Button';
@@ -280,6 +280,332 @@ function UnreadableFlows({ application, fleetFailed }) {
   );
 }
 
+// ── Retiring an application ────────────────────────────────────────────────
+//
+// ⛔ BOTH LISTS ARE SHOWN BEFORE ANYTHING IS SUBMITTED. This action proposes
+// FIREWALL RULES FOR DELETION, so the operator sees what would be proposed AND
+// what was held back, with each reason, and then clicks a second time. A
+// one-click action whose effect is a surprise is worse than two clicks here —
+// and a screen that showed only the proposal would be presenting a shorter list
+// that looks complete, which is the failure this whole product exists to remove.
+//
+// ⛔ THIS PANEL FETCHES A PROPOSAL, NOT THE EVALUATION. ApplicationBoard's rule
+// against fetching here is about the page's VERDICTS: a second copy of those,
+// taken at a different instant, can disagree with the sentence above the table.
+// A retirement proposal is not rendered anywhere else on the page, so there is
+// no second copy of anything — and it is far too expensive to compute for every
+// application on every page load.
+
+const RETIRE_REASON_LABEL = {
+  also_claimed: 'Another application claims it',
+  unverified_evaluation: 'Not fully verified',
+  no_vendor_identifier: 'No identifier to verify against',
+  usage_not_measured: 'Usage never measured',
+  cleanup_engine_withheld: 'Held back by rule analysis',
+  not_cleanup_eligible: 'Not flagged as removable',
+};
+
+function RetireRuleLine({ item }) {
+  return (
+    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+      {item.deviceName || item.deviceId} · {item.ruleName || '(unnamed)'}
+      {item.ruleIdVendor ? ` · id ${item.ruleIdVendor}` : ''}
+      {item.sequence !== null && item.sequence !== undefined ? ` · #${item.sequence}` : ''}
+      {' · '}
+      {hitLabel(item)}
+    </div>
+  );
+}
+
+function RetireProposedTable({ proposed }) {
+  return (
+    <Table minWidth={720}>
+      <colgroup>
+        <col style={{ width: '22%' }} />
+        <col style={{ width: '40%' }} />
+        <col style={{ width: '20%' }} />
+        <col style={{ width: '18%' }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Firewall</th>
+          <th>Rule</th>
+          <th title="The rule's own measured usage. A rule is never proposed on an unmeasured count.">
+            Usage
+          </th>
+          <th title="What SecVault's rule analysis independently found about this rule.">Also found</th>
+        </tr>
+      </thead>
+      <tbody>
+        {proposed.map((p) => (
+          <tr key={`${p.deviceId}-${p.ruleIdVendor}`}>
+            <td>{p.deviceName || p.deviceId}</td>
+            <td>
+              <div style={{ fontFamily: 'var(--font-mono)', wordBreak: 'break-word' }}>
+                {p.ruleName || '(unnamed)'}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                id {p.ruleIdVendor}
+                {p.sequence !== null && p.sequence !== undefined ? ` · #${p.sequence}` : ''}
+              </div>
+            </td>
+            <td>{hitLabel(p)}</td>
+            <td>{p.findingType ? <Badge color="muted">{p.findingType}</Badge> : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+/**
+ * ⛔ THE WITHHELD LIST IS NOT A FOOTNOTE. Each entry carries the engine's own
+ * sentence, because "we held 29 rules back" with no reasons is a shorter list
+ * wearing a label — and several of these reasons are things the operator can
+ * act on (collect the missing objects, fix an unreadable flow) rather than
+ * limits they must accept.
+ */
+function RetireWithheldTable({ withheld }) {
+  return (
+    <Table minWidth={720}>
+      <colgroup>
+        <col style={{ width: '22%' }} />
+        <col style={{ width: '26%' }} />
+        <col style={{ width: '52%' }} />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Firewall</th>
+          <th>Rule</th>
+          <th>Why it is not proposed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {withheld.map((w, i) => (
+          <tr key={`${w.deviceId}-${w.ruleIdVendor || 'no-id'}-${i}`}>
+            <td>{w.deviceName || w.deviceId}</td>
+            <td>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', wordBreak: 'break-word' }}>
+                {w.ruleName || '(unnamed)'}
+              </div>
+              {hitLabel(w)}
+            </td>
+            <td>
+              <Badge color="muted">{RETIRE_REASON_LABEL[w.reasonCode] || w.reasonCode}</Badge>
+              <div style={{ marginTop: 'var(--s1)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+                {w.reason}
+              </div>
+              {Array.isArray(w.unverifiedReasons) && w.unverifiedReasons.length > 0 && (
+                <ul style={{ margin: 'var(--s1) 0 0', paddingLeft: 'var(--s5)', color: 'var(--unmeasured)', fontSize: 'var(--text-xs)' }}>
+                  {w.unverifiedReasons.map((r, j) => <li key={j}>{r}</li>)}
+                </ul>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  );
+}
+
+function RetireOutcome({ result }) {
+  const requests = Array.isArray(result.requests) ? result.requests : [];
+  const failures = Array.isArray(result.failures) ? result.failures : [];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+      {requests.length > 0 && (
+        <div>
+          <strong>
+            {result.submitted} rule{result.submitted === 1 ? '' : 's'} proposed for removal across{' '}
+            {requests.length} firewall{requests.length === 1 ? '' : 's'}.
+          </strong>
+          <ul style={{ margin: 'var(--s2) 0 0', paddingLeft: 'var(--s5)', color: 'var(--text-secondary)' }}>
+            {requests.map((r) => (
+              <li key={r.requestId}>
+                {r.deviceName || r.deviceId}: {r.ruleCount} rule{r.ruleCount === 1 ? '' : 's'} ·{' '}
+                <a href={`/devices/${r.deviceId}/analysis?tab=cleanup`}>open the change request</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {/* ⛔ A PARTIAL RESULT NEVER READS AS A WHOLE ONE. An operator told "done"
+          while one firewall was skipped never looks at it again. */}
+      {failures.length > 0 && (
+        <ErrorNote>
+          {failures.length} firewall{failures.length === 1 ? '' : 's'} could not be asked:{' '}
+          {failures.map((f) => `${f.deviceName || f.deviceId} (${f.error})`).join('; ')}
+        </ErrorNote>
+      )}
+      <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+        Nothing has been deleted. SecVault will report each rule as removed only when a ruleset
+        collected after this request no longer contains it — there is no way to mark it done by hand.
+      </p>
+    </div>
+  );
+}
+
+function RetirePanel({ application, busy, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [plan, setPlan] = useState(null);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const appId = application.id;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/retire`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json().catch(() => ({}));
+      // ⛔ THE ROUTE'S OWN MESSAGE REACHES THE OPERATOR, including the 403 that
+      // names the missing capability. A button that silently does nothing gets
+      // filed as a broken product rather than as a permission they lack.
+      if (!res.ok) { setError(body.error || `Could not work out what to retire (HTTP ${res.status}).`); return; }
+      setPlan(body.plan || null);
+    } catch (err) {
+      setError('Could not reach SecVault — nothing was proposed and nothing was changed.');
+    } finally {
+      setLoading(false);
+    }
+  }, [appId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = useCallback(async () => {
+    if (!plan || plan.proposed.length === 0) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/retire`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // ⛔ WHAT WAS ON SCREEN IS SENT BACK, and the server treats it as a
+        // ceiling: anything it now proposes that is not in this list stops the
+        // submission. The operator confirms what they SAW, not whatever the
+        // rulebase happens to say at the moment of the click.
+        body: JSON.stringify({ confirm: true, expect: plan.proposed.map((p) => p.ruleIdVendor) }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || `Nothing was submitted (HTTP ${res.status}).`);
+        if (body.plan) setPlan(body.plan);
+        return;
+      }
+      setResult(body);
+    } catch (err) {
+      setError('Could not reach SecVault — nothing was submitted.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [appId, plan]);
+
+  const proposed = plan && Array.isArray(plan.proposed) ? plan.proposed : [];
+  const withheld = plan && Array.isArray(plan.withheld) ? plan.withheld : [];
+  const notes = plan && Array.isArray(plan.notes) ? plan.notes : [];
+  const working = busy || submitting;
+
+  return (
+    <div style={{
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: 'var(--s4)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 'var(--s4)',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--s3)', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 'var(--text-base)' }}>
+          Retire “{application.name}” — which rules exist only to serve it?
+        </strong>
+        <Button variant="secondary" disabled={submitting} onClick={onClose}>Close</Button>
+      </div>
+
+      {error && <ErrorNote>{error}</ErrorNote>}
+
+      {loading && (
+        <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+          Checking every declared application against every collected rulebase…
+        </p>
+      )}
+
+      {result ? <RetireOutcome result={result} /> : plan && (
+        <>
+          <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            {/* ⛔ THE CLAIM IS STATED EXACTLY. "A rule permits one of this
+                application's declared flows and no other declared application's"
+                is a much narrower statement than "this rule is only used by this
+                application", and the difference is the operator's to judge. */}
+            SecVault proposes a rule only when it permits one of this application’s declared flows,
+            no other declared application claims it, its usage was actually measured, and SecVault’s
+            own rule analysis independently flagged it as removable. Everything else is listed
+            below with the reason it was held back.
+          </p>
+
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+            {plan.summary.claimedRules} rule{plan.summary.claimedRules === 1 ? '' : 's'} claimed ·{' '}
+            {plan.summary.proposedRules} proposed across {plan.summary.devices} firewall
+            {plan.summary.devices === 1 ? '' : 's'} · {plan.summary.withheldRules} held back
+            {plan.coverage ? ` · traffic measured over ${plan.coverage.windowDays} days` : ''}
+          </div>
+
+          {notes.map((n) => (
+            <div key={n.code} style={{
+              backgroundImage: 'var(--hatch)',
+              backgroundColor: 'var(--surface-subtle)',
+              border: '1px dashed var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: 'var(--s3)',
+              color: 'var(--unmeasured)',
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.55,
+            }}>
+              {n.text}
+            </div>
+          ))}
+
+          {proposed.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
+              <strong>Would be proposed for removal</strong>
+              <RetireProposedTable proposed={proposed} />
+            </div>
+          )}
+
+          {withheld.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
+              <strong style={{ color: 'var(--unmeasured)' }}>
+                Held back ({withheld.length}) — not proposed, and not cleared either
+              </strong>
+              <RetireWithheldTable withheld={withheld} />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 'var(--s3)', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* ⛔ NEVER HIDDEN FOR A ROLE — the route is gated and answers a 403
+                with the reason, which is shown above. */}
+            <Button variant="danger" disabled={working || proposed.length === 0} onClick={submit}>
+              {submitting
+                ? 'Raising…'
+                : `Raise ${proposed.length} rule${proposed.length === 1 ? '' : 's'} as a change request`}
+            </Button>
+            <Button variant="secondary" disabled={working} onClick={load}>Re-check</Button>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+              This raises a change request per firewall. It deletes nothing, changes no rule, and
+              leaves this application’s status exactly as you set it.
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function ApplicationCard({
   entry,
   busy,
@@ -298,6 +624,12 @@ export default function ApplicationCard({
   // this table changes whenever the list is re-read, so an index would open the
   // editor on whichever flow happened to land in that slot after a refresh.
   const [editingFlowId, setEditingFlowId] = useState(null);
+  // ⛔ CLOSED BY DEFAULT, AND OPENED DELIBERATELY. The panel evaluates every
+  // declared application against every collected rulebase to work out what only
+  // this one claims — far too expensive to run for every card on every load,
+  // and it is a proposal to delete firewall rules, which nobody should meet by
+  // scrolling past it.
+  const [retiring, setRetiring] = useState(false);
   const app = entry.application || {};
   const flows = Array.isArray(entry.flows) ? entry.flows : [];
   // ⛔ Either failure means the flow list on screen is a read that failed, not a
@@ -332,6 +664,12 @@ export default function ApplicationCard({
           <Button variant="secondary" disabled={busy} onClick={() => setEditingApp((v) => !v)}>
             {editingApp ? 'Close editor' : 'Edit'}
           </Button>
+          {/* ⛔ "Retire…" NOT "Retire". It opens a review; it does not retire
+              anything, and a label that promised otherwise would be a one-click
+              action whose effect is deleting firewall rules. */}
+          <Button variant="secondary" disabled={busy} onClick={() => setRetiring((v) => !v)}>
+            {retiring ? 'Close retirement' : 'Retire…'}
+          </Button>
           {confirming ? (
             <>
               <Button variant="danger" disabled={busy} onClick={() => { setConfirming(false); onRemoveApp(app.id); }}>
@@ -359,6 +697,10 @@ export default function ApplicationCard({
               onClose={() => setEditingApp(false)}
             />
           </div>
+        )}
+
+        {retiring && (
+          <RetirePanel application={app} busy={busy} onClose={() => setRetiring(false)} />
         )}
 
         {app.note && (

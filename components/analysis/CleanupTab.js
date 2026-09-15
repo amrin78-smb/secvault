@@ -5,6 +5,12 @@ import {
   listRequests,
   REMOVABLE_FINDING_TYPES,
 } from '../../lib/engines/ruleChangeRequests';
+import {
+  IMPACT,
+  IMPACT_CAVEAT,
+  getImpactIndex,
+  impactForRule,
+} from '../../lib/engines/applicationImpact';
 import Pagination from '../ui/Pagination';
 import { WRAP_CELL } from '../ui/tableStyles';
 import Table from '../ui/Table';
@@ -43,6 +49,39 @@ import RuleChangeRequests, { CleanupRequestPanel } from './RuleChangeRequests';
 // DELETE+reinsert, so the removal could never be confirmed). Drawing only the
 // shorter list would make this screen look complete when it is not — the
 // failed-read-as-a-fact bug with a delete button attached.
+//
+// ── APPLICATION IMPACT (Phase 2a) ─────────────────────────────────────────
+// Until now this screen could say only that SecVault MEASURED a rule as unused.
+// It could not say whether a declared business application depends on it. The
+// "Applications" column answers exactly one question and no more:
+//
+//     "Removing this rule would leave N declared flows with nothing
+//      permitting them."
+//
+// ⛔ IT IS AS COMPLETE AS THE DECLARATION AND NO MORE, and the column says so
+// on screen in every state. A rule serving no declared application is NOT
+// proven safe to remove — with nothing declared, EVERY rule serves nothing, and
+// rendering that as a green all-clear would turn a blank page into a
+// fleet-wide deletion licence.
+//
+// ⛔ IT DOES NOT BLOCK A SUBMISSION, deliberately. The unmeasured-hit_count
+// refusal in getCleanupCandidates is a refusal to GUESS about the device; this
+// is a gap in the OPERATOR'S OWN MAP, and refusing a deletion on the strength
+// of an incomplete declaration would punish them for not having finished it.
+// What it does do is sit in the candidate table, inside the request form, above
+// the submit button — so the figure cannot be missed on the way to a removal.
+//
+// ⛔ THIS COMPONENT PAYS FOR ITS OWN FLEET LOAD, and that is stated rather than
+// hidden. getImpactIndex() runs an ENGINE, not a query: loadFleet is ~750ms plus
+// an evaluation of every declared flow against every device. The alternative
+// precedent is /work, where the page computes segmentation once and passes it
+// in — not available here, because this tab is mounted by a page that is not
+// part of this change. The cost is bounded two ways instead: a COUNT on
+// application_flows stands in front of the whole load (nothing declared → no
+// load at all, which is today's live state on most installs), and the index is
+// built ONCE per render and looked up per rule in O(1). If this tab ever gets
+// slow, move the call up into the analysis page and pass the index down; do NOT
+// call getImpactIndex per row.
 
 const VISUALLY_HIDDEN = {
   position: 'absolute',
@@ -123,9 +162,203 @@ function dedupeCandidates(eligible) {
   );
 }
 
+// Up to three application names inline; the rest stay on the tooltip so a long
+// list cannot push the row height around.
+function appSummary(impact) {
+  const names = (impact.applications || []).map((a) => a.name).filter(Boolean);
+  if (names.length === 0) return null;
+  const shown = names.slice(0, 3).join(', ');
+  return names.length > 3 ? `${shown} +${names.length - 3} more` : shown;
+}
+
+/**
+ * One candidate rule's dependency figure.
+ *
+ * ⛔ FOUR ANSWERS, AND THE THREE ZEROES MUST NOT LOOK ALIKE. `breaks` is the
+ * only one that carries a hue, because it is the only one that is a measured
+ * finding. "Nothing declared", "cannot be told" and "the evaluation failed" all
+ * produce a count of zero and all render HUELESS, through NotMeasured — an
+ * absence of news is not good news, and a green tick here would be this
+ * product's signature bug pointed at a delete button.
+ *
+ * Module top level, never nested inside another component — CLAUDE.md's "NEVER
+ * define a React component inside another React component" rule.
+ */
+function DependencyCell({ impact }) {
+  if (!impact || impact.available === false) {
+    return (
+      <NotMeasured
+        text="Unknown"
+        reason={
+          'SecVault could not evaluate the declared applications just now, so whether anything '
+          + 'depends on this rule is unknown. This is not a statement that nothing does.'
+        }
+      />
+    );
+  }
+
+  if (impact.declarationEmpty) {
+    return (
+      <NotMeasured
+        text="Nothing declared"
+        reason={
+          'No application has been declared yet, so there is nothing to compare this rule '
+          + `against. ${IMPACT_CAVEAT}`
+        }
+      />
+    );
+  }
+
+  if (impact.impact === IMPACT.BREAKS) {
+    const n = impact.onlySupportCount;
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+        <Badge
+          color="danger"
+          title={
+            `Removing this rule would leave ${n} declared flow${n === 1 ? '' : 's'} with nothing `
+            + `permitting ${n === 1 ? 'it' : 'them'} on any firewall. ${IMPACT_CAVEAT}`
+          }
+        >
+          Breaks {n} flow{n === 1 ? '' : 's'}
+        </Badge>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+          {appSummary(impact)}
+        </span>
+        {impact.unknownCount > 0 ? (
+          <NotMeasured
+            text={`+${impact.unknownCount} could not be checked`}
+            reason="These flows could not be verified, so their loss is neither confirmed nor ruled out."
+          />
+        ) : null}
+      </span>
+    );
+  }
+
+  if (impact.impact === IMPACT.UNKNOWN) {
+    // ⛔ NOT a zero. A declared flow does run through this rule, but its
+    // evaluation was unverified — an unresolved object, a firewall with no
+    // collected ruleset, or the fragmentation cap — so other rules may permit
+    // it without having appeared. We cannot say what removal costs.
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+        <NotMeasured
+          text={`${impact.unknownCount} flow${impact.unknownCount === 1 ? '' : 's'} — cannot tell`}
+          reason={
+            'A declared flow uses this rule, but its evaluation could not be verified, so whether '
+            + 'removing the rule would break it is unknown. Never read this as safe.'
+          }
+        />
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+          {appSummary(impact)}
+        </span>
+      </span>
+    );
+  }
+
+  if (impact.impact === IMPACT.SHARED) {
+    const n = impact.applicationCount;
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+        <Badge
+          color="info"
+          title={
+            `${n} declared application${n === 1 ? '' : 's'} use${n === 1 ? 's' : ''} this rule, but `
+            + 'every flow behind it is also permitted by another rule, so removing it leaves '
+            + `nothing unpermitted. ${IMPACT_CAVEAT}`
+          }
+        >
+          {n} app{n === 1 ? '' : 's'}, none lose access
+        </Badge>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+          {appSummary(impact)}
+        </span>
+      </span>
+    );
+  }
+
+  // ⛔ NONE. Muted text and an explicit tooltip, never a tick and never green.
+  // "No declared application uses this" is a fact about the MAP, not about the
+  // rule, and the operator has to be able to see the difference.
+  return (
+    <span
+      style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}
+      title={`No declared flow is permitted by this rule. ${IMPACT_CAVEAT}`}
+    >
+      None declared — not proof it is unused
+    </span>
+  );
+}
+
+/**
+ * The sentence above the candidate list. States the claim, its limits, and what
+ * the evaluation could not cover — before the operator ticks anything.
+ */
+function DependencyNotice({ index }) {
+  const base = {
+    padding: 'var(--s3)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius)',
+    background: 'var(--surface-subtle)',
+    fontSize: 'var(--text-sm)',
+    color: 'var(--text-secondary)',
+    marginBottom: 'var(--s3)',
+  };
+
+  if (!index || index.available === false) {
+    return (
+      <div style={base} role="status">
+        <strong style={{ color: 'var(--text-primary)' }}>
+          Application impact could not be evaluated.
+        </strong>{' '}
+        The Applications column below reads <em>Unknown</em> for every rule. That is not the same
+        as “nothing depends on these rules” — it means SecVault could not check.
+        {(index && index.errors && index.errors.length > 0) ? (
+          <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+            {index.errors.map((e) => `${e.source}: ${e.error}`).join(' · ')}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (index.declarationEmpty) {
+    return (
+      <div style={base}>
+        <strong style={{ color: 'var(--text-primary)' }}>No application has been declared yet</strong>,
+        so nothing here can say what a removal would break. {IMPACT_CAVEAT}
+      </div>
+    );
+  }
+
+  return (
+    <div style={base}>
+      <strong style={{ color: 'var(--text-primary)' }}>
+        The Applications column answers one question: removing this rule would leave N declared
+        flows with nothing permitting them.
+      </strong>{' '}
+      Measured against {index.flowCount} declared flow{index.flowCount === 1 ? '' : 's'} across{' '}
+      {index.applicationCount} application{index.applicationCount === 1 ? '' : 's'}. {IMPACT_CAVEAT}
+      {index.unverifiedFlowCount > 0 ? (
+        <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+          {index.unverifiedFlowCount} of {index.flowCount} declared flow
+          {index.flowCount === 1 ? '' : 's'} could not be fully verified, so any rule behind one of
+          them reads “cannot tell” rather than a number.
+        </div>
+      ) : null}
+      {index.invalidFlowCount > 0 ? (
+        <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+          {index.invalidFlowCount} declared flow{index.invalidFlowCount === 1 ? '' : 's'} could not
+          be read at all and contributed nothing to this column.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Module top level, never nested inside CleanupTab — CLAUDE.md's "NEVER define
 // a React component inside another React component" rule.
-function CandidateTable({ candidates, canWrite }) {
+function CandidateTable({ candidates, canWrite, impacts }) {
   if (candidates.length === 0) {
     return (
       <div
@@ -148,13 +381,17 @@ function CandidateTable({ candidates, canWrite }) {
   // two props go together.
   return (
     <Table stickyHeader maxHeight="420px">
+      {/* tableLayout:'fixed' is enforced by Table; these percentages are what
+          it needs to be meaningful. Widths were re-cut, not appended to, when
+          the Applications column landed. */}
       <colgroup>
-        <col style={{ width: '6%' }} />
-        <col style={{ width: '30%' }} />
-        <col style={{ width: '20%' }} />
-        <col style={{ width: '10%' }} />
-        <col style={{ width: '10%' }} />
+        <col style={{ width: '5%' }} />
         <col style={{ width: '24%' }} />
+        <col style={{ width: '16%' }} />
+        <col style={{ width: '8%' }} />
+        <col style={{ width: '8%' }} />
+        <col style={{ width: '21%' }} />
+        <col style={{ width: '18%' }} />
       </colgroup>
       <thead>
         <tr>
@@ -167,6 +404,7 @@ function CandidateTable({ candidates, canWrite }) {
           <th>Why</th>
           <th>Hits</th>
           <th>Enabled</th>
+          <th title="Declared applications whose flows this rule permits.">Applications</th>
           <th>Evidence</th>
         </tr>
       </thead>
@@ -199,6 +437,12 @@ function CandidateTable({ candidates, canWrite }) {
               {c.hitCount}
             </td>
             <td>{c.enabled === false ? 'No' : 'Yes'}</td>
+            <td style={WRAP_CELL}>
+              {/* ⛔ Inside the request form and above the submit button, so a
+                  removal cannot be proposed without this having been on screen
+                  beside the checkbox that proposes it. */}
+              <DependencyCell impact={impacts ? impacts.get(c.ruleIdVendor) : null} />
+            </td>
             <td style={{ ...WRAP_CELL, color: 'var(--text-secondary)' }}>
               {c.details.length > 0 ? c.details.join(' · ') : '—'}
             </td>
@@ -264,6 +508,31 @@ export default async function CleanupTab({ deviceId, canWrite = false, searchPar
 
   const candidates = dedupeCandidates(eligible);
 
+  // ⛔ ONE call, for the whole tab. getImpactIndex evaluates every declared flow
+  // against the whole fleet; calling it per candidate row would multiply a
+  // ~750ms load by 136. It also never throws — a failure returns
+  // `available:false`, which makes every lookup report UNKNOWN instead of a
+  // fabricated zero — so the try/catch here is belt-and-braces against an
+  // unexpected import-time fault taking the tab down, exactly like the
+  // listRequests catch above.
+  let impactIndex = null;
+  try {
+    impactIndex = await getImpactIndex(pool);
+  } catch (err) {
+    impactIndex = null; // DependencyCell/Notice render this as Unknown, not as 0
+  }
+
+  // ⛔ Keyed on rule_id_vendor per DEVICE. The impact index spans the fleet and
+  // vendor rule ids are only unique within a device (rule "1" exists on every
+  // firewall), so the deviceId is part of the lookup, not an afterthought.
+  const impacts = new Map();
+  for (const c of candidates) {
+    impacts.set(
+      c.ruleIdVendor,
+      impactForRule(impactIndex, { deviceId, ruleIdVendor: c.ruleIdVendor, ruleName: c.ruleName })
+    );
+  }
+
   const eligibleKeys = new Set(
     eligible.map((e) => candidateKey(e.ruleIdVendor, e.ruleName, e.findingType))
   );
@@ -287,7 +556,11 @@ export default async function CleanupTab({ deviceId, canWrite = false, searchPar
         eligibleCount={candidates.length}
         withheld={withheld}
       >
-        <CandidateTable candidates={candidates} canWrite={canWrite} />
+        {/* ⛔ The notice goes BEFORE the list, never after it and never behind a
+            disclosure — the same rule WithheldNotice follows directly above.
+            The figure is only honest if its limits are on screen with it. */}
+        <DependencyNotice index={impactIndex} />
+        <CandidateTable candidates={candidates} canWrite={canWrite} impacts={impacts} />
       </CleanupRequestPanel>
 
       <RuleChangeRequests requests={requests} canWrite={canWrite} loadError={requestsError} />

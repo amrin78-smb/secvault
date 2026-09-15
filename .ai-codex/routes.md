@@ -401,3 +401,52 @@ declaration, and the cap is disclosed in `capped`/`candidateFlowCount`/`omittedB
 
 ⛔ Partial failure leaves the application in place and reports what was and was not created, rather
 than pretending the write was atomic.
+
+## GET /api/applications/impact  (v2.129.0)
+
+`auth` `db`, **ungated** — it only computes over already-collected data and persists nothing, the
+same treatment `/api/devices/[id]/access-path` gets. `?days=` / `?deviceId=`. Returns
+`{claim, caveat, available, declarationEmpty, rules[]}`.
+
+The reverse of the application view: **device rule → the declared flows it permits**, and whether
+removing it would leave any flow with nothing permitting it.
+
+⛔ **THE CLAIM IS EXACTLY ONE SENTENCE AND IS EXPORTED AS `IMPACT_CLAIM`**: *"Removing this rule
+would leave N declared flows with nothing permitting them."* A test rejects the words *safe*,
+*reachable*, *unused* and *guarantee* appearing in it. `IMPACT_CAVEAT` rides on the index AND on
+every per-rule answer — a rule no declared application uses is NOT proven safe to remove, and with
+nothing declared every rule serves nothing.
+
+⛔ **FOUR STATES, AND THE THREE ZEROES NEVER LOOK ALIKE**: `breaks` (≥1 verified flow loses its last
+permitter — the only hue), `shared` (used, but permitted elsewhere too), `unknown` (a flow uses it
+but its evaluation was unverified — hueless), `none` (no declared flow uses it — "not proof it is
+unused"). On an unavailable index the counts are **`null`, not `0`**. ⛔ Unverified never becomes
+"only support" even at support-count 1: an unverified walk applies only a rule's RESOLVED extent, so
+other permitters may be invisible. ⛔ Deny-expectation flows are `violationFlows`, never dependants —
+removing such a rule fixes something.
+
+## POST /api/applications/[id]/retire  (v2.129.0)
+
+`auth` `OPERATE` `db`. Computes the rules **only this application claims** and offers them through
+the EXISTING `ruleChangeRequests` loop. ⛔ It deletes nothing and writes no verifier: `submitRequest`
+hands it to the loop that already proves removal against the re-collected ruleset.
+
+⛔ **"ONLY IT" IS THE WHOLE SAFETY PROPERTY.** Candidates are rules permitting this application's
+`allow`-expectation flows (a rule permitting its *deny* flow is its violation, not its plumbing).
+Other claimants are rules permitting ANY flow of ANY other application, **both expectations, and
+including retired/retiring ones** — status is a label someone typed, not evidence traffic stopped.
+Verified independently: proposed when the application is the sole claimant, withheld as
+`also_claimed` when shared, including when the other application is already retired.
+
+Withholding reasons, each carrying an actionable sentence: `also_claimed`, `unverified_evaluation`,
+`no_vendor_identifier` (removal could never be verified), `usage_not_measured` (refused, not warned
+about), `cleanup_engine_withheld` (that engine's OWN sentence, verbatim — two engines wording one
+refusal differently is how they start disagreeing), `not_cleanup_eligible`.
+
+⛔ **BOTH LISTS COME BACK TOGETHER, ALWAYS.** A response carrying only `proposed` is a shorter list
+that looks complete, with a delete button attached.
+
+⛔ **A CEILING WORTH KNOWING**: `createRequest` only accepts rules `getCleanupCandidates` offers, i.e.
+independently flagged `unused`/`redundant`/`shadow`. So retirement can never propose a BUSY rule that
+exists only for the retired application. Honoured rather than worked around; widening it is a product
+decision, not a bug fix.
