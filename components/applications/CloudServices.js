@@ -1,8 +1,18 @@
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import DeclareCloudApp from './DeclareCloudApp';
+import { pool } from '../../lib/db';
+import { buildPlans, loadDeclarationCatalogue } from '../../app/api/applications/from-cloud/derive';
 
 // What the fleet's rulebase reaches, named against the published cloud
-// catalogue. A SERVER component — it is pure display with no interactivity, so
-// nothing crosses a client boundary and there is nothing to serialise.
+// catalogue. Still a SERVER component: the only interactive part is the
+// per-service Declare control, which is its own small client island. Everything
+// else — the tables, the coverage footer, the finding — renders on the server
+// exactly as before.
+//
+// ⛔ THE DECLARE PLAN IS BUILT HERE, ON THE SERVER, by the same module the POST
+// handler uses. That is what lets each button state how many flows it will
+// create BEFORE it is clicked, on first paint, with no fetch-on-mount and no
+// second version of the derivation to drift against what actually gets written.
 //
 // ⛔ THE CATALOGUE'S STATE IS PART OF EVERY ANSWER HERE. On an install with no
 // outbound access — this product's target customer, not an edge case — the
@@ -48,7 +58,36 @@ function StatusLine({ status }) {
   );
 }
 
-export default function CloudServices({ summary }) {
+/**
+ * provider + service -> the declaration plan for that pair.
+ *
+ * ⛔ KEYED ON (provider, service), NOT ON THE DISPLAY LABEL. The label is built
+ * identically in both places today, but keying a lookup on a presentation
+ * string is how a future wording change silently removes every Declare button
+ * with nothing failing anywhere.
+ */
+function planKey(provider, service) {
+  return `${String(provider || '').toLowerCase()}::${String(service || '').trim().toLowerCase()}`;
+}
+
+async function loadPlans() {
+  try {
+    const catalogue = await loadDeclarationCatalogue(pool);
+    const map = new Map();
+    for (const plan of buildPlans(catalogue)) {
+      map.set(planKey(plan.provider, plan.service), plan);
+    }
+    return map;
+  } catch (_err) {
+    // ⛔ The SECTION is not taken down by this. Naming what the rulebase reaches
+    // is the primary job here and it has already been done; the Declare control
+    // is an extra. Returning null omits the buttons and leaves a stated reason,
+    // rather than rendering a control that would fail on click.
+    return null;
+  }
+}
+
+export default async function CloudServices({ summary }) {
   if (!summary) return null;
   const { status, services, hardcoded, totals } = summary;
 
@@ -77,6 +116,7 @@ export default function CloudServices({ summary }) {
   }
 
   const distinctHardcoded = new Set(hardcoded.map((h) => h.value)).size;
+  const plans = await loadPlans();
 
   return (
     <Card>
@@ -118,10 +158,11 @@ export default function CloudServices({ summary }) {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
                 <colgroup>
-                  <col style={{ width: '46%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '16%' }} />
-                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '28%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '32%' }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -129,6 +170,7 @@ export default function CloudServices({ summary }) {
                     <th style={{ ...LABEL, textAlign: 'right', padding: 'var(--s2) var(--s3)', borderBottom: '1px solid var(--border)' }}>Hostnames</th>
                     <th style={{ ...LABEL, textAlign: 'right', padding: 'var(--s2) var(--s3)', borderBottom: '1px solid var(--border)' }}>Firewalls</th>
                     <th style={{ ...LABEL, textAlign: 'left', padding: 'var(--s2) var(--s3)', borderBottom: '1px solid var(--border)' }}>Reached by rules</th>
+                    <th style={{ ...LABEL, textAlign: 'left', padding: 'var(--s2) var(--s3)', borderBottom: '1px solid var(--border)' }}>Declare as an application</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -159,6 +201,25 @@ export default function CloudServices({ summary }) {
                           </span>
                         )}
                       </td>
+                      <td style={{ padding: 'var(--s3)', borderBottom: '1px solid var(--border-light)' }}>
+                        {/* ⛔ The control states its effect before it is clicked,
+                            from a plan built on the server by the same module
+                            that will do the writing. Where the plan is missing
+                            the button is omitted rather than offering an action
+                            the route would refuse. */}
+                        {plans ? (
+                          <DeclareCloudApp
+                            provider={s.provider}
+                            service={s.service}
+                            label={s.label}
+                            plan={(plans.get(planKey(s.provider, s.service)) || {}).derivation || null}
+                          />
+                        ) : (
+                          <span style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-xs)' }}>
+                            unavailable — the catalogue could not be re-read
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -169,6 +230,20 @@ export default function CloudServices({ summary }) {
               enabled rule names them, directly or through a group. It does <strong>not</strong> mean
               the service is blocked — traffic to it may be permitted by a broader rule that names no
               hostname at all.
+            </p>
+            {/* ⛔ WHAT DECLARING DOES, AND WHAT IT DOES NOT. Stated once here so
+                every button below it is read correctly: a declaration built
+                from a publisher's list is destination-and-port only. The source
+                is a placeholder on every flow, because no publisher knows —
+                and SecVault cannot know — which of your networks reaches the
+                service. */}
+            <p style={{ margin: 'var(--s2) 0 0', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.55, maxWidth: '82ch' }}>
+              Declaring builds flows <strong>only from what the provider publishes</strong> — their IP
+              ranges and, where they state them, their ports. No port is invented, and where a provider
+              lists a service by hostname only the application is created with no flows, which is the
+              correct answer rather than a failure. Every created flow&rsquo;s source is a{' '}
+              <strong>placeholder</strong> you need to narrow: only you know which of your networks
+              reaches the service.
             </p>
           </section>
         )}

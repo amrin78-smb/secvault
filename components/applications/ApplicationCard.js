@@ -16,6 +16,13 @@
 // answerable from anything SecVault holds. The footnote under the table says so
 // in plain words, OUTSIDE any disclosure, because a reader who skips it would
 // otherwise draw a conclusion the data does not support.
+//
+// ⛔ EDITING CHANGES NOTHING ON SCREEN BY ITSELF. An editor collects values and
+// hands them to the board, which PUTs them and re-runs the server evaluation.
+// Nothing here keeps a local copy of an application, a flow, or a verdict — the
+// row an operator just edited is re-read from the server like every other row,
+// so the heading, the table and the sentence above the page cannot disagree
+// about what was saved. See the note at the top of ApplicationBoard.js.
 
 import { useState } from 'react';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
@@ -24,8 +31,48 @@ import Button from '../ui/Button';
 import Badge from '../ui/Badge';
 import Disclosure from '../ui/Disclosure';
 import { AppStateChip, FindingCell, PermittedCell, UsedCell } from './FlowChips';
-import { AddFlowForm } from './ApplicationForms';
+import { AddFlowForm, EditApplicationForm, EditFlowForm, ErrorNote } from './ApplicationForms';
 import { endpointsLabel, expectationLabel, serviceLabel } from './flowVocabulary';
+
+/**
+ * ⛔ A LIFECYCLE STATE IS SHOWN, NEVER ACTED ON. Nothing in this file filters,
+ * collapses or greys out an application because of its status: a retired
+ * application that the rulebase still permits is one of the most useful things
+ * this page can tell anyone, and a product that quietly dropped it from the
+ * list would be hiding exactly that. The badge states the fact and the title
+ * says what it does and does not imply.
+ *
+ * ⛔ AND IT CARRIES NO SEVERITY HUE. Retiring is not a problem and retired is
+ * not an all-clear; colour in this product means risk, and neither of these is
+ * a risk judgement. `warning` would read as "something is wrong with this
+ * application", which is a claim nobody made.
+ */
+const STATUS_BADGE = {
+  retiring: {
+    label: 'Retiring',
+    title:
+      'Declared as being decommissioned. It is still listed here in full and its flows are still '
+      + 'evaluated against the rulebase — the state is a label, not a filter.',
+  },
+  retired: {
+    label: 'Retired',
+    title:
+      'Declared retired. It is still listed here in full and its flows are still evaluated: a '
+      + 'retired application the rules continue to permit is worth knowing about, so nothing is '
+      + 'hidden because of this state.',
+  },
+};
+
+function StatusBadge({ status }) {
+  if (!status || status === 'active') return null;
+  // An unrecognised state is printed verbatim rather than swallowed — a status
+  // this file has not been taught is still a fact about the row.
+  const meta = STATUS_BADGE[status] || {
+    label: status,
+    title: 'A lifecycle state SecVault does not recognise. It is shown exactly as it is stored.',
+  };
+  return <Badge color="muted" title={meta.title}>{meta.label}</Badge>;
+}
 
 function hitLabel(rule) {
   // ⛔ TRI-STATE, PRESERVED ALL THE WAY TO THE PIXEL. null is "this firewall
@@ -96,7 +143,14 @@ function FlowEvidence({ evaluated }) {
   );
 }
 
-function FlowRows({ evaluated, busy, onRemoveFlow }) {
+/**
+ * ⛔ THE EDITOR SITS BENEATH THE ROW IT EDITS, and the row stays on screen while
+ * it is open. Replacing the row with the form would take away the verdict the
+ * operator is editing in response to — they came here because the Permitted or
+ * Used column said something, and hiding it mid-correction is how the wrong
+ * field gets changed.
+ */
+function FlowRows({ evaluated, busy, editing, error, onEdit, onCancelEdit, onSaveFlow, onRemoveFlow }) {
   const flow = evaluated.flow || {};
   const evidence = <FlowEvidence evaluated={evaluated} />;
   return (
@@ -120,9 +174,39 @@ function FlowRows({ evaluated, busy, onRemoveFlow }) {
         <td><UsedCell evaluated={evaluated} /></td>
         <td><FindingCell evaluated={evaluated} /></td>
         <td>
-          <Button variant="secondary" disabled={busy} onClick={() => onRemoveFlow(flow.id)}>Remove</Button>
+          <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap' }}>
+            {/* ⛔ NEVER HIDDEN FOR A ROLE. Both routes behind these buttons are
+                gated on the operate capability and answer a 403 with the reason;
+                a button removed because of a guess about the session leaves an
+                operator concluding the product is broken rather than that they
+                lack access. */}
+            <Button variant="secondary" disabled={busy} onClick={editing ? onCancelEdit : onEdit}>
+              {editing ? 'Cancel' : 'Edit'}
+            </Button>
+            <Button variant="secondary" disabled={busy} onClick={() => onRemoveFlow(flow.id)}>Remove</Button>
+          </div>
         </td>
       </tr>
+      {editing && (
+        <tr>
+          <td colSpan={6}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+              {/* ⛔ THE REASON IS SHOWN WHERE THE EDIT WAS MADE. The PUT returns
+                  the engine's own parse failure — "Source "10.0.0.300" is not a
+                  valid address or CIDR." — which names the field that is wrong.
+                  Replacing it with a generic message would throw away the only
+                  part of it that makes the mistake fixable. */}
+              {error && <ErrorNote>{error}</ErrorNote>}
+              <EditFlowForm
+                busy={busy}
+                flow={flow}
+                onSubmit={(body) => onSaveFlow(flow.id, body)}
+                onClose={onCancelEdit}
+              />
+            </div>
+          </td>
+        </tr>
+      )}
       {evidence && (
         <tr>
           <td colSpan={6}>{evidence}</td>
@@ -132,8 +216,23 @@ function FlowRows({ evaluated, busy, onRemoveFlow }) {
   );
 }
 
-export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, onRemoveApp }) {
+export default function ApplicationCard({
+  entry,
+  busy,
+  error = '',
+  errorAt = '',
+  onAddFlow,
+  onUpdateApp,
+  onUpdateFlow,
+  onRemoveFlow,
+  onRemoveApp,
+}) {
   const [confirming, setConfirming] = useState(false);
+  const [editingApp, setEditingApp] = useState(false);
+  // ⛔ ONE EDITOR AT A TIME, BY ID rather than by index. A flow's position in
+  // this table changes whenever the list is re-read, so an index would open the
+  // editor on whichever flow happened to land in that slot after a refresh.
+  const [editingFlowId, setEditingFlowId] = useState(null);
   const app = entry.application || {};
   const flows = Array.isArray(entry.flows) ? entry.flows : [];
 
@@ -143,7 +242,7 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
         <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)', flexWrap: 'wrap' }}>
           {app.name}
           {app.criticality === 'critical' && <Badge color="danger">Critical</Badge>}
-          {app.status && app.status !== 'active' && <Badge color="muted">{app.status}</Badge>}
+          <StatusBadge status={app.status} />
           {entry.unevaluated ? (
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)', fontWeight: 400 }}>
               not evaluated — the fleet rulebase could not be loaded
@@ -156,6 +255,9 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
             {app.owner ? `Owner: ${app.owner}` : 'No owner recorded'}
           </span>
+          <Button variant="secondary" disabled={busy} onClick={() => setEditingApp((v) => !v)}>
+            {editingApp ? 'Close editor' : 'Edit'}
+          </Button>
           {confirming ? (
             <>
               <Button variant="danger" disabled={busy} onClick={() => { setConfirming(false); onRemoveApp(app.id); }}>
@@ -170,6 +272,21 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
       </CardHeader>
 
       <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
+        {editingApp && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+            {error && errorAt === `app:${app.id}` && <ErrorNote>{error}</ErrorNote>}
+            {/* The editor is mounted only while it is open, so its fields are
+                seeded from this application as it currently stands and it can
+                never be showing values belonging to a previous one. */}
+            <EditApplicationForm
+              busy={busy}
+              application={app}
+              onSubmit={(body) => onUpdateApp(app.id, body)}
+              onClose={() => setEditingApp(false)}
+            />
+          </div>
+        )}
+
         {app.note && (
           <p style={{ margin: 0, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{app.note}</p>
         )}
@@ -183,15 +300,17 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
           <>
             {/* ⛔ tableLayout:'fixed' comes from ui/Table and is required by the
                 percentage widths below; without it these columns collapse
-                unpredictably on overflow. */}
-            <Table minWidth={860}>
+                unpredictably on overflow. The last column carries two controls
+                now, so it is wide enough for both — a column narrower than its
+                buttons wraps them into a ragged stack. */}
+            <Table minWidth={920}>
               <colgroup>
-                <col style={{ width: '26%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: '18%' }} />
-                <col style={{ width: '20%' }} />
-                <col style={{ width: '8%' }} />
+                <col style={{ width: '24%' }} />
+                <col style={{ width: '11%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '17%' }} />
+                <col style={{ width: '19%' }} />
+                <col style={{ width: '14%' }} />
               </colgroup>
               <thead>
                 <tr>
@@ -204,18 +323,26 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
                     Permitting rules used
                   </th>
                   <th>What it means</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {flows.map((evaluated, idx) => (
-                  <FlowRows
-                    key={(evaluated.flow && evaluated.flow.id) || `flow-${idx}`}
-                    evaluated={evaluated}
-                    busy={busy}
-                    onRemoveFlow={onRemoveFlow}
-                  />
-                ))}
+                {flows.map((evaluated, idx) => {
+                  const flowId = (evaluated.flow && evaluated.flow.id) || null;
+                  return (
+                    <FlowRows
+                      key={flowId || `flow-${idx}`}
+                      evaluated={evaluated}
+                      busy={busy}
+                      editing={!!flowId && editingFlowId === flowId}
+                      error={error && errorAt === `flow:${flowId}` ? error : ''}
+                      onEdit={() => setEditingFlowId(flowId)}
+                      onCancelEdit={() => setEditingFlowId(null)}
+                      onSaveFlow={onUpdateFlow}
+                      onRemoveFlow={onRemoveFlow}
+                    />
+                  );
+                })}
               </tbody>
             </Table>
 
@@ -233,7 +360,7 @@ export default function ApplicationCard({ entry, busy, onAddFlow, onRemoveFlow, 
         )}
 
         <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 'var(--s4)' }}>
-          <AddFlowForm busy={busy} onSubmit={(body) => onAddFlow(app.id, body)} />
+          <AddFlowForm busy={busy} idPrefix={`add-flow-${app.id}`} onSubmit={(body) => onAddFlow(app.id, body)} />
         </div>
       </CardBody>
     </Card>

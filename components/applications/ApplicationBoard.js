@@ -23,6 +23,15 @@
 // halves of the page move together. The only fetches this component makes are
 // the mutations themselves.
 //
+// ⛔ AN EDIT IS A MUTATION LIKE ANY OTHER AND TAKES EXACTLY THAT PATH. It is the
+// most tempting place in this file to introduce optimistic state — the operator
+// typed the new name, we have it right here, we could paint it immediately —
+// and it is the worst place to do it. A renamed application whose verdict,
+// headline sentence and coverage summary still describe the old declaration is
+// two copies disagreeing on the one page whose job is to be trusted about what
+// the rules permit. The PUT lands, router.refresh() re-runs the evaluation, and
+// the edited row is re-read from the server like every other row.
+//
 // ⛔ EVERY COMPONENT HERE IS DEFINED AT MODULE TOP LEVEL. A component declared
 // inside another is a new type on every render, so React remounts its subtree
 // and the declare form loses focus after one character.
@@ -33,23 +42,7 @@ import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Button from '../ui/Button';
 import ApplicationCard from './ApplicationCard';
 import CoverageSummary from './CoverageSummary';
-import { DeclareApplicationForm } from './ApplicationForms';
-
-function ErrorNote({ children }) {
-  return (
-    <p style={{
-      margin: 0,
-      color: 'var(--tint-danger-fg)',
-      background: 'var(--tint-danger)',
-      border: '1px solid var(--sev-crit)',
-      borderRadius: 'var(--radius-sm)',
-      padding: 'var(--s2) var(--s3)',
-      fontSize: 'var(--text-base)',
-    }}>
-      {children}
-    </p>
-  );
-}
+import { DeclareApplicationForm, ErrorNote } from './ApplicationForms';
 
 const SOURCE_LABEL = {
   applications: 'The declared applications',
@@ -130,6 +123,12 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
   // places prints every message twice; rendered only at the top, a validation
   // error raised by the declare form at the bottom of a long page can be
   // off-screen at the moment it is raised.
+  //
+  // ⛔ AN EDIT'S FAILURE BELONGS AT THE EDITOR, so the slot is an ADDRESS, not a
+  // fixed set: 'board', 'form', `app:<id>` or `flow:<id>`. Reason enough on its
+  // own — but the specific message these routes return is the engine's own parse
+  // failure, naming the field that is wrong, and a message that names a field
+  // printed hundreds of pixels away from that field is barely a message at all.
   const [errorAt, setErrorAt] = useState('board');
 
   const fail = useCallback((msg, at) => { setError(msg); setErrorAt(at || 'board'); }, []);
@@ -174,6 +173,28 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     'form',
     'save',
+  ), [mutate]);
+
+  /**
+   * ⛔ THE ROUTE'S OWN MESSAGE IS WHAT REACHES THE OPERATOR. `mutate` already
+   * prefers `body.error`, and on these two PUTs that string is the engine's
+   * verbatim reason — `Source "10.0.0.300" is not a valid address or CIDR.`,
+   * `Another application already has that name.`, or the 403 naming the missing
+   * capability. Substituting a generic "invalid input" here would discard the
+   * only part of the response that tells anyone what to change.
+   */
+  const updateApplicationById = useCallback((id, body) => mutate(
+    `/api/applications/${encodeURIComponent(id)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    `app:${id}`,
+    'save that change',
+  ), [mutate]);
+
+  const updateFlowById = useCallback((appId, flowId, body) => mutate(
+    `/api/applications/${encodeURIComponent(appId)}/flows/${encodeURIComponent(flowId)}`,
+    { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    `flow:${flowId}`,
+    'save that change',
   ), [mutate]);
 
   const removeApplication = useCallback((id) => mutate(
@@ -252,7 +273,14 @@ export default function ApplicationBoard({ initial = null, initialError = '' }) 
             key={entry.application.id}
             entry={entry}
             busy={working}
+            // The card renders this only when errorAt addresses something
+            // inside it, so the one shared string is still printed exactly once
+            // on the page.
+            error={error}
+            errorAt={errorAt}
             onAddFlow={addFlow}
+            onUpdateApp={updateApplicationById}
+            onUpdateFlow={(flowId, body) => updateFlowById(entry.application.id, flowId, body)}
             onRemoveFlow={(flowId) => removeFlow(entry.application.id, flowId)}
             onRemoveApp={removeApplication}
           />

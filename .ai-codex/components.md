@@ -471,3 +471,35 @@ Props: `summary` from `lib/engines/cloudAppsData.summariseCloudUsage()`.
   published list, and how many use a shape SecVault does not read at all (451 live, mostly
   `start-end` ranges). A naming feature that shows its hits and hides its misses reads as far more
   complete than it is.
+
+## components/applications/DeclareCloudApp.js (added 2026-09-15, v2.127.0)
+
+`'use client'` island inside the otherwise server-rendered `CloudServices.js` — the section was NOT
+converted wholesale to a client component. Posts to `POST /api/applications/from-cloud`.
+
+⛔ The control states what it will create BEFORE it is clicked (how many flows, or that none can be
+derived), from the same `derive.js` the write uses. A one-click action whose effect is a surprise is
+worse than two clicks. ⛔ After success it shows what was created AND the `src: 'any'` caveat.
+
+## components/applications/ApplicationForms.js — editing (v2.127.0)
+
+Gained `EditApplicationForm`, `EditFlowForm` and `ErrorNote` (moved here from the board: the card
+needs it too, and card→board would be circular). All at module top level — CLAUDE.md's first
+critical rule, and this file is all forms, so it is where that rule is most likely to be broken.
+
+⛔ `withCurrent(options, current)` offers an unrecognised STORED value back as its own
+`"<value> (as declared)"` option. A controlled `<select>` whose value matches no option renders
+blank and the first save silently rewrites that column — and `status`, `criticality`, `protocol` and
+`expectation` are all plain TEXT with **no CHECK constraint** (verified in `lib/schema.sql`; only a
+comment names the intended values), so this is reachable, not hypothetical.
+
+⛔ `AddFlowForm` takes an `idPrefix`. It previously used fixed ids (`flow-src`, …) while rendering
+inside EVERY card, so on a multi-application page clicking card 3's "From" label focused card 1's
+input. The live fleet has one application, which is why nobody hit it.
+
+⛔ `retired` HIDES NOTHING — the card still lists the application, still shows every flow, still
+evaluates it. `StatusBadge` states the state with no severity hue: retiring is not a problem and
+retired is not an all-clear, and in this product colour means risk.
+
+⛔ Editing goes through the board's existing `mutate` → `router.refresh()`. No local copy of the
+server evaluation is introduced — read the comment in `ApplicationBoard.js` before changing this.

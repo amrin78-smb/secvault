@@ -118,11 +118,17 @@ const FILES = walk(API_DIR).map((file) => {
 });
 
 describe('the application routes exist at all', () => {
-  it('found the four declared route files and nothing unexpected', () => {
+  it('found the five declared route files and nothing unexpected', () => {
     assert.deepEqual(FILES.map((f) => f.rel).sort(), [
       'app/api/applications/[id]/flows/[flowId]/route.js',
       'app/api/applications/[id]/flows/route.js',
       'app/api/applications/[id]/route.js',
+      // Declares a published cloud service in one action (v2.126.0). Its
+      // derivation lives beside it in from-cloud/derive.js, which is NOT a
+      // route module and so is not walked here — a Next route file may export
+      // only handlers, which is why the logic it shares with the UI sits in a
+      // sibling.
+      'app/api/applications/from-cloud/route.js',
       'app/api/applications/route.js',
     ]);
   });
@@ -145,7 +151,7 @@ describe('the application routes exist at all', () => {
           `${f.rel} ${method} body contains no response — the wrong text was captured`);
       }
     }
-    assert.equal(handlers, 8, 'expected GET+POST, GET+PUT+DELETE, POST, PUT+DELETE');
+    assert.equal(handlers, 9, 'expected GET+POST, GET+PUT+DELETE, POST, PUT+DELETE, POST');
   });
 
   it('every engine function the routes call really is exported', () => {

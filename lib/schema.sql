@@ -231,6 +231,15 @@ CREATE TABLE IF NOT EXISTS cloud_app_ranges (
   range_end BIGINT,
   -- Microsoft's Optimize/Allow/Default routing category. NULL elsewhere.
   category TEXT,
+  -- The PUBLISHED ports for this endpoint set, verbatim ('80,443', '143, 587,
+  -- 993, 995'). ⛔ These exist so "declare Microsoft 365" can build a flow from
+  -- what Microsoft actually states rather than from a guess at 443 — a guessed
+  -- port in a declared flow is a fabricated declaration, and it would be the
+  -- operator's name on it. NULL where the publisher gives none, which is most
+  -- of them: live, only 9 of 63 Microsoft sets carry both ports and IP ranges,
+  -- and AWS/Google/Cloudflare publish no ports at all.
+  tcp_ports TEXT,
+  udp_ports TEXT,
   -- The source's own version stamp (M365 'latest', AWS/Google syncToken), so a
   -- reader can tell WHICH publication a row came from rather than only when we
   -- happened to fetch it.
@@ -250,6 +259,15 @@ CREATE INDEX IF NOT EXISTS idx_cloud_app_ranges_ip
   ON cloud_app_ranges (range_start, range_end) WHERE kind = 'ip';
 CREATE INDEX IF NOT EXISTS idx_cloud_app_ranges_host
   ON cloud_app_ranges (value) WHERE kind = 'host';
+
+-- ⛔ COMPANION ALTERS, because CREATE TABLE IF NOT EXISTS GUARDS CREATION ONLY.
+-- cloud_app_ranges shipped in v2.125.0, so every already-deployed server has the
+-- table and would keep the old shape silently — the body of the CREATE above
+-- still reads correctly in the diff, which is exactly what makes this easy to
+-- repeat. The first query selecting these columns would then crash with
+-- "column ... does not exist" on a server that looked like it had migrated.
+ALTER TABLE cloud_app_ranges ADD COLUMN IF NOT EXISTS tcp_ports TEXT;
+ALTER TABLE cloud_app_ranges ADD COLUMN IF NOT EXISTS udp_ports TEXT;
 
 -- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT

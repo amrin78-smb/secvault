@@ -363,3 +363,41 @@ without it the PCI and ISO reports downloaded the same day collide and the brows
 one "(1)", leaving two indistinguishable files in a folder meant to be evidence.
 `Cache-Control: no-store` — a report is a point-in-time measurement and a cached copy asserts a
 generation time it does not have. Errors are returned as JSON 500s, never swallowed into an empty 200.
+
+## POST /api/applications/from-cloud  (v2.127.0)
+
+`auth` `OPERATE` `db`. Turns a cloud-catalogue suggestion into a declared application.
+Body `{provider, service}`, validated against what is actually IN `cloud_app_ranges` — an unknown
+pair is a 400, never trusted from the body. Duplicate application name → **409**, matching
+`POST /api/applications`.
+
+Derivation lives in `app/api/applications/from-cloud/derive.js`, a 5th file beside the route
+because a Next route module may export only handlers and the server-rendered preview must use the
+SAME derivation as the write — otherwise the button promises flows the write does not create.
+`tests/applicationRoutes.test.js`'s walker only picks up `route.js`, so it stays out of that scope;
+that suite's hardcoded file/handler counts were updated to five and nine.
+
+⛔ **A FLOW IS ONLY EVER BUILT FROM WHAT THE PUBLISHER PUBLISHED.** The operator's name goes on the
+declaration; a guessed port is a fabricated one they will later be judged against. Four cases,
+evaluated PER CATALOGUE ROW (M365 ports are per endpoint *set* while `service` is the coarser
+*serviceArea*, so several sets with different ports collapse into one service):
+
+| case | result |
+|---|---|
+| ranges + readable ports | one flow per (prefix × port range), `tcp` from `tcp_ports`, `udp` from `udp_ports` |
+| ranges, **no** ports published | one flow, ports NULL **and `protocol:'any'`** — a publisher stating no port stated no protocol either, and writing `tcp` is the same invention one field to the left |
+| ranges, ports published but **unreadable** | **no flow**, counted in `unreadablePorts[]` with the verbatim string. ⛔ Does NOT fall through to the case above: "we could not read it" must never become "they published none" and thence an every-port flow |
+| no ranges at all | application created with ZERO flows and a stated reason. ⛔ A success, not an error |
+
+⛔ `src: 'any'` IS A PLACEHOLDER. `SRC_PLACEHOLDER_NOTE` is written verbatim as each flow's entire
+`note` AND returned as `derivation.srcCaveat` — one runtime constant, so the stored note and the
+on-screen caveat cannot drift.
+
+⛔ **Cap 50**, the same figure and reasoning as `workQueueData.js`'s `PER_SOURCE_CAP`. Live: AWS
+`AMAZON` alone is 5,969 prefixes; Exchange Online's 16 expand to ~48 flows, so it does not bite on
+the case that matters and bites hard on the one that would be unreviewable. Not settable from the
+request (pinned by a test). Candidates sorted before truncation so two clicks plan the same
+declaration, and the cap is disclosed in `capped`/`candidateFlowCount`/`omittedByCap` and in prose.
+
+⛔ Partial failure leaves the application in place and reports what was and was not created, rather
+than pretending the write was atomic.

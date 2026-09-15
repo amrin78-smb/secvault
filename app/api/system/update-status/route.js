@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.127.0': [
+    'Declare a cloud service as an application in one click. SecVault builds the flows from the provider’s own published address ranges and ports — never from a guess, because your name goes on the declaration.',
+    'Where a provider publishes an address range but no port, the flow is declared for every port rather than assuming 443. Where the published ports cannot be read, no flow is created and the reason is shown.',
+    'The source of each created flow is “any” as a placeholder — only you know which of your networks reaches the service — and every created flow says so.',
+    'Applications and flows can now be edited: name, owner, criticality, status and note, and any part of a flow. Previously these could only be changed through the API.',
+    'An application marked retiring or retired still appears in full, with its state stated. Nothing disappears from the list.',
+  ],
   '2.126.1': [
     'Removed a stray “no entry” symbol from the middle of a sentence on the Applications page, where it read as an error rather than as the note it was.',
   ],
