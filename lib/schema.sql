@@ -188,6 +188,69 @@ CREATE TABLE IF NOT EXISTS application_flows (
 
 CREATE INDEX IF NOT EXISTS idx_application_flows_app ON application_flows(application_id);
 
+
+-- ─────────────────────────────────────────
+-- CLOUD APPLICATION CATALOGUE (v2.125.0)
+-- ─────────────────────────────────────────
+--
+-- Published address space for well-known SaaS/cloud providers, so a rule that
+-- references `outlook.office365.com` or permits 52.112.0.0/14 can be NAMED
+-- rather than sitting in the rulebase as an opaque string. Measured on the
+-- reference fleet before this was built: 510 distinct FQDN address objects, of
+-- which Microsoft's own endpoint feed names 152 (30%).
+--
+-- ⛔ A PROVIDER IS NOT AN APPLICATION. An address inside AWS's published ranges
+-- tells you it is AWS — NOT that it is Salesforce, or anything else a customer
+-- runs on AWS. Only some feeds carry a service breakdown (Microsoft 365 by
+-- serviceArea, AWS by `service`), and where a feed gives none this column is
+-- NULL. ⛔ Never synthesise a service label the source did not publish.
+--
+-- ⛔ THE FEED'S OWN GRANULARITY IS THE GRANULARITY WE MAY REPORT. Microsoft
+-- publishes four service areas and 131 of the 152 live matches fall into its
+-- catch-all "Microsoft 365 Common and Office Online". We can say Teams; we
+-- cannot say Word, because Microsoft does not break it down that far.
+--
+-- ⛔ AN EMPTY CATALOGUE MEANS UNKNOWN, NEVER "NOT A CLOUD APP". SecVault is
+-- built to install on segmented and air-gapped networks, where these feeds
+-- cannot be fetched at all — that is the normal case for this product, not an
+-- edge one. A lookup against an empty or stale catalogue must resolve to "we
+-- do not know", the same rule every other unmeasured value in this schema
+-- follows.
+CREATE TABLE IF NOT EXISTS cloud_app_ranges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider TEXT NOT NULL,          -- 'microsoft_365' | 'aws' | 'google_cloud' | 'cloudflare'
+  -- The feed's OWN service label, verbatim. NULL when the feed publishes none.
+  service TEXT,
+  service_display TEXT,
+  kind TEXT NOT NULL,              -- 'ip' | 'host'
+  value TEXT NOT NULL,             -- a CIDR, or a (possibly wildcard) hostname
+  -- Normalised inclusive bounds for kind='ip', so matching is arithmetic rather
+  -- than text. NULL for kind='host'. IPv4 only today: the matcher is IPv4 and
+  -- storing v6 rows it can never use would overstate coverage.
+  range_start BIGINT,
+  range_end BIGINT,
+  -- Microsoft's Optimize/Allow/Default routing category. NULL elsewhere.
+  category TEXT,
+  -- The source's own version stamp (M365 'latest', AWS/Google syncToken), so a
+  -- reader can tell WHICH publication a row came from rather than only when we
+  -- happened to fetch it.
+  source_version TEXT,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- ⛔ NULLS NOT DISTINCT because `service` is legitimately NULL for feeds that
+  -- publish no breakdown (Cloudflare). Without it every sync would insert a
+  -- duplicate "unknown service" row instead of refreshing one — the same trap
+  -- documented on the syslog rollups, and the usual workaround (a sentinel
+  -- string like 'unknown') is precisely the fabricated-value pattern this
+  -- schema bans.
+  CONSTRAINT uq_cloud_app_ranges UNIQUE NULLS NOT DISTINCT (provider, kind, value, service)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_app_ranges_ip
+  ON cloud_app_ranges (range_start, range_end) WHERE kind = 'ip';
+CREATE INDEX IF NOT EXISTS idx_cloud_app_ranges_host
+  ON cloud_app_ranges (value) WHERE kind = 'host';
+
 -- ─────────────────────────────────────────
 -- DEVICE MANAGEMENT
 -- ─────────────────────────────────────────

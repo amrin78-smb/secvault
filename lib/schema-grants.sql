@@ -191,3 +191,10 @@ GRANT SELECT ON TABLE applications TO claude_readonly;
 GRANT SELECT ON TABLE applications TO nocvault_readonly;
 GRANT SELECT ON TABLE application_flows TO claude_readonly;
 GRANT SELECT ON TABLE application_flows TO nocvault_readonly;
+
+-- Cloud application catalogue (v2.125.0). Published, public address space from
+-- Microsoft/AWS/Google/Cloudflare — nothing here is customer data and nothing
+-- is a secret. It is only in the database at all so the product works without
+-- reaching the internet on every page view.
+GRANT SELECT ON TABLE cloud_app_ranges TO claude_readonly;
+GRANT SELECT ON TABLE cloud_app_ranges TO nocvault_readonly;

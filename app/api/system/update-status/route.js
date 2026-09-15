@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.125.0': [
+    'SecVault now recognises well-known cloud services. Rules that reference Microsoft 365, AWS, Google Cloud or Cloudflare addresses are named instead of sitting in the rulebase as opaque strings.',
+    'Names come from each provider’s own published list, refreshed on the existing feed cycle — so the label is whatever Microsoft or AWS actually publish, never a guess.',
+    'An address inside a provider’s range identifies the provider, not an application: AWS means AWS, not whatever a customer runs there.',
+    'On a network with no outbound access the catalogue stays empty and every lookup says so. It never reports “not a cloud service” from a list it could not fetch.',
+    'A bad or truncated response can no longer empty the catalogue — below a plausibility floor the existing entries are kept and the sync is reported as failed.',
+  ],
   '2.124.0': [
     'New Applications page. Declare what an application actually needs — which addresses talk to which, on which ports — and SecVault checks it against the collected rulebase every time you look, rather than taking the declaration on trust.',
     'Each declared flow is answered two ways and they are kept apart: whether a rule permits it, and whether the permitting rule has seen traffic. A flow whose usage cannot be measured says so rather than guessing.',
