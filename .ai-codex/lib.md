@@ -2141,3 +2141,51 @@ previously asserted "Session history covers <window start> to now" above 411 dis
 renders as coverage. ⛔ `getVpnDetections` has no per-device filter, so a device-scoped review
 carries FLEET-WIDE detections and says so; and the detection window is clamped at 192h by the
 engine, so it is read back from the engine's own answer rather than from what was asked for.
+
+## lib/engines/cloudApps.js + lib/feeds/cloudApps.js — cloud catalogue (v2.125.0)
+
+Names an address or hostname against published cloud address space, so a rule
+referencing `outlook.office365.com` or permitting 52.112.0.0/14 is readable instead of opaque.
+Live on the reference fleet: **144 of 510 distinct FQDN address objects named (28%)**, plus 53
+literal IP objects that fall inside published ranges — 35 of those in Exchange Online space, i.e.
+hardcoded Microsoft IPs that break when Microsoft rotates them.
+
+**Engine (pure).** `matchHost` / `matchIp` / `catalogueStatus` / `suggestApplications`.
+- ⛔ `unavailable` IS A DISTINCT STATE FROM `no_match`. An empty catalogue means we could not check;
+  it never means "not a cloud app". This product installs on segmented networks where the feeds are
+  unreachable by design, so that confident negative would be the failed-read-as-a-fact bug in its
+  most plausible form. Pinned.
+- ⛔ A WILDCARD MATCHES SUBDOMAINS, NEVER THE APEX. Measured cost on this fleet: **8 objects**
+  (`microsoft.com`, `office.com`, `office365.com`, `yammer.com`, `lync.com`, …) go unnamed that a
+  looser rule would have claimed. Accepted deliberately — under-claiming leaves something
+  unlabelled, which is visible and harmless; over-claiming puts a confident wrong name on a rule.
+- ⛔ SMALLEST RANGE WINS; two providers claiming the same space is reported `ambiguous`, never
+  silently resolved.
+- ⛔ A PROVIDER IS NOT AN APPLICATION. AWS's catch-all `AMAZON` is carried verbatim. A feed with no
+  service breakdown (Cloudflare) is labelled by provider alone, with `service` honestly null.
+- ⛔ THE FEED'S GRANULARITY IS OURS. Microsoft publishes four service areas and 125 of the 144 live
+  matches land in its catch-all. Teams can be said; Word cannot.
+- ⛔ `catalogueStatus` has FOUR states — `empty` / `stale` / `unknown_age` / `ok`. Stale is still
+  USABLE: published ranges move slowly and refusing to name anything from a two-week-old copy is
+  worse than naming it with its age attached.
+- ⛔ `Number(range_start)` is deliberate — node-pg returns BIGINT as a STRING, and a lexical
+  comparison would silently match the wrong ranges.
+
+**Feed.** `syncCloudApps(pool)` → Microsoft 365 / AWS / Google Cloud / Cloudflare, each isolated.
+Registered as `cloud_apps` in `feed_sync_log` and run LAST in `runFullSync` so a slow publisher can
+never delay the advisory feeds. Live: **11,766 rows in 2.1s.**
+- ⛔ A PLAUSIBILITY FLOOR PER SOURCE guards the prune (`MIN_PLAUSIBLE`). A 200 with a truncated body
+  must not be able to empty the catalogue — that turns one bad response into "your fleet uses no
+  cloud services". Below the floor NOTHING is written or deleted and the sync reports failed.
+- ⛔ Deduped on the unique key before insert: Postgres aborts an `ON CONFLICT DO UPDATE` that would
+  touch a row twice, so one repeated value would fail an entire sync. Live, Microsoft's 250 parsed
+  entries collapse to 226.
+- ⛔ IPv6 prefixes are SKIPPED, not stored. The matcher is IPv4; storing rows it can never match
+  would overstate coverage.
+- Batched via `unnest()` at 1,000 rows per statement — AWS publishes 10,517 prefixes and a row per
+  round trip made a sync ten thousand of them.
+- `clientRequestId()` keeps Microsoft's GUID stable per install in `settings`, which is what their
+  service expects; a fresh GUID per call looks like a new client every sync.
+
+⛔ `suggestApplications()` PROPOSES AND NEVER CREATES. An auto-created application is a declaration
+with nobody behind it, which is worse than the stale-but-owned map the competing products ship.

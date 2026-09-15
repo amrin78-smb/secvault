@@ -1323,7 +1323,22 @@ SHAPE of the id rather than trusting the provider name.
 | CVE.org | `cveawg.mitre.org/api/cve/{id}` | 6h, after KEV | **ENRICHMENT-ONLY**, never inserts. CVE Record 5.2. Bounded: ~150 gap rows/run, 13 hash buckets. |
 | FIRST EPSS | `epss.empiricalsecurity.com/epss_scores-current.csv.gz` | 6h, last | **ENRICHMENT-ONLY**, never inserts. Bulk CSV; `api.first.org` fallback. |
 
-Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV → CVE.org → EPSS.
+| Cloud catalogue | M365 `endpoints.office.com` · AWS `ip-ranges.json` · Google `cloud.json` · Cloudflare `ips-v4` | 6h, LAST | **NOT a CVE feed.** Published cloud address space, so a rule referencing `outlook.office365.com` is readable. Live: 11,766 rows in 2.1s. |
+
+⛔ **The cloud catalogue names a PROVIDER, never an application.** An address inside AWS's ranges is
+AWS — not Salesforce or anything else a customer runs there. Only some feeds publish a service
+breakdown (M365 by serviceArea, AWS by `service`); where a feed gives none, `service` stays NULL and
+the label is the provider alone. ⛔ **The feed's granularity is the granularity we may report**: 125
+of the 144 live matches fall in Microsoft's own catch-all, so Teams can be said and Word cannot.
+
+⛔ **AN EMPTY CATALOGUE MEANS UNKNOWN, NEVER "NOT A CLOUD APP".** This product installs on segmented
+and air-gapped networks — the target customer, not an edge case — where these feeds cannot be
+fetched at all. `unavailable` is a distinct state from `no_match` and a test pins them apart. A
+**plausibility floor per source** guards the prune so a 200 with a truncated body cannot empty the
+catalogue; below it nothing is written or deleted and the sync reports failed. Full rules and the
+measured wildcard/apex trade-off: `.ai-codex/lib.md`.
+
+Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV → CVE.org → EPSS → cloud catalogue (last, so a slow publisher can never delay the advisory feeds).
 
 ⛔ **The last two are ENRICHMENT-ONLY and run LAST for that reason** — they add facts to advisories the
 discovery feeds just landed. Neither may ever INSERT an advisory row. `advisories.cve_id` is UNIQUE and

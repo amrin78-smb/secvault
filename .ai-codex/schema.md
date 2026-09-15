@@ -1214,3 +1214,31 @@ attribute bandwidth, destinations or applications to a person. Indexed partially
 Four indexes: `(device_id, login_time DESC)`, `(username, login_time DESC)`, partial
 `(device_id) WHERE ended_at IS NULL` (end-detection sweep + "who is connected now"), and the
 `assigned_ip` one above. Granted SELECT to both readonly roles in `schema-grants.sql`.
+
+### cloud_app_ranges (v2.125.0)
+```
+id              UUID PK
+provider        TEXT NOT NULL          -- 'microsoft_365' | 'aws' | 'google_cloud' | 'cloudflare'
+service         TEXT                   -- the feed's OWN label, NULL when it publishes none
+service_display TEXT
+kind            TEXT NOT NULL          -- 'ip' | 'host'
+value           TEXT NOT NULL          -- a CIDR, or a (possibly wildcard) hostname
+range_start     BIGINT                 -- inclusive bounds for kind='ip'; NULL for hosts
+range_end       BIGINT
+category        TEXT                   -- M365 Optimize/Allow/Default; AWS region; Google scope
+source_version  TEXT                   -- M365 'latest', AWS/Google syncToken
+first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+UNIQUE NULLS NOT DISTINCT (provider, kind, value, service)
+```
+Indexes: `idx_cloud_app_ranges_ip(range_start, range_end) WHERE kind='ip'`,
+`idx_cloud_app_ranges_host(value) WHERE kind='host'`. Readonly grants: both roles — this is
+published public address space, no customer data and no secrets.
+
+Live after the first sync: **11,766 rows** — aws 10,517 · google_cloud 1,008 · microsoft_365 226
+(192 host + 34 ip) · cloudflare 15.
+
+⛔ `NULLS NOT DISTINCT` is load-bearing: Cloudflare publishes no service breakdown, so `service` is
+legitimately NULL, and without it every sync would insert a duplicate rather than refresh one. The
+usual workaround — a sentinel string like `'unknown'` — is exactly the fabricated-value pattern this
+schema bans. ⛔ `last_seen_at` is what the prune keys on, so it is a liveness marker, not decoration.
