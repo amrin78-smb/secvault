@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.119.0': [
+    'Groundwork for the reporting platform: the PDF drawing code both existing reports relied on now lives in one place instead of two diverging copies.',
+    'Fixed a latent defect in the monthly compliance PDF. A page-break guard had been written for the rule-change report and never reached the compliance one, which could have scattered a table header across several near-empty pages.',
+    'Both reports were verified to render identically before and after, operator by operator — a report is an audit document and a refactor must not quietly repaginate one.',
+  ],
   '2.118.0': [
     'Security: signing in through LDAP skipped multi-factor authentication entirely. Any account existing both in the directory and locally could use the other door and arrive as an administrator with no second factor.',
     'Security: a captured authenticator code could be used twice if both attempts arrived together, and two recovery codes used at once restored one another. Both are now settled by the database rather than by a stale read.',
