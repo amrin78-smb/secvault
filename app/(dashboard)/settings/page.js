@@ -5,6 +5,7 @@ import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
+import LicensePanel from '../../../components/settings/LicensePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
@@ -30,6 +31,12 @@ const TABS = [
   { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
   { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
   { key: 'certificate', label: 'Certificate', requires: 'manage_settings' },
+  // ⛔ VISIBLE TO EVERY ROLE, unlike the other administrative tabs. The panel
+  // is where the Server ID lives, and an operator asked to read it off the
+  // server for a renewal should not have to borrow a Super Admin account to
+  // do it. Only the ACTIVATION controls are gated, by MANAGE_LICENSE, both in
+  // the panel and in the route behind it.
+  { key: 'subscription', label: 'Subscription' },
   { key: 'updates', label: 'Updates', requires: 'run_update' },
   { key: 'about', label: 'About' },
 ];
@@ -318,6 +325,17 @@ export default function SettingsPage() {
       {effectiveTab === 'profiles' && caps.manage_credential_profiles && <CredentialProfilesPanel />}
 
       {effectiveTab === 'notifications' && caps.manage_settings && <NotificationsPanel />}
+
+      {/* ⛔ No capability guard on the tab BODY either, matching the tab list.
+          The panel self-gates its write controls on canManage, which the
+          route computes from MANAGE_LICENSE — so what a reader can SEE here is
+          exactly what the API would let them do, per this product's rule that a
+          UI gate must never be stricter than the route it fronts. */}
+      {effectiveTab === 'subscription' && (
+        <div style={{ maxWidth: 760 }}>
+          <LicensePanel />
+        </div>
+      )}
 
       {effectiveTab === 'updates' && caps.run_update && (
         <div style={{ maxWidth: 576 }}>

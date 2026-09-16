@@ -14,6 +14,26 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- When the 30-day trial started. See lib/productLicense.js.
+--
+-- ⛔ `ON CONFLICT DO NOTHING` IS LOAD-BEARING TWICE OVER. It is what stops
+-- every deploy restarting the trial clock (schema.sql re-runs on every update),
+-- and it is what makes the value mean "the day this install began" rather than
+-- "the day it was last upgraded".
+--
+-- ⛔ ON AN INSTALL THAT PREDATES LICENSING, THIS DATES THE TRIAL TO THE DEPLOY
+-- THAT INTRODUCED IT, AND THAT IS CORRECT. The alternative — deriving the date
+-- from the oldest row in the database — would date the reference deployment to
+-- months before licensing existed and expire it the moment it upgraded, locking
+-- a running customer out of their own platform on the strength of a rule that
+-- did not exist when they installed. A trial starts when the trial starts.
+--
+-- Deleting this row does NOT buy a fresh 30 days: productLicenseData.js then
+-- re-derives the date from the first user account. That derivation is the
+-- anti-tamper path, not the normal one.
+INSERT INTO settings (key, value) VALUES ('install_date', now()::text)
+  ON CONFLICT (key) DO NOTHING;
+
 -- ─────────────────────────────────────────
 -- USERS (RBAC — admin vs viewer)
 -- ─────────────────────────────────────────

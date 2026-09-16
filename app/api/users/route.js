@@ -4,6 +4,7 @@ import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { can, MANAGE_USERS, forbiddenResponse, ASSIGNABLE_ROLES, OPERATOR_ROLE, SUPER_ADMIN_ROLE, isAssignableRole } from '../../../lib/rbac';
+import { licenceBlockForWrite } from '../../../lib/productLicenseData';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,14 @@ export async function POST(request) {
   if (!can(session, MANAGE_USERS)) {
     return forbiddenResponse(MANAGE_USERS);
   }
+
+  // ⛔ CREATING an account is growth; EDITING one is not gated. An expired
+  // subscription must not be able to strand an organisation with an account
+  // whose password cannot be reset or whose role cannot be corrected — that
+  // turns a billing lapse into a lockout from a security platform, which is
+  // the one outcome worse for the customer than an unpaid invoice.
+  const licenceBlock = await licenceBlockForWrite(pool);
+  if (licenceBlock) return NextResponse.json(licenceBlock.body, { status: licenceBlock.status });
 
   const body = await request.json().catch(() => ({}));
   const username = typeof body?.username === 'string' ? body.username.trim() : '';

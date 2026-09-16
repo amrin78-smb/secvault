@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.131.0': [
+    'SecVault is now licensed in its own right: every installation starts with a 30-day trial, and a subscription is then licensed by the number of firewalls monitored and renewed yearly.',
+    'Settings → Subscription shows your Server ID — quote it when buying or renewing, since a key is issued for one server — along with how many firewalls your subscription covers and how many are in use.',
+    'Monitoring never stops. Collection, CVE assessment, compliance evaluation, rule analysis and alerting run in every subscription state, including expired. An expired subscription prevents adding firewalls, changing settings and creating accounts; it never hides a finding or leaves a firewall unassessed.',
+    'A key that is not accepted now says why — wrong server, not a SecVault licence, unreadable or expired — instead of quietly leaving the installation looking like it has no key at all.',
+    'Two weeks of grace after a subscription lapses, and a reminder from 60 days before it does, because a renewal has to get through a purchase order.',
+  ],
   '2.130.0': [
     'A firewall vendor’s own advisory feed is now fetched only when you actually have that vendor’s devices. Its advisories could never match anything else, so running it otherwise was pure cost.',
     'The general CVE databases are deliberately unchanged and still cover every supported vendor, so a firewall added next month already has history behind it.',

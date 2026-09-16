@@ -6,6 +6,7 @@ import { isValidUuid } from '../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
+import { licenceBlockForNewDevice } from '../../../lib/productLicenseData';
 import {
   VENDOR_META,
   VENDOR_SLUGS,
@@ -58,6 +59,21 @@ export async function POST(request) {
   if (!isAdmin(session)) {
     return forbiddenResponse();
   }
+
+  // ⛔ THE LICENSED UNIT IS A MONITORED FIREWALL, AND THIS IS THE ONLY PLACE
+  // THE COUNT IS ENFORCED. Adding one more is refused when the subscription
+  // does not cover it; nothing anywhere stops collecting from, assessing,
+  // scoring or alerting on a firewall already in the inventory, in any licence
+  // state. See monitoringAllowed() in lib/productLicense.js — a firewall that
+  // silently stopped being assessed renders as the healthiest device on the
+  // fleet, and billing must never be able to manufacture that.
+  //
+  // ⛔ AFTER the RBAC check, deliberately. "You may not do this" outranks
+  // "this costs more": telling an operator to buy a bigger subscription for an
+  // action their role was never going to permit is both wrong and a disclosure
+  // of the commercial state to someone who cannot act on it.
+  const licenceBlock = await licenceBlockForNewDevice(pool);
+  if (licenceBlock) return NextResponse.json(licenceBlock.body, { status: licenceBlock.status });
 
   const body = await request.json().catch(() => ({}));
   const {

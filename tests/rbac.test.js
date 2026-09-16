@@ -52,6 +52,7 @@ describe('the capability matrix, asserted in full', () => {
       operate: true,
       view_identity: true,
       view_log_search: true,
+      manage_license: true,
     },
     [ADMIN_ROLE]: {
       manage_users: false,              // ⛔ the whole point of the role
@@ -62,6 +63,10 @@ describe('the capability matrix, asserted in full', () => {
       operate: true,
       view_identity: true,
       view_log_search: true,
+      // ⛔ An administrator runs the platform; they do not decide what the
+      //    organisation has bought. Swapping the licence key sets how many
+      //    firewalls may be monitored and when the subscription lapses.
+      manage_license: false,
     },
     [OPERATOR_ROLE]: {
       manage_users: false,
@@ -72,6 +77,7 @@ describe('the capability matrix, asserted in full', () => {
       operate: true,                     // ⛔ the only thing an operator may do
       view_identity: false,
       view_log_search: false,
+      manage_license: false,
     },
   };
 
@@ -99,7 +105,8 @@ describe('the capability matrix, asserted in full', () => {
     assert.ok(Array.isArray(adminGrants));
     assert.equal(adminGrants.includes(MANAGE_USERS), false);
     assert.equal(adminGrants.includes(MANAGE_CREDENTIAL_PROFILES), false);
-    assert.equal(adminGrants.length, ALL_CAPABILITIES.length - 2);
+    assert.equal(adminGrants.includes('manage_license'), false);
+    assert.equal(adminGrants.length, ALL_CAPABILITIES.length - 3);
   });
 });
 

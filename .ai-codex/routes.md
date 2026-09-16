@@ -203,8 +203,20 @@ GET /api/search [auth] [db] — header search dropdown: ILIKE lookup against `de
 
 ## /api/settings
 
-GET /api/settings [auth] [db] — list `settings` rows, filters out `admin_password_hash` via `HIDDEN_KEYS`.
-PUT /api/settings [auth, admin only for feed_poll_interval_hours] [db] — self-service own-password change (any role, requires `current_password`) always allowed; `feed_poll_interval_hours` update requires `isAdmin()`, checked BEFORE any write so a mixed request can't partially commit.
+GET /api/license [auth, ANY role] [db] — subscription verdict for the banner + Settings→Subscription panel.
+  Returns status (trial|active|grace|expired|invalid), daysRemaining, serverId, customer, expiry,
+  maxDevices, deviceCount, devicesRemaining, sentence{tone,text}, readErrors[], canManage. ⛔ NEVER
+  returns the stored key. ⛔ Open to every role deliberately — an operator who cannot see "lapses in
+  nine days" is the person most likely to still be using it on day ten.
+POST /api/license [manage_license] [db] — validate + store a key. 400 with a SPECIFIC code
+  (unreadable|wrong_server|wrong_product|expired) — four different customer next-actions, never one
+  flat "invalid key". An invalid key is NEVER stored (a typo during a trial must not end the trial).
+  Reports overDeviceLimit when a genuine key covers fewer firewalls than are already monitored.
+DELETE /api/license [manage_license] [db] — clear the stored key. Exists for the hardware-migration
+  case: a key names one machine, so after a move the old one reports `invalid` forever with no way
+  out but a manual DELETE against the production settings table.
+GET /api/settings [auth] [db] — list `settings` rows, filters out `admin_password_hash` AND `product_license_key` via `HIDDEN_KEYS`.
+PUT /api/settings [auth, admin only for feed_poll_interval_hours] [db] [licence-gated: admin field only] — self-service own-password change (any role, requires `current_password`) always allowed; `feed_poll_interval_hours` update requires `isAdmin()`, checked BEFORE any write so a mixed request can't partially commit.
 
 ## /api/system
 

@@ -4,11 +4,20 @@ import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { can, MANAGE_SETTINGS, forbiddenResponse } from '../../../lib/rbac';
+import { licenceBlockForWrite } from '../../../lib/productLicenseData';
 
 export const dynamic = 'force-dynamic';
 
 // Keys that must never be returned over the API.
-const HIDDEN_KEYS = new Set(['admin_password_hash']);
+//
+// ⛔ `product_license_key` is here because NOTHING NEEDS IT BACK. The licence
+// verdict is served by /api/license, which returns what the UI renders and
+// never the key itself; handing the raw key to every signed-in session through
+// the generic settings endpoint would put a commercial credential in browser
+// network logs for no purpose. It is not a secret the way the password hash is
+// — it names one machine and one expiry — which is exactly why it is easy to
+// leave lying around.
+const HIDDEN_KEYS = new Set(['admin_password_hash', 'product_license_key']);
 
 export async function GET() {
   const result = await pool.query('SELECT key, value FROM settings', []);
@@ -45,6 +54,13 @@ export async function PUT(request) {
     if (!can(session, MANAGE_SETTINGS)) {
       return forbiddenResponse(MANAGE_SETTINGS);
     }
+    // ⛔ INSIDE THIS BRANCH, NOT AT THE TOP OF THE HANDLER. The licence gate
+    // covers the ADMIN setting only; the self-service password change below is
+    // deliberately left reachable in every licence state. Refusing to let
+    // someone change their own password because an invoice is late would make a
+    // billing state into an account-security problem, on a security product.
+    const licenceBlock = await licenceBlockForWrite(pool);
+    if (licenceBlock) return NextResponse.json(licenceBlock.body, { status: licenceBlock.status });
     // ⛔ VALIDATE. Confirmed live: settings.feed_poll_interval_hours holds an
     // EMPTY STRING in production, because a blank form field arrives as '' —
     // which is neither undefined nor null, so it passed this guard and was

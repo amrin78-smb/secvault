@@ -36,7 +36,8 @@ $$;
 REVOKE SELECT ON TABLE settings FROM claude_readonly, nocvault_readonly;
 
 CREATE OR REPLACE VIEW settings_readonly AS
-  SELECT key, value, updated_at FROM settings WHERE key <> 'admin_password_hash';
+  SELECT key, value, updated_at FROM settings
+   WHERE key NOT IN ('admin_password_hash', 'product_license_key');
 
 GRANT SELECT ON settings_readonly TO claude_readonly, nocvault_readonly;
 -- ⛔ A whole-TABLE grant covers columns added later, so

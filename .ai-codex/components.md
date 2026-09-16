@@ -543,3 +543,19 @@ would turn an empty declaration into a veto.
 full. A one-click action whose effect is a surprise is worse than two clicks, and this one proposes
 firewall changes. A null hit count renders hueless as "usage not measured", never as "0 hits".
 Submit is disabled at zero proposed. All components at module top level.
+
+## Licensing (v2.131.0)
+
+- `components/settings/LicensePanel.js` — Settings→Subscription. ⛔ The **Server ID** is shown
+  first, in monospace, with a copy button, ABOVE the key box: a licence is minted against one
+  machine, so nothing can be bought or renewed until that value has been read off the server. Shows
+  status/entitlement/device headroom, states in-product that monitoring never stops, and carries the
+  `license-action` class on the Activate/Remove buttons (NetVault's lesson: the control that
+  RESTORES a subscription must never be caught by any future disabled-while-unlicensed styling).
+  Renders "could not be counted" for a null device count, never 0. Self-gates writes on
+  `canManage` (MANAGE_LICENSE), matching the route.
+- `components/layout/SubscriptionNotifier.js` — top banner, mounted beside `UpdateNotifier` in
+  `app/(dashboard)/layout.js`. ⛔ Silent unless there is something to do (trial ≤7d, renewal due,
+  grace, expired, invalid). Dismissal is sessionStorage keyed on status+daysRemaining so it
+  re-appears as the situation worsens; `expired`/`invalid` cannot be dismissed at all. The
+  decision function `bannerFor` lives in `lib/productLicense.js`, not here, so it is testable.

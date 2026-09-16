@@ -1242,3 +1242,16 @@ Live after the first sync: **11,766 rows** — aws 10,517 · google_cloud 1,008 
 legitimately NULL, and without it every sync would insert a duplicate rather than refresh one. The
 usual workaround — a sentinel string like `'unknown'` — is exactly the fabricated-value pattern this
 schema bans. ⛔ `last_seen_at` is what the prune keys on, so it is a liveness marker, not decoration.
+
+## Licensing keys in `settings` (v2.131.0)
+
+- `install_date` — seeded by schema.sql, `now()::text`, **ON CONFLICT DO NOTHING** (that clause is
+  what stops every deploy restarting the trial clock). Re-derived from the first user account if the
+  row is ever removed.
+- `product_license_key` — the stored subscription key. ⛔ Excluded from `GET /api/settings`
+  (`HIDDEN_KEYS`) and from the `settings_readonly` view. Nothing needs it back; the verdict route
+  never returns it.
+
+No new tables — the verdict is computed at read time from the key, the install date and a live count
+of `devices WHERE active = true`. A stored licence verdict would go stale against the fleet it
+describes.

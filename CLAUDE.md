@@ -1343,6 +1343,141 @@ SHAPE of the id rather than trusting the provider name.
 
 ---
 
+## Commercial Licensing (v2.131.0)
+
+30-day trial by default, then a **per-firewall yearly subscription** (subscription + maintenance).
+`lib/productLicense.js` is pure (validation, status, entitlement — no pool, no clock it does not
+take as an argument); `lib/productLicenseData.js` is the plumbing and the route guards. Settings →
+Subscription; banner in `app/(dashboard)/layout.js`.
+
+⛔ **NAMED `productLicense`, NOT `license`.** `device_licenses`, `getLicenses()` and `/lifecycle`
+already exist and are about the FIREWALL VENDOR's entitlements (FortiGuard contracts, PAN-OS
+support). Those answer "is the customer's firewall still entitled to signatures"; this answers "is
+the customer entitled to SecVault". One word apart is how a session edits the wrong one.
+
+### How the suite does it, and why SecVault does it differently
+
+**NetVault is the hub and validates locally. LogVault/DDIVault/SpanVault validate NOTHING** — each
+HTTP-GETs NetVault's `/api/license`, caches the verdict for 5 minutes, and fails open on any network
+problem (`<app>/api/licenseCheck.js`). That is correct for a suite module sold with the hub.
+
+⛔ **SecVault CANNOT use the satellite model** — it is a separate product with no runtime dependency
+on any sibling app, and it is sold on its own. It follows NetVault's shape: validate locally.
+
+The **key format is byte-compatible with the existing NocVault generator** so one generator issues
+keys for the whole range — `base64(ivHex + ':' + aes-256-cbc-hex)`, cipher key `sha256(secret)`,
+payload `{customer, serverId, expiry, modules, maxDevices, issuedAt}`. Do not change it.
+
+⛔ **`maxDevices` HAS ALWAYS BEEN IN THE PAYLOAD AND NETVAULT NEVER ENFORCED IT** — it appears there
+only in the type, the API echo and the settings display. SecVault is the first product in the range
+to make it mean something, so there is no prior art to copy and no sibling behaviour to match.
+
+### Three independent boundaries — keep them separate
+
+| boundary | field | rule |
+|---|---|---|
+| WHICH MACHINE | `serverId` | the 32-hex hash must match; **the prefix is ignored** |
+| WHICH PRODUCT | `modules` | must contain `secvault`; **fails CLOSED** |
+| WHEN | `expiry` | yearly; 14-day grace, 60-day renewal notice |
+| HOW MANY | `maxDevices` | `active = true` devices; absent ⇒ **unlimited** |
+
+⛔ **BOTH `SCV-` AND `NCV-` PREFIXES ARE ACCEPTED for the same machine hash.** Which one the
+generator emits depends on a tool this repo does not contain, and rejecting the other would refuse
+every legitimately-issued key for a reason no error message could explain. This loosens nothing:
+the hash still has to match, and the PRODUCT boundary is `modules`, checked separately and strictly.
+
+⛔ **`modules` FAILS CLOSED ON AN EMPTY LIST — the deliberate OPPOSITE of the siblings.** They treat
+empty as "allow" so legacy suite keys are never bricked. SecVault has never shipped a licence, so
+there are no legacy keys to protect, and failing open would turn every NocVault key already in the
+field into a free SecVault licence.
+
+⛔ **FIVE STATUSES, NOT FOUR — `invalid` IS ITS OWN STATE.** NetVault's rejected key falls through
+to the trial branch, so a customer who pasted a key for the wrong server is told "trial, 12 days
+remaining" and never learns their key did nothing. The key was READ AND REJECTED; reporting that as
+"no key" is this file's own failed-read-as-a-fact rule wearing a commercial hat. Each rejection
+carries one of four reasons — unreadable / wrong_server / wrong_product / expired — because the
+customer's next action differs in each case.
+
+### ⛔ THE LINE THE PRODUCT WILL NOT CROSS
+
+**Collection, CVE assessment, compliance evaluation, rule analysis, syslog ingestion, alerting and
+reporting run in EVERY licence state, including fully expired.** `monitoringAllowed()` returns a
+literal `true` and a test pins the source shape.
+
+This is not generosity. A firewall that silently stopped being assessed shows no CVEs, no failing
+checks and no rule findings — **it renders as the healthiest device on the fleet.** That is this
+codebase's most-repeated bug class with a commercial motive attached, aimed at exactly the customer
+least likely to be watching. An unpaid invoice is a commercial problem; a security blind spot the
+customer cannot see is a breach waiting to be attributed to us.
+
+Expiry withholds **growth and administration** — adding a firewall, changing settings, creating an
+account. All three are visible, actionable, and harmless to the customer's security posture.
+
+⛔ **The device limit ONLY refuses a NEW firewall** (`canAddDevice`, enforced once, in
+`POST /api/devices`). Nothing re-checks it against a device already in the inventory, ever.
+
+⛔ **CHANGING YOUR OWN PASSWORD AND EDITING AN EXISTING ACCOUNT ARE NEVER GATED.** The settings
+guard sits INSIDE the admin-field branch, not at the top of the handler. An expired subscription
+that could strand an organisation with an account whose password cannot be reset turns a billing
+lapse into a lockout from a security platform.
+
+⛔ **THE LICENCE GUARD FAILS OPEN; THE RBAC GUARD FAILS CLOSED.** They sit one line apart in every
+route that uses both, and the order is deliberate: RBAC first, because "you may not do this"
+outranks "this costs more". A database blip must never lock a paying customer out of their own
+platform, but it must also never let anyone past an authorisation check.
+
+⛔ **AN UNCOUNTABLE FLEET IS UNKNOWN, NOT ZERO AND NOT OVER.** `deviceCount === null` leaves
+`withinDeviceLimit` null and `canAddDevice` returns `uncountable` — try again. A failed `COUNT`
+read as 0 reads as "plenty of headroom"; read as "over" it locks out a paying customer.
+(`Number(null)` is 0 and 0 is finite, so a bare `Number.isFinite` guard on `maxDevices` would turn
+"this licence does not state a count" into "this licence covers no firewalls".)
+
+### Trial
+
+⛔ **UNLIMITED FIREWALLS FOR 30 DAYS.** The thing being evaluated is whether SecVault can see a
+whole estate; a trial capped at a handful demonstrates the opposite of the product.
+
+⛔ **`install_date` IS SEEDED BY `schema.sql` WITH `ON CONFLICT DO NOTHING`**, which is what stops
+every deploy restarting the clock. On an install that predates licensing this dates the trial to the
+deploy that introduced it, and **that is correct** — deriving it from the oldest row would expire a
+running customer the moment they upgraded, on the strength of a rule that did not exist when they
+installed.
+
+⛔ **DELETING THAT ROW DOES NOT BUY A FRESH 30 DAYS.** `resolveInstallDate` then re-derives it from
+the first user account (falling back to the oldest device) and writes it back. NetVault reports the
+full trial length when the row is missing, which makes one `DELETE` an unlimited extension.
+
+### Machine identity
+
+`SCV-` + first 32 hex of `sha256(hostname + '-' + MachineGuid)`. ⛔ **A failed registry read falls
+back to a MAC address, not to the empty string.** NetVault's returns `''`, so every machine that
+fails the same way AND shares a hostname gets the SAME server id and one key unlocks all of them. A
+fallback identity is reported as `weak` in the panel rather than presented as a confident one.
+
+### The secret, honestly
+
+The shared symmetric literal is carried over from NetVault so one generator serves the range.
+Anyone who can read the source can forge a key; there is no licence server and no revocation. It
+raises the cost of casual copying and nothing more, which is the accepted trade for an on-premises
+product with no call-home. ⛔ **The real fix, if this becomes worth attacking, is asymmetric signing
+— ship only a public key. Rotating the literal is NOT that fix**: it re-issues every key in the
+field for the same weakness.
+
+`product_license_key` is excluded from `GET /api/settings` (`HIDDEN_KEYS`) and from the
+`settings_readonly` view — nothing needs it back, and the verdict route never returns it.
+
+### RBAC
+
+New capability `manage_license`, **super_admin only** — the ninth. ⛔ Separate from
+`manage_settings`, which `admin` holds: whoever can swap the key decides how many firewalls the
+organisation may monitor and when the subscription lapses. That belongs with whoever can also create
+accounts. `GET /api/license` is open to any signed-in user (the banner needs it, and an operator who
+cannot see "lapses in nine days" is the person most likely to still be using it on day ten); the
+Settings tab is visible to every role because the **Server ID** lives there and is the one thing a
+customer must read off the server to buy or renew anything.
+
+---
+
 ## Feed Sources
 
 | Feed | URL | Schedule | Notes |
@@ -1682,6 +1817,16 @@ LOG_HIT_LOOKBACK_DAYS=7                    # [log-hit] window; SHORTER than rete
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
 LOG_RETENTION_WARM_DAYS=365
+
+
+# Commercial licence (optional — leave BLANK on every normal install)
+# SECVAULT_LICENSE_SECRET is a per-install ROTATION HOOK, not a setting to fill in.
+# The shared NocVault secret is compiled in, which is what lets ONE generator issue
+# keys for the whole product range. Setting this means keys minted with the shared
+# secret stop working on THIS server and every key for it must be re-issued against
+# the value you chose. No installer provisions it. Leave it blank unless you are
+# deliberately isolating one deployment.
+SECVAULT_LICENSE_SECRET=
 
 # Suite integration (optional — leave blank for standalone)
 NETVAULT_URL=

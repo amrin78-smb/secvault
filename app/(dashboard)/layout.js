@@ -5,6 +5,7 @@ import { capabilitiesOf } from '../../lib/rbac';
 import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
+import SubscriptionNotifier from '../../components/layout/SubscriptionNotifier';
 import NavProgress from '../../components/layout/NavProgress';
 import { EvidenceProvider } from '../../components/ui/Evidence';
 import pkg from '../../package.json';
@@ -30,6 +31,7 @@ export default async function DashboardLayout({ children }) {
           <Suspense fallback={null}>
             <NavProgress />
           </Suspense>
+          <SubscriptionNotifier />
           <UpdateNotifier />
           {/* ⛔ Mounted ONCE, here, rather than per page. The drawer is a
               single global surface so the affordance is identical everywhere —

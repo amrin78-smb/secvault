@@ -2249,3 +2249,52 @@ rules; the mechanics:
 Live: 11 Palo Alto and 5 Fortinet devices, so both registered feeds run. The four unowned Tier-1
 vendors were never PSIRT feeds to begin with; what this changes for them is nothing, and what it
 changes the day one is decommissioned is that its feed stops rather than failing quietly forever.
+
+---
+
+## productLicense.js / productLicenseData.js (v2.131.0) — the commercial licence
+
+Pure/plumbing split, same shape as segmentation and workQueue. Full rules in CLAUDE.md's
+"Commercial Licensing" section — this is the API surface.
+
+**productLicense.js** (pure; `getServerId()` is the only impure call)
+- `getServerId()` → `{serverId, weak, source, hash}`. `SCV-` + 32 hex of
+  sha256(hostname + '-' + MachineGuid). ⛔ Falls back to a MAC address, not to '' — NetVault's
+  returns '' so every machine failing the same way AND sharing a hostname shares a licence.
+  `weak:true` on a fallback, surfaced in the panel rather than presented as certain.
+- `deriveServerId(hostname, guid, mac, prefix)` — the testable seam.
+- `validateLicenseKey(key, localHash, now)` → `{valid, payload?, error?, code?}` where code is
+  `unreadable|wrong_server|wrong_product|expired`. Decrypts the NocVault generator's exact format.
+- `serverIdMatches(payloadServerId, localHash)` — ⛔ PREFIX-AGNOSTIC (`SCV-`/`NCV-` both match).
+- `coversSecVault(modules)` — ⛔ FAILS CLOSED on empty/missing, the opposite of the satellites.
+- `getLicenseStatus({installDate, licenseKey, localHash, deviceCount, now})` → the verdict.
+  FIVE statuses; `invalid` is its own, never a silent fall-through to `trial`.
+- `deviceAllowance(status, payload)` → limit or **null = unlimited**. ⛔ An absent maxDevices is
+  unlimited, not zero (`Number(null)` is 0 and 0 is finite).
+- `canAddDevice(verdict)` → `{allowed, reason, code}`. The ONLY thing the device limit does.
+- `monitoringAllowed()` → literal `true`, in every state. Pinned by a source-shape test.
+- `writeAllowed(verdict)` → false only for `expired`/`invalid`; ⛔ **true for null/undefined** —
+  the billing gate fails OPEN.
+- `licenceSentence(verdict)` → `{tone, text}`; names the date and the device count, never
+  "expiring soon". ⛔ An undeterminable state is `unknown` and HUELESS, never green.
+- `bannerFor(info)` — re-exported from **`lib/licenceBanner.js`**, which is a separate,
+  IMPORT-FREE module. ⛔ The banner is a `use client` component and this file requires
+  `child_process`/`crypto`, so importing it from the browser bundle fails the build outright. The
+  rule is not duplicated — one definition, re-exported — and a test asserts `BANNER_STATUS` deep-
+  equals `STATUS` so the restated literals cannot drift. Silent on a healthy trial/licence;
+  `expired` and `invalid` are NOT dismissible.
+
+**productLicenseData.js** (takes a pool)
+- `getLicenseVerdict(pool, {force, now})` — 5-minute cache; ⛔ **only a clean read is cached**, so a
+  one-second blip cannot pin the install into "unknown" for five minutes.
+- `resolveInstallDate(pool)` — settings first, else derived from the first user account (then the
+  oldest device) and written back. ⛔ Deleting the row does not buy a fresh 30 days.
+- `countMonitoredDevices(pool)` — `active = true` (same definition the PSIRT gate uses).
+  ⛔ Returns **null on failure, never 0**.
+- `activateLicense` / `clearLicense` / `invalidate`.
+- `licenceBlockForWrite(pool)` / `licenceBlockForNewDevice(pool)` — route guards returning
+  `{status, body}` or null. Both ⛔ fail OPEN on an unreadable state.
+
+Enforced in exactly three places: `POST /api/devices` (the licensed unit),
+`PUT /api/settings` (inside the admin-field branch only), `POST /api/users`.
+`tests/productLicense.test.js` — 35 cases; 7 mutations verified to bite.
