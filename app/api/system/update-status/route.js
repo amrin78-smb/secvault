@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.132.1': [
+    'Corrects the previous note. The Check Point expansion reaches about 107 vulnerabilities, but only around a dozen of them were published from 2015 onward — the largest additions are FireWall-1 and VPN-1 records that stop in 2006 and 2011. For a fleet on Gaia R80 or later the real gain is closer to seven advisories becoming twenty.',
+    'The older product names are kept anyway: version matching means they cannot produce a false finding, and a site still running an older appliance is exactly who needs them.',
+    'On a network that cannot reach the vulnerability database directly, the gain is currently nil — the fallback source returns the same records without usable version information, and SecVault refuses to store those rather than imply the firewall is unaffected.',
+  ],
   '2.132.0': [
     'Check Point vulnerability coverage went from 7 advisories to around 107. The gateway has been filed under about fifteen different product names across three rebrands, and SecVault was only asking for four of them — so the page looked reassuringly empty when it should not have.',
     'Forcepoint now also covers its Security Management Center and the older Stonesoft-era naming. Both it and Check Point are managed through a management server, so vulnerabilities in that server are now reported too.',

@@ -1533,7 +1533,13 @@ problem: the feed ran, the dashboard was green, and `/vulnerability` was simply 
 files the Check Point gateway under ~15 product names accumulated across three rebrands (FireWall-1
 → VPN-1 → Security Gateway → Quantum) and `VENDOR_CPES` asked for four. Expanded to **22 strings,
 ~107 CVEs**, each probed against the live NVD API with the `totalResults` it returned recorded
-beside it. Forcepoint likewise gained its SMC and the Stonesoft-era `stonegate`.
+beside it. ⛔ **That number is true and misleading and must never travel alone**: only **12 of the
+73 newly-reachable CVEs are from 2015 onward** (`firewall-1`'s 43 stop at 2006), so for a fleet on
+Gaia R80+ the honest gain is about **7 → 20**. Legacy strings are kept because version matching makes
+them incapable of producing a false finding — not because they are worth much. ⛔ And on a site where
+NVD is unreachable the gain is **currently zero**: CIRCL returns the same records but without
+parseable version bounds, so they are correctly refused as `unmatchable`. The remaining bottleneck
+there is CIRCL version extraction, not the CPE list. Forcepoint likewise gained its SMC and the Stonesoft-era `stonegate`.
 
 ⛔ **THE VENDOR-LEVEL WILDCARD WAS TESTED, WORKS, AND WAS REFUSED.** `cpe:2.3:a:checkpoint` returns
 129 more CVEs — ZoneAlarm, Harmony, Capsule, SmartConsole, the identity and VPN *clients*. None runs
