@@ -711,6 +711,37 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
 # update -- a half-started system is harder to reason about than a stopped
 # one.
 #
+# ⛔ REGISTER THE BACKUP TASK ON EVERY UPDATE, NOT ONLY AT INSTALL.
+#
+# It was added to Install-SecVault.ps1 alone, and the reference deployment --
+# which upgrades and never reinstalls -- therefore had no backup task at all.
+# The script was present, tested and working; nothing was ever going to run it.
+# Caught by checking the live box rather than assuming the install path covers
+# installs that already exist.
+#
+# Same shape as this codebase's CREATE TABLE IF NOT EXISTS rule: guarding the
+# CREATE path only leaves every already-deployed server silently on the old
+# state. Anything an existing install must CATCH UP ON belongs here.
+#
+# schtasks /f overwrites, so this is idempotent. Best effort and never fatal: a
+# machine that cannot register it still has a working SecVault, and the script
+# can always be run by hand.
+Invoke-Step 'Register the daily backup task' {
+    $backupScript = Join-Path $repoRoot 'installer\Backup-SecVault.ps1'
+    if (-not (Test-Path $backupScript)) {
+        Write-Log '  [WARN] installer\Backup-SecVault.ps1 not found -- no backup task registered.'
+        return
+    }
+    $tr = 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "' + $backupScript + '"'
+    $out = Invoke-Native { & schtasks /create /tn 'SecVaultBackup' /tr $tr /sc daily /st 02:30 /f /ru SYSTEM 2>&1 }
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log '  [OK] SecVaultBackup scheduled daily at 02:30.'
+    } else {
+        Write-Log "  [WARN] Could not register SecVaultBackup (exit $LASTEXITCODE). Run installer\Backup-SecVault.ps1 by hand or schedule it yourself."
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+    }
+}
+
 # Started BEFORE SecVault-App so log ingestion resumes at the earliest
 # possible moment: while the collector is down, firewalls are still sending
 # and those datagrams are lost -- UDP has no retry.

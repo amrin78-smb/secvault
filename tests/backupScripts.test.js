@@ -201,6 +201,26 @@ describe('the install registers the backup', () => {
   });
 });
 
+describe('⛔ BOTH installer paths register the task', () => {
+  const update = fs.readFileSync(path.join(dir, 'Update-SecVault.ps1'), 'utf8');
+
+  it('the UPDATER registers it too, not just the installer', () => {
+    // It was added to Install-SecVault.ps1 alone, and the reference deployment
+    // — which upgrades and never reinstalls — had no backup task at all. The
+    // script was present, tested and working; nothing was going to run it.
+    // Same shape as CREATE TABLE IF NOT EXISTS guarding only creation.
+    assert.match(update, /SecVaultBackup/);
+    assert.match(update, /schtasks \/create/);
+  });
+
+  it('registration is idempotent and never fatal', () => {
+    const at = update.indexOf('SecVaultBackup');
+    const block = update.slice(Math.max(0, at - 1400), at + 1200);
+    assert.match(block, /\/f /, 'schtasks needs /f to overwrite on every update');
+    assert.match(block, /\[WARN\]/, 'a failure to register must warn, not fail the update');
+  });
+});
+
 describe('the sizing guide states measurements, not estimates', () => {
   const doc = fs.readFileSync(
     path.join(__dirname, '..', 'docs', 'SIZING-AND-BACKUP.md'), 'utf8'
