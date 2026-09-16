@@ -1244,6 +1244,33 @@ Write-Host '=================================================='
 # click -- and, worse, a plaintext request into a TLS listener is a protocol
 # error, not a redirect, so it fails with no explanation at all. (server.js
 # handles that case on the app port; the banner should still be right.)
+# ── Daily backup task ───────────────────────────────────────────────────────
+#
+# ⛔ A SYSTEM-scheduled task, not a service and not a job inside the engine. The
+# engine runs as a limited service account; pg_dump has to write outside the
+# install tree, and a backup that dies whenever the engine restarts mid-deploy
+# is not a backup. Same reasoning as the updater task.
+#
+# ⛔ Best effort: a machine where this cannot be registered still has a working
+# SecVault. It warns rather than failing the install, and the script can always
+# be run by hand.
+$backupScript = Join-Path $InstallDir 'installer\Backup-SecVault.ps1'
+if (Test-Path $backupScript) {
+    try {
+        $tr = 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "' + $backupScript + '"'
+        & schtasks /create /tn 'SecVaultBackup' /tr $tr /sc daily /st 02:30 /f /ru SYSTEM | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host '    [OK] Daily backup task registered: SecVaultBackup at 02:30.'
+        } else {
+            Write-Host '    [WARN] Could not register the SecVaultBackup task. Run installer\Backup-SecVault.ps1 by hand or schedule it yourself.' -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "    [WARN] Could not register the SecVaultBackup task: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host '    [WARN] installer\Backup-SecVault.ps1 not found -- no backup task registered.' -ForegroundColor Yellow
+}
+
 $consoleScheme = 'http'
 if ($tlsEnabled) { $consoleScheme = 'https' }
 

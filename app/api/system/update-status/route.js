@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.133.0': [
+    'SecVault now backs itself up every night, and can restore from it. The backup covers everything that cannot be recomputed \u2014 firewalls, credentials, rules, vulnerabilities, compliance history, configuration snapshots and all long-term traffic summaries.',
+    'Raw syslog is deliberately left out. It is 99% of the database and SecVault deletes it within 30 days anyway, so including it would turn a two-minute backup into an hours-long one that mostly preserves data with days left to live.',
+    'Each backup is read back and checked before the previous one is removed, and it refuses to start if the disk is too full to hold it \u2014 a truncated file that looks like a backup is worse than none.',
+    'The credential encryption key is saved alongside, and restoring checks it matches. Without that check a restore completes, looks perfectly healthy, and cannot log in to a single firewall.',
+    'New guide covering disk sizing: how much space a fleet needs, what actually drives it, and what a restore does and does not bring back.',
+  ],
   '2.132.1': [
     'Corrects the previous note. The Check Point expansion reaches about 107 vulnerabilities, but only around a dozen of them were published from 2015 onward — the largest additions are FireWall-1 and VPN-1 records that stop in 2006 and 2011. For a fleet on Gaia R80 or later the real gain is closer to seven advisories becoming twenty.',
     'The older product names are kept anyway: version matching means they cannot produce a false finding, and a site still running an older appliance is exactly who needs them.',

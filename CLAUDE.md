@@ -1632,6 +1632,46 @@ pinned via SSH config, `known_hosts` pre-seeded, auth-tested before `git clone`)
 under a different profile than whoever installed. Both copies must exist — see `gotchas.md`'s Deploy
 section.
 
+### Backup and restore (v2.133.0)
+
+`installer\Backup-SecVault.ps1` (daily `SecVaultBackup` SYSTEM task, 02:30) and
+`installer\Restore-SecVault.ps1`. Sizing figures and the full operator guide live in
+`docs/SIZING-AND-BACKUP.md`; the rules that must not drift:
+
+⛔ **RAW SYSLOG IS EXCLUDED BY `--exclude-table-data`, NEVER `--exclude-table`.** Measured
+2026-09-16: raw syslog is **197 GB of a 199 GB database (99%)** and SecVault deletes all of it
+within 30 days; the irreplaceable part — system of record 902 MB plus permanent rollups 1.9 GB — is
+under 1%. But the dump must still carry the `CREATE TABLE` and every partition definition:
+`--exclude-table` restores an installation with no partitioned `syslog_events`, the collector
+starts, every INSERT fails, and the only symptom is a syslog pipeline that is quietly dead.
+
+⛔ **`.env.local` IS PART OF THE BACKUP.** `device_credentials` is AES-256-GCM keyed on
+`CREDENTIAL_KEY`, which exists nowhere else. A dump without it restores an installation that looks
+completely healthy and cannot reach a single firewall — collection fails device by device with
+authentication errors that read as though the firewalls changed their passwords. The restore
+**compares the two keys and ABORTS on a mismatch** (`-SkipKeyCheck` to override deliberately).
+⛔ The consequence is that the backup directory is as sensitive as the database — it holds the
+encryption key beside the encrypted credentials. ACL it.
+
+⛔ **A BACKUP VERIFIES ITSELF WHILE A GOOD COPY STILL EXISTS.** Free space is checked before the
+dump (a dump that fills its volume leaves a TRUNCATED file that looks complete); the finished
+archive is read back with `pg_restore --list`; an archive with fewer than 20 entries is rejected
+and deleted (an EMPTY archive passes `--list` cleanly); and old sets are pruned **only after** the
+new one is verified. A corrupt file that looks like a backup is worse than no backup.
+
+⛔ **THE RESTORE IS A DRY RUN UNTIL `-Force`**, stops services with `sc.exe`, re-runs
+`migrate.js` (the dump predates any schema shipped since) and `schema-grants.sql` (dropped by
+`--no-acl`), then probes `/api/health` — NSSM reports a crash-looping process as Running.
+⛔ It uses the SHARED `Test-SecVaultResponding`; a hand-rolled probe here is how two production
+outages happened (see that function's own comment). ⛔ `pg_restore` exits non-zero for benign
+"does not exist, skipping" notices on `--clean`; the exit code is not the verdict, the probe is.
+
+⛔ **SIZING IS BY EVENTS/SEC, NEVER BY DEVICE COUNT.** On the reference fleet the busiest firewall
+produces **94x** the traffic of the quietest (12.8M vs 136K events/day), so a per-device model is
+wrong for almost every customer. `events/sec x 86,400 x 415 bytes x SYSLOG_RETENTION_DAYS`, plus
+~35% for the archive. ⛔ The 415 bytes/row holds only at `SYSLOG_RAW_MESSAGE=security`; at `all`
+the window roughly triples.
+
 ### Update Script — Exact Order (do not change without testing)
 
 ```powershell
