@@ -125,15 +125,33 @@ if ($envText -notmatch '(?m)^DATABASE_URL=(.+)$') {
 }
 $dbUrl = $Matches[1].Trim()
 
-# postgresql://user:pass@host:port/dbname
-if ($dbUrl -notmatch '^postgres(?:ql)?://([^:]+):([^@]*)@([^:/]+):(\d+)/(.+)$') {
-    Write-Log '  [FAIL] DATABASE_URL is not in the expected postgresql://user:pass@host:port/db form.'
+# ⛔ HOST AND PORT ARE OPTIONAL, AND THE REFERENCE DEPLOYMENT OMITS BOTH.
+#
+# The first version of this required 'user:pass@host:port/db' and failed on its
+# very first live run, because the real deployed .env.local reads
+#     postgresql://secvault_user:<pass>@/secvault
+# with no host and no port. node-pg fills those from libpq defaults, so the
+# application had never cared and nothing anywhere said the URL was unusual.
+#
+# That was an ASSUMED format meeting a real one -- the same mistake this codebase
+# bans for vendor APIs ("verify against live responses; documentation lies"),
+# applied to our own configuration.
+#
+# ⛔ AND [System.Uri] IS NOT THE FIX. It throws "Invalid URI: The hostname could
+# not be parsed" on exactly that hostless form, so the obvious "use a real URL
+# parser" correction fails on the one input that prompted it. Tested, rejected.
+#
+# Host and port therefore default to what libpq would have used.
+$dbHost = 'localhost'
+$dbPort = '5432'
+if ($dbUrl -notmatch '^postgres(?:ql)?://([^:@/]+)(?::([^@]*))?@([^:/]*)(?::(\d+))?/(.+)$') {
+    Write-Log '  [FAIL] DATABASE_URL could not be parsed. Expected postgresql://user[:pass]@[host][:port]/dbname.'
     exit 1
 }
-$dbUser = $Matches[1]
+$dbUser = [System.Uri]::UnescapeDataString($Matches[1])
 $dbPass = [System.Uri]::UnescapeDataString($Matches[2])
-$dbHost = $Matches[3]
-$dbPort = $Matches[4]
+if ($Matches[3]) { $dbHost = $Matches[3] }
+if ($Matches[4]) { $dbPort = $Matches[4] }
 $dbName = $Matches[5]
 
 Write-Log "  Database : $dbName on ${dbHost}:${dbPort} as $dbUser"

@@ -171,13 +171,19 @@ if (-not (Test-Path $envCopy)) {
 # ── Connection details ──────────────────────────────────────────────────────
 if ($envText -notmatch '(?m)^DATABASE_URL=(.+)$') { Write-Log '  [FAIL] DATABASE_URL not found.'; exit 1 }
 $dbUrl = $Matches[1].Trim()
-if ($dbUrl -notmatch '^postgres(?:ql)?://([^:]+):([^@]*)@([^:/]+):(\d+)/(.+)$') {
-    Write-Log '  [FAIL] DATABASE_URL is not in the expected form.'; exit 1
+# ⛔ Host and port are OPTIONAL -- the reference deployment omits both
+# (postgresql://secvault_user:<pass>@/secvault). See the longer note in
+# Backup-SecVault.ps1; [System.Uri] cannot parse that form either.
+$dbHost = 'localhost'
+$dbPort = '5432'
+if ($dbUrl -notmatch '^postgres(?:ql)?://([^:@/]+)(?::([^@]*))?@([^:/]*)(?::(\d+))?/(.+)$') {
+    Write-Log '  [FAIL] DATABASE_URL could not be parsed. Expected postgresql://user[:pass]@[host][:port]/dbname.'
+    exit 1
 }
-$dbUser = $Matches[1]
+$dbUser = [System.Uri]::UnescapeDataString($Matches[1])
 $dbPass = [System.Uri]::UnescapeDataString($Matches[2])
-$dbHost = $Matches[3]
-$dbPort = $Matches[4]
+if ($Matches[3]) { $dbHost = $Matches[3] }
+if ($Matches[4]) { $dbPort = $Matches[4] }
 $dbName = $Matches[5]
 Write-Log "  Target database: $dbName on ${dbHost}:${dbPort} as $dbUser"
 
