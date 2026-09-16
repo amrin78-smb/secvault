@@ -1255,3 +1255,14 @@ schema bans. ⛔ `last_seen_at` is what the prune keys on, so it is a liveness m
 No new tables — the verdict is computed at read time from the key, the install date and a live count
 of `devices WHERE active = true`. A stored licence verdict would go stale against the fleet it
 describes.
+
+## ldap_role_mappings (v2.134.0)
+
+`id | group_dn | group_dn_normalised (UNIQUE) | role | description | created_at | updated_at`
+
+⛔ An EMPTY table is an INSTRUCTION, not an absence — zero rows means legacy mode (grant `admin`,
+as every release before mappings existed); one row closes the gate. ⛔ `group_dn_normalised` carries
+the uniqueness so the same group cannot be mapped twice to two roles, while `group_dn` keeps the
+operator's own spelling for display. No CHECK on `role` — validated in app code against
+`ASSIGNABLE_ROLES`, same convention as `users.role`. Granted to both readonly roles: a group DN is
+not a secret.

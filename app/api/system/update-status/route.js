@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.134.0': [
+    'Directory logins now get their role from their AD groups. Until now every person who could sign in against your directory became an Administrator of SecVault \u2014 able to add and remove firewalls, change settings and trigger updates.',
+    'Map a group to Operator, Administrator or Super Admin under Settings \u2192 Users. Someone in several mapped groups gets the most privileged of them, and capitalisation and spacing in the group name do not matter.',
+    'Nothing changes until you add the first mapping \u2014 existing directory logins keep working exactly as before, and a warning now says plainly that everyone is an Administrator until you do. From the first mapping onward, anyone in no mapped group is refused.',
+    'Changing a mapping takes effect immediately for everyone already signed in. Moving someone between groups in the directory takes effect at their next sign-in.',
+    'Fixed: SecVault could not actually sign anyone in against a normal Active Directory. It built the account\u2019s directory name from the username, which is almost never how AD is arranged. It now looks the account up properly.',
+  ],
   '2.133.0': [
     'SecVault now backs itself up every night, and can restore from it. The backup covers everything that cannot be recomputed \u2014 firewalls, credentials, rules, vulnerabilities, compliance history, configuration snapshots and all long-term traffic summaries.',
     'Raw syslog is deliberately left out. It is 99% of the database and SecVault deletes it within 30 days anyway, so including it would turn a two-minute backup into an hours-long one that mostly preserves data with days left to live.',

@@ -4,6 +4,7 @@ import * as mfa from '../../../../lib/mfa';
 import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
+import * as ldapRoles from '../../../../lib/ldapRoles';
 
 // A real bcrypt hash (of a random string) used so a login attempt for an
 // UNKNOWN username still pays the bcrypt cost and cannot be distinguished by
@@ -11,32 +12,129 @@ import { pool } from '../../../../lib/db';
 // See the constant-time note in the local provider's authorize() below.
 const DUMMY_BCRYPT_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
-// Binds against LDAP_URL / LDAP_BASE_DN. Resolves to the bound username on
-// success, rejects on any failure. Never throws out of authorize() — caller
-// wraps this in a try/catch and returns null on error.
+// ⛔ SEARCH-THEN-BIND, BECAUSE A USER'S DN CANNOT BE BUILT FROM THEIR USERNAME.
+//
+// This function used to construct `cn=${username},${baseDn}` and bind that.
+// Probed against the live directory (thaiunion.co.th, 2026-09-16), that DN does
+// not exist and could never have existed: the account's real DN is
+//
+//   CN=Service MFA,OU=Hybrid Joined Device,OU=Windows Update Delivery
+//   Optimization,OU=TUF HQ,OU=TUF,DC=thaiunion,DC=co,DC=th
+//
+// — the CN is the person's DISPLAY NAME, not their login, and the account sits
+// four OUs below the base. Its userPrincipalName is `FIRMANS0@thaiunion.com`
+// while the directory is `DC=thaiunion,DC=co,DC=th`, so even the UPN suffix
+// cannot be derived from the base DN. Any Active Directory of normal shape
+// defeats the old construction.
+//
+// So: bind as the SERVICE ACCOUNT, search for the user, then bind as the DN the
+// directory gave us. ⛔ LDAP_BIND_DN / LDAP_BIND_PASSWORD have been in
+// .env.local.example since the beginning and were NEVER READ by any code —
+// documented configuration that did nothing.
+//
+// ⛔ THE OLD DIRECT-BIND PATH IS KEPT as the fallback when no service account is
+// configured. A flat OpenLDAP tree where `cn=<login>,<base>` IS the DN is a real
+// deployment shape, and removing it would break an install that works today to
+// fix one that does not.
+//
+// Resolves `{ dn, username, groups }`. ⛔ `groups` is NULL when membership could
+// not be read — never `[]`. Empty means "this user is in no groups"; null means
+// "we could not ask", and lib/ldapRoles.js refuses the login on the second
+// rather than treating a read failure as an authorisation fact.
 function ldapAuthenticate(username, password) {
   return new Promise((resolve, reject) => {
     const ldapUrl = process.env.LDAP_URL;
     const baseDn = process.env.LDAP_BASE_DN;
+    const bindDn = (process.env.LDAP_BIND_DN || '').trim();
+    const bindPassword = process.env.LDAP_BIND_PASSWORD || '';
 
-    const client = ldap.createClient({ url: ldapUrl });
+    const client = ldap.createClient({ url: ldapUrl, timeout: 10000, connectTimeout: 10000 });
+    let settled = false;
+    const done = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      try { client.unbind(() => {}); } catch { /* already gone */ }
+      fn(arg);
+    };
 
-    client.on('error', (err) => {
-      reject(err);
-    });
+    client.on('error', (err) => done(reject, err));
 
-    const userDn = baseDn && baseDn.toLowerCase().startsWith('cn=')
-      ? baseDn
-      : `cn=${username},${baseDn}`;
+    // ── Fallback: no service account, so keep the historical construction ──
+    if (!bindDn) {
+      const userDn = baseDn && baseDn.toLowerCase().startsWith('cn=')
+        ? baseDn
+        : `cn=${username},${baseDn}`;
+      client.bind(userDn, password, (err) => {
+        if (err) return done(reject, err);
+        // ⛔ NULL, not []. Without a service account we cannot search for group
+        // membership at all, and saying "this user has no groups" would be a
+        // claim we have not established.
+        return done(resolve, { dn: userDn, username, groups: null });
+      });
+      return;
+    }
 
-    client.bind(userDn, password, (err) => {
-      if (err) {
-        client.unbind(() => {});
-        reject(err);
-        return;
-      }
-      client.unbind(() => {});
-      resolve(username);
+    // ── Search-then-bind ──────────────────────────────────────────────────
+    client.bind(bindDn, bindPassword, (bindErr) => {
+      if (bindErr) return done(reject, bindErr);
+
+      // ⛔ BOTH sAMAccountName AND userPrincipalName. People type either, and
+      // the probe showed the two carry different suffixes on the same account.
+      const safe = String(username).replace(/[()*\\\0]/g, '');
+      const filter = `(&(objectClass=user)(|(sAMAccountName=${safe})(userPrincipalName=${safe})))`;
+
+      client.search(baseDn, {
+        scope: 'sub',
+        filter,
+        // memberOf is the DIRECT membership. Verified populated on this
+        // directory, holding full group DNs.
+        attributes: ['distinguishedName', 'sAMAccountName', 'memberOf'],
+        sizeLimit: 2,
+      }, (searchErr, res) => {
+        if (searchErr) return done(reject, searchErr);
+
+        let found = null;
+        res.on('searchEntry', (entry) => {
+          if (found) return; // first match wins; sizeLimit guards the rest
+          const get = (name) => {
+            const a = (entry.attributes || []).find(
+              (x) => x.type && x.type.toLowerCase() === name.toLowerCase()
+            );
+            if (!a) return [];
+            return a.vals || a.values || [];
+          };
+          found = {
+            dn: entry.objectName ? String(entry.objectName) : (get('distinguishedName')[0] || null),
+            groups: get('memberOf').map(String),
+          };
+        });
+        res.on('error', (e) => done(reject, e));
+        res.on('end', () => {
+          if (!found || !found.dn) {
+            return done(reject, new Error('user not found in directory'));
+          }
+          // ⛔ A SECOND CLIENT for the user's own bind. Re-binding the same
+          // connection would discard the service-account binding mid-flight,
+          // and a failed user bind would leave it bound as nobody — so a later
+          // reuse of that client would silently run anonymous.
+          const userClient = ldap.createClient({
+            url: ldapUrl, timeout: 10000, connectTimeout: 10000,
+          });
+          let userSettled = false;
+          const userDone = (fn, arg) => {
+            if (userSettled) return;
+            userSettled = true;
+            try { userClient.unbind(() => {}); } catch { /* already gone */ }
+            fn(arg);
+          };
+          userClient.on('error', (e) => userDone(reject, e));
+          userClient.bind(found.dn, password, (err) => {
+            if (err) return userDone(reject, err);
+            try { client.unbind(() => {}); } catch { /* already gone */ }
+            return userDone(resolve, { dn: found.dn, username, groups: found.groups });
+          });
+        });
+      });
     });
   });
 }
@@ -159,7 +257,8 @@ export const authOptions = {
         }
 
         try {
-          const username = await ldapAuthenticate(credentials.username, credentials.password);
+          const bound = await ldapAuthenticate(credentials.username, credentials.password);
+          const username = bound.username;
           // Known limitation: LDAP/AD users always get 'admin' — there is
           // no LDAP-group-to-role mapping. A successful bind against
           // LDAP_URL/LDAP_BASE_DN was already an explicit trust boundary
@@ -232,7 +331,57 @@ export const authOptions = {
             }
           }
 
-          return { id: username, name: username, role: 'admin' };
+          // ── ⛔ GROUP-TO-ROLE RESOLUTION (v2.134.0) ──────────────────────
+          //
+          // Replaces a hardcoded `role: 'admin'` that made every person in the
+          // directory an administrator of the firewall-management platform.
+          //
+          // ⛔ FAILS CLOSED, like every other authorisation decision here. An
+          // unreadable mapping table REFUSES the login rather than falling back
+          // to the old grant: `loadMappings` throws on a read failure precisely
+          // so an empty array can keep its meaning, because an empty array is
+          // an INSTRUCTION ("legacy mode, grant admin") and returning one for a
+          // database blip would grant Administrator to the whole directory.
+          let mappings;
+          try {
+            mappings = await ldapRoles.loadMappings(pool);
+          } catch (err) {
+            console.error('[auth] LDAP: role mappings unreadable, refusing login:', err.message);
+            return null;
+          }
+
+          const resolution = ldapRoles.resolveRole({ groups: bound.groups, mappings });
+
+          if (!ldapRoles.isPermitted(resolution)) {
+            // Reason logged, never returned — same oracle rule as the MFA path.
+            console.warn(
+              `[auth] LDAP login refused for '${username}' (${resolution.outcome}): ${resolution.reason}`
+            );
+            return null;
+          }
+
+          if (resolution.outcome === ldapRoles.OUTCOME.LEGACY_NO_MAPPINGS) {
+            // ⛔ LOUD ON EVERY LOGIN, not once at startup. An insecure default
+            // that nothing complains about is one nobody ever fixes, and this
+            // one hands Administrator to anyone who can bind.
+            console.warn(
+              `[auth] ⛔ LDAP user '${username}' was granted Administrator because NO group-to-role `
+              + 'mappings are configured. Every directory user currently receives Administrator. '
+              + 'Configure a mapping in Settings -> Security to close this.'
+            );
+          }
+
+          // ⛔ THE GROUPS TRAVEL WITH THE SESSION so jwt() can re-resolve the
+          // role on every token use without re-binding the directory. A mapping
+          // change then takes effect IMMEDIATELY, exactly as a local user's role
+          // change does — rather than waiting out a 30-day JWT during which a
+          // demoted group keeps its old authority.
+          return {
+            id: username,
+            name: username,
+            role: resolution.role,
+            ldapGroups: bound.groups,
+          };
         } catch (err) {
           return null;
         }
@@ -255,6 +404,31 @@ export const authOptions = {
         // nothing. With three roles there is no safe default to invent, so an
         // absent role becomes null and lib/rbac.js grants it no capabilities.
         token.role = user.role || null;
+        // Carried so the LDAP re-check below can re-map without re-binding.
+        if (user.ldapGroups !== undefined) token.ldapGroups = user.ldapGroups;
+      }
+
+      // ⛔ LDAP ROLES ARE RE-RESOLVED ON EVERY TOKEN USE TOO, from the groups
+      // captured at sign-in against the CURRENT mapping table. Local users have
+      // had this since RBAC shipped; LDAP users were explicitly exempt, so a
+      // mapping an administrator revoked would have kept working for the life
+      // of the JWT — up to 30 days of authority nobody intended to grant.
+      //
+      // ⛔ IT RE-READS THE MAPPINGS, NOT THE DIRECTORY. Re-binding LDAP on every
+      // request would put a network round-trip on the authorisation path of a
+      // security product. The consequence is stated rather than hidden: a
+      // MAPPING change applies immediately; a change to the user's GROUP
+      // MEMBERSHIP applies at their next sign-in.
+      //
+      // ⛔ FAILS CLOSED to null on any error, identical to the local branch.
+      if (token.provider === 'ldap' && token.ldapGroups !== undefined) {
+        try {
+          const mappings = await ldapRoles.loadMappings(pool);
+          const again = ldapRoles.resolveRole({ groups: token.ldapGroups, mappings });
+          token.role = ldapRoles.isPermitted(again) ? again.role : null;
+        } catch {
+          token.role = null;
+        }
       }
 
       // Re-validate role against the live `users` table on every request

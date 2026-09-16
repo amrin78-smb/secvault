@@ -559,3 +559,14 @@ Submit is disabled at zero proposed. All components at module top level.
   grace, expired, invalid). Dismissal is sessionStorage keyed on status+daysRemaining so it
   re-appears as the situation worsens; `expired`/`invalid` cannot be dismissed at all. The
   decision function `bannerFor` lives in `lib/productLicense.js`, not here, so it is testable.
+
+## LdapRolesPanel (v2.134.0)
+
+`components/settings/LdapRolesPanel.js`, rendered under Settings → **Users** (same `manage_users`
+gate as its route). ⛔ The WARNING is the point, not the table: with LDAP on and no mappings, a
+full-danger panel states that every directory user is an Administrator right now — an empty table
+looks like an unused feature, not a standing grant. Also warns when no service account is
+configured (without one SecVault cannot search, so no mapping can ever match), confirms when the
+first mapping ends legacy mode, and requires a typed confirmation naming the consequence before
+removing the last one. States both timings: a mapping change is immediate, a group-membership
+change applies at next sign-in.

@@ -2298,3 +2298,25 @@ Pure/plumbing split, same shape as segmentation and workQueue. Full rules in CLA
 Enforced in exactly three places: `POST /api/devices` (the licensed unit),
 `PUT /api/settings` (inside the admin-field branch only), `POST /api/users`.
 `tests/productLicense.test.js` — 35 cases; 7 mutations verified to bite.
+
+---
+
+## ldapRoles.js (v2.134.0) — which role a directory user gets
+
+Pure `resolveRole` + three pool-taking storage functions. Full rules in CLAUDE.md; the surface:
+
+- `resolveRole({groups, mappings})` → `{role, outcome, matched, reason}`.
+  Outcomes: `mapped` | `legacy_no_mappings` | `no_matching_group` | `groups_unreadable`.
+  ⛔ ZERO mappings → `admin` (legacy ramp, preserves every existing install through the upgrade).
+  ⛔ `groups === null` → refused; an unreadable read is not "no groups".
+  ⛔ Most privileged match wins.
+- `normaliseDn(dn)` — lowercases and trims around commas ONLY; spaces inside a value are
+  significant (`CN=Help Desk`).
+- `isMappableRole(role)` — validated against rbac's `ASSIGNABLE_ROLES`, never a local list.
+- `isPermitted(resolution)` — deliberately not `!!role`.
+- `loadMappings(pool)` ⛔ **THROWS** on a read failure; `[]` is an instruction, not an absence.
+- `upsertMapping` / `deleteMapping`.
+
+`app/api/auth/[...nextauth]/route.js` uses it twice: at `authorize()` (refusing the login when the
+mapping table is unreadable) and in `jwt()` on EVERY token use, so a revoked mapping applies at once
+rather than at JWT expiry. 24 tests, 7 mutations verified to bite.

@@ -153,6 +153,10 @@ GRANT SELECT ON TABLE syslog_vpn_auth_hourly TO nocvault_readonly;
 -- name and a URL query string. user_id is a reference, not credential data.
 GRANT SELECT ON TABLE saved_views TO claude_readonly;
 GRANT SELECT ON TABLE saved_views TO nocvault_readonly;
+-- ldap_role_mappings holds no secret: a group DN is not sensitive, and which
+-- group maps to which role is exactly what a diagnostic query is for.
+GRANT SELECT ON TABLE ldap_role_mappings TO claude_readonly;
+GRANT SELECT ON TABLE ldap_role_mappings TO nocvault_readonly;
 
 -- Hourly threat aggregates (2026-09-09). Counts only, no message text.
 GRANT SELECT ON TABLE syslog_threat_hourly TO claude_readonly;

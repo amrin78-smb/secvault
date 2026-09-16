@@ -65,6 +65,43 @@ CREATE TABLE IF NOT EXISTS users (
 -- ─────────────────────────────────────────
 
 -- ⛔ ONE ROW PER USER, and it is a SECRET-BEARING TABLE. It holds the TOTP
+-- ─────────────────────────────────────────
+-- LDAP GROUP -> ROLE MAPPING (v2.134.0)
+-- ─────────────────────────────────────────
+-- Which SecVault role a directory user gets. Before this, ANY successful LDAP
+-- bind returned a hardcoded 'admin' — every person in the directory was an
+-- administrator of the firewall-management platform.
+--
+-- ⛔ AN EMPTY TABLE IS AN INSTRUCTION, NOT AN ABSENCE. Zero rows means "legacy
+-- mode": grant admin as before, and say so loudly. One row means an
+-- administrator has expressed an intent, and a user in no mapped group is
+-- refused. See resolveRole() in lib/ldapRoles.js — the two states must never be
+-- collapsed, or the upgrade that delivered this feature would lock every
+-- existing LDAP install out of its own platform.
+--
+-- ⛔ `group_dn_normalised` CARRIES THE UNIQUENESS, not `group_dn`. AD DNs are
+-- case-insensitive and tolerate spaces around the commas, so an operator
+-- pasting one out of ADUC will not match the byte sequence the directory
+-- returns. Storing both keeps the operator's own spelling on screen while
+-- comparison and uniqueness use the canonical form — without it the same group
+-- could be mapped twice, to two different roles, and which one won would depend
+-- on row order.
+CREATE TABLE IF NOT EXISTS ldap_role_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_dn TEXT NOT NULL,
+  group_dn_normalised TEXT NOT NULL UNIQUE,
+  -- No CHECK constraint, same convention as users.role — validated in
+  -- application code against ASSIGNABLE_ROLES (lib/rbac.js).
+  role TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Its own table, holding no secret — a group DN is not sensitive, and seeing
+-- which groups map to which role is exactly what a diagnostic query is for.
+
+-- MFA secrets. This table holds the TOTP
 -- shared secret (encrypted with the same AES-256-GCM as device_credentials,
 -- via lib/credStore.js) and bcrypt hashes of the recovery codes. It must NEVER
 -- be granted to claude_readonly / nocvault_readonly — same rule as

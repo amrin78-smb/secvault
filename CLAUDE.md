@@ -1339,7 +1339,67 @@ return the same kind of id — local gives a UUID with a `users` row, LDAP gives
 with no row at all — so per-user storage works only for local accounts, and callers check the
 SHAPE of the id rather than trusting the provider name.
 
-**LDAP provider limitation, not fixed**: hardcodes `role: 'admin'` for any successful bind, no group-to-role mapping. ⛔ Since v2.110.0 that is no longer the TOP role — an LDAP user cannot manage accounts or credential profiles, which is a deliberate tightening given there is still no group mapping — revisit if a viewer-role LDAP user is ever needed. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
+**LDAP roles come from directory groups since v2.134.0** — see the Commercial Licensing section's neighbour below. The old hardcoded `role: 'admin'` for any successful bind is gone. UI-level hiding of write-action buttons is defense-in-depth only; real enforcement is always the server-side guard.
+
+### LDAP group-to-role mapping (v2.134.0) — replaces the hardcoded `admin`
+
+`lib/ldapRoles.js` (pure `resolveRole`, plus three pool-taking storage functions),
+`ldap_role_mappings`, `GET/POST/DELETE /api/ldap-mappings` (**`manage_users`** — super_admin
+only), Settings → Users → Directory group access.
+
+⛔ **THE UPGRADE IS THE DANGEROUS PART, AND "NO MAPPINGS CONFIGURED" ≠ "NO MAPPING MATCHED".**
+The obvious fix — no mapping, no access — locks every existing LDAP install out of its own platform
+on the deploy that delivers it, for customers who did nothing wrong. So:
+**ZERO mappings = LEGACY MODE**, grant `admin` exactly as before; **≥1 mapping** means an
+administrator has expressed an intent and a user in no mapped group is REFUSED. Same distinction the
+vendor-PSIRT gate draws between an empty inventory and an unreadable one.
+⛔ **Legacy mode is a ramp, not a resting state**: it warns on EVERY login and renders a full-danger
+panel in Settings saying every directory user is currently an Administrator. An insecure default
+that nothing complains about is one nobody ever fixes.
+
+⛔ **UNREADABLE GROUPS IS NOT "NO GROUPS".** `groups === null` refuses the login with its own
+outcome. This is an AUTHORISATION check and fails CLOSED — the opposite call from the licence guard
+one section up, which fails open because it is only a billing one.
+⛔ **`loadMappings` THROWS rather than returning `[]`** for the same reason: an empty array is an
+INSTRUCTION here, so returning one for a database blip would grant Administrator to the whole
+directory.
+
+⛔ **THE MOST PRIVILEGED MATCH WINS.** A user in both "Firewall Admins" and "Helpdesk" is a firewall
+admin; resolving down would make adding someone to a second group silently REMOVE access.
+
+⛔ **DNs COMPARE CASE- AND SPACING-INSENSITIVELY** (around the commas only — `CN=Help Desk` is a
+real group name). `group_dn_normalised` carries the UNIQUE constraint while `group_dn` keeps the
+operator's own spelling for display; without that split the same group could be mapped twice to two
+roles and row order would decide.
+
+⛔ **A MAPPING CHANGE APPLIES IMMEDIATELY; A GROUP-MEMBERSHIP CHANGE APPLIES AT NEXT SIGN-IN.**
+`jwt()` now re-resolves LDAP roles on every token use from groups captured at sign-in against the
+CURRENT mapping table — LDAP users were previously exempt from the re-check local users have always
+had, so a revoked mapping kept working for the life of the JWT. It deliberately re-reads the
+MAPPINGS, not the directory: an LDAP round-trip on every request is not acceptable on the
+authorisation path. The panel states both timings rather than hiding the asymmetry.
+
+### ⛔ The LDAP bind was BROKEN, and the live probe is what found it
+
+`ldapAuthenticate` built `cn=${username},${baseDn}`. Probed against the customer's own directory
+(thaiunion.co.th, 2026-09-16) that DN **does not exist and could not have**:
+
+- the account's real DN is `CN=Service MFA,OU=Hybrid Joined Device,OU=Windows Update Delivery
+  Optimization,OU=TUF HQ,OU=TUF,DC=thaiunion,DC=co,DC=th` — **the CN is the DISPLAY NAME, not the
+  login**, and the account sits four OUs below the base;
+- `userPrincipalName` is `FIRMANS0@thaiunion.com` while the directory is `DC=thaiunion,DC=co,DC=th`
+  — **the UPN suffix is not the DNS domain** and cannot be derived from the base DN;
+- `memberOf` IS populated with full group DNs; groups live in mixed containers
+  (`OU=Microsoft Exchange Security Groups`, `CN=Users`, `CN=Builtin`) and contain spaces.
+
+So it is now **search-then-bind**: bind as the service account, search
+`(|(sAMAccountName=…)(userPrincipalName=…))`, then bind as the DN the directory returned.
+⛔ `LDAP_BIND_DN`/`LDAP_BIND_PASSWORD` have been in `.env.local.example` since the beginning and
+were **never read by any code** — documented configuration that did nothing.
+⛔ **The old direct-bind path is KEPT** as the fallback when no service account is configured: a flat
+OpenLDAP tree where `cn=<login>,<base>` really is the DN is a real shape, and removing it would
+break an install that works to fix one that does not. That path cannot SEARCH, so it reports
+`groups: null` — and the panel warns that no mapping can ever match without a service account.
 
 ---
 

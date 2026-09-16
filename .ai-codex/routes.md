@@ -462,3 +462,17 @@ that looks complete, with a delete button attached.
 independently flagged `unused`/`redundant`/`shadow`. So retirement can never propose a BUSY rule that
 exists only for the retired application. Honoured rather than worked around; widening it is a product
 decision, not a bug fix.
+
+## LDAP group-to-role mapping (v2.134.0)
+
+GET /api/ldap-mappings [manage_users] [db] — mappings + `legacyModeActive` (LDAP on, zero mappings =
+  every directory user is an Administrator right now) + `bindAccountConfigured` (without a service
+  account SecVault cannot search, so no mapping can ever match).
+POST /api/ldap-mappings [manage_users] [db] — upsert {groupDn, role, description}. Keyed on the
+  NORMALISED dn. Returns `legacyModeEnded` when this was the FIRST mapping, because that changes the
+  outcome for every other directory user on their next login.
+DELETE /api/ldap-mappings?id= [manage_users] [db] — returns `legacyModeReopened` when it was the
+  LAST one, which re-grants Administrator to the whole directory.
+
+⛔ `manage_users`, NOT `manage_settings` — super_admin only. A mapping says "everyone in this group
+administers the firewall platform", reached through a membership list SecVault cannot see.

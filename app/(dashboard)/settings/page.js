@@ -7,6 +7,7 @@ import Button from '../../../components/ui/Button';
 import UpdatePanel from '../../../components/settings/UpdatePanel';
 import LicensePanel from '../../../components/settings/LicensePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
+import LdapRolesPanel from '../../../components/settings/LdapRolesPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
@@ -320,7 +321,18 @@ export default function SettingsPage() {
 
       {effectiveTab === 'certificate' && caps.manage_settings && <TlsPanel />}
 
-      {effectiveTab === 'users' && <UsersPanel />}
+      {effectiveTab === 'users' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s6)' }}>
+          <UsersPanel />
+          {/* ⛔ UNDER USERS, NOT SETTINGS, because it is gated on the SAME
+              capability as the route behind it (manage_users, super_admin
+              only). A mapping here says "everyone in this directory group
+              administers the firewall platform", which is the same authority as
+              creating an account — reached through a group whose membership
+              SecVault cannot see. */}
+          <LdapRolesPanel />
+        </div>
+      )}
 
       {effectiveTab === 'profiles' && caps.manage_credential_profiles && <CredentialProfilesPanel />}
 
