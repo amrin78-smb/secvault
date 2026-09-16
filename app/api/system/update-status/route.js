@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.132.0': [
+    'Check Point vulnerability coverage went from 7 advisories to around 107. The gateway has been filed under about fifteen different product names across three rebrands, and SecVault was only asking for four of them — so the page looked reassuringly empty when it should not have.',
+    'Forcepoint now also covers its Security Management Center and the older Stonesoft-era naming. Both it and Check Point are managed through a management server, so vulnerabilities in that server are now reported too.',
+    'Every product name was checked against the live vulnerability database before being added, and the number of CVEs each one returned is recorded alongside it.',
+    'Deliberately not included: ZoneAlarm, Harmony, Capsule and the endpoint and VPN client software. Those are real Check Point products with real vulnerabilities, but they do not run on your firewall, and reporting them against one would create urgent-looking work that is not real.',
+  ],
   '2.131.0': [
     'SecVault is now licensed in its own right: every installation starts with a 30-day trial, and a subscription is then licensed by the number of firewalls monitored and renewed yearly.',
     'Settings → Subscription shows your Server ID — quote it when buying or renewing, since a key is issued for one server — along with how many firewalls your subscription covers and how many are in use.',

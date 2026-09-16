@@ -1527,6 +1527,30 @@ challenge, which is the ground `fortinet_psirt` is already stuck on; **Cisco** h
 (200, 8 items, 19 CVE ids) but it is a rolling window with no history and the real openVuln API
 answers **403** without registered credentials.
 
+⛔ **A VENDOR'S CPE PRODUCT LIST IS COVERAGE, AND UNDER-ASKING IS SILENT** (v2.132.0). Check Point
+collected **7 advisories** for a firewall with a thirty-year CVE history, and nothing reported a
+problem: the feed ran, the dashboard was green, and `/vulnerability` was simply almost empty. NVD
+files the Check Point gateway under ~15 product names accumulated across three rebrands (FireWall-1
+→ VPN-1 → Security Gateway → Quantum) and `VENDOR_CPES` asked for four. Expanded to **22 strings,
+~107 CVEs**, each probed against the live NVD API with the `totalResults` it returned recorded
+beside it. Forcepoint likewise gained its SMC and the Stonesoft-era `stonegate`.
+
+⛔ **THE VENDOR-LEVEL WILDCARD WAS TESTED, WORKS, AND WAS REFUSED.** `cpe:2.3:a:checkpoint` returns
+129 more CVEs — ZoneAlarm, Harmony, Capsule, SmartConsole, the identity and VPN *clients*. None runs
+on the firewall and the adapter talks to none of them. Filing an endpoint-agent CVE against a
+firewall manufactures urgent work that is not real, which on an evidence-backed product is worse
+than the gap it closes. `tests/vendorCpeCoverage.test.js` names those products and fails if one is
+ever queried. **Do not "simplify" the list into a wildcard.**
+
+⛔ **The MANAGEMENT plane is deliberately included** (`provider-1`, multi-domain, management/log
+server for Check Point; the SMC for Forcepoint) — both adapters authenticate to the management
+server, never the gateway, so a management-server CVE is a CVE in something SecVault talks to.
+
+⛔ **A string that returns 0 is KEPT if the product is real.** `forcepoint:flexedge_secure_sd-wan`
+answers 0 from both NVD and CIRCL today; the rebrand exists, and a removed string costs the first
+advisory ever filed under it. A string that returns 0 because the SPELLING is wrong
+(`sangfor:next_gen_application_firewall`) is not listed at all.
+
 Sync order is deliberately **sequential**: NVD → Palo Alto → Fortinet → KEV → CVE.org → EPSS → cloud catalogue (last, so a slow publisher can never delay the advisory feeds).
 
 ⛔ **The last two are ENRICHMENT-ONLY and run LAST for that reason** — they add facts to advisories the

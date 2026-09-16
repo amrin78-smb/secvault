@@ -230,9 +230,13 @@ describe('fetchCvesForVendor — the breaker in the real fetch loop (stubbed fet
       if (isNvd(u)) throw networkError();
       return emptyCircl();
     };
-    // checkpoint has four CPE strings — the vendor that pays the most for re-discovery.
+    // ⛔ DERIVED FROM THE TABLE, NOT HARDCODED. This said 4 and broke the day
+    // Check Point's list grew from 4 strings to 22 (2026-09-16) — a test failing
+    // because the thing it guards got BETTER teaches the next person to edit the
+    // number rather than read the assertion. What matters here is that NVD is
+    // probed ONCE however long the list is; the length itself is not the subject.
     const cpeCount = VENDOR_CPES.checkpoint.length;
-    assert.equal(cpeCount, 4);
+    assert.ok(cpeCount > 1, 'this test needs a vendor with several CPE strings');
     const circuit = makeNvdCircuit(1); // threshold 1 keeps the test off the 3 s retry sleep
     const result = await fetchCvesForVendor(stubPool, 'checkpoint', noThrottle, circuit);
 
@@ -261,7 +265,10 @@ describe('fetchCvesForVendor — the breaker in the real fetch loop (stubbed fet
 
     assert.equal(circuit.isOpen(), false, 'NVD answered — a 403 is an API-key problem, not a blocked network');
     assert.equal(circuit.summary().networkFailures, 0);
-    assert.equal(fetchCalls.filter(isNvd).length, 4, 'all four CPE strings are still attempted');
+    assert.equal(
+      fetchCalls.filter(isNvd).length, VENDOR_CPES.checkpoint.length,
+      'an HTTP error is not an outage — every CPE string must still be attempted'
+    );
     assert.equal(
       fetchCalls.filter((u) => u.startsWith(CIRCL_HOST)).length,
       0,
@@ -277,7 +284,7 @@ describe('fetchCvesForVendor — the breaker in the real fetch loop (stubbed fet
 
     assert.equal(circuit.isOpen(), false, 'a corrupt response is an NVD data problem, not a reachability one');
     assert.equal(circuit.summary().networkFailures, 0);
-    assert.equal(fetchCalls.filter(isNvd).length, 4);
+    assert.equal(fetchCalls.filter(isNvd).length, VENDOR_CPES.checkpoint.length);
     assert.equal(fetchCalls.filter((u) => u.startsWith(CIRCL_HOST)).length, 0);
   });
 
@@ -293,9 +300,16 @@ describe('fetchCvesForVendor — the breaker in the real fetch loop (stubbed fet
     };
     const circuit = makeNvdCircuit(2);
     await fetchCvesForVendor(stubPool, 'checkpoint', noThrottle, circuit);
-    // CPE 1 succeeded (streak 0). CPE 2 fails twice -> threshold 2 -> open. CPE 3, 4 skipped.
+    // CPE 1 succeeded (streak 0). CPE 2 fails twice -> threshold 2 -> open.
+    // EVERY REMAINING string is then skipped — 20 of them on today's Check Point
+    // list, 2 on the four-string list this was written against. Derived, because
+    // the property is "all the rest", not "two".
     assert.equal(circuit.isOpen(), true);
-    assert.equal(circuit.summary().skippedCpeStrings.length, 2);
+    assert.equal(
+      circuit.summary().skippedCpeStrings.length,
+      VENDOR_CPES.checkpoint.length - 2,
+      'every CPE string after the one that opened the breaker must be skipped'
+    );
     assert.equal(fetchCalls.filter(isNvd).length, 3, '1 success + 2 failures, then no more probing');
   });
 });
@@ -307,13 +321,19 @@ describe('fetchAndUpsertVendorCves — one honest statement per run, not 22 time
       if (isNvd(u)) throw networkError();
       return emptyCircl();
     };
+    // Same reasoning as above: the saving scales with the list, so pin the
+    // PROPERTY (probes are bounded by the streak, not by the list) rather than
+    // the list's current length. Was 11; is 32 since the Check Point expansion.
     const totalCpeStrings = Object.values(VENDOR_CPES).reduce((n, list) => n + list.length, 0);
-    assert.equal(totalCpeStrings, 11, 'the live fleet queries 11 CPE strings across 6 vendors');
+    assert.ok(totalCpeStrings > NVD_UNREACHABLE_STREAK,
+      'the run must query more CPE strings than the breaker allows probes, or this proves nothing');
 
     const result = await fetchAndUpsertVendorCves(stubPool);
 
-    // ⛔ THE HEADLINE NUMBER. Before the breaker this was 22 attempts (11 strings x 2, each
-    // pair costing 43 s of timeouts) = ~473 s. It is now the threshold, once, for the run.
+    // ⛔ THE HEADLINE NUMBER, and it is now worth far more than when it was written.
+    // Before the breaker every CPE string was probed twice at ~43 s per pair. At
+    // the original 11 strings that was ~473 s; at today's 32 it would be ~1,376 s
+    // — over 22 minutes of timeouts per cycle. It is the threshold, once, per run.
     assert.equal(fetchCalls.filter(isNvd).length, NVD_UNREACHABLE_STREAK);
     assert.equal(result.nvdUnreachable, true);
 
