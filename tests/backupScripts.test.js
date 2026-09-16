@@ -32,8 +32,19 @@ const install = fs.readFileSync(path.join(dir, 'Install-SecVault.ps1'), 'utf8');
  * they are the only reason the next person does not reintroduce either one.
  */
 function codeOnly(src) {
+  // ⛔ NORMALISE LINE ENDINGS FIRST. Without this the stripper silently does
+  // nothing on a CRLF file: `.` does not match `\r`, so `.*$` cannot reach the
+  // end of a line that ends `\r`, and `^\s*#.*$` never matches a comment.
+  //
+  // It passed when written and failed later for no apparent code change,
+  // because a file WRITTEN here is LF and the same file CHECKED OUT FROM GIT is
+  // CRLF (core.autocrlf). A test whose result depends on which of those you are
+  // looking at is worse than no test — it goes green locally and red in CI, or
+  // the reverse, and the obvious "fix" is to weaken the assertion it was right
+  // about all along.
   return src
-    .replace(/<#[\s\S]*?#>/g, '')            // block comments
+    .replace(/\r\n/g, '\n')
+    .replace(/<#[\s\S]*?#>/g, '')                // block comments
     .split('\n')
     .map((line) => line.replace(/^\s*#.*$/, '')) // whole-line comments
     .join('\n');
