@@ -19,6 +19,8 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 - `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
 - `.ai-codex/application-view-plan.md` — PROPOSAL ONLY (not built): the application-centric view
+- `.ai-codex/central-cve-feed-proposal.md` — PROPOSAL ONLY (not built): moving CVE collection
+  into the central nocvault-eol service and syncing a signed feed
 
 ### Maintaining the index — MANDATORY
 
