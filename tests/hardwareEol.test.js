@@ -111,6 +111,45 @@ describe('⛔ absence is UNKNOWN, never "no end-of-support"', () => {
   });
 });
 
+describe('⛔ a DATE from the database renders as a date', () => {
+  const { toDateString } = require('../lib/engines/hardwareEol');
+
+  it('formats a node-pg Date, not just a string', () => {
+    // node-pg returns a DATE column as a JavaScript Date. Every fixture in this
+    // file uses strings, so the whole suite passed while the live page rendered
+    // 'Thu Aug 31 2028 00:00:00 GMT+0700 (Indochina Time)' under a column
+    // headed 'End of support'. Only running it against the real database caught
+    // it.
+    assert.equal(toDateString(new Date(2028, 7, 31)), '2028-08-31');
+    assert.equal(toDateString('2028-08-31'), '2028-08-31');
+    assert.equal(toDateString('2028-08-31T00:00:00.000Z'), '2028-08-31');
+    assert.equal(toDateString(null), null);
+    assert.equal(toDateString('nonsense'), 'nonsense'.slice(0, 10));
+  });
+
+  it('⛔ does not shift the day in a positive UTC offset', () => {
+    // A DATE arrives as LOCAL midnight. At UTC+7 that is 17:00 the previous day
+    // in UTC, so toISOString() would render the day BEFORE — an end-of-support
+    // date silently one day early is the kind of wrong nobody notices.
+    const d = new Date(2028, 7, 31);
+    assert.equal(toDateString(d), '2028-08-31');
+    if (d.getTimezoneOffset() < 0) {
+      assert.notEqual(toDateString(d), d.toISOString().slice(0, 10));
+    }
+  });
+
+  it('a Date reaches resolveDevice and comes out formatted', () => {
+    const idx = buildIndex([{
+      vendor: 'Palo Alto', modelRaw: 'PA-3220', aliases: [],
+      supportEndDate: new Date(2028, 7, 31), confidence: 'high',
+    }]);
+    const r = resolveDevice(dev('paloalto', 'PA-3220'), idx, NOW);
+    assert.equal(r.supportEndDate, '2028-08-31');
+    assert.match(r.reason, /2028-08-31/);
+    assert.ok(!/GMT|Indochina/.test(r.reason));
+  });
+});
+
 describe('dated devices', () => {
   const index = buildIndex(CATALOGUE);
 
