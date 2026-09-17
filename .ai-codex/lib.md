@@ -2320,34 +2320,3 @@ Pure `resolveRole` + three pool-taking storage functions. Full rules in CLAUDE.m
 `app/api/auth/[...nextauth]/route.js` uses it twice: at `authorize()` (refusing the login when the
 mapping table is unreadable) and in `jwt()` on EVERY token use, so a revoked mapping applies at once
 rather than at JWT expiry. 24 tests, 7 mutations verified to bite.
-
----
-
-## Hardware EOL (v2.135.0) — eolNormalize.js / engines/hardwareEol.js / feeds/eolFeed.js
-
-SecVault consuming the central nocvault-eol catalogue. ⛔ **NOT `device_licenses`** — that holds the
-support CONTRACTS a device reports about itself; this holds "the vendor stops supporting this
-chassis on this date". A device can hold a valid contract on hardware whose support ends next year.
-
-- **`eolNormalize.js`** — `normalizeForMatch(vendor, model)`, ⛔ ported VERBATIM from
-  nocvault-eol/`match-normalize.ts` (itself from NetVault). THREE COPIES EXIST; a one-sided change
-  does not throw, it silently stops matching. `NORMALIZER_VERSION` = 4, bumped in all three or none.
-  `vendorLabelFor(slug)` — ⛔ pass the LABEL (`Palo Alto`), never the slug, or the vendor-prefix
-  strip misses and the key matches nothing.
-- **`engines/hardwareEol.js`** (pure) — `buildIndex` (⛔ indexes every alias, not just the canonical
-  spelling), `resolveDevice`, `resolveFleet`. ⛔ FOUR states: `dated` / `no_date_published` /
-  `unknown` / `no_model`. `no_date_published` is built before the hub emits it so adding it later
-  needs no UI change. `resolveFleet` returns `incomplete`, which forbids an all-clear.
-- **`feeds/eolFeed.js`** — `syncEolFeed` (fetch → ⛔ verify sha256 + Ed25519 BEFORE any write →
-  upsert `eol_seed`), `loadCatalogue`, `catalogueFreshness`. ⛔ Sends `accept-encoding: gzip`
-  explicitly — node does NOT negotiate it, and forgetting costs 4.4 MB instead of 180 KB per sync
-  with no error. ⛔ A verified-but-empty feed is REFUSED (plausibility floor), or one sync turns
-  every dated device into "unknown".
-
-Wired as `eol_catalogue` in `runFullSync`, LAST with the cloud catalogue, so a slow third-party
-publisher never delays advisory discovery. Reachability shows in `feed_sync_log`; ⛔ staleness of the
-CATALOGUE is a separate signal, because a hub serving a three-month-old feed is up and useless.
-
-**Measured 2026-09-17: 2 of 16 live firewalls match.** Every miss is current-generation hardware
-(PA-440/460/3410, PA-VM, FortiGate-60F/80F). That is the catalogue's coverage, not a bug — and it is
-why `unknown` is rendered hueless and never as "no end-of-support".
