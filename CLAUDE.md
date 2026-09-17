@@ -1544,7 +1544,7 @@ customer must read off the server to buy or renew anything.
 
 | Feed | URL | Schedule | Notes |
 |---|---|---|---|
-| NVD API 2.0 | `services.nvd.nist.gov/rest/json/cves/2.0` | 6h | 1 req/6s no key, 5 req/30s w/ `NVD_API_KEY`. Always `virtualMatchString`, never `cpeName`. |
+| NVD API 2.0 | `services.nvd.nist.gov/rest/json/cves/2.0` | 6h | ⛔ **5 requests / rolling 30s WITHOUT a key, 50 / 30s WITH one** (verified 2026-09-17 — this table said `5 req/30s w/ NVD_API_KEY`, which is the UNKEYED rate and understates a key by 10x). So ~6.2s between requests unkeyed, ~0.7s keyed. Key goes in an `apiKey` REQUEST HEADER, not the query string (that was the 1.0 API). Always `virtualMatchString`, never `cpeName`. |
 | Palo Alto PSIRT | `security.paloaltonetworks.com/api/v1/products/PAN-OS/advisories` | 6h, after NVD | Bulk beta API, ~346 advisories/call, CVE Record Format 5.x. |
 | Fortinet FortiGuard | `fortiguard.com/rss/ir.xml` → CSAF 2.0 JSON | 6h, after PA | RSS discovery-only; CSAF is the real data source. |
 | CISA KEV | `cisa.gov/.../known_exploited_vulnerabilities.json` | 6h | Full download, cross-referenced by cve_id |
