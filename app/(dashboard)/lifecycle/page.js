@@ -12,6 +12,9 @@ import StatCard from '../../../components/ui/StatCard';
 import Pagination from '../../../components/ui/Pagination';
 import { paginateArray } from '../../../lib/pagination';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
+import { resolveFleet } from '../../../lib/engines/hardwareEol';
+import { loadCatalogue, catalogueFreshness } from '../../../lib/feeds/eolFeed';
+import HardwareEolPanel from '../../../components/lifecycle/HardwareEolPanel';
 import { titleCase } from '../../../lib/formatDisplay';
 
 export const dynamic = 'force-dynamic';
@@ -187,8 +190,17 @@ function deviceLink(deviceId, name) {
 const HA_SORT_RANK = { degraded: 0, standalone: 1, healthy: 2, unknown: 3 };
 
 async function getLifecycleData() {
-  const [devices, licenses, haRows, content] = await Promise.all([
-    pool.query('SELECT id, name, vendor FROM devices WHERE active = true ORDER BY name ASC'),
+  const [devices, licenses, haRows, content, eolCatalogue, eolFreshness] = await Promise.all([
+    // ⛔ THE MODEL LIVES ON device_versions, NOT devices — there is no
+    // devices.model column, and assuming one is what would have made the whole
+    // hardware-EOL lookup silently match nothing. DISTINCT ON takes the latest
+    // collected row per device.
+    pool.query(`
+      SELECT DISTINCT ON (d.id) d.id, d.name, d.vendor, v.model
+        FROM devices d
+        LEFT JOIN device_versions v ON v.device_id = d.id
+       WHERE d.active = true
+       ORDER BY d.id, v.collected_at DESC NULLS LAST`),
     pool.query(
       `SELECT l.id, l.device_id, l.feature, l.description, l.expires_at, l.expires_raw, l.expired
        FROM device_licenses l
@@ -209,8 +221,17 @@ async function getLifecycleData() {
        JOIN devices d ON d.id = c.device_id
        WHERE d.active = true`
     ),
+    // ⛔ NEVER FATAL. A catalogue that cannot be read must not take the whole
+    // lifecycle page down — the licence, HA and content sections beside it are
+    // independent and still useful. Failure degrades to an empty catalogue,
+    // which the engine correctly reports as "unknown for every device" rather
+    // than as "nothing is past end-of-support".
+    loadCatalogue(pool).catch(() => []),
+    catalogueFreshness(pool).catch(() => null),
   ]);
   return {
+    eolCatalogue,
+    eolFreshness,
     devices: devices.rows,
     licenses: licenses.rows,
     haRows: haRows.rows,
@@ -355,7 +376,9 @@ function buildHaEvidence(row, licensesForDevice, now) {
 const SECTION_NOTE_STYLE = { margin: '8px 0 14px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' };
 
 export default async function LifecyclePage({ searchParams }) {
-  const { devices, licenses, haRows, content } = await getLifecycleData();
+  const { devices, licenses, haRows, content, eolCatalogue, eolFreshness } = await getLifecycleData();
+  // Read-time match, no stored verdict — same rule as every other engine here.
+  const hardwareEol = resolveFleet(devices, eolCatalogue);
   const now = new Date();
   const deviceById = new Map(devices.map((d) => [d.id, d]));
 
@@ -637,6 +660,14 @@ export default async function LifecyclePage({ searchParams }) {
           )}
         </CardBody>
       </Card>
+
+      {/* ⛔ HARDWARE end-of-support, which is NOT the licence section above it.
+          That one reports the support CONTRACTS a device holds; this reports
+          when the vendor stops supporting the chassis at all. A firewall can
+          hold a perfectly valid FortiGuard contract on hardware whose support
+          ends next year, so neither answers the other's question and they are
+          deliberately not merged. */}
+      <HardwareEolPanel fleet={hardwareEol} freshness={eolFreshness} />
 
       {/* High Availability — collapsed, with a one-line summary always visible. */}
       <Card>

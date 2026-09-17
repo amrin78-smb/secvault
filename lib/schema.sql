@@ -66,6 +66,51 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- ⛔ ONE ROW PER USER, and it is a SECRET-BEARING TABLE. It holds the TOTP
 -- ─────────────────────────────────────────
+-- HARDWARE END-OF-LIFE CATALOGUE (v2.135.0)
+-- ─────────────────────────────────────────
+-- Pulled from the central nocvault-eol service. Generic vendor/model rows only:
+-- ⛔ THE DEVICES NEVER LEAVE. Matching happens at READ time in
+-- lib/engines/hardwareEol.js, so this is a reference catalogue and nothing else.
+-- Reverting a sync is DELETE FROM eol_seed WHERE added_by = 'feed'.
+--
+-- ⛔ NOT THE SAME THING AS device_licenses. That table holds the support
+-- CONTRACTS a device reports about itself (FortiGuard entitlements, PAN-OS
+-- support). This holds "the vendor stops supporting this chassis on this date".
+-- A device can hold a perfectly valid contract on hardware whose support ends
+-- next year, so neither answers the other's question.
+--
+-- ⛔ no_date_published IS THE THIRD STATE AND IT IS LOAD-BEARING. A model ABSENT
+-- from this table means EITHER "the vendor published no date" OR "the catalogue
+-- does not cover it yet", and those are different facts an operator would act on
+-- differently. This column lets the hub say "we checked, there is none" once it
+-- starts recording that; until then it is always false and the engine reports
+-- absence as UNKNOWN, never as "no end-of-support". Measured 2026-09-17: only
+-- 2 of 16 live firewalls matched, every miss being current-generation hardware.
+CREATE TABLE IF NOT EXISTS eol_seed (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor TEXT NOT NULL,
+  model_raw TEXT NOT NULL,
+  model_normalized TEXT NOT NULL,
+  -- model_raw is the canonical spelling; these are the vendor's other spellings.
+  aliases TEXT[] NOT NULL DEFAULT '{}',
+  support_end_date DATE,
+  os_eol_date DATE,
+  end_of_sale DATE,
+  no_date_published BOOLEAN NOT NULL DEFAULT false,
+  checked_at DATE,
+  confidence TEXT,
+  source_url TEXT,
+  note TEXT,
+  -- 'feed' = from the central service. Anything else is operator-entered and is
+  -- never touched by a sync.
+  added_by TEXT NOT NULL DEFAULT 'feed',
+  feed_version TEXT,
+  synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (vendor, model_normalized)
+);
+CREATE INDEX IF NOT EXISTS idx_eol_seed_normalized ON eol_seed (model_normalized);
+
+-- ─────────────────────────────────────────
 -- LDAP GROUP -> ROLE MAPPING (v2.134.0)
 -- ─────────────────────────────────────────
 -- Which SecVault role a directory user gets. Before this, ANY successful LDAP

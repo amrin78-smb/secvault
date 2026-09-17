@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.135.0': [
+    'New on Lifecycle: hardware end-of-support. SecVault now knows when the vendor stops supporting the firewall chassis itself — a different question from the support contracts the device reports about itself, and one SecVault could not answer at all before.',
+    'The dates come from the central NocVault lifecycle catalogue, signed and checked before anything is stored. Your firewalls are never sent anywhere — SecVault pulls a generic list of models and matches it locally.',
+    'Models the catalogue does not cover are shown as unknown, never as “no end-of-support”. That may mean the vendor has published no date yet, or that the catalogue does not list it, and SecVault will not guess between the two.',
+    'The page always states how much of the fleet could actually be checked, so a reassuring headline can never hide the firewalls nobody could answer for.',
+  ],
   '2.134.0': [
     'Directory logins now get their role from their AD groups. Until now every person who could sign in against your directory became an Administrator of SecVault \u2014 able to add and remove firewalls, change settings and trigger updates.',
     'Map a group to Operator, Administrator or Super Admin under Settings \u2192 Users. Someone in several mapped groups gets the most privileged of them, and capitalisation and spacing in the group name do not matter.',
