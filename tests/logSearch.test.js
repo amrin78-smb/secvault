@@ -20,6 +20,26 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+
+// ⛔ THE STUB MUST MODEL THE REAL POOL, INCLUDING connect(). searchEvents takes a
+// dedicated client so it can `SET LOCAL statement_timeout` inside a transaction —
+// pool.query hands back an arbitrary connection, so a timeout set that way leaks
+// onto unrelated queries or applies to none. A stub with only `query` let the
+// tests pass against a shape production does not have.
+//
+// BEGIN / SET LOCAL / COMMIT / ROLLBACK are answered here and NOT passed to the
+// caller's handler, so an assertion about "the SQL searchEvents built" still sees
+// only the search itself.
+function stubPool(handler) {
+  const passthrough = (sql) => /^(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(String(sql).trim());
+  return {
+    query: async (sql, params) => (passthrough(sql) ? { rows: [] } : handler(sql, params)),
+    connect: async () => ({
+      query: async (sql, params) => (passthrough(sql) ? { rows: [] } : handler(sql, params)),
+      release() {},
+    }),
+  };
+}
 const {
   buildSearchQuery,
   searchEvents,
@@ -100,16 +120,14 @@ describe('logSearch: results are capped and the cap is honest', () => {
 
   it('⛔ reports truncation and does NOT return the probe row', async () => {
     const limit = 3;
-    const pool = {
-      query: async () => ({ rows: Array.from({ length: limit + 1 }, (_, i) => ({ id: i, message: 'x' })) }),
-    };
+    const pool = stubPool(async () => ({ rows: Array.from({ length: limit + 1 }, (_, i) => ({ id: i, message: 'x' })) }));
     const r = await searchEvents(pool, { limit }, NOW);
     assert.equal(r.truncated, true, 'the caller must be told there are more');
     assert.equal(r.rows.length, limit, 'the +1 probe row must not be shown');
   });
 
   it('does not claim truncation when the results fit', async () => {
-    const pool = { query: async () => ({ rows: [{ id: 1, message: 'x' }] }) };
+    const pool = stubPool(async () => ({ rows: [{ id: 1, message: 'x' }] }));
     const r = await searchEvents(pool, { limit: 10 }, NOW);
     assert.equal(r.truncated, false);
     assert.equal(r.rows.length, 1);
@@ -177,11 +195,9 @@ describe('⛔ logSearch: every value is a bind parameter', () => {
 
 describe('logSearch: the row shape keeps its caveats', () => {
   it('carries tzAssumed through, because investigations turn on timestamps', async () => {
-    const pool = {
-      query: async () => ({
-        rows: [{ id: 1, message: 'x', tz_assumed: true, src_port: '443', bytes_sent: null }],
-      }),
-    };
+    const pool = stubPool(async () => ({
+      rows: [{ id: 1, message: 'x', tz_assumed: true, src_port: '443', bytes_sent: null }],
+    }));
     const r = await searchEvents(pool, {}, NOW);
     assert.equal(r.rows[0].tzAssumed, true);
     assert.equal(r.rows[0].srcPort, 443, 'numeric strings become numbers');
@@ -190,7 +206,7 @@ describe('logSearch: the row shape keeps its caveats', () => {
 
   it('⛔ lets a query error propagate rather than returning an empty result', async () => {
     // "0 results" from a failed query reads as "that traffic never happened".
-    const pool = { query: async () => { throw new Error('relation does not exist'); } };
+    const pool = stubPool(async () => { throw new Error('relation does not exist'); });
     await assert.rejects(() => searchEvents(pool, {}, NOW), /relation does not exist/);
   });
 });
@@ -231,7 +247,7 @@ describe('⛔ log search pages without ever counting', () => {
   });
 
   it('reports hasMore from the probe row and does not return it', async () => {
-    const pool = { query: async () => ({ rows: Array.from({ length: 11 }, (_, i) => ({ id: i, message: 'x' })) }) };
+    const pool = stubPool(async () => ({ rows: Array.from({ length: 11 }, (_, i) => ({ id: i, message: 'x' })) }));
     const r = await searchEvents(pool, { limit: 10, page: 2 }, NOW);
     assert.equal(r.hasMore, true);
     assert.equal(r.rows.length, 10);
@@ -239,8 +255,74 @@ describe('⛔ log search pages without ever counting', () => {
   });
 
   it('reports hasMore false on the last page', async () => {
-    const pool = { query: async () => ({ rows: [{ id: 1, message: 'x' }] }) };
+    const pool = stubPool(async () => ({ rows: [{ id: 1, message: 'x' }] }));
     const r = await searchEvents(pool, { limit: 10 }, NOW);
     assert.equal(r.hasMore, false);
+  });
+});
+
+describe('⛔ a stopped search is not an empty one', () => {
+  // A query cancelled by statement_timeout returns zero rows. Rendering that as
+  // "nothing matched" would let an investigator conclude a host never connected
+  // when the question was simply never answered — this codebase's signature bug
+  // on the one page where it is least survivable.
+  const canceled = () => {
+    const e = new Error('canceling statement due to statement timeout');
+    e.code = '57014';
+    return e;
+  };
+
+  it('reports timedOut with a reason, and does NOT return an empty result set', async () => {
+    const pool = stubPool(async () => { throw canceled(); });
+    const r = await searchEvents(pool, {}, NOW);
+    assert.equal(r.timedOut, true, 'the caller must be able to tell this apart from no matches');
+    assert.equal(r.rows.length, 0);
+    assert.match(r.reason, /NOT a statement that no matching traffic exists/i);
+    assert.equal(r.truncated, false);
+  });
+
+  it('a successful search is explicitly NOT timed out', async () => {
+    const pool = stubPool(async () => ({ rows: [{ id: 1, message: 'x' }] }));
+    const r = await searchEvents(pool, {}, NOW);
+    assert.equal(r.timedOut, false, 'absent would be falsy too — it is set explicitly');
+  });
+
+  it('⛔ a NON-timeout error still propagates, and is never dressed as a timeout', async () => {
+    const pool = stubPool(async () => { throw new Error('relation does not exist'); });
+    await assert.rejects(() => searchEvents(pool, {}, NOW), /relation does not exist/);
+  });
+
+  it('⛔ the timeout is applied with SET LOCAL on a dedicated client', async () => {
+    const seen = [];
+    const handler = async () => ({ rows: [] });
+    const pool = {
+      query: async () => { throw new Error('searchEvents must not use pool.query — the timeout would leak'); },
+      connect: async () => ({
+        query: async (sql, params) => { seen.push(String(sql).trim().split('\n')[0]); 
+          return /^(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(String(sql).trim()) ? { rows: [] } : handler(sql, params); },
+        release() {},
+      }),
+    };
+    await searchEvents(pool, {}, NOW);
+    assert.ok(seen.some((q) => /^BEGIN/i.test(q)), 'SET LOCAL needs a transaction');
+    assert.ok(seen.some((q) => /^SET LOCAL statement_timeout/i.test(q)), 'the timeout must actually be set');
+    assert.ok(seen.some((q) => /^COMMIT/i.test(q)));
+  });
+
+  it('⛔ the client is released even when the query throws', async () => {
+    let released = 0;
+    const pool = {
+      query: async () => { throw new Error('must not be used'); },
+      connect: async () => ({
+        query: async (sql) => {
+          if (/^(BEGIN|SET LOCAL|ROLLBACK)/i.test(String(sql).trim())) return { rows: [] };
+          throw canceled();
+        },
+        release() { released += 1; },
+      }),
+    };
+    const r = await searchEvents(pool, {}, NOW);
+    assert.equal(r.timedOut, true);
+    assert.equal(released, 1, 'a leaked connection on every expensive search would exhaust the pool');
   });
 });
