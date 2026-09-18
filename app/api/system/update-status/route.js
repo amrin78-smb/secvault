@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.138.0': [
+    'The feed status no longer shows a permanent warning for something working correctly. This server cannot reach the national vulnerability database directly — your internal address ranges overlap its public ones — so that sync could only ever fail, and it reported “degraded” for ever.',
+    'Now that the central feed supplies the same data, the direct sync is marked “skipped” with the reason, shown in grey rather than amber, and roughly two minutes per cycle are no longer spent on requests that cannot succeed.',
+    'It is skipped only when the central feed actually delivered that cycle. If the central feed is unreachable or returns nothing, the direct sync runs exactly as before — SecVault never stops collecting from both.',
+    'The other feeds are unaffected and are not fallbacks: CISA KEV, Palo Alto PSIRT, EPSS and CVE.org each supply something the central feed does not, and all keep running.',
+    'Fixed: a deliberately skipped feed was being displayed as a failure, which would have made this change look like a fault.',
+  ],
   '2.137.0': [
     'Vulnerability data now comes from a central feed, and the difference is large. This server cannot reach the national vulnerability database at all — your internal address ranges overlap its public ones, so those requests never leave the building. SecVault has been falling back to a secondary source that does not publish which software versions each vulnerability affects.',
     'Measured on your fleet: 439 of 1,006 advisories could never be matched to a firewall. Cisco ASA had usable version data for 70 of 353; Check Point for 0 of 7.',

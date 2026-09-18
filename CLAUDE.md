@@ -1717,6 +1717,46 @@ isolated**: if the hub is unreachable the local NVD path still runs immediately
 after and CIRCL still backs it up. A central feed that could block local discovery
 would be worse than not having one.
 
+### ⛔ The local NVD sync is SKIPPED when the hub delivered (v2.138.0)
+
+On a site whose egress cannot reach NVD, `runNvdSync` can never succeed: it spends
+~2 minutes on requests guaranteed to time out and then reports `partial` for ever.
+**A permanent amber chip for a system working exactly as designed teaches an
+operator to ignore the chip that matters** — the same reason the vendor-PSIRT gate
+writes `skipped` rather than letting a feed quietly stop appearing.
+
+⛔ **THE CONDITION IS THE WHOLE SAFETY OF IT.** The skip requires `hubDelivered` —
+a VERIFIED, NON-EMPTY corpus **from this cycle**, never a config flag saying "we
+use the hub now". If the hub is unconfigured, unreachable, or returned errors, NVD
+runs exactly as before with CIRCL behind it. Otherwise the day the hub breaks,
+discovery stops silently while every signal stays green.
+
+⛔ **IT ALSO SKIPS CIRCL**, which only runs inside `runNvdSync` as NVD's
+network-failure fallback. Those advisories are almost all `unmatchable` (CIRCL
+publishes no parseable version bounds), so the loss is small — but it IS a loss,
+and it is why the gate is on the hub having DELIVERED rather than on the hub being
+configured.
+
+⛔ **THE OTHER FEEDS ARE NOT FALLBACKS AND MUST NEVER BE TREATED AS ONE.** The hub
+carries version ranges and nothing else. **CISA KEV is branch 1 of the priority
+tree** and the hub does not carry it; Palo Alto PSIRT is vendor-authoritative and
+better than NVD for that vendor; EPSS and CVE.org are enrichment the hub has no
+column for. Suppressing them while the hub is healthy would stop the product
+learning which CVEs are known-exploited — this codebase's signature bug aimed at
+its own strongest signal.
+
+### ⛔ `skipped` had no rank, and rendered DEGRADED (fixed v2.138.0)
+
+`FEED_STATUS_ORDER` carried no `skipped` entry, so `feedStatusRank('skipped')` fell
+through to the unknown-status rank (1) and `feedState` returned `degraded` — the
+exact opposite of what this file has documented since the vendor-PSIRT gate
+shipped. **It was latent only because nothing had ever been skipped**: both PSIRT
+vendors are in the reference inventory, so `planVendorPsirts` never skipped either.
+`skipped` is now its own state, excluded from the pill's worst-state reduction
+alongside `missing` — and ⛔ **a fleet where EVERY feed is skipped reports `none`,
+never `ok`**, because excluding them all would otherwise leave the reduce seed and
+render a product collecting nothing as green. Pinned by `tests/feedSkipped.test.js`.
+
 ⛔ **NOT CONFIGURED IS NOT AN ERROR.** Without `CVE_HUB_LICENSE_KEY` the feed returns
 `notRun` and is logged `skipped` **with a reason** — a feed that simply stops
 appearing is indistinguishable from one that silently broke.
