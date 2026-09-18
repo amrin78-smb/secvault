@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../api/auth/[...nextauth]/route';
-import { isAdmin } from '../../../../lib/rbac';
+import { isAdmin, can, VIEW_LOG_SEARCH } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import Badge from '../../../../components/ui/Badge';
 import Button from '../../../../components/ui/Button';
@@ -708,7 +708,16 @@ export default async function DeviceDetailPage({ params, searchParams }) {
           individually and pointless on every other tab; the page already
           follows this pattern for its own per-tab fetches above. */}
       {tab === 'traffic' && (
-        <DeviceTrafficTab deviceId={device.id} deviceName={device.name} />
+        <DeviceTrafficTab
+          deviceId={device.id}
+          deviceName={device.name}
+          /* ⛔ THE LINK IS RENDERED ONLY FOR SOMEONE WHO MAY FOLLOW IT. Log
+             search is gated on VIEW_LOG_SEARCH because raw syslog carries
+             usernames, internal addresses and visited URLs. Linking regardless
+             would hand an operator a row of links that all land on a NoAccess
+             panel — a UI that looks broken rather than one that looks bounded. */
+          canSearchLogs={can(session, VIEW_LOG_SEARCH)}
+        />
       )}
 
       {tab === 'overview' && (

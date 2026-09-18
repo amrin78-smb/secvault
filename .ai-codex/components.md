@@ -579,12 +579,20 @@ ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}] — firewall fi
   ⛔ Lists every active device INCLUDING those with 0 paths, with the count in the
   option label — an absent firewall is indistinguishable from an unmonitored one.
 
-DeviceTrafficTab  deviceId, deviceName — per-firewall traffic (devices/[id]?tab=traffic).
+DeviceTrafficTab  deviceId, deviceName, canSearchLogs — per-firewall traffic (devices/[id]?tab=traffic).
   Nine widgets (log volume, session outcomes, top hosts, top applications, protocols,
   blocked destinations, top rules by traffic, threat activity, reached-this-firewall), all scoped IN SQL via the optional deviceId now accepted by
   lib/syslog/trafficStats. ⛔ Resolves syslog COVERAGE first and renders one of three
   states: never sent (a collection gap on our side), sent-but-silent-in-window (the
   device stopped, keeps its last bucket), or data. An empty widget otherwise reads as
   "no traffic" when it may mean "not collected". ⛔ Never reads syslog_events.
+  Every ranked value drills through to /logs scoped to this device (srcIp, ruleName,
+  threatName, application, dstIp+dstPort+protocol). ⛔ The link carries the widget's
+  own 24h window — /logs defaults to ONE HOUR, so a bare link would show a fraction
+  of the rows the number beside it claims and read as the widget lying. ⛔ Rendered as
+  a link ONLY when canSearchLogs (VIEW_LOG_SEARCH); otherwise plain text, because a
+  link that lands on a refusal looks broken rather than bounded. ⛔ '(unnamed)' threats
+  are never linked — that label is invented here for a NULL threat_name and searching
+  it literally matches nothing.
   ⛔ Distinct from DeviceTrafficTable above, which is the FLEET dashboard's per-device
   summary row — one word apart, opposite scopes.

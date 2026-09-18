@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
@@ -95,7 +96,7 @@ function RankedList({ rows, labelOf, keyOf, color }) {
   );
 }
 
-export default async function DeviceTrafficTab({ deviceId, deviceName }) {
+export default async function DeviceTrafficTab({ deviceId, deviceName, canSearchLogs = false }) {
   // ⛔ COVERAGE FIRST. Everything below is meaningless without knowing whether
   // this device logs to SecVault at all.
   const coverage = await getDeviceSyslogCoverage(pool, deviceId, 24);
@@ -164,6 +165,36 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
   // of those prints "49.231.158.90:null" — a fabricated port on a security page.
   const endpoint = (ip, port, proto) =>
     `${String(ip).replace('/32', '')}${port ? `:${port}` : ''}${proto ? ` ${proto}` : ''}`;
+
+  // ⛔ THE LINK CARRIES THE SAME 24h WINDOW THE WIDGET USED. Log search defaults
+  // to ONE HOUR, so a bare link would show a fraction of the rows the number
+  // beside it claims — and the operator would read that as the widget lying,
+  // not as two components disagreeing about time. The window travels with the
+  // link so the two always describe the same period.
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  function logHref(fields) {
+    const p = new URLSearchParams({ deviceId, from: since });
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === null || v === undefined || v === '') continue;
+      // ⛔ Strip the /32 the rollups carry — logSearch matches a bare address,
+      // and a CIDR-suffixed value would silently return nothing.
+      p.set(k, String(v).replace('/32', ''));
+    }
+    return `/logs?${p.toString()}`;
+  }
+
+  // ⛔ NOT WRAPPED WHEN THE VIEWER CANNOT FOLLOW IT. Log search is gated on
+  // VIEW_LOG_SEARCH (raw syslog carries usernames, internal addresses and
+  // visited URLs), so for an operator the value renders as plain text rather
+  // than as a link that lands on a refusal.
+  function Drill({ fields, title, children }) {
+    if (!canSearchLogs) return <>{children}</>;
+    return (
+      <Link href={logHref(fields)} title={title} style={{ color: 'var(--text-primary)' }}>
+        {children}
+      </Link>
+    );
+  }
 
   const namedThreats = threats.threats.filter((t) => t.name !== '(unnamed)');
   const unnamedThreats = threats.threats.find((t) => t.name === '(unnamed)');
@@ -254,7 +285,11 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
             <RankedList
               rows={hosts}
               keyOf={(r) => r.srcIp}
-              labelOf={(r) => r.srcIp.replace('/32', '')}
+              labelOf={(r) => (
+                <Drill fields={{ srcIp: r.srcIp }} title={`Search this firewall's logs for ${r.srcIp.replace('/32', '')} over the same 24h`}>
+                  {r.srcIp.replace('/32', '')}
+                </Drill>
+              )}
               color="var(--primary)"
             />
           )}
@@ -272,7 +307,11 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
               <RankedList
                 rows={apps.applications}
                 keyOf={(r) => r.application}
-                labelOf={(r) => r.application}
+                labelOf={(r) => (
+                  <Drill fields={{ application: r.application }} title={`Search this firewall's logs for ${r.application} over the same 24h`}>
+                    {r.application}
+                  </Drill>
+                )}
                 color="var(--purple)"
               />
               {apps.unclassified > 0 ? (
@@ -313,7 +352,9 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
                 <div key={`${r.rule}-${r.action}`}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                     <span style={{ fontSize: 'var(--text-sm)' }}>
-                      {r.rule}
+                      <Drill fields={{ ruleName: r.rule, action: r.action }} title={`Search this firewall's logs for rule ${r.rule} over the same 24h`}>
+                        {r.rule}
+                      </Drill>
                       <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 'var(--text-xs)' }}>
                         {r.action}
                       </span>
@@ -346,7 +387,15 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
                     <div key={`${t.name}-${t.severity}`}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                         <span style={{ fontSize: 'var(--text-sm)' }}>
-                          {t.name}
+                          {/* ⛔ Only NAMED threats are linked. '(unnamed)' is a
+                              label this component invents for a NULL
+                              threat_name; searching for it literally would
+                              match nothing and look like a broken link. It is
+                              excluded from this list already and reported
+                              separately as a count. */}
+                          <Drill fields={{ threatName: t.name }} title={`Search this firewall's logs for ${t.name} over the same 24h`}>
+                            {t.name}
+                          </Drill>
                           {t.severity ? (
                             <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 'var(--text-xs)' }}>
                               {t.severity}
@@ -415,7 +464,12 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
                   <div key={`${r.dstIp}-${r.dstPort}-${r.protocol}-${r.allowed}-${r.publicSource}`}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
-                        {endpoint(r.dstIp, r.dstPort, r.protocol)}
+                        <Drill
+                          fields={{ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol }}
+                          title="Search this firewall's logs for what arrived at this address over the same 24h"
+                        >
+                          {endpoint(r.dstIp, r.dstPort, r.protocol)}
+                        </Drill>
                       </span>
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
                         <span style={{ color: r.publicSource ? 'var(--red)' : 'var(--text-muted)' }}>
@@ -448,7 +502,14 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
             <RankedList
               rows={blocked}
               keyOf={(r) => `${r.dstIp}:${r.dstPort}:${r.protocol}`}
-              labelOf={(r) => `${r.dstIp}${r.dstPort ? `:${r.dstPort}` : ''}${r.protocol ? ` ${r.protocol}` : ''}`}
+              labelOf={(r) => (
+                <Drill
+                  fields={{ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol }}
+                  title="Search this firewall's logs for this destination over the same 24h"
+                >
+                  {endpoint(r.dstIp, r.dstPort, r.protocol)}
+                </Drill>
+              )}
               color="var(--red)"
             />
           )}
