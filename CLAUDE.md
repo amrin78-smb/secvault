@@ -1584,11 +1584,32 @@ chip that matters. ⛔ Nothing is deleted; advisories already collected for a de
 history and stay.
 
 ⛔ **Registering a vendor requires a VERIFIED machine-readable source**, same rule as a device parser.
-Probed 2026-09-15 and both obvious additions were REFUSED: **Check Point** has no feed —
-`advisories.checkpoint.com`, its `/feed/` and its `/wp-json/` paths all answer **202 text/html**, a bot
-challenge, which is the ground `fortinet_psirt` is already stuck on; **Cisco** has a working PSIRT RSS
-(200, 8 items, 19 CVE ids) but it is a rolling window with no history and the real openVuln API
-answers **403** without registered credentials.
+Both obvious additions are still REFUSED, but **the recorded reason for Check Point was wrong and is
+corrected here (re-probed 2026-09-18 from three hosts)**:
+
+- **Check Point** — this file said `advisories.checkpoint.com` and its `/feed/` answer **202
+  text/html, a bot challenge**. That is NO LONGER TRUE and may never have been the whole story: it now
+  answers **200 with 147 KB of ordinary HTML and no challenge markers**, from the SecVault box, an
+  office connection and Netlify alike. `/feed/` answers **404**. It is still refused — HTML is not a
+  machine-readable source — but the refusal rests on *there being no feed*, not on a bot wall.
+  ⛔ A stale reason is worse than none: it sent a session looking for a proxy/UA workaround for a
+  problem that had gone away, for a source that was never going to qualify anyway.
+- **Cisco** — PSIRT RSS still works (**200, `application/xml`, 146 KB**, reachable from all three
+  hosts) and is still a rolling window with no history. `api.cisco.com/security/advisories/v2/all`
+  answers **403 "Developer Inactive"** — registered credentials, not merely a missing header.
+
+⛔ **THE FORTINET BOT CHALLENGE IS ON THE ADVISORY PAGE, NOT THE FEED, AND MOVING HOSTS CANNOT FIX
+IT.** Measured 2026-09-18 from the SecVault server, an office connection and a Netlify function:
+`fortiguard.com/rss/ir.xml` returns **200 `text/xml`, 38 KB** everywhere (it redirects to
+`filestore.fortinet.com`, which answers in ~46 ms and is not fronted by Cloudflare), while
+`fortiguard.com/psirt/<id>` returns a **byte-identical 19,751-byte Cloudflare "Just a moment"
+interstitial** from all three. It is a JAVASCRIPT challenge: **not IP-dependent and not UA-dependent**
+— a Chrome user-agent gets the same page as a bot one. ⛔ **So relocating this fetch to the central
+hub would move the failure, not fix it**, and a datacenter IP is typically treated more harshly, not
+less. There is also no alternative path: `filestore.../psirt/*.json`, `/psirt/csaf/`, `psirt-csaf/`
+and `fortinet.com/.well-known/csaf/provider-metadata.json` all **404** — Fortinet publishes no CSAF
+provider endpoint. The cost is bounded: FortiOS is covered via NVD at **282 of 287 advisories with
+usable ranges (98%)**; what is missing is Fortinet's own earlier-than-NVD disclosure timing.
 
 ⛔ **A VENDOR'S CPE PRODUCT LIST IS COVERAGE, AND UNDER-ASKING IS SILENT** (v2.132.0). Check Point
 collected **7 advisories** for a firewall with a thirty-year CVE history, and nothing reported a
