@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { KNOWN_FEEDS } from '../../lib/feedStatus';
-import { FEED_LABELS } from '../../lib/formatDisplay';
+import { FEED_LABELS, feedStatusRank } from '../../lib/formatDisplay';
 import { useRouter } from 'next/navigation';
 import Button from '../ui/Button';
 import LoadingSpinner from '../ui/LoadingSpinner';
@@ -103,11 +103,24 @@ export default function SyncNowButton() {
           // known feed-name list) rather than treating "finished_at is set" as "succeeded".
           // Without this, a source that errored out (e.g. NVD failed while KEV succeeded)
           // still reported ok: true here, hiding a real partial failure from the operator.
-          const failed = FEED_SOURCES.filter(({ key }) => bySource[key] && bySource[key].status === 'error');
+          // ⛔ 'failed' IS A REAL STATUS AND WAS NEVER MATCHED. runCveHubSync's
+          // catch and runCloudAppsSync both write it, and FEED_STATUS_ORDER
+          // lists failed alongside error -- so the CENTRAL CVE FEED throwing
+          // produced a green "Sync complete."
+          //
+          // ⛔ AND 'partial' IS A FAILURE STATE, not a clean one. The comment
+          // above claimed this mirrors getSyncPillStatus's convention; that
+          // convention is the opposite -- feedState returns 'degraded' for
+          // partial. So the header pill read FEEDS DEGRADED while the button
+          // directly beneath it read "Sync complete." Both opinions now come
+          // from feedStatusRank, which is the single definition.
+          const failed = FEED_SOURCES.filter(
+            ({ key }) => bySource[key] && feedStatusRank(bySource[key].status) <= 1
+          );
           const ok = failed.length === 0;
           const text = ok
             ? `Sync complete. ${summarizeBySource(bySource)}`
-            : `Sync completed with errors (${failed.map((f) => f.label).join(', ')}). ${summarizeBySource(bySource)}`;
+            : `Sync completed with problems (${failed.map((f) => f.label).join(', ')}). ${summarizeBySource(bySource)}`;
           setResult({ ok, text });
           router.refresh();
         }

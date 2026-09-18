@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 
 const {
   diskState, getDatabaseSize, getSyslogRetention, getIngestHealth,
-  getServiceLiveness, volumeFor, BYTES_IN_GB,
+  getServiceLiveness, volumeFor, volumeKey, BYTES_IN_GB,
 } = require('../lib/serverHealth');
 
 const GB = BYTES_IN_GB;
@@ -61,11 +61,18 @@ test('volumeFor returns null for a missing path argument', async () => {
 
 const failPool = { query: async () => { throw new Error('connection refused'); } };
 
-test('getDatabaseSize reports null and the error, not 0 bytes', async () => {
+test('getDatabaseSize reports null and the error, not 0 bytes or an empty list', async () => {
   const r = await getDatabaseSize(failPool);
   assert.equal(r.totalBytes, null);
   assert.match(r.error, /connection refused/);
-  assert.deepEqual(r.tables, []);
+  // THIS ASSERTION USED TO READ deepEqual(r.tables, []) AND PINNED THE BUG.
+  // An empty array renders exactly like "nothing qualified" — the dead-tuple
+  // block is drawn only when the array is non-empty — so a failed read was a
+  // clean bill of health. The test enforced it.
+  assert.equal(r.tables, null, 'a failed read is not an empty list');
+  assert.equal(r.deadTuples, null, 'and absence of dead tuples is not an all-clear');
+  assert.match(r.tablesError, /connection refused/);
+  assert.match(r.deadTuplesError, /connection refused/);
 });
 
 test('getSyslogRetention reports nulls when the catalogue cannot be read', async () => {
@@ -108,7 +115,62 @@ test('getIngestHealth clamps the window rather than trusting the caller', async 
   await getIngestHealth(pool, 99999);
   await getIngestHealth(pool, -5);
   await getIngestHealth(pool, 'nonsense');
-  assert.deepEqual(seen, [1440, 1, 15]);
+  // null / false / '' / [] all convert to 0, which IS finite — so a bare
+  // Number.isFinite guard clamped them to 1 MINUTE instead of the 15-minute
+  // fallback. The original test covered 99999, -5 and 'nonsense' and omitted
+  // precisely the inputs the guard got wrong.
+  await getIngestHealth(pool, null);
+  await getIngestHealth(pool, '');
+  await getIngestHealth(pool, false);
+  assert.deepEqual(seen, [1440, 1, 15, 15, 15, 15]);
+});
+
+test('getIngestHealth: a row missing keys yields null, never NaN', async () => {
+  // The published contract is "null means not measured"; NaN !== null, so a
+  // consumer testing `dropped === null` would treat NaN as a measured value.
+  const pool = { query: async () => ({ rows: [{}] }) };
+  const r = await getIngestHealth(pool, 15);
+  assert.equal(r.received, null);
+  assert.equal(r.dropped, null);
+  assert.equal(r.stored, null);
+  assert.equal(r.eventsPerSec, null);
+});
+
+test('⛔ the ingest ERROR shape keeps every key the renderer reads', async () => {
+  // `flushes` was omitted, and the widget's "collector recorded no flushes"
+  // banner is gated on `flushes === 0` — undefined === 0 is false, so a DATABASE
+  // failure suppressed the one banner that says ingest is broken.
+  const r = await getIngestHealth(failPool, 15);
+  assert.equal(r.flushes, 0, 'the banner gate must still fire');
+  assert.equal(r.received, null);
+  assert.equal(r.dropped, null);
+  assert.equal(r.eventsPerSec, null);
+  assert.ok(r.error, 'and the reason is carried');
+});
+
+test('diskState refuses a non-finite figure', () => {
+  // NaN < 20 and NaN < 100 are both FALSE, so a guard testing only null and
+  // undefined fell through and returned 'ok' — a GREEN bar for an unmeasured
+  // volume, the exact inversion this module exists to prevent.
+  assert.equal(diskState({ freeBytes: NaN }), null);
+  assert.equal(diskState({ freeBytes: 'abc' }), null);
+  assert.equal(diskState({ freeBytes: Infinity }), null);
+});
+
+test('volumeKey treats E: and e: as one volume', () => {
+  // path.resolve does not normalise a Windows drive letter, so a lowercase
+  // drive in .env.local split one volume into two identical rows.
+  assert.equal(volumeKey('E:/SecVaultArchive'), volumeKey('e:/SecVaultSpool'));
+});
+
+test('getSyslogRetention keeps retentionDays through a database failure', async () => {
+  // It is a process.env read with no dependency on the database; dropping it
+  // made the page claim it did not know its own configuration during a blip.
+  process.env.SYSLOG_RETENTION_DAYS = '30';
+  const r = await getSyslogRetention(failPool);
+  assert.equal(r.partitions, null);
+  assert.equal(r.retentionDays, 30);
+  delete process.env.SYSLOG_RETENTION_DAYS;
 });
 
 test('⛔ getServiceLiveness: never-run and broken are different answers', async () => {

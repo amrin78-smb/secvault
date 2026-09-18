@@ -20,6 +20,8 @@ function gb(bytes) {
     return <span style={{ color: 'var(--unmeasured)' }}>—</span>;
   }
   const v = Number(bytes) / BYTES_IN_GB;
+  // Below a gigabyte, "0.0 GB" is indistinguishable from nothing at all.
+  if (v < 1) return <>{Math.max(1, Math.round(Number(bytes) / (1024 ** 2)))} MB</>;
   return <>{v >= 100 ? v.toFixed(0) : v.toFixed(1)} GB</>;
 }
 
@@ -137,10 +139,24 @@ export default async function ServerHealthWidgets() {
             not measured — {h.database.error}
           </div>
         ) : null}
-        {h.database.tables.slice(0, 5).map((t) => (
+        {h.database.tablesError ? (
+          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)' }}>
+            Largest relations not measured — {h.database.tablesError}
+          </div>
+        ) : null}
+        {(h.database.tables || []).slice(0, 5).map((t) => (
           <Row key={t.name} label={<span style={{ fontFamily: 'var(--font-mono)' }}>{t.name}</span>} value={gb(t.bytes)} />
         ))}
-        {h.database.deadTuples.length > 0 ? (
+        {/* A FAILED READ IS NOT AN ALL-CLEAR. This block used to render only when
+            the array was non-empty, and the array was [] on failure — so a
+            permission-denied pg_stat_user_tables was pixel-identical to "no table
+            has significant dead tuples". */}
+        {h.database.deadTuplesError ? (
+          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
+            Dead-tuple pressure not measured — {h.database.deadTuplesError}
+          </div>
+        ) : null}
+        {h.database.deadTuples && h.database.deadTuples.length > 0 ? (
           <div style={{ marginTop: 'var(--s3)', paddingTop: 'var(--s3)', borderTop: '1px solid var(--border)' }}>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>
               {/* ⛔ Dead tuples are a real signal on this product, not trivia: a
@@ -148,7 +164,7 @@ export default async function ServerHealthWidgets() {
                   every deploy and left that table 18.6% dead. */}
               Dead tuples — space held by deleted or updated rows, reclaimed by autovacuum
             </div>
-            {h.database.deadTuples.map((t) => (
+            {(h.database.deadTuples || []).map((t) => (
               <Row
                 key={t.name}
                 label={<span style={{ fontFamily: 'var(--font-mono)' }}>{t.name}</span>}
@@ -160,6 +176,11 @@ export default async function ServerHealthWidgets() {
       </Panel>
 
       <Panel icon={IconGrid} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Raw syslog retention">
+        {h.retention.error ? (
+          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
+            Partition catalogue not measured — {h.retention.error}
+          </div>
+        ) : null}
         <Row label="Daily partitions" value={num(h.retention.partitions)} />
         <Row label="Oldest day retained" value={h.retention.oldestDay || <span style={{ color: 'var(--unmeasured)' }}>—</span>} />
         <Row label="Newest day" value={h.retention.newestDay || <span style={{ color: 'var(--unmeasured)' }}>—</span>} />
@@ -178,6 +199,17 @@ export default async function ServerHealthWidgets() {
       </Panel>
 
       <Panel icon={IconActivity} tint="var(--tint-warn-fg)" tintBg="var(--tint-warn)" title={`Ingest (last ${h.ingest.windowMinutes} min)`}>
+        {/* THE PANEL WHOSE JOB IS TO SAY INGEST IS BROKEN MUST SAY SO. Its error
+            was never rendered at all, and because the error shape omitted
+            `flushes`, the "no flushes recorded" banner below was ALSO suppressed
+            (undefined === 0 is false) — so a database failure produced five
+            em-dashes and no explanation whatsoever. */}
+        {h.ingest.error ? (
+          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
+            Ingest statistics could not be read — {h.ingest.error}. These figures are NOT MEASURED,
+            not zero.
+          </div>
+        ) : null}
         <Row label="Events received" value={num(h.ingest.received)} />
         <Row label="Rate" value={h.ingest.eventsPerSec === null ? num(null) : <>{num(h.ingest.eventsPerSec)}/sec</>} />
         <Row
@@ -220,8 +252,16 @@ export default async function ServerHealthWidgets() {
           <Row
             key={s.name}
             label={s.name}
-            value={<span style={{ color: s.ageSeconds === null ? 'var(--unmeasured)' : undefined }}>{ago(s.ageSeconds)}</span>}
-            sub={s.error ? `not measured — ${s.error}` : 'last write to its own tables'}
+            // "NEVER" IS A FACT; A FAILED READ IS NOT. Both produced ageSeconds
+            // null and the value column printed "never" for both - asserting, on
+            // the panel that decides whether the engine is alive, something
+            // manufactured from a read that did not happen.
+            value={
+              s.error
+                ? <span style={{ color: 'var(--unmeasured)' }}>not measured</span>
+                : <span style={{ color: s.ageSeconds === null ? 'var(--unmeasured)' : undefined }}>{ago(s.ageSeconds)}</span>
+            }
+            sub={s.error ? `could not read its table — ${s.error}` : 'last write to its own tables'}
           />
         ))}
         <Row label="App memory (RSS)" value={gb(h.process.rssBytes)} />

@@ -18,13 +18,19 @@ import { useRouter } from 'next/navigation';
 // word of its label". A device filter is that same hazard with a nicer control,
 // so the scope is stated rather than inferred.
 
-export default function ExposureFilters({ currentDeviceId = '', devices = [] }) {
+export default function ExposureFilters({ currentDeviceId = '', devices = [], currentLimit = '' }) {
   const router = useRouter();
 
   function navigate(nextDeviceId) {
     const params = new URLSearchParams();
     if (nextDeviceId) params.set('device_id', nextDeviceId);
-    // `page` is deliberately NOT carried over — see the header.
+    // ⛔ `limit` IS CARRIED, `page` IS NOT. Dropping page is deliberate and the
+    // header explains why. Dropping limit was not: the Pagination control writes
+    // the rows-per-page there, so choosing a firewall silently reset a reader
+    // who had selected 200 rows back to 50, with nothing to indicate it. The
+    // comment said "page is deliberately NOT carried over", implying everything
+    // else was — and the code carried nothing.
+    if (currentLimit) params.set('limit', String(currentLimit));
     const qs = params.toString();
     router.push(qs ? `/exposure?${qs}` : '/exposure');
   }

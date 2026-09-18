@@ -362,7 +362,16 @@ export default async function ExposurePage({ searchParams }) {
             </Card>
           ) : null}
 
-          {rows.length === 0 ? (
+          {/* GATED ON THE FLEET, NOT ON THE FILTERED PAGE. This tested
+              rows.length — the filtered, paginated count — so selecting a
+              firewall with no exposure paths rendered the FLEET-WIDE all-clear
+              ("No internet-facing exposure paths were found"), and because the
+              filter control lives in the else arm, the dropdown and Clear button
+              vanished with it: no indication a filter was active and no way back
+              except editing the URL. The per-device empty state below was
+              therefore unreachable dead code, describing the exact behaviour
+              that was shipping. */}
+          {allRows.length === 0 ? (
             <Card>
               <CardBody>
                 <EmptyState message="No internet-facing exposure paths were found. This means no enabled allow rule was matched to a public interface address or a destination-NAT published address — not that the fleet has no public presence." />
@@ -381,20 +390,28 @@ export default async function ExposurePage({ searchParams }) {
                     marginBottom: 'var(--s4)',
                   }}
                 >
-                  <ExposureFilters currentDeviceId={selectedDeviceId} devices={deviceOptions} />
+                  <ExposureFilters
+                    currentDeviceId={selectedDeviceId}
+                    devices={deviceOptions}
+                    currentLimit={searchParams?.limit || ''}
+                  />
                   {/* ⛔ NAMES THE SCOPE WHENEVER ONE IS APPLIED. Without this the
                       table below reads as the whole estate while the tiles above
                       genuinely are — two different scopes, identically styled. */}
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
                     {selectedDeviceId ? (
                       <>
-                        Showing <strong>{tableRows.length}</strong> of {allRows.length} path(s) —{' '}
+                        <strong>{tableRows.length}</strong> of {allRows.length} path(s) match —{' '}
                         <strong>{selectedDevice ? selectedDevice.name : 'unknown firewall'}</strong> only.
                         The figures above remain fleet-wide.
                       </>
                     ) : (
                       <>
-                        Showing all <strong>{allRows.length}</strong> path(s) across the fleet.
+                        {/* "Showing" read as "on screen" while the pager
+                            immediately below said "1-50 of 300" — two labels
+                            contradicting each other on the same card. This one
+                            describes what MATCHES; the pager describes the page. */}
+                        <strong>{allRows.length}</strong> path(s) across the fleet.
                       </>
                     )}
                   </div>
