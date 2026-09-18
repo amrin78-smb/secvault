@@ -7,6 +7,7 @@ import { IconActivity, IconShield, IconTrendingUp, IconDevices, IconRefresh } fr
 import { classifyAction } from '../../lib/syslog/actions';
 import {
   getTrafficTimeline,
+  fillHourlyGaps,
   getTopTalkers,
   getActionBreakdown,
   getTopRules,
@@ -60,6 +61,10 @@ const SESSION_OUTCOMES_SHOWN = 8;
 
 export async function TrafficVolumeWidget() {
   const rows = await getTrafficTimeline(pool, 24);
+  // Densified for the strip only — a filled hour has no events and no deny
+  // count, so it can move no figure, only show where the axis is empty.
+  const hourly = fillHourlyGaps(rows, 24, Date.now());
+  const gapHours = hourly.filter((r) => !r.measured).length;
   const total = rows.reduce((n, r) => n + r.events, 0);
   const max = rows.reduce((n, r) => Math.max(n, r.events), 0);
   // ⛔ `denied` is deliberately TRI-STATE in trafficStats.js: NULL means this
@@ -135,22 +140,34 @@ export async function TrafficVolumeWidget() {
             </div>
             {/* Hand-rolled bars — this codebase has no charting library beyond
                 recharts, and a 24-bucket bar strip does not warrant one. */}
+            {/* ⛔ AN HOUR WITH NO ROW IS A GAP IN THE AXIS, NOT A MISSING BAR.
+                The rollup writes nothing for an hour in which nothing was
+                stored, so mapping the returned rows spread however many bars
+                existed evenly across the strip and a collector outage came out
+                as an unbroken, healthy-looking series. Hueless (--hatch),
+                never a zero bar -- see fillHourlyGaps. */}
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 46 }}>
-              {rows.map((r) => (
+              {hourly.map((r) => (
                 <div
                   key={r.hour.toISOString()}
-                  title={`${r.hour.toISOString().slice(11, 16)} UTC — ${r.events.toLocaleString()} events`}
+                  title={
+                    r.measured
+                      ? `${r.hour.toISOString().slice(11, 16)} UTC — ${r.events.toLocaleString()} events`
+                      : `${r.hour.toISOString().slice(11, 16)} UTC — NOT MEASURED: no events were stored for this hour.`
+                  }
                   style={{
                     flex: 1,
-                    height: `${max > 0 ? Math.max(3, (r.events / max) * 100) : 3}%`,
-                    background: 'var(--accent-teal)',
+                    height: r.measured ? `${max > 0 ? Math.max(3, (r.events / max) * 100) : 3}%` : '100%',
+                    background: r.measured ? 'var(--accent-teal)' : 'var(--hatch)',
                     borderRadius: 2,
                   }}
                 />
               ))}
             </div>
             <div style={{ marginTop: 6, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-              {rows.length} hour{rows.length === 1 ? '' : 's'} of history. Volume covers Palo Alto
+              {rows.length} of the last 24 hours carried events{gapHours > 0
+                ? `; ${gapHours} recorded none at all (shown hueless — a silent fleet or an ingestion gap, not distinguished here)`
+                : ''}. Volume covers Palo Alto
               session-close records only — FortiOS reports running cumulative counters
               that cannot be summed, so its traffic is counted but not measured in bytes.
             </div>

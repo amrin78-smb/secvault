@@ -7,6 +7,59 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.148.0': [
+    'The traffic charts now show the hours in which nothing arrived. Previously an hour with no events was simply left out, so a gap in collection was drawn as an unbroken line — the one thing a traffic chart exists to show. Missing hours are now drawn without colour, which is how this product marks anything it has not measured.',
+    'Clicking a busy rule in a firewall\'s Traffic tab now finds its traffic. Where the firewall names a rule by number rather than by name, the search was looking in the wrong field and came back empty — which reads as "this rule carried no traffic", directly contradicting the count beside it.',
+    'The feed status no longer reports a working system as an empty one. If every advisory feed had been deliberately skipped, the header claimed no feed had ever run and that all vulnerability data was missing. It now says what actually happened.',
+    'When a feed is skipped, the green feed status names it and says so, instead of quietly leaving it off the list of feeds that ran.',
+    'A firewall whose internet exposure could not be assessed is now listed on the Exposure page instead of being absent from it, so it cannot be mistaken for a firewall that is not monitored. Separately, a log search that runs out of time is now reported as a failure to the programs that call it, rather than as a successful search with no results.',
+  ],
+  '2.147.0': [
+    'Second half of a two-part review of the previous week\'s changes. Nine further fixes, all of the same kind: something SecVault could not measure was being displayed as a measured value.',
+    'On the new Server tab: free disk space is now judged by how much room is actually left rather than by percentage used, a volume that could not be read shows as unknown instead of as full, and the database size panel no longer shows a clean bill of health drawn from a reading that failed.',
+    'A deliberately skipped feed is no longer shown in red on the Advisories page, and no longer counts as "never succeeded" in the monthly vulnerability report sent to customers.',
+    'The Exposure page\'s new firewall filter keeps your rows-per-page choice, and selecting a firewall with no exposure paths now says so instead of showing the fleet-wide all-clear.',
+  ],
+  '2.146.0': [
+    'First half of a two-part review of the previous week\'s changes, covering the central vulnerability feed and the new per-firewall traffic view.',
+    'The central feed is now only credited with supplying data if its advisories were actually applied. A feed that arrived but could not be read would previously have been treated as a success, and the direct vulnerability sync would have been skipped in favour of nothing.',
+    'On the per-firewall Traffic tab: the "reached this firewall" count now comes from its own total rather than from the handful of rows on screen, the bar scale uses the real maximum, and a port the firewall did not report is left blank instead of printed as the word "null".',
+    'One failing traffic panel can no longer take down the whole firewall page — each panel now fails on its own and says which one, rather than leaving an empty panel that reads as "no traffic".',
+  ],
+  '2.145.0': [
+    'New Server tab on the Overview page: disk space for every volume this product writes to, database size, the largest tables, raw-log retention, collector throughput, and whether the Engine and Collector services are alive.',
+    'Service health is inferred from what each service actually writes, not from asking Windows — Windows reports a crash-looping service as Running, so the evidence is more truthful than the status.',
+    'Anything that cannot be read is shown as unknown rather than as zero. "No free space" is an emergency; "we could not read the volume" is a gap in our own instrumentation, and the two must not look the same.',
+    'Raw-log retention is read from the storage catalogue rather than by counting rows — counting would scan tens of millions of rows every time the page is opened.',
+  ],
+  '2.144.1': [
+    'Internal test corrections following the log-search time limit added in 2.144.0. No change to how the product behaves.',
+    'The time limit\'s behaviour is now pinned by tests, so a future change cannot quietly remove it.',
+  ],
+  '2.144.0': [
+    'Log searches are now stopped after ten seconds instead of running until the browser gives up. Raw events are indexed by firewall and time, not by address or application, so a search for a rare value reads the whole window — and while it does, it competes with the collector for the same disk.',
+    'A search that is stopped says so, in full, including why and what to do about it. It is never reported as "no results", which on a forensics page would tell an investigator that traffic never happened.',
+  ],
+  '2.143.0': [
+    'Values in a firewall\'s Traffic tab are now clickable: a busy address, application, rule, threat or destination opens Log search already filtered to it.',
+    'The link carries the same 24-hour window the widget used, so the two always describe the same period. Log search otherwise defaults to one hour, which would have shown a fraction of the number beside the link.',
+    'For a user without permission to search raw logs, the value is shown as plain text rather than as a link that leads to a refusal — raw logs carry usernames, internal addresses and visited sites.',
+  ],
+  '2.142.0': [
+    'Three more per-firewall traffic panels: the busiest rules, threat activity by name and severity, and what reached this firewall\'s own addresses from outside.',
+    '"Reached this firewall" counts traffic arriving at the firewall\'s own interface addresses — its management and VPN services — not traffic passing through it. Whether the source was public and whether the traffic was allowed are shown separately, and where the firewall did not report either, it is left blank rather than assumed.',
+    'Threat events the firewall did not name are counted separately instead of being quietly folded in with the named ones.',
+  ],
+  '2.141.0': [
+    'New Traffic tab on each firewall, showing that firewall\'s own log volume, session outcomes, busiest sources, applications, protocols and blocked destinations over 24 hours.',
+    'The existing fleet-wide Traffic view is unchanged. This answers the question the fleet view cannot: what is this one firewall doing.',
+    'A firewall that has never sent a log says so, and distinguishes that from one that used to and stopped — the second is something to investigate.',
+  ],
+  '2.140.0': [
+    'The Exposure page can now be filtered to a single firewall, instead of reading a paginated fleet-wide table line by line.',
+    'The filter scopes the table only. The totals above it remain fleet-wide and say so, so a filtered view cannot be mistaken for the whole estate.',
+    'Every active firewall is offered, including those with no internet-facing paths — "this firewall has nothing exposed" is usually the answer being looked for, and a firewall missing from the list would be indistinguishable from one that is not monitored.',
+  ],
   '2.139.0': [
     'SecVault now notices if the central vulnerability feed stops being updated. Until now it would have kept fetching the same unchanged feed every six hours, checking its signature, and reporting success — a green light over data that had quietly stopped moving.',
     'If the feed has not been refreshed for more than a day, the sync is reported as incomplete and says how long it has been, so it appears in the feed status instead of passing silently.',

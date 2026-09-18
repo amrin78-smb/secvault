@@ -14,6 +14,7 @@ import {
   getTopRules,
   getDeviceNamedThreats,
   getDeviceInboundHits,
+  fillHourlyGaps,
 } from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
@@ -93,6 +94,22 @@ function RankedList({ rows, labelOf, keyOf, color }) {
         </div>
       ))}
     </div>
+  );
+}
+
+// ⛔ MODULE TOP LEVEL, NEVER NESTED -- CLAUDE.md's first React rule. This was
+// declared inside DeviceTrafficTab, which makes it a NEW component type on every
+// render: React unmounts and remounts the whole subtree, losing focus and state.
+// It is a server component today so nothing was visibly broken, which is exactly
+// how the pattern survives long enough to be copied into a client one.
+//
+// A null `href` renders the children as plain text -- see drillHref.
+function Drill({ href, title, children }) {
+  if (!href) return <>{children}</>;
+  return (
+    <Link href={href} title={title} style={{ color: 'var(--text-primary)' }}>
+      {children}
+    </Link>
   );
 }
 
@@ -205,18 +222,12 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
     return `/logs?${p.toString()}`;
   }
 
-  // ⛔ NOT WRAPPED WHEN THE VIEWER CANNOT FOLLOW IT. Log search is gated on
+  // ⛔ NOT LINKED WHEN THE VIEWER CANNOT FOLLOW IT. Log search is gated on
   // VIEW_LOG_SEARCH (raw syslog carries usernames, internal addresses and
   // visited URLs), so for an operator the value renders as plain text rather
-  // than as a link that lands on a refusal.
-  function Drill({ fields, title, children }) {
-    if (!canSearchLogs) return <>{children}</>;
-    return (
-      <Link href={logHref(fields)} title={title} style={{ color: 'var(--text-primary)' }}>
-        {children}
-      </Link>
-    );
-  }
+  // than as a link that lands on a refusal. A null href is what says so, and
+  // the Drill component itself lives at module top level -- see its comment.
+  const drillHref = (fields) => (canSearchLogs ? logHref(fields) : null);
 
   const namedThreats = threats.threats.filter((t) => t.name !== '(unnamed)');
   // SUM, NOT find(). getDeviceNamedThreats groups by name AND severity, so
@@ -234,6 +245,12 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
   // rows[0] is not the busiest -- using it as the bar scale made a 5-event row
   // the denominator for a 480,000-event row and every bar rendered full.
   const inboundMax = inboundRows.reduce((n, r) => Math.max(n, r.events), 0);
+
+  // Densified for the bar strip only. The figures below still come from the
+  // MEASURED rows: a filled hour contributes no events and no deny count, so it
+  // can never move a total, only reveal a hole in the axis.
+  const hourly = fillHourlyGaps(timeline, 24, Date.now());
+  const gapHours = hourly.filter((r) => !r.measured).length;
 
   const totalEvents = timeline.reduce((n, r) => n + r.events, 0);
   // ⛔ NULL-SAFE SUM. `denied` is null when the vendor never reports an action,
@@ -283,20 +300,40 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>denied / dropped</div>
             </div>
           </div>
+          {/* ⛔ EVERY HOUR GETS A SLOT, INCLUDING THE ONES WITH NO ROW. The
+              rollup writes nothing for an hour in which nothing was stored, so
+              mapping the returned rows drew 14 evenly-spread bars across a
+              24-hour axis and an ingestion outage rendered as an unbroken
+              series. When traffic stopped is the one thing this strip exists to
+              show. A filled hour is hueless (--hatch), never a zero bar: no row
+              means nothing was STORED, and whether the firewall was silent or
+              the collector was down is not something this can tell. */}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 56 }}>
-            {timeline.map((r) => (
+            {hourly.map((r) => (
               <div
                 key={String(r.hour)}
-                title={`${new Date(r.hour).toISOString().slice(0, 16).replace('T', ' ')} UTC — ${r.events.toLocaleString()} events`}
+                title={
+                  r.measured
+                    ? `${new Date(r.hour).toISOString().slice(0, 16).replace('T', ' ')} UTC — ${r.events.toLocaleString()} events`
+                    : `${new Date(r.hour).toISOString().slice(0, 16).replace('T', ' ')} UTC — NOT MEASURED: no events were stored for this hour. The firewall may have been silent, or ingestion may have stopped.`
+                }
                 style={{
                   flex: 1,
-                  height: `${maxHour > 0 ? Math.max(3, Math.round((r.events / maxHour) * 100)) : 3}%`,
-                  background: 'var(--primary)',
+                  height: r.measured
+                    ? `${maxHour > 0 ? Math.max(3, Math.round((r.events / maxHour) * 100)) : 3}%`
+                    : '100%',
+                  background: r.measured ? 'var(--primary)' : 'var(--hatch)',
                   borderRadius: '2px 2px 0 0',
                 }}
               />
             ))}
           </div>
+          {gapHours > 0 ? (
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--s2)' }}>
+              {gapHours} of the last 24 hours recorded no events at all (shown hueless). That is
+              either a silent firewall or an ingestion gap — the two are not distinguished here.
+            </div>
+          ) : null}
           {measuredDenied.length > 0 && measuredDenied.length < timeline.length ? (
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--s3)' }}>
               {/* ⛔ Partial measurement is disclosed rather than averaged away. */}
@@ -347,7 +384,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
               rows={hosts}
               keyOf={(r) => r.srcIp}
               labelOf={(r) => (
-                <Drill fields={{ srcIp: r.srcIp }} title={`Search this firewall's logs for ${r.srcIp.replace('/32', '')} over the same 24h`}>
+                <Drill href={drillHref({ srcIp: r.srcIp })} title={`Search this firewall's logs for ${r.srcIp.replace('/32', '')} over the same 24h`}>
                   {r.srcIp.replace('/32', '')}
                 </Drill>
               )}
@@ -369,7 +406,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                 rows={apps.applications}
                 keyOf={(r) => r.application}
                 labelOf={(r) => (
-                  <Drill fields={{ application: r.application }} title={`Search this firewall's logs for ${r.application} over the same 24h`}>
+                  <Drill href={drillHref({ application: r.application })} title={`Search this firewall's logs for ${r.application} over the same 24h`}>
                     {r.application}
                   </Drill>
                 )}
@@ -413,7 +450,18 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                 <div key={`${r.rule}-${r.action}`}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                     <span style={{ fontSize: 'var(--text-sm)' }}>
-                      <Drill fields={{ ruleName: r.rule, action: r.action }} title={`Search this firewall's logs for rule ${r.rule} over the same 24h`}>
+                      {/* ⛔ NAME OR ID, WHICHEVER THIS ROW ACTUALLY HOLDS. The widget shows
+                          coalesce(rule_name, rule_id), and passing that as `ruleName`
+                          searched rule_name for what was often an ID -- returning
+                          nothing, next to a hit count saying this rule is the busiest
+                          on the firewall. An empty forensics result reads as "no such
+                          traffic", not as "wrong field". */}
+                      <Drill
+                        href={drillHref(r.ruleName
+                          ? { ruleName: r.ruleName, action: r.action }
+                          : { ruleId: r.ruleId, action: r.action })}
+                        title={`Search this firewall's logs for rule ${r.rule} over the same 24h`}
+                      >
                         {r.rule}
                       </Drill>
                       <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 'var(--text-xs)' }}>
@@ -454,7 +502,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                               match nothing and look like a broken link. It is
                               excluded from this list already and reported
                               separately as a count. */}
-                          <Drill fields={{ threatName: t.name }} title={`Search this firewall's logs for ${t.name} over the same 24h`}>
+                          <Drill href={drillHref({ threatName: t.name })} title={`Search this firewall's logs for ${t.name} over the same 24h`}>
                             {t.name}
                           </Drill>
                           {t.severity ? (
@@ -529,7 +577,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
                         <Drill
-                          fields={{ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol }}
+                          href={drillHref({ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol })}
                           title="Search this firewall's logs for what arrived at this address over the same 24h"
                         >
                           {endpoint(r.dstIp, r.dstPort, r.protocol)}
@@ -584,7 +632,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
               keyOf={(r) => `${r.dstIp}:${r.dstPort}:${r.protocol}`}
               labelOf={(r) => (
                 <Drill
-                  fields={{ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol }}
+                  href={drillHref({ dstIp: r.dstIp, dstPort: r.dstPort, protocol: r.protocol })}
                   title="Search this firewall's logs for this destination over the same 24h"
                 >
                   {endpoint(r.dstIp, r.dstPort, r.protocol)}

@@ -1374,10 +1374,15 @@ CREATE INDEX IF NOT EXISTS idx_vrr_vendor ON vendor_recommended_releases(vendor)
 
 CREATE TABLE IF NOT EXISTS feed_sync_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  feed_name TEXT NOT NULL, -- 'nvd' | 'paloalto_psirt' | 'fortinet_psirt' | 'kev' (comment corrected
-    -- 2026-07-23 — the latter two vendor PSIRT feeds were added after this comment was first
-    -- written and never updated; see CLAUDE.md's "Feed Sources" table for the full sync-order list)
-  status TEXT NOT NULL, -- 'success' | 'error' | 'partial'
+  feed_name TEXT NOT NULL, -- 'cve_hub' | 'nvd' | 'paloalto_psirt' | 'fortinet_psirt' | 'kev' |
+    -- 'cveorg' | 'epss' | 'cloud_apps'. Corrected twice now (2026-07-23 for the vendor PSIRT
+    -- feeds, 2026-09-18 for the central feed and the enrichment ones) -- see CLAUDE.md's
+    -- "Feed Sources" table for the full sync-order list, which is authoritative.
+  status TEXT NOT NULL, -- 'success' | 'error' | 'failed' | 'partial' | 'skipped'.
+    -- 'skipped' is a RECORDED DECISION, not a result: the vendor-PSIRT inventory gate and the
+    -- central-feed-delivered gate both write it rather than letting a feed silently stop
+    -- appearing, and readers must not rank it with the failures. Documenting only three of the
+    -- five here is how a reader concludes an unlisted status is impossible.
   inserted INTEGER NOT NULL DEFAULT 0,
   updated INTEGER NOT NULL DEFAULT 0,
   errors JSONB,

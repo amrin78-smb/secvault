@@ -234,7 +234,20 @@ test('⛔ server health never counts rows in syslog_events', () => {
   // Retention comes from the partition CATALOGUE: count(*) over that table is a
   // full scan of ~28M rows per day of retention, on a page that renders often.
   const src = healthSource();
-  assert.doesNotMatch(src, /count\(\*\)[\s\S]{0,40}FROM\s+syslog_events\b/i);
+  // ⛔ THE WINDOW WAS 40 CHARACTERS AND THE THING IT FORBIDS IS ROUTINELY
+  // LONGER THAN THAT. `count(*)::bigint AS events, max(received_at) AS last`
+  // then a newline and FROM is already past it -- so the guard would have
+  // watched the exact shape a real regression takes go by. A guard whose reach
+  // is shorter than the pattern it bans is a guard that cannot fire.
+  assert.doesNotMatch(src, /count\(\s*\*\s*\)[\s\S]{0,600}?FROM\s+syslog_events\b/i);
+  // And the window itself is pinned, so a later edit cannot quietly shrink it
+  // back: this sample MUST be caught.
+  const wouldBeCaught = `SELECT count(*)::bigint AS events,
+            max(received_at) AS last_event,
+            min(received_at) AS first_event
+       FROM syslog_events
+      WHERE received_at > now() - interval '1 day'`;
+  assert.match(wouldBeCaught, /count\(\s*\*\s*\)[\s\S]{0,600}?FROM\s+syslog_events\b/i);
   assert.match(src, /pg_tables/, 'partitions come from the catalogue');
 });
 
@@ -246,4 +259,62 @@ test('⛔ server health never shells out to read service state', () => {
       `must not use ${forbidden} — NSSM reports a crash-looping process as Running anyway, so the service state would be LESS truthful than the evidence each service writes`
     );
   }
+});
+
+// ── the two functions nothing covered ─────────────────────────────────────
+
+const path = require('node:path');
+const { getDiskUsage, getServerHealth } = require('../lib/serverHealth');
+
+test('getDiskUsage reports one row per VOLUME, with every role that uses it', async () => {
+  // Two paths on the same drive were two rows with identical byte figures and
+  // different role labels, and statfs ran twice on the same volume. React keys
+  // stayed distinct so nothing warned.
+  const prevSpool = process.env.SYSLOG_SPOOL_DIR;
+  const prevArchive = process.env.SYSLOG_ARCHIVE_DIR;
+  try {
+    process.env.SYSLOG_SPOOL_DIR = path.join(__dirname, '..', 'spool-nonexistent');
+    process.env.SYSLOG_ARCHIVE_DIR = path.join(__dirname, '..', 'archive-nonexistent');
+    const rows = await getDiskUsage({ installDir: path.join(__dirname, '..') });
+    assert.ok(Array.isArray(rows) && rows.length >= 1);
+    const volumes = rows.map((r) => r.volume);
+    assert.equal(new Set(volumes).size, volumes.length, 'one row per volume');
+    const roles = rows.flatMap((r) => r.roles);
+    for (const r of ['install', 'syslog spool', 'syslog archive']) {
+      assert.ok(roles.includes(r), `${r} must be accounted for somewhere`);
+    }
+    for (const row of rows) {
+      // Either a real figure or an explicit null -- never a fabricated zero.
+      assert.ok(row.totalBytes === null || Number.isFinite(row.totalBytes));
+      assert.ok(row.freeBytes === null || Number.isFinite(row.freeBytes));
+    }
+  } finally {
+    if (prevSpool === undefined) delete process.env.SYSLOG_SPOOL_DIR; else process.env.SYSLOG_SPOOL_DIR = prevSpool;
+    if (prevArchive === undefined) delete process.env.SYSLOG_ARCHIVE_DIR; else process.env.SYSLOG_ARCHIVE_DIR = prevArchive;
+  }
+});
+
+test('⛔ getServerHealth still answers when the database is unreachable', async () => {
+  // The Server tab is the page an operator opens BECAUSE something is wrong. If
+  // one failing source could reject the whole thing, the tab would go blank at
+  // exactly the moment it is needed -- and a blank page reports nothing at all,
+  // which is strictly worse than reporting the failure.
+  const pool = { query: async () => { throw new Error('ECONNREFUSED'); } };
+  const health = await getServerHealth(pool, { installDir: path.join(__dirname, '..') });
+  for (const key of ['disks', 'database', 'retention', 'ingest', 'services', 'process']) {
+    assert.ok(key in health, `${key} must still be present`);
+  }
+  assert.equal(health.database.totalBytes, null, 'never a fabricated 0 bytes');
+  assert.match(health.database.error, /ECONNREFUSED/);
+  assert.equal(health.retention.partitions, null);
+  // The one figure that survives a database failure, because it never needed it.
+  assert.ok('retentionDays' in health.retention);
+  assert.equal(health.ingest.received, null, 'no events received is not the same as no answer');
+  assert.equal(health.ingest.flushes, 0, 'the "collector recorded no flushes" banner is gated on this');
+  assert.ok(Array.isArray(health.services));
+  for (const svc of health.services) {
+    assert.equal(svc.lastSeen, null);
+    assert.match(svc.error, /ECONNREFUSED/);
+  }
+  assert.ok(Number.isFinite(health.process.uptimeSeconds));
 });

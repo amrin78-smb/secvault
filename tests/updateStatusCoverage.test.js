@@ -1,7 +1,8 @@
 'use strict';
-// Pins three defects found in the 2026-09-09 whole-app sweep, all of the same
-// family: SecVault could not determine something, and said something
-// affirmative instead.
+// Pins defects found in the whole-app sweeps, all of the same family: SecVault
+// could not determine something, and said something affirmative instead. The
+// last block is a different shape -- it enforces a documented policy that
+// nothing but prose was enforcing, and that eight consecutive releases missed.
 //
 // These are SOURCE-LEVEL pins. The route and the config are not unit-testable
 // without a Next server and a git repo, but each defect was a single decision
@@ -79,5 +80,38 @@ describe('the image optimizer is disabled, not merely routed through middleware'
     walk(path.join(ROOT, 'app'));
     walk(path.join(ROOT, 'components'));
     assert.deepEqual(hits, []);
+  });
+});
+
+describe('every shipped version carries release notes', () => {
+  // ⛔ THE ONLY PLACE RELEASE NOTES EXIST IS THIS ROUTE -- there is no
+  // CHANGELOG.md -- and the in-app updater shows them to decide whether to
+  // update. Eight consecutive versions shipped without an entry, and nothing
+  // failed: the object simply had no key, the UI rendered no bullets, and the
+  // gap was invisible from inside the product. A policy enforced only by a
+  // sentence in a documentation file is not enforced.
+  const pkg = JSON.parse(read('package.json'));
+  const src = read('app/api/system/update-status/route.js');
+  const keys = new Set([...src.matchAll(/^\s*'(\d+\.\d+\.\d+)':/gm)].map((m) => m[1]));
+
+  it('found the notes object at all', () => {
+    assert.ok(keys.size > 10, `expected many versions, found ${keys.size}`);
+  });
+
+  it(`the current version (${pkg.version}) has an entry`, () => {
+    assert.ok(
+      keys.has(pkg.version),
+      `package.json is ${pkg.version} but app/api/system/update-status/route.js has no release notes for it`
+    );
+  });
+
+  it('the entry is 3-6 bullets of real prose, not a placeholder', () => {
+    const at = src.indexOf(`'${pkg.version}': [`);
+    assert.ok(at > -1);
+    // From after the opening bracket, so the key line itself is not counted.
+    const block = src.slice(src.indexOf('[', at) + 1, src.indexOf('],', at));
+    const bullets = block.match(/^\s*['"]/gm) || [];
+    assert.ok(bullets.length >= 3 && bullets.length <= 6, `${bullets.length} bullets`);
+    assert.ok(!/TODO|TBD|placeholder/i.test(block), 'a placeholder is worse than an omission');
   });
 });

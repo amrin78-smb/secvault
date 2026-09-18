@@ -326,3 +326,110 @@ describe('⛔ a stopped search is not an empty one', () => {
     assert.equal(released, 1, 'a leaked connection on every expensive search would exhaust the pool');
   });
 });
+
+// ── the dedicated client, and what happens to it afterwards ─────────────────
+
+describe('logSearch: the transaction is set up in the right order, with the right value', () => {
+  const { STATEMENT_TIMEOUT_MS } = require('../lib/syslog/logSearch');
+  // PostgreSQL's code for a statement cancelled by statement_timeout.
+  const canceled = () => {
+    const e = new Error('canceling statement due to statement timeout');
+    e.code = '57014';
+    return e;
+  };
+
+  it('⛔ SET LOCAL comes AFTER BEGIN and BEFORE the search', async () => {
+    // Order is the whole mechanism: SET LOCAL outside a transaction is a
+    // no-op with no error, and after the query it bounds nothing. Asserting
+    // that all three appear somewhere -- which is what the existing test did --
+    // passes for a sequence that protects nothing at all.
+    const seen = [];
+    const pool = {
+      query: async () => { throw new Error('must not use pool.query'); },
+      connect: async () => ({
+        query: async (sql) => {
+          const q = String(sql).trim();
+          seen.push(q.split('\n')[0]);
+          return { rows: [] };
+        },
+        release() {},
+      }),
+    };
+    await searchEvents(pool, {}, NOW);
+    const iBegin = seen.findIndex((q) => /^BEGIN/i.test(q));
+    const iSet = seen.findIndex((q) => /^SET LOCAL statement_timeout/i.test(q));
+    const iSelect = seen.findIndex((q) => /^SELECT/i.test(q));
+    assert.ok(iBegin > -1 && iSet > -1 && iSelect > -1, seen.join(' | '));
+    assert.ok(iBegin < iSet, 'SET LOCAL outside a transaction silently does nothing');
+    assert.ok(iSet < iSelect, 'a timeout set after the query bounds nothing');
+  });
+
+  it('⛔ the value set is the constant the reason text quotes', async () => {
+    // The refusal message tells the operator the search was stopped after N
+    // seconds. If the statement actually carried a different number, the
+    // product would be stating a fact about itself that is not true.
+    let setSql = null;
+    const pool = {
+      query: async () => { throw new Error('must not use pool.query'); },
+      connect: async () => ({
+        query: async (sql) => {
+          if (/^SET LOCAL/i.test(String(sql).trim())) setSql = String(sql);
+          return { rows: [] };
+        },
+        release() {},
+      }),
+    };
+    await searchEvents(pool, {}, NOW);
+    assert.ok(typeof STATEMENT_TIMEOUT_MS === 'number' && STATEMENT_TIMEOUT_MS > 0);
+    assert.equal(setSql, `SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
+  });
+
+  it('the client is released exactly once on the happy path', async () => {
+    let released = 0;
+    const pool = {
+      query: async () => { throw new Error('must not use pool.query'); },
+      connect: async () => ({
+        query: async () => ({ rows: [] }),
+        release(arg) { released++; assert.equal(arg, undefined, 'a healthy connection must go back to the pool'); },
+      }),
+    };
+    await searchEvents(pool, {}, NOW);
+    assert.equal(released, 1, 'leaking a connection per search exhausts the pool');
+  });
+
+  it('⛔ a client whose ROLLBACK failed is DESTROYED, not returned to the pool', async () => {
+    // release() with no argument hands the connection back. If the ROLLBACK
+    // itself threw, that connection may still be inside a failed transaction,
+    // and every later borrower gets "current transaction is aborted" on a
+    // perfectly good query. node-pg destroys it when release is called WITH an
+    // error. The empty catch made a broken connection indistinguishable from a
+    // recovered one.
+    let releasedWith = 'not called';
+    const pool = {
+      query: async () => { throw new Error('must not use pool.query'); },
+      connect: async () => ({
+        query: async (sql) => {
+          const q = String(sql).trim();
+          if (/^BEGIN|^SET LOCAL/i.test(q)) return { rows: [] };
+          if (/^ROLLBACK/i.test(q)) throw new Error('connection terminated');
+          throw canceled();
+        },
+        release(arg) { releasedWith = arg; },
+      }),
+    };
+    const r = await searchEvents(pool, {}, NOW);
+    assert.equal(r.timedOut, true, 'the caller still gets the honest timeout answer');
+    assert.ok(releasedWith instanceof Error, 'the failure must travel with the connection');
+    assert.match(releasedWith.message, /connection terminated/);
+  });
+
+  it('a rule ID is searchable as an ID, not only as a name', () => {
+    // The top-rules widget shows coalesce(rule_name, rule_id); FortiOS names
+    // most policies by number. Searching an ID in the NAME column matches
+    // nothing, and an empty forensics result reads as "no such traffic".
+    const { sql, params, applied } = buildSearchQuery({ ruleId: '42' }, NOW);
+    assert.ok('ruleId' in applied, 'the filter must be accepted, not dropped');
+    assert.match(sql, /rule_id\s*=/);
+    assert.ok(params.includes('42'));
+  });
+});

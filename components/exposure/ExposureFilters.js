@@ -18,7 +18,12 @@ import { useRouter } from 'next/navigation';
 // word of its label". A device filter is that same hazard with a nicer control,
 // so the scope is stated rather than inferred.
 
-export default function ExposureFilters({ currentDeviceId = '', devices = [], currentLimit = '' }) {
+export default function ExposureFilters({
+  currentDeviceId = '',
+  devices = [],
+  unassessed = [],
+  currentLimit = '',
+}) {
   const router = useRouter();
 
   function navigate(nextDeviceId) {
@@ -68,6 +73,22 @@ export default function ExposureFilters({ currentDeviceId = '', devices = [], cu
             {d.name} ({d.paths} path{d.paths === 1 ? '' : 's'})
           </option>
         ))}
+        {/* ⛔ A FIREWALL WHOSE EXPOSURE COULD NOT BE COMPUTED IS SHOWN AND
+            DISABLED. Leaving it out made it indistinguishable from a firewall
+            SecVault does not monitor -- the same reason a device with zero
+            paths is listed above. It is not selectable because the only thing
+            selecting it could render is an empty table, and an empty exposure
+            table reads as "nothing is exposed here", which is precisely the
+            claim we cannot make about a device we failed to assess. */}
+        {unassessed.length > 0 ? (
+          <optgroup label="Could not be assessed — not in any figure on this page">
+            {unassessed.map((d) => (
+              <option key={d.deviceId || d.name} value="" disabled title={d.error || undefined}>
+                {d.name} (not assessed)
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
       </select>
       {currentDeviceId ? (
         <button

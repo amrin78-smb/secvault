@@ -263,6 +263,18 @@ export default async function ExposurePage({ searchParams }) {
     .map((d) => ({ deviceId: d.deviceId, name: d.name, paths: d.paths.length }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // ⛔ A FIREWALL THAT COULD NOT BE ASSESSED IS ABSENT FROM fleet.devices, AND
+  // THEREFORE WAS ABSENT FROM THE DROPDOWN ENTIRELY. The list already makes a
+  // point of offering devices with ZERO paths, because a firewall missing from
+  // it is indistinguishable from one that is not monitored -- and an errored
+  // device was missing from it for exactly that reason. It is listed, named,
+  // and NOT selectable: selecting it would produce an empty table, which is the
+  // one rendering an exposure page must never give to an unmeasured device.
+  const unassessed = fleet.errors
+    .filter((e) => e.name)
+    .map((e) => ({ deviceId: e.deviceId || null, name: e.name, error: e.error }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const selectedDeviceId = typeof searchParams?.device_id === 'string' ? searchParams.device_id : '';
   // ⛔ An unknown device_id yields an EMPTY table, never a silent fall-back to
   // the whole fleet: showing every path under a filter the operator believes is
@@ -393,6 +405,7 @@ export default async function ExposurePage({ searchParams }) {
                   <ExposureFilters
                     currentDeviceId={selectedDeviceId}
                     devices={deviceOptions}
+                    unassessed={unassessed}
                     currentLimit={searchParams?.limit || ''}
                   />
                   {/* ⛔ NAMES THE SCOPE WHENEVER ONE IS APPLIED. Without this the

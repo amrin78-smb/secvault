@@ -109,6 +109,13 @@ const PILL_TONE = {
 // No advisory feed has ever run, or the status query itself failed. Both are
 // gaps, not all-clears, and both keep the alarming treatment they already had.
 PILL_TONE.none = PILL_TONE.error;
+// ⛔ EVERY FEED SKIPPED IS HUELESS, NOT AMBER AND NOT RED. A skip is a recorded
+// decision rather than a verdict about the data, and this product's own rule is
+// that a permanent warning chip for correct behaviour teaches an operator to
+// ignore the chip that matters. It is not green either: with every feed skipped
+// nothing is collecting advisories, which the title says in words. Without this
+// entry the state fell through to PILL_TONE.none and painted danger red.
+PILL_TONE.skipped = PILL_TONE.running;
 
 export default async function Header({ session }) {
   let syncStatus = {

@@ -240,7 +240,8 @@ GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one ro
 
 ## /api/logs/search
 
-GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
+GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit`/`page` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, ruleId, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
+⛔ **A search stopped by the 10s statement timeout answers 504, not 200** (v2.148.0), carrying the same body including `timedOut:true` and the reason. `searchEvents` already refuses to return an empty result set as an answer; wrapping that in a 200 with `rows: []` reintroduced the exact failure one layer up, for any consumer that checks `res.ok` and reads `rows`.
 Deliberately NOT admin-gated — read-only, persists nothing, same reasoning as `access-path`/`path-query`. ⛔ A query error returns **500**, never an empty `rows` array: "0 results" from a failed query reads as "that traffic never happened". Added 2026-09-08.
 
 ## /api/applications (v2.124.0)

@@ -571,7 +571,8 @@ first mapping ends legacy mode, and requires a typed confirmation naming the con
 removing the last one. States both timings: a mapping change is immediate, a group-membership
 change applies at next sign-in.
 
-ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}] — firewall filter for /exposure.
+ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}], unassessed[{deviceId,name,error}], currentLimit — firewall filter for /exposure.
+  ⛔ `unassessed` (v2.148.0) lists firewalls whose exposure computation FAILED, as a DISABLED optgroup. They are absent from `fleet.devices` and so were absent from the dropdown entirely — indistinguishable from a firewall SecVault does not monitor, which is the same reason a device with zero paths is listed. Not selectable: the only thing selecting one could render is an empty table, and an empty exposure table reads as "nothing is exposed here".
   Same convention as AlertsFilters (select + router.push, resets `page` to 1).
   ⛔ Scopes the TABLE ONLY — the KPI tiles, answer sentence and unmeasured caveat
   above it are FLEET statements and stay that way; the page states the scope in a
@@ -580,6 +581,11 @@ ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}] — firewall fi
   option label — an absent firewall is indistinguishable from an unmonitored one.
 
 DeviceTrafficTab  deviceId, deviceName, canSearchLogs — per-firewall traffic (devices/[id]?tab=traffic).
+  Module-level helper `Drill({href, title, children})` — a null `href` renders the children as plain
+  text (the viewer lacks VIEW_LOG_SEARCH). ⛔ It was declared INSIDE DeviceTrafficTab until v2.148.0,
+  which is CLAUDE.md's first React rule: a component defined inside another is a new type on every
+  render. Harmless in a server component, which is exactly how the pattern survives to be copied
+  into a client one.
   Nine widgets (log volume, session outcomes, top hosts, top applications, protocols,
   blocked destinations, top rules by traffic, threat activity, reached-this-firewall), all scoped IN SQL via the optional deviceId now accepted by
   lib/syslog/trafficStats. ⛔ Resolves syslog COVERAGE first and renders one of three

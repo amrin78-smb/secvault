@@ -39,7 +39,11 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 ## lib/feedStatus.js
 
 `getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
-`getSyncPillStatus(pool)` -> `Promise<{ok: boolean, label: string, lastSyncs: object[]}>` — condensed header-pill status across `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`; `label` is `'NO SYNC YET'|'FEEDS OK'|'FEED ERROR'`.
+`getSyncPillStatus(pool, {now})` -> `Promise<{state, ok, label, title, feeds[], lastSyncs[]}>` — condensed header-pill status across `KNOWN_FEEDS` (cve_hub, nvd, paloalto_psirt, fortinet_psirt, kev, cveorg, epss). `state` is `ok|degraded|error|running|skipped|none`.
+`severityOf(state)` -> `number` — rank used by the worst-state reduction. ⛔ An UNLISTED state ranks **-1, worse than `error`**, never `undefined`: `undefined < n` is false, so a state that fell through the `rated` filter used to leave the accumulator on `ok`. The filter and the severity table were coupled by nothing but happening to agree.
+⛔ **`skipped` is its own pill state, and all-skipped is NOT "no sync yet" (v2.148.0).** The never-run branch accepted skipped feeds, then told the operator no feed had EVER completed a sync and that every CVE count was empty for want of data — both false, since a skip is written BY a cycle that ran and made a decision. `PILL_TONE.skipped` is hueless (not amber, not red, not green).
+⛔ **The `ok` title names the skipped feeds too.** It listed only `rated`, so on this deployment — where the direct NVD sync is skipped every cycle because the central feed delivered — the evidence behind a green pill had NVD missing from it with no explanation.
+⛔ **A skip's recorded reason is not an error count.** `logSkipped()` writes the reason into `errors` (no detail column exists), so `jsonb_array_length` reported `errorCount: 1` for a feed working as designed; `getLatestPerFeed` now zeroes it for `status='skipped'`. Tests: `tests/feedStatusPill.test.js`.
 
 ## lib/formatDisplay.js
 
@@ -481,7 +485,11 @@ Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/f
 ## lib/feedStatus.js
 
 `getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
-`getSyncPillStatus(pool)` -> `Promise<{ok: boolean, label: string, lastSyncs: object[]}>` — condensed header-pill status across `nvd`/`paloalto_psirt`/`fortinet_psirt`/`kev`; `label` is `'NO SYNC YET'|'FEEDS OK'|'FEED ERROR'`.
+`getSyncPillStatus(pool, {now})` -> `Promise<{state, ok, label, title, feeds[], lastSyncs[]}>` — condensed header-pill status across `KNOWN_FEEDS` (cve_hub, nvd, paloalto_psirt, fortinet_psirt, kev, cveorg, epss). `state` is `ok|degraded|error|running|skipped|none`.
+`severityOf(state)` -> `number` — rank used by the worst-state reduction. ⛔ An UNLISTED state ranks **-1, worse than `error`**, never `undefined`: `undefined < n` is false, so a state that fell through the `rated` filter used to leave the accumulator on `ok`. The filter and the severity table were coupled by nothing but happening to agree.
+⛔ **`skipped` is its own pill state, and all-skipped is NOT "no sync yet" (v2.148.0).** The never-run branch accepted skipped feeds, then told the operator no feed had EVER completed a sync and that every CVE count was empty for want of data — both false, since a skip is written BY a cycle that ran and made a decision. `PILL_TONE.skipped` is hueless (not amber, not red, not green).
+⛔ **The `ok` title names the skipped feeds too.** It listed only `rated`, so on this deployment — where the direct NVD sync is skipped every cycle because the central feed delivered — the evidence behind a green pill had NVD missing from it with no explanation.
+⛔ **A skip's recorded reason is not an error count.** `logSkipped()` writes the reason into `errors` (no detail column exists), so `jsonb_array_length` reported `errorCount: 1` for a feed working as designed; `getLatestPerFeed` now zeroes it for `status='skipped'`. Tests: `tests/feedStatusPill.test.js`.
 
 ## lib/density.js
 
@@ -697,7 +705,9 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 
 ## lib/syslog/logSearch.js
 
-`buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `clampPage` / `MAX_PAGE` (200).
+`buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `clampPage` / `MAX_PAGE` (200) · `STATEMENT_TIMEOUT_MS` (10000).
+⛔ **`ruleId` is a filter as well as `ruleName` (v2.148.0).** The rollups store both and a vendor may populate either — FortiOS names most policies by number — so the Traffic tab's top-rules widget routinely holds an ID. Searching an ID in the NAME column matches nothing, and an empty forensics result reads as "no such traffic".
+⛔ **A client whose ROLLBACK failed is DESTROYED, not returned to the pool** (`client.release(err)`). A bare `release()` hands back a connection that may still be inside a failed transaction, and every later borrower gets "current transaction is aborted" on a perfectly good query.
 ⛔ **NO COUNT(*), EVER.** Measured on the live fleet: an exact count of a ONE-HOUR window took **43 SECONDS** (1,657,462 rows). Paging works without a total — `limit + 1` reveals whether a next page exists and `<Pagination hasMore>` renders "Page 3" rather than a "of 47" nobody verified. Paging itself is cheap: the PK is `(received_at, id)`, exactly the sort order (measured 5ms page 1, 2ms at OFFSET 500), and MAX_PAGE bounds how deep OFFSET can go. · `resolveWindow` · `clampLimit`.
 ⛔ **The ONLY place that reads `syslog_events` directly** instead of a rollup — an aggregate has thrown away the individual event, which is exactly what an investigation needs. In exchange it is disciplined about it:
 ⛔ **A time window is MANDATORY and BOUNDED** (`MAX_WINDOW_DAYS`=8, default last hour). `resolveWindow()` never returns an unbounded or inverted range whatever it is handed. At ~133 GB/day an open-ended search is not a slow query, it is an outage for the ~1,500 rows/sec ingest on the same disk. A clamped range sets `clamped:true` and the UI says so.
@@ -2348,6 +2358,10 @@ Wired in `lib/feeds/index.js` as `runCveHubSync`, running **FIRST in
 `runFullSync`** — `advisories.cve_id` is UNIQUE with one vendor, so feed order is
 the attribution rule. Logged to `feed_sync_log` as `cve_hub`; `skipped` when not
 configured. Tests: `tests/cveHub.test.js` (18 cases, 6 mutations verified).
+
+`fillHourlyGaps(rows, hours, nowMs)` -> densified series, one slot per hour, each `{hour, events, denied, bytesSent, bytesReceived, measured}` (v2.148.0). PURE — no pool, clock is a parameter. ⛔ **A MISSING HOUR IS A GAP, NOT A NARROWER CHART**: the rollup writes no row for an hour in which nothing was stored, so a bar strip mapping only the returned rows spread 14 bars evenly across a 24-hour axis and a ten-hour ingestion outage rendered as an unbroken, healthy-looking series — the one thing a traffic timeline exists to show. ⛔ A filled hour carries `measured:false` and is drawn with `--hatch`, NEVER as a zero bar: no row means nothing was STORED, and a silent firewall is not distinguished from a stopped collector. ⛔ `denied`/bytes stay NULL in a filled hour, so it can move no total — only reveal a hole in the axis. Used by `DeviceTrafficTab` and `SyslogWidgets`; tests `tests/trafficTimelineGaps.test.js`.
+
+⛔ **`getTopRules` returns `rule` (display), `ruleName` and `ruleId` separately** (v2.148.0). It was one `coalesce(rule_name, rule_id)` column, so a caller linking the displayed value into log search as a rule NAME silently searched for what was often an ID and got nothing back — next to a hit count calling that rule the busiest on the firewall.
 
 `lib/syslog/trafficStats.js` — optional device scope (v2.141.0). getTrafficTimeline,
 getActionBreakdown, getTopHosts, getTopApplications, getProtocolBreakdown and

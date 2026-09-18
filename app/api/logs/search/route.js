@@ -23,7 +23,7 @@ export async function GET(request) {
   const filters = {};
   for (const k of [
     'from', 'to', 'limit', 'deviceId', 'vendor', 'action', 'logClass', 'logSubtype',
-    'protocol', 'application', 'ruleName', 'srcUser', 'srcCountry', 'dstCountry',
+    'protocol', 'application', 'ruleName', 'ruleId', 'srcUser', 'srcCountry', 'dstCountry',
     'threatName', 'urlCategory', 'urlHostname', 'sourceIp', 'srcIp', 'dstIp',
     'srcPort', 'dstPort', 'q',
     // ⛔ `page` was missing from this list, so `buildSearchQuery` always read
@@ -42,7 +42,16 @@ export async function GET(request) {
   }
 
   try {
-    return NextResponse.json(await searchEvents(pool, filters));
+    const result = await searchEvents(pool, filters);
+    // ⛔ A TIMED-OUT SEARCH IS NOT A 200. searchEvents already refuses to
+    // return an empty result set as if it were an answer -- it returns
+    // timedOut:true with a reason -- but this route wrapped that in a 200 with
+    // `rows: []`, so an API consumer checking res.ok and reading rows concludes
+    // the traffic never happened. That is the precise failure the timeout state
+    // exists to prevent, reintroduced one layer up. 504 carries the same body,
+    // reason and all, so nothing is lost by the status change.
+    if (result && result.timedOut) return NextResponse.json(result, { status: 504 });
+    return NextResponse.json(result);
   } catch (err) {
     // ⛔ Report the failure rather than returning an empty result set. An
     // investigator who sees "0 results" from a query that actually errored
