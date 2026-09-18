@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.137.0': [
+    'Vulnerability data now comes from a central feed, and the difference is large. This server cannot reach the national vulnerability database at all — your internal address ranges overlap its public ones, so those requests never leave the building. SecVault has been falling back to a secondary source that does not publish which software versions each vulnerability affects.',
+    'Measured on your fleet: 439 of 1,006 advisories could never be matched to a firewall. Cisco ASA had usable version data for 70 of 353; Check Point for 0 of 7.',
+    'With the central feed those become roughly 332 of 369 for Cisco ASA and 68 of 80 for Check Point — about 439 advisories that can now be matched against your devices for the first time.',
+    'The feed is signed, and SecVault refuses to import it if the signature does not verify. It will never replace version data it already has with blank data, and never moves an advisory from one vendor to another.',
+    'Set CVE_HUB_LICENSE_KEY to switch it on. Left blank, the feed simply does not run and says so — everything else is unchanged.',
+  ],
   '2.134.0': [
     'Directory logins now get their role from their AD groups. Until now every person who could sign in against your directory became an Administrator of SecVault \u2014 able to add and remove firewalls, change settings and trigger updates.',
     'Map a group to Operator, Administrator or Super Admin under Settings \u2192 Users. Someone in several mapped groups gets the most privileged of them, and capitalisation and spacing in the group name do not matter.',

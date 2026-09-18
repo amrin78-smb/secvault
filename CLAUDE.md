@@ -1544,6 +1544,7 @@ customer must read off the server to buy or renew anything.
 
 | Feed | URL | Schedule | Notes |
 |---|---|---|---|
+| **Central CVE hub** | `nocvault-eol` `/api/v1/cve-feed` | 6h, **FIRST** | Signed Ed25519 corpus. ⛔ Runs BEFORE NVD — `cve_id` is UNIQUE with one vendor, so feed ORDER IS the attribution rule. **DISCOVERY feed (it inserts), not enrichment.** See its own section below. |
 | NVD API 2.0 | `services.nvd.nist.gov/rest/json/cves/2.0` | 6h | ⛔ **5 requests / rolling 30s WITHOUT a key, 50 / 30s WITH one** (verified 2026-09-17 — this table said `5 req/30s w/ NVD_API_KEY`, which is the UNKEYED rate and understates a key by 10x). So ~6.2s between requests unkeyed, ~0.7s keyed. Key goes in an `apiKey` REQUEST HEADER, not the query string (that was the 1.0 API). Always `virtualMatchString`, never `cpeName`. |
 | Palo Alto PSIRT | `security.paloaltonetworks.com/api/v1/products/PAN-OS/advisories` | 6h, after NVD | Bulk beta API, ~346 advisories/call, CVE Record Format 5.x. |
 | Fortinet FortiGuard | `fortiguard.com/rss/ir.xml` → CSAF 2.0 JSON | 6h, after PA | RSS discovery-only; CSAF is the real data source. |
@@ -1636,6 +1637,93 @@ is ALSO the highest EPSS (0.861/99.7th pct); all 26 `scheduled` sit at ≤0.0167
 CVEs. Changing the tree requires documenting it HERE first. Each feed's failure is isolated (its own try/catch) and never blocks the next; each gets its own `feed_sync_log` row.
 
 **NVD → CIRCL fallback** (`vulnerability.circl.lu`) triggers ONLY on a true network-level failure (`err.status == null` — timeout/DNS/connection refused), never on an NVD HTTP error response. `FETCH_TIMEOUT_MS = 20000` on every feed call. Full triggering condition, endpoint, and per-vendor fetch quirks (Palo Alto's beta-bulk-endpoint-only rule, Fortinet's CSAF-over-RSS + 1-second inter-fetch delay): `.ai-codex/cve-pipeline.md`, stages 1-2.
+
+
+## Central CVE feed (`cve_hub`, v2.137.0) — `lib/feeds/cveHub.js`
+
+⛔ **THIS EXISTS BECAUSE THIS SERVER CANNOT REACH NVD AT ALL, AND NO FIREWALL RULE
+CAN FIX THAT.** The sites use internal public IP ranges that **overlap NVD's own
+address space**, so traffic to `services.nvd.nist.gov` routes to an internal
+host. You cannot permit egress to a range your own network claims. Every NVD call
+fails at the network level, every CPE string falls through to the CIRCL fallback,
+and CIRCL's records carry no parseable version bounds — which `nvd.js` correctly
+refuses as `unmatchable`.
+
+Measured 2026-09-18 on the live fleet, both columns scored with **this repo's own
+extractor**, so the only variable is the data source:
+
+| vendor | usable ranges via CIRCL | usable from NVD |
+|---|---|---|
+| `cisco_asa` | 70 / 353 (20%) | **332 / 369 (90%)** |
+| `checkpoint` | 0 / 7 (0%) | **68 / 80 (85%)** |
+
+Fleet-wide, **439 of 1,006 advisories could never match a device**. Vendors with a
+working PSIRT are healthy (`paloalto` 98%, `fortinet` 67%); the ones that depend on
+NVD are gutted. ⛔ **The CPE list and the extractor were never the problem** — both
+were fixed correctly in v2.132.0. Only the data reaching the box was wrong.
+
+⛔ **THE TRANSPORT WAS PROVEN BEFORE THIS WAS BUILT**: `eol_catalogue` pulled 2,770
+rows from that same hub into this same server on schedule while every NVD call
+failed. The address overlap does not touch that path.
+
+### Verification — fails CLOSED
+
+Ed25519 detached signature over the exact received bytes, plus a `sha256` header,
+identical in shape to the EOL feed so no new crypto was written. ⛔ **A feed whose
+signature does not verify is REFUSED, not imported with a warning** — it is not the
+publisher's feed, and applying it would write unverified data into the table that
+drives the priority decision tree. ⛔ **Bytes are verified BEFORE `JSON.parse`**;
+verifying a re-serialised object would check our own `stringify` output, which
+differs from the publisher's for identical data. ⛔ **A verified-but-EMPTY feed is
+refused** — a publisher bug emitting zero rows is otherwise a correctly-signed
+instruction to change nothing, reported as a clean success.
+
+⛔ **The public key is PINNED IN SOURCE.** The hub also serves it at
+`/api/v1/cve-feed/pubkey`, and fetching it from there at verification time would
+verify nothing — whoever could swap the feed could swap the key with it. The
+repository is the trusted channel. `CVE_HUB_PUBLIC_KEY` overrides it only for a
+customer running their own hub.
+
+### The five apply rules — each decided by measurement, not judgement
+
+From the collision report against the live fleet (909 distinct CVEs in the feed):
+**74 absent, 835 present with the SAME vendor, 0 with a different vendor, 365
+repairable, 1 that would degrade.**
+
+1. **INSERT when the CVE is absent** (74).
+2. **REPAIR ranges only when ours are empty and the hub's are real** (365).
+3. ⛔ **NEVER replace a non-empty range with an empty one.** Not a preference —
+   there is exactly **1** live case, and one is enough: it turns a matched advisory
+   into an unmatchable one and the device silently stops being flagged. **The guard
+   is expressed TWICE** (JS predicate + a `WHERE` clause on the `UPDATE`), the same
+   doubling config retention uses for its delete protections.
+4. ⛔ **NEVER change an existing row's vendor.** `advisories.cve_id` is UNIQUE with
+   a single vendor, so a re-attribution is permanent and silent.
+5. **A CVE the hub holds under TWO vendors** (1 case: CVE-2004-0112,
+   checkpoint+forcepoint) keeps whichever we already hold; holding neither, it takes
+   the **alphabetically first**, so the choice cannot depend on row order.
+
+⛔ **`matchability` MUST BE `'matched'`, NOT MERELY A NON-EMPTY ARRAY.** An
+`unmatchable` hub row with an incidentally-populated array would otherwise overwrite
+a good local one — importing a known-bad extraction over a known-good gap, which is
+worse than not running at all. Pinned by `tests/cveHub.test.js` (18 cases, 6
+mutations verified).
+
+⛔ **ORDER: FIRST, BEFORE NVD.** `cve_id` is UNIQUE with one vendor, so whichever
+feed lands a CVE first owns it permanently, and the hub is the only source here with
+usable ranges. ⛔ **It is a DISCOVERY feed — it INSERTS**, the opposite of
+`cveorg`/`epss`, which is why it does not run last with them. ⛔ **Its failure is
+isolated**: if the hub is unreachable the local NVD path still runs immediately
+after and CIRCL still backs it up. A central feed that could block local discovery
+would be worse than not having one.
+
+⛔ **NOT CONFIGURED IS NOT AN ERROR.** Without `CVE_HUB_LICENSE_KEY` the feed returns
+`notRun` and is logged `skipped` **with a reason** — a feed that simply stops
+appearing is indistinguishable from one that silently broke.
+
+⛔ **`accept-encoding: gzip` IS SENT EXPLICITLY** — node's `fetch` does not negotiate
+compression. Measured: 3.3 MB raw, **173 KB gzipped (5%)**. Omitting it costs a 20x
+download on a link this product often shares with a syslog stream.
 
 ---
 

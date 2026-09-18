@@ -2320,3 +2320,31 @@ Pure `resolveRole` + three pool-taking storage functions. Full rules in CLAUDE.m
 `app/api/auth/[...nextauth]/route.js` uses it twice: at `authorize()` (refusing the login when the
 mapping table is unreadable) and in `jwt()` on EVERY token use, so a revoked mapping applies at once
 rather than at JWT expiry. 24 tests, 7 mutations verified to bite.
+
+## `lib/feeds/cveHub.js` (v2.137.0) — central CVE feed consumer
+
+`fetchAndUpsertHubAdvisories(pool)` -> `{inserted, repaired, updated, unchanged,
+degradeRefused, vendorConflict, multiVendorCollapsed, errors, feed_version,
+feed_sha256, feed_rows}`; or `{notRun:true, reason}` when `CVE_HUB_LICENSE_KEY` is
+unset. Also exports the pure `hasRanges`, `hubIsBetter`, `applyFeed` and the pinned
+`FEED_PUBLIC_KEY_SPKI_B64`.
+
+Pulls the Ed25519-signed advisory corpus from `nocvault-eol`
+(`/api/v1/cve-feed`). **Exists because this server cannot reach NVD at all** — the
+sites' internal public IP ranges overlap NVD's address space. Full rationale,
+measurements and the five apply rules are in CLAUDE.md's "Central CVE feed"
+section; do not re-derive them here.
+
+The three things most likely to be broken by a well-meaning edit:
+- **`hubIsBetter` requires `matchability === 'matched'`**, not merely a non-empty
+  array — an `unmatchable` row carrying an array must never overwrite a good local
+  one.
+- **Rule 3 (never blank out real ranges) is expressed TWICE** — the JS predicate
+  and a `WHERE` clause on the `UPDATE`. Removing either leaves the other holding.
+- **Signature verification throws.** It is not advisory, and the bytes are verified
+  before `JSON.parse`, not after.
+
+Wired in `lib/feeds/index.js` as `runCveHubSync`, running **FIRST in
+`runFullSync`** — `advisories.cve_id` is UNIQUE with one vendor, so feed order is
+the attribution rule. Logged to `feed_sync_log` as `cve_hub`; `skipped` when not
+configured. Tests: `tests/cveHub.test.js` (18 cases, 6 mutations verified).
