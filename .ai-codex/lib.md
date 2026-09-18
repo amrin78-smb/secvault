@@ -2374,3 +2374,41 @@ into the other. ⛔ Ordered by `(public_source AND allowed) DESC` before volume:
 hit on a management port outranks a million blocked scans, and ranking by count buries it.
 
 `getTopRules` also takes the optional trailing `deviceId` now.
+
+## `lib/serverHealth.js` (v2.145.0) — the SERVER, not the fleet
+
+`getServerHealth(pool, opts)` -> `{disks, database, retention, ingest, services, process}`.
+Also `diskState`, `volumeFor`, and the five gatherers individually.
+
+⛔ **NOT deviceHealth.js / FleetSystemHealth**, which are about the FIREWALLS' CPU,
+memory and licences. This is the box SecVault runs on. The dashboard's `fleet` tab
+description used to say "system health" too; it now says "device system health"
+because one word apart is how someone reads a firewall's CPU as the server's.
+
+⛔ **EVERY FIGURE IS NULLABLE.** "0 GB free" is an emergency and "we could not read
+the volume" is a gap in our own instrumentation; if a failed read becomes a zero
+they render identically and the alarming one wins.
+
+⛔ **`diskState` THRESHOLDS ON FREE SPACE, NOT PERCENT.** A 2 TB volume at 90% has
+200 GB; a 100 GB volume at 90% has 10, and this product writes ~31 GB/day of raw
+syslog. Percentage alone calls the dangerous one healthy. Returns `null`, never
+`'ok'`, when the figure is unknown.
+
+⛔ **RETENTION IS COUNTED FROM `pg_tables`, NEVER `count(*)`** — that is a full scan
+of ~28M rows per day of retention on a page that renders often.
+
+⛔ **SERVICE LIVENESS IS INFERRED FROM WHAT EACH SERVICE WRITES**, not from `sc.exe`:
+NSSM reports a crash-looping process as Running, so the service state is LESS
+truthful than the evidence, and asking Windows would mean spawning a process from a
+web request. `lastSeen: null` means NEVER (a fresh install) and is reported apart
+from an error.
+
+⛔ **NO FLUSHES IS NOT ZERO DROPS.** An absent collector would otherwise render as a
+clean ingest — the most reassuring possible way to show nothing is being collected.
+
+⛔ **The PostgreSQL data directory cannot be located from SQL** by the app's role
+(`SHOW data_directory` is superuser-only), so it is never claimed to be covered —
+only measured when it shares a volume with a path SecVault writes to.
+
+Tests: `tests/serverHealth.test.js` (15 cases, all could-not-measure shaped, plus a
+test that the comment stripper in its own source guards actually strips).

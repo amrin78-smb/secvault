@@ -596,3 +596,10 @@ DeviceTrafficTab  deviceId, deviceName, canSearchLogs — per-firewall traffic (
   it literally matches nothing.
   ⛔ Distinct from DeviceTrafficTable above, which is the FLEET dashboard's per-device
   summary row — one word apart, opposite scopes.
+
+ServerHealthWidgets  (no props) — the dashboard's `?tab=server` body. Disk volumes,
+  database size + biggest tables + dead tuples, raw syslog retention, ingest
+  throughput/drops/backlog, and service liveness. ⛔ Renders null as an em-dash and
+  an unmeasured volume as a HATCHED bar, never a zero-width or full-width one —
+  both would be claims the data does not support. ⛔ Distinct from
+  FleetSystemHealth, which is the FIREWALLS' health.

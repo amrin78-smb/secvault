@@ -39,6 +39,7 @@ import {
   BlockedDestinationsWidget,
   DeviceTrafficTable,
 } from '../../components/dashboard/TrafficWidgets';
+import ServerHealthWidgets from '../../components/dashboard/ServerHealthWidgets';
 import {
   TopAttackersWidget,
   TopTargetsWidget,
@@ -293,6 +294,14 @@ export default async function DashboardPage({ searchParams }) {
             <DeviceTrafficTable />
           </div>
         </>
+      )}
+
+      {/* ⛔ The SERVER, not the fleet. Rendered only when selected — it stats
+          volumes and reads pg_class, which is cheap but pointless elsewhere. */}
+      {tab === 'server' && (
+        <div className="dashboard-widget-grid">
+          <ServerHealthWidgets />
+        </div>
       )}
 
       {tab === 'fleet' && (
