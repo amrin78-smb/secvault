@@ -124,6 +124,28 @@ export default function LogResults({ result, deviceNames, searchParams }) {
     );
   }
 
+  // ⛔ A STOPPED SEARCH IS NOT AN EMPTY ONE, and this is the branch that keeps
+  // them apart. A query cancelled by statement_timeout returns zero rows; the
+  // empty state below would render that as "nothing matched", and an
+  // investigator would conclude the host never connected when in fact the
+  // question was never answered. On a forensics page that is the most dangerous
+  // wrong answer available.
+  if (result.timedOut) {
+    return (
+      <Card>
+        <CardBody>
+          <div style={{ fontSize: 'var(--text-base)', lineHeight: 1.7 }}>
+            <strong style={{ color: 'var(--yellow)' }}>Search stopped — it was too expensive to finish.</strong>
+            <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>{result.reason}</div>
+            <div style={{ color: 'var(--text-muted)', marginTop: 6, fontSize: 'var(--text-sm)' }}>
+              This is not a result. No conclusion about whether such traffic exists can be drawn from it.
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+    );
+  }
+
   const rows = result.rows || [];
   const windowText =
     `${fmtTime(result.from)} to ${fmtTime(result.to)} UTC`;

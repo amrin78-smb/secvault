@@ -2390,6 +2390,43 @@ none of these carry Critical-Rules-level footguns.
 - **Rule shadow analysis** is O(n²) against rule count — capped at 1000 rules (warning above threshold, not silently truncated), run off-hours for 500+ rulesets. Address/service object resolution needs all elements loaded before analysis — cache per device per session.
 - **Windows Server tool paths and `psql` exit-code quirks**: see `gotchas.md`'s Deploy section.
 
+### ⛔ Log search has THREE bounds, and the third was missing until v2.144.0
+
+`lib/syslog/logSearch.js` bounded the WINDOW and the ROW COUNT. Neither prevents
+the thing its own header warns about — "a careless query would evict the buffer
+cache out from under an ingest running at ~1,500 rows/second" — because a legal
+24h window on a busy firewall is still millions of rows, and
+`ORDER BY received_at DESC LIMIT n` only exits early **if enough rows MATCH**.
+
+Measured on OKF(F2) (~406,000 events/hour), same device, same 24h window:
+
+| filter | time |
+|---|---|
+| common `src_ip` | **23ms** (fills the LIMIT at once) |
+| busy `dst_ip` | **32ms** |
+| **indexed** `threat_name`, 0 matches here | **10,969ms** |
+| rare `application` | **never returned** |
+
+⛔ **COST TRACKS HOW RARE THE VALUE IS, NOT WHICH COLUMN IS INDEXED** — the
+indexed column was the slow one, because an index does not help when there is
+nothing to find. And the rarest value is usually the one worth investigating, so
+the worst case is the useful case.
+
+⛔ **`STATEMENT_TIMEOUT_MS` (10s) is now the third bound**, applied with
+`SET LOCAL` inside a transaction on a DEDICATED CLIENT — `pool.query` hands back
+an arbitrary connection, so a timeout set that way leaks onto unrelated queries
+or applies to none.
+
+⛔ **A TIMED-OUT SEARCH IS ITS OWN STATE, NEVER AN EMPTY RESULT.** It returns
+`timedOut: true` with a reason, and `LogResults` renders a distinct panel saying
+so. Returning `[]` would render as "nothing matched" and an investigator would
+conclude a host never connected when the question was simply never answered —
+the failed-read-as-a-fact rule at its most dangerous, on a forensics page.
+
+⛔ **INDEXING `src_ip`/`dst_ip` IS STILL REFUSED.** The write cost lands on the
+collector at ~1,000 inserts/sec, and the measurement above shows an index would
+not even fix the slow case.
+
 ---
 
 ## Testing (`tests/`, added 2026-08-25)
