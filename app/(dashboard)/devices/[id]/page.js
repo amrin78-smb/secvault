@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { vendorLabel } from '../../../../components/devices/vendorMeta';
+import DeviceTrafficTab from '../../../../components/devices/DeviceTrafficTab';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
@@ -607,7 +608,7 @@ export default async function DeviceDetailPage({ params, searchParams }) {
     );
   }
 
-  const tab = ['overview', 'cve', 'rules', 'config', 'admins', 'manage'].includes(searchParams?.tab)
+  const tab = ['overview', 'cve', 'rules', 'config', 'admins', 'traffic', 'manage'].includes(searchParams?.tab)
     ? searchParams.tab
     : 'overview';
   const confirmDelete = searchParams?.confirmDelete === '1';
@@ -696,8 +697,19 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'rules', 'Rules')}
         {tabLink(device.id, tab, 'config', 'Config Changes')}
         {tabLink(device.id, tab, 'admins', 'Admins')}
+        {/* ⛔ Ungated, like every other read-only tab here. It renders already-
+            collected rollups and persists nothing, so the mutating-route rule
+            does not apply — see the RBAC section's note on non-mutating reads. */}
+        {tabLink(device.id, tab, 'traffic', 'Traffic')}
         {canWrite && tabLink(device.id, tab, 'manage', 'Manage')}
       </div>
+
+      {/* ⛔ RENDERED ONLY WHEN SELECTED. Its six rollup queries are cheap
+          individually and pointless on every other tab; the page already
+          follows this pattern for its own per-tab fetches above. */}
+      {tab === 'traffic' && (
+        <DeviceTrafficTab deviceId={device.id} deviceName={device.name} />
+      )}
 
       {tab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

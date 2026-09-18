@@ -2348,3 +2348,14 @@ Wired in `lib/feeds/index.js` as `runCveHubSync`, running **FIRST in
 `runFullSync`** — `advisories.cve_id` is UNIQUE with one vendor, so feed order is
 the attribution rule. Logged to `feed_sync_log` as `cve_hub`; `skipped` when not
 configured. Tests: `tests/cveHub.test.js` (18 cases, 6 mutations verified).
+
+`lib/syslog/trafficStats.js` — optional device scope (v2.141.0). getTrafficTimeline,
+getActionBreakdown, getTopHosts, getTopApplications, getProtocolBreakdown and
+getTopBlockedDestinations all take an OPTIONAL trailing `deviceId`; `null` means the
+fleet. ⛔ APPENDED, never inserted — reordering would turn an existing caller's `limit`
+into a device id. ⛔ An unrecognised id returns NO ROWS, never the fleet. New:
+`getDeviceSyslogCoverage(pool, deviceId, hours)` -> `{everSent, inWindow, events,
+lastBucket}`, which is what lets a per-device view tell "sends no syslog" from "was
+quiet". ⛔ getTopApplications returns `{applications, unclassified}`, NOT an array, and
+its unclassified count is scoped too — unscoped it captioned one firewall's list with
+the fleet's total.
