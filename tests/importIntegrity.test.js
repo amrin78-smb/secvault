@@ -41,8 +41,34 @@ function walk(dir, out = []) {
 // Exported names worth policing: helpers a page would call by bare name.
 // Deliberately excludes single-letter and very common words, which would make
 // the mention-test noisy rather than useful.
+/**
+ * Comments and string/template literals removed.
+ *
+ * ⛔ USED BY BOTH SIDES NOW. The consumer scan below always did this; the EXPORT
+ * scan did not, so prose inside a `module.exports = { … }` block was harvested
+ * as export names — the non-greedy match runs to the first `}` and the name
+ * pattern is a word followed by `,` `:` or `}`, so a comment reading
+ * "…appear in the source, which kept passing…" registered `source` as an export.
+ *
+ * ⛔ AND THE FAILURE LANDS IN A DIFFERENT FILE FROM THE CAUSE, which is what
+ * made it expensive: `app/(dashboard)/exposure/page.js` has carried the JSX
+ * prose "{p.evidence.sources} source(s)" since v2.81.0, and the consumer scan
+ * reads that as a call to `source`. The moment `source` entered the exported
+ * set, a two-year-old line in an untouched file started failing. Two scanners
+ * with different ideas of what counts as code is how that happens; there is now
+ * one.
+ */
+function stripCommentsAndLiterals(raw) {
+  return raw
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/`(?:\\.|[^`\\])*`/g, '``')
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+}
+
 function exportedNames(file) {
-  const src = fs.readFileSync(file, 'utf8');
+  const src = stripCommentsAndLiterals(fs.readFileSync(file, 'utf8'));
   const names = new Set();
   for (const m of src.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) {
     names.add(m[1]);
@@ -94,12 +120,7 @@ describe('pages and components import what they use', () => {
       // constantly ("see runAnalysisForDevice", "same shape as classifyDiff"),
       // so scanning raw text produced 26 false positives on the first run. A
       // guard that cries wolf gets deleted, which is worse than no guard.
-      const src = raw
-        .replace(/\/\*[\s\S]*?\*\//g, ' ')
-        .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-        .replace(/`(?:\\.|[^`\\])*`/g, '``')
-        .replace(/'(?:\\.|[^'\\])*'/g, "''")
-        .replace(/"(?:\\.|[^"\\])*"/g, '""');
+      const src = stripCommentsAndLiterals(raw);
       const missing = [];
       for (const [name, definedIn] of exported) {
         // ⛔ A file is never checked against a name IT ITSELF exports. Once

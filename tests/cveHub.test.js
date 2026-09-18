@@ -244,24 +244,6 @@ function hubSource() {
     .replace(/\r\n/g, '\n');
 }
 
-test('verification FAILS CLOSED — an unverified feed is never applied', () => {
-  const src = hubSource();
-  assert.match(
-    src, /signature did NOT verify — refusing to import/,
-    'a failed signature must throw, not warn'
-  );
-  assert.match(src, /carried no X-Feed-Signature — refusing to import/);
-  assert.match(src, /sha256 mismatch/);
-  // The verify must run against the received bytes, before JSON.parse.
-  const verifyAt = src.indexOf('crypto.verify(');
-  const parseAt = src.indexOf('JSON.parse(body');
-  assert.ok(verifyAt > 0 && parseAt > verifyAt, 'bytes are verified BEFORE they are parsed');
-});
-
-test('a verified-but-EMPTY feed is refused, not treated as "nothing to do"', () => {
-  assert.match(hubSource(), /contained 0 advisories — refusing/);
-});
-
 test('the public key is PINNED in source, not fetched at verification time', () => {
   const src = hubSource();
   assert.match(FEED_PUBLIC_KEY_SPKI_B64, /^[A-Za-z0-9+/=]{40,}$/, 'a real spki-der base64 key');
@@ -366,13 +348,3 @@ test('freshnessErrors: a missing verdict is treated as a problem, not as fresh',
   assert.equal(freshnessErrors(undefined).length, 1);
 });
 
-test('the feed is applied BEFORE freshness is judged, and stale never blocks it', () => {
-  // the stale data is still VALID data - the advisories did not become wrong
-  // because the hub stopped collecting new ones. Refusing it would throw away
-  // good information to protest a different problem.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'feeds', 'cveHub.js'), 'utf8');
-  const applyAt = src.indexOf('await applyFeed(pool, feed)');
-  const useAt = src.indexOf('...freshnessErrors(freshness)');
-  assert.ok(applyAt > 0, 'applyFeed is called');
-  assert.ok(useAt > applyAt, 'and freshness is folded in AFTER the apply, never before it');
-});

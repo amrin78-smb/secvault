@@ -106,15 +106,25 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
       <Card>
         <CardBody>
           <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.7 }}>
-            <strong>{deviceName} has never sent syslog to SecVault.</strong>
+            <strong>No aggregated syslog exists for {deviceName} yet.</strong>
             <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>
               {/* ⛔ NOT "no traffic". This is a COLLECTION gap on our side, and
                   saying otherwise would report a configuration omission as a
                   quiet firewall — the most misleading thing this tab could do. */}
-              This is a collection gap, not a statement about the firewall&apos;s traffic — it is
-              almost certainly passing traffic that SecVault cannot see. Point the device&apos;s syslog
-              target at this server and confirm the inbound firewall rule for the collector port,
-              then this tab fills in within a rollup cycle.
+              {/* THIS IS A STATEMENT ABOUT THE ROLLUP, NOT ABOUT THE DEVICE, and
+                  it used to claim the latter in bold. Coverage here is decided
+                  purely by rows in syslog_rollup_hourly, which the sweep
+                  populates every few minutes -- so a firewall added three minutes
+                  ago, or any device during a stalled rollup, was told with
+                  certainty that it was misconfigured, and its operator sent to
+                  change a syslog target that was working. "The rollup has no rows
+                  for this device" and "this device has never sent syslog" are
+                  different facts, and only the first is measured here. */}
+              Usually this is a collection gap: the firewall is almost certainly passing traffic
+              SecVault cannot see. Check that its syslog target points at this server and that the
+              collector port is open inbound. It can also mean the device was added in the last few
+              minutes, or that the rollup job has not caught up — raw events are aggregated on a
+              short cycle and this tab reads only the aggregates, never the raw table.
             </div>
           </div>
         </CardBody>
@@ -147,17 +157,29 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
     );
   }
 
+  // ONE FAILING SOURCE MUST NOT TAKE DOWN THE DEVICE PAGE. None of these was
+  // guarded, and this tab renders inside /devices/[id] -- so a server that has
+  // not yet migrated one of the newer rollups (syslog_threat_hourly,
+  // syslog_device_inbound_hourly) threw 42P01 and errored the whole page, which
+  // is the page an operator needs in order to fix anything. Each source now
+  // fails to a safe empty shape and is reported below, never silently.
+  const failures = [];
+  const guard = (name, p, fallback) => p.catch((err) => {
+    failures.push({ name, message: err && err.message ? err.message : String(err) });
+    return fallback;
+  });
+
   const [timeline, actions, hosts, apps, protocols, blocked, rules, threats, inbound] =
     await Promise.all([
-      getTrafficTimeline(pool, 24, deviceId),
-      getActionBreakdown(pool, 24, deviceId),
-      getTopHosts(pool, 24, 8, deviceId),
-      getTopApplications(pool, 24, 8, deviceId),
-      getProtocolBreakdown(pool, 24, deviceId),
-      getTopBlockedDestinations(pool, 24, 8, deviceId),
-      getTopRules(pool, 1, 8, deviceId),
-      getDeviceNamedThreats(pool, deviceId, 24, 8),
-      getDeviceInboundHits(pool, deviceId, 24, 8),
+      guard('log volume', getTrafficTimeline(pool, 24, deviceId), []),
+      guard('session outcomes', getActionBreakdown(pool, 24, deviceId), []),
+      guard('top hosts', getTopHosts(pool, 24, 8, deviceId), []),
+      guard('top applications', getTopApplications(pool, 24, 8, deviceId), { applications: [], unclassified: 0 }),
+      guard('protocols', getProtocolBreakdown(pool, 24, deviceId), []),
+      guard('blocked destinations', getTopBlockedDestinations(pool, 24, 8, deviceId), []),
+      guard('top rules', getTopRules(pool, 1, 8, deviceId), []),
+      guard('threat activity', getDeviceNamedThreats(pool, deviceId, 24, 8), { threats: [], total: 0 }),
+      guard('reached this firewall', getDeviceInboundHits(pool, deviceId, 24, 8), { rows: [], reachedAndAllowedTotal: 0 }),
     ]);
 
   // ⛔ A null port renders as nothing, never the string "null". Live rows carry
@@ -197,8 +219,21 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
   }
 
   const namedThreats = threats.threats.filter((t) => t.name !== '(unnamed)');
-  const unnamedThreats = threats.threats.find((t) => t.name === '(unnamed)');
-  const reachedAndAllowed = inbound.filter((r) => r.publicSource && r.allowed);
+  // SUM, NOT find(). getDeviceNamedThreats groups by name AND severity, so
+  // '(unnamed)' legitimately appears once per distinct severity. Taking the
+  // first understated the caption while explicitly inviting the reader to
+  // reconcile it against the total printed beside it.
+  const unnamedThreatEvents = threats.threats
+    .filter((t) => t.name === '(unnamed)')
+    .reduce((n, t) => n + t.events, 0);
+  const inboundRows = inbound.rows;
+  // THE TOTAL COMES FROM ITS OWN COUNT, NOT FROM THIS PAGE. Counting the
+  // LIMITed rows reported 8 where the truth was 150 on the live fleet.
+  const reachedAndAllowedTotal = inbound.reachedAndAllowedTotal;
+  // A REAL MAXIMUM. inboundRows is ordered by the public/allowed flag FIRST, so
+  // rows[0] is not the busiest -- using it as the bar scale made a 5-event row
+  // the denominator for a 480,000-event row and every bar rendered full.
+  const inboundMax = inboundRows.reduce((n, r) => Math.max(n, r.events), 0);
 
   const totalEvents = timeline.reduce((n, r) => n + r.events, 0);
   // ⛔ NULL-SAFE SUM. `denied` is null when the vendor never reports an action,
@@ -211,6 +246,25 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {failures.length > 0 ? (
+        /* A FAILED SOURCE IS BANNERED, NEVER SILENT. An empty widget and a
+           broken one look identical, and the empty one reads as "no traffic". */
+        <Card>
+          <CardBody>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--yellow)' }}>
+              <strong>{failures.length} traffic source(s) could not be read</strong>, so those panels
+              are NOT MEASURED rather than empty:
+              <ul style={{ margin: '6px 0 0 18px' }}>
+                {failures.map((f) => (
+                  <li key={f.name}>
+                    {f.name} — {f.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
         <Panel icon={IconActivity} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Log Volume (24h)">
           <div style={{ display: 'flex', gap: 'var(--s5)', flexWrap: 'wrap', marginBottom: 'var(--s4)' }}>
@@ -246,8 +300,15 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           {measuredDenied.length > 0 && measuredDenied.length < timeline.length ? (
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--s3)' }}>
               {/* ⛔ Partial measurement is disclosed rather than averaged away. */}
-              Deny counts are available for {measuredDenied.length} of {timeline.length} hours; the
-              rest carried no action field and are excluded from that figure rather than counted as zero.
+              {/* THE OLD WORDING ASSERTED A CAUSE IT CANNOT KNOW. A NULL here
+                  means no row in that hour matched a deny verb -- which on a
+                  device that reports actions normally is a MEASURED ZERO, not a
+                  missing action field. Claiming the latter was a false statement
+                  about the data in the common case. */}
+              Deny counts are available for {measuredDenied.length} of {timeline.length} hours with
+              traffic. The remaining hours recorded no denied session, which may mean none occurred
+              or that this vendor did not report an action — the two are not distinguished here, so
+              they are excluded from the figure rather than counted as zero.
             </div>
           ) : null}
         </Panel>
@@ -416,13 +477,13 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
               ) : (
                 <Empty>This firewall logged threat activity, but none of it carried a signature name.</Empty>
               )}
-              {unnamedThreats ? (
+              {unnamedThreatEvents > 0 ? (
                 /* ⛔ COUNTED, NEVER DROPPED. Measured live: 946,434 of ITC-SK's
                    949,950 threat events (99.6%) carry no name. Filtering them
                    out would hide almost the entire threat volume while looking
                    tidier on screen. */
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--s3)' }}>
-                  A further <strong>{unnamedThreats.events.toLocaleString()}</strong> threat event(s)
+                  A further <strong>{unnamedThreatEvents.toLocaleString()}</strong> threat event(s)
                   carried no signature name from this vendor. They are counted in the total of{' '}
                   {threats.total.toLocaleString()} but cannot be ranked.
                 </div>
@@ -438,13 +499,13 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
               neither may be collapsed into the other: a blocked probe from the
               internet and an allowed one are opposite outcomes, and an allowed
               one from the LAN is a far weaker claim than one from outside. */}
-          {inbound.length === 0 ? (
+          {inboundRows.length === 0 ? (
             <Empty>Nothing was recorded arriving at this firewall&apos;s own addresses. Matching this
               needs collected interface or NAT addresses — without them the traffic is NOT MEASURED
               here, not absent.</Empty>
           ) : (
             <>
-              {reachedAndAllowed.length > 0 ? (
+              {reachedAndAllowedTotal > 0 ? (
                 <div
                   style={{
                     fontSize: 'var(--text-xs)',
@@ -455,12 +516,15 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                     marginBottom: 'var(--s3)',
                   }}
                 >
-                  <strong>{reachedAndAllowed.length}</strong> of these were reached from a PUBLIC
-                  source and ALLOWED.
+                  <strong>{reachedAndAllowedTotal.toLocaleString()}</strong> endpoint/port
+                  combination(s) on this firewall were reached from a PUBLIC source and ALLOWED in
+                  the window{reachedAndAllowedTotal > inboundRows.length
+                    ? ' \u2014 the list below shows the busiest of them'
+                    : ''}.
                 </div>
               ) : null}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                {inbound.map((r) => (
+                {inboundRows.map((r) => (
                   <div key={`${r.dstIp}-${r.dstPort}-${r.protocol}-${r.allowed}-${r.publicSource}`}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
                       <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
@@ -472,12 +536,28 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                         </Drill>
                       </span>
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
-                        <span style={{ color: r.publicSource ? 'var(--red)' : 'var(--text-muted)' }}>
-                          {r.publicSource ? 'public' : 'internal'}
+                        {/* BOTH FIELDS ARE TRI-STATE AND A NULL IS NOT A NO.
+                            The rollup writes NULL for any action verb in neither
+                            the allow nor the deny list, and for a record with no
+                            source address. A plain truthiness test printed GREEN
+                            "blocked" for a session nobody classified -- on the
+                            one widget that answers "did anyone get in". */}
+                        <span style={{ color: r.publicSource === true ? 'var(--red)' : 'var(--text-muted)' }}>
+                          {r.publicSource === true ? 'public'
+                            : r.publicSource === false ? 'internal'
+                            : 'source unknown'}
                         </span>
                         {' / '}
-                        <span style={{ color: r.allowed ? 'var(--red)' : 'var(--green)' }}>
-                          {r.allowed ? 'allowed' : 'blocked'}
+                        <span
+                          style={{
+                            color: r.allowed === true ? 'var(--red)'
+                              : r.allowed === false ? 'var(--green)'
+                              : 'var(--unmeasured)',
+                          }}
+                        >
+                          {r.allowed === true ? 'allowed'
+                            : r.allowed === false ? 'blocked'
+                            : 'not classified'}
                         </span>
                         {' '}&middot;{' '}
                         <Num value={r.events} />
@@ -485,8 +565,8 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
                     </div>
                     <Bar
                       value={r.events}
-                      max={inbound[0].events}
-                      color={r.publicSource && r.allowed ? 'var(--red)' : 'var(--yellow)'}
+                      max={inboundMax}
+                      color={r.publicSource === true && r.allowed === true ? 'var(--red)' : 'var(--yellow)'}
                     />
                   </div>
                 ))}
