@@ -11,6 +11,7 @@ import EmptyState from '../../../components/ui/EmptyState';
 import { computeFleetExposure } from '../../../lib/engines/exposureQuery';
 import { SEVERITY_BADGE_COLOR, SEVERITY_LABEL } from '../../../components/analysis/severityRamp';
 import Pagination from '../../../components/ui/Pagination';
+import ExposureFilters from '../../../components/exposure/ExposureFilters';
 import { resolvePage, resolvePageSize, paginateArray, DEFAULT_PAGE_SIZE } from '../../../lib/pagination';
 
 export const dynamic = 'force-dynamic';
@@ -246,12 +247,37 @@ export default async function ExposurePage({ searchParams }) {
     .flatMap((d) => d.paths.map((p) => ({ ...p, deviceName: d.name, deviceId: d.deviceId })))
     .sort((a, b) => b.score - a.score);
 
+  // ⛔ THE FIREWALL FILTER SCOPES THE TABLE ONLY, AND DELIBERATELY NOT THE
+  // FIGURES ABOVE IT. The KPI tiles, the answer sentence and the unmeasured
+  // caveat are FLEET statements — see the note on allRows. Recomputing them for
+  // one device would silently turn "156 exposure paths across 8 devices" into a
+  // subset wearing a fleet label, which is precisely the failure that comment
+  // exists to prevent. The scope is instead STATED next to the table, so a
+  // filtered view can never be mistaken for the whole estate.
+  //
+  // ⛔ EVERY ACTIVE DEVICE IS OFFERED, INCLUDING THOSE WITH ZERO PATHS. A
+  // firewall missing from the list is indistinguishable from one that is not
+  // monitored, and "this firewall has no internet-facing paths" is the answer
+  // an operator most often came for.
+  const deviceOptions = fleet.devices
+    .map((d) => ({ deviceId: d.deviceId, name: d.name, paths: d.paths.length }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const selectedDeviceId = typeof searchParams?.device_id === 'string' ? searchParams.device_id : '';
+  // ⛔ An unknown device_id yields an EMPTY table, never a silent fall-back to
+  // the whole fleet: showing every path under a filter the operator believes is
+  // applied is the dangerous direction on an exposure report.
+  const selectedDevice = deviceOptions.find((d) => d.deviceId === selectedDeviceId) || null;
+  const tableRows = selectedDeviceId
+    ? allRows.filter((r) => r.deviceId === selectedDeviceId)
+    : allRows;
+
   // Paginated in memory: exposure paths are COMPUTED per request from rules,
   // interfaces and NAT, not selected from a table, so there is no LIMIT to push
   // down to SQL. paginateArray clamps a past-the-end ?page= to the last page
   // rather than rendering an empty table, which would read as "no exposure".
   const pageSize = resolvePageSize(searchParams?.limit, DEFAULT_PAGE_SIZE);
-  const paged = paginateArray(allRows, resolvePage(searchParams?.page), pageSize);
+  const paged = paginateArray(tableRows, resolvePage(searchParams?.page), pageSize);
   const rows = paged.rows;
 
   return (
@@ -345,6 +371,47 @@ export default async function ExposurePage({ searchParams }) {
           ) : (
             <Card>
               <CardBody>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 'var(--s4)',
+                    flexWrap: 'wrap',
+                    marginBottom: 'var(--s4)',
+                  }}
+                >
+                  <ExposureFilters currentDeviceId={selectedDeviceId} devices={deviceOptions} />
+                  {/* ⛔ NAMES THE SCOPE WHENEVER ONE IS APPLIED. Without this the
+                      table below reads as the whole estate while the tiles above
+                      genuinely are — two different scopes, identically styled. */}
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                    {selectedDeviceId ? (
+                      <>
+                        Showing <strong>{tableRows.length}</strong> of {allRows.length} path(s) —{' '}
+                        <strong>{selectedDevice ? selectedDevice.name : 'unknown firewall'}</strong> only.
+                        The figures above remain fleet-wide.
+                      </>
+                    ) : (
+                      <>
+                        Showing all <strong>{allRows.length}</strong> path(s) across the fleet.
+                      </>
+                    )}
+                  </div>
+                </div>
+                {selectedDeviceId && tableRows.length === 0 ? (
+                  /* ⛔ An empty FILTERED table is not an all-clear and must not
+                     look like one. It says which firewall, and that the filter
+                     is what emptied it. */
+                  <EmptyState
+                    message={
+                      selectedDevice
+                        ? `${selectedDevice.name} has no internet-facing exposure paths. `
+                          + 'Other firewalls may still have them — clear the filter to see the fleet.'
+                        : 'That firewall is not in the current exposure set. Clear the filter to see the fleet.'
+                    }
+                  />
+                ) : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
                     <thead>
@@ -453,11 +520,15 @@ export default async function ExposurePage({ searchParams }) {
                     </tbody>
                   </table>
                 </div>
+                )}
 
-                {/* ⛔ The label says "exposure paths" and the total is the FLEET total,
-                    not this page’s row count. A pager that says "1-50 of 50" on a
-                    fleet with 300 paths is the same class of error as a filtered view
-                    reporting itself as the whole set. */}
+                {/* ⛔ The label says "exposure paths" and the total is the total of
+                    the SET BEING PAGED — the fleet when no firewall filter is
+                    applied, and that firewall's paths when one is. A pager that
+                    says "1-50 of 50" over a 300-path fleet would be the same class
+                    of error as a filtered view reporting itself as the whole set,
+                    which is why the scope is named in the line above the table
+                    rather than left to be inferred from this number. */}
                 <Pagination
                   basePath="/exposure"
                   searchParams={searchParams}

@@ -570,3 +570,11 @@ configured (without one SecVault cannot search, so no mapping can ever match), c
 first mapping ends legacy mode, and requires a typed confirmation naming the consequence before
 removing the last one. States both timings: a mapping change is immediate, a group-membership
 change applies at next sign-in.
+
+ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}] — firewall filter for /exposure.
+  Same convention as AlertsFilters (select + router.push, resets `page` to 1).
+  ⛔ Scopes the TABLE ONLY — the KPI tiles, answer sentence and unmeasured caveat
+  above it are FLEET statements and stay that way; the page states the scope in a
+  line beside the filter rather than letting a filtered table be read as the estate.
+  ⛔ Lists every active device INCLUDING those with 0 paths, with the count in the
+  option label — an absent firewall is indistinguishable from an unmonitored one.
