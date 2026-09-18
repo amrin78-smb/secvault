@@ -282,3 +282,97 @@ test('an unset licence key is notRun, never an error', () => {
   assert.match(src, /notRun: true/);
   assert.match(src, /CVE_HUB_LICENSE_KEY is not set/);
 });
+
+// ── freshness / liveness ────────────────────────────────────────────────────
+//
+// ⛔ WITHOUT THIS, THE FEED THAT FIXED THE BLIND SPOT BECOMES ONE. A hub that
+// stopped publishing would be invisible: the same feed_version fetched every six
+// hours, signature verifying perfectly, nothing applied, `success` logged for
+// ever — a green light over a corpus that stopped moving.
+
+const { feedFreshness, freshnessErrors, STALE_AFTER_MS } = require('../lib/feeds/cveHub');
+const NOW_MS = Date.parse('2026-09-18T12:00:00Z');
+const hoursAgo = (h) => new Date(NOW_MS - h * 3600000).toISOString();
+
+test('freshness: a recent ingest is fresh', () => {
+  const f = feedFreshness(hoursAgo(2), NOW_MS);
+  assert.equal(f.state, 'fresh');
+  assert.equal(f.reason, '');
+});
+
+test('freshness: just inside and just outside the threshold', () => {
+  assert.equal(feedFreshness(hoursAgo(23), NOW_MS).state, 'fresh');
+  assert.equal(feedFreshness(hoursAgo(25), NOW_MS).state, 'stale');
+  assert.equal(STALE_AFTER_MS, 24 * 3600000, 'the hub publishes 6-hourly; 24h is four missed runs');
+});
+
+test('freshness: a stale verdict NAMES the age and says the data is still valid', () => {
+  const f = feedFreshness(hoursAgo(50), NOW_MS);
+  assert.equal(f.state, 'stale');
+  assert.match(f.reason, /50h ago/);
+  assert.match(f.reason, /still valid/i, 'stale data is not wrong data, and the message must say so');
+  assert.match(f.reason, /scheduled ingest/i, 'and must point at what to check');
+});
+
+test('freshness: MISSING checked_at is unknown, never fresh', () => {
+  // ⛔ THE CASE THAT REGRESSES SILENTLY. An absent header is exactly what an
+  // older hub build serves; reading it as healthy is a failed read recorded as
+  // an affirmative value.
+  for (const v of [null, undefined, '', '   ']) {
+    const f = feedFreshness(v, NOW_MS);
+    assert.equal(f.state, 'unknown', `${JSON.stringify(v)} must be unknown`);
+    assert.notEqual(f.state, 'fresh');
+    assert.match(f.reason, /cannot be established|no checked_at/i);
+  }
+});
+
+test('freshness: an unparseable checked_at is unknown, never fresh', () => {
+  const f = feedFreshness('yesterday-ish', NOW_MS);
+  assert.equal(f.state, 'unknown');
+  assert.match(f.reason, /unparseable/i);
+});
+
+test('freshness: a FUTURE checked_at is unknown, not fresh', () => {
+  // ⛔ Clock disagreement makes the age meaningless; reporting it healthy would
+  // hide the skew. Same call vpn_sessions makes on a negative duration.
+  const f = feedFreshness(new Date(NOW_MS + 3 * 3600000).toISOString(), NOW_MS);
+  assert.equal(f.state, 'unknown');
+  assert.match(f.reason, /FUTURE/);
+  assert.match(f.reason, /not a measurement/i);
+});
+
+test('freshness: small forward skew is tolerated rather than alarmed on', () => {
+  assert.equal(feedFreshness(new Date(NOW_MS + 60000).toISOString(), NOW_MS).state, 'fresh');
+});
+
+test('freshnessErrors: a fresh verdict contributes nothing', () => {
+  assert.deepEqual(freshnessErrors({ state: 'fresh', reason: '' }), []);
+});
+
+test('freshnessErrors: stale and unknown BOTH contribute an error', () => {
+  // ⛔ Non-empty is what makes the sync report `partial` rather than `success`,
+  // and therefore what makes a frozen hub visible at all.
+  for (const state of ['stale', 'unknown']) {
+    const errs = freshnessErrors({ state, reason: 'because reasons' });
+    assert.equal(errs.length, 1, `${state} must contribute an error`);
+    assert.equal(errs[0].cve_id, null);
+    assert.match(errs[0].message, new RegExp(`central CVE feed ${state}`));
+    assert.match(errs[0].message, /because reasons/, 'and must carry the reason through');
+  }
+});
+
+test('freshnessErrors: a missing verdict is treated as a problem, not as fresh', () => {
+  assert.equal(freshnessErrors(null).length, 1);
+  assert.equal(freshnessErrors(undefined).length, 1);
+});
+
+test('the feed is applied BEFORE freshness is judged, and stale never blocks it', () => {
+  // the stale data is still VALID data - the advisories did not become wrong
+  // because the hub stopped collecting new ones. Refusing it would throw away
+  // good information to protest a different problem.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'feeds', 'cveHub.js'), 'utf8');
+  const applyAt = src.indexOf('await applyFeed(pool, feed)');
+  const useAt = src.indexOf('...freshnessErrors(freshness)');
+  assert.ok(applyAt > 0, 'applyFeed is called');
+  assert.ok(useAt > applyAt, 'and freshness is folded in AFTER the apply, never before it');
+});

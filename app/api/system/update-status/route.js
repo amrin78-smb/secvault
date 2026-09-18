@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.139.0': [
+    'SecVault now notices if the central vulnerability feed stops being updated. Until now it would have kept fetching the same unchanged feed every six hours, checking its signature, and reporting success — a green light over data that had quietly stopped moving.',
+    'If the feed has not been refreshed for more than a day, the sync is reported as incomplete and says how long it has been, so it appears in the feed status instead of passing silently.',
+    'Stale data is still used. The advisories did not become wrong because collection stopped, so they are applied as normal and the age is reported alongside — nothing is discarded.',
+    'If the age cannot be established at all, that is reported too rather than assumed to be fine.',
+    'When the central feed is stale, the direct vulnerability-database sync resumes as a backstop instead of being skipped.',
+  ],
   '2.138.0': [
     'The feed status no longer shows a permanent warning for something working correctly. This server cannot reach the national vulnerability database directly — your internal address ranges overlap its public ones — so that sync could only ever fail, and it reported “degraded” for ever.',
     'Now that the central feed supplies the same data, the direct sync is marked “skipped” with the reason, shown in grey rather than amber, and roughly two minutes per cycle are no longer spent on requests that cannot succeed.',

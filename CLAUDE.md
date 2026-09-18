@@ -1778,6 +1778,46 @@ alongside `missing` — and ⛔ **a fleet where EVERY feed is skipped reports `n
 never `ok`**, because excluding them all would otherwise leave the reduce seed and
 render a product collecting nothing as green. Pinned by `tests/feedSkipped.test.js`.
 
+### ⛔ A frozen hub must be VISIBLE (v2.139.0)
+
+Without this the feed that fixed the blind spot becomes one: a hub that stopped
+publishing would be invisible here — the same `feed_version` fetched every six
+hours, signature verifying perfectly, nothing applied, `success` logged for ever.
+A green light over a corpus that stopped moving.
+
+⛔ **IT READS `checked_at`, NOT `generated_at`, AND THE DIFFERENCE IS THE WHOLE
+POINT.** The hub's publish is idempotent — an unchanged corpus republishes nothing
+and keeps its version — so `generated_at` only advances when the CONTENT changes.
+On a quiet week at NVD a dead hub and a healthy one are indistinguishable by that
+field. `checked_at` is `MAX(cve_ingest_state.last_success_at)` on the hub: when it
+last completed an ingest target. It advances every healthy run and stops when the
+hub does. It arrives in the `X-Feed-Checked-At` header rather than the signed body,
+because putting it in the body would change the bytes every run and defeat the
+idempotent publish it exists to compensate for.
+
+⛔ **STALE REPORTS; IT NEVER REFUSES.** A stale feed is still VALID data — the
+advisories did not become wrong because the hub stopped collecting new ones — so
+the feed is APPLIED and the verdict is pushed into `errors`, which is what turns
+the sync `partial` and puts it on the banner. Refusing would throw away good
+information to protest a different problem.
+
+⛔ **MISSING, UNPARSEABLE, OR IN THE FUTURE ARE ALL `unknown`, NEVER `fresh`.** An
+absent header is exactly what an older hub build serves. A `checked_at` in the
+future is a clock disagreement, not freshness — the same call `vpn_sessions` makes
+on a negative duration. ⛔ And an ABSENT VERDICT contributes an error too: the
+defensive branch is where "default it to fine" survives review.
+
+⛔ **A STALE HUB MAKES `hubDelivered` FALSE**, so the local NVD path runs again
+with CIRCL behind it. On this site that attempt still fails — but loudly, and
+CIRCL may still land something, which beats quietly trusting a frozen central feed
+because it happened to verify.
+
+Threshold `STALE_AFTER_MS` = 24h: the hub publishes 6-hourly, so that is four
+missed runs. Pinned by `tests/cveHub.test.js` (29 cases, freshness mutations
+verified — including one that initially ESCAPED because the test asserted the
+`errors.push` LINE existed rather than that it ran; the logic was extracted into
+`freshnessErrors()` so it could be tested by behaviour instead of by shape).
+
 ⛔ **NOT CONFIGURED IS NOT AN ERROR.** Without `CVE_HUB_LICENSE_KEY` the feed returns
 `notRun` and is logged `skipped` **with a reason** — a feed that simply stops
 appearing is indistinguishable from one that silently broke.
