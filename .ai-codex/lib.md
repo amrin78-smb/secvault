@@ -2359,3 +2359,18 @@ lastBucket}`, which is what lets a per-device view tell "sends no syslog" from "
 quiet". ⛔ getTopApplications returns `{applications, unclassified}`, NOT an array, and
 its unclassified count is scoped too — unscoped it captioned one firewall's list with
 the fleet's total.
+
+`getDeviceNamedThreats(pool, deviceId, hours, limit)` -> `{threats[], total}` (v2.142.0).
+⛔ A NULL `threat_name` is COUNTED as an explicit `(unnamed)` row, never dropped: live,
+946,434 of ITC-SK's 949,950 threat events (99.6%) carry no name, so filtering them would
+hide almost the entire threat volume while looking tidier. ⛔ This is ATTACK CONTEXT and
+must never feed the CVE priority tree — threat signatures were measured and REJECTED as a
+band modifier because they fire on nearly every device.
+
+`getDeviceInboundHits(pool, deviceId, hours, limit)` -> rows from
+`syslog_device_inbound_hourly` (v2.142.0) — the same evidence /exposure and `log_hit` are
+built on. ⛔ `publicSource` and `allowed` are SEPARATE facts and neither may be collapsed
+into the other. ⛔ Ordered by `(public_source AND allowed) DESC` before volume: one allowed
+hit on a management port outranks a million blocked scans, and ranking by count buries it.
+
+`getTopRules` also takes the optional trailing `deviceId` now.

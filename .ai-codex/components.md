@@ -580,8 +580,8 @@ ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}] — firewall fi
   option label — an absent firewall is indistinguishable from an unmonitored one.
 
 DeviceTrafficTab  deviceId, deviceName — per-firewall traffic (devices/[id]?tab=traffic).
-  Six widgets (log volume, session outcomes, top hosts, top applications, protocols,
-  blocked destinations), all scoped IN SQL via the optional deviceId now accepted by
+  Nine widgets (log volume, session outcomes, top hosts, top applications, protocols,
+  blocked destinations, top rules by traffic, threat activity, reached-this-firewall), all scoped IN SQL via the optional deviceId now accepted by
   lib/syslog/trafficStats. ⛔ Resolves syslog COVERAGE first and renders one of three
   states: never sent (a collection gap on our side), sent-but-silent-in-window (the
   device stopped, keeps its last bucket), or data. An empty widget otherwise reads as

@@ -10,6 +10,9 @@ import {
   getProtocolBreakdown,
   getTopBlockedDestinations,
   getDeviceSyslogCoverage,
+  getTopRules,
+  getDeviceNamedThreats,
+  getDeviceInboundHits,
 } from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
@@ -143,14 +146,28 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
     );
   }
 
-  const [timeline, actions, hosts, apps, protocols, blocked] = await Promise.all([
-    getTrafficTimeline(pool, 24, deviceId),
-    getActionBreakdown(pool, 24, deviceId),
-    getTopHosts(pool, 24, 8, deviceId),
-    getTopApplications(pool, 24, 8, deviceId),
-    getProtocolBreakdown(pool, 24, deviceId),
-    getTopBlockedDestinations(pool, 24, 8, deviceId),
-  ]);
+  const [timeline, actions, hosts, apps, protocols, blocked, rules, threats, inbound] =
+    await Promise.all([
+      getTrafficTimeline(pool, 24, deviceId),
+      getActionBreakdown(pool, 24, deviceId),
+      getTopHosts(pool, 24, 8, deviceId),
+      getTopApplications(pool, 24, 8, deviceId),
+      getProtocolBreakdown(pool, 24, deviceId),
+      getTopBlockedDestinations(pool, 24, 8, deviceId),
+      getTopRules(pool, 1, 8, deviceId),
+      getDeviceNamedThreats(pool, deviceId, 24, 8),
+      getDeviceInboundHits(pool, deviceId, 24, 8),
+    ]);
+
+  // ⛔ A null port renders as nothing, never the string "null". Live rows carry
+  // dst_port NULL (an ICMP or protocol-only record), and `${ip}:${port}` on one
+  // of those prints "49.231.158.90:null" — a fabricated port on a security page.
+  const endpoint = (ip, port, proto) =>
+    `${String(ip).replace('/32', '')}${port ? `:${port}` : ''}${proto ? ` ${proto}` : ''}`;
+
+  const namedThreats = threats.threats.filter((t) => t.name !== '(unnamed)');
+  const unnamedThreats = threats.threats.find((t) => t.name === '(unnamed)');
+  const reachedAndAllowed = inbound.filter((r) => r.publicSource && r.allowed);
 
   const totalEvents = timeline.reduce((n, r) => n + r.events, 0);
   // ⛔ NULL-SAFE SUM. `denied` is null when the vendor never reports an action,
@@ -278,6 +295,149 @@ export default async function DeviceTrafficTab({ deviceId, deviceName }) {
               labelOf={(r) => String(r.protocol)}
               color="var(--yellow)"
             />
+          )}
+        </Panel>
+
+        <Panel icon={IconActivity} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Top Rules by Traffic (24h)">
+          {/* ⛔ THE ONE WIDGET HERE A LOG ANALYSER CANNOT DRAW. It joins traffic
+              to this firewall's own RULEBASE, which is what makes the `unused`
+              findings on Rule hygiene evidence rather than assumption. ⛔ A rule
+              ABSENT from this list is NOT proven unused — `unused` requires a
+              MEASURED zero, and a missing row is not a measurement. */}
+          {rules.length === 0 ? (
+            <Empty>No rule-attributed traffic for this firewall. Its logs carry no rule identifier,
+              so rule usage here is NOT MEASURED — not zero.</Empty>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {rules.map((r) => (
+                <div key={`${r.rule}-${r.action}`}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 'var(--text-sm)' }}>
+                      {r.rule}
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 'var(--text-xs)' }}>
+                        {r.action}
+                      </span>
+                    </span>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                      <Num value={r.hits} />
+                    </span>
+                  </div>
+                  <Bar value={r.hits} max={rules[0].hits} color="var(--teal)" />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel icon={IconShield} tint="var(--tint-danger-fg)" tintBg="var(--tint-danger)" title="Threat Activity (24h)">
+          {/* ⛔ ATTACK CONTEXT, NOT PRIORITISATION. Threat signatures were
+              deliberately REJECTED as a CVE band modifier: they fire on nearly
+              every device, so admitting them would push ~every assessment to
+              patch_now and leave the queue with no ordering at all. Beside a
+              device's traffic is the use that was always considered correct. */}
+          {threats.total === 0 ? (
+            <Empty>No threat or UTM records from this firewall in the window. That means its logs
+              carried none — not that nothing was attempted.</Empty>
+          ) : (
+            <>
+              {namedThreats.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {namedThreats.map((t) => (
+                    <div key={`${t.name}-${t.severity}`}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+                        <span style={{ fontSize: 'var(--text-sm)' }}>
+                          {t.name}
+                          {t.severity ? (
+                            <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 'var(--text-xs)' }}>
+                              {t.severity}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                          <Num value={t.events} />
+                          <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>
+                            {' '}&middot; {t.sources} src
+                          </span>
+                        </span>
+                      </div>
+                      <Bar value={t.events} max={namedThreats[0].events} color="var(--red)" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty>This firewall logged threat activity, but none of it carried a signature name.</Empty>
+              )}
+              {unnamedThreats ? (
+                /* ⛔ COUNTED, NEVER DROPPED. Measured live: 946,434 of ITC-SK's
+                   949,950 threat events (99.6%) carry no name. Filtering them
+                   out would hide almost the entire threat volume while looking
+                   tidier on screen. */
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 'var(--s3)' }}>
+                  A further <strong>{unnamedThreats.events.toLocaleString()}</strong> threat event(s)
+                  carried no signature name from this vendor. They are counted in the total of{' '}
+                  {threats.total.toLocaleString()} but cannot be ranked.
+                </div>
+              ) : null}
+            </>
+          )}
+        </Panel>
+
+        <Panel icon={IconChart} tint="var(--tint-warn-fg)" tintBg="var(--tint-warn)" title="Reached This Firewall (24h)">
+          {/* ⛔ THE SAME EVIDENCE /exposure AND log_hit ARE BUILT ON. Exposure
+              says a path is open; this says whether anyone knocked and whether
+              they got in. ⛔ `public_source` and `allowed` are SEPARATE facts and
+              neither may be collapsed into the other: a blocked probe from the
+              internet and an allowed one are opposite outcomes, and an allowed
+              one from the LAN is a far weaker claim than one from outside. */}
+          {inbound.length === 0 ? (
+            <Empty>Nothing was recorded arriving at this firewall&apos;s own addresses. Matching this
+              needs collected interface or NAT addresses — without them the traffic is NOT MEASURED
+              here, not absent.</Empty>
+          ) : (
+            <>
+              {reachedAndAllowed.length > 0 ? (
+                <div
+                  style={{
+                    fontSize: 'var(--text-xs)',
+                    color: 'var(--tint-danger-fg)',
+                    background: 'var(--tint-danger)',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    marginBottom: 'var(--s3)',
+                  }}
+                >
+                  <strong>{reachedAndAllowed.length}</strong> of these were reached from a PUBLIC
+                  source and ALLOWED.
+                </div>
+              ) : null}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                {inbound.map((r) => (
+                  <div key={`${r.dstIp}-${r.dstPort}-${r.protocol}-${r.allowed}-${r.publicSource}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+                      <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
+                        {endpoint(r.dstIp, r.dstPort, r.protocol)}
+                      </span>
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                        <span style={{ color: r.publicSource ? 'var(--red)' : 'var(--text-muted)' }}>
+                          {r.publicSource ? 'public' : 'internal'}
+                        </span>
+                        {' / '}
+                        <span style={{ color: r.allowed ? 'var(--red)' : 'var(--green)' }}>
+                          {r.allowed ? 'allowed' : 'blocked'}
+                        </span>
+                        {' '}&middot;{' '}
+                        <Num value={r.events} />
+                      </span>
+                    </div>
+                    <Bar
+                      value={r.events}
+                      max={inbound[0].events}
+                      color={r.publicSource && r.allowed ? 'var(--red)' : 'var(--yellow)'}
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </Panel>
 
