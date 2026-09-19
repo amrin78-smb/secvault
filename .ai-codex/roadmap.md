@@ -267,9 +267,33 @@ touching `advisories`, `device_cve_assessments`, `versionMatcher`, the KEV cross
 fleet count, so it needs its own decision. Adding more feeds (CVE.org, EPSS) RAISES this risk, since
 each new source is another candidate first-ingester.
 
-## Two live data bugs found 2026-09-10, reported not fixed
+## Two live data bugs found 2026-09-10 — #1 RESOLVED 2026-09-19, #2 still open
 
-### 1. ⛔ CORRECTED 2026-09-11 — the 0.0 scores are the VENDOR’s, not a SecVault fabrication
+### 1. ⛔ RESOLVED — THERE WAS NO BUG, AND THE PROPOSED FIX WOULD HAVE CAUSED ONE
+
+**Decision taken 2026-09-19 and recorded in CLAUDE.md: the vendor's 0.0 is a score, it is kept, and
+no third-party score is imported over it.** Code, comments and `tests/cvssZeroScore.test.js` landed
+with that decision.
+
+⛔ **THIS ENTRY'S CENTRAL CLAIM WAS FALSE.** It said "CVE-2022-22963 sits in `monitor` on a
+fabricated 0 when decision-tree rule 3 should fire — a real, live mis-prioritisation". Measured:
+there is **no assessment for it at all**, nor for any of the other 45 zero-score rows. Palo Alto
+declares PAN-OS `unaffected`, so no version range is extracted and no device can match. The entry
+described a mis-prioritisation that was not happening, and prescribed importing CVE.org's 9.8 —
+which is the Spring Framework's severity, and would have manufactured 46 urgent findings against a
+product its vendor says is unaffected.
+
+⛔ **WHAT WAS GENUINELY WRONG was two things neither of which this entry named:** the
+`suspicious_zero_scores` report keyed on `cvss_source IS NULL` and therefore could not fire at all
+after v2.104.0 stamped that column (live: 0 rows, permanently — re-pointed at zero-scores that DO
+claim a version range, live 3 rows); and the guard that makes the whole thing safe had no test, no
+comment, and was credited to the wrong line when one was first written.
+
+(Original entry below, kept for the CVE ids it names and as a record of two successive wrong
+diagnoses of the same rows — first "the feed fabricates a 0", then "the 0 is the vendor's but it
+mis-prioritises".)
+
+### 1-old. ⛔ CORRECTED 2026-09-11 — the 0.0 scores are the VENDOR’s, not a SecVault fabrication
 
 This entry originally said the fix belonged "in the producing feed plus a `lib/migrate.js`
 backfill", on the assumption that `lib/feeds/paloalto.js` was inventing a 0 for "no score".
@@ -287,6 +311,8 @@ did publish as absent. Either way it needs deciding deliberately.
 ⛔ `lib/feeds/cveorg.js` surfaces these as `suspicious_zero_scores`, but its predicate is
 `cvss_score = 0 AND cvss_source IS NULL` — and those rows now carry `psirt` after the v2.104.0
 writer fix, so **that report will go quiet**. Re-point it before relying on it.
+**DONE 2026-09-19** — and this prediction was exactly right: measured before the change, the old
+predicate returned 0 rows and could never return more.
 
 (Original entry below, kept for the CVE ids it names.)
 ### 1b. The 0.0 rows, as first found

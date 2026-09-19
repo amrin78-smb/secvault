@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.149.0': [
+    'A vulnerability whose vendor says "this does not affect our product" is no longer treated as one that might. Palo Alto publishes informational advisories scored zero to state that PAN-OS is not impacted by a third-party vulnerability — 46 of them here — and SecVault now records why that zero is correct rather than leaving it looking like a missing score.',
+    'Deliberately NOT changed: those advisories keep the vendor's score. Replacing it with the higher score published elsewhere would have filed another product's severity against your firewalls, creating 46 urgent items that are not real.',
+    'A report that was supposed to flag suspicious zero scores had been returning nothing for a fortnight, because the condition it tested could no longer be met. It now flags the case that can actually mislead: a severity of zero attached to a version range the advisory does claim.',
+    'Added a test around the check that keeps "not affected" advisories off your devices. It protects 261 version entries where the vendor names a real version number and marks it unaffected — without it, an advisory that clears a firewall could file a finding against it.',
+  ],
   '2.148.0': [
     'The traffic charts now show the hours in which nothing arrived. Previously an hour with no events was simply left out, so a gap in collection was drawn as an unbroken line — the one thing a traffic chart exists to show. Missing hours are now drawn without colour, which is how this product marks anything it has not measured.',
     'Clicking a busy rule in a firewall\'s Traffic tab now finds its traffic. Where the firewall names a rule by number rather than by name, the search was looking in the wrong field and came back empty — which reads as "this rule carried no traffic", directly contradicting the count beside it.',

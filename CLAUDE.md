@@ -529,6 +529,34 @@ unmeasurable → `null`, rendered "—". `monitor`-band CVEs contribute nothing 
 
 **Any change to these weights or to the polarity must be documented here before the code changes.**
 
+### ⛔ A VENDOR-PUBLISHED 0.0 IS A SCORE — DECIDED 2026-09-19, DO NOT REOPEN
+
+Palo Alto publishes `baseScore: 0` with `baseSeverity: "NONE"` on advisories titled
+**"Informational: Impact of \<third-party CVE\>"** — documents whose purpose is to say PAN-OS is
+NOT impacted. Verified against the live bulk endpoint: **47 of 350 records score 0, and 45 of those
+declare PAN-OS `status: "unaffected"`.** Live in the database: 46 such rows and **0 device
+assessments across all of them**.
+
+⛔ **DO NOT IMPORT A THIRD-PARTY SCORE OVER IT.** CVE.org scores CVE-2022-22963 at 9.8 — that is
+the SPRING FRAMEWORK's severity, and filing it against a firewall whose own vendor says it is
+unaffected would manufacture 46 urgent findings that are not real. Same trade as the vendor-level
+CPE wildcard, tested and refused for the same reason. The vendor's 0 answers the question this
+product actually asks (does this affect THIS product) and it is the best available answer.
+
+⛔ **A 0.0 WHOSE VECTOR CONTRADICTS IT IS STILL STORED VERBATIM.** Four records carry
+`CVSS:4.0/…/VC:H/VI:H/VA:H` with `baseScore: 0`. The vendor publishes both in ONE metric block, so
+this is not a pairing error of ours; recomputing a score from the vector would invent a number
+nobody published.
+
+⛔ **TWO SEPARATE GUARDS KEEP THESE OFF DEVICES, AND THEY COVER DIFFERENT RECORDS.**
+`extractAffectedRanges` skips `status !== 'affected'`, and `looksLikeVersion()` rejects the
+`version: "All"` the informational bulletins use. The 45 bulletins are caught by the SECOND; the
+status check earns its place on **261 live version entries that pair a non-affected status with a
+real numeric version** (CVE-2026-0308 lists `unaffected: 12.2.0` beside three affected branches) —
+delete it and an advisory that CLEARS a branch would file every device on it as vulnerable.
+Pinned by `tests/cvssZeroScore.test.js`, whose first draft passed with the status check deleted
+because its fixtures exercised only the other guard.
+
 ### Applicability Tri-State Default
 
 See Critical Rules above for the core "never collapse `unknown` to `no`" rule. Specifics not covered
