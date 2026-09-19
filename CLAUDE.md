@@ -140,7 +140,11 @@ query, a renderer, or an engine; sort with `NULLS LAST`.
   responses on first integration test; never assume CPE strings/endpoints/field names from docs alone.
 
 ### Pre-Commit Checklist
-`node --check` + `npm run build` before every commit — full checklist under Claude Code Workflow's "Before Committing" at the end of this file.
+`npm test` + `npm run build` before every commit — full checklist under Claude Code Workflow's
+"Before Committing" at the end of this file. ⛔ **`node --check` is a NO-OP on any file with a
+top-level `import`** (measured 2026-09-19: four different syntax errors, all exit 0 in ESM, all
+exit 1 in CommonJS), so it is a real gate for `lib/**` and `services/**` and worth nothing for
+`app/**`. `npm test` is the syntax gate — `tests/jsxSyntax.test.js` parses every file with SWC.
 
 ---
 
@@ -2167,6 +2171,12 @@ LOG_HIT_LOOKBACK_DAYS=7                    # [log-hit] window; SHORTER than rete
 LOG_RETENTION_HOT_DAYS=90
 LOG_RETENTION_WARM_DAYS=365
 
+# Page-render smoke sweep (scripts/smoke.js). Optional; blank = the update logs a
+# SKIP with its reason rather than reporting a pass. Use a dedicated local account
+# WITHOUT MFA - the harness cannot supply a second factor.
+SMOKE_USER=
+SMOKE_PASS=
+
 
 # Commercial licence (optional — leave BLANK on every normal install)
 # SECVAULT_LICENSE_SECRET is a per-install ROTATION HOOK, not a setting to fill in.
@@ -2477,6 +2487,34 @@ rows and records the SQL it was handed. Live verification against the real fleet
 separate, required step for anything touching a device — these tests replace neither that nor the
 "verify against live responses before writing any parser" rule.
 
+### ⛔ The page-render smoke sweep (`npm run smoke`, v2.150.0) — the one gate that loads a page
+
+**Nothing in `npm test` renders a page, and the four guards that sound like they do each stop
+short by design**: `jsxSyntax` parses (syntax only), `moduleLoad` deliberately EXCLUDES `app/` and
+`components/`, `importIntegrity` scans for a mentioned-but-unimported name, and `reportRoute`
+regex-asserts `clientSafe()` on `/reports` alone. Every dashboard page is `force-dynamic`, so
+`next build` never evaluates one either.
+
+That is how **v2.120.0 shipped a blank `/reports`**: a `builder` FUNCTION passed from a server
+component to a client one, which React refuses to serialise. 2,399 tests passed, the build was
+clean, the deploy verified, and because a production build withholds the message "to avoid leaking
+sensitive details" the only symptom was a digest on an empty page. The same blindness produced the
+v2.86.1 outage (a wrong column name), where "the only real gate was loading the page".
+
+`scripts/smoke.js` signs in and loads all 28 of them, asserting a per-page CONTENT MARKER.
+⛔ **A marker may never be a NAV LABEL** — the sidebar renders those into every page from the
+shared layout, so such a marker is satisfied by a working shell around a dead page, which is the
+exact failure being hunted. Pinned by `tests/smokeHarness.test.js`, which also feeds the verdict
+logic the v2.120.0 shape directly: a live sweep only ever exercises the green path, and a harness
+that has never gone red proves nothing.
+
+⛔ **IT IS NOT IN `npm test` AND MUST NOT BE.** It needs a built app, a running server and a
+database. A test that skips when it cannot reach one is the guard-that-cannot-fire pattern; this
+FAILS LOUDLY instead and lives behind its own script. `Update-SecVault.ps1` runs it after the HTTPS
+verify, **non-fatally** — a broken page is not a reason to roll a deploy back (the rollback there
+restores a TLS entry point, which would not fix it) — but it sets `hadFailure`, so the closing
+banner cannot say "completed successfully" over a page that did not render.
+
 **What a test here is FOR.** Nearly every bug these cover is one class: a failed read recorded as
 an affirmative value (`hit_count` defaulting to 0, `getRules()` returning `[]`, an unanswerable
 compliance check scored as a `warning`). So a new test must include the **"we could not measure
@@ -2508,9 +2546,17 @@ shipping.
 
 ### Before Committing
 ```bash
-node --check lib/**/*.js services/**/*.js app/api/**/*.js
-npm test                                                  # must be zero failures
+# ⛔ node --check IS A NO-OP ON ESM. Measured 2026-09-19: an unterminated string, an
+# unclosed paren, a double comma and a broken function signature ALL exit 0 in a file
+# with a top-level `import`, and all exit 1 without one. It is a real check for the
+# CommonJS half of the repo and worth nothing for app/** -- which is how a syntax
+# error in an API route reached main. `npm test` is what actually catches this.
+node --check lib/**/*.js services/**/*.js                 # CommonJS only -- see above
+npm test                                                  # must be zero failures; the REAL syntax gate
 npm run build                                             # must be zero errors
+# If a PAGE or a server->client prop changed, also sweep a running instance:
+#   SMOKE_URL=https://<server>:3010 SMOKE_USER=… SMOKE_PASS=… SMOKE_INSECURE=1 npm run smoke
+# Nothing in `npm test` renders a page -- see the smoke-sweep note under Testing.
 # If schema.sql changed: verify all new tables have per-table grants for readonly users
 # If new env vars added: add to .env.local.example
 # Update CLAUDE.md if architectural decisions were made

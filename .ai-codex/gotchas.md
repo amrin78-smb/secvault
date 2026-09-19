@@ -138,17 +138,52 @@ of text stored in 752 bytes. TOAST only compresses once a tuple exceeds ~2 KB an
 ~1 KB. Even forced, per-row compression is 2-3x, because the 11x comes from compressing ACROSS
 lines. This is why the archive is a file and not a column.
 
-## `node --check` does NOT validate JSX (found 2026-09-08)
+## ⛔ `node --check` IS A NO-OP ON ANY FILE WITH A TOP-LEVEL `import` (found 2026-09-19)
+
+**It is not "JSX-blind". It is blind.** The section below (written 2026-09-08) concluded that
+CLAUDE.md's checklist was "CORRECT as written" because it scopes `node --check` to non-JSX
+directories. That conclusion was wrong, and it was wrong in the reassuring direction: every file in
+`app/api/**` is ESM, and `node --check` reports **nothing at all** for an ESM file.
+
+Measured 2026-09-19, four different syntax errors, each written twice — once after a top-level
+`import`, once without:
+
+| error | in an ESM file | in a CJS file |
+|---|---|---|
+| `const x = 'un'terminated';` | **exit 0** | exit 1 |
+| `const x = (1 + 2;` | **exit 0** | exit 1 |
+| `const x = {a: 1,,};` | **exit 0** | exit 1 |
+| `function f( { return 1; }` | **exit 0** | exit 1 |
+
+So the "unclosed paren IS caught" consolation below holds only for CommonJS — `lib/**` and
+`services/**`, which is where it still earns its place.
+
+⛔ **HOW IT WAS FOUND: it passed a genuinely broken file that shipped to `main`.** A release-notes
+string in `app/api/system/update-status/route.js` contained an unescaped apostrophe
+(`the vendor's score`), which ends the string early and is a plain syntax error — nothing to do
+with JSX. `node --check` exited 0. The file would have failed `npm run build` on the production
+server, mid-deploy. What caught it was `tests/jsxSyntax.test.js`, which uses SWC and parses
+everything; **`npm test` is the real syntax gate for this repo, not `node --check`.**
+
+⛔ The deeper lesson is the one this file keeps recording: the 2026-09-08 entry below stopped at
+the first explanation that fit the evidence it had (JSX), certified the checklist on that basis,
+and the certification outlived the reasoning. A gate blessed by a comment is the hardest kind to
+re-examine.
+
+## `node --check` does NOT validate JSX (found 2026-09-08 — see the correction above)
 
 ⛔ `node --check` exits **0** on a component containing broken JSX. Verified: appending
 `export function Broken() { return <div><span>oops</div>; }` to `components/ui/Badge.js` still
 passes. It parses the file as ESM and never reaches the JSX, so an unclosed tag, a stray brace
 inside a `{...}` expression, or a mismatched fragment all sail through.
 
-CLAUDE.md's pre-commit checklist is CORRECT as written — it scopes `node --check` to
-`lib/**`, `services/**` and `app/api/**`, which are non-JSX. ⛔ **Do not widen that glob to
-`components/**` or `app/(dashboard)/**` thinking it adds a check.** It would add only a false
-green. For those files the real gate is `npm run build`.
+⛔ **CORRECTED 2026-09-19 — this paragraph used to certify the checklist and was wrong.** It
+said: "CLAUDE.md's pre-commit checklist is CORRECT as written — it scopes `node --check` to
+`lib/**`, `services/**` and `app/api/**`, which are non-JSX." The `app/api/**` half is false:
+those files are ESM, and `node --check` reports nothing whatsoever for an ESM file (table at the
+top of this section). It is a real check for `lib/**` and `services/**` only.
+⛔ **Do not widen the glob to `components/**` or `app/(dashboard)/**` thinking it adds a check** —
+that part stands, and for the same reason it should never have been trusted on `app/api/**`.
 
 Confusingly, `node --check` DOES catch some errors in the same files — an unclosed *paren*
 breaks the CommonJS fallback parse and is reported. So it fails loudly on some corruption and

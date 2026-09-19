@@ -1011,6 +1011,69 @@ if ($tlsEnabled -and -not $appStartSkipped) {
         }
     }
 }
+
+# -----------------------------------------------------------------------
+# Does every page actually RENDER?
+#
+# "Service Running" is not "app serving", and the existing probe only proves
+# ONE url answers. v2.120.0 shipped a blank /reports page: 2,399 tests passed,
+# the build was clean, this updater verified, and the page was a bare digest.
+# Every dashboard page is force-dynamic, so `next build` never evaluates one --
+# loading them is the only gate that can see it.
+#
+# NON-FATAL, DELIBERATELY. A failing page is not a reason to roll a whole
+# deploy back (the rollback here restores a TLS entry point, which would not fix
+# a broken page anyway), and a sweep that could abort an update would be a new
+# way for a deploy to fail. It reports, loudly, into the same log the operator
+# is already reading -- and it sets hadFailure so the closing banner does not
+# say "completed successfully" over a broken page.
+#
+# SKIPPED, NOT FAILED, when no credentials are configured: SMOKE_USER /
+# SMOKE_PASS live in .env.local and no installer provisions them. A skip is
+# logged with its reason, never left to look like a pass.
+# -----------------------------------------------------------------------
+if (-not $appStartSkipped) {
+    Invoke-Step 'Verify every page renders' {
+        $envLocal = Join-Path $repoRoot '.env.local'
+        $smokeUser = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'SMOKE_USER'
+        $smokePass = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'SMOKE_PASS'
+        if ([string]::IsNullOrWhiteSpace($smokeUser) -or [string]::IsNullOrWhiteSpace($smokePass)) {
+            Write-Log '  SKIPPED - SMOKE_USER / SMOKE_PASS are not set in .env.local, so no page could be loaded as a signed-in user.'
+            Write-Log '  Set them to a local account WITHOUT MFA to have every page checked on each update.'
+            return
+        }
+
+        $port = 3010
+        $configured = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'APP_PORT'
+        if ($configured) {
+            $parsed = 0
+            if ([int]::TryParse($configured, [ref]$parsed) -and $parsed -gt 0) { $port = $parsed }
+        }
+        $scheme = if ($tlsEnabled) { 'https' } else { 'http' }
+
+        $env:SMOKE_URL = "$($scheme)://127.0.0.1:$port"
+        $env:SMOKE_USER = $smokeUser
+        $env:SMOKE_PASS = $smokePass
+        try {
+            # PS5 cannot pipe out of try/catch, so capture then log.
+            $out = & node (Join-Path $repoRoot 'scripts\smoke.js') 2>&1
+            $code = $LASTEXITCODE
+            foreach ($line in $out) { Write-Log "  $line" }
+            if ($code -ne 0) {
+                Write-Log "  [ERROR] One or more pages did not render (exit $code). The app is UP but part of the console is broken."
+                Write-Log '  This does not roll the deploy back. Check logs\app-error.log for the digest, and fix forward.'
+                $script:hadFailure = $true
+            }
+        } finally {
+            # ⛔ The password must not outlive the step in this process's
+            # environment; anything spawned later would inherit it.
+            $env:SMOKE_PASS = ''
+            $env:SMOKE_USER = ''
+            $env:SMOKE_URL  = ''
+        }
+    }
+}
+
 Write-Log '=================================================='
 if ($script:hadFailure) {
     # ⛔ Bug fixed 2026-07-19: this line used to unconditionally claim "Both
