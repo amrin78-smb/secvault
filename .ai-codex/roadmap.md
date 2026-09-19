@@ -1,8 +1,16 @@
 # SecVault Roadmap
 
-Living document. Last reviewed **2026-09-09** against the live fleet (15 active devices,
-~74M syslog events/day) and against the ManageEngine Firewall Analyzer (FWA) feature comparison
-that motivated this product.
+Living document. **Built-state reviewed 2026-09-19** (v2.148.0). The measured FLEET FIGURES
+below are from **2026-09-09** (15 active devices, ~74M syslog events/day) unless a line restates
+them, and the FWA feature comparison that motivated this product is from the same date.
+
+⛔ **THIS FILE WENT 24 VERSIONS STALE (v2.124.0 -> v2.148.0) AND SAID SO NOWHERE.** It carried
+"Still open, unchanged: Phase 2" for a phase shipped in v2.129.0, and described RBAC as
+"admin/viewer only" nineteen versions after `viewer` was retired. That is the exact failure its own
+header warns about one paragraph down, in the file written to prevent it. Two lessons, both now
+acted on: a review date is not a freshness guarantee unless something re-reads it, and the
+"Already built" table is the half that MUST be updated in the same commit as the work — a missing
+future item costs a conversation, a missing BUILT item costs a rebuild.
 
 ⛔ **Read `## Already built` before proposing anything.** Several items that read as missing are
 done — CLAUDE.md's own "Not built yet" section was stale by a whole phase when this was written,
@@ -37,6 +45,18 @@ Every number below is measured, not estimated. Where something is uncertain it s
 | **Work queue, one ranked list across all 9 engines** | v2.115.0; live: 19 act-now / 60 scheduled / 6 needs-a-human |
 | Reporting platform, catalogue + 10 reports | Phase D, v2.123.0 |
 | **Application-centric view, Phase 1** | v2.124.0; `applications`/`application_flows`, two engines, `/applications`, work-queue source #10 |
+| **Application intent Phase 2 — rule impact + retirement** | v2.129.0; `IMPACT_CLAIM`, proposals through the existing `ruleChangeRequests` loop. ⛔ Neither can CONCLUDE on this fleet (14 of 16 firewalls reference objects the device never reported) and that is correct — the fix is collecting the objects, not loosening the engine |
+| **Vendor PSIRT gated on the inventory** | v2.130.0; a vendor's own feed runs only if that vendor is deployed. Gate FAILS OPEN; a skip is WRITTEN with a reason |
+| **Commercial licensing** | v2.131.0; trial/valid/grace/expired/**invalid**, per-firewall count. ⛔ Monitoring runs in EVERY licence state including expired |
+| **Check Point / Forcepoint CPE coverage** | v2.132.0; 4 -> 22 strings, ~107 CVEs. ⛔ Honest gain on a Gaia R80+ fleet is ~7 -> 20, not 7 -> 107 |
+| **Backup and restore** | v2.133.0; daily SYSTEM task, self-verifying archive, `.env.local` included, dry-run restore |
+| **LDAP group-to-role mapping** | v2.134.0; replaced the hardcoded `admin` for any successful bind. Search-then-bind — the old direct-bind DN could not have existed in the customer's directory |
+| **Central CVE feed (`cve_hub`)** | v2.137.0-v2.139.0; Ed25519-signed corpus from nocvault-eol, because this server's egress **cannot reach NVD at all** (internal public ranges overlap NVD's). Live: 439 advisories that could never match a device, now matchable. Local NVD is SKIPPED only when the hub actually delivered, and a FROZEN hub is visible (`checked_at`, not `generated_at`) |
+| **Exposure filtered by firewall** | v2.140.0; table only — the fleet figures above it stay fleet-wide and say so |
+| **Per-firewall Traffic tab + drill-through to log search** | v2.141.0-v2.143.0; nine widgets, per-source error isolation, the 24h window travels with the link |
+| **Log search bounded by EXECUTION TIME** | v2.144.0; the third bound. Cost tracks how RARE the value is, not which column is indexed — the indexed column was the 11-second one |
+| **Server health tab** | v2.145.0; disk per volume, database size, retention, ingest, service liveness inferred from what each service WRITES (NSSM reports a crash-looping process as Running) |
+| **Two bug sweeps + the open-items pass** | v2.146.0-v2.148.0; 25 fixes, all one family. See those commits before assuming a "missing" honesty guard is missing |
 
 ---
 
@@ -112,7 +132,7 @@ period, because the job runs both on cron and at every service start.
 | **Capacity planning / bandwidth forecast** | Rollups hold the history; no trend projection | Medium. ⛔ Only for vendors where `bytes_summable` is true — FortiOS cumulative counters are already excluded and must stay excluded |
 | **Custom report builder** | Fixed reports only | Large. Defer until the report registry above exists |
 | **Multi-tenancy / site scoping** | `devices.site` exists and is **empty on 14 of 15 devices** | Small technically, but pointless until sites are actually populated. Blocked on data, not code |
-| **Granular RBAC** | admin/viewer only, deliberately | Revisit only if a customer asks; a coarse boundary is safer |
+| **Granular RBAC** | **THREE roles since v2.110.0** (`super_admin`/`admin`/`operator`, nine capabilities); `viewer` is retired and unassignable. This line said "admin/viewer only" for nineteen versions | Only if a customer asks for something the nine capabilities cannot express. ⛔ Grants are listed explicitly per role, never derived by subtraction |
 | Forensic log search | `/logs`, index-backed, honest about depth caps | **Done, arguably better than FWA** |
 | Compliance reporting | 45 checks, 5 standards, PDF | **Done** |
 | VPN reporting | Sessions, geography, spray detection | **Done, beyond FWA** |
@@ -280,7 +300,13 @@ evidence-based (an authoritative source publishing a different score), in the pr
 
 ### 2. `nvd.js` never asks CIRCL for the score it actually has
 CIRCL’s legacy per-CVE endpoint returns NVD’s own CVSS and is reachable while NVD itself is blocked; the
-search endpoint SecVault uses does not carry it. This is the concrete path to filling the 255 missing scores.
+search endpoint SecVault uses does not carry it. This was the concrete path to filling the 255 missing scores.
+
+⛔ **RE-MEASURE BEFORE WORKING THIS — the central CVE feed (v2.137.0) changed its premise.** The hub
+publishes NVD-derived records straight into `advisories`, so some of those 255 may already be
+scored, and the remaining gap may be a different set of rows entirely. The "255" is a 2026-09-10
+figure taken before the hub existed. Count it again first; a fix sized against a number that has
+moved is how effort lands on the wrong rows.
 
 ## Reporting platform — Phase D complete (2026-09-15, v2.123.0)
 
@@ -339,7 +365,16 @@ source. Two departures from the plan, both deliberate and both written up in CLA
 2. **Multi-hop is not modelled.** Each device is evaluated independently and volumes are NEVER
    unioned across devices, so §4.3's "topology covers 2 of 6 vendors" does not bite Phase 1 at all.
 
-Still open, unchanged: Phase 2 (impact/decommissioning), Phase 3 (a `syslog_flow_hourly` rollup —
-a storage decision dressed as a feature, to be argued on its own measured cardinality), Phase 4
-(discovery). Phase 1 is now the live thing to reassess against the fleet — note that with nothing
-declared the honest answer is "no items", which is what the work-queue source returns.
+⛔ **PHASE 2 IS BUILT (v2.129.0) — this paragraph said "still open, unchanged" for it through
+nineteen versions.** Rule impact (`IMPACT_CLAIM`, one claim, pinned by a test that rejects the
+words *safe*, *reachable*, *unused* and *guarantee*) and retirement (which PROPOSES through the
+existing `ruleChangeRequests` loop and never deletes) both shipped. ⛔ Neither can CONCLUDE on this
+fleet today — 14 of 16 firewalls carry rules referencing an address or service the device never
+reported, so impact reads "cannot tell" for all 29 touched rules and retirement proposes 0 of 29.
+That is the correct behaviour and the fix is COLLECTING THE MISSING OBJECTS, not loosening either
+engine.
+
+Still open: **Phase 3** (a `syslog_flow_hourly` rollup — a storage decision dressed as a feature,
+to be argued on its own measured cardinality) and **Phase 4** (discovery). Phase 1 remains the live
+thing to reassess against the fleet — note that with nothing declared the honest answer is "no
+items", which is what the work-queue source returns.
