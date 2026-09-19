@@ -267,6 +267,45 @@ touching `advisories`, `device_cve_assessments`, `versionMatcher`, the KEV cross
 fleet count, so it needs its own decision. Adding more feeds (CVE.org, EPSS) RAISES this risk, since
 each new source is another candidate first-ingester.
 
+### ⛔ MEASURED AND DEFERRED 2026-09-19 — instrumented instead (v2.151.0)
+
+**The loss was not measurable, so the first change was to measure it.** Every upsert already
+refused to clobber another vendor's row and then reported nothing: a permanently lost advisory
+looked exactly like an update where nothing had changed. Both discovery feeds now count it
+(`claimed_by_other_vendor`, with up to 10 worked examples naming the holding vendor) into
+`feed_sync_log`. Fortinet is the exposed one — it runs LAST and republishes third-party CVEs.
+
+**What the measurements say today:**
+
+| question | measured |
+|---|---|
+| Stored CVEs matching 2+ supported vendors in NVD's own `configurations` | **0 of an 80-CVE spread** of the 1,021-CVE corpus |
+| Palo Alto's published CVE ids held here under another vendor | **0 of 291** |
+| CVEs the central hub holds under two vendors | **1 of 909** (CVE-2004-0112) |
+| FK constraints that would have to move | **0** — all three reference `advisories(id)`, the UUID PK |
+
+**What the change would cost, audited file by file:** 4 upserts break structurally (Postgres raises
+`no unique or exclusion constraint matching the ON CONFLICT specification`); `cveHub.js` is keyed on
+`cve_id` throughout and needs rekeying; ~8 read sites become WRONG in the dangerous direction — the
+`/vulnerability` tiles (`COUNT(DISTINCT advisory_id)` aliased `*_cves`), the dashboard severity
+histogram **which is persisted into the daily trend**, `RiskByCategory`, `reportStats` (PDF headline
+figures) and `api/cve/fleet`; ~12 more silently pick an arbitrary vendor row, including the entire
+advisory-curation surface, where a curator would write conditions onto one row and re-open the page
+to find them gone. `lib/evidence.js` and `lib/answers.js` carry explicit comments promising these
+numbers count DISTINCT CVEs — claims the change would falsify. And **no URL can address a specific
+vendor's row**: every route is `[cveId]` with no vendor segment, which is the structural gap behind
+every one of those.
+
+⛔ **So it is a change to how this product COUNTS VULNERABILITIES, not a schema change**, and today
+it buys about one CVE. Deferred on evidence, not on effort — and the counter is what will reopen it.
+**Revisit when `claimed_by_other_vendor` is consistently non-zero**, which is the number to look for
+in the NVD and Fortinet rows of `feed_sync_log`.
+
+⛔ One thing the matcher makes safe either way, worth recording: `versionMatcher.js` selects
+advisories with `WHERE vendor = $1` (the device's own vendor), so a second vendor row would be
+picked up automatically with **no matcher change**, and no single DEVICE could ever double-count.
+The inflation would be strictly fleet-level, across devices of different vendors.
+
 ## Two live data bugs found 2026-09-10 — #1 RESOLVED 2026-09-19, #2 still open
 
 ### 1. ⛔ RESOLVED — THERE WAS NO BUG, AND THE PROPOSED FIX WOULD HAVE CAUSED ONE

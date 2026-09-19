@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.151.0': [
+    'When two vendors publish advisories for the same vulnerability, SecVault can only store one of them — whichever feed collected it first. That has always been true; what is new is that the ones it could not store are now counted and named in the feed log, instead of being indistinguishable from an ordinary update.',
+    'Fortinet is the feed most affected, because it runs last and republishes vulnerabilities found in shared components such as OpenSSL.',
+    'The count is recorded as information, not as an error — nothing is broken, and a feed should not report itself degraded because another feed got there first.',
+    'We checked whether this is costing you coverage today and it is not: across a spread of your stored vulnerabilities, none affects more than one of your firewall vendors. The deeper change to how vulnerabilities are identified is deferred until that number says otherwise.',
+  ],
   '2.150.0': [
     'Every update now loads every page and checks that it actually rendered. Until today the only check after an update was that one address answered — which is how a release once shipped with a completely blank Reports page while every test passed, the build was clean and the update reported success.',
     'A page that fails is named in the update log, with where to find the underlying error. The update is not rolled back for it: the rest of the product is working, and the fix belongs in the next release rather than in an automatic revert.',

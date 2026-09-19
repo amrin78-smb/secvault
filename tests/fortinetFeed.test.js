@@ -269,8 +269,45 @@ describe('a degraded RSS record can only fill a gap', () => {
   });
 
   test('zero returned rows is reported as "unchanged", never as an update', async () => {
-    const pool = { async query() { return { rows: [] }; } };
-    assert.equal(await F.upsertAdvisory(pool, degraded), 'unchanged');
+    // ⛔ ZERO ROWS MEANT TWO THINGS AND REPORTED ONE, so the return became an
+    // object (v2.151.0): the ON CONFLICT ... WHERE declines either because this
+    // degraded record had no gap to fill -- routine -- or because ANOTHER VENDOR
+    // owns the cve_id, which is a Fortinet advisory permanently lost. Both used
+    // to collapse into the string 'unchanged', so the loss was invisible.
+    // Here the follow-up SELECT reports US as the owner: a real no-op.
+    const pool = {
+      async query(sql) {
+        if (/SELECT vendor FROM advisories/.test(sql)) return { rows: [{ vendor: degraded.vendor }] };
+        return { rows: [] };
+      },
+    };
+    assert.deepEqual(await F.upsertAdvisory(pool, degraded), { outcome: 'unchanged' });
+  });
+
+  test('⛔ but zero rows because ANOTHER vendor owns the cve_id is reported as claimed', async () => {
+    // The live case this exists for: CVE-2022-0778 is an OpenSSL CVE FortiGuard
+    // republishes and `paloalto` already owns here, with 6 real version ranges.
+    const pool = {
+      async query(sql) {
+        if (/SELECT vendor FROM advisories/.test(sql)) return { rows: [{ vendor: 'paloalto' }] };
+        return { rows: [] };
+      },
+    };
+    const res = await F.upsertAdvisory(pool, degraded);
+    assert.equal(res.outcome, 'claimed', 'must not be folded into the routine no-op');
+    assert.equal(res.heldBy, 'paloalto', 'a bare count cannot be acted on — name the holder');
+  });
+
+  test('an advisory with no row at all is still not mistaken for a claim', async () => {
+    // Defensive: if the follow-up SELECT finds nothing (a row deleted between
+    // the two statements), that is not evidence another vendor holds it.
+    const pool = {
+      async query(sql) {
+        if (/SELECT vendor FROM advisories/.test(sql)) return { rows: [] };
+        return { rows: [] };
+      },
+    };
+    assert.deepEqual(await F.upsertAdvisory(pool, degraded), { outcome: 'unchanged' });
   });
 });
 
