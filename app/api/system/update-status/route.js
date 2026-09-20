@@ -10,6 +10,7 @@ const releaseNotes = {
   '2.152.1': [
     'Correction to 2.152.0: the new "blocked" state never actually activated. It required every advisory-page failure to be the bot challenge, but after three refusals SecVault stops probing and files the remaining items under a different reason — so a real blocked run never matched the condition.',
     'Found by checking the live feed log after deploying, not by the tests, which had agreed with the code rather than with the real data.',
+    'The Fortinet feed now reports "blocked" as intended, in grey rather than amber, and returns to normal on its own the first time an advisory page loads.',
   ],
   '2.152.0': [
     'The Fortinet advisory feed no longer reports itself as faulty every six hours. FortiGuard answers every advisory page with a bot-protection challenge — the same response from three different networks, so it is not something this server can get past — and the sync was reporting that as a partial failure for ever.',
