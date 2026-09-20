@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.152.1': [
+    'Correction to 2.152.0: the new "blocked" state never actually activated. It required every advisory-page failure to be the bot challenge, but after three refusals SecVault stops probing and files the remaining items under a different reason — so a real blocked run never matched the condition.',
+    'Found by checking the live feed log after deploying, not by the tests, which had agreed with the code rather than with the real data.',
+  ],
   '2.152.0': [
     'The Fortinet advisory feed no longer reports itself as faulty every six hours. FortiGuard answers every advisory page with a bot-protection challenge — the same response from three different networks, so it is not something this server can get past — and the sync was reporting that as a partial failure for ever.',
     'It now reports a distinct "blocked" state: the feed ran, the publisher refused it, and that is shown in grey rather than amber. A permanent warning for a condition nobody can act on only teaches people to ignore warnings.',

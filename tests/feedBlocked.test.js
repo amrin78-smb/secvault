@@ -24,10 +24,16 @@ const { isPublisherBlocked } = require('../lib/feeds/fortinet');
 const { feedStatusRank } = require('../lib/formatDisplay');
 const { feedState, getSyncPillStatus, severityOf } = require('../lib/feedStatus');
 
+// ⛔ THE LIVE SHAPE, COPIED FROM feed_sync_log ON 2026-09-20, not invented.
+// The first version of this file used { bot_challenge: 45 } and passed, while
+// the predicate NEVER FIRED in production: the circuit breaker stops probing
+// after 3 consecutive challenges and files the remaining 47 items under its own
+// reason. A fixture that cannot produce the real shape is a test that agrees
+// with the code instead of with the world.
 const base = {
   rssItemCount: 50,
   resolvedFromPage: 0,
-  pageFailureReasons: { bot_challenge: 45 },
+  pageFailureReasons: { bot_challenge: 3, page_probe_suspended: 47 },
   upsertErrors: [],
 };
 
@@ -49,9 +55,28 @@ describe('⛔ isPublisherBlocked is narrow on purpose', () => {
     );
   });
 
-  it('FALSE when any other failure reason is mixed in', () => {
+  it('FALSE when a GENUINELY different failure reason is mixed in', () => {
+    // page_empty is a real, separate failure — the page loaded and had no
+    // advisory in it. That is not the publisher refusing us.
     assert.equal(
-      isPublisherBlocked({ ...base, pageFailureReasons: { bot_challenge: 40, page_empty: 5 } }),
+      isPublisherBlocked({ ...base, pageFailureReasons: { bot_challenge: 3, page_empty: 5 } }),
+      false
+    );
+  });
+
+  it('⛔ but the reason the circuit breaker files does NOT disqualify it', () => {
+    // page_probe_suspended is the breaker doing what the challenge built it to
+    // do, so it appears in every real blocked run. Treating it as a second
+    // fault is what kept this state from ever firing.
+    assert.equal(isPublisherBlocked(base), true);
+    assert.ok(base.pageFailureReasons.page_probe_suspended > 0, 'the fixture must contain it');
+  });
+
+  it('FALSE when probing was suspended but no challenge was ever seen', () => {
+    // Otherwise a future, unrelated cause of suspension would silently inherit
+    // the blocked state and be painted as "not our problem".
+    assert.equal(
+      isPublisherBlocked({ ...base, pageFailureReasons: { page_probe_suspended: 47 } }),
       false
     );
   });
