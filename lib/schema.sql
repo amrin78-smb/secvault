@@ -1378,11 +1378,14 @@ CREATE TABLE IF NOT EXISTS feed_sync_log (
     -- 'cveorg' | 'epss' | 'cloud_apps'. Corrected twice now (2026-07-23 for the vendor PSIRT
     -- feeds, 2026-09-18 for the central feed and the enrichment ones) -- see CLAUDE.md's
     -- "Feed Sources" table for the full sync-order list, which is authoritative.
-  status TEXT NOT NULL, -- 'success' | 'error' | 'failed' | 'partial' | 'skipped'.
+  status TEXT NOT NULL, -- 'success' | 'error' | 'failed' | 'partial' | 'skipped' | 'blocked'.
     -- 'skipped' is a RECORDED DECISION, not a result: the vendor-PSIRT inventory gate and the
     -- central-feed-delivered gate both write it rather than letting a feed silently stop
     -- appearing, and readers must not rank it with the failures. Documenting only three of the
     -- five here is how a reader concludes an unlisted status is impossible.
+    -- 'blocked' is the PUBLISHER's decision rather than ours: the feed ran and was refused (a bot
+    -- interstitial on every FortiGuard advisory page). Distinct from 'skipped' deliberately --
+    -- collapsing them would claim SecVault chose not to collect, which it did not.
   inserted INTEGER NOT NULL DEFAULT 0,
   updated INTEGER NOT NULL DEFAULT 0,
   errors JSONB,

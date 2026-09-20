@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.152.0': [
+    'The Fortinet advisory feed no longer reports itself as faulty every six hours. FortiGuard answers every advisory page with a bot-protection challenge — the same response from three different networks, so it is not something this server can get past — and the sync was reporting that as a partial failure for ever.',
+    'It now reports a distinct "blocked" state: the feed ran, the publisher refused it, and that is shown in grey rather than amber. A permanent warning for a condition nobody can act on only teaches people to ignore warnings.',
+    'Deliberately NOT called "skipped". That word means SecVault chose not to run the feed; this one ran and was turned away, and the two should not read the same.',
+    'Your Fortinet vulnerability coverage is unaffected and was verified: 282 of 287 advisories carry usable version data, and every FortiOS vulnerability published in the last four months is present and matched against your firewalls.',
+    'If FortiGuard drops the challenge, or you obtain API credentials, the feed returns to normal on its own — the state clears the first time a single advisory page loads.',
+  ],
   '2.151.0': [
     'When two vendors publish advisories for the same vulnerability, SecVault can only store one of them — whichever feed collected it first. That has always been true; what is new is that the ones it could not store are now counted and named in the feed log, instead of being indistinguishable from an ordinary update.',
     'Fortinet is the feed most affected, because it runs last and republishes vulnerabilities found in shared components such as OpenSSL.',

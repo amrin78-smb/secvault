@@ -116,6 +116,11 @@ PILL_TONE.none = PILL_TONE.error;
 // nothing is collecting advisories, which the title says in words. Without this
 // entry the state fell through to PILL_TONE.none and painted danger red.
 PILL_TONE.skipped = PILL_TONE.running;
+// ⛔ And a feed the PUBLISHER refused gets the same hueless treatment. It is not
+// green (nothing was collected from it), not amber (there is nothing to fix here)
+// and not red (SecVault is not broken). The pill title names it; see feedStatus.js
+// for why this is only the right call while another feed covers the same vendor.
+PILL_TONE.blocked = PILL_TONE.running;
 
 export default async function Header({ session }) {
   let syncStatus = {

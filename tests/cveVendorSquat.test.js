@@ -86,11 +86,17 @@ describe('⛔ it reaches feed_sync_log, or it may as well not exist', () => {
     // appended, exactly as the per-vendor summary already is. A feed reporting
     // itself degraded because another feed owns a CVE would be a permanent
     // amber chip for correct behaviour.
-    const fortinetBlock = index.slice(index.indexOf("logSyncStart(pool, 'fortinet_psirt')"));
+    // ⛔ ANCHORED, NOT WINDOWED. This sliced a fixed 1200 characters and broke
+    // the moment a comment was added above the code it was checking -- a test
+    // that fails on unrelated edits gets its assertion deleted rather than read.
+    const start = index.indexOf("logSyncStart(pool, 'fortinet_psirt')");
+    const end = index.indexOf('logSyncFinish', index.indexOf('const claimed =', start));
+    const fortinetBlock = index.slice(start, end);
     const statusIdx = fortinetBlock.indexOf('const status =');
     const claimedIdx = fortinetBlock.indexOf('const claimed =');
+    assert.ok(start > -1 && end > start, 'the fortinet sync block must be locatable');
     assert.ok(statusIdx > -1 && claimedIdx > statusIdx, 'status must be decided before the summary is built');
-    assert.match(fortinetBlock.slice(0, 1200), /informational, not an error/);
+    assert.match(fortinetBlock, /informational, not an error/);
   });
 
   it('⛔ the KEV block does not reference fortinet\'s local variable', () => {

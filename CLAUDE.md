@@ -1630,6 +1630,25 @@ corrected here (re-probed 2026-09-18 from three hosts)**:
   hosts) and is still a rolling window with no history. `api.cisco.com/security/advisories/v2/all`
   answers **403 "Developer Inactive"** — registered credentials, not merely a missing header.
 
+### ⛔ `blocked` is a FEED STATUS in its own right (v2.152.0)
+
+A feed that RAN and was REFUSED BY ITS PUBLISHER reports `blocked` — not `partial`, which painted a
+permanent amber chip for a condition SecVault cannot act on, and **not `skipped`, which means
+SecVault DECIDED not to run it**. Collapsing the two would claim we chose not to collect.
+
+⛔ **Excluded from the pill's verdict, never from its evidence**: every title NAMES the blocked feed
+and says its advisories come from the other feeds. ⛔ **Every feed blocked still reports
+`FEEDS BLOCKED`, never green** — excluding it from the reduction must not let a fleet collecting
+nothing read as an all-clear. ⛔ **Narrow and SELF-CLEARING** (`isPublisherBlocked`): true only when
+every advisory-page failure was the challenge, NOTHING resolved, no upsert failed and the RSS
+itself worked. One resolved page or one upsert error takes the feed straight back out, so no code
+change is needed the day the challenge lifts.
+
+⛔ **The exclusion is only right while ANOTHER feed covers that vendor**, and that is measured, not
+assumed: Fortinet sits at **282/287 advisories (98%) with usable ranges**, and **all 10 FortiOS CVEs
+NVD published in the last 120 days are held and matched** (2026-09-20). If FortiGuard ever became
+the only source for a vendor, a block WOULD be a coverage loss and green would be the wrong colour.
+
 ⛔ **THE FORTINET BOT CHALLENGE IS ON THE ADVISORY PAGE, NOT THE FEED, AND MOVING HOSTS CANNOT FIX
 IT.** Measured 2026-09-18 from the SecVault server, an office connection and a Netlify function:
 `fortiguard.com/rss/ir.xml` returns **200 `text/xml`, 38 KB** everywhere (it redirects to

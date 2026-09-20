@@ -132,6 +132,12 @@ function syncBadgeColor(status) {
   // ignore the one that matters. Muted, which is this product's colour for
   // "nothing to say".
   if (status === 'skipped') return 'muted';
+  // ⛔ 'blocked' IS THE SAME CALL FOR A DIFFERENT REASON, and the reason
+  // matters: a skip is OUR decision, a block is the publisher's. FortiGuard
+  // answers every advisory page with a bot interstitial that no change here can
+  // get past, so amber would be a permanent chip for a condition SecVault
+  // cannot act on. Muted, and named in the feed panel rather than coloured.
+  if (status === 'blocked') return 'muted';
   return 'warning';
 }
 
