@@ -3,11 +3,13 @@ import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
 import { IconDevices, IconGrid, IconShield, IconChart, IconActivity } from '../icons';
+import WebActivityPanel from '../traffic/WebActivityPanel';
 import {
   getTrafficTimeline,
   getActionBreakdown,
   getTopHosts,
   getTopApplications,
+  getWebActivity,
   getProtocolBreakdown,
   getTopBlockedDestinations,
   getDeviceSyslogCoverage,
@@ -186,12 +188,18 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
     return fallback;
   });
 
-  const [timeline, actions, hosts, apps, protocols, blocked, rules, threats, inbound] =
+  // ⛔ POSITIONAL. Adding a gather without widening this list shifts every
+  //   name after it onto the wrong result, and it builds and renders cleanly.
+  const [timeline, actions, hosts, apps, web, protocols, blocked, rules, threats, inbound] =
     await Promise.all([
       guard('log volume', getTrafficTimeline(pool, 24, deviceId), []),
       guard('session outcomes', getActionBreakdown(pool, 24, deviceId), []),
       guard('top hosts', getTopHosts(pool, 24, 8, deviceId), []),
       guard('top applications', getTopApplications(pool, 24, 8, deviceId), { applications: [], unclassified: 0 }),
+      // Same panel as the fleet tab, scoped to this firewall. A failure
+      // yields null and the panel renders nothing rather than an empty
+      // one, which would read as "this firewall uses nothing".
+      guard('web activity', getWebActivity(pool, 24, deviceId, 10), null),
       guard('protocols', getProtocolBreakdown(pool, 24, deviceId), []),
       guard('blocked destinations', getTopBlockedDestinations(pool, 24, 8, deviceId), []),
       guard('top rules', getTopRules(pool, 1, 8, deviceId), []),
@@ -282,6 +290,14 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           </CardBody>
         </Card>
       ) : null}
+      {/* ⛔ ABOVE THE GRID AND FULL WIDTH, the same placement as the fleet
+          Traffic tab. Its coverage line - how much of THIS firewall's
+          traffic it can name at all - is what stops the rankings being
+          read as complete, and that is the line a grid cell truncates.
+          On a FortiGate over SSH the whole volume half is legitimately
+          unanswerable, and the panel says so rather than rendering
+          empty. */}
+      {web ? <div style={{ marginBottom: 16 }}><WebActivityPanel web={web} perDevice /></div> : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
         <Panel icon={IconActivity} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Log Volume (24h)">
           <div style={{ display: 'flex', gap: 'var(--s5)', flexWrap: 'wrap', marginBottom: 'var(--s4)' }}>

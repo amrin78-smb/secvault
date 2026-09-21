@@ -1194,3 +1194,44 @@ LITERAL entry point and never reads `nssm get` back, so the UTF-16/NUL corruptio
 does not resolve on a non-English Windows: inheritance is stripped and then no grant is added,
 leaving the private key with an EMPTY ACL and only a friendly note in the log. Now `S-1-5-18` /
 `S-1-5-32-544`.
+
+
+## ⛔ "Top websites" is NOT buildable from `url_hostname` — do not try (measured 2026-09-21)
+
+Management asks for it by name ("can we see traffic to YouTube, Facebook"), the column exists, and
+a query against it returns rows. All three are true and it is still the wrong feature.
+
+`syslog_events.url_hostname` measured over a 20-minute live window: **18,723 of ~1,405,000 events
+(1.3%)**, and five Palo Altos — SMT, TUM(TUTH1), TUG, ITC-SLY, IDC FW — reported **zero**. It also
+has **no rollup**, so whatever is there dies with the 30-day partitions, and `syslog_events` may
+never be scanned for a ranking (no `src_ip`/hostname index, ~28M rows/day; the whole reason
+`logSearch.js` needs three bounds).
+
+So a "Top websites" table would describe a fortieth of the traffic under a heading claiming the
+estate — and, worse, would look complete. **The answerable question is the APPLICATION**
+(`youtube-base`, `facebook-base`, `tiktok-base`), which IS rolled up hourly with byte counts and
+retained: live 24h, facebook-base 33.9 GB / tiktok-base 24.1 GB / youtube-base 4.8 GB. Both the
+Traffic Activity PDF and `WebActivityPanel` say out loud why there is no hostname list, because an
+unexplained absence reads as an oversight and invites the next session to add it from exactly this
+data.
+
+Closing it needs URL-filtering log profiles enabled on the firewalls AND a `syslog_url_hourly`
+rollup argued on measured cardinality — an ingestion-cost decision, not a query change.
+
+## ⛔ A chart is the one claim nobody checks (v2.157.0)
+
+A wrong number in a table gets queried by the person who knows what it should be. A wrong bar just
+looks like a bar. Every honesty rule this codebase applies to a figure applies to its picture, and
+the failure modes are listed with their fixes under `lib.md`'s chassis-charts section. The two that
+were NOT hypothetical, both found by rendering the real PDF against live data and looking at it:
+
+1. **A chart sliced to 15 by its caller rendered 10** and looked complete — `drawBarChart`'s `max`
+   defaults to 10 and truncates silently. Every call site now spells `max` out.
+2. **Two palette entries were grey and near-black**, so `ms-ds-smbv3` rendered in the exact grey
+   this product reserves for "not measured". Colour that means something elsewhere cannot be
+   borrowed for decoration here.
+
+⛔ AND THE PROCESS POINT: neither was visible to any unit test, and both were obvious in one
+screenshot. Rasterise the PDF and LOOK at it (`pymupdf`, `get_pixmap`) before committing a report
+change — the same lesson as the cover-chips bug one version earlier, which also only surfaced
+against real data.

@@ -59,6 +59,99 @@ home for "a stored value, in words". Server and client components both import it
 `newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
 `STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
 
+## lib/syslog/applications.js (v2.157.0)
+
+The single source of truth for what an application string and a URL-category string MEAN, beside
+`actions.js` and for the same reason that file exists. Exports `UNATTRIBUTED_APPLICATIONS` /
+`isUnattributedApplication` and `UNCLASSIFIED_URL_CATEGORIES` / `isUnclassifiedCategory`.
+
+⛔ A TRANSPORT IS NOT AN APPLICATION AND A NON-ANSWER IS NOT A CATEGORY. `ssl`, `quic-base`,
+`web-browsing`, `unknown-tcp`, `incomplete`, `insufficient-data` and FortiOS's `tcp/8443` /
+`udp/29810` / `icmp6/131/0` shapes are the firewall naming a transport or declaring that it could
+not identify the session. Measured 24h on the live fleet, `ssl` alone is **869 GB against YouTube's
+4.2 GB**, so a single list ranked by size answers "what is using our bandwidth" with "encrypted
+traffic we did not identify", three times, before naming anything a person would recognise. Same
+for `any` / `unscanned` / `license-expired` / `not-resolved` on the category side: they were
+**34.2M of 43.7M sessions (78%)**, an order of magnitude larger than every real category put
+together.
+
+⛔ THE CRITERION IS THE VENDOR'S OWN MEANING, NOT OUR INTEREST, and nothing is ever DROPPED —
+both buckets are returned whole with their totals and every caller prints them. A real application
+moved here because it looked dull would be a report editing its own evidence.
+
+⛔ `license-expired` IS AN OPERATIONAL FINDING WEARING A CATEGORY'S CLOTHES. Live: SMT (2.8M
+sessions) and TUG (0.6M) hold a lapsed PAN-DB subscription, so they classify NOTHING — their users
+vanish from every category figure while their traffic still counts everywhere else, and the picture
+reads as though those sites are not being visited. A coverage hole that looks like good news. Both
+the PDF and the panel name the firewalls and lead with it.
+
+## lib/syslog/webActivityText.js (v2.157.0)
+
+Pure sentence builders for the web-activity panel: `fmtBytes`, `volumeAttributionSentence`,
+`categoryCaveatSentence`, `coverageSentence`, `noVolumeReason`. Separate from the component because
+JSX cannot be required by `node:test` (no transform in this repo, deliberately) and because **the
+sentences ARE the feature** — two bar charts are almost incapable of being wrong, the three claims
+beside them are where a plausible wrong answer renders perfectly. Pinned by `tests/webActivity.test.js`
+(16 cases, 5 mutations verified).
+
+## lib/syslog/trafficStats.js — getWebActivity (v2.157.0)
+
+Feeds `WebActivityPanel` on both the fleet Traffic tab and every firewall's. Returns FOUR things and
+a caller must show all four: `identified` (by BYTES), `unattributed` (kept whole), `categories`
+(classified/unclassified split, plus `licenceLapsed`), `coverage` (per firewall, how much it names).
+
+⛔ IT DOES NOT REPLACE `getTopApplications`, which ranks every application string by EVENT COUNT —
+the right shape for "what is chatty" and the reason `ssl`, `dns-base` and `ping` sit on top of it.
+One list cannot be both.
+
+⛔ BYTES ARE SCOPED TO THE DEVICES WHOSE COUNTERS MAY BE SUMMED, established first from the same
+rollup the traffic totals use, so this widget and the Traffic Activity PDF always describe the same
+firewalls. FortiOS re-logs a session with a running cumulative counter; on this fleet that is 5 of
+16 devices and `bytesCapable` is 10. A Fortinet-scoped call returns `identified: []` with
+`bytesCapable: 0`, and the panel prints WHY rather than rendering empty — "we may not sum this" and
+"there was no traffic" are opposite facts.
+
+⛔ `namedRatio` IS TRI-STATE. A firewall that sent nothing to the rollup is `null`, never 0 — 0%
+would state our coverage gap as a fact about their device. Live: every PAN-OS names 100%, four of
+five FortiGates name under half, OKF(F2) names 3%.
+
+## lib/reports/chassis.js — charts (v2.157.0)
+
+`drawBarChart` / `drawDonut` / `drawTimeSeries` / `chartColor` / `fmtCompact`, plus `ALLOWED_RAMP`
+and `DENIED_RAMP`. Hand-rolled pdfkit vectors — **no charting library**, same call as the topology
+map, because `npm ci` runs on a firewall-management box and a donut is thirty lines of arithmetic.
+
+⛔ A CHART MAY NOT HIDE WHAT A TABLE WOULD HAVE SHOWN, and all four rules are pinned by
+`tests/reportCharts.test.js` (12 cases, 4 mutations verified):
+- an unmeasured bar row gets a HUELESS RULE across its track and an em dash, never a short bar and
+  never a 0; the scale comes from the largest MEASURED value;
+- a donut slice marked `unmeasured` is drawn at true size in `UNMEASURED` and EXCLUDED from the
+  percentages — dropping it would re-normalise the ring, including it would imply we know its share;
+- a `null` point in a time series is a hueless baseline tick, never a zero-height bar: an hour with
+  no data and an hour with no traffic are different facts and closing the line over the first
+  invents a smooth trend. A real 0 is still a measurement and is NOT drawn as a gap;
+- `max` truncates SILENTLY, so every call site spells it out. A chart sliced to 15 by its caller
+  rendered 10 and looked complete — the work queue's `PER_SOURCE_CAP` failure, in a picture.
+
+⛔ NO GREY AND NO NAVY IN `CHART_PALETTE`. Both were in the first version; `UNMEASURED` grey is
+this product's printed mark for "we could not measure this" and NAVY is the chrome, so a category
+in either reads as a non-answer. Observed live: `ms-ds-smbv3` rendered in the same grey the report
+uses for an em dash.
+
+⛔ THE OUTCOME RAMPS EXIST BECAUSE ONE SEMANTIC FAMILY HOLDS SEVERAL SLICES, and they are long
+enough not to wrap: five allowed verbs against a four-entry ramp drew `server-rst` in exactly the
+same green as `allow`. Slice colour comes from `classifyAction` in `lib/syslog/actions.js`
+UNCHANGED — an early draft used a regex written in the report file, which would have been a FIFTH
+deny list and wrong on this fleet today (`close`/`client-rst`/`server-rst` are teardown verbs of
+permitted traffic; `reset-both` looks like that family and is a block). Its word is `'blocked'`,
+not `'denied'`.
+
+⛔ `drawCover` NOW SETS `doc.y` UNCONDITIONALLY. Every caller passing `footerStamp` already did;
+the ones that did not got back whatever y pdfkit was at, which on a cover drawing summary CHIPS was
+a point INSIDE them — the Traffic Activity coverage note was drawn across the chips. No-op for the
+eight reports that pass `footerStamp`, and `tests/reportChassis.test.js`'s byte comparison confirms
+the compliance PDF is unchanged.
+
 ## lib/reports/trafficWindow.js + trafficActivity.js
 
 The **Traffic Activity** report (v2.156.0): per-firewall or fleet, over an ARBITRARY window.

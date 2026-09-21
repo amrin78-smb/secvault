@@ -4,10 +4,12 @@ import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import Table from '../ui/Table';
 import IconChip from '../ui/IconChip';
+import WebActivityPanel from '../traffic/WebActivityPanel';
 import { IconDevices, IconGrid, IconShield, IconChart, IconActivity } from '../icons';
 import {
   getTopHosts,
   getTopApplications,
+  getWebActivity,
   getProtocolBreakdown,
   getTopBlockedDestinations,
   getDeviceTrafficStats,
@@ -148,6 +150,27 @@ export async function TopHostsWidget() {
       </CardBody>
     </Card>
   );
+}
+
+/**
+ * Web and application activity - what the estate is USING, by volume.
+ *
+ * ⛔ IT DOES NOT REPLACE TopApplicationsWidget BELOW, AND THE TWO ANSWER
+ * DIFFERENT QUESTIONS. That one ranks every application string by EVENT COUNT,
+ * which is the right shape for "what is chatty" and puts `ssl`, `dns-base` and
+ * `ping` on top. This one ranks by BYTES with the transport and unidentified
+ * buckets lifted out, which is the right shape for "what is using our
+ * bandwidth" - the question that was actually asked. Measured on this fleet,
+ * `ssl` alone is 869 GB against YouTube's 4.2 GB, so one list cannot be both.
+ *
+ * ⛔ FULL WIDTH, OUTSIDE THE WIDGET GRID. It carries two rankings and a
+ * coverage statement, and the coverage statement is the part that stops the
+ * rankings being read as a fact about the whole estate. In a grid cell it is
+ * the part that gets truncated.
+ */
+export async function WebActivityWidget() {
+  const web = await getWebActivity(pool, 24, null, 10);
+  return <WebActivityPanel web={web} />;
 }
 
 /** Top applications — Firewall Analyzer's application/protocol-group view. */

@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.157.0': [
+    'The Traffic Activity report now carries charts: an hourly volume graph, a session-outcomes pie, and ranked bars for sources, applications, categories, blocked destinations and busiest rules.',
+    'New "Web and application activity" panel on the Traffic tab and on every firewall, answering what is actually being used \u2014 Facebook, TikTok, YouTube, Teams, SharePoint and the rest \u2014 ranked by bandwidth over the last 24 hours.',
+    'Traffic the firewall could not identify (ssl, quic-base) is totalled separately instead of topping the chart, so the named applications are readable. Every figure is stated as a floor, because some of that unidentified volume belongs to them.',
+    'The panel says which firewalls can answer at all: on your fleet every Palo Alto names 100% of its sessions while four of five FortiGates name under half.',
+    'It flags that URL filtering has lapsed on SMT and TUG \u2014 those firewalls classify nothing, so their users are missing from the category figures while their traffic still counts elsewhere.',
+    'Individual web addresses are deliberately not reported. The firewalls log a hostname on only a small minority of sessions, and a "top websites" list built from that would describe a fraction of the traffic under a heading claiming the whole estate.',
+  ],
   '2.156.0': [
     'New Traffic Activity report: what went through the firewalls in a window you choose — volume, session outcomes, busiest sources, applications, protocols, most-blocked destinations and busiest rules.',
     'Pick one firewall or the whole fleet, and either a preset window (24 hours, 7 days, 30 days) or your own start and end.',

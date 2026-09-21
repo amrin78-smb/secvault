@@ -585,6 +585,19 @@ ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}], unassessed[{de
   ⛔ Lists every active device INCLUDING those with 0 paths, with the count in the
   option label — an absent firewall is indistinguishable from an unmonitored one.
 
+WebActivityPanel (components/traffic/, v2.157.0)  web, perDevice — "what is actually being used",
+  by BANDWIDTH, from getWebActivity(). ⛔ ONE COMPONENT, BOTH TABS: the fleet Traffic tab renders it
+  full width above the widget grid (via TrafficWidgets' WebActivityWidget) and DeviceTrafficTab
+  renders it full width above its own grid with perDevice. Two implementations of a panel whose
+  whole value is a claim boundary would drift, and the one that drifted would be the one someone
+  screenshotted. ⛔ FULL WIDTH, NOT A GRID CELL — its coverage line is what stops the rankings being
+  read as a fact about the whole estate, and that is the line a cell truncates. ⛔ NOT TITLED "TOP
+  WEBSITES": the firewalls report an APPLICATION identity, not the hostname. url_hostname exists on
+  raw events at ~1.3% population with several firewalls reporting none, and has no rollup, so a top-
+  websites list would describe a fortieth of the traffic under a heading claiming the estate. ⛔
+  THREE THINGS ALWAYS SHOWN TOGETHER: what was identified, how much could NOT be (usually larger),
+  and which firewalls can answer at all. Every sentence comes from lib/syslog/webActivityText.js.
+
 DeviceTrafficTab  deviceId, deviceName, canSearchLogs — per-firewall traffic (devices/[id]?tab=traffic).
   Module-level helper `Drill({href, title, children})` — a null `href` renders the children as plain
   text (the viewer lacks VIEW_LOG_SEARCH). ⛔ It was declared INSIDE DeviceTrafficTab until v2.148.0,

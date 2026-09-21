@@ -35,6 +35,7 @@ import {
 import {
   TopHostsWidget,
   TopApplicationsWidget,
+  WebActivityWidget,
   ProtocolBreakdownWidget,
   BlockedDestinationsWidget,
   DeviceTrafficTable,
@@ -276,6 +277,16 @@ export default async function DashboardPage({ searchParams }) {
 
       {tab === 'traffic' && (
         <>
+          {/* ⛔ ABOVE THE GRID, DELIBERATELY. "What are people using, and how
+              much of that could we actually see" is the question this tab is
+              opened to answer; the per-widget rankings below are the detail
+              behind it. It is full width because its coverage statement - which
+              firewalls can answer at all - is what stops the rankings being
+              read as a fact about the whole estate, and that is the line a grid
+              cell truncates. */}
+          <div style={{ marginBottom: 16 }}>
+            <WebActivityWidget />
+          </div>
           <div className="dashboard-widget-grid">
             <TrafficVolumeWidget />
             <TopHostsWidget />
