@@ -5,6 +5,7 @@ import Card, { CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
 import Badge from '../ui/Badge';
 import {
+  IconActivity,
   IconTrendingUp,
   IconChecklist,
   IconShield,
@@ -45,7 +46,14 @@ import {
 // single description of a report while the element stays on the client.
 // An unknown name falls back to IconReport rather than rendering nothing —
 // a missing glyph would silently break the rail's only wayfinding cue.
+// ⛔ Every rail entry keeps a DISTINCT glyph. That is the wayfinding cue rather
+// than colour, and tests/reportRoute.test.js enforces both the distinctness and
+// that every name the catalogue declares appears HERE.
+// ⛔ The comment sits outside the braces on purpose: that test parses this block
+// by splitting on commas, so a comment containing one fragments the parse and
+// the entry beside it stops being recognised.
 const GLYPHS = {
+  IconActivity,
   IconTrendingUp,
   IconChecklist,
   IconShield,
