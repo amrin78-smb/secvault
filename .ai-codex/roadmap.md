@@ -43,7 +43,7 @@ Every number below is measured, not estimated. Where something is uncertain it s
 | **Segmentation intent — CAN it, and DID it** | v2.113.0; live: `untrust -> private` permitted by 2 rules, 0 hits |
 | Tunnel health answer-first + coverage bar | v2.114.0 |
 | **Work queue, one ranked list across all 9 engines** | v2.115.0; live: 19 act-now / 60 scheduled / 6 needs-a-human |
-| Reporting platform, catalogue + 10 reports | Phase D, v2.123.0 |
+| Reporting platform, catalogue + **11 reports** | Phase D v2.123.0; +Traffic Activity v2.156.0, +Rule Risk by Traffic v2.158.0 |
 | **Application-centric view, Phase 1** | v2.124.0; `applications`/`application_flows`, two engines, `/applications`, work-queue source #10 |
 | **Application intent Phase 2 — rule impact + retirement** | v2.129.0; `IMPACT_CLAIM`, proposals through the existing `ruleChangeRequests` loop. ⛔ Neither can CONCLUDE on this fleet (14 of 16 firewalls reference objects the device never reported) and that is correct — the fix is collecting the objects, not loosening the engine |
 | **Vendor PSIRT gated on the inventory** | v2.130.0; a vendor's own feed runs only if that vendor is deployed. Gate FAILS OPEN; a skip is WRITTEN with a reason |
@@ -373,12 +373,34 @@ scored, and the remaining gap may be a different set of rows entirely. The "255"
 figure taken before the hub existed. Count it again first; a fix sized against a number that has
 moved is how effort lands on the wrong rows.
 
-## Reporting platform — Phase D complete (2026-09-15, v2.123.0)
+## Reporting platform — Phase D complete (2026-09-15, v2.123.0); 11 reports as of v2.158.0
 
-Nine reports registered in `lib/reports/catalogue.js`: Executive Security Posture, Rule Hygiene,
-Vulnerability & Patch Posture, Compliance (fleet or one standard), Segmentation Posture, Lifecycle &
-Support, Configuration Change Audit, VPN Access Review, Rule Change Request. All nine verified
-building against the live fleet through the route's own dispatch shape.
+Registered in `lib/reports/catalogue.js`: Executive Security Posture, Rule Hygiene, Vulnerability &
+Patch Posture, Compliance (fleet or one standard), Segmentation Posture, Lifecycle & Support,
+Configuration Change Audit, VPN Access Review, Rule Change Request, **Traffic Activity** (v2.156.0,
+charts v2.157.0) and **Rule Risk by Traffic** (v2.158.0). All verified building against the live
+fleet through the route's own dispatch shape.
+
+⛔ **EVERY REPORT NEEDS A DISTINCT GLYPH** and a test enforces it — the same wayfinding rule the
+sidebar follows. Adding one means adding its icon to `GLYPHS` in `ReportWorkspace.js` as well as to
+the catalogue entry; reusing an existing glyph fails `tests/reportRoute.test.js`.
+
+### Operational reporting beyond Firewall Analyzer (proposed 2026-09-20, partly built)
+
+The plan that produced the last three versions, recorded here because it lived only in a session
+until now — which is how this file went 24 versions stale the first time.
+
+| phase | what | state |
+|---|---|---|
+| 0 | Remove the dead FWA import scripts | done |
+| 1 | Report chassis + catalogue hardening | done |
+| 2 | **Scheduled report delivery** | DEFERRED by the user 2026-09-21 ("not that important now") — see the Phase C note below, it is the same work |
+| 3 | Traffic Activity report, arbitrary window | v2.156.0; charts and the web/application section v2.157.0 |
+| 4 | **Rule Risk by Traffic** — the fusion report | v2.158.0 |
+
+Phase 4 is what the competition structurally cannot build: a traffic tool has never read the
+rulebase, a policy tool has never seen a packet. Live on this fleet, 11 of the 15 busiest rules
+also carry a hygiene finding and 63% of the traffic on those rules runs on a flawed rule.
 
 Still deferred, deliberately:
 - **Scheduling and delivery** (Phase C). Only the monthly compliance report is scheduled today, via
@@ -389,9 +411,13 @@ Still deferred, deliberately:
 - **Per-user destinations in the VPN review.** Not possible without a rollup schema change —
   `syslog_app_hourly`/`syslog_blocked_dst_hourly` carry no `src_ip`, and `syslog_events` is refused
   (no `src_ip` index, ~28M rows/day).
-- **A render/page-load smoke harness.** There is still none. v2.120.0 shipped a blank `/reports`
-  with every test passing and a clean build; the gap is covered today only by shape guards on what
-  crosses into client components.
+- ~~**A render/page-load smoke harness.**~~ ⛔ **BUILT in v2.150.0** — this entry said "there is
+  still none" for eight versions after it shipped, which is the precise failure this file's own
+  opening paragraph complains about: a stale "not built yet" sends a session off to rebuild
+  something that works. `scripts/smoke.js` signs in and loads all 28 pages asserting a per-page
+  content marker, and `Update-SecVault.ps1` runs it after the HTTPS verify, non-fatally.
+  ⛔ What IS still open: it needs `SMOKE_USER`/`SMOKE_PASS` in the deployed `.env.local` or it logs
+  a SKIP rather than a pass, and it cannot be run from a dev machine with no local instance.
 
 ## Application-centric view — ⛔ PHASE 1 **BUILT** (v2.124.0); phases 2-4 still proposed
 
