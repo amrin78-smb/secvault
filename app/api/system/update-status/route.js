@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.162.0': [
+    'Sweep, third pass — the last of the findings worth fixing.',
+    'Report date pickers were off by your timezone offset: the "Last 24 hours" preset silently omitted the most recent 7 hours and printed the wrong boundaries labelled UTC. The boxes now show your own clock and the report covers exactly what you asked for.',
+    'A new notification channel no longer subscribes to the Work Queue band by default — it already covers Patch Now CVEs and Critical Compliance Failures, so one failing check was sending six messages. Choosing both together is still allowed, and now says so.',
+    'The page-render check could be satisfied by a blank compliance page, because its marker was a sidebar label. Fixed, and the guard now covers per-firewall pages too and fails loudly rather than passing.',
+    'Charts no longer reuse the allow/deny colours for unrelated categories, and the donut geometry that decides every slice above half the ring is now tested.',
+    'Corrected a claim in the previous release: the shared cover change DID move the monthly compliance PDF by a small amount. It moved for the better — a heading had been overlapping the summary tiles — but it moved.',
+  ],
   '2.161.0': [
     'Second pass on the bug sweep: seven more fixes, all of them things that rendered perfectly while saying something untrue.',
     'The hourly traffic chart dropped a real hour and invented a "missing data" gap at the other end, so it did not add up to the Events figure on the page before it. It reconciles exactly now.',

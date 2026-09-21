@@ -67,6 +67,34 @@ const GLYPHS = {
   IconUser,
 };
 
+// ⛔ A `datetime-local` VALUE HAS NO TIMEZONE, AND THE WIRE FORMAT MUST.
+// The picker both reads and writes a zoneless `YYYY-MM-DDTHH:mm`, which
+// JavaScript parses as LOCAL — while the presets were filling it from
+// `toISOString()`, a UTC instant. So the box said one thing, the server's
+// `new Date()` understood another, and nothing reported a discrepancy.
+// Measured under Asia/Bangkok (the reference deployment, UTC+7) with the exact
+// bytes the "Last 24 hours" preset put on the wire: the report covered
+// 08:00Z -> 08:00Z instead of 15:00Z -> 15:00Z, silently omitting the most
+// recent SEVEN HOURS with `clamped: false` and no stated reason — and then
+// printed those boundaries on the cover labelled "UTC".
+//
+// Fixed at both ends: the picker is filled with LOCAL time (so it shows the
+// operator their own clock) and the query converts to an explicit UTC instant
+// (so the server has nothing to guess).
+function toLocalInputValue(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function localInputToIso(value) {
+  if (!value) return '';
+  const d = new Date(value); // zoneless => parsed as this browser's local time
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+}
+
 const SCOPE_LABEL = {
   fleet: 'Whole fleet',
   device: 'One firewall',
@@ -116,8 +144,11 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
     // timestamps, so the server has one shape to validate and the download URL
     // says exactly what the document will cover.
     if (p.kind === 'range') {
-      if (paramValues.from) query.set('from', paramValues.from);
-      if (paramValues.to) query.set('to', paramValues.to);
+      // ⛔ CONVERTED, NEVER PASSED THROUGH. See toLocalInputValue above.
+      const from = localInputToIso(paramValues.from);
+      const to = localInputToIso(paramValues.to);
+      if (from) query.set('from', from);
+      if (to) query.set('to', to);
       continue;
     }
     const v = paramValues[p.key];
@@ -383,8 +414,8 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                               const from = new Date(to.getTime() - preset.hours * 3600000);
                               setParamValues((prev) => ({
                                 ...prev,
-                                from: from.toISOString().slice(0, 16),
-                                to: to.toISOString().slice(0, 16),
+                                from: toLocalInputValue(from),
+                                to: toLocalInputValue(to),
                               }));
                             }}
                           >
@@ -418,8 +449,10 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                           range older than the rollups keep should learn it here,
                           not after opening a document that quietly covers less. */}
                       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                        Leave both empty for the last 24 hours. Ranges reaching further back than the
-                        retained rollups are moved forward, and the report states the adjustment.
+                        Times are your own local clock; the report converts them and prints the
+                        window it covered in UTC. Leave both empty for the last 24 hours. Ranges
+                        reaching further back than the retained rollups are moved forward, and the
+                        report states the adjustment.
                       </span>
                     </div>
                   ) : (

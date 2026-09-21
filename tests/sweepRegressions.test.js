@@ -30,9 +30,16 @@ function stubDoc() {
     addPage() { this.y = 40; return this; },
     rect(x, y, w, h) { this._p = { op: 'rect', x, y, w, h }; return this; },
     roundedRect(x, y, w, h) { this._p = { op: 'rr', x, y, w, h }; return this; },
-    path() { this._p = { op: 'path' }; return this; },
+    path(d) { this._p = { op: 'path', d }; return this; },
     fill(c) { calls.push({ ...this._p, color: c }); return this; },
     fillAndStroke(a) { calls.push({ ...this._p, color: a }); return this; },
+    moveTo() { return this; },
+    lineTo() { return this; },
+    stroke() { return this; },
+    strokeColor() { return this; },
+    lineWidth() { return this; },
+    save() { return this; },
+    restore() { return this; },
     fillColor(c) { this._fill = c; return this; },
     fontSize() { return this; },
     font() { return this; },
@@ -198,6 +205,92 @@ describe('⛔ a chart may not outrank the data it draws', () => {
     assert.doesNotThrow(() => chassis.drawTimeSeries(doc, layout, [
       { t: 'not a date', value: 10 }, { t: new Date(), value: 20 },
     ]));
+  });
+});
+
+describe('⛔ the cover owns the cursor it leaves behind', () => {
+  // The Traffic Activity coverage note was drawn ACROSS the summary chips, and
+  // the fix was called a no-op for every caller without checking: the monthly
+  // compliance PDF is a ninth caller that passes no footerStamp, and its body
+  // moved 24.75pt. No test rendered a real report, so nothing could have said
+  // so — the byte-comparison in reportChassis.test.js runs on fake fixtures.
+  const CHIP_HEIGHT = 52;
+
+  for (const opts of [
+    { name: 'flowing cover with chips', fixedGeometry: false, footerStamp: false },
+    { name: 'fixed-geometry cover with chips (the compliance report)', fixedGeometry: true, footerStamp: false },
+    { name: 'with a footer stamp', fixedGeometry: false, footerStamp: true },
+  ]) {
+    it(`leaves doc.y below the chips — ${opts.name}`, () => {
+      const { doc, calls } = stubDoc();
+      chassis.drawCover(doc, {
+        title: 'T',
+        subtitle: 'S',
+        company: 'C',
+        generatedAt: 'now',
+        meta: [['a', 'b'], ['c', 'd']],
+        summary: [{ value: '1', label: 'one' }, { value: '2', label: 'two' }],
+        ...opts,
+      }, layout);
+      // The chips are the last thing drawn: find the lowest one.
+      const chips = calls.filter((c) => c.op === 'rr' && Math.round(c.h) === CHIP_HEIGHT);
+      assert.ok(chips.length >= 2, 'the fixture draws chips');
+      const chipBottom = Math.max(...chips.map((c) => c.y + c.h));
+      assert.ok(doc.y >= chipBottom,
+        `doc.y ${doc.y} must clear the chip row ending at ${chipBottom}`);
+    });
+  }
+});
+
+describe('⛔ the donut geometry that nothing was checking', () => {
+  // Replacing the large-arc flag with a constant 0 left all 12 chart tests
+  // green, and a donut that misstates every proportion above 50% is the one
+  // chart failure nobody can check by eye against the table beside it.
+  function sweptAngle(pathData) {
+    // "A rOuter rOuter 0 <large> 1 x y" — the flag is what distinguishes a
+    // 252-degree wedge from a 108-degree one drawn between the same endpoints.
+    const m = /A [\d.]+ [\d.]+ 0 (\d)/.exec(pathData);
+    return m ? Number(m[1]) : null;
+  }
+
+  it('a slice over half the ring sets the large-arc flag, and one under it does not', () => {
+    const { doc, calls } = stubDoc();
+    chassis.drawDonut(doc, layout, [
+      { label: 'big', value: 70 },
+      { label: 'small', value: 30 },
+    ]);
+    const arcs = calls.filter((c) => c.op === 'path');
+    assert.equal(arcs.length, 2);
+    assert.equal(sweptAngle(arcs[0].d), 1, '70% must be drawn the long way round');
+    assert.equal(sweptAngle(arcs[1].d), 0, '30% must be drawn the short way');
+  });
+
+  it('a single slice covering the whole ring still leaves the hole', () => {
+    // The inner arc's endpoints coincide, so pdfkit dropped it and the "ring"
+    // came out a solid disc — reachable whenever one category is the only one,
+    // which on the rule-risk donut is the GOOD-NEWS case.
+    const { doc, calls } = stubDoc();
+    chassis.drawDonut(doc, layout, [{ label: 'only', value: 100 }]);
+    const arcs = calls.filter((c) => c.op === 'path');
+    assert.equal(arcs.length, 1);
+    const inner = /L .+ A ([\d.]+)/.exec(arcs[0].d);
+    assert.ok(inner, 'the path must still contain an inner arc');
+  });
+});
+
+describe('⛔ a category colour may not be a verdict colour', () => {
+  it('no chart palette entry is the allow or deny colour', () => {
+    // The session-outcomes donut captions green as "permitted" and red as
+    // "refused"; the protocols donut two sections later painted its 3rd and 6th
+    // slices in exactly those, on a fleet where six slices is normal.
+    const reserved = new Set([
+      chassis.GREEN, chassis.STATUS_RED, chassis.UNMEASURED, chassis.NAVY,
+      ...chassis.ALLOWED_RAMP, ...chassis.DENIED_RAMP,
+    ].map((c) => String(c).toUpperCase()));
+    for (let i = 0; i < 24; i++) {
+      const c = chassis.chartColor(i).toUpperCase();
+      assert.ok(!reserved.has(c), `chartColor(${i}) = ${c} is a reserved verdict/state colour`);
+    }
   });
 });
 

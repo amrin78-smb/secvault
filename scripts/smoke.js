@@ -173,6 +173,25 @@ const ERROR_SHAPES = [
 // only ever returned green proves nothing: the failing path is the one that
 // matters and it is the one a live run never exercises. tests/smokeHarness.test.js
 // feeds this synthetic responses, including the exact v2.120.0 shape.
+// ⛔ THE GUARD RUNS ON DISCOVERED ROUTES TOO, NOT JUST THE STATIC TABLE.
+// tests/smokeHarness.test.js asserted NAV_LABELS only over STATIC_ROUTES, so a
+// marker added in discoverRoutes() escaped it entirely — and one had. A sweep
+// that can be made green by a blank page is worse than no sweep, so this throws
+// rather than warning: the update's own log would otherwise report a pass.
+function assertUsableMarkers(routes) {
+  for (const r of routes || []) {
+    for (const m of r.markers || []) {
+      if (NAV_LABELS.includes(m)) {
+        throw new Error(
+          `${r.path}: "${m}" is a navigation label, which the shared layout renders into every `
+          + 'page — a blank body would pass. Use a string only this page produces.'
+        );
+      }
+    }
+  }
+  return routes;
+}
+
 function pageVerdict(route, { status, location, body }) {
   const fail = (reason) => ({ path: route.path, ok: false, reason, status });
 
@@ -228,7 +247,11 @@ async function discoverRoutes() {
                 : [dev.name],
           });
         }
-        out.push({ path: `/compliance/${dev.id}`, markers: ['Compliance', dev.name] });
+        // ⛔ NOT the bare word 'Compliance' — that is the SIDEBAR's label, which
+        // the shared layout renders into every dashboard page, so it passed on a
+        // blank body. This file's own NAV_LABELS comment predicted this exact
+        // line. The page's own header is `Compliance — <device>`.
+        out.push({ path: `/compliance/${dev.id}`, markers: [`Compliance — ${dev.name}`, dev.name] });
         out.push({ path: `/compliance/${dev.id}/standards`, markers: ['All Checks', dev.name] });
       }
     }
@@ -248,7 +271,9 @@ async function main() {
   }
 
   const dynamic = await discoverRoutes();
-  const routes = [...STATIC_ROUTES, ...dynamic];
+  // ⛔ BOTH TABLES, EVERY RUN. The static one was guarded by a test; the
+  // discovered one was not, and that is where a nav label had been sitting.
+  const routes = assertUsableMarkers([...STATIC_ROUTES, ...dynamic]);
   if (dynamic.length === 0) {
     console.log('[smoke] NOTE: no device id could be discovered, so no per-device page was checked.');
   }
@@ -279,4 +304,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { pageVerdict, STATIC_ROUTES, NAV_LABELS, ERROR_SHAPES };
+module.exports = { pageVerdict, STATIC_ROUTES, NAV_LABELS, ERROR_SHAPES, assertUsableMarkers };

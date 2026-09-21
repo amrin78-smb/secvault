@@ -48,7 +48,7 @@ const ALERT_TYPE_LABEL = {
   // for AND that are urgent now. Anything unmeasured is refused entry to this
   // band however urgent its source claimed to be, so this cannot become the
   // firehose that got the rule-findings alert removed in July.
-  work_act_now: 'Work Queue — Act Now',
+  work_act_now: 'Work Queue — Act Now (covers CVEs and compliance)',
   compliance_report: 'Monthly Compliance Report',
 };
 // 'compliance_report' only ever means anything for an email channel (a PDF
@@ -57,6 +57,25 @@ const ALERT_TYPE_LABEL = {
 // below) so an admin can never opt a webhook channel into a report type
 // the engine-worker job will just silently skip forever.
 const EMAIL_ONLY_ALERT_TYPES = new Set(['compliance_report']);
+
+// ⛔ `work_act_now` IS AN AGGREGATE OF THE OTHER TWO, so it is NOT selected by
+// default. Its work-queue sources ARE the patch_now CVE set and the critical
+// compliance set, seen through one band — so a channel subscribed to all three
+// reports the same problem from two directions. Measured live: one CVE produced
+// 1 work_act_now message PLUS 3 patch_now_cve messages, and one failing
+// compliance check produced 1 PLUS 5. Six notifications for one problem, on the
+// feature whose stated justification is that it cannot repeat the noise that got
+// the rule-findings alert removed in July.
+//
+// It stays available, because a channel that wants ONE ranked feed instead of
+// per-engine alerts is a legitimate and arguably better setup — it is just not
+// the default, and choosing both is disclosed below rather than discovered.
+const AGGREGATE_ALERT_TYPES = new Set(['work_act_now']);
+
+// Which per-engine types each aggregate already covers, for the overlap notice.
+const AGGREGATE_COVERS = {
+  work_act_now: ['patch_now_cve', 'compliance_critical'],
+};
 
 // Fresh, empty field-state object for either the create form or an in-place
 // rotation — same shape used by both, same convention as
@@ -67,7 +86,9 @@ const EMAIL_ONLY_ALERT_TYPES = new Set(['compliance_report']);
 // "checked" in the submitted data despite never being shown.
 function emptyFields(channelType) {
   const defaultAlertTypes = ALERT_TYPES.filter(
-    (t) => !EMAIL_ONLY_ALERT_TYPES.has(t) || channelType === 'email'
+    (t) => (!EMAIL_ONLY_ALERT_TYPES.has(t) || channelType === 'email')
+      // ⛔ Aggregates are opt-in — see AGGREGATE_ALERT_TYPES.
+      && !AGGREGATE_ALERT_TYPES.has(t)
   );
   return {
     webhookUrl: '',
@@ -223,9 +244,35 @@ function renderChannelFields(channelType, fields, setFields, idPrefix) {
             {ALERT_TYPE_LABEL[t]}
           </label>
         ))}
+        {/* ⛔ OVERLAP IS DISCLOSED, NOT PREVENTED. Subscribing to an aggregate
+            AND the per-engine alerts it covers is a legitimate choice — it is
+            just one nobody makes deliberately unless they are told. Live, the
+            combination sent six messages for one failing compliance check. */}
+        {overlappingAlertTypes(fields.alertTypes).map(([agg, covered]) => (
+          <p key={agg} style={{
+            margin: '4px 0 0', padding: '8px 10px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--tint-warn)', color: 'var(--tint-warn-fg)',
+            fontSize: 'var(--text-xs)', lineHeight: 1.5,
+          }}>
+            <strong>{ALERT_TYPE_LABEL[agg]}</strong> already covers{' '}
+            {covered.map((c) => ALERT_TYPE_LABEL[c]).join(' and ')}. With both selected this
+            channel will be told about the same problem twice — once ranked, once per engine.
+          </p>
+        ))}
       </div>
     </>
   );
+}
+
+// Which selected aggregates overlap other selected types. Pure, so the notice
+// cannot disagree with the checkboxes it sits under.
+function overlappingAlertTypes(selected) {
+  const chosen = new Set(selected || []);
+  return Object.entries(AGGREGATE_COVERS)
+    .filter(([agg]) => chosen.has(agg))
+    .map(([agg, covers]) => [agg, covers.filter((c) => chosen.has(c))])
+    .filter(([, covered]) => covered.length > 0);
 }
 
 function lastStatusText(channel) {

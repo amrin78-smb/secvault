@@ -17,7 +17,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { pageVerdict, STATIC_ROUTES, NAV_LABELS, ERROR_SHAPES } = require('../scripts/smoke');
+const { assertUsableMarkers, pageVerdict, STATIC_ROUTES, NAV_LABELS, ERROR_SHAPES } = require('../scripts/smoke');
 
 const route = { path: '/reports', markers: ['Point-in-time PDFs you can hand to an auditor'] };
 
@@ -130,5 +130,28 @@ describe('⛔ no marker may be a navigation label', () => {
     for (const must of ['/', '/reports', '/devices', '/work', '/settings', '/login']) {
       assert.ok(STATIC_ROUTES.some((r) => r.path === must), `${must} must be swept`);
     }
+  });
+});
+
+describe('⛔ the nav-label guard covers DISCOVERED routes, not just the static table', () => {
+  it('refuses a marker that the shared layout renders into every page', () => {
+    // It used to be asserted only over STATIC_ROUTES, so `/compliance/<id>`
+    // shipped with markers: ['Compliance', <device>] — and since markers are
+    // OR'd, a blank body wrapped in a working sidebar passed the sweep. The
+    // file's own comment had predicted that exact line.
+    assert.throws(
+      () => assertUsableMarkers([{ path: '/compliance/abc', markers: ['Compliance', 'FW1'] }]),
+      /navigation label/
+    );
+  });
+
+  it('accepts a marker only the page body produces', () => {
+    const routes = [{ path: '/compliance/abc', markers: ['Compliance — FW1', 'FW1'] }];
+    assert.equal(assertUsableMarkers(routes), routes);
+  });
+
+  it('and it throws rather than warning, because the update logs a pass either way', () => {
+    // A sweep that can be made green by a blank page is worse than no sweep.
+    assert.throws(() => assertUsableMarkers([{ path: '/x', markers: ['Settings'] }]));
   });
 });
