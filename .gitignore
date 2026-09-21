@@ -57,3 +57,11 @@ installer/dependencies/*
 # belong in git. The .bak.* files are the timestamped backups the Settings ->
 # Certificate page writes before replacing a pair.
 certs/
+
+# ⛔ lib/envFile.js writes a timestamped backup beside .env.local before every
+# edit, and that backup holds CREDENTIAL_KEY, the database password and
+# NEXTAUTH_SECRET. The existing `.env*.local` rule does NOT cover it, because
+# the name ends `.bak` — so one `git add -A` on the server would commit every
+# secret in the product to the repository.
+.env.local.*.bak
+*.env.local.bak

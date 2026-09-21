@@ -4,6 +4,9 @@ import { useState, useEffect, useRef } from 'react';
 import { PRODUCT_NAME } from '../../../lib/branding';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
+// ⛔ A PURE MODULE, NOT A LOCAL HELPER. The first version lived here, could
+// not be imported by a test, and was bypassable with an embedded tab.
+import { safeReturnPath } from '../../../lib/returnPath';
 import Button from '../../../components/ui/Button';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 
@@ -29,24 +32,6 @@ const FEATURES = [
   'Rule hygiene, shadow, and redundancy analysis',
   'PCI DSS, ISO 27001, CIS v8, NIST, and SANS compliance scoring',
 ];
-
-// ⛔ AN OPEN REDIRECT IS THE WHOLE RISK IN HONOURING callbackUrl. It arrives
-// in the URL, so anyone can put anything in it — including an absolute address
-// on a host they control, which would turn this login page into a convincing
-// hop to a credential-harvesting clone. Only a SAME-SITE PATH is accepted:
-// starts with a single `/`, and never `//` or `/\` (both of which browsers
-// resolve as protocol-relative absolute URLs to another host). Anything else
-// falls back to the dashboard root rather than being reported as an error —
-// the user came here to sign in, not to debug a link.
-function safeReturnPath(raw) {
-  if (typeof raw !== 'string' || raw === '') return '/';
-  let v = raw;
-  try { v = decodeURIComponent(raw); } catch { return '/'; }
-  if (!v.startsWith('/')) return '/';
-  if (v.startsWith('//') || v.startsWith('/\\')) return '/';
-  if (v.startsWith('/login')) return '/';
-  return v;
-}
 
 export default function LoginPage() {
   const router = useRouter();

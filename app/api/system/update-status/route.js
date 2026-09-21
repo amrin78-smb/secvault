@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.160.0': [
+    'Bug sweep of everything shipped today, run by six parallel reviewers against the live fleet. Nine defects fixed, four of them already deployed.',
+    'Fixed: every per-firewall Traffic Activity report on a Fortinet failed with an error — 5 of your 16 firewalls.',
+    'Fixed: the idle timeout was an ABSOLUTE timeout. It would have signed people out 30 minutes after logging in however hard they were working, and the warning dialog dismissed itself if you moved the mouse toward its button.',
+    'Fixed: saving the console address or the session timeout APPENDED a duplicate line to the configuration file instead of replacing it, which a later update could silently revert. Backup copies of that file are also no longer left unignored beside it.',
+    'Fixed: the rule cleanup list nominated rules for deletion under merge and performance suggestions, and showed "no data" for rules the firewall itself reports millions of hits on — 300 of 405 candidates. Those now state the counter.',
+    'Fixed: a firewall that simply sent no logs was described as one whose traffic volume cannot be measured, and a sign-in link could be crafted to bounce you to another site after a successful login.',
+  ],
   '2.159.0': [
     'Sessions now sign out after inactivity \u2014 30 minutes by default, changeable in Settings \u2192 Security, 0 to switch it off. Until now there was no timeout at all: a browser left signed in stayed signed in for 30 days.',
     'A warning appears 60 seconds beforehand with a "Stay signed in" button, and signing in again takes you back to the page you were on.',

@@ -58,14 +58,27 @@ export async function PUT(request) {
     }, { status: 500 });
   }
 
+  // ⛔ setEnvValue RETURNS {ok:false, error}; IT DOES NOT THROW for any of its
+  // real failure modes. An earlier version of this route wrapped it in
+  // try/catch and never inspected the return value, so a REFUSED write — a
+  // duplicated key, an unreadable file, a failed backup — fell through to an
+  // HTTP 200 saying "Saved. Restart the service." An administrator would then
+  // restart believing a security control was in force when the write had been
+  // declined. The sibling console-url route gets this right; this now matches it.
+  let result;
   try {
-    // ⛔ setEnvValue does a LINE EDIT with a backup and a post-write verify that
-    // every OTHER key is byte-identical, because this file also holds
-    // CREDENTIAL_KEY and the database password. It refuses a duplicated key
-    // rather than guessing which copy a loader honours.
-    setEnvValue(file, 'SESSION_IDLE_MINUTES', String(verdict.value));
+    result = setEnvValue(file, 'SESSION_IDLE_MINUTES', String(verdict.value));
   } catch (err) {
-    return NextResponse.json({ error: err.message || 'Could not save the timeout.' }, { status: 500 });
+    // ⛔ The message can carry the absolute path to .env.local, so it is not
+    // echoed. The caller already knows where the file is; a stack trace in a
+    // settings panel is a disclosure for no benefit.
+    return NextResponse.json({ error: 'Could not save the timeout.' }, { status: 500 });
+  }
+  if (!result || !result.ok) {
+    return NextResponse.json({
+      error: (result && result.error) || 'Could not save the timeout.',
+      backupPath: (result && result.backupPath) || null,
+    }, { status: 500 });
   }
 
   // ⛔ THE RUNNING VALUE AND THE SAVED VALUE ARE REPORTED SEPARATELY. NextAuth
@@ -81,7 +94,11 @@ export async function PUT(request) {
   } catch { /* the write already succeeded; reporting it back is best-effort */ }
 
   return NextResponse.json({
+    ok: true,
     saved,
+    previous: result.previous ?? null,
+    unchanged: Boolean(result.unchanged),
+    backupPath: result.backupPath || null,
     running,
     restartRequired: running !== verdict.value,
     disabled: verdict.disabled,

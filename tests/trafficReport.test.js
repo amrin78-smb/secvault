@@ -62,10 +62,19 @@ describe('⛔ the window is clamped, and the clamp is reported', () => {
     assert.match(w.reasons.join(' '), /future/);
   });
 
-  it('a collapsed range becomes one hour rather than a blank report', () => {
+  it('⛔ a range entirely before retention lands INSIDE the retained window', () => {
+    // It used to derive `from` from the clamped `to` and stop, which put the
+    // window back in January — every firewall then reported "sent nothing" and
+    // the coverage sentence said that "may mean no traffic, or may mean they
+    // are not logging". It meant neither: retention had deleted it, which the
+    // function knew one branch earlier and threw away.
     const w = resolveWindow('2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z', NOW, 30);
+    const floor = NOW.getTime() - 30 * 24 * H;
     assert.equal(w.hours >= 1, true);
-    assert.match(w.reasons.join(' '), /collapsed/);
+    assert.ok(w.from.getTime() >= floor,
+      `from ${w.from.toISOString()} must not precede the retention floor`);
+    assert.ok(w.to.getTime() <= NOW.getTime());
+    assert.match(w.reasons.join(' '), /deleted by retention, not quiet/);
   });
 
   it('no input at all defaults to the last 24 hours, unclamped', () => {

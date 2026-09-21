@@ -57,24 +57,42 @@ describe('⛔ only an explicit 0 disables the timeout', () => {
   });
 });
 
-describe('⛔ updateAge must stay below maxAge or it is an ABSOLUTE timeout', () => {
-  it('is always strictly less than half the window', () => {
-    // The relation, not the number: if updateAge >= maxAge the token is never
-    // refreshed and an active user is signed out N minutes after LOGGING IN.
-    for (const v of ['2', '5', '15', '30', '120', '1440']) {
-      const o = sessionOptions(env(v));
-      assert.ok(o.updateAge < o.maxAge,
-        `updateAge ${o.updateAge} must be < maxAge ${o.maxAge} for ${v} minutes`);
-      assert.ok(o.updateAge <= Math.floor(o.maxAge / 2),
-        `updateAge ${o.updateAge} must leave room to refresh within ${o.maxAge}`);
-      assert.ok(o.updateAge >= 1);
+describe('⛔ the keep-alive is what makes this IDLE rather than ABSOLUTE', () => {
+  it('⛔ `updateAge` is NOT passed, because it does nothing under the jwt strategy', () => {
+    // Verified against the installed next-auth 4.24.15: `updateAge` is read in
+    // exactly one place, inside the DATABASE-session branch of
+    // core/routes/session.js. The jwt branch re-encodes unconditionally. An
+    // earlier version of this file clamped it carefully and documented it as
+    // load-bearing; it was inert configuration, which is the "guard that cannot
+    // fire" pattern with a comment vouching for it.
+    for (const v of [undefined, '2', '30', '1440']) {
+      assert.equal(sessionOptions(env(v)).updateAge, undefined);
     }
   });
 
-  it('the shortest allowed window still refreshes', () => {
+  it('every enabled window advertises a keep-alive well inside it', () => {
+    // If the refresh cadence ever reached the window, an active user's token
+    // would die before the next refresh arrived — the absolute-timeout failure
+    // arriving through the other side.
+    for (const v of ['2', '5', '15', '30', '120', '1440']) {
+      const c = clientPolicy(env(v));
+      const windowSeconds = c.idleMinutes * 60;
+      assert.ok(c.keepAliveSeconds > 0, `${v} must advertise a keep-alive`);
+      assert.ok(c.keepAliveSeconds <= Math.floor(windowSeconds / 4),
+        `keepAlive ${c.keepAliveSeconds} must be well inside the ${windowSeconds}s window`);
+    }
+  });
+
+  it('a DISABLED timeout advertises no keep-alive', () => {
+    // Nothing to keep alive, and a background fetch loop on a console that
+    // never times out is pure noise.
+    assert.equal(clientPolicy(env('0')).keepAliveSeconds, 0);
+  });
+
+  it('the shortest allowed window is still refreshable', () => {
     const o = sessionOptions(env(String(MIN_IDLE_MINUTES)));
     assert.equal(o.maxAge, MIN_IDLE_MINUTES * 60);
-    assert.ok(o.updateAge < o.maxAge);
+    assert.ok(clientPolicy(env(String(MIN_IDLE_MINUTES))).keepAliveSeconds < o.maxAge);
   });
 
   it('keeps the jwt strategy in every case — this must never become a DB session', () => {
@@ -153,12 +171,13 @@ describe('⛔ the server, not the browser, is the boundary', () => {
     assert.match(src, /FAIL_OPEN\s*=\s*\{\s*enabled:\s*false/);
   });
 
-  it('⛔ the login page refuses an off-site callbackUrl', () => {
-    // callbackUrl arrives in the URL, so an unguarded redirect turns the login
-    // page into a hop to a credential-harvesting clone.
+  it('the login page wires the shared guard rather than a local copy', () => {
     const src = read('app/(auth)/login/page.js');
-    assert.match(src, /function safeReturnPath/);
-    assert.match(src, /startsWith\('\/\/'\)/, 'protocol-relative URLs are absolute');
+    assert.match(src, /from '\.\.\/\.\.\/\.\.\/lib\/returnPath'/);
     assert.match(src, /router\.push\(returnTo\.current\)/);
+    // ⛔ And NOT a local reimplementation. The first version defined
+    // safeReturnPath inside this client component, where no test could call it,
+    // and it shipped bypassable.
+    assert.doesNotMatch(src, /function safeReturnPath/);
   });
 });
