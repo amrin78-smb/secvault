@@ -346,6 +346,49 @@ a default code path.
 `middleware.js`: protects all `/(dashboard)` routes (redirect to `/login`), allows `/login` +
 `/api/auth/*` unauthenticated, API routes return `401` (not redirect) when unauthenticated.
 
+### Idle session timeout (v2.159.0)
+
+`lib/sessionPolicy.js` (pure) owns the whole policy; `SESSION_IDLE_MINUTES` (default **30**, `0`
+disables, clamped 2-1440) drives NextAuth's `session` block, and Settings -> Security writes it via
+`lib/envFile.js`.
+
+⛔ **THERE WAS NO TIMEOUT AT ALL.** `session: { strategy: 'jwt' }` with no `maxAge` means
+NextAuth's default applies — **30 days**. A browser left signed in on a firewall-management console
+stayed signed in for a month.
+
+⛔ **THE SERVER IS THE BOUNDARY; THE MODAL IS THE COURTESY.** NetVault's `IdleTimeout.tsx` is
+client-only: it calls `signOut()`, which clears the cookie in that one browser while the JWT stays
+valid for its full lifetime, so a copied cookie is untouched. Here the token itself expires and
+`components/layout/IdleTimeout.js` exists so the expiry is not a surprise. Delete the component and
+the timeout still happens — without warning.
+
+⛔ **`updateAge` IS LOAD-BEARING.** With the JWT strategy NextAuth only rewrites (and so extends)
+the token once `updateAge` has elapsed. Left at its 24h default beside a 30-minute `maxAge` the
+token is never refreshed and every user is signed out 30 minutes after LOGGING IN, however hard
+they are working — an ABSOLUTE timeout wearing an idle timeout's name. It is clamped to at most
+half the window, and a TEST PINS THE RELATION rather than the number.
+
+⛔ **ONLY AN EXPLICIT `0` DISABLES.** A negative or unparseable value falls back to the default: a
+typo must not switch a security control off. Disabling restores `maxAge` to NextAuth's own 30 days,
+i.e. exactly the behaviour before this existed, rather than "no expiry" or "expires instantly".
+
+⛔ **ONE SOURCE OF TRUTH.** The browser reads `GET /api/system/session-policy` (open to any
+signed-in user — someone who cannot read it is signed out with no warning) rather than carrying its
+own copy. A second number in a settings table would drift, and the drift shows up as a modal
+promising 60 seconds on a session that already ended. ⛔ A FAILED read arms NOTHING rather than
+guessing a window, because a guess shorter than the real one signs people out of a valid session;
+NetVault guesses 30 minutes, which it can afford to because there the client IS the timeout.
+
+⛔ **THE LOGIN PAGE HONOURS `callbackUrl` THROUGH `safeReturnPath()`**, which accepts only a
+same-site path — never `//` or `/\\`, both of which browsers resolve as absolute URLs to another
+host. An unguarded redirect would turn the login page into a hop to a credential-harvesting clone.
+A timeout is tinted as INFORMATION, not danger: shown in red it reads as a rejected sign-in and the
+next thing the user doubts is their password.
+
+⛔ **A SAVED VALUE IS NOT A RUNNING VALUE.** NextAuth reads its options once at startup, so the
+panel reports both and states that a restart is required — the same rule the console-address panel
+follows. Pinned by `tests/sessionPolicy.test.js` (16 cases, mutations verified).
+
 ### Multi-factor authentication (TOTP, v2.111.0)
 
 `lib/totp.js` (pure RFC 6238/4226 + RFC 4648 base32, **zero dependencies** — node's own
@@ -2175,6 +2218,12 @@ DATABASE_URL=postgresql://secvault_user:PASSWORD@SERVER_IP:5432/secvault
 # Auth (standalone — not shared with NocVault suite)
 NEXTAUTH_URL=http://SERVER_IP:3010
 NEXTAUTH_SECRET=                           # Generate: openssl rand -base64 32
+# Sign out after inactivity. 30 by default; 0 switches it off. Accepted range
+# 2-1440 minutes, and anything unparseable (including a NEGATIVE) falls back to
+# 30 rather than to off -- a typo must never silently remove the control.
+# Settable from Settings -> Security, which writes it here; NextAuth reads it
+# ONCE at startup, so a change needs a SecVault-App restart and the panel says so.
+SESSION_IDLE_MINUTES=30
 
 # Credentials encryption (SEPARATE from NEXTAUTH_SECRET)
 CREDENTIAL_KEY=                            # 32-byte hex — generate at install

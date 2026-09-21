@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { PRODUCT_NAME } from '../../../lib/branding';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
@@ -30,6 +30,24 @@ const FEATURES = [
   'PCI DSS, ISO 27001, CIS v8, NIST, and SANS compliance scoring',
 ];
 
+// ⛔ AN OPEN REDIRECT IS THE WHOLE RISK IN HONOURING callbackUrl. It arrives
+// in the URL, so anyone can put anything in it — including an absolute address
+// on a host they control, which would turn this login page into a convincing
+// hop to a credential-harvesting clone. Only a SAME-SITE PATH is accepted:
+// starts with a single `/`, and never `//` or `/\` (both of which browsers
+// resolve as protocol-relative absolute URLs to another host). Anything else
+// falls back to the dashboard root rather than being reported as an error —
+// the user came here to sign in, not to debug a link.
+function safeReturnPath(raw) {
+  if (typeof raw !== 'string' || raw === '') return '/';
+  let v = raw;
+  try { v = decodeURIComponent(raw); } catch { return '/'; }
+  if (!v.startsWith('/')) return '/';
+  if (v.startsWith('//') || v.startsWith('/\\')) return '/';
+  if (v.startsWith('/login')) return '/';
+  return v;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
@@ -37,6 +55,19 @@ export default function LoginPage() {
   const [totp, setTotp] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // ⛔ READ FROM window.location IN AN EFFECT, NOT useSearchParams(). This page
+  // is statically prerendered; useSearchParams() in a client component opts the
+  // whole subtree out of that unless it is wrapped in Suspense, and a login
+  // page that renders a moment later is a worse trade than reading the query
+  // string directly once the browser has it.
+  const [timedOut, setTimedOut] = useState(false);
+  const returnTo = useRef('/');
+
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setTimedOut(q.get('reason') === 'timeout');
+    returnTo.current = safeReturnPath(q.get('callbackUrl'));
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -64,7 +95,8 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/');
+      // Back to whatever the idle timeout interrupted, or the dashboard.
+      router.push(returnTo.current);
     } catch (err) {
       setError('Login failed. Please try again.');
       setSubmitting(false);
@@ -231,6 +263,26 @@ export default function LoginPage() {
                 style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.12em' }}
               />
             </div>
+
+            {/* ⛔ A TIMEOUT IS NOT A FAILURE, and it is tinted as information
+                rather than danger. Someone returning to a signed-out console
+                needs to know nothing went wrong and nothing was lost — shown
+                in the danger colour it reads as a rejected sign-in, and the
+                next thing they do is doubt their password. */}
+            {timedOut && !error && (
+              <p
+                style={{
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--tint-info)',
+                  color: 'var(--tint-info-fg)',
+                  padding: '8px 12px',
+                  fontSize: 'var(--text-base)',
+                }}
+              >
+                You were signed out because there was no activity. Sign in again and you will go
+                back to the page you were on.
+              </p>
+            )}
 
             {error && (
               <p

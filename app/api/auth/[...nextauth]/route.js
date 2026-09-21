@@ -4,6 +4,7 @@ import * as mfa from '../../../../lib/mfa';
 import bcrypt from 'bcryptjs';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
+import { sessionOptions } from '../../../../lib/sessionPolicy';
 import * as ldapRoles from '../../../../lib/ldapRoles';
 
 // A real bcrypt hash (of a random string) used so a login attempt for an
@@ -388,9 +389,13 @@ export const authOptions = {
       },
     }),
   ],
-  session: {
-    strategy: 'jwt',
-  },
+  // ⛔ THE IDLE TIMEOUT IS ENFORCED HERE, BY TOKEN EXPIRY, not by the browser.
+  // This was `{ strategy: 'jwt' }` with no maxAge, so NextAuth's default of
+  // THIRTY DAYS applied and a console left signed in stayed signed in for a
+  // month. sessionOptions() owns the maxAge/updateAge relation because getting
+  // updateAge wrong turns an idle timeout into an absolute one that signs
+  // active users out mid-work — see lib/sessionPolicy.js.
+  session: sessionOptions(process.env),
   pages: {
     signIn: '/login',
   },

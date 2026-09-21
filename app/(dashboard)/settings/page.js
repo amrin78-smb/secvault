@@ -9,6 +9,7 @@ import LicensePanel from '../../../components/settings/LicensePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import LdapRolesPanel from '../../../components/settings/LdapRolesPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
+import SessionTimeoutPanel from '../../../components/settings/SessionTimeoutPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
 import ConsoleAddressPanel from '../../../components/settings/ConsoleAddressPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
@@ -318,7 +319,16 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {effectiveTab === 'security' && <SecurityPanel />}
+      {effectiveTab === 'security' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s5)' }}>
+          <SecurityPanel />
+          {/* ⛔ SHOWN TO EVERY ROLE, EDITABLE ONLY WITH manage_settings. Every
+              role is SUBJECT to the timeout, and someone signed out after half
+              an hour who cannot find out why concludes the product is broken
+              rather than that a policy is in force. */}
+          <SessionTimeoutPanel canManage={Boolean(caps.manage_settings)} />
+        </div>
+      )}
 
       {effectiveTab === 'certificate' && caps.manage_settings && (
         /* The address sits BESIDE the certificate because that is when it

@@ -7,6 +7,7 @@ import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
 import SubscriptionNotifier from '../../components/layout/SubscriptionNotifier';
 import NavProgress from '../../components/layout/NavProgress';
+import IdleTimeout from '../../components/layout/IdleTimeout';
 import { EvidenceProvider } from '../../components/ui/Evidence';
 import pkg from '../../package.json';
 
@@ -21,6 +22,12 @@ export default async function DashboardLayout({ children }) {
 
   return (
     <div className="sv-shell">
+      {/* ⛔ INSIDE THE DASHBOARD LAYOUT ONLY, so it never mounts on /login —
+          a timeout modal over the sign-in page would be nonsense, and the
+          component's own signOut() would loop. The server expires the token
+          regardless of whether this renders; this is the warning, not the
+          boundary. */}
+      <IdleTimeout />
       <Header session={session} />
       <div className="sv-body">
         <Sidebar version={pkg.version} capabilities={capabilities} />

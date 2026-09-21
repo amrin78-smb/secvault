@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.159.0': [
+    'Sessions now sign out after inactivity \u2014 30 minutes by default, changeable in Settings \u2192 Security, 0 to switch it off. Until now there was no timeout at all: a browser left signed in stayed signed in for 30 days.',
+    'A warning appears 60 seconds beforehand with a "Stay signed in" button, and signing in again takes you back to the page you were on.',
+    'The timeout is enforced by the server, not just the browser, so it applies even if the tab is closed or the warning is ignored.',
+    'Changing it needs a SecVault-App restart, and the panel shows the saved value beside the one actually in force rather than pretending the change is live.',
+  ],
   '2.158.0': [
     'New report: Rule Risk by Traffic \u2014 which firewall rules carry the traffic, and which of those also have something wrong with them. The overlap is the work worth doing first, and it is the one report a log analyser or a policy tool cannot produce on its own.',
     'A chart leads with the answer: the busiest rules, with the ones carrying a hygiene finding marked in red. On your fleet 11 of the 15 busiest are red, and 63% of the traffic on those rules runs on a rule with a finding.',

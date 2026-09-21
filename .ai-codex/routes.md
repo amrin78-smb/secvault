@@ -238,6 +238,17 @@ DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own lo
 
 GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
 
+## /api/system/session-policy
+
+GET  /api/system/session-policy [auth] — `{idleMinutes, enabled, warnSeconds}`.
+⛔ NOT capability-gated: the browser arms its own warning from this, so a user who cannot read it
+is signed out with no notice. Unauthenticated still gets 401.
+PUT  /api/system/session-policy [auth] [manage_settings] — `{idleMinutes}` → writes
+`SESSION_IDLE_MINUTES` to `.env.local` via `lib/envFile.js` (line edit, backup, post-write verify).
+Returns `{saved, running, restartRequired, disabled, limits, message}`.
+⛔ SAVED ≠ RUNNING: NextAuth reads its session options once at startup, so both are reported and
+`restartRequired` says whether the value is actually in force. See CLAUDE.md's Idle session timeout.
+
 ## /api/system/console-url
 
 GET /api/system/console-url [auth] [manage_settings] — `{current, running, restartPending, tlsActive,

@@ -571,6 +571,18 @@ first mapping ends legacy mode, and requires a typed confirmation naming the con
 removing the last one. States both timings: a mapping change is immediate, a group-membership
 change applies at next sign-in.
 
+IdleTimeout (components/layout/, v2.159.0)  (no props) — the warning before an idle session ends.
+  Mounted ONCE in the dashboard layout (never on /login, where signOut() would loop). ⛔ IT IS NOT
+  THE BOUNDARY: the server expires the token (lib/sessionPolicy.js drives NextAuth maxAge) and this
+  only warns and returns you to the page you were on. Adapted from NetVault's IdleTimeout.tsx, which
+  IS client-only and therefore not a session-security control. ⛔ Carries NO window of its own — it
+  reads GET /api/system/session-policy; a failed read arms NOTHING rather than guessing.
+
+SessionTimeoutPanel (components/settings/, v2.159.0)  canManage — Settings → Security. Visible to
+  every role (everyone is subject to the timeout), editable only with manage_settings. Shows the
+  saved value beside the running one whenever they differ. ⛔ A failed read renders hueless, never
+  as "no timeout".
+
 ConsoleAddressPanel  (no props) — Settings → Certificate. Sets the address the console is reached
   on (`NEXTAUTH_URL`). ⛔ Shows the SAVED value and the RUNNING value separately when they differ;
   a "save it anyway" button appears only after the server returns 409 for a host that resolves
