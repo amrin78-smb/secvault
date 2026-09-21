@@ -10,6 +10,7 @@ import UsersPanel from '../../../components/settings/UsersPanel';
 import LdapRolesPanel from '../../../components/settings/LdapRolesPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
+import ConsoleAddressPanel from '../../../components/settings/ConsoleAddressPanel';
 import { capabilitiesOf } from '../../../lib/rbac';
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '../../../lib/branding';
 import CredentialProfilesPanel from '../../../components/settings/CredentialProfilesPanel';
@@ -319,7 +320,16 @@ export default function SettingsPage() {
 
       {effectiveTab === 'security' && <SecurityPanel />}
 
-      {effectiveTab === 'certificate' && caps.manage_settings && <TlsPanel />}
+      {effectiveTab === 'certificate' && caps.manage_settings && (
+        /* The address sits BESIDE the certificate because that is when it
+           matters: a new certificate for a new hostname is useless until
+           SecVault is told it is reached on that hostname, and the two changes
+           are made in the same sitting. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <TlsPanel />
+          <ConsoleAddressPanel />
+        </div>
+      )}
 
       {effectiveTab === 'users' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s6)' }}>

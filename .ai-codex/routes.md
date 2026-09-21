@@ -238,6 +238,19 @@ DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own lo
 
 GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
 
+## /api/system/console-url
+
+GET /api/system/console-url [auth] [manage_settings] — `{current, running, restartPending, tlsActive,
+scheme, httpsPort, httpPort, envPath, writable}`. `current` is the value ON DISK and `running` is the
+one this process started with; they differ until a restart, which is what makes "restart pending"
+verifiable rather than a guess.
+
+PUT /api/system/console-url [auth] [manage_settings] — `{url, force?}` writes `NEXTAUTH_URL`.
+⛔ **409 + `needsConfirmation`** when the host resolves away from this server: that typo locks out
+whoever made it, so it takes a second deliberate action. 400 on any shape that would break sign-in
+silently (scheme vs transport, path, query, credentials, no scheme). Returns `backupPath`,
+`restartRequired` and a `recovery` sentence naming the file and the service to restart.
+
 ## /api/logs/search
 
 GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit`/`page` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, ruleId, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.

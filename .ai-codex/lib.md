@@ -59,6 +59,27 @@ home for "a stored value, in words". Server and client components both import it
 `newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
 `STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
 
+## lib/consoleUrl.js
+
+`validateConsoleUrl(input, {tlsActive})` -> `{ok, url, scheme, host, port, warnings}` | `{ok:false, error}`.
+Pure. ⛔ REFUSES rather than warns on: http-while-TLS-active (and the reverse), a path, a query or
+fragment, embedded credentials. Each breaks sign-in with NO visible error anywhere. A missing scheme
+is caught BEFORE `new URL()`, which parses `host:3010` as a protocol and would otherwise report the
+hostname as an unsupported one. IP and localhost are allowed WITH warnings.
+`hostPointsHere(host, {lookup, localAddresses})` -> `{resolved, pointsHere, addresses}`.
+⛔ `pointsHere: null` on an unresolvable host — neither a pass nor a refusal, because an internal
+name may resolve from every workstation and not from this one. Tests: `tests/consoleAddress.test.js`.
+
+## lib/envFile.js
+
+`parseEnv(text)` · `readEnvFile(path)` · `setEnvValue(path, key, value)` -> `{ok, previous, backupPath, unchanged}`.
+⛔ Guards the file holding `CREDENTIAL_KEY`, the database password and `NEXTAUTH_SECRET`. LINE EDIT
+only — comments, ordering and untouched values survive byte for byte. Backs up first, then RE-READS
+and verifies every other key is unchanged, restoring the backup if not. ⛔ Writes IN PLACE, never by
+rename, so an ACL on that file is not silently replaced by a fresh default. ⛔ A DUPLICATED key is
+REFUSED: which copy the loader honours is not this file's property, and editing the wrong one
+reports success while changing nothing.
+
 ## lib/density.js
 
 Client module. Table density, stamped as `data-density` on `<html>`. Structural mirror of lib/corners.js and lib/theme.js — same storage/attribute/event/no-flash-script shape, so there is one pattern for all three.

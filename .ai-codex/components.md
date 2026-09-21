@@ -571,6 +571,11 @@ first mapping ends legacy mode, and requires a typed confirmation naming the con
 removing the last one. States both timings: a mapping change is immediate, a group-membership
 change applies at next sign-in.
 
+ConsoleAddressPanel  (no props) — Settings → Certificate. Sets the address the console is reached
+  on (`NEXTAUTH_URL`). ⛔ Shows the SAVED value and the RUNNING value separately when they differ;
+  a "save it anyway" button appears only after the server returns 409 for a host that resolves
+  elsewhere, so the lockout case is a second deliberate action rather than a pre-ticked box.
+
 ExposureFilters  currentDeviceId, devices[{deviceId,name,paths}], unassessed[{deviceId,name,error}], currentLimit — firewall filter for /exposure.
   ⛔ `unassessed` (v2.148.0) lists firewalls whose exposure computation FAILED, as a DISABLED optgroup. They are absent from `fleet.devices` and so were absent from the dropdown entirely — indistinguishable from a firewall SecVault does not monitor, which is the same reason a device with zero paths is listed. Not selectable: the only thing selecting one could render is an empty table, and an empty exposure table reads as "nothing is exposed here".
   Same convention as AlertsFilters (select + router.push, resets `page` to 1).

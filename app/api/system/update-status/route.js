@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.155.0': [
+    'You can now set the address the console is reached on from Settings → Certificate, instead of editing a configuration file on the server. This is what you need after pointing a DNS name at SecVault and installing a certificate for that name.',
+    'It refuses the combinations that break sign-in silently: an http address while TLS is on, a trailing path, or a scheme left off entirely. Each of those would otherwise let every login bounce back to the login page with no error shown anywhere.',
+    'If the hostname does not resolve to this server, it asks you to confirm before saving — that is the one mistake that locks everyone out, including whoever made it.',
+    'The configuration file is backed up before any change and checked afterwards; if writing the new address would have disturbed any other setting, nothing is written and the original is restored.',
+    'A service restart is required for the new address to take effect, and the page says so rather than implying the change is already live.',
+  ],
   '2.154.0': [
     'The work queue can now reach you. Everything SecVault considers urgent and can show measured evidence for — vulnerabilities, failing checks, unreviewed config changes, firewalls it cannot collect from — can be sent to Slack, Teams, email or a webhook. Pick "Work Queue — Act Now" on a channel in Settings.',
     'Only the "act now" band is sent. Scheduled work is by definition not urgent, and anything SecVault could not measure is never promoted into this band however urgent its source claims to be — so this cannot become the flood that had rule-level findings removed from the Alerts feed in July.',

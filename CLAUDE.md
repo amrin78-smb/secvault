@@ -190,6 +190,38 @@ its most dangerous. It logs a banner at error level every start and is reported 
 platform an outage means nobody can see the fleet, which has its own security cost. That is only
 safe BECAUSE `failed` is never silent — do not make it quiet.
 
+### ⛔ Console address — settable from Settings (v2.155.0)
+
+**Settings → Certificate → Console address** writes `NEXTAUTH_URL` to `.env.local`, so changing the
+name the console answers on no longer means editing a file over RDP. It sits beside the certificate
+deliberately: a certificate for a new hostname is useless until SecVault is told it is reached on
+that hostname, and the two changes are made in the same sitting.
+
+⛔ **IT IS THE MOST DANGEROUS FIELD IN SETTINGS, so the validation IS the feature.**
+`lib/consoleUrl.js` is pure and separately tested. It REFUSES (never warns about) a scheme that
+disagrees with the transport, a trailing path, a query/fragment, and embedded credentials — each of
+which produces a callback URL that fails sign-in with no visible error. A missing scheme is caught
+BEFORE `new URL()`, which otherwise parses `host:3010` as a protocol and reports the hostname as an
+unsupported one.
+
+⛔ **THE LOCKOUT GUARD.** A host that resolves somewhere other than this server needs explicit
+confirmation (HTTP 409 + `needsConfirmation`), because that typo is the one way to make the console
+unreachable by the person who made it. ⛔ An UNRESOLVABLE host is `pointsHere: null` — neither a pass
+nor a refusal: an internal name may resolve from every workstation and not from this host, and
+refusing a correct address because our own resolver is unhappy is its own lockout.
+
+⛔ **`lib/envFile.js` GUARDS THE FILE THAT HOLDS EVERY SECRET** — `CREDENTIAL_KEY`, the database
+password, `NEXTAUTH_SECRET`. It does a LINE EDIT (comments, ordering and untouched values survive
+byte for byte), backs up first, and then RE-READS AND VERIFIES that every other key is unchanged,
+restoring the backup if not. ⛔ It writes IN PLACE rather than by rename, so an ACL on `.env.local`
+is not silently replaced by a fresh default. ⛔ A **duplicated key is refused**, not guessed at: which
+copy a loader honours is the loader's property, and editing the wrong one reports success while
+changing nothing — found by a test where the writer replaced the first occurrence and the parser
+read the last.
+
+⛔ **A restart is required and is stated in the API response, not only in the UI.** The panel shows
+the saved value and the RUNNING value separately whenever they differ.
+
 ⛔ **`NEXTAUTH_URL` must follow the scheme.** NextAuth builds its callback from it; left on `http://`
 while the server speaks https, the cookie is issued for an origin the browser is not on and every
 sign-in silently bounces back to the login page with no error anywhere. The updater flips it, and
