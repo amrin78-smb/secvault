@@ -1235,3 +1235,36 @@ were NOT hypothetical, both found by rendering the real PDF against live data an
 screenshot. Rasterise the PDF and LOOK at it (`pymupdf`, `get_pixmap`) before committing a report
 change — the same lesson as the cover-chips bug one version earlier, which also only surfaced
 against real data.
+
+
+## ⛔ `firewall_rules.hit_count` IS A LIFETIME COUNTER, NOT A WINDOW (measured 2026-09-21)
+
+The column is tri-state and every rule about NULL still holds — but the NUMBER, when present, is
+the firewall's own counter since IT last reset, on a date SecVault does not know and which differs
+per device. It is NOT "hits in the last N days", and `ruleHitCorrelation.js`'s `effectiveHitCount`
+prefers it over log-derived hits.
+
+That preference is CORRECT for `unused` (a device-reported zero is the strongest evidence
+available) and WRONG for anything windowed. Measured against the same rules' 30-day logged hits:
+
+| rule | device counter | logged 30d | ratio |
+|---|---|---|---|
+| `Allow-M365-MDE-Intune` (TUM) | 4,183,915,499 | 3,886,420 | 1,076x |
+| `Private2LAN` (SMT) | 4,085,493,504 | 24,519,895 | 167x |
+| `PRIVATE TO DMZ1` (IDC FW) | 4,000,924,982 | **0** | — |
+
+⛔ So a fleet-wide ranking built on it compares numbers that were never comparable, and the last
+row is the proof: 4 billion lifetime hits beside nothing at all in the window. Any report or widget
+answering "in the last N days" must rank on `loggedHits` from `syslog_rule_hits_hourly`. Keep the
+counter if it is useful — label it lifetime, never sum it, never compare it between rows.
+
+## ⛔ A 30-DAY WINDOW CANNOT BE COVERED ON THIS FLEET YET
+
+`ruleHitCorrelation.getDeviceLogCoverage` calls a device covered only at `MIN_COVERAGE_RATIO` 0.9
+of the window. The collector started 2026-09-08, so ~313 hours exist: at 7 days all 15 logging
+devices are covered (ratio 1.01) and at 30 days **none** is (ratio 0.43).
+
+⛔ The consequence is not a smaller number, it is a DIFFERENT KIND OF ANSWER: with no device
+covered, nothing is ever `measured-zero`, so every "this rule carried no traffic" list is empty.
+Empty because unmeasurable, which reads exactly like empty because clean. Any feature defaulting to
+30 days over rule-hit evidence inherits this — default to 7 and say which window was used.

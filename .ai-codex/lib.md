@@ -59,6 +59,50 @@ home for "a stored value, in words". Server and client components both import it
 `newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
 `STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
 
+## lib/reports/ruleRiskByTraffic.js + ruleRiskByTrafficPdf.js (Phase 4, v2.158.0)
+
+The fusion report: which rules carry the traffic, and which of those also carry a hygiene finding.
+Pure-ish data layer (`buildRuleRiskData`, `headlineSentence`, `worstFinding`) plus a renderer that
+leads with a bar chart, red where a busiest rule also has a finding.
+
+⛔ **THE RANKED UNIT IS `loggedHits`, NEVER `effectiveHitCount`, AND THIS IS THE WHOLE
+CORRECTNESS OF THE REPORT.** `ruleHitCorrelation.js` defines `effectiveHitCount` as the DEVICE's own
+counter where one exists, falling back to logs — the right call for `unused`, and wrong here for two
+independent reasons measured live 2026-09-21:
+1. a PAN-OS counter is CUMULATIVE SINCE ITS LAST RESET, not windowed. Against the same rule's 30-day
+   logged hits it ran **33x to 1,076x** (`Allow-M365-MDE-Intune`: 4,183,915,499 vs 3,886,420);
+2. every device's counter resets on its own unknown date, so the ratio between two rules on two
+   firewalls means nothing. `IDC FW`'s `PRIVATE TO DMZ1` showed **4.0 billion lifetime hits and ZERO
+   logged hits in 30 days** — under the old measure the fleet's 4th busiest rule, on evidence about
+   nothing recent. The counter is KEPT and SHOWN as `lifetimeHits`, labelled lifetime, never summed
+   and never compared between rows.
+
+⛔ **THE DEFAULT WINDOW IS 7 DAYS, BY MEASUREMENT.** A rule is MEASURED only if its firewall logged
+throughout the window (`MIN_COVERAGE_RATIO` 0.9). The collector holds ~313 hours, so a 30-day window
+sits at 0.43 coverage: **0 of 15 devices covered, 278 of 1,283 rules measurable, ZERO cleanup
+candidates**. At 7 days all 15 pass, 1,235 rules are measurable and 566 candidates appear. The engine
+is right at both; the window was wrong.
+
+⛔ **AN EMPTY CLEANUP LIST IS THE MOST DANGEROUS OUTPUT HERE**, because its next step is deleting
+firewall rules. `cleanupMeasurable` is the denominator: zero candidates out of zero answerable rules
+is a coverage gap, zero out of a thousand is good news, and they render differently — including the
+COVER CHIP, which shows a hueless dash rather than `0` (caught by rendering the 30-day document,
+where the chip said 0 under a note explaining it could not look). `headlineSentence` leads with the
+coverage failure and the words "nothing here may be read as a cleanup list".
+
+⛔ **`RISK_FINDINGS` EXCLUDES THREE TYPES DELIBERATELY**, each wrong in its own way on a table of
+the busiest rules: `unused` is the opposite claim, `correlation` is a merge suggestion about ruleset
+complexity, `reorder_candidate` is a performance hint whose whole argument IS being busy. ⛔ And
+`log_disabled` can never reach the busiest list BY CONSTRUCTION — a rule that cannot emit a log line
+is `rule-logging-disabled`, i.e. unmeasured — which the document states rather than leaving as a
+silent dead entry.
+
+⛔ **The Pareto cap is DISCLOSED when it bites.** `MAX_BUSIEST` 25 against a 0.8 target; the
+headline says the list "stops at N because that is this report's limit, not because the traffic ran
+out" and names how many rules carried traffic. Same failure as the work queue's `PER_SOURCE_CAP`.
+
+Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
+
 ## lib/syslog/applications.js (v2.157.0)
 
 The single source of truth for what an application string and a URL-category string MEAN, beside
