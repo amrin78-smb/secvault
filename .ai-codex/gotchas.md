@@ -1268,3 +1268,36 @@ devices are covered (ratio 1.01) and at 30 days **none** is (ratio 0.43).
 covered, nothing is ever `measured-zero`, so every "this rule carried no traffic" list is empty.
 Empty because unmeasurable, which reads exactly like empty because clean. Any feature defaulting to
 30 days over rule-hit evidence inherits this — default to 7 and say which window was used.
+
+
+## ⛔ What the six-agent sweep of 2026-09-21 found, and the one pattern behind it
+
+Nine P0 fixes in v2.160.0 and seven more in v2.161.0. Four were in code already
+running on the reference deployment. The individual defects are documented at
+their sites; what is worth carrying forward is that **almost every one shipped
+past a test that asserted the SHAPE of the code rather than its BEHAVIOUR.**
+
+The clearest case: the login page's open-redirect guard was covered by
+`assert.match(src, /startsWith\('\/\/'\)/)` — a regex proving a string existed
+in a file. Replacing the entire function with `raw => raw` left the suite green.
+The guard was bypassable with an embedded tab and shipped anyway.
+
+⛔ **A test that reads source text can only prove a line exists. It cannot prove
+the line runs, that it runs before the thing it guards, or that it is correct.**
+Where a behavioural test is impossible because the function lives in a client
+component, that is a signal to MOVE THE FUNCTION, not to settle for a regex —
+which is why `lib/returnPath.js` exists as its own pure module.
+
+Second pattern, three independent instances: **a function whose empty case had a
+different TYPE from its full case.** `windowAppBytes` returned `[]` on its early
+exits and an object otherwise, and every per-firewall report on a Fortinet was a
+500. Same class as `getRules()` returning `[]`, and it will not be the last.
+
+Third: **`bool_or()` on the outer side of a LEFT JOIN returns `false`, never
+`NULL`**, because `x IS NOT NULL` never evaluates to NULL. Any tri-state built
+that way is silently a two-state. Use `FILTER (WHERE <joined>.id IS NOT NULL)`
+so the aggregate sees zero rows and returns NULL.
+
+Fourth: **`sum(...) FILTER (...)` returns NULL when no row matches the filter**,
+which is NOT the same as "the column was never populated". Distinguishing them
+needs a second aggregate counting rows that carry the column at all.

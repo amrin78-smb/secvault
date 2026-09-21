@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.161.0': [
+    'Second pass on the bug sweep: seven more fixes, all of them things that rendered perfectly while saying something untrue.',
+    'The hourly traffic chart dropped a real hour and invented a "missing data" gap at the other end, so it did not add up to the Events figure on the page before it. It reconciles exactly now.',
+    'A firewall that reports actions but denied nothing showed "—" with the note "no vendor reported an action, so this is NOT zero". It now shows a real measured 0.',
+    'Deny rules using reset-both — 735,000 hits a day, including three of the fifteen busiest — were drawn in the allow colour under a caption saying red bars are deny rules.',
+    'The web panel said a firewall "names 100% of its sessions" directly below "44% was attributed to a named application". Both are now measured the same way, and a 99.7% share no longer rounds up to a flat 100%.',
+    'A chart could render a real measurement shorter than the not-measured mark, and a single unreadable value blanked every bar while the numbers beside them kept printing.',
+  ],
   '2.160.0': [
     'Bug sweep of everything shipped today, run by six parallel reviewers against the live fleet. Nine defects fixed, four of them already deployed.',
     'Fixed: every per-firewall Traffic Activity report on a Fortinet failed with an error — 5 of your 16 firewalls.',
