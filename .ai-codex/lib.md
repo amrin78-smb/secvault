@@ -59,6 +59,31 @@ home for "a stored value, in words". Server and client components both import it
 `newestFeedAt(rows)` -> `Date|null` — newest `finished_at || started_at` across feed rows. ⛔ The column is `finished_at`; asking for `completed_at` here and on the dashboard is what took `/` down on 2026-09-09 (gotchas.md).
 `STANDARD_LABELS` / `standardLabel(key)` -> `string` — compliance standard DB key to its real name (`PCI_DSS` -> `'PCI DSS'`). Unrecognised keys fall through to `titleCase`, never to a guess.
 
+## lib/reports/trafficWindow.js + trafficActivity.js
+
+The **Traffic Activity** report (v2.156.0): per-firewall or fleet, over an ARBITRARY window.
+
+⛔ **Why a second query module rather than `lib/syslog/trafficStats.js`.** Every query there is
+anchored to NOW ("the last N hours") — right for a dashboard widget, and unable to answer
+"1-15 September" at all. A date picker that silently slid to "the last N days" would be this
+codebase's signature bug in a report. ⛔ What IS shared is the only JUDGEMENT involved: the
+allowed/denied vocabulary from `lib/syslog/actions.js`, unchanged. Everything else is a GROUP BY.
+A second copy of that list would put the PDF and the dashboard permanently ~5% apart (the
+2026-09-09 `timeout` reclassification moved 5.2% of the fleet's denied total).
+
+`resolveWindow(from, to, now, retentionDays)` — pure. Clamps to `SYSLOG_DETAIL_RETENTION_DAYS`,
+trims a future end, swaps an inverted range, and returns `requestedFrom/requestedTo` BESIDE
+`from/to` plus `reasons[]`, so the cover can print both. ⛔ The clamp is stated on page one.
+
+⛔ **COVERAGE BEFORE TOTALS.** `windowCoverage()` reports every active device, whether it logged,
+and whether its bytes are summable (TRI-STATE: null = logged nothing, so unknown). Live: 16 active,
+15 logging, 10 summable. A traffic total without those three numbers is a statement about 15 devices
+wearing a label that says 16.
+
+⛔ Exports are prefixed `window*` deliberately: `timeline`/`actions`/`protocols` collided with local
+variable names across the UI and `tests/importIntegrity.test.js` flagged six files — the same
+generic-export-name trap the `source` incident already records.
+
 ## lib/consoleUrl.js
 
 `validateConsoleUrl(input, {tlsActive})` -> `{ok, url, scheme, host, port, warnings}` | `{ok:false, error}`.

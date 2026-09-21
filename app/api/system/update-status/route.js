@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.156.0': [
+    'New Traffic Activity report: what went through the firewalls in a window you choose — volume, session outcomes, busiest sources, applications, protocols, most-blocked destinations and busiest rules.',
+    'Pick one firewall or the whole fleet, and either a preset window (24 hours, 7 days, 30 days) or your own start and end.',
+    'It states what it could not see before it states any total: how many firewalls logged, which sent nothing, and which vendors cannot report byte counts. On your fleet that is 15 of 16 logging, with 5 unable to be summed for volume.',
+    'A window reaching further back than the stored detail is moved forward and the adjustment is printed on the first page, rather than quietly answering a 90-day question with 30 days of data.',
+    'A figure that could not be measured prints as a dash. It is never shown as zero.',
+  ],
   '2.155.0': [
     'You can now set the address the console is reached on from Settings → Certificate, instead of editing a configuration file on the server. This is what you need after pointing a DNS name at SecVault and installing a certificate for that name.',
     'It refuses the combinations that break sign-in silently: an http address while TLS is on, a trailing path, or a scheme left off entirely. Each of those would otherwise let every login bounce back to the login page with no error shown anywhere.',
