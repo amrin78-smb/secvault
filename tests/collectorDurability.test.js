@@ -39,12 +39,24 @@ const zlib = require('zlib');
 const { appendRecords, fileNameFor } = require('../lib/syslog/archive');
 const { trimDetailRollups } = require('../lib/syslog/rollups');
 
-const COLLECTOR = fs.readFileSync(
-  path.join(__dirname, '..', 'services', 'collector.js'), 'utf8'
-);
-const ENV_EXAMPLE = fs.readFileSync(
-  path.join(__dirname, '..', '.env.local.example'), 'utf8'
-);
+// ⛔ LINE ENDINGS NORMALISED FIRST, or these guards pass and fail by checkout.
+// This repo checks out CRLF on Windows, and the structural assertion below
+// uses a pattern ending in a newline to prove the backlog drain sits OUTSIDE
+// the batch branch. Against a CRLF file that pattern cannot match: the greedy
+// whitespace class stops at the brace, and the literal newline after it meets
+// a carriage return instead. So the test failed on source that was entirely
+// correct, and would have started passing again the moment someone checked
+// out with LF endings.
+//
+// The same trap is already recorded in tests/serverHealth.test.js and
+// tests/backupScripts.test.js. It cost a debugging round here too, which is
+// the most expensive kind of false positive: it accuses working code.
+const readSource = (...parts) => fs
+  .readFileSync(path.join(__dirname, '..', ...parts), 'utf8')
+  .replace(/\r\n/g, '\n');
+
+const COLLECTOR = readSource('services', 'collector.js');
+const ENV_EXAMPLE = readSource('.env.local.example');
 
 // Call-site counting must not count the COMMENTS that explain the call sites —
 // this file's rules are heavily documented in the source they pin.

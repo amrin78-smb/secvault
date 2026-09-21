@@ -82,7 +82,9 @@ const { buildEvent } = require('../lib/syslog/eventShape');
 const archive = require('../lib/syslog/archive');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
-const { runRollupMaintenance, trimDetailRollups, refreshThreatRollup } = require('../lib/syslog/rollups');
+const {
+  runRollupMaintenance, trimDetailRollups, trimIngestStats, refreshThreatRollup,
+} = require('../lib/syslog/rollups');
 
 // --- configuration ---------------------------------------------------------
 function intEnv(name, def, min, max) {
@@ -702,6 +704,17 @@ async function maintenance() {
     // SILENT -- and an un-trimmed high-cardinality table is exactly how a
     // disk fills up with every health signal still reporting green.
     if (trimmed.error) log(`WARN detail rollup trim: ${trimmed.error}`);
+
+    // ⛔ syslog_ingest_stats is trimmed HERE, beside the rollups, because
+    // retention is the collector's job -- trimDetailRollups has exactly one
+    // production caller and this is it. The engine worker does not touch rollup
+    // retention at all, so putting this in its nightly job would have looked
+    // right and run nowhere near the rest of the policy.
+    const ingestTrim = await trimIngestStats(pool, DETAIL_RETENTION_DAYS);
+    if (ingestTrim.deleted > 0) {
+      log(`retention: trimmed ${ingestTrim.deleted} ingest-stat row(s) older than ${ingestTrim.keepDays}d`);
+    }
+    if (ingestTrim.error) log(`WARN ingest stats trim: ${ingestTrim.error}`);
 
     // ⛔ Quarantined files are counted NOWHERE else: syslog_ingest_stats'
     // spool_backlog counts .ready only, so a .failed file is undelivered

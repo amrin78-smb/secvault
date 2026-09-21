@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.153.0': [
+    'The "Syslog Events Dropped" alert now works. It was fully built and shown as an option in Settings, but saving a channel that subscribed to it failed — so nobody could ever receive it. Dropped syslog events are unrecoverable, which makes it the one alert you most want to arrive.',
+    'Three separate lists defined which alerts exist and nothing kept them in step. A test now checks them against each other, so the next alert type cannot be half-connected the same way.',
+    'The collector now prunes its own ingest statistics. That table had no retention anywhere — one row every two seconds, kept for ever — and it is the table both the new alert and the Server tab read.',
+    'Removed the historical-archive import tools now that the ManageEngine archive has been deleted; they pointed at a path that no longer exists.',
+  ],
   '2.152.1': [
     'Correction to 2.152.0: the new "blocked" state never actually activated. It required every advisory-page failure to be the bot challenge, but after three refusals SecVault stops probing and files the remaining items under a different reason — so a real blocked run never matched the condition.',
     'Found by checking the live feed log after deploying, not by the tests, which had agreed with the code rather than with the real data.',

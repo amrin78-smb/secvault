@@ -1421,6 +1421,8 @@ CREATE TABLE IF NOT EXISTS notification_channels (
   name TEXT NOT NULL UNIQUE,
   channel_type TEXT NOT NULL, -- 'slack_webhook' | 'teams_webhook' | 'email' | 'generic_webhook'
   enabled BOOLEAN NOT NULL DEFAULT true,
+  -- The DEFAULT only applies to a row created by raw SQL; the app always sends
+  -- an explicit list. It stayed at three while the vocabulary grew to five.
   alert_types TEXT[] NOT NULL DEFAULT ARRAY['patch_now_cve','compliance_critical','config_diff'],
   config JSONB NOT NULL DEFAULT '{}'::jsonb,
   encrypted_data TEXT NOT NULL,
@@ -1447,13 +1449,26 @@ CREATE TABLE IF NOT EXISTS notification_channels (
 -- re-claimed via ON CONFLICT DO UPDATE, never a fresh INSERT.
 CREATE TABLE IF NOT EXISTS notification_dispatch_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  alert_type TEXT NOT NULL, -- 'patch_now_cve' | 'compliance_critical' | 'config_diff'
+  alert_type TEXT NOT NULL, -- 'patch_now_cve' | 'compliance_critical' | 'config_diff' | 'ingest_drop'
+    -- ('compliance_report' is deliberately absent: it is schedule-driven by
+    -- complianceReport.js and never passes through the dispatch loop.)
   natural_key TEXT NOT NULL,
-  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  -- ⛔ NULLABLE, because not every alert HAS a device. A full ingest buffer
+  -- refuses whatever arrives next, from whichever firewall; blaming one device
+  -- would invent an attribution the data cannot support, so fetchOpenIngestDrop
+  -- returns deviceId: null. Against NOT NULL that INSERT throws -- latent only
+  -- because the alert could not reach a channel to be claimed in the first
+  -- place. Relaxed 2026-09-21, in the same commit that made it deliverable.
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
   dispatched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   cleared_at TIMESTAMPTZ,
   UNIQUE (alert_type, natural_key)
 );
+
+-- ⛔ CREATE TABLE IF NOT EXISTS GUARDS CREATION ONLY -- every already-deployed
+-- server keeps the old NOT NULL without this, and the first deviceless alert
+-- crashes the dispatch job there while working perfectly on a fresh install.
+ALTER TABLE notification_dispatch_log ALTER COLUMN device_id DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_ndl_device_id ON notification_dispatch_log(device_id);
 CREATE INDEX IF NOT EXISTS idx_ndl_alert_type_cleared ON notification_dispatch_log(alert_type, cleared_at);
