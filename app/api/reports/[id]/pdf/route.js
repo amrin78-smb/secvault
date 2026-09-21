@@ -115,6 +115,30 @@ export async function GET(request, { params }) {
   const declared = Array.isArray(entry.params) ? entry.params : [];
   const paramValues = {};
   for (const p of declared) {
+    // ⛔ A RANGE IS VALIDATED BY SHAPE, NOT BY MEMBERSHIP. A time window is not
+    // a closed set, so the allow-list that protects every other parameter
+    // cannot protect this one. What replaces it: both ends must parse as real
+    // timestamps, and the BUILDER clamps them to what the rollups retain and
+    // states the clamp. Nothing here reaches SQL as text — the values are
+    // passed as Date objects through bound parameters.
+    if (p.kind === 'range') {
+      const rawFrom = searchParams.get('from');
+      const rawTo = searchParams.get('to');
+      if (rawFrom === null && rawTo === null) continue; // the builder's default window
+      for (const [name, v] of [['from', rawFrom], ['to', rawTo]]) {
+        if (v === null || v === '') continue;
+        if (Number.isNaN(new Date(v).getTime())) {
+          return Response.json(
+            { error: `${name} is not a valid date or time.` },
+            { status: 400 }
+          );
+        }
+      }
+      if (rawFrom) paramValues.from = rawFrom;
+      if (rawTo) paramValues.to = rawTo;
+      continue;
+    }
+
     const raw = searchParams.get(p.key);
     // Absent or empty means "unscoped", which is every report's default and is
     // not an error — the picker's empty option is a real choice, not a blank.

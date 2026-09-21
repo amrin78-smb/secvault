@@ -101,6 +101,15 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
   const query = new URLSearchParams();
   if (deviceId) query.set('deviceId', deviceId);
   for (const p of declared) {
+    // ⛔ A RANGE SENDS from/to, NEVER ITS OWN KEY. Presets are a UI
+    // convenience that fill the two boxes; the wire format is always the two
+    // timestamps, so the server has one shape to validate and the download URL
+    // says exactly what the document will cover.
+    if (p.kind === 'range') {
+      if (paramValues.from) query.set('from', paramValues.from);
+      if (paramValues.to) query.set('to', paramValues.to);
+      continue;
+    }
     const v = paramValues[p.key];
     if (v) query.set(p.key, v);
   }
@@ -343,7 +352,67 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                     </label>
                   ) : null}
 
-                  {declared.map((p) => (
+                  {declared.map((p) => (p.kind === 'range' ? (
+                    <div
+                      key={p.key}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}
+                    >
+                      <span className="rpt-section-label" style={{ margin: 0 }}>{p.label}</span>
+                      <div style={{ display: 'flex', gap: 'var(--s2)', flexWrap: 'wrap' }}>
+                        {(p.presets || []).map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ padding: '4px 10px', fontSize: 'var(--text-xs)' }}
+                            onClick={() => {
+                              // A preset simply FILLS the two boxes, so what is
+                              // sent is identical to a hand-typed range and the
+                              // operator can see exactly what they chose.
+                              const to = new Date();
+                              const from = new Date(to.getTime() - preset.hours * 3600000);
+                              setParamValues((prev) => ({
+                                ...prev,
+                                from: from.toISOString().slice(0, 16),
+                                to: to.toISOString().slice(0, 16),
+                              }));
+                            }}
+                          >
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: 'var(--s3)', flexWrap: 'wrap' }}>
+                        {[['from', 'From'], ['to', 'To']].map(([key, label]) => (
+                          <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                              {label}
+                            </span>
+                            <input
+                              type="datetime-local"
+                              value={paramValues[key] || ''}
+                              onChange={(e) => setParamValues((prev) => ({
+                                ...prev, [key]: e.target.value,
+                              }))}
+                              style={{
+                                padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border)', background: 'var(--bg-card)',
+                                color: 'var(--text-primary)', fontSize: 'var(--text-sm)',
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      {/* ⛔ The retention limit is stated BEFORE the download, not
+                          only on the cover of the PDF. An operator who picks a
+                          range older than the rollups keep should learn it here,
+                          not after opening a document that quietly covers less. */}
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                        Leave both empty for the last 24 hours. Ranges reaching further back than the
+                        retained rollups are moved forward, and the report states the adjustment.
+                      </span>
+                    </div>
+                  ) : (
                     <label
                       key={p.key}
                       style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s1)' }}
@@ -369,7 +438,7 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                         ))}
                       </select>
                     </label>
-                  ))}
+                  )))}
 
                   {/* ⛔ An anchor, not a fetch — the browser owns the file
                       dialog and a large report streams instead of being
