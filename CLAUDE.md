@@ -1142,6 +1142,33 @@ rules referencing an address or service the device never reported, so impact rea
 all 29 touched rules and retirement proposes 0 of 29. The fix is collecting the missing objects, NOT
 loosening either engine — an engine that concluded anyway would be guessing about a firewall change.
 
+### ⛔ The work queue is DISPATCHED OUTBOUND (`work_act_now`, v2.154.0)
+
+`notificationDispatch.js` gains one alert type fed by `bandFor(item) === 'act_now'` — **not one
+per source, and not the whole queue**. Twelve source types already carry severity, urgency and an
+evidence grade; dispatching each as its own type would invent a FOURTH vocabulary beside the three
+that were found disagreeing with each other in v2.153.0, and mailing `scheduled` or `verify` would
+send work that is by definition not urgent.
+
+⛔ **IT IS THE ANSWER TO THE NOISE PROBLEM THAT GOT AN ALERT REMOVED.** `new_finding` was taken
+out of the Alerts feed on 2026-07-20 on direct user feedback. `act_now` cannot repeat it: an item is
+a DECISION not a finding (1,132 rule findings are one item per firewall), and `bandFor()` refuses
+anything `unmeasured` however urgent its source declared itself.
+
+⛔ **AN INCOMPLETE QUEUE THROWS, AND THAT IS THE WHOLE SAFETY PROPERTY.** `gatherWorkQueue`
+isolates each source, so a failure contributes zero items and reports `{ok:false}`. Returning that
+shorter list would let the dispatcher's reconcile step read every missing `natural_key` as RESOLVED
+and clear real, still-open security work — then re-notify on recovery. Throwing makes the loop
+`continue` BEFORE the reconcile, so nothing changes. **Truncation (`PER_SOURCE_CAP` = 50, which has
+bitten live) throws for the identical reason.** Silence for one cycle is recoverable; a false
+all-clear is not.
+
+⛔ **ONE DEVICE OR NONE.** An item spanning three firewalls names no `device_id` rather than the
+first — the same fabricated-attribution rule `fetchOpenIngestDrop` follows. `affects` states who is
+involved in words. ⛔ Called with **no opts**, so `segmentation` and `application` (the two expensive
+sources) stay cheap: a 15-minute background poll must not pay a cost the page pays because a person
+is waiting.
+
 ## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
 
 Declared zone-to-zone policy, tested TWO WAYS: **CAN** (the rulebase) and **DID** (the traffic).

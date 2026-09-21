@@ -32,7 +32,8 @@ const CHANNEL_TYPE_LABEL = {
 // dual-registry-kept-in-sync-by-hand convention CLAUDE.md documents for
 // components/devices/vendorMeta.js <-> lib/adapters/index.js.
 const ALERT_TYPES = [
-  'patch_now_cve', 'compliance_critical', 'config_diff', 'ingest_drop', 'compliance_report',
+  'patch_now_cve', 'compliance_critical', 'config_diff', 'ingest_drop', 'work_act_now',
+  'compliance_report',
 ];
 const ALERT_TYPE_LABEL = {
   patch_now_cve: 'Patch Now CVEs',
@@ -42,6 +43,12 @@ const ALERT_TYPE_LABEL = {
   // way on purpose: dropped datagrams are UNRECOVERABLE, so the channel owner
   // needs to know evidence was lost, not that a threat was seen.
   ingest_drop: 'Syslog Events Dropped',
+  // ⛔ Named for the BAND, not for "the work queue", because that is what the
+  // subscriber is choosing: only the items SecVault can show measured evidence
+  // for AND that are urgent now. Anything unmeasured is refused entry to this
+  // band however urgent its source claimed to be, so this cannot become the
+  // firehose that got the rule-findings alert removed in July.
+  work_act_now: 'Work Queue — Act Now',
   compliance_report: 'Monthly Compliance Report',
 };
 // 'compliance_report' only ever means anything for an email channel (a PDF

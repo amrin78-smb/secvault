@@ -1449,7 +1449,9 @@ CREATE TABLE IF NOT EXISTS notification_channels (
 -- re-claimed via ON CONFLICT DO UPDATE, never a fresh INSERT.
 CREATE TABLE IF NOT EXISTS notification_dispatch_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  alert_type TEXT NOT NULL, -- 'patch_now_cve' | 'compliance_critical' | 'config_diff' | 'ingest_drop'
+  alert_type TEXT NOT NULL, -- 'patch_now_cve' | 'compliance_critical' | 'config_diff' |
+    -- 'ingest_drop' | 'work_act_now' (the work queue's act_now band; natural_key is 'work:' + the
+    -- queue item's own stable key, so one CVE across three firewalls stays ONE alert)
     -- ('compliance_report' is deliberately absent: it is schedule-driven by
     -- complianceReport.js and never passes through the dispatch loop.)
   natural_key TEXT NOT NULL,

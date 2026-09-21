@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.154.0': [
+    'The work queue can now reach you. Everything SecVault considers urgent and can show measured evidence for — vulnerabilities, failing checks, unreviewed config changes, firewalls it cannot collect from — can be sent to Slack, Teams, email or a webhook. Pick "Work Queue — Act Now" on a channel in Settings.',
+    'Only the "act now" band is sent. Scheduled work is by definition not urgent, and anything SecVault could not measure is never promoted into this band however urgent its source claims to be — so this cannot become the flood that had rule-level findings removed from the Alerts feed in July.',
+    'One item is one alert, even when it spans several firewalls: patching one vulnerability across three devices is a single message, not three.',
+    'If any part of the queue fails to load, nothing is sent and nothing is marked resolved. A shorter list would otherwise be read as "these are fixed" and quietly close still-open security work.',
+  ],
   '2.153.0': [
     'The "Syslog Events Dropped" alert now works. It was fully built and shown as an option in Settings, but saving a channel that subscribed to it failed — so nobody could ever receive it. Dropped syslog events are unrecoverable, which makes it the one alert you most want to arrive.',
     'Three separate lists defined which alerts exist and nothing kept them in step. A test now checks them against each other, so the next alert type cannot be half-connected the same way.',
