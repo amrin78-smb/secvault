@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.171.0': [
+    'A full sweep of the Configuration Changes page rather than another one-off fix. Measured across 30 days of real changes: 200 of 695 entries on screen were raw config paths (29%). That is now 19 (2.7%).',
+    'The largest single cause was list membership — 125 of those 200. A user joining a group, an address joining a group, a GlobalProtect split-tunnel route: all now read as ‘User group member "abeam_cm" was added’ instead of a path ending in member[42].',
+    'Settings under a numbered parent are next: ‘IPsec tunnel monitor destination IP was changed’. These deliberately do not name WHICH tunnel — the firewall does not tell us, and the old path did not either, so nothing is lost and nothing is invented.',
+    'Fixed a mislabel this exposed: a device setting called disable-https was being described as a firewall Service object, because the word service appears in its settings path.',
+    'What remains raw is a handful of legacy whole-subtree captures, listed rather than quietly rounded away.',
+  ],
   '2.170.1': [
     'Fixes a one-line slip in the previous release: the change-summary rewrite ran correctly and rewrote 181 records, but failed to record that it had run, so it would have repeated on every future update.',
     'Harmless — the rewrite skips records that would not change, so repeating it cost nothing and changed nothing. It is simply noise in the update log that should not be there.',

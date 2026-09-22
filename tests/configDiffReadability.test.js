@@ -177,6 +177,110 @@ describe('⛔ an indexed entry is named from its own value', () => {
   });
 });
 
+describe('⛔ a list membership names the member, not a creation', () => {
+  // Measured 2026-09-22 over 30 days of real diffs: 200 of 695 rendered entries
+  // were raw config paths and 125 of those were this one shape. PAN-OS uses it
+  // for user-group members, address-group members, GlobalProtect split-tunnel
+  // routes and interface lists alike.
+  it('names the member and the kind of list it joined', () => {
+    const all = describeAll(diffOf([
+      added('shared.local-user-database.user-group.entry[0].user.member[42]', 'abeam_cm'),
+      added('devices.entry.vsys.entry.address-group.entry[9].static.member[3]', 'IDC-SSL_Pool'),
+      added('devices.entry.vsys.entry.global-protect.global-protect-gateway.entry[0]'
+        + '.remote-user-tunnel-configs.entry.split-tunneling.access-route.member[148]',
+      'HRIS_PRD_BioStar_DB-192.168.8.80'),
+      added('devices.entry.network.virtual-router.entry.interface.member[2]', 'ethernet1/4'),
+    ])).join(String.fromCharCode(10));
+    assert.match(all, /User group member "abeam_cm" was added/);
+    assert.match(all, /Address group member "IDC-SSL_Pool" was added/);
+    assert.match(all, /Split-tunnel access route "HRIS_PRD_BioStar_DB-192\.168\.8\.80" was added/);
+    assert.match(all, /Virtual router interface "ethernet1\/4" was added/);
+    assert.equal(/\(raw\)/.test(all), false, all);
+  });
+
+  it('⛔ it says MEMBER, never that the thing was created', () => {
+    // An account joining a group is not a new account. This is the same lie
+    // the indexed-entry guard prevents, arriving by a different road.
+    const all = describeAll(diffOf([
+      added('shared.local-user-database.user-group.entry[0].user.member[42]', 'abeam_cm'),
+    ]));
+    assert.equal(/^Local user "abeam_cm" was added/.test(all[0]), false, all[0]);
+    assert.match(all[0], /member/i);
+  });
+
+  it('an array-valued member list is described as a change, not skipped', () => {
+    // PAN-OS collapses a one-element list to a bare string and expands it to an
+    // array on the second element, so this is the ordinary shape of "another
+    // interface was added to the zone" -- and it was rendering as a raw path.
+    const all = describeAll(diffOf([], [], [{
+      path: 'devices.entry.vsys.entry.zone.entry[3].network.layer3.member',
+      old: 'ethernet1/1',
+      new: ['ethernet1/1', 'ethernet1/4'],
+    }]));
+    assert.match(all[0], /changed from "ethernet1\/1" to "ethernet1\/1, ethernet1\/4"/);
+  });
+
+  it('⛔ a member with an OBJECT value is left to the shapes that know more', () => {
+    // A member carrying structure is not a plain list entry, and flattening it
+    // into a quoted string would throw away what it actually says.
+    const all = describeAll(diffOf([
+      added('devices.entry.vsys.entry.some-list.member[1]', { a: 1, b: 2 }),
+    ]));
+    assert.match(all[0], /^\(raw\)/);
+  });
+});
+
+describe('⛔ a field under an indexed parent names the setting', () => {
+  it('describes the parent kind and the field', () => {
+    const all = describeAll(diffOf([], [], [
+      { path: 'devices.entry.network.tunnel.ipsec.entry[7].tunnel-monitor.destination-ip', old: '1.1.1.1', new: '2.2.2.2' },
+      { path: 'shared.local-user-database.user.entry[510].disabled', old: 'no', new: 'yes' },
+      { path: 'devices.entry.network.virtual-router.entry.routing-table.ip.static-route.entry[3].metric', old: 10, new: 20 },
+    ])).join(String.fromCharCode(10));
+    assert.match(all, /IPsec tunnel tunnel monitor destination ip was changed/i);
+    assert.match(all, /Local user disabled was changed/i);
+    assert.match(all, /Static route metric was changed/i);
+  });
+
+  it('⛔ it does NOT name which parent, because the diff does not carry one', () => {
+    // The parent is an index in the path and its name is nowhere in the entry.
+    // The raw path did not identify it either, so nothing is lost -- but
+    // inventing a name would be the fabrication this file refuses elsewhere.
+    const all = describeAll(diffOf([], [], [
+      { path: 'devices.entry.network.tunnel.ipsec.entry[7].tunnel-monitor.enable', old: 'no', new: 'yes' },
+    ]));
+    assert.equal(/"/.test(all[0]), false, `must not quote a name it cannot read: ${all[0]}`);
+  });
+
+  it('a very deep tail is left alone rather than read as a sentence', () => {
+    const all = describeAll(diffOf([
+      added('devices.entry.network.tunnel.ipsec.entry[7].a.b.c.d.e', 'x'),
+    ]));
+    assert.match(all[0], /^\(raw\)/);
+  });
+});
+
+describe('⛔ deviceconfig is a SETTING, not a firewall object', () => {
+  it('names the setting', () => {
+    const all = describeAll(diffOf([], [], [
+      { path: 'devices.entry.deviceconfig.system.ip-address', old: '10.0.0.1', new: '10.0.0.2' },
+    ]));
+    assert.match(all[0], /System ip address was changed/i);
+  });
+
+  it('⛔ and is never read as an address or service OBJECT', () => {
+    // `deviceconfig.system.service.disable-https` was rendering as
+    // `Service object "disable-https" was changed` -- the object-section loop
+    // matched the word `service` inside a settings path and named the wrong
+    // kind of thing entirely.
+    const all = describeAll(diffOf([], [], [
+      { path: 'devices.entry.deviceconfig.system.service.disable-https', old: 'no', new: 'yes' },
+    ]));
+    assert.equal(/Service object/.test(all[0]), false, all[0]);
+    assert.match(all[0], /System service disable https was changed/i);
+  });
+});
+
 describe('⛔ the path-named shapes are untouched', () => {
   it('a name carried IN the path still uses its own builder', () => {
     // The fallback runs LAST precisely so it cannot override these.
