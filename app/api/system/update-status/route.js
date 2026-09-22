@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.166.0': [
+    'The Compliance Report can now be run for a single firewall, not just the whole fleet — on its own or combined with the existing per-standard filter. Four documents from one entry: fleet, one framework, one firewall, or one firewall against one framework.',
+    'Choosing a firewall re-reads the report from scratch at that scope rather than filtering the fleet document. That matters most for the coverage figures: a Fortinet-only check counts toward what can be asked of a Fortinet, and counts as inapplicable on a Palo Alto.',
+    'Scoped to one firewall the wording follows — "on TSR-TL" rather than "across the fleet" — and a firewall nothing has been assessed on still says so plainly instead of reading as a firewall with nothing wrong.',
+    'The firewall is named in the document title, so a filed copy cannot be mistaken for the fleet report. Existing fleet and per-standard titles are unchanged.',
+    'Asking for a firewall that does not exist returns a not-found error rather than quietly handing back the fleet report.',
+  ],
   '2.165.0': [
     'Compliance scores now state how old they are. Two of the sixteen firewalls were being scored on configurations collected 10 and 46 days ago, shown beside fourteen twelve-hour-old ones with nothing to tell them apart.',
     'The age shown is the age of the CONFIGURATION, not of the last check run — and those are not the same number. On TSR_EKC the checks had already been re-run 18 days after the last successful collection, so the run time made the evidence look 18 days newer than it was.',

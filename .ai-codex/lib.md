@@ -103,6 +103,10 @@ out" and names how many rules carried traffic. Same failure as the work queue's 
 
 Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
 
+## lib/engines/complianceReport.js — scope (v2.166.0)
+
+`generateReportPdf(pool, { standard, deviceId })` — both axes optional and independent. `deviceId` narrows every read in SQL (scores, findings appendix, and BOTH coverage denominators); an unresolvable one returns `null` → 404. New export `summaryFromPerDevice`. Full rules: `.ai-codex/compliance-pipeline.md`.
+
 ## lib/engines/complianceFreshness.js (v2.165.0)
 
 Pure. How old is a compliance result? `freshnessOf(evidenceAt, now, env)` grades ONE timestamp into

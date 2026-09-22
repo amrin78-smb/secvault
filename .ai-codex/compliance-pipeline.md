@@ -258,3 +258,50 @@ device COLLECTION and says re-running would only re-read the same old config.
   the date beside it.
 
 Pinned by `tests/complianceFreshness.test.js` (21 cases, 13 mutations verified).
+
+---
+
+## Report scope — one firewall and/or one framework (v2.166.0)
+
+`generateReportPdf(pool, { standard, deviceId })`. Both axes are optional and independent, so the
+one catalogue entry serves four documents: fleet/all, fleet/one framework, one firewall/all, one
+firewall/one framework. `optionalDevice: true` on `compliance-fleet` is what exposes the device
+axis; the route (`app/api/reports/[id]/pdf/route.js`) already validated the UUID and, before this,
+**refused** a `deviceId` on this report with a 400.
+
+⛔ **SCOPING TO A FIREWALL IS NOT FILTERING THE FLEET DOCUMENT.** Every read is narrowed in SQL —
+`buildPerDeviceStandards`, `buildFindingsAppendix`, `fleetCheckCoverage` and `libraryCoverage` all
+take the scope. A JS-side filter over fleet reads would leave every coverage denominator counted
+across all sixteen firewalls while the scores came from one, which is the overclaim v2.163.0
+removed arriving through a device filter.
+
+⛔ **`applicable` BECOMES "CAN RUN ON THIS VENDOR".** A Fortinet-only check is applicable on a fleet
+holding a Fortinet and INAPPLICABLE on a Palo Alto. `libraryCoverage(pool, [vendor])` mirrors what
+the per-device page already does (`getCheckLibraryCoverage(pool, [selected.vendor])`). ⛔ The fleet
+form keeps its own `IN (SELECT vendor FROM devices WHERE active)` subquery rather than reading the
+vendor list in JS — an inventory read returning nothing would otherwise become "no vendor applies
+to anything".
+
+⛔ **THE SUMMARY IS COMPUTED FROM THE PER-DEVICE COUNTS, NOT FROM `computeFleetComplianceScores()`.**
+That function always counts every active firewall, so calling it for a scoped report would print
+the fleet's score under one firewall's name. `summaryFromPerDevice()` reproduces its formula
+**exactly, including `overall` summing the PER-STANDARD counts** — a check mapped to three
+frameworks contributes to three. Recomputing over distinct findings would be more defensible in the
+abstract and would print a different number under the same word on one report out of eleven.
+
+⛔ **AN UNRESOLVABLE OR INACTIVE `deviceId` RETURNS `null`**, which the route turns into a 404 —
+never a fleet-bodied document titled with an id nobody can resolve.
+
+⛔ **EVERY SCOPE-DEPENDENT NOUN FOLLOWS THE SCOPE.** "across the fleet" becomes "on <device>", and
+the unassessed-coverage caveat gets its own sentence rather than "1 of 1 firewalls have no findings"
+— arithmetically true and read as a statistic about an estate. The firewall's name is **prefixed to
+the title** (`fw-a — PCI DSS Compliance Report`), so the two existing titles stay byte-identical for
+already-filed copies.
+
+⛔ **The Per-Device Scores table is OMITTED on a one-firewall report**, not printed as a single row:
+it would restate the summary cell for cell, and a reader meeting the same figure twice under two
+headings reasonably assumes they are two measurements.
+
+Pinned by `tests/complianceDeviceScope.test.js` (16 cases, 10 mutations verified — two of which
+initially survived: a `/fw-forti/` title assertion satisfied by the cover tile, and an appendix test
+whose fixture had no other device's findings to leak).
