@@ -75,6 +75,21 @@ describe('the two compliant shapes both pass', () => {
     assert.match(r.detail, new RegExp(bad.rule_name), 'a count with no names is not actionable');
     assert.deepEqual(r.matchedRuleIds, [bad.id]);
   });
+
+  it('⛔ the sentence reads correctly — `subject` carries its own article', () => {
+    // Shipped as "have no a security profile" in v2.167.0 and was visible on
+    // nine live firewalls. A template that concatenates a determiner in front
+    // of a phrase that already has one is the kind of defect every test here
+    // passed straight over, because they all asserted counts.
+    const r = evaluateRulePropertyCheck(CHECK, [bare()], ZONES);
+    assert.equal(/no a |no an /.test(r.detail), false, r.detail);
+    assert.match(r.detail, /are missing a security profile/);
+    // The pass and warning sentences read the subject too.
+    assert.match(
+      evaluateRulePropertyCheck(CHECK, [withGroup()], ZONES).detail,
+      /carry a security profile/
+    );
+  });
 });
 
 describe('⛔ a rule we cannot judge is never a finding and never a pass', () => {

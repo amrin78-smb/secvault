@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.167.1': [
+    'Fixes a wording slip in the new per-rule compliance findings: they read "have no a log-forwarding profile". Now "are missing a log-forwarding profile".',
+    'Cosmetic only — no status, count or score changes.',
+    'It was visible on nine firewalls and every test passed over it, because they all asserted counts rather than reading the sentence. A test now reads it.',
+  ],
   '2.167.0': [
     'Three compliance checks that used to report "cannot be determined" now produce real results. They ask about a setting attached to every firewall rule — security profiles, log forwarding, IPS sensors — and the engine could previously only look at one fixed place in a configuration, never at every rule.',
     'The answers were already collected. SecVault stores each rule exactly as the firewall reported it, so the check now reads that. Found immediately: 622 enabled allow rules across nine Palo Altos have no log-forwarding profile, so those sessions never reach the SIEM.',
