@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Table from '../ui/Table';
+import { displayRowsFor } from '../../lib/configDiffDisplay';
 import Badge from '../ui/Badge';
 import { ruleFromBraceEntry } from '../../lib/adapters/paloalto/sshParser';
 import { parseRuleEntry } from '../../lib/adapters/paloalto/parser';
@@ -591,8 +592,9 @@ function flatFieldDisplay(value) {
 // One added/removed flat-object value, e.g. an address object
 // ({"ip-netmask": "10.0.0.5", "description": "web server"}) or a Fortinet
 // admin record. Caller must already know isFlatObject(value) is true.
-function FlatObjectTable({ value }) {
-  const keys = Object.keys(value);
+function FlatObjectTable({ value, nameInHeading }) {
+  const rows = displayRowsFor(value, nameInHeading);
+  if (rows === null || rows.length === 0) return null;
   return (
     <Table>
       <colgroup>
@@ -600,11 +602,12 @@ function FlatObjectTable({ value }) {
         <col style={{ width: '70%' }} />
       </colgroup>
       <tbody>
-        {keys.map((key) => {
-          const display = flatFieldDisplay(value[key]);
+        {rows.map((row) => {
+          const display = flatFieldDisplay(row.value);
+          const label = row.path.map((p) => titleCaseField(p)).join(' ');
           return (
-            <tr key={key}>
-              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{titleCaseField(key)}</td>
+            <tr key={row.path.join('.')}>
+              <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{label}</td>
               <td title={typeof display === 'string' ? display : undefined} style={{ wordBreak: 'break-word' }}>
                 {display}
               </td>
@@ -691,7 +694,11 @@ function DiffValueRow({ path, value, friendlyDescription }) {
   // only be true for an object/array/large-string value) — a flat object
   // swaps in the Field|Value table in place of the raw-JSON CollapsibleValue,
   // everything else about the block/inline colon logic below is untouched.
-  const flatTable = block && isFlatObject(value);
+  // ⛔ Nested objects now qualify too, because flattenForDisplay() can present
+  // them -- it returns null when it cannot, and that falls back to raw JSON.
+  // ⛔ Nested objects now qualify too: displayRowsFor() presents them, and
+  // returns null when it cannot, which falls back to the raw-JSON renderer.
+  const flatTable = block && displayRowsFor(value, hasDescription) !== null;
   const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
   const label = hasDescription ? friendlyDescription : path;
   return (
@@ -699,7 +706,11 @@ function DiffValueRow({ path, value, friendlyDescription }) {
       <span style={PATH_LABEL_STYLE} title={hasDescription ? path : undefined}>
         {label}{block ? ':' : ''}
       </span>
-      {block ? (flatTable ? <FlatObjectTable value={value} /> : renderBlockValue(value)) : <span>: {formatValue(value)}</span>}
+      {block
+        ? (flatTable
+          ? <FlatObjectTable value={value} nameInHeading={hasDescription} />
+          : renderBlockValue(value))
+        : <span>: {formatValue(value)}</span>}
     </span>
   );
 }

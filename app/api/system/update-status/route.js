@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.172.0': [
+    'Section headings on Configuration Changes now say what they are. "Other (Tag)" is "Tags", "Other (Global Protect)" is "GlobalProtect", and the remaining "Other (…)" headings — which were the classifier admitting it gave up — are gone.',
+    'The detail tables read better too. A service object’s protocol and port were being dumped as raw JSON under a heading; they now appear as ordinary rows.',
+    'The Name row is dropped when the heading already names the object — but only then. Where the heading cannot name it, the row stays, because that is the only place the name appears.',
+    'Care taken: adding Tags as a heading initially pulled 33 rule changes out of Security Rules, because a rule also has tags. A rule’s own fields stay with their rule.',
+    'Table logic moved out of the page component so it can be tested; it previously could only be checked by looking at the screen.',
+  ],
   '2.171.0': [
     'A full sweep of the Configuration Changes page rather than another one-off fix. Measured across 30 days of real changes: 200 of 695 entries on screen were raw config paths (29%). That is now 19 (2.7%).',
     'The largest single cause was list membership — 125 of those 200. A user joining a group, an address joining a group, a GlobalProtect split-tunnel route: all now read as ‘User group member "abeam_cm" was added’ instead of a path ending in member[42].',

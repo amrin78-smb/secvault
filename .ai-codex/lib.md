@@ -107,6 +107,10 @@ Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
 
 `generateReportPdf(pool, { standard, deviceId })` — both axes optional and independent. `deviceId` narrows every read in SQL (scores, findings appendix, and BOTH coverage denominators); an unresolvable one returns `null` → 404. New export `summaryFromPerDevice`. Full rules: `.ai-codex/compliance-pipeline.md`.
 
+## lib/configDiffDisplay.js (v2.172.0)
+
+Pure. Turns one changed config object into the rows of the Field | Value table under a diff row. `flattenForDisplay` presents one level of nesting (a PAN-OS service object's `protocol.tcp.port`) instead of dumping raw JSON; `displayRowsFor` also drops the object's own name row when the heading above already names it. ⛔ Past its depth/width bounds it returns `null` so the caller falls back to raw JSON — it never truncates a table into looking complete. ⛔ Extracted from `components/config/DiffViewer.js` so it could be tested at all.
+
 ## lib/engines/complianceFreshness.js (v2.165.0)
 
 Pure. How old is a compliance result? `freshnessOf(evidenceAt, now, env)` grades ONE timestamp into
