@@ -305,3 +305,59 @@ headings reasonably assumes they are two measurements.
 Pinned by `tests/complianceDeviceScope.test.js` (16 cases, 10 mutations verified — two of which
 initially survived: a `/fw-forti/` title assertion satisfied by the cover tile, and an appendix test
 whose fixture had no other device's findings to leak).
+
+---
+
+## `rule_property` — the fourth evaluator shape (v2.167.0)
+
+The universal quantifier over rules: **"does every rule the question applies to carry property Y"**.
+It sits beside the three that already existed and covers what none of them could:
+
+| shape | question |
+|---|---|
+| `evaluateCheck` (predicate engine) | one fixed dot-path into `config_parsed` |
+| `rule_scan` | reuses already-decided Phase 5 `ruleAnalysis` findings |
+| `ruleset_property` | EXISTENTIAL — "does at least one rule exist with X" |
+| **`rule_property`** | **UNIVERSAL — "does every applicable rule carry Y"** |
+
+⛔ **IT IS THE ROOT-CAUSE FIX FOR `not_evaluable_from_config`.** Three checks were declared
+unanswerable for one structural reason — the fact they ask about is attached to EVERY rule while the
+predicate engine followed a single fixed path. ⛔ **The data was already collected and was never
+looked at**: `raw_rule` is the verbatim vendor rule (`raw_rule: entry`), on the very table this
+audit already queries. Measured 2026-09-22: 1,063 of 1,586 Palo Alto rules carry `profile-setting`
+(975 individual `profiles`, 88 a `group`); 36 of 181 FortiOS policies carry `ips-sensor`.
+
+⛔ **ABSENCE IS ONLY A FINDING WHEN ABSENCE IS A FACT, AND THAT IS NOT UNIFORM.** 33 live rules
+carry `@_panorama` — pushed from Panorama, where a profile group is invisible to this firewall's own
+config. Reading their silence as "no profile" would manufacture 33 findings from a place SecVault
+cannot see. `undecidable_when_key` makes them UNDECIDABLE: counted, named, never a violation and
+never a pass.
+
+Result rules, in order:
+1. no rules collected, or no rule matches the selector → **`na`** (never `pass` — "0 of 0 rules are
+   missing a profile" is a clean score computed from an empty set).
+2. ≥1 **definite** violation → **`fail`**, naming the rules. ⛔ A definite violation OUTRANKS an
+   undecidable one: reporting `warning` while 415 rules definitely lack a profile would bury a real
+   finding behind a caveat. Undecidables are still disclosed in the same sentence.
+3. 0 violations but ≥1 undecidable → **`warning`** — an all-clear is forbidden while coverage is
+   incomplete.
+4. otherwise → **`pass`**.
+
+⛔ **A ZONE-SCOPED QUESTION NEEDS CLASSIFIED ZONES AND SAYS SO.** Only 5 of 16 firewalls have them.
+Guessing which zone faces the internet from its NAME is the "documentation lies" trap aimed at a
+customer's own naming, and widening to every rule would answer a different question under this
+check's name. So it is `na` — but naming the missing input, which the operator can fix in minutes.
+That is a materially better `na` than "cannot be determined, by construction". ⛔ `any` as a source
+zone INCLUDES the external one; matching it literally would understate exposure.
+
+⛔ **PRESENT-BUT-EMPTY IS NOT CONFIGURED** (`{}`, `''`, `[]`) — mirrors `hasUsableConfig`.
+⛔ **A missing `raw_rule` is undecidable, never "no profile".**
+
+Converted: `paloalto-security-profiles-internet-facing`, `paloalto-log-forwarding-profiles` (no zone
+dependency — log forwarding is expected on every enabled allow rule, so it answers on EVERY
+firewall), `fortinet-ips-internet-facing-policies`. Three checks keep
+`not_evaluable_from_config` for genuinely different reasons: `fortinet-unused-interfaces-shutdown`
+(needs telemetry), `paloalto-threat-prevention-license` (a licence fact — note `device_licenses`
+now exists and this may be answerable by a future shape), `cisco-asa-local-admin-accounts-present`.
+
+Pinned by `tests/ruleProperty.test.js` (19 cases, 7 mutations verified).

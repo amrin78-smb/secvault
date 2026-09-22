@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.167.0': [
+    'Three compliance checks that used to report "cannot be determined" now produce real results. They ask about a setting attached to every firewall rule — security profiles, log forwarding, IPS sensors — and the engine could previously only look at one fixed place in a configuration, never at every rule.',
+    'The answers were already collected. SecVault stores each rule exactly as the firewall reported it, so the check now reads that. Found immediately: 622 enabled allow rules across nine Palo Altos have no log-forwarding profile, so those sessions never reach the SIEM.',
+    'Rules pushed from Panorama are reported as unjudgeable rather than as failures. Their security profile can be attached in Panorama, where this firewall cannot see it — counting that silence as a fault would have invented findings.',
+    'Where a check only applies to internet-facing rules and a firewall has no zones classified yet, it still reports as not assessed — but now says that classifying the zones is what would answer it, instead of the old permanent "not evaluable".',
+    'Expect compliance scores to move. These are real failures that were previously excluded from the score rather than counted.',
+  ],
   '2.166.0': [
     'The Compliance Report can now be run for a single firewall, not just the whole fleet — on its own or combined with the existing per-standard filter. Four documents from one entry: fleet, one framework, one firewall, or one firewall against one framework.',
     'Choosing a firewall re-reads the report from scratch at that scope rather than filtering the fleet document. That matters most for the coverage figures: a Fortinet-only check counts toward what can be asked of a Fortinet, and counts as inapplicable on a Palo Alto.',
