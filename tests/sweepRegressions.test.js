@@ -294,6 +294,35 @@ describe('⛔ a category colour may not be a verdict colour', () => {
   });
 });
 
+describe('⛔ a fallback that could never fire, on two write paths', () => {
+  const { findGitRoot } = require('../lib/updateCheck');
+
+  it('findGitRoot() with no argument returns a path instead of throwing', () => {
+    // Two routes called it as `findGitRoot() || process.cwd()`, which READS as
+    // handled and is not: path.join(undefined, '.git') THROWS, so the fallback
+    // was unreachable. Measured live 2026-09-22: GET /api/system/console-url
+    // answered HTTP 500 with an empty body, and the PUT on both that route and
+    // /api/system/session-policy was dead — so the console address and the idle
+    // timeout could not be saved from Settings at all. Only the write paths
+    // resolve the env file, which is why the GETs looked fine.
+    assert.doesNotThrow(() => findGitRoot());
+    assert.equal(typeof findGitRoot(), 'string');
+    assert.ok(findGitRoot().length > 0);
+  });
+
+  it('and an explicitly undefined or empty argument behaves the same', () => {
+    // The call sites pass nothing; a future one may pass a value that is absent.
+    for (const v of [undefined, '', null]) {
+      assert.doesNotThrow(() => findGitRoot(v), `findGitRoot(${JSON.stringify(v)})`);
+      assert.equal(typeof findGitRoot(v), 'string');
+    }
+  });
+
+  it('a real path still resolves to the repo root', () => {
+    assert.equal(findGitRoot(process.cwd()), findGitRoot());
+  });
+});
+
 describe('⛔ one vocabulary, two consumers', () => {
   it('the SQL predicate is generated from the same list as the regex', () => {
     const { sql, params } = unattributedSqlPredicate('a.application', 2);
