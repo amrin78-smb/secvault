@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.173.0': [
+    'Compliance scores now agree with each other. The fleet PDF could print “PCI DSS 57%” in its table and “the 58% rests on 40 checks” one line below, because two parts of the product rounded the same figure differently. Every copy now matches what the compliance pages show.',
+    'Fixed a row that invented a collection date: a firewall whose configuration has never been collected was showing its audit timestamp as though it were the collection time, in the fresh colour — while the banner above correctly listed it as behind.',
+    'The Fortinet IPS check no longer passes a sensor that is switched off. FortiOS only applies a security profile when UTM is enabled, so both are now required — a named sensor on a policy with UTM off inspects nothing.',
+    'A required setting explicitly set to false counted as configured. It no longer does.',
+    'Setting a configuration pull interval under one hour silently switched the whole staleness warning off. It is now clamped to one hour.',
+  ],
   '2.172.1': [
     'Urgent fix: yesterday’s release could throw while drawing a configuration change that added or removed an object. A variable was read one line before it was defined, which only affects non-simple values — exactly the ones the new tables were built for.',
     'Security fix: an account restricted to specific firewalls could still read, modify or delete a firewall outside its restriction by using a different request type on the same address. The restriction was only being applied to reads.',

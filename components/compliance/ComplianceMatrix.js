@@ -181,8 +181,17 @@ export default function ComplianceMatrix({ devices }) {
                   // 2026-09-22 TSR_EKC's audit had run 18 days AFTER its last
                   // successful collection, so the audit timestamp understated
                   // the real age of the evidence by that much.
+                  // ⛔ NO FALLBACK TO THE AUDIT TIME. `configCollectedAt ||
+                  // lastRunAt` fabricated a collection date: a device with NO
+                  // device_configs row is still audited (it gets `na` findings
+                  // stamped now()), so it rendered "12h ago" in the fresh tone
+                  // with the AUDIT timestamp printed underneath as if it were
+                  // the collection time. That is the exact laundering this
+                  // engine exists to prevent, and it made the row disagree with
+                  // the banner above it, which never had the fallback and
+                  // correctly counted the device as behind.
                   const f = complianceFreshness({
-                    evidenceAt: d.configCollectedAt || d.lastRunAt,
+                    evidenceAt: d.configCollectedAt,
                     evaluatedAt: d.lastRunAt,
                   });
                   const tone = AGE_TONE[f.state] || AGE_TONE.fresh;
@@ -196,7 +205,7 @@ export default function ComplianceMatrix({ devices }) {
                         fontSize: 'var(--text-xs)',
                         color: 'var(--text-muted)',
                       }}>
-                        {formatLastRun(d.configCollectedAt || d.lastRunAt)}
+                        {formatLastRun(d.configCollectedAt)}
                       </span>
                     </span>
                   );
