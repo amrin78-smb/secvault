@@ -73,6 +73,9 @@ GRANT SELECT ON TABLE finding_acknowledgements TO claude_readonly, nocvault_read
 GRANT SELECT ON TABLE cve_assessment_acknowledgements TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE audit_checks TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE audit_findings TO claude_readonly, nocvault_readonly;
+-- Holds a reason, an owner and an expiry. No secret, so readable like every
+-- other finding table.
+GRANT SELECT ON TABLE compliance_exceptions TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_risk_history TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE fleet_dashboard_snapshots TO claude_readonly, nocvault_readonly;
 GRANT SELECT ON TABLE device_connectivity_history TO claude_readonly, nocvault_readonly;

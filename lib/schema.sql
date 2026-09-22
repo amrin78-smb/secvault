@@ -959,6 +959,63 @@ CREATE INDEX IF NOT EXISTS idx_audit_findings_device_id ON audit_findings(device
 CREATE INDEX IF NOT EXISTS idx_audit_findings_check_id ON audit_findings(check_id);
 CREATE INDEX IF NOT EXISTS idx_audit_findings_status ON audit_findings(status);
 
+-- ── compliance_exceptions ──────────────────────────────────────────────────
+--
+-- An operator's recorded decision that a FAILING check is accepted on this
+-- device, with a compensating control and an owner. Every real audit
+-- conversation is "yes, and here is why that is mitigated", and without
+-- somewhere to put that answer a 51% score is un-actionable and people stop
+-- opening the page -- the same dynamic that got `new_finding` pulled from the
+-- Alerts feed in July 2026.
+--
+-- KEYED ON (device_id, check_slug), NEVER ON audit_findings.id. Findings are
+-- DELETE+reinserted on every compliance run, so an exception pointing at a
+-- finding row would be orphaned within hours. `check_slug` is audit_checks'
+-- STABLE TEXT id (e.g. rule-no-any-any-allow), not audit_checks.id -- the seed
+-- upserts that table and a re-seed may hand a check a new UUID, while the slug
+-- is the durable identity. Same lesson as finding_acknowledgements.rule_id_vendor,
+-- which routes through firewall_rules for exactly this reason.
+--
+-- IT DOES NOT CHANGE A FINDING'S STATUS, AND THE HEADLINE SCORE IS COMPUTED
+-- WITHOUT IT. A failing check with an accepted exception is still a FAIL: the
+-- firewall is still configured that way, and letting a label somebody typed
+-- move a measurement is how a compliance score becomes a number people manage
+-- instead of a fact they act on. The UI and the PDF show the accepted count
+-- BESIDE the score, and may show a second with-exceptions figure, but never in
+-- place of the first.
+--
+-- expires_at IS NOT NULL, DELIBERATELY. An exception with no expiry is a
+-- permanent silent pass, which is the whole failure mode this table exists to
+-- avoid. An expired row stops counting as accepted the moment it lapses, with
+-- no job required -- expiry is evaluated at READ time against now(), the same
+-- way lib/engines/deviceHealth.js derives staleness.
+CREATE TABLE IF NOT EXISTS compliance_exceptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  -- audit_checks.check_id (the text slug), NOT audit_checks.id. No FK on
+  -- purpose: a check removed from the seed library leaves a harmless orphan
+  -- that resolves to zero rows on the next join, which is preferable to a
+  -- cascade silently deleting an operator's recorded decision.
+  check_slug TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  compensating_control TEXT,
+  accepted_by TEXT NOT NULL,
+  accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  revoked_by TEXT
+);
+
+-- ONE LIVE EXCEPTION PER (device, check), enforced by the database -- but a
+-- PARTIAL index, so revoking one and recording a new one keeps the history
+-- rather than overwriting the audit trail.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_compliance_exceptions_live
+  ON compliance_exceptions (device_id, check_slug) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_compliance_exceptions_device
+  ON compliance_exceptions (device_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_exceptions_expiry
+  ON compliance_exceptions (expires_at) WHERE revoked_at IS NULL;
+
 -- Rule Analysis Dashboard Phase 4: risk-score trend + operator audit trail.
 
 -- One row per completed rule-analysis run (both scheduled collects and manual
