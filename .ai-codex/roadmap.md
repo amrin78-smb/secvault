@@ -543,3 +543,57 @@ Still open: **Phase 3** (a `syslog_flow_hourly` rollup — a storage decision dr
 to be argued on its own measured cardinality) and **Phase 4** (discovery). Phase 1 remains the live
 thing to reassess against the fleet — note that with nothing declared the honest answer is "no
 items", which is what the work-queue source returns.
+
+---
+
+## ⛔ `syslog_flow_hourly` — MEASURED 2026-09-22, THE PROPOSED SHAPE IS REFUSED
+
+P2 #6 asked for a flow-grain rollup so `/applications` could answer "did this src → dst:port carry
+traffic" instead of falling back to the weaker "a rule permitting it has seen traffic". The roadmap
+required the decision be argued on measured cardinality. It now is, and the answer is no — **at the
+proposed grain**.
+
+Three hours sampled on the live fleet (never wider than one hour, per the `syslog_events` rule):
+
+| hour | events | full flow grain | /24 subnet grain |
+|---|---|---|---|
+| 03:00 quiet | 1,823,848 | 193,873 | 41,745 |
+| 11:00 busy | 4,719,321 | **884,882** | 135,854 |
+| 20:00 evening | 1,985,879 | 223,163 | 50,373 |
+
+⛔ **THE FULL GRAIN BARELY COMPRESSES — 5.3:1 ON THE BUSY HOUR.** A rollup that is one fifth of the
+thing it summarises is not a rollup, it is a second copy with a longer retention. Weighting the
+sampled hours across a day gives **~9.9M rows/day**, and these tables are kept INDEFINITELY:
+roughly **360 GB in the first year**, still growing. Raw `syslog_events` is larger per day but is
+bounded at 30 days; this would have no bound at all.
+
+⛔ **AND THE MEASURING STICK IS NOT THE RAW TABLE, IT IS THE PERMANENT SET.** Every permanent
+`syslog_*_hourly` rollup on this fleet totals **3.2 GB**. The full grain would be ~110x that in year
+one; the /24 subnet grain ~1.8M rows/day, ~64 GB/year, still ~20x. Neither is a rollup-shaped cost.
+
+⛔ **THE CROSS PRODUCT IS THE WHOLE PROBLEM, AND IT IS NOT FIXABLE BY COARSENING.** Source alone is
+11,920 distinct values/hour (that is `syslog_talker_hourly`, which already exists and is cheap);
+destination+port alone is 106,441. Pairing the two ends is what explodes it — which is exactly why
+every existing rollup is source-keyed OR destination-keyed. Dropping to /16 reaches 47,660/hour but
+merges unrelated networks, so it answers a question nobody asked.
+
+### The viable shape: aggregate the DECLARED flows, not all traffic
+
+⛔ **A GENERAL ROLLUP ANSWERS EVERY POSSIBLE QUESTION; ONLY A BOUNDED SET IS EVER ASKED.** Live
+today: **5 applications, 92 declared flows.** A rollup keyed on (declared flow, device, hour)
+is bounded by the DECLARATION, not by the traffic: 92 x 16 devices x 24h = **35,328 rows/day worst
+case**, and far less in practice because a flow matches few devices. That is ~1.3 GB/year — about
+1/50th of the subnet-grain general rollup, and it answers the question `/applications` actually asks.
+
+⛔ **ITS HONEST COST IS NO RETROSPECTIVE HISTORY.** A flow declared today has no evidence before
+today, and changing a declaration starts its history over. That MUST be stated in the UI as its own
+state — a flow with no history yet is not a flow with no traffic, the same distinction
+`vpnDetections` draws between "insufficient baseline" and "no data". A targeted rollup that rendered
+its own youth as absence would be this codebase's signature bug wearing a storage optimisation.
+
+⛔ **UNTIL THAT EXISTS, `/applications` KEEPS SAYING "a rule permitting this flow is in use".** That
+wording is already correct and already weaker-by-design; it must not be strengthened on the strength
+of a rollup that was refused.
+
+**Status: P2 #6 CLOSED as specified** (the storage decision was the deliverable, and it is "no").
+The targeted rollup is a new, better-specified item — argued, sized, and not yet built.
