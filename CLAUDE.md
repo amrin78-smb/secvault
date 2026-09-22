@@ -2160,6 +2160,21 @@ the window roughly triples.
 8. sc.exe start SecVault-App
 ```
 
+⛔ **THE UPDATER UPDATES ITSELF, SO A FIX TO IT LANDS ONE DEPLOY LATE.** Step 3's `git pull`
+replaces `Update-SecVault.ps1` while that very script is running — and PowerShell parsed the OLD
+copy into memory before step 1. So the run that DELIVERS a fix to the updater still EXECUTES the
+unfixed version, and the fix takes effect on the NEXT deploy.
+
+Measured 2026-09-22: v2.164.0 fixed the page-sweep step reporting a false failure, and its own
+deploy reported that same false failure — which reads exactly like "the fix did not work". Proven
+on the server afterwards that the new code was correct (a bare native call under
+`$ErrorActionPreference = 'Stop'` threw; the same call through `Invoke-Native` returned cleanly with
+the sweep passing 28/28).
+
+⛔ So when changing this script, VERIFY THE NEW LOGIC DIRECTLY on the server rather than inferring
+it from the deploy that shipped it, and expect one more deploy before the behaviour changes. The
+same applies to anything else `git pull` replaces mid-run.
+
 Step 5b re-runs `schema-grants.sql` unconditionally (idempotent) using `PG_ADMIN_PASSWORD` read back out of the deployed `.env.local`; missing/empty value or a `psql` failure only logs a warning, never fails the update.
 
 ### One-shot backfill ledger (v2.116.0) — why updates are no longer 15 minutes

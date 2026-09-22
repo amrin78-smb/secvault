@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.164.1': [
+    'Documentation only. The previous update still reported "completed WITH ERRORS" because the updater replaces itself mid-run: the version that delivers a fix to it is still running the old copy, so the fix takes effect on the following update. This one.',
+  ],
   '2.164.0': [
     'Fixed: the update reported "completed WITH ERRORS" when nothing had gone wrong. The new page check writes a routine warning to its error stream, and PowerShell 5.1 turns that into a fatal error — so a sweep that passed all 28 pages was logged as a failed step.',
     'It only surfaced now because the check had been skipping on every previous deploy for want of credentials, so it had never actually run during an update.',
