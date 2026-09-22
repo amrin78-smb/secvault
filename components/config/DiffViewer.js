@@ -592,9 +592,12 @@ function flatFieldDisplay(value) {
 // One added/removed flat-object value, e.g. an address object
 // ({"ip-netmask": "10.0.0.5", "description": "web server"}) or a Fortinet
 // admin record. Caller must already know isFlatObject(value) is true.
-function FlatObjectTable({ value, nameInHeading }) {
-  const rows = displayRowsFor(value, nameInHeading);
-  if (rows === null || rows.length === 0) return null;
+// ⛔ TAKES THE ROWS, NOT THE VALUE. It used to recompute displayRowsFor()
+// itself, so the caller ran it once to decide whether to render a table and
+// this ran it again to build one -- two chances for the two calls to disagree,
+// and twice the work on every row.
+function FlatObjectTable({ rows }) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
   return (
     <Table>
       <colgroup>
@@ -694,12 +697,18 @@ function DiffValueRow({ path, value, friendlyDescription }) {
   // only be true for an object/array/large-string value) — a flat object
   // swaps in the Field|Value table in place of the raw-JSON CollapsibleValue,
   // everything else about the block/inline colon logic below is untouched.
-  // ⛔ Nested objects now qualify too, because flattenForDisplay() can present
-  // them -- it returns null when it cannot, and that falls back to raw JSON.
-  // ⛔ Nested objects now qualify too: displayRowsFor() presents them, and
-  // returns null when it cannot, which falls back to the raw-JSON renderer.
-  const flatTable = block && displayRowsFor(value, hasDescription) !== null;
   const hasDescription = typeof friendlyDescription === 'string' && friendlyDescription.length > 0;
+  // ⛔ DECLARED BEFORE IT IS READ. v2.172.0 put this line ABOVE the
+  // `const hasDescription` below it, so every non-primitive value hit the
+  // temporal dead zone and threw a ReferenceError at RENDER time -- objects and
+  // arrays being exactly the values the flattening was built for. `block`
+  // short-circuits for primitives, which is why the page did not fail outright
+  // and the smoke sweep stayed green.
+  //
+  // ⛔ Nested objects qualify too: displayRowsFor() presents them, and returns
+  // null when it cannot, which falls back to the raw-JSON renderer.
+  const rows = block ? displayRowsFor(value, hasDescription) : null;
+  const flatTable = rows !== null;
   const label = hasDescription ? friendlyDescription : path;
   return (
     <span style={{ display: 'block' }}>
@@ -708,7 +717,7 @@ function DiffValueRow({ path, value, friendlyDescription }) {
       </span>
       {block
         ? (flatTable
-          ? <FlatObjectTable value={value} nameInHeading={hasDescription} />
+          ? <FlatObjectTable rows={rows} />
           : renderBlockValue(value))
         : <span>: {formatValue(value)}</span>}
     </span>

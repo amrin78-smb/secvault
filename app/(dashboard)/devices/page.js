@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import {
-  loadScopeForSession, filterDevices, isScoped, SCOPE_STATES,
+  loadScopeForSession, filterDevices, isScoped, SCOPE_STATES, canSeeDevice,
 } from '../../../lib/deviceScope';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { isAdmin } from '../../../lib/rbac';
@@ -61,6 +61,21 @@ async function deleteDeviceAction(formData) {
     redirect('/devices?error=forbidden');
   }
   const id = formData.get('deviceId');
+
+  // ⛔ THE DEVICE ID COMES FROM THE FORM BODY, SO IT IS NOT TRUSTED. The page
+  // is scope-aware, but a Server Action is reached by POSTing to the page's own
+  // URL — middleware allows that, because the page is 'aware' — and the body
+  // can name ANY device id. Without this a scoped admin could delete a firewall
+  // it was never granted, which is strictly worse than the read the GET route
+  // refuses. Same shape as the saved-views rule: what does the security work is
+  // that the identity comes from the SESSION and the target is re-checked
+  // server-side, never that the form was rendered with the right value.
+  const session2 = await getServerSession(authOptions);
+  const scope = await loadScopeForSession(session2, pool);
+  if (!canSeeDevice(scope, id)) {
+    redirect('/devices?error=forbidden');
+  }
+
   await pool.query('DELETE FROM devices WHERE id = $1', [id]);
   revalidatePath('/devices');
   redirect('/devices');

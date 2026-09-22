@@ -100,6 +100,23 @@ export async function PUT(request, { params }) {
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }
+
+  // ⛔ THE SCOPE CHECK BELONGS ON EVERY VERB, NOT JUST GET. v2.168.0 added it
+  // to GET only, so a scoped account could read a firewall it was never
+  // granted by sending PUT with an empty body — no field to update means no
+  // UPDATE runs and the handler returns the full devices row, including
+  // mgmt_ip and smc_host. The 404 GET goes to such lengths to produce was
+  // defeated by the sibling verb in the same file. It could also MODIFY or
+  // DELETE that firewall.
+  //
+  // ⛔ 404, not 403, for the same anti-enumeration reason as GET.
+  const deviceScope = await loadScopeForSession(session, pool);
+  if (!canSeeDevice(deviceScope, params.id)) {
+    return NextResponse.json(
+      { error: 'Device not found', reason: refusalMessage(deviceScope) },
+      { status: 404 }
+    );
+  }
   const body = await request.json().catch(() => ({}));
   const {
     smc_api_key,
@@ -396,6 +413,23 @@ export async function DELETE(request, { params }) {
 
   if (!isValidUuid(params.id)) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
+  }
+
+  // ⛔ THE SCOPE CHECK BELONGS ON EVERY VERB, NOT JUST GET. v2.168.0 added it
+  // to GET only, so a scoped account could read a firewall it was never
+  // granted by sending PUT with an empty body — no field to update means no
+  // UPDATE runs and the handler returns the full devices row, including
+  // mgmt_ip and smc_host. The 404 GET goes to such lengths to produce was
+  // defeated by the sibling verb in the same file. It could also MODIFY or
+  // DELETE that firewall.
+  //
+  // ⛔ 404, not 403, for the same anti-enumeration reason as GET.
+  const deviceScope = await loadScopeForSession(session, pool);
+  if (!canSeeDevice(deviceScope, params.id)) {
+    return NextResponse.json(
+      { error: 'Device not found', reason: refusalMessage(deviceScope) },
+      { status: 404 }
+    );
   }
 
   let device;

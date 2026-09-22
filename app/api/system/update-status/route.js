@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.172.1': [
+    'Urgent fix: yesterday’s release could throw while drawing a configuration change that added or removed an object. A variable was read one line before it was defined, which only affects non-simple values — exactly the ones the new tables were built for.',
+    'Security fix: an account restricted to specific firewalls could still read, modify or delete a firewall outside its restriction by using a different request type on the same address. The restriction was only being applied to reads.',
+    'Security fix: the delete action on the firewall list took its target from the submitted form rather than re-checking it, so a restricted account could delete a firewall it was not granted.',
+    'Ten more screens now refuse restricted accounts. Each was serving fleet-wide firewall names and addresses through shared code, which the completeness check could not see because it only read the screen’s own file.',
+    'Found by a review of the day’s changes, not in production. No evidence any of it was used.',
+  ],
   '2.172.0': [
     'Section headings on Configuration Changes now say what they are. "Other (Tag)" is "Tags", "Other (Global Protect)" is "GlobalProtect", and the remaining "Other (…)" headings — which were the classifier admitting it gave up — are gone.',
     'The detail tables read better too. A service object’s protocol and port were being dumped as raw JSON under a heading; they now appear as ordinary rows.',
