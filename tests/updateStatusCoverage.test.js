@@ -109,7 +109,16 @@ describe('every shipped version carries release notes', () => {
     const at = src.indexOf(`'${pkg.version}': [`);
     assert.ok(at > -1);
     // From after the opening bracket, so the key line itself is not counted.
-    const block = src.slice(src.indexOf('[', at) + 1, src.indexOf('],', at));
+    // ⛔ THE BLOCK ENDS AT THE CLOSING BRACKET ON ITS OWN LINE, not at the
+    // first `],` in the text. A bullet is allowed to QUOTE one — v2.170.0's
+    // notes quote the config path `devices.entry.vsys.entry.tag.entry[17], ...`
+    // that release exists to remove — and matching inside a string truncated
+    // the block to its first bullet and failed a perfectly good entry. The
+    // indentation is what distinguishes structure from content here.
+    const open = src.indexOf('[', at) + 1;
+    const close = src.indexOf('\n  ],', open);
+    assert.ok(close > open, 'could not find the closing bracket for this version block');
+    const block = src.slice(open, close);
     const bullets = block.match(/^\s*['"]/gm) || [];
     assert.ok(bullets.length >= 3 && bullets.length <= 6, `${bullets.length} bullets`);
     assert.ok(!/TODO|TBD|placeholder/i.test(block), 'a placeholder is worse than an omission');

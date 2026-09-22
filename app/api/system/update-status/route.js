@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.170.0': [
+    'Configuration changes are readable now. The summary line used to be three internal firewall config paths — "12 added — e.g. devices.entry.vsys.entry.tag.entry[17], ..." — and now says what actually changed: "12 added — 4 tags, 4 address objects, 3 security rules, 1 service object".',
+    'Each change inside the diff is named too. An address object now reads ‘Address object "HRIS-172.40.33.15" was added’ instead of an array index into the config tree that nobody can look up.',
+    'The cause: the name is carried in the path on some firewall formats, and in the value on Palo Alto’s. Everything that reads the path was returning nothing, and nothing came after it. Affects 101 address objects, 53 local users, 41 static routes and more on this fleet.',
+    'Historical changes were rewritten too, not just new ones — the summary is stored when the change is detected, so improving it alone would have left every past change reading the old way for ever.',
+    'Security rule changes are unchanged: those already rendered as proper tables.',
+  ],
   '2.169.0': [
     'Firewall restrictions are now actually enforced. In the previous release the rules were written down and checked at build time but nothing applied them while the product was running — a restricted account would still have been shown the whole fleet on the compliance and vulnerability screens.',
     'Restrictions are also now settable from Settings → Users. Each account shows whether it sees all firewalls or a subset, and the editor spells out that saving with none selected grants EVERY firewall rather than none.',
