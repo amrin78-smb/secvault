@@ -199,7 +199,8 @@ IpsecTunnelsTable  tunnels — live IPSec site-to-site tunnel table (Tunnel/Peer
 
 ## compliance/
 
-ComplianceMatrix  devices — fleet table of device compliance scores by standard ("Compare Devices")
+ComplianceMatrix  devices — fleet table of device compliance scores by standard ("Compare Devices"). Each row now shows the AGE of the configuration the checks read (`configCollectedAt`), with the timestamp underneath and `freshnessNote()` on hover — v2.165.0, because a bare ISO date gave a 46-day-old score the same visual weight as a 12-hour-old one.
+StaleConfigBanner  freshness, device — the shared stale/ageing panel for /compliance (cards view) and /compliance/[deviceId]. ⛔ Links to DEVICE COLLECTION, never to Run Audit: the auditor reads the newest device_configs row whatever its age and stamps detected_at = now(), so re-running puts a fresh date on old evidence. Added v2.165.0.
 (c) DeviceSelect  devices, selectedId — dropdown to switch device in Cards view
 (c) PrintReportButton  no props — triggers window.print() for the print report page
 RuleEvidenceTable  rules — table of offending rules for a failed compliance check; multi-value columns (src/dst addr, service, zones) wrap as pills (ListPills) instead of single-line ellipsis truncation

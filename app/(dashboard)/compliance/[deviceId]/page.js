@@ -7,7 +7,8 @@ import PageHeader from '../../../../components/ui/PageHeader';
 import Badge from '../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../components/ui/Card';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
-import { complianceFreshness, ageLabel, freshnessNote, STATES } from '../../../../lib/engines/complianceFreshness';
+import { complianceFreshness, ageLabel, freshnessNote } from '../../../../lib/engines/complianceFreshness';
+import StaleConfigBanner from '../../../../components/compliance/StaleConfigBanner';
 import StandardCard from '../../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
 import ExceptionsPanel from '../../../../components/compliance/ExceptionsPanel';
@@ -302,33 +303,7 @@ export default async function DeviceCompliancePage({ params }) {
         }
       />
 
-      {(freshness.state === STATES.STALE || freshness.state === STATES.AGEING) && (
-        <div style={{
-          padding: '10px 12px',
-          borderRadius: 'var(--radius-sm)',
-          background: 'var(--tint-warn)',
-          color: 'var(--tint-warn-fg)',
-          fontSize: 'var(--text-sm)',
-          lineHeight: 1.6,
-        }}>
-          <strong>These checks describe a configuration collected {ageLabel(freshness)}.</strong>{' '}
-          {freshnessNote(freshness, device.name)}
-          {freshness.evaluatedAgainstOldConfig && (
-            <>
-              {' '}The checks themselves were last re-run{' '}
-              {ageLabel(freshness.evaluation)}, but against that same old configuration — which
-              is why the two dates differ.
-            </>
-          )}
-          {' '}
-          {/* ⛔ The useful action is RE-COLLECTION, not re-running the checks:
-              the auditor reads the newest device_configs row whatever its age,
-              so Run Audit would stamp a new date on the same old evidence. */}
-          <Link href={`/devices/${device.id}`} style={{ color: 'inherit', fontWeight: 600 }}>
-            Collect from {device.name}
-          </Link>{' '}to refresh the configuration these checks read.
-        </div>
-      )}
+      <StaleConfigBanner freshness={freshness} device={device} />
 
       {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={device.id} />}
 

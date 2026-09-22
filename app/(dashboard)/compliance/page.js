@@ -5,7 +5,8 @@ import AnswerHeader from '../../../components/ui/AnswerHeader';
 import { EvidenceMark } from '../../../components/ui/Evidence';
 import { buildDeviceComplianceAnswer } from '../../../lib/answers';
 import { deviceComplianceEvidence } from '../../../lib/evidence';
-import { summariseFreshness } from '../../../lib/engines/complianceFreshness';
+import { summariseFreshness, complianceFreshness } from '../../../lib/engines/complianceFreshness';
+import StaleConfigBanner from '../../../components/compliance/StaleConfigBanner';
 import {
   COVERAGE_CLAIM,
   buildStandardCoverage,
@@ -252,6 +253,24 @@ async function getFleetCompliance(dbPool) {
 // chore. And it says the score is still REAL evidence about an OLD config,
 // because wording it as garbage pushes people to ignore the page rather than
 // fix the collection.
+// ⛔ The stale-config panel is a SHARED component
+// (components/compliance/StaleConfigBanner.js), not a local copy: the
+// per-device page shows the same thing and a second hand-written version would
+// drift into a different claim. The fleet banner below stays here because it is
+// a roll-up with no per-device equivalent.
+
+// ⛔ Same query as the per-device page's getLatestConfigCollectedAt(). The
+// EVIDENCE time, which is not the audit time -- see
+// lib/engines/complianceFreshness.js.
+async function getLatestConfigCollectedAt(dbPool, deviceId) {
+  const { rows } = await dbPool.query(
+    `SELECT collected_at FROM device_configs
+     WHERE device_id = $1 ORDER BY collected_at DESC LIMIT 1`,
+    [deviceId]
+  );
+  return rows.length ? rows[0].collected_at : null;
+}
+
 function freshnessBanner(devices) {
   // ⛔ Graded on configCollectedAt, not lastRunAt -- an evaluation cannot be
   // more current than the configuration it read.
@@ -623,6 +642,7 @@ export default async function CompliancePage({ searchParams }) {
     { pass: 0, fail: 0, warning: 0, na: 0 }
   );
   const complianceAnswer = buildDeviceComplianceAnswer(statusCounts, selected.name);
+  const selectedConfigAt = await getLatestConfigCollectedAt(pool, selected.id);
   const complianceEvidence = deviceComplianceEvidence(statusCounts, selected.name);
   const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
   const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
@@ -671,6 +691,11 @@ export default async function CompliancePage({ searchParams }) {
       {viewToggle(view)}
 
       <DeviceSelect devices={activeDevices} selectedId={selected.id} />
+
+      <StaleConfigBanner
+        freshness={complianceFreshness({ evidenceAt: selectedConfigAt, evaluatedAt: lastRunAt }, new Date())}
+        device={selected}
+      />
 
       {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={selected.id} />}
 
