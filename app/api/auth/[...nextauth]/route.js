@@ -456,6 +456,34 @@ export const authOptions = {
           // DB unreachable — fail closed rather than trust a stale role.
           token.role = null;
         }
+
+        // ⛔ WHETHER THIS ACCOUNT IS DEVICE-SCOPED TRAVELS IN THE TOKEN, AND
+        // ONLY THE BOOLEAN DOES. middleware.js runs before any route and cannot
+        // reach the database, so without this the coverage register would be a
+        // build-time document enforcing nothing at runtime — which is exactly
+        // what it was when scoping first shipped in v2.168.0.
+        //
+        // ⛔ THE DEVICE LIST IS DELIBERATELY NOT CARRIED. A JWT is client-held
+        // and this one already lives for up to 30 days; putting the granted ids
+        // in it would both leak which firewalls exist and let a stale copy
+        // decide access. The boolean only routes the request; WHICH devices are
+        // visible is re-read from the database by every scope-aware surface.
+        //
+        // ⛔ RE-READ ON EVERY TOKEN USE, beside the role, so granting or
+        // revoking a scope takes effect immediately rather than after the JWT
+        // expires — and FAILS CLOSED to `true` on an error, which is the
+        // restrictive direction here: a scoped user briefly seeing fewer
+        // screens is recoverable, an unscoped one being handed the fleet is
+        // not.
+        try {
+          const sc = await pool.query(
+            'SELECT 1 FROM user_device_scopes WHERE user_id = $1 LIMIT 1',
+            [token.id]
+          );
+          token.deviceScoped = sc.rows.length > 0;
+        } catch {
+          token.deviceScoped = true;
+        }
       }
 
       return token;

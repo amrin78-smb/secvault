@@ -1629,6 +1629,21 @@ scope-aware yet.** Partial coverage therefore degrades to LESS access, never mor
 real product state, not a TODO — a scoped user gets a smaller product, honestly described. Unscoped
 accounts (every account that exists today) are completely unaffected.
 
+⛔ **THE REGISTER IS ENFORCED IN `middleware.js`, AND IN v2.168.0 IT WAS NOT.** Every surface was
+classified and a test failed the build on an unclassified one — and nothing called any of it at
+runtime, so a scoped account would still have been served the whole fleet on `/compliance`. The
+default-deny property the design rests on was documented, completeness-tested and unenforced: a
+guard that cannot fire, which is the defect this codebase names most often. `lib/deviceScopePaths.js`
+compiles the register into URL matchers and middleware refuses a `blocked` path when the token says
+the account is scoped. ⛔ The token carries **only the boolean**, never the granted ids — a JWT is
+client-held and long-lived, so the list would both leak which firewalls exist and let a stale copy
+decide access. WHICH devices are visible is re-read from the database by every aware surface.
+⛔ The flag is re-read beside the role on every token use and **fails closed to `true`** (the
+restrictive direction here). ⛔ **First match wins, most specific first** — a dynamic segment
+otherwise shadows its literal sibling, and an `aware` literal under a `blocked` dynamic neighbour
+would be refused for a reason nobody could find. That rule cannot be exercised by the live register
+today, so a test pins it against a synthetic one.
+
 ⛔ **`lib/deviceScopeCoverage.js` CLASSIFIES EVERY ROUTE AND PAGE** as `aware` / `blocked` /
 `no-device-data`, and `tests/deviceScopeCoverage.test.js` fails the build when a surface is on none
 of them — so a new route is a deliberate decision, never a default. It also re-derives the

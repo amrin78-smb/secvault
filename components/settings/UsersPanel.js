@@ -17,6 +17,7 @@ import Badge from '../ui/Badge';
 import { ASSIGNABLE_ROLES, ROLE_LABELS, ROLE_DESCRIPTIONS } from '../../lib/rbac';
 import Button from '../ui/Button';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import DeviceScopeEditor from './DeviceScopeEditor';
 
 // ⛔ RED IS RESERVED FOR DANGER. 'admin' was `danger`, so every administrator
 // wore the same red this product uses for "critically exposed" and
@@ -39,6 +40,30 @@ export default function UsersPanel() {
 // app/api/users/route.js. A create form that defaults to a powerful role
 // makes over-granting the path of least resistance.
   const [newRole, setNewRole] = useState('operator');
+  // Per-user device scope (v2.169.0). `scopes` is keyed by user id; a missing
+  // entry renders as a dash rather than as "All firewalls", because not having
+  // READ the scope yet is not the same fact as the account having none.
+  const [scopes, setScopes] = useState({});
+  const [devices, setDevices] = useState([]);
+  const [scopeFor, setScopeFor] = useState(null);
+
+  // ⛔ Best-effort: a failure here must not take down user management. The
+  // column degrades to a dash, which reads as "not known" rather than
+  // inventing either answer.
+  async function loadScopes(list) {
+    try {
+      const res = await fetch('/api/devices');
+      if (res.ok) setDevices(await res.json());
+    } catch { /* column still renders, editor reports its own error */ }
+    const out = {};
+    await Promise.all((list || []).map(async (u) => {
+      try {
+        const r = await fetch(`/api/users/${u.id}/device-scope`);
+        if (r.ok) out[u.id] = await r.json();
+      } catch { /* leave this user's cell as a dash */ }
+    }));
+    setScopes(out);
+  }
 
   async function loadUsers() {
     try {
@@ -53,6 +78,7 @@ export default function UsersPanel() {
       setUsers(data.users || []);
       setVisible(true);
       setLoadError(false);
+      loadScopes(data.users || []);
     } catch (err) {
       // Network-level failure (fetch() rejected) -- distinct from a 403.
       // Keep the panel visible and show a retry-able error instead of
@@ -158,13 +184,22 @@ export default function UsersPanel() {
       </CardHeader>
       <CardBody>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {scopeFor && (
+        <DeviceScopeEditor
+          user={scopeFor}
+          devices={devices}
+          onClose={() => setScopeFor(null)}
+          onSaved={(userId, data) => setScopes((prev) => ({ ...prev, [userId]: data }))}
+        />
+      )}
       {users && users.length > 0 && (
         <Table>
           <thead>
             <tr>
-              <th style={{ width: '40%' }}>Username</th>
-              <th style={{ width: '20%' }}>Role</th>
-              <th style={{ width: '40%' }}>Actions</th>
+              <th style={{ width: '26%' }}>Username</th>
+              <th style={{ width: '14%' }}>Role</th>
+              <th style={{ width: '22%' }}>Firewalls</th>
+              <th style={{ width: '38%' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -176,7 +211,27 @@ export default function UsersPanel() {
                     {ROLE_LABELS[u.role] || u.role}
                   </Badge>
                 </td>
+                {/* ⛔ "All firewalls" is the DEFAULT and is drawn neutrally,
+                    not as a warning: it is how every account has always worked,
+                    and tinting it would make the normal state look wrong. */}
+                <td>
+                  {(() => {
+                    const sc = scopes[u.id];
+                    if (!sc) return <span style={{ color: 'var(--unmeasured)' }}>&mdash;</span>;
+                    if (sc.state !== 'scoped') {
+                      return <span style={{ color: 'var(--text-secondary)' }}>All firewalls</span>;
+                    }
+                    return (
+                      <span title={(sc.devices || []).map((d) => d.name).join(', ')}>
+                        {sc.devices.length} of {devices.length}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button variant="secondary" onClick={() => setScopeFor(u)}>
+                    Firewalls
+                  </Button>
                   <select
                     className="select"
                     value={u.role}

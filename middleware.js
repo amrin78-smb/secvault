@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { blockedSurfaceFor } from './lib/deviceScopePaths';
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
@@ -10,6 +11,16 @@ export async function middleware(request) {
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    if (isRefusedByDeviceScope(token, pathname)) {
+      return NextResponse.json(
+        {
+          error: 'This account is restricted to specific firewalls, and this endpoint does not '
+            + 'yet support that restriction.',
+          deviceScoped: true,
+        },
+        { status: 403 }
+      );
+    }
     return NextResponse.next();
   }
 
@@ -18,7 +29,32 @@ export async function middleware(request) {
     return NextResponse.redirect(loginUrl);
   }
 
+  if (isRefusedByDeviceScope(token, pathname)) {
+    // ⛔ REDIRECTED TO THE ONE PLACE THIS ACCOUNT CAN WORK, not shown a bare
+    // 403. A restricted account meeting a dead end on the page it lands on
+    // after signing in reads as a broken product, and the person who set the
+    // restriction is not the person looking at the screen.
+    const to = new URL('/devices', request.url);
+    to.searchParams.set('scopeBlocked', pathname);
+    return NextResponse.redirect(to);
+  }
+
   return NextResponse.next();
+}
+
+// ⛔ THE RUNTIME HALF OF THE COVERAGE REGISTER. Without this,
+// lib/deviceScopeCoverage.js is a build-time document enforcing nothing —
+// which is exactly what it was when scoping first shipped: every surface was
+// classified, a test failed the build on an unclassified one, and a scoped
+// account was still served the whole fleet on /compliance.
+//
+// ⛔ ONLY SCOPED ACCOUNTS ARE AFFECTED. `deviceScoped` is false for every
+// account that has no scope rows, which is every account that exists today, so
+// this changes nothing for them. The flag is re-read from the database on every
+// token use beside the role (see the jwt callback) and fails closed to `true`.
+function isRefusedByDeviceScope(token, pathname) {
+  if (!token || token.deviceScoped !== true) return false;
+  return blockedSurfaceFor(pathname) !== null;
 }
 
 export const config = {

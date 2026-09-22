@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.169.0': [
+    'Firewall restrictions are now actually enforced. In the previous release the rules were written down and checked at build time but nothing applied them while the product was running — a restricted account would still have been shown the whole fleet on the compliance and vulnerability screens.',
+    'Restrictions are also now settable from Settings → Users. Each account shows whether it sees all firewalls or a subset, and the editor spells out that saving with none selected grants EVERY firewall rather than none.',
+    'A restricted account reaching a screen that does not yet support restrictions is sent to the firewall list and told which screen was withheld and why, rather than meeting a dead end.',
+    'No account is affected unless a restriction has been set for it. Every existing account continues to see everything.',
+    'The enforcement was missing because the check existed and was never called — the failure this codebase guards against most often. It is now pinned by tests that exercise it at the URL level, including a case the live configuration cannot produce on its own.',
+  ],
   '2.168.0': [
     'New: a user account can be restricted to specific firewalls. Until now every account saw the whole fleet, which ruled out an MSP, a holding company, or simply letting a regional team see only its own firewalls.',
     'Nothing changes for any existing account. An account with no restriction set sees everything, exactly as before — and clearing a restriction WIDENS access rather than revoking it, which the product states rather than leaving you to find out.',

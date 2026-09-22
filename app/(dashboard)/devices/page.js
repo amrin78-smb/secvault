@@ -173,6 +173,15 @@ export default async function DevicesPage({ searchParams }) {
   const deviceScope = await loadScopeForSession(
     await getServerSession(authOptions), pool
   );
+  // ⛔ SET BY middleware.js WHEN IT REDIRECTED A SCOPED ACCOUNT HERE. Without
+  // it the person lands on a different page than the one they asked for, with
+  // no explanation, and concludes the product is broken -- which is worse than
+  // a refusal, because the person looking at the screen is not the person who
+  // set the restriction. Displayed as INFORMATION, not danger: nothing has
+  // gone wrong.
+  const blockedFrom = typeof searchParams?.scopeBlocked === 'string'
+    ? searchParams.scopeBlocked.slice(0, 120)
+    : null;
   const scopeNarrowed = isScoped(deviceScope) || deviceScope.state === SCOPE_STATES.UNKNOWN;
   const allRows = scopeNarrowed ? filterDevices(deviceScope, inventoryRows) : inventoryRows;
   const fleetTiles = scopeNarrowed ? computeTiles(allRows) : inventoryTiles;
@@ -274,6 +283,22 @@ export default async function DevicesPage({ searchParams }) {
       )}
 
       <DeviceInventoryTiles tiles={tiles} />
+
+      {blockedFrom && (
+        <div style={{
+          padding: '10px 12px',
+          borderRadius: 'var(--radius-sm)',
+          background: 'var(--tint-info)',
+          color: 'var(--tint-info-fg)',
+          fontSize: 'var(--text-sm)',
+          lineHeight: 1.6,
+        }}>
+          <strong>Your account is restricted to specific firewalls.</strong>{' '}
+          <code style={{ fontFamily: 'var(--font-mono)' }}>{blockedFrom}</code> does not yet
+          support that restriction, so it is not shown rather than showing you the whole fleet.
+          Ask a Super Admin if you need it.
+        </div>
+      )}
 
       <DeviceFilters
         vendors={vendors}
