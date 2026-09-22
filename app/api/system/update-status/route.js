@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.165.0': [
+    'Compliance scores now state how old they are. Two of the sixteen firewalls were being scored on configurations collected 10 and 46 days ago, shown beside fourteen twelve-hour-old ones with nothing to tell them apart.',
+    'The age shown is the age of the CONFIGURATION, not of the last check run — and those are not the same number. On TSR_EKC the checks had already been re-run 18 days after the last successful collection, so the run time made the evidence look 18 days newer than it was.',
+    'That also answers "can we just re-run the checks": no. The checks read whatever configuration is newest on file, so re-running them on a firewall that has stopped being collectable puts a fresh date on month-old evidence. The fleet and per-firewall pages now say so and link to collection instead.',
+    'The fleet page carries a banner naming which firewalls are behind, and each row shows an age rather than a bare timestamp.',
+    'Scores themselves are unchanged — a stale 60% is still 60% of what was measured. What was missing was the date beside it.',
+  ],
   '2.164.1': [
     'The previous update still reported "completed WITH ERRORS" even though it contained the fix for exactly that. This update is the one where the fix takes effect.',
     'The reason is worth knowing: the updater replaces itself while it runs. It pulls the new version of its own script at step 3, but Windows already loaded the old copy into memory at step 1 — so a change to the update process always applies one update later.',

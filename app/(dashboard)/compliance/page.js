@@ -5,6 +5,7 @@ import AnswerHeader from '../../../components/ui/AnswerHeader';
 import { EvidenceMark } from '../../../components/ui/Evidence';
 import { buildDeviceComplianceAnswer } from '../../../lib/answers';
 import { deviceComplianceEvidence } from '../../../lib/evidence';
+import { summariseFreshness } from '../../../lib/engines/complianceFreshness';
 import {
   COVERAGE_CLAIM,
   buildStandardCoverage,
@@ -167,11 +168,22 @@ function accumulateCheckSets(sets, standardsForRow, checkSlug, status) {
 // that view is unchanged.
 async function getFleetCompliance(dbPool) {
   const { rows } = await dbPool.query(
+    // cfg.collected_at is the EVIDENCE time -- what these checks were actually
+    // evaluated against. It is a separate fact from af.detected_at (when they
+    // last ran) and it is the one freshness grades on; see
+    // lib/engines/complianceFreshness.js for why the audit time flatters.
+    // LATERAL rather than a join on device_configs: that table holds one row
+    // per pull per device and we want exactly the newest.
     `SELECT d.id AS device_id, d.name AS device_name, d.vendor AS vendor,
-            af.status, af.detected_at, ac.standards, ac.check_id AS check_slug
+            af.status, af.detected_at, ac.standards, ac.check_id AS check_slug,
+            cfg.collected_at AS config_collected_at
      FROM devices d
      LEFT JOIN audit_findings af ON af.device_id = d.id
      LEFT JOIN audit_checks ac ON ac.id = af.check_id
+     LEFT JOIN LATERAL (
+       SELECT collected_at FROM device_configs
+       WHERE device_id = d.id ORDER BY collected_at DESC LIMIT 1
+     ) cfg ON true
      WHERE d.active = true
      ORDER BY d.name ASC`
   );
@@ -192,6 +204,7 @@ async function getFleetCompliance(dbPool) {
         deviceName: row.device_name,
         vendor: row.vendor,
         lastRunAt: null,
+        configCollectedAt: row.config_collected_at || null,
         standards: emptyStandardCounts(),
       };
       byId.set(row.device_id, device);
@@ -228,6 +241,46 @@ async function getFleetCompliance(dbPool) {
 // Active devices for the DeviceSelect dropdown (Cards view). Deliberately
 // slim (id/name/vendor only) -- this is all DeviceSelect and the "which
 // device is selected" resolution below need.
+// ⛔ A SCORE WITHOUT A DATE IS A CLAIM ABOUT TODAY. Compliance runs inside
+// collectAndStore, gated on `result.configCollected` — so a firewall that stops
+// being collectable stops being audited and its findings simply freeze. Live
+// 2026-09-22: TSR_EKC's score was 28 days old and TSR-TL's 10, rendered beside
+// fourteen ~12-hour-old ones with nothing to tell them apart.
+//
+// ⛔ IT NAMES THE DEVICES. "2 firewalls are behind" sends someone hunting
+// through the table; naming them is the difference between a warning and a
+// chore. And it says the score is still REAL evidence about an OLD config,
+// because wording it as garbage pushes people to ignore the page rather than
+// fix the collection.
+function freshnessBanner(devices) {
+  // ⛔ Graded on configCollectedAt, not lastRunAt -- an evaluation cannot be
+  // more current than the configuration it read.
+  const f = summariseFreshness(
+    devices.map((d) => ({ deviceName: d.deviceName, lastRunAt: d.configCollectedAt })),
+    new Date()
+  );
+  if (f.behind.length === 0) return null;
+  const shown = f.behind.slice(0, 6).join(', ');
+  const more = f.behind.length > 6 ? `, and ${f.behind.length - 6} more` : '';
+  return (
+    <div style={{
+      margin: '0 0 var(--s4)',
+      padding: '10px 12px',
+      borderRadius: 'var(--radius-sm)',
+      background: 'var(--tint-warn)',
+      color: 'var(--tint-warn-fg)',
+      fontSize: 'var(--text-sm)',
+      lineHeight: 1.6,
+    }}>
+      <strong>{f.behind.length} of {f.total} firewalls were last collected some time ago</strong>
+      {' — '}{shown}{more}. Compliance checks read the newest configuration on file, so these
+      scores are real but describe those firewalls as they were then, not as they are now.
+      Re-running the checks would only re-read the same old configuration — what needs fixing
+      is the collection.
+    </div>
+  );
+}
+
 async function getActiveDevicesForSelect(dbPool) {
   const { rows } = await dbPool.query(
     `SELECT id, name, vendor FROM devices WHERE active = true ORDER BY name ASC`
@@ -499,6 +552,7 @@ export default async function CompliancePage({ searchParams }) {
         />
         {viewToggle(view)}
         {coverageLegend(fleetCoverage)}
+        {freshnessBanner(devices)}
         <ComplianceMatrix devices={devices} />
       </div>
     );

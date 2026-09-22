@@ -221,3 +221,40 @@ design is in the schema comment and in CLAUDE.md. ⛔ Keyed on `(device_id, chec
 `audit_findings` is DELETE+reinserted every run, and the slug is `audit_checks.check_id` (TEXT)
 while `audit_findings.check_id` is a UUID FK to `audit_checks.id` — two columns, same name, two
 types. Every query goes through `audit_checks`.
+
+---
+
+## Freshness — the age of a score is a second fact (v2.165.0)
+
+`lib/engines/complianceFreshness.js` (pure; no pool). Rendered on `/compliance` (fleet banner +
+per-row age) and `/compliance/[deviceId]` (header + stale banner).
+
+⛔ **GRADED ON THE CONFIG COLLECTION TIME, NEVER ON `audit_findings.detected_at`.**
+`runComplianceAuditForDevice` calls `getLatestConfigParsed()` — the newest `device_configs` row
+**whatever its age** — and stamps `detected_at = now()`. The two timestamps genuinely diverge.
+Measured 2026-09-22:
+
+| device | config collected | checks last run | gap |
+|---|---|---|---|
+| TSR_EKC | 1,116h (46d) | 669h (28d) | **18 days** |
+| TSR-TL | 252h | 252h | 0 |
+| the other 14 | ~12h | ~12h | 0 |
+
+An audit had already run 18 days after the last successful collection, so the run time understated
+the real age of the evidence by that much. ⛔ **A "run checks now" press today would understate it
+by 46 days** — a brand-new timestamp over month-old evidence. That is this codebase's signature bug
+(a failed read rendering as a fact) reachable from a button, which is why the stale banner links to
+device COLLECTION and says re-running would only re-read the same old config.
+
+- States: `fresh` / `ageing` / `stale` / `never` / `unknown`. ⛔ `never` and `unknown` are separate
+  from `stale`, and a future timestamp is `unknown` (clock disagreement), never fresh.
+- ⛔ **Thresholds are MULTIPLES OF `CONFIG_PULL_INTERVAL_HOURS` (2x ageing, 7x stale), not absolute
+  hours** — compliance rides the config pull, so a 6-hourly fleet and a weekly one do not share a
+  definition of late. Read at call time; junk/0/negative falls back to 24, never to 0.
+- `complianceFreshness({evidenceAt, evaluatedAt})` also returns `evaluationLagHours` and
+  `evaluatedAgainstOldConfig`. ⛔ The lag is **null, never 0**, when either end is unmeasurable —
+  0 would read as "evaluated the moment it was collected".
+- ⛔ **It changes no score.** A stale 60% is still 60% of what was measured; what was missing was
+  the date beside it.
+
+Pinned by `tests/complianceFreshness.test.js` (21 cases, 13 mutations verified).

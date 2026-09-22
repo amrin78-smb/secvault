@@ -7,6 +7,7 @@ import PageHeader from '../../../../components/ui/PageHeader';
 import Badge from '../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../components/ui/Card';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
+import { complianceFreshness, ageLabel, freshnessNote, STATES } from '../../../../lib/engines/complianceFreshness';
 import StandardCard from '../../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
 import ExceptionsPanel from '../../../../components/compliance/ExceptionsPanel';
@@ -38,6 +39,15 @@ export const dynamic = 'force-dynamic';
 // ever fed the table), so getFindings()/its query here is intentionally
 // slimmer than the standards page's own copy.
 
+// ⛔ 'Never run' and 'Never collected' are different facts and the compliance
+// header shows both timestamps, so the empty wording cannot be shared.
+function formatCollected(value) {
+  if (!value) return 'never collected';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'collection time unreadable';
+  return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
 function formatDateTime(value) {
   if (!value) return 'Never run';
   const d = new Date(value);
@@ -61,6 +71,20 @@ async function getDevice(dbPool, id) {
 // Slimmer than the standards page's own copy of this query — this page only
 // ever needs status/standards/name for the cards' aggregate stats and
 // failed-check quick-list, never matched_rule_ids/rule evidence.
+// ⛔ THE EVIDENCE TIME, WHICH IS NOT THE AUDIT TIME.
+// runComplianceAuditForDevice() reads getLatestConfigParsed() -- the newest
+// device_configs row, whatever its age -- and stamps detected_at = now(). So
+// the audit timestamp says when we last asked the question, and THIS says how
+// old the answer's evidence is. Only the second is a freshness claim.
+async function getLatestConfigCollectedAt(dbPool, deviceId) {
+  const { rows } = await dbPool.query(
+    `SELECT collected_at FROM device_configs
+     WHERE device_id = $1 ORDER BY collected_at DESC LIMIT 1`,
+    [deviceId]
+  );
+  return rows.length ? rows[0].collected_at : null;
+}
+
 async function getFindings(dbPool, deviceId) {
   const result = await dbPool.query(
     `SELECT af.id, ac.check_id AS check_slug, ac.name, ac.standards, af.status, af.detected_at
@@ -209,6 +233,16 @@ export default async function DeviceCompliancePage({ params }) {
     return !latest || new Date(f.detectedAt) > new Date(latest) ? f.detectedAt : latest;
   }, null);
 
+  // ⛔ THE AGE OF THIS SCORE IS A SEPARATE FACT FROM THE SCORE. The audit
+  // runs inside collectAndStore gated on `result.configCollected`, so a
+  // firewall that stops being collectable stops being audited and every number
+  // on this page simply freezes. Measured live 2026-09-22, TSR_EKC's page was
+  // rendering a 27-day-old result with nothing on it saying so.
+  const configCollectedAt = await getLatestConfigCollectedAt(pool, device.id);
+  const freshness = complianceFreshness(
+    { evidenceAt: configCollectedAt, evaluatedAt: lastRunAt }, new Date()
+  );
+
   // Derived from the already-fetched `findings` array -- no new query needed.
   // Feeds each StandardCard's "Failed Checks" quick-list, linking straight
   // to the per-check detail page (a REAL page navigation) -- see that
@@ -243,7 +277,13 @@ export default async function DeviceCompliancePage({ params }) {
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
-            <span>Last run: {formatDateTime(lastRunAt)}</span>
+            <span title={freshnessNote(freshness, device.name)}>
+              Configuration collected {ageLabel(freshness)}
+              <span style={{ color: 'var(--text-muted)' }}>
+                {' '}({formatCollected(configCollectedAt)}); checks last run{' '}
+                {formatDateTime(lastRunAt)}
+              </span>
+            </span>
           </span>
         }
         actions={
@@ -261,6 +301,34 @@ export default async function DeviceCompliancePage({ params }) {
           </>
         }
       />
+
+      {(freshness.state === STATES.STALE || freshness.state === STATES.AGEING) && (
+        <div style={{
+          padding: '10px 12px',
+          borderRadius: 'var(--radius-sm)',
+          background: 'var(--tint-warn)',
+          color: 'var(--tint-warn-fg)',
+          fontSize: 'var(--text-sm)',
+          lineHeight: 1.6,
+        }}>
+          <strong>These checks describe a configuration collected {ageLabel(freshness)}.</strong>{' '}
+          {freshnessNote(freshness, device.name)}
+          {freshness.evaluatedAgainstOldConfig && (
+            <>
+              {' '}The checks themselves were last re-run{' '}
+              {ageLabel(freshness.evaluation)}, but against that same old configuration — which
+              is why the two dates differ.
+            </>
+          )}
+          {' '}
+          {/* ⛔ The useful action is RE-COLLECTION, not re-running the checks:
+              the auditor reads the newest device_configs row whatever its age,
+              so Run Audit would stamp a new date on the same old evidence. */}
+          <Link href={`/devices/${device.id}`} style={{ color: 'inherit', fontWeight: 600 }}>
+            Collect from {device.name}
+          </Link>{' '}to refresh the configuration these checks read.
+        </div>
+      )}
 
       {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={device.id} />}
 

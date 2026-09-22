@@ -103,6 +103,18 @@ out" and names how many rules carried traffic. Same failure as the work queue's 
 
 Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
 
+## lib/engines/complianceFreshness.js (v2.165.0)
+
+Pure. How old is a compliance result? `freshnessOf(evidenceAt, now, env)` grades ONE timestamp into
+`fresh|ageing|stale|never|unknown` at 2x/7x `CONFIG_PULL_INTERVAL_HOURS`;
+`complianceFreshness({evidenceAt, evaluatedAt})` takes both, grades on the EVIDENCE (config
+collection) time and reports `evaluationLagHours` / `evaluatedAgainstOldConfig`. Plus `ageLabel`,
+`freshnessNote`, `summariseFreshness` (fleet roll-up naming who is behind), `pullIntervalHours`.
+
+⛔ Grading on `audit_findings.detected_at` flatters: the auditor reads the newest `device_configs`
+row whatever its age and stamps `now()`. Full rationale and the live measurements:
+`.ai-codex/compliance-pipeline.md`.
+
 ## lib/engines/complianceCoverage.js (v2.163.0)
 
 PURE, no pool. `COVERAGE_CLAIM`, `GRADES`, `GRADE_*`, `gradeFor`, `buildStandardCoverage`,

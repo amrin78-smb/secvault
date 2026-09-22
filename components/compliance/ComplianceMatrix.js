@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+import { complianceFreshness, ageLabel, freshnessNote } from '../../lib/engines/complianceFreshness';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
 
@@ -112,6 +113,18 @@ function formatLastRun(value) {
   return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
+// ⛔ A TIMESTAMP IS NOT A WARNING. This column printed an ISO date and nothing
+// else, so "2026-08-25" and "2026-09-22" carried identical visual weight and a
+// 27-day-old score sat beside a 12-hour-old one unremarked. Measured live
+// 2026-09-22: TSR_EKC 28 days, TSR-TL 10 days, the other fourteen ~12 hours.
+// The age and the state now lead, with the exact timestamp kept underneath.
+const AGE_TONE = {
+  stale: { color: 'var(--tint-warn-fg)', weight: 600 },
+  ageing: { color: 'var(--tint-warn-fg)', weight: 500 },
+  unknown: { color: 'var(--unmeasured)', weight: 400 },
+  fresh: { color: 'var(--text-secondary)', weight: 400 },
+};
+
 // Fleet-wide compliance matrix: rows = devices, columns = the 4 standards,
 // cells = a colored score chip linking into that device's compliance page.
 // Purely presentational, no local state -- stays a plain server-renderable
@@ -163,7 +176,31 @@ export default function ComplianceMatrix({ devices }) {
             </td>
             <td style={{ color: 'var(--text-secondary)' }}>
               {d.lastRunAt ? (
-                formatLastRun(d.lastRunAt)
+                (() => {
+                  // ⛔ GRADED ON THE CONFIG TIME, NOT THE AUDIT TIME. Live
+                  // 2026-09-22 TSR_EKC's audit had run 18 days AFTER its last
+                  // successful collection, so the audit timestamp understated
+                  // the real age of the evidence by that much.
+                  const f = complianceFreshness({
+                    evidenceAt: d.configCollectedAt || d.lastRunAt,
+                    evaluatedAt: d.lastRunAt,
+                  });
+                  const tone = AGE_TONE[f.state] || AGE_TONE.fresh;
+                  return (
+                    <span title={freshnessNote(f, d.deviceName)}>
+                      <span style={{ color: tone.color, fontWeight: tone.weight }}>
+                        {ageLabel(f)}
+                      </span>
+                      <span style={{
+                        display: 'block',
+                        fontSize: 'var(--text-xs)',
+                        color: 'var(--text-muted)',
+                      }}>
+                        {formatLastRun(d.configCollectedAt || d.lastRunAt)}
+                      </span>
+                    </span>
+                  );
+                })()
               ) : (
                 <NotMeasured
                   text="Never run"
