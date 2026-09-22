@@ -2,8 +2,14 @@ import Link from 'next/link';
 import { pool } from '../../../lib/db';
 import PageHeader from '../../../components/ui/PageHeader';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
+import { EvidenceMark } from '../../../components/ui/Evidence';
 import { buildDeviceComplianceAnswer } from '../../../lib/answers';
 import { deviceComplianceEvidence } from '../../../lib/evidence';
+import {
+  COVERAGE_CLAIM,
+  buildStandardCoverage,
+  coverageEvidence,
+} from '../../../lib/engines/complianceCoverage';
 import Badge from '../../../components/ui/Badge';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -59,13 +65,110 @@ function emptyStandardCounts() {
   return standards;
 }
 
+// ⛔ THE DENOMINATOR BEHIND EVERY PER-STANDARD PERCENTAGE ON THIS PAGE.
+//
+// Until v2.163.0 this page printed "NIST 42%" and let it stand for that
+// framework's posture. It never was: the curated library is 45 checks, a check
+// carries a `standards` ARRAY, and the five mappings measured live are
+// CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 / NIST 7. So the NIST figure
+// is computed over SEVEN checks, three of which are vendor-scoped and can
+// therefore never all run on one firewall. The arithmetic was always right; the
+// claim the bare figure invited was not.
+//
+// `applicable` is counted against the vendors actually in scope, because a
+// check scoped to another vendor can never run and must not sit in a
+// denominator as though an audit might one day answer it.
+//
+// ⛔ A FAILED READ RETURNS null, NEVER `{mapped: 0}`. "0 of 45 checks map to
+// PCI DSS" is a claim, and a false one that reads as "SecVault does not support
+// this standard" — the same call lib/engines/complianceReport.js's
+// standardCoverage() already makes for the scoped PDF.
+async function getCheckLibraryCoverage(dbPool, vendors) {
+  const scope = Array.isArray(vendors) ? vendors.filter(Boolean) : [];
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT s AS standard,
+              count(*)::int AS mapped,
+              count(*) FILTER (WHERE ac.vendor IS NULL OR ac.vendor = ANY($1::text[]))::int AS applicable,
+              (SELECT count(*)::int FROM audit_checks) AS library_total
+       FROM audit_checks ac, unnest(ac.standards) s
+       GROUP BY s`,
+      [scope]
+    );
+    if (rows.length === 0) return null;
+    const byStandard = {};
+    let libraryTotal = null;
+    for (const r of rows) {
+      if (typeof r.standard !== 'string' || !Number.isFinite(Number(r.mapped))) continue;
+      byStandard[r.standard] = { mapped: Number(r.mapped), applicable: Number(r.applicable) };
+      if (Number.isFinite(Number(r.library_total))) libraryTotal = Number(r.library_total);
+    }
+    if (libraryTotal === null) return null;
+    return { libraryTotal, byStandard };
+  } catch (err) {
+    console.warn('[compliance] check-library coverage read failed, coverage will report as unread:', err.message);
+    return null;
+  }
+}
+
+// Turns whatever getCheckLibraryCoverage() returned (possibly null) plus the
+// per-standard tallies this page already has into one coverage statement per
+// standard. Pure assembly — the judgement lives in lib/engines/complianceCoverage.js
+// so the page, the All Checks page and the PDF cannot word it three ways.
+function buildCoverage({ library, stats, checkSets, scope, deviceCount }) {
+  const out = {};
+  for (const s of STANDARDS) {
+    const lib = library && library.byStandard[s.key] ? library.byStandard[s.key] : null;
+    const counts = stats[s.key] || {};
+    const sets = checkSets ? checkSets[s.key] : null;
+    out[s.key] = buildStandardCoverage({
+      standard: s.key,
+      label: s.label,
+      scope,
+      deviceCount,
+      libraryTotal: library ? library.libraryTotal : null,
+      mapped: lib ? lib.mapped : null,
+      applicable: lib ? lib.applicable : null,
+      evaluatedChecks: sets ? sets.evaluated.size : null,
+      answeredChecks: sets ? sets.answered.size : null,
+      findings: {
+        pass: counts.pass,
+        fail: counts.fail,
+        warning: counts.warning,
+        na: counts.na,
+      },
+      scorePct: counts.scorePct === undefined ? null : counts.scorePct,
+    });
+  }
+  return out;
+}
+
+function emptyCheckSets() {
+  const sets = {};
+  for (const s of STANDARDS) sets[s.key] = { evaluated: new Set(), answered: new Set() };
+  return sets;
+}
+
+// ⛔ DISTINCT CHECKS, NOT FINDING ROWS. On a fleet a finding is a (device,
+// check) PAIR, so 91 NIST finding rows come from at most 7 distinct questions.
+// Counting rows here would restate the library as fourteen times larger than it
+// is — the same two-units trap lib/evidence.js's CVE builder documents.
+function accumulateCheckSets(sets, standardsForRow, checkSlug, status) {
+  if (!checkSlug) return;
+  for (const key of standardsForRow) {
+    if (!sets[key]) continue;
+    sets[key].evaluated.add(checkSlug);
+    if (status && status !== 'na') sets[key].answered.add(checkSlug);
+  }
+}
+
 // Only used by the "table" (Compare firewalls) view now -- feeds
 // ComplianceMatrix's device x standard grid. Still fleet-wide by design;
 // that view is unchanged.
 async function getFleetCompliance(dbPool) {
   const { rows } = await dbPool.query(
     `SELECT d.id AS device_id, d.name AS device_name, d.vendor AS vendor,
-            af.status, af.detected_at, ac.standards
+            af.status, af.detected_at, ac.standards, ac.check_id AS check_slug
      FROM devices d
      LEFT JOIN audit_findings af ON af.device_id = d.id
      LEFT JOIN audit_checks ac ON ac.id = af.check_id
@@ -73,8 +176,15 @@ async function getFleetCompliance(dbPool) {
      ORDER BY d.name ASC`
   );
 
+  // Fleet-wide per-standard totals and the DISTINCT set of checks behind them,
+  // accumulated in the same pass as the per-device grid — no second query.
+  const fleetStats = emptyStandardCounts();
+  const fleetCheckSets = emptyCheckSets();
+  const vendors = new Set();
+
   const byId = new Map();
   for (const row of rows) {
+    if (row.vendor) vendors.add(row.vendor);
     let device = byId.get(row.device_id);
     if (!device) {
       device = {
@@ -94,7 +204,10 @@ async function getFleetCompliance(dbPool) {
       if (!device.standards[key]) continue; // ignore 'CUSTOM' / anything outside the 4-tab UI
       device.standards[key][row.status] = (device.standards[key][row.status] || 0) + 1;
       device.standards[key].total += 1;
+      fleetStats[key][row.status] = (fleetStats[key][row.status] || 0) + 1;
+      fleetStats[key].total += 1;
     }
+    accumulateCheckSets(fleetCheckSets, list, row.check_slug, row.status);
   }
 
   const devices = Array.from(byId.values());
@@ -103,7 +216,13 @@ async function getFleetCompliance(dbPool) {
       device.standards[s.key].scorePct = scorePctFromCounts(device.standards[s.key]);
     }
   }
-  return devices;
+  for (const s of STANDARDS) fleetStats[s.key].scorePct = scorePctFromCounts(fleetStats[s.key]);
+  return {
+    devices,
+    fleetStats,
+    fleetCheckSets,
+    vendors: Array.from(vendors),
+  };
 }
 
 // Active devices for the DeviceSelect dropdown (Cards view). Deliberately
@@ -190,6 +309,139 @@ function aggregateStandards(findings) {
   return result;
 }
 
+// One device: each check yields at most one finding, so the distinct-check
+// count and the finding count coincide here. It is still computed as a SET,
+// because the fleet path shares the same accumulator and the two must not
+// answer the same question two ways.
+function aggregateCheckSets(findings) {
+  const sets = emptyCheckSets();
+  for (const f of findings) accumulateCheckSets(sets, f.standards, f.checkSlug, f.status);
+  return sets;
+}
+
+// ── Coverage rendering ────────────────────────────────────────────────────
+//
+// ⛔ Plain functions returning JSX, called imperatively, at module top level —
+// never components defined inside a component (CLAUDE.md's React rule), the
+// same pattern viewToggle() above and ComplianceMatrix's scoreChip() already
+// use.
+
+// The strength meter: how many checks the percentage rests on, in the product's
+// existing HUELESS vocabulary. Filled pips are --unmeasured and empty ones are
+// --hatch, because "how well do we know this" is a different axis from "how bad
+// is it" — a green or red meter here would say the evidence grade is good or
+// bad news, and it is neither. Nothing new is invented: --unmeasured, --hatch
+// and the violet EvidenceMark are the three marks this product already uses for
+// exactly this statement.
+function coveragePips(coverage) {
+  const pips = [];
+  for (let i = 0; i < coverage.pipTotal; i += 1) {
+    const on = i < coverage.pips;
+    pips.push(
+      <span
+        key={i}
+        style={{
+          width: 13,
+          height: 8,
+          flex: 'none',
+          borderRadius: 3,
+          border: '1px solid var(--border)',
+          background: on ? 'var(--unmeasured)' : 'var(--surface-subtle)',
+          backgroundImage: on ? 'none' : 'var(--hatch)',
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      title={`${coverage.gradeLabel}: ${coverage.answeredChecks === null ? 'an unknown number of' : coverage.answeredChecks} SecVault checks behind this figure`}
+      style={{ display: 'inline-flex', gap: 3, alignItems: 'center', marginTop: 4 }}
+    >
+      {pips}
+    </span>
+  );
+}
+
+// ⛔ THE FIGURE MAY NEVER APPEAR NAKED. This sits in the same grid cell as the
+// card whose percentage it qualifies, in the same reading motion — not in a
+// footnote, not behind a tooltip, and not once at the top of the page for five
+// different denominators. AnswerHeader's own coverage line established the
+// rule; this applies it per standard.
+function coverageStrip(coverage) {
+  if (!coverage) return null;
+  const evidence = coverageEvidence(coverage);
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 'var(--s2)',
+        padding: 'var(--s2) var(--s3)',
+        fontSize: 'var(--text-xs)',
+        lineHeight: 1.5,
+        color: 'var(--text-muted)',
+        borderLeft: '2px solid var(--unmeasured)',
+        background: 'var(--surface-subtle)',
+        borderRadius: 'var(--radius-sm)',
+      }}
+    >
+      {coveragePips(coverage)}
+      <span style={{ flex: '1 1 auto' }}>
+        <b style={{ color: 'var(--unmeasured)', fontWeight: 600 }}>{coverage.gradeLabel}</b>
+        {' · '}
+        {coverage.headline}
+        {coverage.detail ? '; ' : '. '}
+        {coverage.detail}
+        <span style={{ display: 'block', marginTop: 2 }}>{coverage.caveat}</span>
+      </span>
+      {evidence && <EvidenceMark evidence={evidence} subject={`${coverage.label} coverage`} />}
+    </div>
+  );
+}
+
+// The fleet table's version: five columns of bare percentages need their five
+// denominators stated once, above the grid, because the column HEADER is the
+// only place the standard is named there.
+function coverageLegend(coverageByStandard) {
+  return (
+    <Card>
+      <CardBody>
+        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+          What each column is computed over
+        </div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--s3)' }}>
+          {COVERAGE_CLAIM}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--s3)' }}>
+          {STANDARDS.map((s) => {
+            const coverage = coverageByStandard[s.key];
+            const evidence = coverage ? coverageEvidence(coverage) : null;
+            return (
+              <div key={s.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--s2)' }}>
+                {coverage && coveragePips(coverage)}
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  <b style={{ color: 'var(--text-secondary)' }}>{s.label}</b>
+                  {' — '}
+                  {coverage ? coverage.cell : '—'}
+                  {' library checks carry this mapping'}
+                  <span style={{ display: 'block', color: 'var(--unmeasured)' }}>
+                    {coverage ? coverage.gradeLabel : 'Evidence not known'}
+                    {coverage && coverage.answeredChecks !== null
+                      ? ` · ${coverage.answeredChecks} gradeable fleet-wide`
+                      : ''}
+                  </span>
+                </span>
+                {evidence && <EvidenceMark evidence={evidence} subject={`${s.label} coverage`} />}
+              </div>
+            );
+          })}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
 // Plain function returning JSX (not a nested component -- CLAUDE.md's
 // critical React rule), matching the tabLink()/scoreChip() "helper called
 // imperatively" pattern already used elsewhere in this codebase.
@@ -219,7 +471,16 @@ export default async function CompliancePage({ searchParams }) {
   const view = searchParams?.view === 'table' ? 'table' : 'cards';
 
   if (view === 'table') {
-    const devices = await getFleetCompliance(pool);
+    const fleet = await getFleetCompliance(pool);
+    const devices = fleet.devices;
+    const library = await getCheckLibraryCoverage(pool, fleet.vendors);
+    const fleetCoverage = buildCoverage({
+      library,
+      stats: fleet.fleetStats,
+      checkSets: fleet.fleetCheckSets,
+      scope: 'fleet',
+      deviceCount: devices.length,
+    });
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
@@ -237,6 +498,7 @@ export default async function CompliancePage({ searchParams }) {
           }
         />
         {viewToggle(view)}
+        {coverageLegend(fleetCoverage)}
         <ComplianceMatrix devices={devices} />
       </div>
     );
@@ -279,6 +541,20 @@ export default async function CompliancePage({ searchParams }) {
   const zones = await getDeviceZones(pool, selected.id);
 
   const standards = aggregateStandards(findings);
+
+  // ⛔ The denominator behind every donut below, computed against THIS
+  // firewall's vendor — a check scoped to another vendor can never run here and
+  // is stated as inapplicable rather than left to look like an unanswered
+  // question. Best-effort: a failed library read leaves the coverage
+  // statement reporting itself unread, never "0 of 45".
+  const library = await getCheckLibraryCoverage(pool, [selected.vendor]);
+  const coverage = buildCoverage({
+    library,
+    stats: standards,
+    checkSets: aggregateCheckSets(findings),
+    scope: 'device',
+    deviceCount: 1,
+  });
 
   // ⛔ Counted straight off the findings already fetched — no second query.
   // All four statuses are tallied, INCLUDING `na`, because the answer sentence
@@ -370,17 +646,22 @@ export default async function CompliancePage({ searchParams }) {
           const meta = STANDARD_META[s.key] || {};
           const failed = failedChecksByStandard[s.key] || [];
           return (
-            <StandardCard
-              key={s.key}
-              standard={s}
-              description={meta.description}
-              referenceUrl={meta.referenceUrl}
-              stats={standards[s.key]}
-              failedChecks={failed.slice(0, 5)}
-              failedChecksTotal={failed.length}
-              viewMoreHref={`/compliance/${selected.id}/standards#${s.key}`}
-              lastRunAt={lastRunAt}
-            />
+            // ⛔ The card and its coverage statement are ONE cell, deliberately.
+            // The percentage and the number of checks it rests on have to be
+            // read together or the figure goes back to standing alone.
+            <div key={s.key} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
+              <StandardCard
+                standard={s}
+                description={meta.description}
+                referenceUrl={meta.referenceUrl}
+                stats={standards[s.key]}
+                failedChecks={failed.slice(0, 5)}
+                failedChecksTotal={failed.length}
+                viewMoreHref={`/compliance/${selected.id}/standards#${s.key}`}
+                lastRunAt={lastRunAt}
+              />
+              {coverageStrip(coverage[s.key])}
+            </div>
           );
         })}
       </div>

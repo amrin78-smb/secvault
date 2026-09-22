@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.163.0': [
+    'Compliance no longer implies a framework score it cannot measure. Every per-standard percentage now states what it rests on — "NIST: 7 of 45 checks in SecVault’s library", with the evidence graded thin, moderate or broad — on the page, the per-firewall tabs and the PDF. The scores themselves are unchanged.',
+    'New: record an accepted risk against a failing check, with a compensating control, an owner and a mandatory expiry date. It shows as accepted, expiring, or lapsed, and lapses on its own with no job to run.',
+    '⛔ An accepted exception does NOT change the score. A failing check is still failing — the firewall is still configured that way — so the accepted count is shown beside the score, never folded into it.',
+    'Fixed: Settings → Certificate → Console address and the session timeout could not be SAVED at all — both write paths returned an error. The console address feature had never worked since it shipped.',
+    'Two new checks run on demand: every API route is now verified to be locked and to refuse bad input (375 assertions), and every database query this product issues is executed against the real schema (104 functions). The first one found the save bug above.',
+  ],
   '2.162.0': [
     'Sweep, third pass — the last of the findings worth fixing.',
     'Report date pickers were off by your timezone offset: the "Last 24 hours" preset silently omitted the most recent 7 hours and printed the wrong boundaries labelled UTC. The boxes now show your own clock and the report covers exactly what you asked for.',

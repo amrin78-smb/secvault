@@ -1,0 +1,697 @@
+// tests/dbCheckHarness.test.js
+//
+// The PURE half of scripts/dbCheck.js, fed the shapes a live run never
+// produces.
+//
+// ⛔ WHY A TEST FOR A TEST TOOL. `npm run dbcheck` talks to a production
+// database, so on this fleet it has only ever returned green. A harness that
+// has never gone red proves nothing: the whole value of the tool is in the
+// branches a healthy fleet does not exercise — the wrong column name, the
+// swallowed error, the permission refusal, the function that resolves without
+// issuing a statement. Every one of those is reproduced here from synthetic
+// input, exactly as tests/smokeHarness.test.js feeds `pageVerdict` the
+// v2.120.0 blank-page shape.
+//
+// ⛔ THIS FILE TOUCHES NO DATABASE and must never be made to. `require`ing
+// scripts/dbCheck.js opens no socket (its `main()` is behind
+// `require.main === module`), which tests/moduleLoad.test.js' rule already
+// depends on elsewhere in this repo.
+//
+// ⛔ AND IT PINS THE GUARDS, NOT JUST THE REPORT. The read-only name guard and
+// the statement guard are the only things standing between this tool and a
+// write against a live security database; a regression in either must fail a
+// build rather than be discovered by its consequences.
+
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const dc = require('../scripts/dbCheck.js');
+
+// ── 1. the read-only NAME guard ────────────────────────────────────────────
+
+test('name guard accepts the read verbs this repo actually uses', () => {
+  for (const name of [
+    'getLastSyncs', 'listIntents', 'loadFleet', 'buildRuleHygieneData',
+    'computeFleetExposure', 'gatherWorkQueue', 'queryAccessPath',
+    'summariseCloudUsage', 'evaluateSegmentation', 'correlateDeviceRules',
+    'searchEvents', 'windowCoverage', 'standardCoverage',
+  ]) {
+    assert.equal(dc.checkReadOnlyName(name).ok, true, `${name} should be accepted`);
+  }
+});
+
+test('name guard refuses every writer name that exists in lib/', () => {
+  // Real exports from this repo. Each one would mutate a production database.
+  for (const name of [
+    'storeVpnSessions', 'saveView', 'runComplianceAuditForDevice',
+    'collectAndStore', 'dispatchNotification', 'trimDetailRollups',
+    'dropOldPartitions', 'createApplication', 'updateFlow', 'deleteIntent',
+    'setCredential', 'enqueueJob', 'claimNextJob', 'finishJob', 'reapStaleJobs',
+    'activateLicense', 'clearLicense', 'recordConnectivity', 'seedAuditChecks',
+    'generateReportPdf', 'verifyRequestsForDevice', 'submitRequest',
+  ]) {
+    const v = dc.checkReadOnlyName(name);
+    assert.equal(v.ok, false, `${name} must be refused`);
+    assert.match(v.reason, /names a write|not a known read verb/);
+  }
+});
+
+test('name guard FAILS CLOSED on a verb it has never seen', () => {
+  // ⛔ The branch that earns the guard its place. A new export called
+  // `refreshFoo` or `rebuildBar` is refused until a human reads it — the cost
+  // of a wrong "allow" here is a write against a live security database.
+  for (const name of ['refreshCache', 'rebuildIndex', 'touchRow', 'mangleThings']) {
+    const v = dc.checkReadOnlyName(name);
+    assert.equal(v.ok, false, `${name} must fail closed`);
+    assert.match(v.reason, /not a known read verb/);
+  }
+});
+
+test('name guard refuses a name it cannot read at all', () => {
+  for (const name of ['', null, undefined, 'GetThings', '_getThings', '123']) {
+    assert.equal(dc.checkReadOnlyName(name).ok, false, `${JSON.stringify(name)} must be refused`);
+  }
+});
+
+test('assertReadOnlyRegistry throws and names every offender, rather than skipping them', () => {
+  // ⛔ A skipped entry is a silently shorter report, and a shorter report looks
+  // complete. So this throws.
+  assert.throws(
+    () => dc.assertReadOnlyRegistry([
+      { mod: 'lib/a.js', fn: 'getThings' },
+      { mod: 'lib/b.js', fn: 'storeThings' },
+      { mod: 'lib/c.js', fn: 'deleteThings' },
+    ]),
+    (err) => {
+      assert.match(err.message, /2 registered function\(s\) may write/);
+      assert.match(err.message, /lib\/b\.js/);
+      assert.match(err.message, /lib\/c\.js/);
+      assert.doesNotMatch(err.message, /lib\/a\.js/);
+      return true;
+    }
+  );
+});
+
+test('the shipped registry passes its own guard', () => {
+  assert.doesNotThrow(() => dc.assertReadOnlyRegistry(dc.REGISTRY));
+  assert.ok(dc.REGISTRY.length > 80, 'the registry should cover the product, not a sample');
+});
+
+test('every registry entry is well formed, so a typo cannot silently skip a check', () => {
+  for (const e of dc.REGISTRY) {
+    assert.equal(typeof e.mod, 'string', `${JSON.stringify(e)} needs a module path`);
+    assert.match(e.mod, /^lib\//, `${e.mod} must live under lib/`);
+    assert.equal(typeof e.fn, 'string');
+    assert.equal(typeof e.args, 'function', `${e.fn} needs an args builder`);
+    assert.equal(typeof e.spec, 'object', `${e.fn} needs a shape spec`);
+    // args() must not throw on a context with nothing in it but the fields the
+    // runner always supplies — a throwing args builder would abort the sweep.
+    const ctx = {
+      now: new Date(),
+      deviceId: '00000000-0000-0000-0000-000000000000',
+      deviceIds: [],
+      window: { from: new Date(0), to: new Date(1), clamped: false },
+      window20: { from: new Date(0), to: new Date(1), clamped: false },
+    };
+    assert.doesNotThrow(() => e.args(ctx), `${e.fn}'s args builder threw`);
+    assert.ok(Array.isArray(e.args(ctx)), `${e.fn}'s args builder must return an array`);
+  }
+});
+
+test('the registry has no duplicate entries', () => {
+  const seen = new Set();
+  for (const e of dc.REGISTRY) {
+    const key = `${e.mod}#${e.fn}`;
+    assert.equal(seen.has(key), false, `${key} is registered twice`);
+    seen.add(key);
+  }
+});
+
+// ── 2. the STATEMENT guard ─────────────────────────────────────────────────
+
+test('statement guard admits the reads this tool legitimately issues', () => {
+  for (const sql of [
+    'SELECT 1',
+    '  \n  SELECT a FROM b',
+    '-- a leading comment\nSELECT a FROM b',
+    '/* block */ SELECT a FROM b',
+    'WITH t AS (SELECT 1) SELECT * FROM t',
+    'SHOW statement_timeout',
+    'EXPLAIN SELECT 1',
+    'BEGIN',
+    'COMMIT',
+    'ROLLBACK',
+    // lib/syslog/logSearch.js does exactly this, on a dedicated client, and it
+    // is the right thing for it to do.
+    'SET LOCAL statement_timeout = 10000',
+  ]) {
+    assert.equal(dc.guardStatement(sql).ok, true, `${sql} should be admitted`);
+  }
+});
+
+test('statement guard refuses every write shape', () => {
+  const cases = [
+    ['INSERT INTO settings (key) VALUES ($1)', /INSERT statement/],
+    ['UPDATE devices SET active = false', /UPDATE statement/],
+    ['DELETE FROM advisories', /DELETE statement/],
+    ['TRUNCATE syslog_events', /TRUNCATE statement/],
+    ['DROP TABLE devices', /DROP statement/],
+    ['ALTER TABLE devices ADD COLUMN x TEXT', /ALTER statement/],
+    ['CREATE TABLE t (a int)', /CREATE statement/],
+    ['GRANT SELECT ON t TO claude_readonly', /GRANT statement/],
+    ['COPY t FROM STDIN', /COPY statement/],
+    ['CALL do_something()', /CALL statement/],
+    ['DO $$ BEGIN END $$', /DO statement/],
+    ['VACUUM FULL syslog_events', /VACUUM statement/],
+    ['', /empty statement/],
+  ];
+  for (const [sql, re] of cases) {
+    const v = dc.guardStatement(sql);
+    assert.equal(v.ok, false, `${sql} must be refused`);
+    assert.match(v.reason, re);
+  }
+});
+
+test('statement guard refuses a READ-NAMED WRITER — the reason guard 2 exists', () => {
+  // ⛔ THE CONCRETE CASE. lib/productLicenseData.js's `resolveInstallDate`
+  // begins with "resolve", which IS a read verb, and it INSERTs into
+  // `settings`. The name guard passes it. The statement guard is what stops
+  // it, which is why both exist and why neither is redundant.
+  assert.equal(dc.checkReadOnlyName('resolveInstallDate').ok, true);
+  const v = dc.guardStatement(
+    'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING'
+  );
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /INSERT statement/);
+});
+
+test('statement guard refuses a data-modifying CTE', () => {
+  for (const sql of [
+    'WITH d AS (DELETE FROM advisories RETURNING id) SELECT * FROM d',
+    'WITH u AS (UPDATE devices SET active = false RETURNING id) SELECT * FROM u',
+    'WITH i AS (INSERT INTO t (a) VALUES (1) RETURNING a) SELECT * FROM i',
+  ]) {
+    const v = dc.guardStatement(sql);
+    assert.equal(v.ok, false, `${sql} must be refused`);
+    assert.match(v.reason, /data-modifying CTE/);
+  }
+});
+
+test('statement guard does not mistake the WORD "delete" in a literal for a write', () => {
+  // A refusal here would be a false alarm, and a false alarm trains the next
+  // person to delete the guard.
+  const v = dc.guardStatement("WITH t AS (SELECT 'delete' AS verb) SELECT * FROM t");
+  assert.equal(v.ok, true);
+});
+
+test('statement guard refuses SET ROLE / SET SESSION AUTHORIZATION', () => {
+  for (const sql of ['SET ROLE secvault_user', 'SET SESSION AUTHORIZATION secvault_user']) {
+    const v = dc.guardStatement(sql);
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /change who this is/);
+  }
+});
+
+test('statement guard refuses an UNBOUNDED read of syslog_events', () => {
+  // ⛔ ~28M rows/day, and a careless scan evicts the buffer cache out from
+  // under an ingest running at ~1,000 inserts/sec.
+  const bad = dc.guardStatement('SELECT count(*) FROM syslog_events');
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason, /no received_at bound/);
+
+  const alsoBad = dc.guardStatement('SELECT src_ip FROM syslog_events WHERE device_id = $1');
+  assert.equal(alsoBad.ok, false);
+
+  const good = dc.guardStatement(
+    "SELECT id FROM syslog_events WHERE received_at >= now() - interval '20 minutes' LIMIT 5"
+  );
+  assert.equal(good.ok, true);
+});
+
+test('statement guard accepts an object-form query, as pg does', () => {
+  assert.equal(dc.guardStatement({ text: 'SELECT 1', values: [] }).ok, true);
+  assert.equal(dc.guardStatement({ text: 'DELETE FROM t' }).ok, false);
+});
+
+// ── 3. error classification ────────────────────────────────────────────────
+
+test('a wrong column name is a FAILURE and the message says what is wrong', () => {
+  // ⛔ THE v2.86.1 SHAPE, exactly: `feed_sync_log.completed_at` does not exist.
+  const v = dc.classifyError({
+    code: '42703',
+    message: 'column f.completed_at does not exist',
+  });
+  assert.equal(v.state, 'fail');
+  assert.match(v.reason, /names a column that does not exist/);
+  assert.match(v.reason, /completed_at/);
+});
+
+test('every class-42 defect code is classified as a failure, not swallowed', () => {
+  for (const code of Object.keys(dc.DEFECT_CODES)) {
+    const v = dc.classifyError({ code, message: 'boom' });
+    assert.equal(v.state, 'fail', `${code} must fail`);
+  }
+});
+
+test('the missing ::timestamptz cast has its own message', () => {
+  const v = dc.classifyError({
+    code: '42P18',
+    message: 'could not determine data type of parameter $1',
+  });
+  assert.equal(v.state, 'fail');
+  assert.match(v.reason, /::timestamptz/);
+});
+
+test('a permission error on a DELIBERATELY denied table is `blocked`, never `ok`', () => {
+  for (const table of dc.EXPECTED_UNREADABLE) {
+    const v = dc.classifyError({
+      code: '42501',
+      message: `permission denied for table ${table}`,
+    });
+    assert.equal(v.state, 'blocked', `${table} should be blocked`);
+    assert.notEqual(v.state, 'ok');
+    // ⛔ The message must say BOTH facts: the grants policy held, AND the query
+    // was not verified. Collapsing the second into a pass is the
+    // failed-read-as-a-fact bug applied to this tool's own reporting.
+    assert.match(v.reason, /deliberately denied/);
+    assert.match(v.reason, /NOT verified/);
+  }
+});
+
+test('device_credentials specifically is blocked, not failed — the grants policy working', () => {
+  const v = dc.classifyError({ code: '42501', message: 'permission denied for table device_credentials' });
+  assert.equal(v.state, 'blocked');
+});
+
+test('a permission error on ANY OTHER table is a FAILURE — a missing per-table GRANT', () => {
+  const v = dc.classifyError({ code: '42501', message: 'permission denied for table firewall_rules' });
+  assert.equal(v.state, 'fail');
+  assert.match(v.reason, /missing per-table GRANT SELECT/);
+});
+
+test('a statement timeout is a failure with its own wording', () => {
+  const v = dc.classifyError({ code: '57014', message: 'canceling statement due to statement timeout' });
+  assert.equal(v.state, 'fail');
+  assert.match(v.reason, /statement timeout/);
+});
+
+test('an UNRECOGNISED rejection is a failure — not evidence that things are fine', () => {
+  for (const err of [
+    { code: 'XX000', message: 'internal error' },
+    { message: 'something threw with no code' },
+    new Error('a plain Error'),
+  ]) {
+    assert.equal(dc.classifyError(err).state, 'fail');
+  }
+});
+
+// ── 4. shape assertions ────────────────────────────────────────────────────
+
+test('an array spec rejects a non-array', () => {
+  const { problems } = dc.checkShape({ a: 1 }, { array: true });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /callers iterate it as an array/);
+});
+
+test('rowKeys catches a renamed column in the rows that came back', () => {
+  const { problems } = dc.checkShape(
+    [{ feed_name: 'nvd', status: 'ok', started_at: 1, completed_at: 2 }],
+    { array: true, rowKeys: ['feed_name', 'status', 'started_at', 'finished_at'] }
+  );
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /missing finished_at/);
+  // the message must also show what IS there, or the reader cannot act on it
+  assert.match(problems[0], /completed_at/);
+});
+
+test('rowKeys on an EMPTY array is UNVERIFIED, never ok', () => {
+  // ⛔ An empty table proves nothing about the column names a row would have
+  // carried. An assertion that passes because there was nothing to check is
+  // this codebase's signature bug wearing a test's clothes.
+  const { problems, unverified } = dc.checkShape([], { array: true, rowKeys: ['id'] });
+  assert.deepEqual(problems, []);
+  assert.equal(unverified.length, 1);
+  assert.match(unverified[0], /not verified/);
+});
+
+test('an object spec catches a missing key and names the keys present', () => {
+  const { problems } = dc.checkShape(
+    { windowDays: 1, intents: [], summary: {} },
+    { object: ['results', 'rulesCollected'] }
+  );
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /missing results, rulesCollected/);
+  assert.match(problems[0], /windowDays/);
+});
+
+test('a key PRESENT AND UNDEFINED is reported separately — the worse case', () => {
+  // ⛔ `'k' in obj` is true, so every reader destructures a confident
+  // undefined and no error is raised anywhere. This is the 2026-09-21 shape
+  // (a `sum(...) FILTER (...)` the caller believed was a real zero) and it is
+  // why "did not throw" is not the whole check.
+  const { problems } = dc.checkShape({ total: undefined }, { object: ['total'] });
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /present but undefined/);
+});
+
+test('null is a failure unless the spec permits it, and a permitted null is UNVERIFIED', () => {
+  const strict = dc.checkShape(null, { object: ['a'] });
+  assert.equal(strict.problems.length, 1);
+  assert.match(strict.problems[0], /no caller handles/);
+
+  const lenient = dc.checkShape(null, { nullable: true, object: ['a'] });
+  assert.deepEqual(lenient.problems, []);
+  assert.equal(lenient.unverified.length, 1);
+  assert.match(lenient.unverified[0], /not verified/);
+});
+
+test('undefined is always a failure', () => {
+  assert.equal(dc.checkShape(undefined, {}).problems.length, 1);
+});
+
+// ── 5. the swallowed-error harvest ─────────────────────────────────────────
+
+test('harvests gatherWorkQueue\'s per-source failure', () => {
+  // ⛔ THE MOST IMPORTANT CHECK IN THE TOOL. gatherWorkQueue isolates every
+  // source, so a broken query RESOLVES and contributes zero items. A checker
+  // that only asked "did it throw" would report green over a page rendering a
+  // named gap where a table should be.
+  const found = dc.harvestSwallowedErrors({
+    items: [],
+    sources: [
+      { key: 'cve', ok: true, count: 1 },
+      { key: 'rule_cleanup', ok: false, error: 'operator does not exist: text = uuid' },
+    ],
+  });
+  assert.equal(found.length, 1);
+  assert.match(found[0], /rule_cleanup/);
+  assert.match(found[0], /text = uuid/);
+});
+
+test('harvests errors, sectionErrors and failures alike', () => {
+  assert.equal(dc.harvestSwallowedErrors({ errors: [{ message: 'a' }] }).length, 1);
+  assert.equal(dc.harvestSwallowedErrors({ sectionErrors: [{ section: 's', message: 'b' }] }).length, 1);
+  assert.equal(dc.harvestSwallowedErrors({ failures: [{ name: 'n', message: 'c' }] }).length, 1);
+  assert.equal(
+    dc.harvestSwallowedErrors({ errors: ['a'], sectionErrors: ['b'], failures: ['c'] }).length,
+    3
+  );
+});
+
+test('harvests gatherExecutiveSummary\'s keyed sections', () => {
+  const found = dc.harvestSwallowedErrors({
+    sections: {
+      headline: { ok: true, value: {} },
+      compliance: { ok: false, error: 'relation "audit_findings" does not exist' },
+    },
+  });
+  assert.equal(found.length, 1);
+  assert.match(found[0], /compliance/);
+});
+
+test('a source reporting ok:false with NO message is still harvested', () => {
+  const found = dc.harvestSwallowedErrors({ sources: [{ key: 'x', ok: false }] });
+  assert.equal(found.length, 1);
+  assert.match(found[0], /no message/);
+});
+
+test('a clean result harvests nothing', () => {
+  assert.deepEqual(dc.harvestSwallowedErrors({ errors: [], sectionErrors: [], failures: [] }), []);
+  assert.deepEqual(dc.harvestSwallowedErrors({ sources: [{ key: 'a', ok: true }] }), []);
+  assert.deepEqual(dc.harvestSwallowedErrors(null), []);
+  assert.deepEqual(dc.harvestSwallowedErrors('not an object'), []);
+});
+
+test('truncation is DISCLOSED, not failed', () => {
+  const notes = dc.harvestTruncation({
+    sources: [{ key: 'compliance', ok: true, count: 50, truncatedFrom: 74 }],
+  });
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /50 of 74/);
+});
+
+// ── 6. composition ─────────────────────────────────────────────────────────
+
+const OK_RESULT = { name: 'x.y', ms: 5, value: { a: 1 }, spec: { object: ['a'] }, statements: 1 };
+
+test('a clean read is ok', () => {
+  const r = dc.classifyResult(OK_RESULT);
+  assert.equal(r.state, 'ok');
+  assert.equal(r.reason, null);
+});
+
+test('a swallowed error beats a passing shape', () => {
+  // ⛔ The shape is perfect and the result is wrong. This ordering is the whole
+  // point: `{items: [], sources: [...]}` satisfies every structural
+  // assertion.
+  const r = dc.classifyResult({
+    name: 'workQueueData.gatherWorkQueue',
+    ms: 10,
+    value: { items: [], sources: [{ key: 'cve', ok: false, error: 'column x does not exist' }] },
+    spec: { object: ['items', 'sources'] },
+    statements: 12,
+  });
+  assert.equal(r.state, 'fail');
+  assert.match(r.reason, /swallowed error/);
+  assert.match(r.reason, /column x does not exist/);
+});
+
+test('a function that issued NO statement is blocked, not ok', () => {
+  // ⛔ The guard-that-cannot-fire pattern inside this tool's own output. A
+  // short-circuiting reader (windowAppBytes handed no summable device ids)
+  // resolves with a valid shape and verifies nothing.
+  const r = dc.classifyResult({ ...OK_RESULT, statements: 0 });
+  assert.equal(r.state, 'blocked');
+  assert.match(r.reason, /without issuing a single statement/);
+  assert.match(r.reason, /NO SQL was verified/);
+});
+
+test('an error outranks everything and is classified, not merely recorded', () => {
+  const r = dc.classifyResult({
+    name: 'x.y',
+    ms: 3,
+    error: { code: '42703', message: 'column q does not exist' },
+    spec: { object: ['a'] },
+    statements: 1,
+  });
+  assert.equal(r.state, 'fail');
+  assert.match(r.reason, /names a column that does not exist/);
+});
+
+test('notes survive onto a failing result — a gap does not stop mattering', () => {
+  const r = dc.classifyResult({
+    name: 'x.y',
+    ms: 3,
+    value: { rows: [], sources: [{ key: 'a', ok: true, count: 50, truncatedFrom: 74 }] },
+    spec: { array: true, rowKeys: ['id'] },
+    statements: 1,
+  });
+  assert.equal(r.state, 'fail'); // an object where an array was expected
+  assert.ok(r.notes.some((n) => /50 of 74/.test(n)));
+});
+
+// ── 7. the closing verdict ─────────────────────────────────────────────────
+
+const EMPTY_SCHEMA = { missingTables: [], missingColumns: [] };
+
+test('a fully clean run is ok and exits 0', () => {
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }, { state: 'ok', notes: [] }],
+    EMPTY_SCHEMA
+  );
+  assert.equal(v.tone, 'ok');
+  assert.equal(v.exitCode, 0);
+  assert.match(v.sentence, /returned the expected shape/);
+});
+
+test('⛔ AN ALL-CLEAR IS FORBIDDEN WHILE ANYTHING IS BLOCKED', () => {
+  // The rule lib/answers.js enforces product-wide: a clean result over
+  // incomplete coverage is `unknown`, never `ok`.
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }, { state: 'blocked', notes: [] }],
+    EMPTY_SCHEMA
+  );
+  assert.equal(v.tone, 'unknown');
+  assert.notEqual(v.tone, 'ok');
+  assert.match(v.sentence, /NOT an all-clear/);
+  // ⛔ AND IT STILL EXITS 0. `blocked` is the grants policy working; failing the
+  // run on it would make the only way to a green sweep granting a readonly role
+  // access to device_credentials.
+  assert.equal(v.exitCode, 0);
+});
+
+test('⛔ AN ALL-CLEAR IS FORBIDDEN WHILE A SHAPE IS UNVERIFIED', () => {
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: ['returned 0 rows, so its row shape was not verified'] }],
+    EMPTY_SCHEMA
+  );
+  assert.equal(v.tone, 'unknown');
+  assert.equal(v.unverified, 1);
+  assert.match(v.sentence, /NOT an all-clear/);
+});
+
+test('one failure fails the run', () => {
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }, { state: 'fail', notes: [] }],
+    EMPTY_SCHEMA
+  );
+  assert.equal(v.tone, 'fail');
+  assert.equal(v.exitCode, 1);
+  assert.match(v.sentence, /1 read\(s\) failed/);
+});
+
+test('a schema gap fails the run even when every read passed', () => {
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }],
+    { missingTables: ['compliance_exceptions'], missingColumns: [] }
+  );
+  assert.equal(v.exitCode, 1);
+  assert.equal(v.schemaProblems, 1);
+  assert.match(v.sentence, /missing from the live database/);
+  assert.doesNotMatch(v.sentence, /0 read/);
+});
+
+// ── 8. the schema parse and diff ───────────────────────────────────────────
+
+test('parses a CREATE TABLE body, skipping table-level constraints', () => {
+  const t = dc.parseSchemaSql(`
+CREATE TABLE IF NOT EXISTS widgets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,           -- a trailing comment
+  ratio NUMERIC(5,2),
+  UNIQUE (name),
+  CONSTRAINT chk CHECK (ratio > 0)
+);
+`);
+  assert.deepEqual([...t.get('widgets')].sort(), ['id', 'name', 'ratio']);
+});
+
+test('a PARTITION BY table does not swallow the next table', () => {
+  // ⛔ The exact trap tests/sqlColumns.test.js documents: syslog_events ends
+  // `) PARTITION BY RANGE (received_at);`, and a `\n);` pattern reads the
+  // following table's body as part of it.
+  const t = dc.parseSchemaSql(`
+CREATE TABLE IF NOT EXISTS events (
+  id BIGSERIAL,
+  received_at TIMESTAMPTZ NOT NULL
+) PARTITION BY RANGE (received_at);
+
+CREATE TABLE IF NOT EXISTS later (
+  other TEXT
+);
+`);
+  assert.deepEqual([...t.get('events')].sort(), ['id', 'received_at']);
+  assert.deepEqual([...t.get('later')], ['other']);
+  assert.equal(t.get('events').has('other'), false);
+});
+
+test('⛔ ALTER TABLE … ADD COLUMN is collected — the whole point of the check', () => {
+  // `CREATE TABLE IF NOT EXISTS` guards the TABLE only, so a column added to an
+  // existing table's CREATE body never reaches a deployed server. Both
+  // spellings have to be diffed or the trap is invisible.
+  const t = dc.parseSchemaSql(`
+CREATE TABLE IF NOT EXISTS d (
+  id UUID PRIMARY KEY
+);
+ALTER TABLE d ADD COLUMN IF NOT EXISTS serial TEXT;
+ALTER TABLE IF EXISTS d ADD COLUMN hostname TEXT;
+ALTER TABLE brand_new ADD COLUMN IF NOT EXISTS only_column TEXT;
+`);
+  assert.deepEqual([...t.get('d')].sort(), ['hostname', 'id', 'serial']);
+  assert.deepEqual([...t.get('brand_new')], ['only_column']);
+});
+
+test('diffSchema reports a declared table missing from the live database', () => {
+  const declared = new Map([['a', new Set(['x'])], ['b', new Set(['y'])]]);
+  const live = new Map([['a', new Set(['x'])]]);
+  const d = dc.diffSchema(declared, live);
+  assert.deepEqual(d.missingTables, ['b']);
+  assert.deepEqual(d.missingColumns, []);
+});
+
+test('diffSchema reports a declared COLUMN missing from an existing table', () => {
+  const declared = new Map([['a', new Set(['x', 'y'])]]);
+  const live = new Map([['a', new Set(['x'])]]);
+  const d = dc.diffSchema(declared, live);
+  assert.deepEqual(d.missingTables, []);
+  assert.deepEqual(d.missingColumns, ['a.y']);
+});
+
+test('an UNDECLARED live table is informational, and partitions are ignored', () => {
+  // ⛔ Failing on this would train the next person to delete the check, which
+  // costs more than the coverage it gives up.
+  const declared = new Map([['syslog_events', new Set(['id'])]]);
+  const live = new Map([
+    ['syslog_events', new Set(['id'])],
+    ['syslog_events_20260922', new Set(['id'])],
+    ['data_backfills', new Set(['name'])],
+  ]);
+  const d = dc.diffSchema(declared, live);
+  assert.deepEqual(d.missingTables, []);
+  assert.deepEqual(d.undeclaredTables, ['data_backfills']);
+});
+
+test('the real lib/schema.sql parses into the table count schema.md claims', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'lib', 'schema.sql'), 'utf8');
+  const t = dc.parseSchemaSql(sql);
+  assert.ok(t.size >= 60, `expected at least 60 tables, parsed ${t.size}`);
+  // Spot-check the two shapes most likely to break the parser.
+  assert.ok(t.get('syslog_events').has('received_at'), 'the partitioned table must parse');
+  assert.ok(t.get('firewall_rules').has('hit_count'), 'hit_count must be found');
+  assert.ok(t.get('device_versions').has('serial'), 'an ALTER-added column must be found');
+});
+
+// ── 9. plumbing ────────────────────────────────────────────────────────────
+
+test('entryName is stable and derived from the module path', () => {
+  assert.equal(dc.entryName({ mod: 'lib/syslog/trafficStats.js', fn: 'getTopHosts' }), 'trafficStats.getTopHosts');
+});
+
+test('the raw-table window this tool asks for is 20 minutes or less', () => {
+  assert.ok(dc.RAW_WINDOW_MINUTES <= 20, 'the raw syslog_events window must stay narrow');
+});
+
+test('the deliberately-denied table list holds every secret-bearing table', () => {
+  // A table dropped from this list would start reporting its (correct)
+  // permission refusal as a FAILURE, which is a false alarm; a table wrongly
+  // ADDED would turn a real missing grant into a blocked line nobody chases.
+  for (const t of ['device_credentials', 'credential_profiles', 'notification_channels', 'user_mfa', 'settings', 'users']) {
+    assert.ok(dc.EXPECTED_UNREADABLE.includes(t), `${t} must be on the deliberately-denied list`);
+  }
+});
+
+test('requiring the script opens no socket and runs nothing', () => {
+  // It is guarded by `require.main === module`; without that, merely requiring
+  // it here would connect to a production database from `npm test` — which is
+  // the one thing CLAUDE.md forbids the test suite to do.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'scripts', 'dbCheck.js'),
+    'utf8'
+  );
+  assert.match(src, /if \(require\.main === module\)/);
+  // and the pool is only constructed inside main()
+  assert.doesNotMatch(src, /^const pool = new Pool/m);
+});
+
+test('no registry entry names a function this repo does not export', () => {
+  // ⛔ A stale registry is a silently shorter sweep. The live runner reports it
+  // too, but it would only be seen by someone who ran the tool against a
+  // database; this catches it in `npm test`, where a rename is made.
+  const path = require('node:path');
+  const stale = [];
+  for (const e of dc.REGISTRY) {
+    let mod;
+    try {
+      mod = require(path.join(__dirname, '..', e.mod));
+    } catch (err) {
+      stale.push(`${e.mod} could not be required: ${err.message}`);
+      continue;
+    }
+    if (typeof mod[e.fn] !== 'function') stale.push(`${e.mod} does not export ${e.fn}`);
+  }
+  assert.deepEqual(stale, []);
+});

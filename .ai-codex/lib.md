@@ -103,6 +103,37 @@ out" and names how many rules carried traffic. Same failure as the work queue's 
 
 Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
 
+## lib/engines/complianceCoverage.js (v2.163.0)
+
+PURE, no pool. `COVERAGE_CLAIM`, `GRADES`, `GRADE_*`, `gradeFor`, `buildStandardCoverage`,
+`buildCoverageSet`, `coverageEvidence`. Per standard: mapped / applicable-to-vendor / evaluated /
+gradeable / `na`, plus an evidence grade on the ABSOLUTE gradeable-check count (thin <= 7, moderate
+8-19, broad >= 20). Live: NIST thin, PCI+SANS moderate, ISO+CIS broad.
+
+⛔ No framework total is invented — see CLAUDE.md's "A per-standard score is a share of OUR OWN
+checks". ⛔ The grade keys on DISTINCT CHECKS, never on finding rows (a finding is a device x check
+pair, so 7 checks produce 91 rows on this fleet). ⛔ `unknown` (read failed) is distinct from `none`
+(nothing ran). Pinned by `tests/complianceCoverage.test.js` (48 cases, 19 mutations verified — two
+survived the first pass and both were real test gaps: an unreachable fallback branch, and a
+`libraryCoverage()` that fabricated a library size on a failed read).
+
+## lib/engines/complianceExceptions.js (v2.163.0)
+
+Pool-taking storage plus PURE state helpers: `exceptionState`, `describeException(s)`,
+`summariseExceptions`, `validateExpiry`, `listExceptions`, `listFailingChecks`, `createException`,
+`revokeException`, `getExceptionView`. Full rules in CLAUDE.md's "Compliance exceptions" section.
+The three that bite: the score is computed WITHOUT exceptions and `summariseExceptions` has no
+score-shaped field (pinned); the slug/UUID join always routes through `audit_checks` (pinned
+NEGATIVELY — the wrong forms are asserted absent); and `expires_at` is mandatory with expiry
+resolved at read time. `tests/complianceExceptions.test.js`, 64 cases, 30/30 mutations killed.
+
+## scripts/apiSweep.js + scripts/dbCheck.js (v2.163.0)
+
+The two gates added beside `npm run smoke`; see CLAUDE.md's "three gates OUTSIDE npm test" table
+for what each proves, what neither covers, and the live 500 `apisweep` found on its first run.
+Harnesses: `tests/apiSweepHarness.test.js` (66 cases, 12/12 mutations) and
+`tests/dbCheckHarness.test.js` (59 cases, 17/17).
+
 ## lib/syslog/applications.js (v2.157.0)
 
 The single source of truth for what an application string and a URL-category string MEAN, beside

@@ -202,3 +202,22 @@ Pinned by `tests/complianceStandardScope.test.js` (22 cases), including a catalo
 guard: every offered choice must be one the engine accepts, every engine standard must be offerable,
 and the labels must match — a dropdown entry the engine rejects is a 500 on download, i.e. a button
 that visibly does nothing.
+
+## Coverage and exceptions (v2.163.0)
+
+Two additions that change what the page SAYS without changing what it COMPUTES.
+
+**Coverage** (`lib/engines/complianceCoverage.js`, pure). A per-standard percentage is the share of
+SecVault's own mapped checks that pass — nothing more — and the page, the tabs and the PDF now all
+say so. Live library: 45 checks, mapped CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 / NIST 7.
+The NIST figure rested on seven questions (six on a given device), which is why this was raised as
+the one place the product overclaimed. ⛔ No framework requirement total is invented; `COVERAGE_CLAIM`
+is the refusal and a test rejects hedged numbers. ⛔ Grade on distinct checks, never finding rows.
+
+**Exceptions** (`compliance_exceptions`, `lib/engines/complianceExceptions.js`). Accepted risk with
+a compensating control, an owner and a MANDATORY expiry, gated on `OPERATE`.
+⛔ It never changes a finding's status and the headline score is computed without it — the whole
+design is in the schema comment and in CLAUDE.md. ⛔ Keyed on `(device_id, check_slug)` because
+`audit_findings` is DELETE+reinserted every run, and the slug is `audit_checks.check_id` (TEXT)
+while `audit_findings.check_id` is a UUID FK to `audit_checks.id` — two columns, same name, two
+types. Every query goes through `audit_checks`.

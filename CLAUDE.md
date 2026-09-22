@@ -669,6 +669,73 @@ A third predicate type, `ruleset_property` (**3 checks**, not 2 — see complian
 
 `scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
 
+### ⛔ A PER-STANDARD SCORE IS A SHARE OF **OUR OWN** CHECKS (v2.163.0)
+
+`/compliance` printed **"NIST 42%"** as if it were that framework's posture. Measured on the live
+fleet: the library is **45 checks**, mapped CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 /
+**NIST 7** — and of NIST's seven, three are vendor-scoped and four are generic firewall hygiene
+(`rule-no-any-any-allow`, `rule-logging-enabled-on-rules`, `rule-has-explicit-deny-all`,
+`rule-no-external-to-internal-access`) wearing a framework's name. On HRIS the figure was **17%
+computed from six checks**. That was the one place this product overclaimed, and the fix is its own
+denominator rule turned inward.
+
+`lib/engines/complianceCoverage.js` is PURE and answers, per standard: mapped / applicable to this
+fleet's vendors / evaluated / gradeable / `na`, plus an evidence grade on the **absolute gradeable
+count** (`thin` <= 7, `moderate` 8-19, `broad` >= 20).
+
+⛔ **NO FRAMEWORK TOTAL IS INVENTED, EVER.** Replacing "NIST 42%" with "7 of ~300 requirements"
+would trade one overclaim for a fabricated denominator — this codebase holds no count of what any
+framework publishes. The refusal is exported as `COVERAGE_CLAIM` and a test rejects both
+`N requirements` and hedged forms (`about`/`roughly`/`~ N`) in every string the engine produces.
+
+⛔ **TWO UNITS, KEPT APART.** A fleet finding is a (device, check) PAIR, so NIST's 91 finding rows
+come from at most 7 distinct questions. The evidence grade is keyed on DISTINCT GRADEABLE CHECKS,
+never on finding rows — grading on rows would make a 7-check standard look broad on a large fleet.
+
+⛔ **THE SCORE ARITHMETIC IS UNCHANGED** and `scorePct` is carried through verbatim, pinned by a
+test. This changed PRESENTATION only. `unknown` (the coverage read failed) is a distinct state from
+`none` (nothing ran).
+
+### ⛔ Compliance exceptions — accepted risk that CANNOT move the score (v2.163.0)
+
+`compliance_exceptions` + `lib/engines/complianceExceptions.js` + `/api/compliance/[deviceId]/exceptions`.
+An operator's recorded decision that a FAILING check is accepted on this device, with a
+compensating control, an owner and a mandatory expiry. It exists because 151 checks fail fleet-wide
+and there was nowhere to put "yes, and here is why that is mitigated" — without which the score is
+un-actionable and people stop opening the page, the same dynamic that got `new_finding` pulled from
+Alerts in July.
+
+⛔ **AN EXCEPTION NEVER CHANGES A FINDING'S STATUS, AND THE HEADLINE SCORE IS COMPUTED WITHOUT
+IT.** A failing check with an accepted exception is still `fail`: the firewall is still configured
+that way, and letting a label somebody typed move a measurement is how a compliance score becomes a
+number people MANAGE instead of a fact they ACT on. The UI shows COUNTS beside the score ("12
+failing · 3 with a live exception"), deliberately **not a rival percentage** — a second figure
+differing from the headline by a set of typed labels is exactly the artefact this rule exists to
+prevent. A repo scan over the five files where the arithmetic lives pins it.
+
+⛔ **GATED ON `OPERATE`, AND ONLY SAFE THERE BECAUSE OF THE RULE ABOVE.** `operate` already means
+"acknowledge findings/alerts/diffs", and an exception is the same act one table over; segmentation
+and application intent set the same precedent. ⛔ **If anyone ever makes an exception move a score,
+this gate must be revisited in the SAME commit** — the authority that would justify escalating is
+"can make the compliance number go up".
+
+⛔ **KEYED ON `(device_id, check_slug)`, NEVER ON `audit_findings.id`** — findings are
+DELETE+reinserted every run. And `check_slug` is `audit_checks.check_id` (the TEXT slug), while
+`audit_findings.check_id` is a UUID FK to `audit_checks.id`: **two columns named `check_id`, two
+tables, two types.** Every query routes through `audit_checks`, and a test pins the wrong forms
+negatively.
+
+⛔ **`expires_at` IS MANDATORY and expiry is evaluated at READ time** — no cron job, and a lapsed
+row stops counting the moment it lapses. FOUR states, never two: `accepted` / `expiring` (30 days,
+chosen because the scheduled report is monthly so a shorter window could open and close between two
+reviews) / `expired` (DANGER tint — a positive actionable fact, not grey and not blank) /
+`revoked` (history). A fifth, HUELESS state covers an unreadable expiry, which falls CLOSED to
+expired and says why.
+
+⛔ **`accepted_by` COMES FROM THE SESSION, NEVER THE BODY**, and an exception may only be recorded
+against a check that is ACTUALLY FAILING on that device — otherwise someone could pre-accept a
+future failure.
+
 ### ⛔ `warning` vs `na` — whose limitation is it? (changed 2026-08-25)
 
 Both mean "not a pass and not a fail", but they answer different questions and only one belongs
@@ -2613,6 +2680,41 @@ nothing here talks to a database: an engine that takes a `pool` gets a STUB that
 rows and records the SQL it was handed. Live verification against the real fleet is still a
 separate, required step for anything touching a device — these tests replace neither that nor the
 "verify against live responses before writing any parser" rule.
+
+### ⛔ The three gates OUTSIDE `npm test`, and why none of them is in it
+
+`npm test` is pure engines with stub pools. That is deliberate and cheap, and it means the suite
+can never see a route, a page, or a real schema. Three scripts cover those, each needing a built
+app and/or a database, each FAILING LOUDLY rather than skipping (a gate that skips is the
+guard-that-cannot-fire pattern), and each behind its own script:
+
+| script | what it proves | scale |
+|---|---|---|
+| `npm run smoke` | every PAGE renders with a real session and a per-page content marker | 28 pages |
+| `npm run apisweep` (v2.163.0) | every API route is auth-gated, refuses bad params, and does not 500 | 82 route files, 375 assertions |
+| `npm run dbcheck` (v2.163.0) | every READ function's SQL executes against the real schema | 104 functions, 537 statements |
+
+⛔ **`apisweep` FOUND A LIVE 500 ON ITS FIRST RUN** — `findGitRoot()` called with no argument
+threw, so `GET /api/system/console-url` answered 500 and the PUT on both it and
+`/api/system/session-policy` was DEAD: neither the console address nor the idle timeout could be
+saved from Settings. `|| process.cwd()` after it was a fallback that could never fire. Nothing in
+`npm test` calls a route, which is exactly why it was invisible.
+
+⛔ **`dbcheck` CALLS THE REAL EXPORTED FUNCTIONS, never a copy of their SQL** — a second copy
+drifts from what ships and then only proves things about itself. It also HARVESTS SWALLOWED ERRORS
+(`gatherWorkQueue`'s per-source `{ok:false}`, the report builders' `failures[]`), because those
+RESOLVE on a broken query: a checker that only asked "did it throw" would go green over a page
+rendering a named gap. ⛔ Read-only is enforced THREE ways — the role, a name guard, and a
+statement guard that inspects every query before it leaves the process. The third is not redundant:
+`resolveInstallDate` begins with a READ verb and INSERTs, so the name guard passes it.
+⛔ It exits non-zero when `schema.sql` declares something the live database lacks, which is the
+`CREATE TABLE IF NOT EXISTS` trap in `.ai-codex/gotchas.md` made visible.
+
+⛔ **NEITHER COVERS A MUTATING ROUTE.** `apisweep` refuses any verb outside a two-entry allow-list
+because it runs against the production fleet, and `dbcheck`'s role cannot write. Every
+400-on-bad-body and 409-on-conflict path is still unverified, and so is role-specific denial — only
+a super_admin test account exists, so a genuine 403 cannot be produced live. Both are stated in
+those files' headers rather than left implied.
 
 ### ⛔ The page-render smoke sweep (`npm run smoke`, v2.150.0) — the one gate that loads a page
 
