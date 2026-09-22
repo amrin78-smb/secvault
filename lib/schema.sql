@@ -2751,3 +2751,27 @@ ALTER TABLE advisories ADD COLUMN IF NOT EXISTS epss_checked_at TIMESTAMPTZ;
 -- matches how an unmeasured value must be sorted everywhere in this codebase.
 CREATE INDEX IF NOT EXISTS idx_advisories_epss_score
   ON advisories (epss_score DESC NULLS LAST);
+
+-- ── user_device_scopes (v2.168.0) ─────────────────────────────────────────
+-- Per-user restriction of WHICH firewalls a local account may see.
+--
+-- Absence of any row for a user means UNSCOPED: that account sees the whole
+-- fleet, which is how this product has always behaved and is what every
+-- existing account keeps. A user with at least one row is SCOPED and sees
+-- exactly those devices.
+--
+-- The asymmetry is deliberate and is the same call the LDAP mapping table
+-- makes: zero rows is "nobody has expressed an intent", not "deny everything".
+-- Making an empty table mean deny would lock every existing installation out
+-- of its own platform on the deploy that delivers this.
+CREATE TABLE IF NOT EXISTS user_device_scopes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_device_scopes
+  ON user_device_scopes (user_id, device_id);
+CREATE INDEX IF NOT EXISTS idx_user_device_scopes_user
+  ON user_device_scopes (user_id);

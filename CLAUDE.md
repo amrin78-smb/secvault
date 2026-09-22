@@ -1604,6 +1604,51 @@ OpenLDAP tree where `cn=<login>,<base>` really is the DN is a real shape, and re
 break an install that works to fix one that does not. That path cannot SEARCH, so it reports
 `groups: null` — and the panel warns that no mapping can ever match without a service account.
 
+### Per-user device scoping (v2.168.0) — DEFAULT-DENY, partially covered ON PURPOSE
+
+`user_device_scopes` + `lib/deviceScope.js` (pure, plus one loader) +
+`lib/deviceScopeCoverage.js` (the register) + `GET/PUT /api/users/[id]/device-scope`
+(**`manage_users`** — super_admin only, the same call `manage_license` makes: whoever can widen an
+account's device scope decides who sees which customer's firewalls).
+
+⛔ **ZERO ROWS IS UNSCOPED, NOT "NO DEVICES".** An account nobody has scoped sees the whole fleet,
+exactly as this product has always behaved. The same asymmetry `ldapRoles.js` draws between "no
+mappings configured" and "no mapping matched" — and for the same reason: making an empty table mean
+deny would lock every existing installation out of its own platform on the deploy that delivers it.
+⛔ Consequently **clearing a scope WIDENS access**, and the API says so in its response rather than
+leaving it to be discovered. To revoke access, disable the account.
+
+⛔ **THE DANGEROUS FAILURE IS "LOOKS SCOPED, LEAKS ANYWAY."** 104 non-test files read device data
+with no chokepoint between them, so this cannot be retrofitted everywhere in one change. A half
+retrofit would let an administrator restrict an account to two firewalls, watch the device list
+obey, and never learn that a report still shows the other fourteen. **A boundary somebody believes
+in and that is not there is worse than no boundary.**
+
+⛔ **SO ENFORCEMENT IS DEFAULT-DENY: a SCOPED account is REFUSED by any surface that is not
+scope-aware yet.** Partial coverage therefore degrades to LESS access, never more. `blocked` is a
+real product state, not a TODO — a scoped user gets a smaller product, honestly described. Unscoped
+accounts (every account that exists today) are completely unaffected.
+
+⛔ **`lib/deviceScopeCoverage.js` CLASSIFIES EVERY ROUTE AND PAGE** as `aware` / `blocked` /
+`no-device-data`, and `tests/deviceScopeCoverage.test.js` fails the build when a surface is on none
+of them — so a new route is a deliberate decision, never a default. It also re-derives the
+device-touching set from SOURCE, catching a file that grew a device query after being classified
+`no-device-data`. The aware count has a FLOOR that may not fall. Shipped at **4 aware / 71 blocked /
+39 no-device-data**.
+
+⛔ **A FAILED SCOPE READ IS `unknown`, WHICH DENIES** — never `unscoped`. Its SQL clause is
+`AND FALSE`, never an absent clause. It is a distinct state from "scoped and not granted" because
+the two send an operator to different places, and the refusal text says which.
+
+⛔ **AN OUT-OF-SCOPE DEVICE ANSWERS 404, NOT 403**, on both the route and the page. A 403 on a
+specific id confirms that id exists, so a restricted account could enumerate the estate by walking
+ids and reading the difference. The existence signal is what is withheld; the explanation is still
+shown.
+
+⛔ **ONLY LOCAL ACCOUNTS CAN BE SCOPED.** LDAP gives the bare username with no `users` row to hang
+a scope on, so `loadScopeForSession` checks the SHAPE of `session.user.id` rather than trusting the
+provider name — the call saved views already make. An LDAP account is UNSCOPED.
+
 ---
 
 ## Commercial Licensing (v2.131.0)

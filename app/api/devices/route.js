@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { loadScopeForSession, scopeSqlClause } from '../../../lib/deviceScope';
 import { pool } from '../../../lib/db';
 import { setCredential } from '../../../lib/credStore';
 import { getProfilePlaintext, createProfile } from '../../../lib/credentialProfiles';
@@ -25,8 +26,18 @@ function coercePort(value) {
 }
 
 // GET /api/devices — list all devices with their latest known version attached.
+// ⛔ SCOPE-AWARE (see lib/deviceScopeCoverage.js). An account restricted to a
+// subset of the fleet gets exactly that subset here, narrowed in SQL rather
+// than after the fact -- a JS filter over a full read would still have put
+// every firewall's management address through the process that serves it.
 export async function GET() {
   try {
+    const session = await getServerSession(authOptions);
+    const scope = await loadScopeForSession(session, pool);
+    // ⛔ $1 is the FIRST free parameter here, and the clause is empty for an
+    // unscoped account, so the unscoped query is byte-identical to the one
+    // this route has always run.
+    const { sql: scopeSql, params: scopeParams } = scopeSqlClause(scope, 'd.id', 1);
     const result = await pool.query(
       `SELECT d.*, dv.version_string, dv.model, dv.collected_at AS version_collected_at
        FROM devices d
@@ -37,7 +48,9 @@ export async function GET() {
          ORDER BY collected_at DESC
          LIMIT 1
        ) dv ON true
-       ORDER BY d.name ASC`
+       WHERE TRUE${scopeSql}
+       ORDER BY d.name ASC`,
+      scopeParams
     );
     return NextResponse.json(result.rows);
   } catch (err) {

@@ -4,6 +4,9 @@ import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
+import {
+  loadScopeForSession, filterDevices, isScoped, SCOPE_STATES,
+} from '../../../lib/deviceScope';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { isAdmin } from '../../../lib/rbac';
 import { pool } from '../../../lib/db';
@@ -155,9 +158,24 @@ function sortLink(activeSortKey, key, label, searchParams) {
 export default async function DevicesPage({ searchParams }) {
   // getDeviceInventory validates ?sort= against its own whitelist and returns
   // the key it actually used, so an unknown value can never reach any ordering.
-  const { rows: allRows, tiles: fleetTiles, sortKey } = await getDeviceInventory(pool, {
+  const { rows: inventoryRows, tiles: inventoryTiles, sortKey } = await getDeviceInventory(pool, {
     sort: searchParams?.sort,
   });
+
+  // ⛔ SCOPE-AWARE (see lib/deviceScopeCoverage.js). A restricted account sees
+  // only the firewalls it was granted.
+  //
+  // ⛔ THE TILES ARE RECOMPUTED, NOT REUSED. getDeviceInventory() returns
+  // fleet-wide tiles; printing those above a narrowed table would state a
+  // fleet fact to somebody who cannot see the fleet -- the same error as a
+  // score averaged over more devices than the operator can see, and on this
+  // page it would also disclose how many firewalls exist outside their scope.
+  const deviceScope = await loadScopeForSession(
+    await getServerSession(authOptions), pool
+  );
+  const scopeNarrowed = isScoped(deviceScope) || deviceScope.state === SCOPE_STATES.UNKNOWN;
+  const allRows = scopeNarrowed ? filterDevices(deviceScope, inventoryRows) : inventoryRows;
+  const fleetTiles = scopeNarrowed ? computeTiles(allRows) : inventoryTiles;
 
   const filters = {
     q: searchParams?.q || '',

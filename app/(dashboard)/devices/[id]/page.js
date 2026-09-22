@@ -4,6 +4,7 @@ import DeviceTrafficTab from '../../../../components/devices/DeviceTrafficTab';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
+import { loadScopeForSession, canSeeDevice } from '../../../../lib/deviceScope';
 import { authOptions } from '../../../api/auth/[...nextauth]/route';
 import { isAdmin, can, VIEW_LOG_SEARCH } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
@@ -582,7 +583,18 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const session = await getServerSession(authOptions);
   const canWrite = isAdmin(session);
 
-  const device = await getDevice(pool, params.id);
+  // ⛔ SCOPE-AWARE (see lib/deviceScopeCoverage.js). A device outside this
+  // account's scope is treated as NOT FOUND, and falls into the existing
+  // not-found branch below rather than getting a distinct "forbidden" page.
+  //
+  // ⛔ THAT SAMENESS IS THE POINT: a page that said "you may not see this
+  // firewall" would confirm the firewall EXISTS, so a restricted account could
+  // enumerate the rest of the estate by walking ids and reading the difference.
+  // What is withheld is the existence signal, not the explanation -- the
+  // refusal reason is still shown to whoever legitimately lands here.
+  const deviceScope = await loadScopeForSession(session, pool);
+  const scopeDenied = !canSeeDevice(deviceScope, params.id);
+  const device = scopeDenied ? null : await getDevice(pool, params.id);
 
   if (!device) {
     // ⛔ "Device not found" is the WRONG answer when the operator just deleted

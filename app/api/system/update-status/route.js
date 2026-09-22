@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.168.0': [
+    'New: a user account can be restricted to specific firewalls. Until now every account saw the whole fleet, which ruled out an MSP, a holding company, or simply letting a regional team see only its own firewalls.',
+    'Nothing changes for any existing account. An account with no restriction set sees everything, exactly as before — and clearing a restriction WIDENS access rather than revoking it, which the product states rather than leaving you to find out.',
+    'Restriction is enforced conservatively: a restricted account is refused by any screen that does not yet understand the restriction, rather than being shown the whole fleet there. It gets a smaller product, never a leaky one.',
+    'This release covers the firewall list and individual firewall pages. Other screens refuse restricted accounts for now and will be opened up one at a time.',
+    'A firewall outside an account’s restriction reports as not found rather than as forbidden, so the restriction cannot be used to discover which firewalls exist.',
+  ],
   '2.167.1': [
     'Fixes a wording slip in the new per-rule compliance findings: they read "have no a log-forwarding profile". Now "are missing a log-forwarding profile".',
     'Cosmetic only — no status, count or score changes.',

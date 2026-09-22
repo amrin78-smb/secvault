@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { loadScopeForSession, canSeeDevice, refusalMessage } from '../../../../lib/deviceScope';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
 import { getProfilePlaintext, createProfile } from '../../../../lib/credentialProfiles';
@@ -49,6 +50,22 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: 'Invalid device id' }, { status: 400 });
   }
   try {
+    // ⛔ SCOPE-AWARE. The check happens BEFORE the row is returned, and a
+    // device outside the scope answers 404 rather than 403.
+    //
+    // ⛔ 404, NOT 403, AND THAT IS DELIBERATE. A 403 on a specific id
+    // confirms that id exists -- so an account restricted to two firewalls
+    // could enumerate the rest of the estate by the difference between 403 and
+    // 404. The refusal reason is still returned in the body for a legitimate
+    // user's benefit; what is withheld is the EXISTENCE signal.
+    const session = await getServerSession(authOptions);
+    const scope = await loadScopeForSession(session, pool);
+    if (!canSeeDevice(scope, params.id)) {
+      return NextResponse.json(
+        { error: 'Device not found', reason: refusalMessage(scope) },
+        { status: 404 }
+      );
+    }
     const result = await pool.query('SELECT * FROM devices WHERE id = $1', [params.id]);
     if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Device not found' }, { status: 404 });

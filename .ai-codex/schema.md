@@ -1266,3 +1266,12 @@ the uniqueness so the same group cannot be mapped twice to two roles, while `gro
 operator's own spelling for display. No CHECK on `role` — validated in app code against
 `ASSIGNABLE_ROLES`, same convention as `users.role`. Granted to both readonly roles: a group DN is
 not a secret.
+
+## user_device_scopes (v2.168.0)
+
+`(user_id -> users, device_id -> devices)`, unique on the pair, both ON DELETE CASCADE.
+Which firewalls a LOCAL account may see.
+
+⛔ **Zero rows for a user means UNSCOPED (sees everything), not "no devices".** Clearing a scope
+WIDENS access. Full rules in CLAUDE.md's "Per-user device scoping"; the engine is
+`lib/deviceScope.js` and the coverage register is `lib/deviceScopeCoverage.js`.

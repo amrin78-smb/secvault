@@ -206,3 +206,10 @@ GRANT SELECT ON TABLE application_flows TO nocvault_readonly;
 -- reaching the internet on every page view.
 GRANT SELECT ON TABLE cloud_app_ranges TO claude_readonly;
 GRANT SELECT ON TABLE cloud_app_ranges TO nocvault_readonly;
+
+-- Per-user device scoping (v2.168.0). Holds no secret — a user id, a device id
+-- and who granted it — but it IS the authorisation boundary, so it is granted
+-- read-only for diagnostics exactly like every other table here and never
+-- written by anything but the app.
+GRANT SELECT ON TABLE user_device_scopes TO claude_readonly;
+GRANT SELECT ON TABLE user_device_scopes TO nocvault_readonly;
