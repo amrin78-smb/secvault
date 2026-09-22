@@ -1,6 +1,7 @@
 # SecVault Roadmap
 
-Living document. **Built-state reviewed 2026-09-19** (v2.148.0). The measured FLEET FIGURES
+Living document. **Built-state reviewed 2026-09-22** (v2.162.0). The COMPLETENESS BACKLOG is the
+first section below — start there. The measured FLEET FIGURES
 below are from **2026-09-09** (15 active devices, ~74M syslog events/day) unless a line restates
 them, and the FWA feature comparison that motivated this product is from the same date.
 
@@ -19,6 +20,76 @@ and a roadmap that re-proposes finished work is worse than no roadmap.
 Every number below is measured, not estimated. Where something is uncertain it says so.
 
 ---
+
+## ⭐ COMPLETENESS BACKLOG — raised 2026-09-22, after the six-agent sweep
+
+Where the product is genuinely weak, ranked. Every row carries the MEASUREMENT that justifies its
+priority, because the whole point of this product is not asserting things without one. Tick the
+Done column in the same commit as the work.
+
+⛔ **THE HEADLINE JUDGEMENT, so nobody re-litigates it from scratch:** the ideas and the evidence
+discipline are the strong part and they held up under adversarial review. What does not hold up is
+the ratio of SURFACE AREA to VERIFICATION. Six parallel reviewers found ~40 defects in ONE DAY's
+code (v2.156.0-v2.159.0), four of them already live on the reference fleet. There is no reason the
+other ~150 versions are cleaner — only less examined. **The next months of value are in depth:
+fewer claims, better verified.**
+
+### P1 — do these before any new feature
+
+| # | Item | Why, measured | Done |
+|---|---|---|:--:|
+| 1 | **Route / component / DB-integration tests** | 3,460 tests and **zero** of any of those three kinds. The 28-page smoke sweep is the ONLY thing that loads a page. All four defects that reached the live fleet on 2026-09-21 sat in that gap: a 500 reachable only through a route, an auth mechanism nobody had read the library for, a writer broken on the line endings that actually ship. | [ ] |
+| 2 | **Compliance: state the COVERAGE DENOMINATOR, stop printing a bare per-standard %** | `/compliance` shows **"NIST 42%"** computed from **7 checks** — of which 3 are vendor-specific, so ~5 apply per device, and 4 are generic firewall hygiene (`rule-no-any-any-allow`, `rule-logging-enabled-on-rules`, `rule-has-explicit-deny-all`, `rule-no-external-to-internal-access`) wearing a framework's name. Library totals: CIS_V8 44, ISO_27001 35, PCI_DSS 21, SANS 12, NIST 7, out of 45 checks. This is the ONE place the product overclaims, and it is the product's own denominator rule turned inward. | [ ] |
+| 3 | **Compliance: exception / compensating-control workflow** | 151 failing checks fleet-wide and no way to record an accepted risk with an expiry. Every real audit conversation is "yes, and here is why that is mitigated". Without it the 51% score is un-actionable and people stop opening it — the same dynamic that got `new_finding` pulled from Alerts in July. CLAUDE.md already notes critical compliance failures have no acknowledgement mechanism. | [ ] |
+
+### P2 — structural, gets more expensive every month
+
+| # | Item | Why, measured | Done |
+|---|---|---|:--:|
+| 4 | **Predicate engine: iterate collections, not one fixed dot-path** | The single-path limit is the ROOT CAUSE of `predicate_type: 'not_evaluable_from_config'`, and `na` is **55 of 404** findings (14%). Anything genuinely per-rule is unanswerable by construction. Fixing this converts a real slice of `na` into actual answers and shrinks the "manual verification" pile. | [ ] |
+| 5 | **RBAC device scoping** | Every role sees the ENTIRE fleet; there is no per-device or per-site grant. Fine for one 27-device organisation, and a hard cap on ever serving an MSP, a holding company, or "the Vietnam team sees Vietnam's firewalls". Architectural, so the cost only grows. | [ ] |
+| 6 | **`syslog_flow_hourly` rollup** | Already documented as the blocker for per-flow traffic evidence. Until it exists `/applications` keeps answering "cannot tell" and people stop opening it. ⛔ A storage decision argued on measured cardinality, NOT a query change. | [ ] |
+
+### P3 — real, but not urgent
+
+| # | Item | Why | Done |
+|---|---|---|:--:|
+| 7 | **Change-request → ticketing (ServiceNow / Jira / webhook)** | The VERIFY half is the moat; the REQUEST half is a CSV someone emails. The product proves a change happened but cannot participate in how it gets approved. | [ ] |
+| 8 | **Scheduled report delivery** | Phase 2 of the reporting plan, deliberately deferred by the user 2026-09-21 ("not that important now"). Same work as the long-standing Phase C note below. | [ ] |
+| 9 | **One fleet-wide SMTP relay** | SMTP is fully built (`lib/notify.js`, nodemailer, send-test route) but configured PER EMAIL CHANNEL, so there is no page labelled SMTP and it reads as missing. A single relay configured once and reused would match the expectation. | [ ] |
+
+### P4 — sweep leftovers, each a one-sitting fix
+
+Found by the 2026-09-21 sweep, triaged as not worth a release of their own. All VERIFIED unless noted.
+
+| # | Item | Done |
+|---|---|:--:|
+| 10 | `Update-SecVault.ps1` logs **"Step succeeded"** when the page sweep SKIPS — three deploys reported success for a gate that never ran. Cosmetic now the credentials are set, still dishonest. | [ ] |
+| 11 | `drawBarChart` with more rows than fit a page shreds labels and bars onto different pages (`ensureSpace` can only add ONE page). Unreachable today — every call site caps at 15. | [ ] |
+| 12 | Chart captions sit OUTSIDE the height reservation, so the sentence stating a chart's denominator can land on the next page. | [ ] |
+| 13 | `drawDonut` has no `opts.format`, unlike `drawBarChart` — a byte-valued donut would print "1.1B" for one gigabyte. | [ ] |
+| 14 | `lib/consoleUrl.js` accepts a zero-padded IPv4 and silently saves a DIFFERENT address (`192.168.010.1` → octal → `192.168.8.1`). | [ ] |
+| 15 | `gatherSegmentation` returns `[]` when called with no opts (the 15-min dispatch path), reported as `{ok:true, count:0}` — so a `violation_active` can show in `/work` as Act now and never reach a channel. Same shape as the bug v2.153.0 fixed. | [ ] |
+| 16 | `feedStatus`: an UNLISTED state ranks -1, wins the reduce, matches no branch, and falls through to `FEEDS OK`. The documented "drift makes the pill go loud" property does not exist — it goes green. Latent on today's seven states. | [ ] |
+| 17 | `feedStatus`: blocked + skipped with nothing rated reports "deliberately skipped", claiming SecVault chose not to collect over feeds a publisher REFUSED. Reachable on a hub-only site (live: `nvd` skipped, `fortinet_psirt` blocked). | [ ] |
+| 18 | `docs/SIZING-AND-BACKUP.md` says ~8.4 GB/day archive; measured **4.0**. | [ ] |
+| 19 | `backfillPaloAltoVersionRanges` still reports `cleaned up 302` every deploy, rewriting 351 advisory rows to identical values. Gated but flagged; first place to look if advisory matching regresses. | [ ] |
+| 20 | Stale `E:\SecVault_Backups` (~4.7 GB) left beside the current backup set. | [ ] |
+
+### ⛔ Deliberately NOT doing — do not re-propose without new evidence
+
+- **More vendors, more reports, more CVE feeds.** Eleven reports, six vendors, eight advisory
+  sources already. Breadth is not the constraint; a seventh vendor adds surface area to a product
+  that just demonstrated it can ship forty defects in a day.
+- **Rewriting the evidence model.** It is the strong part and it survived adversarial review.
+
+### Confidence note on the judgements above
+
+Items 1-3 and 10-20 rest on code read closely and data measured live on 2026-09-21/22. Items 4-9
+are partly inference from `CLAUDE.md` and these index files rather than from reading every engine —
+and documentation in this repo was found WRONG twice on 2026-09-21 (the smoke harness called
+unbuilt eight versions after it shipped; a chassis change called a no-op for every caller when it
+moved the monthly compliance PDF). Re-measure before committing to 4-9.
 
 ## Already built (do not re-propose)
 
