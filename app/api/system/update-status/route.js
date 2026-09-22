@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.170.1': [
+    'Fixes a one-line slip in the previous release: the change-summary rewrite ran correctly and rewrote 181 records, but failed to record that it had run, so it would have repeated on every future update.',
+    'Harmless — the rewrite skips records that would not change, so repeating it cost nothing and changed nothing. It is simply noise in the update log that should not be there.',
+    'Also: section names in the summary keep their capitalisation — "2 NAT rules", not "2 nat rules".',
+  ],
   '2.170.0': [
     'Configuration changes are readable now. The summary line used to be three internal firewall config paths — "12 added — e.g. devices.entry.vsys.entry.tag.entry[17], ..." — and now says what actually changed: "12 added — 4 tags, 4 address objects, 3 security rules, 1 service object".',
     'Each change inside the diff is named too. An address object now reads ‘Address object "HRIS-172.40.33.15" was added’ instead of an array index into the config tree that nobody can look up.',

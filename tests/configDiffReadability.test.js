@@ -86,6 +86,17 @@ describe('⛔ the summary says WHAT changed, not where it lives in the tree', ()
     assert.match(s, / and \d+ more$/, s);
   });
 
+  it('⛔ an acronym in a section label is not lowercased', () => {
+    // Blanket-lowercasing turned "NAT Rules" into "2 nat rules", which reads
+    // as a typo on the page an operator judges the product by.
+    const s = summarizeDiff(diffOf([
+      added('devices.entry.vsys.entry.rulebase.nat.rules.entry[27]', { '@_name': 'a' }),
+      added('devices.entry.vsys.entry.rulebase.nat.rules.entry[28]', { '@_name': 'b' }),
+    ]));
+    assert.match(s, /2 NAT rules/);
+    assert.equal(/nat rules/.test(s), false, s);
+  });
+
   it('never throws on a malformed diff', () => {
     for (const bad of [{}, { added: null }, { added: [{}] }, { added: [{ path: null }] }]) {
       assert.doesNotThrow(() => summarizeDiff(bad), JSON.stringify(bad));
