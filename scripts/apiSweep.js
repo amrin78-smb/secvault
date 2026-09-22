@@ -28,7 +28,8 @@
 // as worse than no guard, so this FAILS LOUDLY when it cannot connect and lives
 // behind its own `npm run apisweep`.
 //
-// ⛔ IT NEVER CALLS A MUTATING ROUTE. This runs against the production fleet.
+// ⛔ NO PROBE ASKS THIS PRODUCT TO CHANGE ANYTHING AN OPERATOR CAN SEE — and
+// that is a narrower claim than the one this header used to make, deliberately.
 // Every probe is a GET, with exactly two exceptions — both POSTs that CLAUDE.md
 // documents as pure computations over already-collected data that persist
 // nothing (`/api/devices/[id]/access-path`, `/api/topology/path-query`). That
@@ -37,6 +38,26 @@
 // unauthenticated probes use GET only — if middleware were broken (the very
 // thing being tested) an unauthenticated POST would reach the handler and
 // write.
+//
+// ⛔ BUT "GET" IS NOT "INERT", AND THE OLD CLAIM ("IT NEVER CALLS A MUTATING
+// ROUTE") WAS ENFORCED ON THE HTTP VERB ALONE. Three GETs in this table do have
+// a server-side effect, each named in SIDE_EFFECTING_GETS below and each
+// requiring its check to say so:
+//
+//   /api/license                    resolveInstallDate() INSERTs settings.install_date
+//                                   when that row is absent — the same function
+//                                   scripts/dbCheck.js names as the canonical
+//                                   read-named writer
+//   /api/system/update-status       git ls-remote, and git fetch into the
+//   /api/system/update-available    PRODUCTION checkout when a newer commit exists
+//
+// They are still probed, for one reason: each is reached by ordinary use of the
+// product (the licence banner renders on every page; Settings → Updates runs the
+// same git transport), and each effect is idempotent and invisible — a settings
+// row that should already exist, and remote refs. None of them touches fleet
+// data, device state, a score or a finding. What is NOT acceptable is a header
+// asserting a property the code does not have, so the claim is now scoped and
+// the exceptions are enforced rather than described.
 //
 // ─── WHAT THIS DOES NOT COVER, STATED UP FRONT ───────────────────────────────
 //
@@ -71,7 +92,18 @@
 //   npm run apisweep                     (defaults to https://127.0.0.1:3010)
 //   SMOKE_URL=https://192.168.7.69:3010 SMOKE_USER=admin SMOKE_PASS=… SMOKE_INSECURE=1 npm run apisweep
 //
-// Exit code 0 = every assertion held. Non-zero = at least one did not.
+// ⛔ EXIT CODES, AND WHY "INCOMPLETE" HAS ITS OWN. A sweep whose fixtures did
+// not resolve leaves whole classes of check UNRUN, and it used to print those
+// after the totals where they touched nothing: an account scoped to no devices
+// makes `/api/devices` answer `200 []`, every per-device check becomes unrun,
+// and the banner read "0 failed", exit 0. A short sweep must never read as a
+// clean one — the rule scripts/dbCheck.js already applies to `blocked`.
+//
+//   0  every assertion held AND every check ran
+//   1  an assertion failed, or fixture discovery errored
+//   2  could not reach the server / could not sign in — nothing was checked
+//   3  harness error
+//   4  every assertion that RAN held, but some checks could not run at all
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -262,7 +294,7 @@ const READ_CHECKS = [
   { path: '/api/cve/fleet' },
   { path: '/api/feeds/status' },
   { path: '/api/ldap-mappings', capability: 'manage_users' },
-  { path: '/api/license', why: 'open to every role — the banner needs it' },
+  { path: '/api/license', sideEffect: true, why: 'open to every role — the banner needs it' },
   { path: '/api/logs/search?limit=5', capability: 'view_log_search', expect: [200, 504], why: '504 is the honest answer to a timed-out search, not an empty 200' },
   { path: '/api/mfa' },
   { path: '/api/notification-channels', capability: 'manage_settings' },
@@ -274,8 +306,8 @@ const READ_CHECKS = [
   { path: '/api/system/console-url', capability: 'manage_settings' },
   { path: '/api/system/session-policy' },
   { path: '/api/system/tls', capability: 'manage_settings' },
-  { path: '/api/system/update-available' },
-  { path: '/api/system/update-status', why: 'degrades to up_to_date on any git failure; must never 500' },
+  { path: '/api/system/update-available', sideEffect: true },
+  { path: '/api/system/update-status', sideEffect: true, why: 'degrades to up_to_date on any git failure; must never 500' },
   { path: '/api/topology/graph' },
   { path: '/api/users', capability: 'manage_users' },
   { path: '/api/vpn/fleet' },
@@ -302,7 +334,12 @@ const READ_CHECKS = [
   { path: '/api/compliance/{fortinet}' },
 
   // nested ids, discovered
-  { path: '/api/devices/{deviceWithBackup}/backups/{backupId}', type: 'text', why: 'raw config download' },
+  // ⛔ `type: 'text'` ASSERTS A DOCUMENT, not just a status code. This route
+  // returns `config_backups.config_raw ?? ''`, so a NULL column is a 200
+  // text/plain download of nothing — the exact artefact the PDF checks refuse
+  // ("a zero-byte PDF someone would file"), in the one place an operator takes
+  // the bytes away and treats them as the firewall's configuration.
+  { path: '/api/devices/{deviceWithBackup}/backups/{backupId}', type: 'text', why: 'raw config download — must be a real config, not an empty or HTML body' },
   { path: '/api/devices/{deviceWithDiff}/diffs/{diffId}', capability: 'operate' },
   { path: '/api/applications/{application}', capability: 'operate' },
   { path: '/api/advisories/{cveId}/conditions' },
@@ -341,6 +378,17 @@ const READ_CHECKS = [
 const NON_MUTATING_POSTS = new Set([
   '/api/devices/{device}/access-path',
   '/api/topology/path-query',
+]);
+
+// ⛔ THE GETs THAT ARE NOT INERT. See the header. Both directions are enforced
+// in assertSafeChecks(): a check on one of these paths MUST carry
+// `sideEffect: true`, and a check carrying it that is NOT on this list is
+// refused — so neither the annotation nor the list can quietly drift away from
+// the other, and adding one is a decision somebody has to write down.
+const SIDE_EFFECTING_GETS = new Map([
+  ['/api/license', 'INSERTs settings.install_date when that row is absent (resolveInstallDate)'],
+  ['/api/system/update-status', 'runs git ls-remote, and git fetch into the production checkout when a newer commit exists (refs only, never the working tree)'],
+  ['/api/system/update-available', 'the same git transport as update-status, behind a 6-hour in-process cache'],
 ]);
 
 // ─── table 3: the report route's own parameter contract ─────────────────────
@@ -488,8 +536,15 @@ function capabilityNamedIn(body, known) {
   if (!parsed || typeof parsed !== 'object') return null;
   if (typeof parsed.required === 'string' && list.includes(parsed.required)) return parsed.required;
   // The prose message names it too, and a client may only have the message.
+  //
+  // ⛔ MATCHED AS A WHOLE WORD, NOT AS A SUBSTRING. `'operator'.includes('operate')`
+  // is true, so a body saying "the operator role may not do this" counted as
+  // naming the `operate` CAPABILITY — defeating the one distinction the test
+  // beside it exists to pin, that a ROLE is not a capability. Capabilities are
+  // snake_case, so the boundary has to exclude `_` as well as letters and
+  // digits: `manage_users_extra` must not match `manage_users` either.
   if (typeof parsed.error === 'string') {
-    const hit = list.find((c) => parsed.error.includes(c));
+    const hit = list.find((c) => new RegExp(`(^|[^a-z0-9_])${c}([^a-z0-9_]|$)`, 'i').test(parsed.error));
     if (hit) return hit;
   }
   return null;
@@ -552,6 +607,20 @@ function authedVerdict(check, observed) {
         + 'must carry `required`, or the operator is told only that they may not do something'
       );
     }
+    // ⛔ `check.capability` IS READ HERE, and until v2.173.0 it was read
+    // NOWHERE — set on sixteen checks, asserted by the harness test, and
+    // never once compared against what a route actually answered. Dead
+    // metadata that a test certifies is worse than none: it reads as coverage.
+    // The live session holds every capability, so this can only fire when a
+    // route gates on an authority the table (or lib/reports/catalogue.js)
+    // does not think it gates on.
+    if (check.capability && named !== check.capability) {
+      checks.push('403-names-the-declared-capability');
+      return fail(
+        `403 requiring "${named}", but this check declares "${check.capability}" — the route and the `
+        + 'sweep table disagree about which authority it gates on, so one of them is wrong'
+      );
+    }
     if (!expect.includes(403)) {
       return fail(
         `403 requiring "${named}" — this session holds every capability, so the route is gating on `
@@ -577,6 +646,21 @@ function authedVerdict(check, observed) {
     if (observed.bytes < 1000) {
       return fail(`200 application/pdf of only ${observed.bytes} bytes — an empty document, not a report`);
     }
+  } else if (type === 'text' && observed.status === 200) {
+    // ⛔ A 200 IS NOT A DOCUMENT. This used to assert the status code and
+    // nothing else, so a zero-byte body, an HTML error page served as 200, or
+    // a JSON error envelope all passed — on the one route whose bytes an
+    // operator saves to disk and reads as a firewall's configuration.
+    checks.push('text-not-empty', 'text-not-html', 'text-not-an-error-envelope');
+    if (observed.bytes === 0) {
+      return fail('200 with a ZERO-BYTE body — an empty download, not a config. The stored config_raw is NULL or empty.');
+    }
+    if (/text\/html/i.test(observed.contentType) || /^\s*<(!doctype|html)\b/i.test(observed.body)) {
+      return fail(`200 whose body is an HTML page (content-type "${observed.contentType || '(none)'}") — an error page served as a download`);
+    }
+    if (/json/i.test(observed.contentType)) {
+      return fail(`200 served as "${observed.contentType}" where a text download was expected — an error envelope with a success status`);
+    }
   } else if (type === 'json' || (type === 'any' && /json/i.test(observed.contentType))) {
     checks.push('json-parses');
     // ⛔ A 400/404 IS ALSO ASSERTED TO BE JSON. Every refusal in this product
@@ -596,6 +680,58 @@ function authedVerdict(check, observed) {
   }
 
   return { key: check.key || check.path, ok: true, status: observed.status, bytes: observed.bytes, checks };
+}
+
+// ─── the closing verdict ────────────────────────────────────────────────────
+
+/** Exit codes, named so the reasons cannot be confused at the call site. */
+const EXIT = { OK: 0, FAILED: 1, UNREACHABLE: 2, HARNESS: 3, INCOMPLETE: 4 };
+
+/**
+ * ⛔ A SHORT SWEEP MUST NEVER READ AS A CLEAN ONE — the rule scripts/dbCheck.js
+ * applies to `blocked`, which this file did not have. `gaps` and `unresolved`
+ * were printed AFTER the totals and touched neither the banner nor the exit
+ * code, so the one state that matters most — a harness account scoped to no
+ * devices, `/api/devices` answering `200 []`, every per-device check unrun —
+ * printed "0 failed" and exited 0. Pure and exported, because a live run only
+ * ever exercises the green path.
+ *
+ * ⛔ INCOMPLETE IS ITS OWN EXIT CODE, NOT A FAILURE AND NOT A PASS. Calling it
+ * a failure would make a fleet that genuinely has no Fortinet red for ever and
+ * train people to ignore the result; calling it a pass is what this fixes.
+ */
+function sweepVerdict({ failed = 0, fixtureErrors = 0, gaps = 0, unresolved = 0, ran = 0 } = {}) {
+  const broken = failed + fixtureErrors;
+  const unrun = gaps + unresolved;
+
+  if (ran === 0) {
+    return {
+      tone: 'fail',
+      exitCode: EXIT.FAILED,
+      sentence: 'NOTHING RAN. No probe reached the server, so this sweep proves nothing about any route.',
+    };
+  }
+  if (broken > 0) {
+    return {
+      tone: 'fail',
+      exitCode: EXIT.FAILED,
+      sentence: `${failed} assertion(s) failed${fixtureErrors ? ` and fixture discovery errored ${fixtureErrors} time(s)` : ''}`
+        + `${unrun ? `, and ${unrun} check(s) could not run at all` : ''}.`,
+    };
+  }
+  if (unrun > 0) {
+    return {
+      tone: 'unknown',
+      exitCode: EXIT.INCOMPLETE,
+      sentence: `Every assertion that RAN held, but ${unrun} check(s) never ran (${gaps} coverage gap(s), `
+        + `${unresolved} unresolved fixture(s)) — this is NOT a clean sweep, and the routes behind them are unswept.`,
+    };
+  }
+  return {
+    tone: 'ok',
+    exitCode: EXIT.OK,
+    sentence: `All ${ran} probes ran and every assertion held.`,
+  };
 }
 
 // ─── the guards on the tables themselves ────────────────────────────────────
@@ -630,6 +766,26 @@ function assertSafeChecks(checks, routes) {
     }
     if (!bare.startsWith('/api/')) {
       throw new Error(`${c.path}: this sweep covers /api only — pages belong to scripts/smoke.js.`);
+    }
+    // ⛔ BOTH DIRECTIONS, so the annotation and the list cannot drift apart.
+    const effect = SIDE_EFFECTING_GETS.get(bare);
+    if (effect && c.sideEffect !== true) {
+      throw new Error(
+        `${c.path} ${effect} — a GET is not automatically inert. Mark the check \`sideEffect: true\` `
+        + 'so the header\'s claim stays true, or drop the check.'
+      );
+    }
+    if (!effect && c.sideEffect) {
+      throw new Error(
+        `${c.path} declares a side effect that SIDE_EFFECTING_GETS does not describe. Add it there with `
+        + 'what it actually does, or remove the flag — an undocumented one is the claim this sweep just stopped making.'
+      );
+    }
+    // ⛔ `capability` IS VALIDATED, because it is now READ (see authedVerdict's
+    // 403 branch). A mistyped one could otherwise never match a real 403 body
+    // and would silently assert nothing — the state this field was in before.
+    if (c.capability !== undefined && c.capability !== null && !ALL_CAPABILITIES.includes(c.capability)) {
+      throw new Error(`${c.path}: "${c.capability}" is not a capability lib/rbac.js knows.`);
     }
   }
   for (const r of routes || []) {
@@ -971,7 +1127,7 @@ async function main() {
     await preflight();
   } catch (err) {
     console.error(`[apisweep] FAILED before any check: ${err.message}`);
-    process.exit(2);
+    process.exit(EXIT.UNREACHABLE);
   }
   const anonResults = [...await runAnon(API_ROUTES), ...await runMatcherProbes(MATCHER_PROBES)];
   const anonBad = anonResults.filter((r) => !r.ok);
@@ -982,7 +1138,7 @@ async function main() {
     await login();
   } catch (err) {
     console.error(`[apisweep] FAILED before any authenticated check: ${err.message}`);
-    process.exit(2);
+    process.exit(EXIT.UNREACHABLE);
   }
 
   const { fixtures, errors: fixtureErrors, gaps } = await discoverFixtures();
@@ -1006,7 +1162,7 @@ async function main() {
   );
 
   // ⛔ A SHORT SWEEP MUST NEVER READ AS A CLEAN ONE. Anything that did not RUN
-  // is printed after the totals, not folded into them — the same rule the work
+  // is listed here AND carried into the verdict below — the same rule the work
   // queue's `verify` band follows. A fixture that does not exist on this fleet
   // is a real coverage gap and the operator has to be told which checks it cost.
   for (const g of gaps) console.log(`  gap   ${g}`);
@@ -1015,22 +1171,35 @@ async function main() {
     '  note  role-specific denial (a 403 for a session that genuinely lacks a capability) is NOT '
     + 'covered — it needs a second, non-super_admin test account.'
   );
+  for (const [p, effect] of SIDE_EFFECTING_GETS) {
+    if (checks.some((c) => String(c.path).split('?')[0] === p)) {
+      console.log(`  note  GET ${p} is not inert: it ${effect}.`);
+    }
+  }
 
   if (fixtureErrors.length) {
     console.error(`[apisweep] fixture discovery failed ${fixtureErrors.length} time(s) — the sweep above is incomplete`);
-    process.exit(1);
   }
   if (bad.length) {
     console.error(`[apisweep] ${bad.length} assertion(s) failed: ${bad.map((b) => b.key).join(', ')}`);
-    process.exit(1);
   }
+
+  const verdict = sweepVerdict({
+    failed: bad.length,
+    fixtureErrors: fixtureErrors.length,
+    gaps: gaps.length,
+    unresolved: unresolved.length,
+    ran: anonResults.length + authedResults.length,
+  });
+  console.log(`[apisweep] ${verdict.sentence}`);
+  process.exit(verdict.exitCode);
 }
 
 // Only sweep when RUN; `require`d (by its test) this file must touch no network.
 if (require.main === module) {
   main().catch((err) => {
     console.error(`[apisweep] harness error: ${err && err.stack ? err.stack : err}`);
-    process.exit(3);
+    process.exit(EXIT.HARNESS);
   });
 }
 
@@ -1040,10 +1209,13 @@ module.exports = {
   REPORT_PARAM_CASES,
   MATCHER_PROBES,
   NON_MUTATING_POSTS,
+  SIDE_EFFECTING_GETS,
   UNKNOWN_UUID,
   UNCAUGHT_500_HINT,
+  EXIT,
   anonVerdict,
   authedVerdict,
+  sweepVerdict,
   // ⛔ EXPORTED BECAUSE A MUTATION ESCAPED WITHOUT IT. The harness test built
   // its own `observed` objects, so re-introducing capture()'s 4 KB slice — the
   // one real defect this sweep has had — changed nothing and the suite stayed

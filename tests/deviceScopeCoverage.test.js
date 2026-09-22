@@ -21,7 +21,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  COVERAGE, CLASSIFICATIONS, isScopeAware, touchesDeviceData, countByClassification,
+  COVERAGE, CLASSIFICATIONS, TRANSITIVE_ALLOWED, isScopeAware, touchesDeviceData,
+  countByClassification,
 } = require('../lib/deviceScopeCoverage');
 
 const ROOT = path.join(__dirname, '..');
@@ -114,17 +115,130 @@ describe('⛔ a surface that reads device data is never silently unclassified', 
   // classified 'no-device-data' is exactly the silent leak this guards.
   const DEVICE_RE = /FROM devices|JOIN devices|\bdeviceId\b|\bdevice_id\b/;
 
+  // ⛔ COMMENTS ARE STRIPPED FIRST. lib/notificationChannels.js says, in
+  // prose, "device_id-scoped and don't apply here" — a sentence explaining
+  // that it holds no device data — and the raw-source check read that as
+  // evidence that it does. A checker that fires on its own subject matter
+  // being DISCUSSED produces noise, and noise is how a real hit gets waved
+  // through. The [^:] guard keeps an https:// inside a string from eating
+  // the rest of its line.
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
   it('nothing classified no-device-data actually queries devices', () => {
     const offenders = [];
     for (const [file, cls] of Object.entries(COVERAGE)) {
       if (cls !== 'no-device-data') continue;
       const full = path.join(ROOT, file);
       if (!fs.existsSync(full)) continue;
-      if (DEVICE_RE.test(fs.readFileSync(full, 'utf8'))) offenders.push(file);
+      if (DEVICE_RE.test(stripComments(fs.readFileSync(full, 'utf8')))) offenders.push(file);
     }
     assert.deepEqual(offenders, [],
       'these are classified as carrying no per-firewall data but reference it. Re-classify '
       + `them 'blocked' (or 'aware' once they narrow):\n  ${offenders.join('\n  ')}`);
+  });
+
+  // ⛔ THE SAME QUESTION, ONE IMPORT DEEPER — and this is where it actually
+  // found something. The check above reads only the surface FILE, so a route
+  // whose device query lives in an engine it imports was invisible to it. Six
+  // were: every /api/applications route imports applicationViewData, which
+  // evaluates declared flows against each device's collected rulebase, while
+  // the PAGE those routes back was already `blocked`; and
+  // credential-profiles/[id] sat open beside its own already-blocked
+  // collection route. Blocking a page and leaving its API open is precisely
+  // the hole this register exists to prevent.
+  //
+  // ⛔ THE UNIVERSAL IMPORTS ARE NOT FOLLOWED, or the checker reports every
+  // authenticated route and therefore reports nothing: `authOptions` reaches
+  // lib/mfa.js -> lib/credStore.js, which mentions device_id, from all 88 of
+  // them. That exclusion is the one judgement in here and it is narrow —
+  // modules every surface imports BY CONSTRUCTION, never a module that happens
+  // to be inconvenient.
+  const UNIVERSAL = [
+    'app/api/auth/[...nextauth]/route.js',
+    'lib/credStore.js',
+    'lib/mfa.js',
+    'lib/db.js',
+    'lib/rbac.js',
+    'lib/deviceScope.js',
+    'lib/deviceScopePaths.js',
+  ];
+  const SPEC = /(?:from\s*|require\()\s*['"](\.[^'"]+)['"]/g;
+
+  function resolveSpec(from, spec) {
+    const base = path.resolve(path.dirname(from), spec);
+    for (const c of [base, `${base}.js`, path.join(base, 'index.js')]) {
+      if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
+    }
+    return null;
+  }
+
+  function reachesDeviceData(file, seen, depth) {
+    if (depth > 6) return null;
+    const real = path.resolve(file);
+    if (seen.has(real)) return null;
+    seen.add(real);
+    let src;
+    try { src = fs.readFileSync(real, 'utf8'); } catch { return null; }
+    const rel = path.relative(ROOT, real).split(path.sep).join('/');
+    if (depth > 0 && UNIVERSAL.includes(rel)) return null;
+    if (depth > 0 && DEVICE_RE.test(stripComments(src))) return rel;
+    const kids = [];
+    let m;
+    SPEC.lastIndex = 0;
+    while ((m = SPEC.exec(src))) kids.push(m[1]);
+    for (const k of kids) {
+      const r = resolveSpec(real, k);
+      if (!r) continue;
+      const hit = reachesDeviceData(r, seen, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  it('⛔ nor does anything it IMPORTS, unless the exemption is written down', () => {
+    const offenders = [];
+    for (const [file, cls] of Object.entries(COVERAGE)) {
+      if (cls !== 'no-device-data') continue;
+      if (TRANSITIVE_ALLOWED[file]) continue;
+      const full = path.join(ROOT, file);
+      if (!fs.existsSync(full)) continue;
+      const via = reachesDeviceData(full, new Set(), 0);
+      if (via) offenders.push(`${file}  (via ${via})`);
+    }
+    assert.deepEqual(offenders, [],
+      'these are classified as carrying no per-firewall data but reach it through an import. '
+      + "Re-classify them 'blocked', or add an entry to TRANSITIVE_ALLOWED saying exactly what "
+      + `the import carries:\n  ${offenders.join('\n  ')}`);
+  });
+
+  it('⛔ every allowlist entry is still needed, and still resolves', () => {
+    // An exemption for a surface that no longer reaches device data reads as a
+    // known hole that is not there, and one for a deleted file is a line
+    // nobody will ever remove. Both make the list less trustworthy than none.
+    const stale = [];
+    for (const file of Object.keys(TRANSITIVE_ALLOWED)) {
+      if (!COVERAGE[file]) { stale.push(`${file} (not in the register)`); continue; }
+      if (COVERAGE[file] !== 'no-device-data') {
+        stale.push(`${file} (now classified ${COVERAGE[file]}, so the exemption is moot)`);
+        continue;
+      }
+      const full = path.join(ROOT, file);
+      if (!fs.existsSync(full)) { stale.push(`${file} (file is gone)`); continue; }
+      if (!reachesDeviceData(full, new Set(), 0)) {
+        stale.push(`${file} (no longer reaches device data — delete the exemption)`);
+      }
+    }
+    assert.deepEqual(stale, [], `stale exemptions:\n  ${stale.join('\n  ')}`);
+  });
+
+  it('and every exemption states a REASON, not just a name', () => {
+    for (const [file, why] of Object.entries(TRANSITIVE_ALLOWED)) {
+      assert.equal(typeof why, 'string', file);
+      assert.ok(why.trim().length >= 12,
+        `${file}: an exemption with no explanation is a suppression`);
+    }
   });
 
   it('and everything else is accounted for as aware or blocked', () => {

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Table from '../ui/Table';
-import { displayRowsFor } from '../../lib/configDiffDisplay';
+import { displayRowsFor, headingNamesObject } from '../../lib/configDiffDisplay';
 import Badge from '../ui/Badge';
 import { ruleFromBraceEntry } from '../../lib/adapters/paloalto/sshParser';
 import { parseRuleEntry } from '../../lib/adapters/paloalto/parser';
@@ -707,18 +707,29 @@ function DiffValueRow({ path, value, friendlyDescription }) {
   //
   // ⛔ Nested objects qualify too: displayRowsFor() presents them, and returns
   // null when it cannot, which falls back to the raw-JSON renderer.
-  const rows = block ? displayRowsFor(value, hasDescription) : null;
+  //
+  // ⛔ THE NAME ROW GOES ONLY IF THE HEADING REALLY SAYS THE NAME. Passing
+  // `hasDescription` here meant "some description exists", which is not the
+  // same question -- see headingNamesObject()'s own comment for the rows it
+  // silently deleted.
+  const rows = block ? displayRowsFor(value, headingNamesObject(friendlyDescription, value)) : null;
   const flatTable = rows !== null;
+  // ⛔ NO DANGLING COLON. An object whose only field was its name renders no
+  // table at all (the heading has already said everything there is), and the
+  // colon promising one below it was left behind.
+  const showsBlock = block && !(flatTable && rows.length === 0);
   const label = hasDescription ? friendlyDescription : path;
   return (
     <span style={{ display: 'block' }}>
       <span style={PATH_LABEL_STYLE} title={hasDescription ? path : undefined}>
-        {label}{block ? ':' : ''}
+        {label}{showsBlock ? ':' : ''}
       </span>
       {block
-        ? (flatTable
-          ? <FlatObjectTable rows={rows} />
-          : renderBlockValue(value))
+        ? (showsBlock
+          ? (flatTable
+            ? <FlatObjectTable rows={rows} />
+            : renderBlockValue(value))
+          : null)
         : <span>: {formatValue(value)}</span>}
     </span>
   );
@@ -1467,7 +1478,15 @@ function IndexedRuleValueCell({ entry }) {
   // to normalize, which keeps the reliable raw rendering below.
   const value = entry.value;
   if (needsBlockRender(value)) {
-    return isFlatObject(value) ? <FlatObjectTable value={value} /> : renderBlockValue(value);
+    // ⛔ IT WAS HANDED THE WRONG PROP AND RENDERED NOTHING. FlatObjectTable
+    // takes ROWS (it stopped taking a value when the flattening moved out to
+    // lib/configDiffDisplay.js); `value={value}` made `rows` undefined, the
+    // component returned null, and a whole changed object vanished from the
+    // cell with no fallback and no error. The name is never dropped here --
+    // this cell has no heading above it to carry one.
+    const rows = displayRowsFor(value, false);
+    if (rows !== null && rows.length > 0) return <FlatObjectTable rows={rows} />;
+    return renderBlockValue(value);
   }
   return <span>{formatValue(value)}</span>;
 }

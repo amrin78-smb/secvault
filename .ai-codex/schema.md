@@ -1275,3 +1275,12 @@ Which firewalls a LOCAL account may see.
 ⛔ **Zero rows for a user means UNSCOPED (sees everything), not "no devices".** Clearing a scope
 WIDENS access. Full rules in CLAUDE.md's "Per-user device scoping"; the engine is
 `lib/deviceScope.js` and the coverage register is `lib/deviceScopeCoverage.js`.
+
+/!\ **`device_id ... ON DELETE CASCADE` IS A LATENT ACCESS WIDENING, and the FK is not what
+guards it** (v2.174.0). Combined with the rule above, deleting the LAST firewall in an account's
+scope promotes that account from "one firewall" to "every firewall" -- silently, as a side effect
+of retiring an unrelated device. `ON DELETE RESTRICT` is NOT the fix (it fails an ordinary
+deletion with a foreign-key error naming an internal table); the guard is
+`scopesEmptiedByDeviceDeletion()` at BOTH deletion points -- `app/api/devices/[id]/route.js` and
+the delete Server Action in `app/(dashboard)/devices/page.js`. A THIRD delete path needs the same
+call, and `tests/deviceScopeEnforcement.test.js` asserts both existing ones make it.

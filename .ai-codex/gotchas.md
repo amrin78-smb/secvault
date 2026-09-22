@@ -325,6 +325,42 @@ defect. Diagnostics belong where the value's meaning is known, not inside a spec
 Pinned by `tests/cidrUtils.test.js`, which uses the real object names from the fleet and fails 11 of
 16 against the pre-fix parser.
 
+## ⛔ A NAME IS NOT A PATH: dots and spaces are legal in PAN-OS names (2026-09-22)
+
+Two separate defects, one root cause — treating punctuation as structure.
+
+- `classifyPath()` split on `.` and called the first segment the rule, so
+  `Allow_URL_tfcc.fisheries.go.th` was displayed as `Allow_URL_tfcc`. **47 of 1,780 live
+  rules carry a dot.** Naming a rule that does not exist is worse than naming none.
+- `PATH_SHAPE_VIOLATION` treated ANY whitespace as proof of a corrupted capture, so
+  `65.32 allow all` and `Batch Scan for 27.254.123.18` rendered as
+  "(unreadable path — see full diff for details)" — in the rule-name column.
+
+⛔ **The second is this repo's signature bug running BACKWARDS.** Usually a failed read is
+recorded as a fact; here a perfectly good fact was recorded as a failed read. Both destroy the
+operator's ability to trust the page, and the second is harder to notice because it looks
+like the system being careful. When you write a guard that declares data unreadable, check
+what it calls unreadable on the LIVE fleet before shipping it.
+
+Anchor on a known FIELD TOKEN at the end, never on the separator. Pinned by
+`tests/configDiffRuleNames.test.js`.
+
+## ⛔ The Panorama origin marker is UNOBSERVABLE over SSH, and the check now says so (2026-09-22)
+
+`undecidable_when_key: '@_panorama'` is an XML attribute the API transport produces.
+`lib/adapters/paloalto/sshParser.js` builds `raw_rule` from brace-parsed attributes and emits
+no `@_*` key at all — while still collecting pre/post-rulebase, i.e. Panorama-pushed rules
+arrive over SSH carrying no origin marker. Same firewall, same rules: `mgmt_method: 'api'`
+gives `warning`, `'ssh'` gives `fail` naming those rules.
+
+⛔ **It is not fixable by reasoning over stored rows**, and a parser change would not repair
+rows already collected. So `configAuditor` detects the absence of the marker's whole
+NAMESPACE (`@_*`), not of `@_panorama` itself — a firewall with genuinely no pushed rules is
+a normal state and must not be caveated — and discloses the limitation in the finding
+(`originMarkerUnobservable`), calling the count an upper bound. ⛔ The `fail` and its rule
+names are KEPT: a real absence on a real rule is a real finding, and burying it is the
+mistake `undecidableNote` already refuses. A `pass` carries no caveat — presence was observed.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

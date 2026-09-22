@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
 import {
   loadScopeForSession, filterDevices, isScoped, SCOPE_STATES, canSeeDevice,
+  scopesEmptiedByDeviceDeletion,
 } from '../../../lib/deviceScope';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { isAdmin } from '../../../lib/rbac';
@@ -74,6 +75,26 @@ async function deleteDeviceAction(formData) {
   const scope = await loadScopeForSession(session2, pool);
   if (!canSeeDevice(scope, id)) {
     redirect('/devices?error=forbidden');
+  }
+
+  // ⛔ THE SAME GUARD THE API ROUTE APPLIES, because this path does its own
+  // DELETE rather than calling that route. `user_device_scopes.device_id` is ON
+  // DELETE CASCADE and zero rows means UNSCOPED, so removing the last firewall
+  // in an account's scope hands that account the whole fleet. One shared helper
+  // rather than a second copy of the query: two implementations of "would this
+  // widen someone's access" would eventually disagree, and the wrong one would
+  // be the one that let the delete through.
+  //
+  // ⛔ A FAILED CHECK REFUSES. A delete is irreversible, so "we could not tell"
+  // must not proceed.
+  let emptied;
+  try {
+    emptied = await scopesEmptiedByDeviceDeletion(pool, id);
+  } catch {
+    redirect('/devices?error=scope_check_failed');
+  }
+  if (emptied.length > 0) {
+    redirect(`/devices?error=scope_last_device&accounts=${encodeURIComponent(emptied.join(', '))}`);
   }
 
   await pool.query('DELETE FROM devices WHERE id = $1', [id]);
@@ -251,8 +272,20 @@ export default async function DevicesPage({ searchParams }) {
       (d) => d.status === 'new' && d.correlation.kind === 'unmanaged'
     ).length;
   } catch (_err) {
-    discoveredCount = 0;
+    // ⛔ null, NOT 0 — the read FAILED. Both render the same today (a bare
+    // chip), and that is exactly why the variable has to stay honest: the next
+    // reader to put a number beside it would otherwise print a measured zero
+    // over a failed read.
+    discoveredCount = null;
   }
+
+  // ⛔ BOTH LINKS GO TO BLOCKED SURFACES FOR A SCOPED ACCOUNT, so offering them
+  // is a UI that is LOOSER than the API behind it — the inverse of this
+  // product's rule, and it lands the person on a redirect that looks like a
+  // bug. Discovered senders and Add firewall are fleet-wide by nature (a sender
+  // that is in nobody's inventory belongs to no scope), so they are hidden
+  // rather than filtered.
+  const fleetWideActionsAllowed = !scopeNarrowed;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -264,15 +297,17 @@ export default async function DevicesPage({ searchParams }) {
                 device (HA peers), because presenting those as "devices to add"
                 is exactly how an operator ends up with duplicate firewalls.
                 Muted at zero — a zero-count chip must not read as an alert. */}
-            <Link
-              href="/devices/discovered"
-              className="btn btn-secondary"
-              title="Firewalls sending syslog from an address that is not in the inventory"
-            >
-              Discovered senders
-              {discoveredCount > 0 ? ` (${discoveredCount})` : ''}
-            </Link>
-            {canWrite && (
+            {fleetWideActionsAllowed && (
+              <Link
+                href="/devices/discovered"
+                className="btn btn-secondary"
+                title="Firewalls sending syslog from an address that is not in the inventory"
+              >
+                Discovered senders
+                {discoveredCount > 0 ? ` (${discoveredCount})` : ''}
+              </Link>
+            )}
+            {canWrite && fleetWideActionsAllowed && (
               <Link href="/devices/new" className="btn btn-primary">
                 Add firewall
               </Link>
@@ -294,6 +329,38 @@ export default async function DevicesPage({ searchParams }) {
           }}
         >
           You don&apos;t have permission to do that — admin role required.
+        </div>
+      )}
+
+      {/* ⛔ A REFUSED DELETE MUST SAY WHY IT WAS REFUSED. Redirecting back with
+          no explanation reads as a broken button, and the operator's next move
+          is to try again rather than to fix the scope that is actually
+          blocking them. */}
+      {(searchParams?.error === 'scope_last_device'
+        || searchParams?.error === 'scope_check_failed') && (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--tint-warn)',
+            color: 'var(--tint-warn-fg)',
+            fontSize: 'var(--text-base)',
+          }}
+        >
+          {searchParams.error === 'scope_last_device' ? (
+            <>
+              Not deleted. This is the only firewall granted to{' '}
+              <strong>{String(searchParams.accounts || 'one or more accounts').slice(0, 200)}</strong>
+              , and an account with no firewalls granted sees <em>every</em> firewall in SecVault.
+              Grant those accounts a different firewall first, then delete this one.
+            </>
+          ) : (
+            <>
+              Not deleted. SecVault could not check whether any account is restricted to this
+              firewall, and a deletion cannot be undone. Try again; if it keeps happening, report
+              it.
+            </>
+          )}
         </div>
       )}
 

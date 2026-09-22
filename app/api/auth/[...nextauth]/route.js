@@ -469,12 +469,24 @@ export const authOptions = {
         // decide access. The boolean only routes the request; WHICH devices are
         // visible is re-read from the database by every scope-aware surface.
         //
-        // ⛔ RE-READ ON EVERY TOKEN USE, beside the role, so granting or
-        // revoking a scope takes effect immediately rather than after the JWT
-        // expires — and FAILS CLOSED to `true` on an error, which is the
-        // restrictive direction here: a scoped user briefly seeing fewer
-        // screens is recoverable, an unscoped one being handed the fleet is
-        // not.
+        // ⛔ RE-READ WHENEVER THIS CALLBACK RUNS — WHICH IS NOT EVERY REQUEST,
+        // AND THE DIFFERENCE MATTERS. This runs on sign-in, on
+        // getServerSession(), and when NextAuth re-issues the cookie. It does
+        // NOT run in middleware: `getToken()` from next-auth/jwt only DECRYPTS
+        // (zero references to `callbacks` in that package). So the claim
+        // middleware reads is as old as the last cookie re-issue — with
+        // SESSION_IDLE_MINUTES=0, NextAuth's own 30 days. An earlier comment
+        // here said "re-read on every token use", which sent a reader looking
+        // for a freshness guarantee that is not there.
+        //
+        // Pages are therefore decided again in app/(dashboard)/layout.js
+        // against a live read; API routes are covered by this claim alone, and
+        // the scope PUT tells the administrator to sign the account out to
+        // apply a new restriction at once.
+        //
+        // ⛔ FAILS CLOSED to `true` on an error, the restrictive direction
+        // here: a scoped user briefly seeing fewer screens is recoverable, an
+        // unscoped one being handed the fleet is not.
         try {
           const sc = await pool.query(
             'SELECT 1 FROM user_device_scopes WHERE user_id = $1 LIMIT 1',

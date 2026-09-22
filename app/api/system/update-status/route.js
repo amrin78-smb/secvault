@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.174.0': [
+    "Firewall change records now read as English. Palo Alto changes captured over SSH arrived as raw configuration paths; every one of them is now described in a sentence — measured across the live fleet, 573 of 573 such entries went from unreadable to named, and the Changes page overall from 77% described to 95%.",
+    "Fixed a rule name that did not exist. A rule whose name contains a dot — 47 of the 1,780 rules on this fleet — was shown truncated, so the Changes page confidently named a rule nobody could find. Rule names with spaces were worse: they were reported as an unreadable path.",
+    "Restricted accounts are now checked against the database on every page, not against a value cached in the browser session. Granting someone access to a specific set of firewalls takes effect on pages immediately; the panel tells you to sign the account out if you need it to apply to the API at once.",
+    "Deleting a firewall can no longer quietly widen someone else’s access. If it is the only firewall an account was granted, the deletion is refused and the accounts are named — previously that account would silently have been given the whole fleet.",
+    "Compliance reporting stopped blaming the firewall for our own gaps: a zone list SecVault could not read now says so rather than telling the operator to classify zones that may already be classified, rules with no zone recorded are no longer dropped from a check in silence, and both printed reports now state how old the configuration behind the score is — a month-old audit of year-old evidence no longer reads as current.",
+    "The updater now checks that the console actually answers after every upgrade, not only after one that turned on HTTPS.",
+  ],
   '2.173.0': [
     'Compliance scores now agree with each other. The fleet PDF could print “PCI DSS 57%” in its table and “the 58% rests on 40 checks” one line below, because two parts of the product rounded the same figure differently. Every copy now matches what the compliance pages show.',
     'Fixed a row that invented a collection date: a firewall whose configuration has never been collected was showing its audit timestamp as though it were the collection time, in the fresh colour — while the banner above correctly listed it as behind.',

@@ -2764,6 +2764,21 @@ CREATE INDEX IF NOT EXISTS idx_advisories_epss_score
 -- makes: zero rows is "nobody has expressed an intent", not "deny everything".
 -- Making an empty table mean deny would lock every existing installation out
 -- of its own platform on the deploy that delivers this.
+--
+-- /!\ THAT ASYMMETRY MAKES `device_id ... ON DELETE CASCADE` A LATENT ACCESS
+-- WIDENING, AND THE FK IS NOT WHAT GUARDS IT. Deleting the LAST firewall in an
+-- account's scope removes its last row, which by the rule above promotes that
+-- account from "sees one firewall" to "sees every firewall" -- silently, as a
+-- side effect of retiring an unrelated device.
+--
+-- ON DELETE RESTRICT is NOT the fix: it would make an ordinary device deletion
+-- fail with a foreign-key error naming an internal table, for an administrator
+-- who has done nothing wrong. The guard is at the DELETION POINTS instead --
+-- scopesEmptiedByDeviceDeletion() in lib/deviceScope.js, called by both
+-- app/api/devices/[id]/route.js and the delete Server Action in
+-- app/(dashboard)/devices/page.js -- which refuse the delete and name the
+-- accounts. If a THIRD path to deleting a device is ever added, it needs the
+-- same call.
 CREATE TABLE IF NOT EXISTS user_device_scopes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

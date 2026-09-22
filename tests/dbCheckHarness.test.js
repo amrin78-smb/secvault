@@ -29,6 +29,54 @@ const assert = require('node:assert/strict');
 
 const dc = require('../scripts/dbCheck.js');
 
+// ── 0. the ROLE assertion ──────────────────────────────────────────────────
+
+test('⛔ the role guard refuses the APPLICATION role — guard 1 was never enforced', () => {
+  // ⛔ THE LIVE SHAPE. `DBCHECK_URL` overrides the connection string and
+  // `current_user` was printed and never checked, so an operator chasing a
+  // missing grant types `DBCHECK_URL=$DATABASE_URL npm run dbcheck` and every
+  // registered function runs as the table OWNER against production.
+  const v = dc.assertReadOnlyRole({
+    user: 'secvault_user', superuser: false, writableTables: 78, writableSample: 'advisories, devices',
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /INSERT\/UPDATE\/DELETE on 78 table\(s\)/);
+  assert.match(v.reason, /DBCHECK_URL/, 'the message must say what to do next');
+});
+
+test('the role guard refuses a superuser', () => {
+  const v = dc.assertReadOnlyRole({ user: 'postgres', superuser: true, writableTables: 0 });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /SUPERUSER/);
+});
+
+test('⛔ an UNKNOWN privilege answer is refused, not read as "may write nothing"', () => {
+  // ⛔ `Number(null)` is 0 and 0 is finite, so a bare Number.isFinite guard
+  // would turn "we could not read this" into a clean bill of health — the
+  // same substitution CLAUDE.md names over the licence guard's maxDevices,
+  // here on the check that decides whether this tool may talk to production.
+  for (const w of [
+    { user: 'x', superuser: false, writableTables: null },
+    { user: 'x', superuser: false, writableTables: undefined },
+    { user: 'x', superuser: false, writableTables: '' },
+    { user: 'x', superuser: false, writableTables: 'lots' },
+  ]) {
+    const v = dc.assertReadOnlyRole(w);
+    assert.equal(v.ok, false, `${JSON.stringify(w)} must be refused`);
+    assert.match(v.reason, /UNKNOWN/);
+  }
+  // and an unknown SUPERUSER answer is refused for the same reason
+  assert.equal(dc.assertReadOnlyRole({ user: 'x', superuser: null, writableTables: 0 }).ok, false);
+  assert.equal(dc.assertReadOnlyRole({ user: '', superuser: false, writableTables: 0 }).ok, false);
+  assert.equal(dc.assertReadOnlyRole(null).ok, false);
+});
+
+test('and the real diagnostics role passes', () => {
+  const v = dc.assertReadOnlyRole({ user: 'claude_readonly', superuser: false, writableTables: 0 });
+  assert.equal(v.ok, true);
+  assert.equal(v.user, 'claude_readonly');
+});
+
 // ── 1. the read-only NAME guard ────────────────────────────────────────────
 
 test('name guard accepts the read verbs this repo actually uses', () => {
@@ -230,6 +278,79 @@ test('statement guard refuses an UNBOUNDED read of syslog_events', () => {
   assert.equal(good.ok, true);
 });
 
+test('⛔ statement guard reads EVERY statement, not just the leading verb', () => {
+  // ⛔ node-pg sends a multi-statement string as a simple query whenever no
+  // parameter array is passed, and PostgreSQL executes all of it. So
+  // `SELECT 1; DELETE FROM advisories` was a WRITE that returned ok from a
+  // guard reading only the first word. No registered function does this
+  // today; the guard's job is to survive the day one does.
+  for (const [sql, re] of [
+    ['SELECT 1; DELETE FROM advisories', /DELETE statement/],
+    ['SELECT 1; INSERT INTO settings (key) VALUES ($1)', /INSERT statement/],
+    ['BEGIN; UPDATE devices SET active = false; COMMIT', /UPDATE statement/],
+    ['SELECT 1;\n  -- a comment\n  DROP TABLE devices', /DROP statement/],
+    ['SELECT 1; WITH d AS (DELETE FROM advisories RETURNING id) SELECT * FROM d', /data-modifying CTE/],
+  ]) {
+    const v = dc.guardStatement(sql);
+    assert.equal(v.ok, false, `${sql} must be refused`);
+    assert.match(v.reason, re);
+    assert.match(v.reason, /statement \d+ of \d+/, 'the message must say WHICH statement objected');
+  }
+});
+
+test('a genuinely chained pair of READS is still admitted, and a trailing semicolon is not a statement', () => {
+  // A refusal here would be a false alarm, and a false alarm trains the next
+  // person to delete the guard.
+  assert.equal(dc.guardStatement('SELECT 1; SELECT 2').ok, true);
+  assert.equal(dc.guardStatement('SELECT 1;').ok, true);
+  assert.equal(dc.guardStatement('BEGIN; SELECT 1; COMMIT').ok, true);
+});
+
+test('a semicolon INSIDE a literal does not fake a statement break', () => {
+  const v = dc.guardStatement("SELECT * FROM t WHERE msg = 'a; DELETE FROM advisories'");
+  assert.equal(v.ok, true);
+  assert.equal(v.statements, 1);
+});
+
+test('splitStatements keeps dollar-quoted blocks and doubled quotes whole', () => {
+  assert.equal(dc.splitStatements("SELECT $$a;b$$ AS x").length, 1);
+  assert.equal(dc.splitStatements("SELECT 'it''s; fine' AS x").length, 1);
+  assert.equal(dc.splitStatements('SELECT 1 /* ; */ ; SELECT 2').length, 2);
+});
+
+test('⛔ a syslog_events read must be BOUNDED, not merely mention the column', () => {
+  // ⛔ THE OLD TEST WAS A SUBSTRING MATCH ON THE WHOLE STATEMENT, so this —
+  // a full scan of every retained partition against a live ingest — passed,
+  // under a comment claiming "an entirely unbounded read is refused outright".
+  const bad = dc.guardStatement('SELECT received_at, src_ip FROM syslog_events');
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason, /no received_at bound/);
+  assert.match(bad.reason, /naming the column is not bounding it/);
+
+  // an upper bound alone is not a bound: it scans everything behind it
+  assert.equal(dc.guardStatement('SELECT id FROM syslog_events WHERE received_at < $1').ok, false);
+  // ORDER BY is not a predicate either
+  assert.equal(dc.guardStatement('SELECT id FROM syslog_events ORDER BY received_at DESC LIMIT 5').ok, false);
+  // and neither is reading a partition by name
+  assert.equal(dc.guardStatement('SELECT id FROM syslog_events_20260922 LIMIT 5').ok, false);
+});
+
+test('and every shape this product actually uses is still admitted', () => {
+  // Each of these is a live query from the registry's own modules; a false
+  // refusal here would take the raw-table readers out of the sweep entirely.
+  for (const sql of [
+    "SELECT id FROM syslog_events WHERE received_at >= now() - interval '20 minutes' LIMIT 5",
+    "SELECT e.received_at FROM syslog_events e WHERE e.received_at >= now() - ($1::int * interval '1 hour') AND e.log_class = 'vpn'",
+    'SELECT id FROM syslog_events WHERE received_at >= $1 AND received_at < $2 ORDER BY received_at DESC',
+    "SELECT id FROM syslog_events WHERE received_at BETWEEN $1 AND $2",
+    'SELECT id FROM syslog_events WHERE $1 <= received_at',
+    // serverHealth counts partitions by NAME, in a literal — it reads no rows
+    "SELECT tablename FROM pg_tables WHERE tablename ~ '^syslog_events_[0-9]{8}$'",
+  ]) {
+    assert.equal(dc.guardStatement(sql).ok, true, `${sql} should be admitted`);
+  }
+});
+
 test('statement guard accepts an object-form query, as pg does', () => {
   assert.equal(dc.guardStatement({ text: 'SELECT 1', values: [] }).ok, true);
   assert.equal(dc.guardStatement({ text: 'DELETE FROM t' }).ok, false);
@@ -417,6 +538,47 @@ test('a source reporting ok:false with NO message is still harvested', () => {
   assert.match(found[0], /no message/);
 });
 
+test('⛔ harvests an ARRAY-shaped result — the blind spot that hid getServiceLiveness', () => {
+  // ⛔ THE LIVE SHAPE. serverHealth.getServiceLiveness returns
+  // [{name, lastSeen, ageSeconds, error?}] and catches PER ELEMENT. Rename a
+  // column on feed_sync_log or syslog_ingest_stats and both its queries throw,
+  // both are caught, the array is the right length, its spec ({}) is
+  // satisfied — and this tool reported `ok` for the function whose whole job
+  // is saying whether the Engine and the Collector are alive.
+  const found = dc.harvestSwallowedErrors([
+    { name: 'Engine (feeds, matching, retention)', lastSeen: null, ageSeconds: null, error: 'column "started_at" does not exist' },
+    { name: 'Collector (syslog ingest)', lastSeen: new Date(), ageSeconds: 4 },
+  ]);
+  assert.equal(found.length, 1);
+  assert.match(found[0], /Engine/);
+  assert.match(found[0], /started_at/);
+});
+
+test('an array element reporting ok:false is harvested even with no message', () => {
+  const found = dc.harvestSwallowedErrors([{ key: 'cve', ok: false }, { key: 'rules', ok: true }]);
+  assert.equal(found.length, 1);
+  assert.match(found[0], /cve/);
+  assert.match(found[0], /no message/);
+});
+
+test('⛔ but a DATABASE ROW carrying an `error` COLUMN is not a swallowed error', () => {
+  // background_jobs.error and compliance_report_log.error are facts about a
+  // JOB, not about our query. Harvesting them would be a false alarm, and a
+  // false alarm is what trains the next person to delete the check. Every such
+  // row carries its primary key; a status-report element does not.
+  assert.deepEqual(
+    dc.harvestSwallowedErrors([{ id: 'b3f0…', job_type: 'collect', status: 'failed', error: 'the firewall refused the connection' }]),
+    []
+  );
+  assert.deepEqual(dc.harvestSwallowedErrors([{ id: 'x', period: '2026-09', status: 'error', error: 'smtp refused' }]), []);
+});
+
+test('an array of ordinary rows harvests nothing', () => {
+  assert.deepEqual(dc.harvestSwallowedErrors([{ feed_name: 'nvd', status: 'success' }]), []);
+  assert.deepEqual(dc.harvestSwallowedErrors([]), []);
+  assert.deepEqual(dc.harvestSwallowedErrors([null, 'text', 42]), []);
+});
+
 test('a clean result harvests nothing', () => {
   assert.deepEqual(dc.harvestSwallowedErrors({ errors: [], sectionErrors: [], failures: [] }), []);
   assert.deepEqual(dc.harvestSwallowedErrors({ sources: [{ key: 'a', ok: true }] }), []);
@@ -551,6 +713,45 @@ test('a schema gap fails the run even when every read passed', () => {
   assert.equal(v.schemaProblems, 1);
   assert.match(v.sentence, /missing from the live database/);
   assert.doesNotMatch(v.sentence, /0 read/);
+});
+
+test('⛔ A CREDENTIAL EXPOSURE REACHES THE CLOSING SENTENCE, AND LEADS IT', () => {
+  // ⛔ THE DEFECT: `deniedNowReadable` — a blanket GRANT SELECT ON ALL TABLES
+  // having made device_credentials readable by the diagnostics role — was
+  // counted for the exit code and left OUT of the verdict, so the last and
+  // loudest line of that run read "All 104 reads executed and returned the
+  // expected shape…". The most serious finding this tool can make was the one
+  // finding its own summary did not mention.
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }],
+    EMPTY_SCHEMA,
+    { missingGrants: [], deniedNowReadable: ['device_credentials', 'user_mfa'] }
+  );
+  assert.equal(v.exitCode, 1);
+  assert.equal(v.tone, 'fail');
+  assert.match(v.sentence, /device_credentials/);
+  assert.match(v.sentence, /credential-exposure regression/);
+  assert.doesNotMatch(v.sentence, /returned the expected shape/);
+  // and it comes FIRST — nothing in this report outranks it
+  assert.ok(v.sentence.indexOf('READABLE') < 40, `exposure must lead the sentence: ${v.sentence}`);
+});
+
+test('a missing per-table GRANT also reaches the verdict, and names the table', () => {
+  const v = dc.summariseRun(
+    [{ state: 'ok', notes: [] }],
+    EMPTY_SCHEMA,
+    { missingGrants: ['compliance_exceptions'], deniedNowReadable: [] }
+  );
+  assert.equal(v.exitCode, 1);
+  assert.equal(v.grantProblems, 1);
+  assert.match(v.sentence, /compliance_exceptions/);
+});
+
+test('and a clean grants audit says so rather than staying silent about it', () => {
+  const v = dc.summariseRun([{ state: 'ok', notes: [] }], EMPTY_SCHEMA, { missingGrants: [], deniedNowReadable: [] });
+  assert.equal(v.tone, 'ok');
+  assert.equal(v.grantProblems, 0);
+  assert.match(v.sentence, /every grant is as lib\/schema-grants\.sql declares it/);
 });
 
 // ── 8. the schema parse and diff ───────────────────────────────────────────

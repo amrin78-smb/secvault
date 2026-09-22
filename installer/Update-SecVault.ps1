@@ -615,6 +615,17 @@ Invoke-Step 'lib\pg-server-settings.sql (server diagnostics)' {
         }
     } catch {
         Write-Log "  [WARN] server settings step failed: $($_.Exception.Message) -- continuing."
+    } finally {
+        # ⛔ THE SUPERUSER PASSWORD MUST NOT SURVIVE THIS STEP. The inline
+        # Remove-Item above only runs on the happy path: anything that threw
+        # between setting PGPASSWORD and clearing it (a psql that is not where
+        # this script thinks it is, a logging failure) left the POSTGRES
+        # SUPERUSER password in this process's environment, where npm run
+        # build, node scripts/smoke.js and every later child process inherit
+        # it -- and the transcript is written by the same process. The
+        # neighbouring grants step clears it on both paths; this one did not.
+        # A finally covers both without depending on either being remembered.
+        Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
     }
 }
 
@@ -656,6 +667,10 @@ Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
     } catch {
         Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
         Write-Log "  [WARN] Applying readonly grants threw an unexpected error -- $($_.Exception.Message). This does not affect application function."
+    } finally {
+        # Same reason as the step above: the clear must not depend on which
+        # path was taken, only on having left the step.
+        Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
     }
 }
 
@@ -902,6 +917,46 @@ if ($buildSucceeded -and $migrateSucceeded) {
         Write-Log "  TLS: NOT ENABLED -- the console remains on plain HTTP (see the [WARN] above for why)."
     }
 }
+
+# -----------------------------------------------------------------------
+# ⛔ "TLS WAS TURNED ON BY THIS RUN" IS NOT "THE CONSOLE SPEAKS HTTPS", AND
+# THE SCRIPT USED $tlsEnabled FOR BOTH.
+#
+# $tlsEnabled is set on the LAST line of the TLS step. Every early return
+# inside it leaves it $false -- SecVault-Tls.ps1 not found, .env.local not
+# found, nssm not found, the certificate failing to mint, the step throwing --
+# and EVERY ONE of those is reachable on a server that is ALREADY serving
+# HTTPS. Two things followed from that, both on exactly the run most likely to
+# have broken something:
+#   (a) the liveness probe and its rollback were SKIPPED entirely;
+#   (b) the page sweep was pointed at http://, which server.js answers with a
+#       301 -- so a perfectly healthy console reported "completed WITH ERRORS".
+#
+# The transport is a property of .env.local, not of what this run did, so it is
+# read from there. ⛔ It is a SETTING, not a guarantee: lib/tlsConfig.js still
+# degrades to plain HTTP when the material will not load ('failed'), which is
+# why the probe below tries HTTP second rather than declaring the console dead.
+# -----------------------------------------------------------------------
+$consoleUsesHttps = $false
+if ($tlsEnabled) {
+    $consoleUsesHttps = $true
+} else {
+    try {
+        $envLocalForScheme = Join-Path $repoRoot '.env.local'
+        if ((Test-Path -LiteralPath $envLocalForScheme) -and (Get-Command Get-SecVaultEnvValue -ErrorAction SilentlyContinue)) {
+            $certConfigured = Get-SecVaultEnvValue -EnvPath $envLocalForScheme -Key 'TLS_CERT_PATH'
+            $keyConfigured  = Get-SecVaultEnvValue -EnvPath $envLocalForScheme -Key 'TLS_KEY_PATH'
+            if ((-not [string]::IsNullOrWhiteSpace($certConfigured)) -and (-not [string]::IsNullOrWhiteSpace($keyConfigured))) {
+                $consoleUsesHttps = $true
+            }
+        }
+    } catch {
+        Write-Log "  [WARN] Could not read the TLS settings out of .env.local -- $($_.Exception.Message). The console transport is UNKNOWN; the probe below will try HTTPS and then HTTP rather than assume."
+        $consoleUsesHttps = $true
+    }
+}
+Write-Log "  Console transport (from .env.local): $(if ($consoleUsesHttps) { 'HTTPS' } else { 'plain HTTP' })"
+
 $appStartSkipped = $false
 if ($buildSucceeded -and $migrateSucceeded) {
     Invoke-Step 'sc.exe start SecVault-App' {
@@ -929,8 +984,26 @@ if ($buildSucceeded -and $migrateSucceeded) {
 # change above -- without it, a bad server.js would leave a firewall-management
 # console dark with a green update log.
 # -----------------------------------------------------------------------
-if ($tlsEnabled -and -not $appStartSkipped) {
-    Invoke-Step 'Verify the console responds over HTTPS' {
+#
+# ⛔ IT RUNS ON EVERY INSTALL, NOT ONLY WHEN THIS RUN TURNED TLS ON. Gating it
+# on $tlsEnabled meant a plain-HTTP installation -- and any HTTPS one where the
+# TLS step returned early -- got NO liveness probe at all, while CLAUDE.md
+# states the updater probes /api/health as a general property of the update.
+# -----------------------------------------------------------------------
+if (-not $appStartSkipped) {
+    Invoke-Step 'Verify the console responds' {
+        # ⛔ A PROBE THAT COULD NOT RUN IS NOT A PASS, and this is checked
+        # FIRST so the reason is precise. If SecVault-Tls.ps1 could not be
+        # dot-sourced, neither Test-SecVaultResponding nor Get-SecVaultEnvValue
+        # exists; letting the APP_PORT read throw would report the same
+        # condition as an opaque step failure, and silently skipping would let
+        # "Step succeeded" stand over a console nobody looked at.
+        if (-not (Get-Command Test-SecVaultResponding -ErrorAction SilentlyContinue)) {
+            Write-Log '  [ERROR] installer\SecVault-Tls.ps1 could not be loaded, so Test-SecVaultResponding does not exist and THE CONSOLE WAS NEVER PROBED. Check it by hand: /api/health on the app port.'
+            $script:hadFailure = $true
+            return
+        }
+
         $port = 3010
         $envLocal = Join-Path $repoRoot '.env.local'
         $configured = Get-SecVaultEnvValue -EnvPath $envLocal -Key 'APP_PORT'
@@ -939,10 +1012,50 @@ if ($tlsEnabled -and -not $appStartSkipped) {
             if ([int]::TryParse($configured, [ref]$parsed) -and $parsed -gt 0) { $port = $parsed }
         }
 
-        if (Test-SecVaultResponding -Port $port -UseHttps -TimeoutSeconds 90) {
-            Write-Log "  Console is answering on https://<server>:$port"
+        $answeredHttps = $false
+        $answeredHttp = $false
+        if ($consoleUsesHttps) {
+            $answeredHttps = Test-SecVaultResponding -Port $port -UseHttps -TimeoutSeconds 90
+            # ⛔ A configured-but-unloadable certificate DEGRADES to HTTP by
+            # design (lib/tlsConfig.js's 'failed' state). Probing only HTTPS
+            # would report that live console as dead.
+            if (-not $answeredHttps) { $answeredHttp = Test-SecVaultResponding -Port $port -TimeoutSeconds 20 }
         } else {
-            Write-Log '  [ERROR] The console did NOT answer over HTTPS within 90s. Rolling back to plain HTTP.'
+            $answeredHttp = Test-SecVaultResponding -Port $port -TimeoutSeconds 90
+        }
+
+        if ($answeredHttps) {
+            Write-Log "  Console is answering on https://<server>:$port"
+            return
+        }
+        if ($answeredHttp -and (-not $consoleUsesHttps)) {
+            Write-Log "  Console is answering on http://<server>:$port"
+            return
+        }
+
+        if ($answeredHttp) {
+            # ⛔ 'failed' MUST NEVER LOOK LIKE 'disabled'. TLS is configured and
+            # the console is serving plain HTTP, which means the certificate or
+            # key could not be loaded. The app is UP, so this is not an outage
+            # and not a rollback trigger on its own -- but it is reported at
+            # ERROR level, because an operator who asked for TLS is not getting
+            # it and nothing else on this box will tell them.
+            Write-Log "  [ERROR] TLS is configured in .env.local, but the console answered on PLAIN HTTP on port $port -- the certificate/key could not be loaded. See the TLS banner in logs\app-error.log."
+            $script:hadFailure = $true
+        } else {
+            Write-Log "  [ERROR] The console did NOT answer on port $port within 90s."
+            $script:hadFailure = $true
+        }
+
+        # ⛔ ROLLBACK ONLY UNDOES WHAT THIS RUN DID. $script:previousAppParameters
+        # is captured inside the TLS step, so on a run that did not enter it
+        # there is nothing to restore -- and the "documented default" fallback
+        # below would put an install that has been serving HTTPS for months back
+        # on `next start`, clear its certificate paths and set ENABLE_TLS=false,
+        # on the strength of one failed probe this run did not cause. Destroying
+        # a working operator's transport is not a safety net.
+        if ($tlsEnabled) {
+            Write-Log '  Rolling back the entry-point change this run made, back to plain HTTP.'
             try {
                 # ⛔ NEVER WRITE A SUSPECT VALUE BACK. The captured value goes
                 # through `nssm get`, which can return UTF-16/NUL-laden output or
@@ -1008,6 +1121,8 @@ if ($tlsEnabled -and -not $appStartSkipped) {
                 Write-Log "  [ERROR] Rollback failed: $($_.Exception.Message)"
                 $script:hadFailure = $true
             }
+        } else {
+            Write-Log '  NO ROLLBACK ATTEMPTED -- this run did not change how the console is reached, so there is nothing here to undo. Fix forward: check logs\app-error.log.'
         }
     }
 }
@@ -1049,7 +1164,13 @@ if (-not $appStartSkipped) {
             $parsed = 0
             if ([int]::TryParse($configured, [ref]$parsed) -and $parsed -gt 0) { $port = $parsed }
         }
-        $scheme = if ($tlsEnabled) { 'https' } else { 'http' }
+        # ⛔ $consoleUsesHttps, NOT $tlsEnabled. Pointing the sweep at http://
+        # on a console that speaks HTTPS gets a 301 from server.js's same-port
+        # redirect for every page, and the step then reports a healthy console
+        # as broken. $tlsEnabled is false on every early return of the TLS
+        # step -- all of which are reachable on an install already serving
+        # HTTPS. See the $consoleUsesHttps block above.
+        $scheme = if ($consoleUsesHttps) { 'https' } else { 'http' }
 
         $env:SMOKE_URL = "$($scheme)://127.0.0.1:$port"
         $env:SMOKE_USER = $smokeUser
@@ -1072,10 +1193,30 @@ if (-not $appStartSkipped) {
             # It went unnoticed until now because the step returned early with a
             # SKIP whenever SMOKE_USER/SMOKE_PASS were unset, so node was never
             # launched.
-            $out = Invoke-Native { & node (Join-Path $repoRoot 'scripts\smoke.js') 2>&1 }
-            $code = $LASTEXITCODE
+            # ⛔ $LASTEXITCODE IS STALE UNTIL A NATIVE COMMAND SETS IT, AND
+            # INSIDE Invoke-Native NOTHING GUARANTEES ONE RAN. $ErrorActionPreference
+            # is 'Continue' in there by design, so a command-resolution failure
+            # (node not on this account's PATH, scripts\smoke.js missing) writes
+            # an error record and returns -- leaving $LASTEXITCODE at whatever
+            # the last native call set it to, which is 0 from `sc.exe start`
+            # a few steps up. The step would then report a page sweep that never
+            # ran as a pass: this codebase's own failed-read-as-a-fact rule,
+            # inside the guard written to catch blank pages.
+            #
+            # So the exit code is captured INSIDE the block, immediately after
+            # the call, into a sentinel that starts as $null. $null therefore
+            # means "no exit code was ever produced" -- never "0".
+            $script:smokeExit = $null
+            $out = Invoke-Native {
+                & node (Join-Path $repoRoot 'scripts\smoke.js') 2>&1
+                $script:smokeExit = $LASTEXITCODE
+            }
+            $code = $script:smokeExit
             foreach ($line in $out) { Write-Log "  $line" }
-            if ($code -ne 0) {
+            if ($null -eq $code) {
+                Write-Log '  [ERROR] The page sweep did not run at all -- node produced no exit code, so scripts\smoke.js was never executed (node not on this account''s PATH, or the file is missing). NO page was checked.'
+                $script:hadFailure = $true
+            } elseif ($code -ne 0) {
                 Write-Log "  [ERROR] One or more pages did not render (exit $code). The app is UP but part of the console is broken."
                 Write-Log '  This does not roll the deploy back. Check logs\app-error.log for the digest, and fix forward.'
                 $script:hadFailure = $true

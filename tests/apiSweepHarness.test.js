@@ -26,9 +26,12 @@ const {
   REPORT_PARAM_CASES,
   MATCHER_PROBES,
   NON_MUTATING_POSTS,
+  SIDE_EFFECTING_GETS,
   UNKNOWN_UUID,
+  EXIT,
   anonVerdict,
   authedVerdict,
+  sweepVerdict,
   capture,
   capabilityNamedIn,
   assertSafeChecks,
@@ -270,10 +273,182 @@ describe('⛔ the 403 shape — what CAN be asserted without a second account', 
     assert.equal(capabilityNamedIn(''), null);
   });
 
+  it('⛔ AND THE PROSE FALLBACK HONOURS THAT TOO — it was a substring test', () => {
+    // `'operator'.includes('operate')` is true, so a body naming the ROLE
+    // satisfied the capability check through the message branch, defeating the
+    // distinction the case directly above exists to pin. The `required` field
+    // was exact; the prose was not, and a route that carries only prose is
+    // exactly the one this fallback is for.
+    assert.equal(capabilityNamedIn('{"error":"the operator role may not do this"}'), null);
+    assert.equal(capabilityNamedIn('{"error":"operators cannot change settings"}'), null);
+    // a capability embedded in a longer identifier is not that capability
+    assert.equal(capabilityNamedIn('{"error":"requires manage_users_extended"}'), null);
+    // and the real sentence forbiddenResponse() produces still resolves
+    assert.equal(capabilityNamedIn(`{"error":"Forbidden — this action requires the \\"${OPERATE}\\" permission"}`), OPERATE);
+    assert.equal(capabilityNamedIn(`{"error":"requires ${MANAGE_USERS}."}`), MANAGE_USERS);
+  });
+
   it('every capability lib/rbac.js exports is recognisable in a 403 body', () => {
     for (const cap of ALL_CAPABILITIES) {
       assert.equal(capabilityNamedIn(JSON.stringify({ required: cap })), cap);
     }
+  });
+});
+
+describe('⛔ a text download must be a document, not a status code', () => {
+  const text = (over) => res({ contentType: 'text/plain; charset=utf-8', body: '', bytes: 0, head: '', ...over });
+
+  it('a real config passes', () => {
+    const body = 'config system global\n set hostname FW1\nend\n';
+    assert.equal(authedVerdict({ path: '/api/devices/a/backups/b', type: 'text' }, text({ body, bytes: body.length })).ok, true);
+  });
+
+  it('⛔ a 200 text/plain of ZERO bytes FAILS — the route returns `config_raw ?? \'\'`', () => {
+    // A NULL config_raw is a 200 download of nothing, which an operator saves
+    // and reads as their firewall's configuration. `type: 'text'` used to
+    // assert the status code and nothing else, so this passed.
+    const v = authedVerdict({ path: '/api/devices/a/backups/b', type: 'text' }, text({}));
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /ZERO-BYTE/);
+  });
+
+  it('an HTML error page served as a download fails', () => {
+    const html = '<!doctype html><html><body>Application error</body></html>';
+    const v = authedVerdict({ path: '/api/devices/a/backups/b', type: 'text' },
+      text({ contentType: 'text/html', body: html, bytes: html.length }));
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /HTML page/);
+    // and on the body alone, when the content-type lies
+    const v2 = authedVerdict({ path: '/api/devices/a/backups/b', type: 'text' },
+      text({ contentType: 'text/plain', body: html, bytes: html.length }));
+    assert.equal(v2.ok, false);
+  });
+
+  it('a JSON error envelope with a 200 fails', () => {
+    const v = authedVerdict({ path: '/api/devices/a/backups/b', type: 'text' },
+      text({ contentType: 'application/json', body: '{"error":"Backup not found"}', bytes: 28 }));
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /error envelope/);
+  });
+});
+
+describe('⛔ `capability` is READ, not decoration', () => {
+  it('a 403 naming a capability the check does not declare is a named failure', () => {
+    // Until v2.173.0 `check.capability` was set on sixteen checks, asserted by
+    // this file, and read NOWHERE — dead metadata that a test certified as
+    // coverage.
+    const v = authedVerdict({ path: '/api/reports/x/pdf', capability: 'view_identity', expect: [403] }, res({
+      status: 403, body: JSON.stringify({ error: 'x', required: OPERATE }),
+    }));
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /declares "view_identity"/);
+    assert.ok(v.checks.includes('403-names-the-declared-capability'));
+  });
+
+  it('and a 403 naming exactly what the check declares is not that failure', () => {
+    const v = authedVerdict({ path: '/api/users', capability: MANAGE_USERS, expect: [403] }, res({
+      status: 403, body: JSON.stringify({ error: 'x', required: MANAGE_USERS }),
+    }));
+    assert.equal(v.ok, true);
+  });
+
+  it('a capability lib/rbac.js does not know is refused in a CHECK, not only in the route table', () => {
+    assert.throws(
+      () => assertSafeChecks([{ path: '/api/x', capability: 'adminish' }], []),
+      /not a capability/
+    );
+    assert.ok(assertSafeChecks([{ path: '/api/x', capability: OPERATE }], []));
+    assert.ok(assertSafeChecks([{ path: '/api/x' }], []), 'no capability is still fine');
+  });
+});
+
+describe('⛔ a GET is not automatically inert', () => {
+  it('the three that are not are declared, in both directions', () => {
+    // The header used to claim "IT NEVER CALLS A MUTATING ROUTE" while
+    // /api/license reaches resolveInstallDate's INSERT and the two update
+    // routes run git fetch against the production checkout.
+    for (const p of SIDE_EFFECTING_GETS.keys()) {
+      const check = READ_CHECKS.find((c) => String(c.path).split('?')[0] === p);
+      assert.ok(check, `${p} is in SIDE_EFFECTING_GETS but not swept — remove it from the map`);
+      assert.equal(check.sideEffect, true, `${p} must declare its side effect`);
+    }
+  });
+
+  it('a check on one of those paths that does NOT declare it is refused', () => {
+    assert.throws(
+      () => assertSafeChecks([{ path: '/api/license' }], []),
+      /a GET is not automatically inert/
+    );
+  });
+
+  it('and a declaration with nothing behind it is refused too', () => {
+    assert.throws(
+      () => assertSafeChecks([{ path: '/api/devices', sideEffect: true }], []),
+      /SIDE_EFFECTING_GETS does not describe/
+    );
+  });
+
+  it('every side effect is described in words, so the header\'s claim can be checked', () => {
+    for (const [p, why] of SIDE_EFFECTING_GETS) {
+      assert.equal(typeof why, 'string');
+      assert.ok(why.length > 20, `${p}: "${why}" does not say what it does`);
+    }
+  });
+});
+
+describe('⛔ a short sweep must never read as a clean one', () => {
+  it('a fully clean sweep is the only thing that exits 0', () => {
+    const v = sweepVerdict({ ran: 120 });
+    assert.equal(v.tone, 'ok');
+    assert.equal(v.exitCode, EXIT.OK);
+  });
+
+  it('⛔ UNRUN CHECKS GET THEIR OWN EXIT CODE — the live shape', () => {
+    // A harness account scoped to no devices makes /api/devices answer
+    // `200 []`. Every per-device check then becomes unrun, and the banner read
+    // "0 failed", exit 0: a sweep of the fleet-level routes only, reported as
+    // a full pass. dbCheck refuses tone 'ok' in the analogous state.
+    const v = sweepVerdict({ ran: 40, gaps: 5, unresolved: 18 });
+    assert.equal(v.tone, 'unknown');
+    assert.notEqual(v.tone, 'ok');
+    assert.equal(v.exitCode, EXIT.INCOMPLETE);
+    assert.notEqual(v.exitCode, EXIT.OK);
+    assert.match(v.sentence, /NOT a clean sweep/);
+    assert.match(v.sentence, /23 check\(s\) never ran/);
+  });
+
+  it('a single unresolved fixture is enough — it is not a threshold', () => {
+    assert.equal(sweepVerdict({ ran: 200, unresolved: 1 }).exitCode, EXIT.INCOMPLETE);
+    assert.equal(sweepVerdict({ ran: 200, gaps: 1 }).exitCode, EXIT.INCOMPLETE);
+  });
+
+  it('a real failure outranks incompleteness, and says both', () => {
+    const v = sweepVerdict({ ran: 100, failed: 2, gaps: 1, unresolved: 3 });
+    assert.equal(v.tone, 'fail');
+    assert.equal(v.exitCode, EXIT.FAILED);
+    assert.match(v.sentence, /2 assertion\(s\) failed/);
+    assert.match(v.sentence, /4 check\(s\) could not run/);
+  });
+
+  it('a fixture-discovery error is a failure, not a gap', () => {
+    // A /api/devices that ERRORS and one that legitimately returns [] are
+    // different facts, and collapsing them would let a broken route reduce
+    // this sweep to the fleet-level checks while still printing a pass.
+    const v = sweepVerdict({ ran: 40, fixtureErrors: 1 });
+    assert.equal(v.exitCode, EXIT.FAILED);
+    assert.match(v.sentence, /fixture discovery errored/);
+  });
+
+  it('⛔ and a sweep where NOTHING ran is a failure, not an empty success', () => {
+    const v = sweepVerdict({ ran: 0 });
+    assert.equal(v.exitCode, EXIT.FAILED);
+    assert.match(v.sentence, /NOTHING RAN/);
+  });
+
+  it('the exit codes are distinct, or a caller cannot tell them apart', () => {
+    const seen = new Set(Object.values(EXIT));
+    assert.equal(seen.size, Object.keys(EXIT).length);
+    assert.equal(EXIT.OK, 0);
   });
 });
 

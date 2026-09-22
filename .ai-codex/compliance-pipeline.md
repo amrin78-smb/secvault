@@ -126,6 +126,40 @@ pass / (pass + fail + warning))`, `na` rows excluded entirely from the denominat
 
 ---
 
+## Evaluator corrections (v2.174.0)
+
+Four in `configAuditor.js`, all of the same family — a limitation of OURS recorded as a fact
+about the DEVICE, or a rule silently dropped from a scope:
+
+1. ⛔ **An empty/null `src_zones` no longer makes a rule vanish.** It is UNCONSTRAINED, exactly
+   as `any` already was three lines above. `firewall_rules.src_zones` is nullable, and the
+   dropped rule took a whole check to `na` ("nothing to assess") on an internet-edge policy
+   with no IPS — a hole reported as absent rather than as open.
+2. ⛔ **An unrecognised `applies_to` key is `warning`, and names the key.** It was ignored, so a
+   curated typo (`dst_zone_role` for `src_zone_role`) silently widened an internet-facing check
+   to every enabled allow rule and still returned a confident verdict — on a 447-rule Palo Alto,
+   a 415-violation `fail` with no sign the scope was never applied. A MALFORMED `applies_to`
+   (array/string/number) became `{}`, i.e. "every rule", and is now `warning` too; an ABSENT one
+   still legitimately means every rule.
+3. ⛔ **A failed zone-classification read is `null`, not `{}`.** It produced an `na` reading
+   "none of this firewall's zones have been classified… Classify this device's zones" on a
+   device whose zones may all be classified — **our outage handed to the customer as their
+   action item.** Both zone-dependent evaluators now say SecVault could not read them.
+4. Zone names and the role value are TRIMMED on both sides. A leading space in an
+   operator-typed `zone_classifications.zone_name` silently emptied a check's scope.
+
+⛔ **`compliance_exceptions` now has an UPPER expiry bound** (`MAX_EXPIRY_DAYS = 365`).
+`2999-12-31` was accepted — a permanent silent pass with a date attached, which defeats the
+forced review the 30-day `expiring` window exists to provide. A constant, not an env var, for
+the same reason `EXPIRING_WINDOW_DAYS` is.
+
+⛔ **Both printed surfaces now carry the CONFIG-COLLECTION age**, not just the audit time. The
+monthly PDF had no freshness statement at all and the per-device print page showed "Last audit
+run" — the exact timestamp that reports a device as freshly verified when its evidence is
+months old. Measured live: evidence 1,116h old, audit 669h old, printed as a 27-day-old audit
+with no qualifier. Freshness is graded on the EVIDENCE, never the audit, and moves no number
+(pinned).
+
 ## CLAUDE.md contradictions / staleness found
 
 - CLAUDE.md's Compliance Engine section previously said `ruleset_property` covers "two checks"

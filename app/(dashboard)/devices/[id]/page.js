@@ -4,7 +4,7 @@ import DeviceTrafficTab from '../../../../components/devices/DeviceTrafficTab';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
-import { loadScopeForSession, canSeeDevice } from '../../../../lib/deviceScope';
+import { loadScopeForSession, canSeeDevice, refusalMessage, SCOPE_STATES } from '../../../../lib/deviceScope';
 import { authOptions } from '../../../api/auth/[...nextauth]/route';
 import { isAdmin, can, VIEW_LOG_SEARCH } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
@@ -590,9 +590,19 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   // ⛔ THAT SAMENESS IS THE POINT: a page that said "you may not see this
   // firewall" would confirm the firewall EXISTS, so a restricted account could
   // enumerate the rest of the estate by walking ids and reading the difference.
-  // What is withheld is the existence signal, not the explanation -- the
-  // refusal reason is still shown to whoever legitimately lands here.
+  // What is withheld is the EXISTENCE SIGNAL, so no per-device explanation may
+  // be given here — an earlier version of this comment claimed "the refusal
+  // reason is still shown", which was both untrue of the code below and the
+  // opposite of what the paragraph above it argues for. A comment that
+  // certifies a control the file does not implement is worse than no comment.
+  //
+  // ⛔ THE ONE EXCEPTION IS A FAILED SCOPE READ, and it leaks nothing because
+  // it does not depend on the device: `unknown` means we could not determine
+  // this account's access at all, which is a FAULT, not a permission. Showing
+  // "not found" there sends the operator to request access to a firewall they
+  // may already hold, and nobody ever looks at the real problem.
   const deviceScope = await loadScopeForSession(session, pool);
+  const scopeUnknown = deviceScope.state === SCOPE_STATES.UNKNOWN;
   const scopeDenied = !canSeeDevice(deviceScope, params.id);
   const device = scopeDenied ? null : await getDevice(pool, params.id);
 
@@ -613,6 +623,20 @@ export default async function DeviceDetailPage({ params, searchParams }) {
         </Link>
         {finishedJob ? (
           <div style={{ marginTop: 16, maxWidth: 720 }}>{deleteJobPanel(finishedJob, params.id)}</div>
+        ) : scopeUnknown ? (
+          <div
+            style={{
+              marginTop: 16,
+              maxWidth: 720,
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--tint-warn)',
+              color: 'var(--tint-warn-fg)',
+              fontSize: 'var(--text-base)',
+            }}
+          >
+            {refusalMessage(deviceScope)}
+          </div>
         ) : (
           <p style={{ marginTop: 16, color: 'var(--text-secondary)' }}>Device not found.</p>
         )}

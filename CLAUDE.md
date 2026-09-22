@@ -1638,8 +1638,30 @@ compiles the register into URL matchers and middleware refuses a `blocked` path 
 the account is scoped. ⛔ The token carries **only the boolean**, never the granted ids — a JWT is
 client-held and long-lived, so the list would both leak which firewalls exist and let a stale copy
 decide access. WHICH devices are visible is re-read from the database by every aware surface.
-⛔ The flag is re-read beside the role on every token use and **fails closed to `true`** (the
-restrictive direction here). ⛔ **First match wins, most specific first** — a dynamic segment
+⛔ **AND MIDDLEWARE READS A CLAIM THAT CAN BE 30 DAYS OLD — IT IS A FAST PATH, NOT THE BOUNDARY
+(corrected v2.174.0).** This file previously said the flag "is re-read from the database on every
+token use". The `jwt()` callback does re-read it; **middleware never calls `jwt()`**. `getToken()`
+from `next-auth/jwt` only DECRYPTS the cookie (verified: zero references to `callbacks` in that
+package), so middleware sees whatever was written the last time NextAuth RE-ISSUED it — with
+`SESSION_IDLE_MINUTES=0` that is NextAuth's own 30 days. The staleness is ASYMMETRIC and only one
+direction matters: a REVOKED scope still claiming `true` merely refuses a surface the account may
+now use, while a **GRANTED scope still claiming `false` would be served the whole fleet**.
+⛔ So **pages are decided AGAIN in `app/(dashboard)/layout.js`** — which every dashboard page
+renders through — against a live `loadScopeForSession` read. middleware sets the pathname on the
+FORWARDED REQUEST headers (`PATHNAME_HEADER`, set never appended, so a client copy cannot claim a
+path) because Next 14 hands a server component no pathname. The verdict itself is the pure
+`pageRefusal()`, so it is tested by BEHAVIOUR rather than by a test that reads the layout looking
+for the right words. ⛔ **AND IT COVERS A HARD LOAD, NOT A SOFT NAVIGATION** — Next preserves a
+shared layout across a client-side link click, so a nav inside an already-open session is still
+decided from the cookie claim (middleware runs on the RSC fetch either way). Stated rather than
+implied; closing it means a `template.js`, which remounts every page subtree on every navigation,
+and that is not worth doing before a customer actually scopes an account. ⛔ Probe the running
+server before acting on this — the `/_next/image` note in `middleware.js` is what happens when
+Next's internal behaviour is reasoned about instead of measured. ⛔ **API ROUTES HAVE NO SUCH
+WRAPPER and are covered by the cookie claim alone**
+— that residual is stated in the PUT response (`appliesTo`), which tells the administrator to sign
+the account out to apply a new restriction at once. ⛔ It still **fails closed to `true`** on a read
+error. ⛔ **First match wins, most specific first** — a dynamic segment
 otherwise shadows its literal sibling, and an `aware` literal under a `blocked` dynamic neighbour
 would be refused for a reason nobody could find. That rule cannot be exercised by the live register
 today, so a test pins it against a synthetic one.
@@ -1648,8 +1670,26 @@ today, so a test pins it against a synthetic one.
 `no-device-data`, and `tests/deviceScopeCoverage.test.js` fails the build when a surface is on none
 of them — so a new route is a deliberate decision, never a default. It also re-derives the
 device-touching set from SOURCE, catching a file that grew a device query after being classified
-`no-device-data`. The aware count has a FLOOR that may not fall. Shipped at **4 aware / 71 blocked /
-39 no-device-data**.
+`no-device-data`. The aware count has a FLOOR that may not fall. Shipped at 4 aware / 71 blocked /
+39 no-device-data; now **4 / 88 / 23**.
+
+⛔ **THE SOURCE CHECK READ ONLY THE SURFACE FILE, AND THAT IS WHERE IT LEAKED (v2.174.0).** A route
+whose device query lives one import away was invisible to it. Six were: every `/api/applications`
+route imports `applicationViewData`, which evaluates declared flows against each device's collected
+rulebase, **while the PAGE those routes back was already `blocked`** — and
+`credential-profiles/[id]` sat open beside its own already-blocked collection route. Blocking a page
+and leaving its API open is the exact hole this register exists to prevent, and only a TRANSITIVE
+check could see it. ⛔ The check does **not** follow the modules every authenticated surface imports
+by construction (`authOptions` -> `lib/mfa.js` -> `lib/credStore.js` reaches `device_id` from all 88
+of them); following them reports everything and therefore reports nothing. ⛔ **Comments are
+stripped first** — `lib/notificationChannels.js` says in prose that it holds no device data, and the
+raw-source check read that sentence as evidence that it does. ⛔ What remains is a NAMED
+`TRANSITIVE_ALLOWED` with a REASON each, never a silent suppression, and a test fails on an
+exemption that is no longer needed. The one accepted residual is the licence `deviceCount`: a scoped
+account learns how many firewalls exist beyond its scope, because `GET /api/license` is deliberately
+open to every signed-in user and blocking it would remove the subscription banner to hide an
+integer. ⛔ A `blocked` surface that compiles to NO URL pattern is an unenforceable refusal — route
+groups are therefore stripped GENERICALLY, and `UNMAPPABLE_BLOCKED` is asserted empty.
 
 ⛔ **A FAILED SCOPE READ IS `unknown`, WHICH DENIES** — never `unscoped`. Its SQL clause is
 `AND FALSE`, never an absent clause. It is a distinct state from "scoped and not granted" because
@@ -1657,12 +1697,44 @@ the two send an operator to different places, and the refusal text says which.
 
 ⛔ **AN OUT-OF-SCOPE DEVICE ANSWERS 404, NOT 403**, on both the route and the page. A 403 on a
 specific id confirms that id exists, so a restricted account could enumerate the estate by walking
-ids and reading the difference. The existence signal is what is withheld; the explanation is still
-shown.
+ids and reading the difference. ⛔ The EXISTENCE SIGNAL is what is withheld, so **no per-device
+explanation may be given** — a comment in `devices/[id]/page.js` claimed "the refusal reason is
+still shown", which was untrue of the code beneath it and the opposite of the paragraph above it.
+⛔ The ONE exception is a FAILED scope read: `unknown` does not depend on the device, so saying "your
+access could not be determined" leaks nothing and stops the operator requesting access to a firewall
+they may already hold.
 
 ⛔ **ONLY LOCAL ACCOUNTS CAN BE SCOPED.** LDAP gives the bare username with no `users` row to hang
 a scope on, so `loadScopeForSession` checks the SHAPE of `session.user.id` rather than trusting the
-provider name — the call saved views already make. An LDAP account is UNSCOPED.
+provider name — the call saved views already make. An LDAP account is UNSCOPED. ⛔ **THREE CASES,
+NOT TWO (v2.174.0):** a session carrying NO id took the same branch as an LDAP one and was reported
+UNSCOPED, i.e. handed the fleet. "This provider cannot be scoped" and "we do not know who this is"
+are different facts, and the second is `unknown`.
+
+⛔ **DELETING A FIREWALL CAN SILENTLY WIDEN SOMEBODY ELSE'S ACCESS (v2.174.0).**
+`user_device_scopes.device_id` is `ON DELETE CASCADE` and zero rows means UNSCOPED, so removing the
+LAST firewall in an account's scope does not narrow that account to nothing — it hands it every
+remaining firewall, with no error and nothing on screen. An administrator retiring one device would
+have granted an outside contractor the rest of the estate. ⛔ `ON DELETE RESTRICT` is NOT the fix: it
+fails an ordinary deletion with a foreign-key error naming an internal table. The guard is
+`scopesEmptiedByDeviceDeletion()`, called by BOTH delete paths (the API route and the `/devices`
+Server Action, which does its own `DELETE`); it REFUSES and names the accounts rather than repairing
+a scope it cannot guess, and it **THROWS rather than returning `[]`** on a failed read, because
+`[]` here means "go ahead". Only the EMPTYING case is refused — shrinking three firewalls to two is
+correct. A THIRD delete path would need the same call, and a test asserts both existing ones make it.
+
+⛔ **AN ACCOUNT THAT CAN MANAGE USERS MAY NOT BE SCOPED (v2.174.0).** `/api/users/[id]/device-scope`
+is itself a `blocked` surface, so a Super Admin who scoped themselves — or scoped the last other one
+— would be refused by the only endpoint that can undo it, from every account able to reach it,
+recoverable only by a direct database edit. Same failure the last-super_admin guard prevents, same
+authority. ⛔ Decided on the CAPABILITY, never the word "admin": `admin` does not hold
+`manage_users` and IS scopable, which is the common case. ⛔ CLEARING a scope stays allowed for every
+role — it can only widen.
+
+⛔ **THE PUT REPORTS A POST-COMMIT FAILURE AS A SUCCESS WITH A CAVEAT, NOT A 500.** The audit line
+and the read-back both run after `COMMIT`; reporting a throw there as a failure would tell an
+administrator their restriction was rejected when it had already been applied, and they would
+believe an account is unrestricted when it is not.
 
 ---
 

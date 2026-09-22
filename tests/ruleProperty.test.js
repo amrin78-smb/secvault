@@ -250,3 +250,221 @@ describe('reproduces the live fleet', () => {
     assert.equal(evaluateRulePropertyCheck(logCheck, rules, ZONES).status, 'pass');
   });
 });
+
+describe('⛔ a rule whose source zone was never reported must not VANISH', () => {
+  const zoned = withCfg({ applies_to: { action: 'allow', enabled_only: true, src_zone_role: 'external' } });
+
+  // `firewall_rules.src_zones` is NULLABLE, and a rule the device reported no
+  // source interface for used to fall out of the applicable set entirely —
+  // neither judged nor counted nor disclosed. It did not become a warning, it
+  // became invisible, and a check whose whole scope disappeared that way
+  // reported `na` ("nothing to assess") on a firewall with plenty to assess.
+  for (const missing of [null, undefined, [], '', '   ', ['  ']]) {
+    it(`src_zones=${JSON.stringify(missing)} is UNCONSTRAINED, so the rule is in scope`, () => {
+      const orphan = rule({ action: 'allow' }, { src_zones: missing });
+      const r = evaluateRulePropertyCheck(zoned, [orphan], ZONES);
+      // ⛔ NOT `na`. "Nothing to assess" here was a rule quietly removing
+      // itself from its own check.
+      assert.notEqual(r.status, 'na', 'the rule must not disappear from the scope');
+      assert.equal(r.status, 'fail');
+      assert.deepEqual(r.matchedRuleIds, [orphan.id]);
+    });
+  }
+
+  it('⛔ the live shape: an internet-edge policy with no IPS and no srcintf FAILS', () => {
+    // An unreported source zone is unconstrained for exactly the reason `any`
+    // is: matching it literally UNDERSTATES exposure, and on a security report
+    // a hole reported as closed is a false assurance, not a missed finding.
+    const edge = rule({ action: 'allow' }, { src_zones: null, rule_name: 'edge-no-ips' });
+    const inside = rule({ 'ips-sensor': 'default', 'utm-status': 'enable' }, { src_zones: ['untrust'] });
+    const r = evaluateRulePropertyCheck(
+      withCfg({
+        subject: 'an ACTIVE IPS sensor',
+        applies_to: { action: 'allow', enabled_only: true, src_zone_role: 'external' },
+        require_any_path: undefined,
+        require_all_path: ['ips-sensor', 'utm-status'],
+      }),
+      [edge, inside], ZONES
+    );
+    assert.equal(r.status, 'fail');
+    assert.match(r.detail, /1 of 2 applicable/);
+    assert.match(r.detail, /edge-no-ips/);
+  });
+
+  it('a rule sourced from a DIFFERENT, classified zone is still out of scope', () => {
+    // The counterpart — widening on an unknown must not widen on a known.
+    const internal = rule({ action: 'allow' }, { src_zones: ['trust'] });
+    assert.equal(evaluateRulePropertyCheck(zoned, [internal], ZONES).status, 'na');
+  });
+});
+
+describe('⛔ zone names are TRIMMED, not just lower-cased', () => {
+  const zoned = withCfg({ applies_to: { action: 'allow', enabled_only: true, src_zone_role: 'external' } });
+
+  it('a space an operator typed into zone_classifications does not empty the scope', () => {
+    // `zone_classifications.zone_name` is typed by hand. Lower-casing without
+    // trimming made the two sides disjoint, so requiredZones matched NOTHING
+    // and every rule silently left the check's scope — invisible, because the
+    // result was a plausible `na`.
+    const r = evaluateRulePropertyCheck(zoned, [bare()], { ' untrust ': 'external' });
+    assert.notEqual(r.status, 'na', 'a stray space must not remove every rule from the scope');
+    assert.equal(r.status, 'fail');
+  });
+
+  it('a space on the DEVICE side matches too, and so does a padded role', () => {
+    const padded = rule({ action: 'allow' }, { src_zones: [' UNTRUST '] });
+    assert.equal(evaluateRulePropertyCheck(zoned, [padded], ZONES).status, 'fail');
+    assert.equal(evaluateRulePropertyCheck(zoned, [bare()], { untrust: ' External ' }).status, 'fail');
+  });
+});
+
+describe('⛔ an unrecognised applies_to key is REFUSED, not ignored', () => {
+  it('a curated typo cannot silently widen the question', () => {
+    // `dst_zone_role` for `src_zone_role` used to be dropped on the floor: the
+    // scope was never applied, the check answered "every enabled allow rule"
+    // under an internet-facing name, and returned a confident fail. On the
+    // live 447-rule Palo Alto that is a 415-violation finding with nothing
+    // anywhere saying the scope went missing.
+    const typo = withCfg({
+      applies_to: { action: 'allow', enabled_only: true, dst_zone_role: 'external' },
+    });
+    const r = evaluateRulePropertyCheck(typo, [bare(), bare(), bare()], ZONES);
+    assert.equal(r.status, 'warning');
+    assert.match(r.detail, /dst_zone_role/, 'the unrecognised key must be named');
+    assert.match(r.detail, /not with this firewall/, 'a curated-data problem is not the device’s fault');
+    assert.deepEqual(r.matchedRuleIds, []);
+    // ⛔ And it is NOT a confident answer about a wider question.
+    assert.equal(/failed/.test(r.detail), false);
+    assert.equal(/passed/.test(r.detail), false);
+  });
+
+  it('every key the evaluator actually reads is still accepted', () => {
+    // The other half: a guard that refuses everything also passes the test
+    // above. All three known keys together must still evaluate.
+    const full = withCfg({
+      applies_to: { action: 'allow', enabled_only: true, src_zone_role: 'external' },
+    });
+    assert.equal(evaluateRulePropertyCheck(full, [withGroup()], ZONES).status, 'pass');
+    assert.equal(
+      evaluateRulePropertyCheck(withCfg({ applies_to: {} }), [withGroup()], ZONES).status, 'pass'
+    );
+  });
+
+  it('a MALFORMED applies_to is a definition problem, not an empty scope', () => {
+    // An absent scope legitimately means "every rule". A scope that was
+    // DECLARED and could not be read is the same failure as a typo'd key:
+    // silently treating it as absent answers a wider question under this
+    // check's name.
+    for (const bad of [['action'], 'allow', 42, true]) {
+      const r = evaluateRulePropertyCheck(withCfg({ applies_to: bad }), [bare()], ZONES);
+      assert.equal(r.status, 'warning', `applies_to=${JSON.stringify(bad)}`);
+      assert.match(r.detail, /not with this firewall/);
+    }
+    // ...while an absent one still means every rule, and still evaluates.
+    for (const absent of [undefined, null]) {
+      assert.equal(
+        evaluateRulePropertyCheck(withCfg({ applies_to: absent }), [bare()], ZONES).status,
+        'fail'
+      );
+    }
+  });
+});
+
+describe('⛔ an unclassified device and an UNREADABLE one do not share a sentence', () => {
+  const zoned = withCfg({ applies_to: { action: 'allow', enabled_only: true, src_zone_role: 'external' } });
+
+  it('a FAILED zone-classification read says so, and does not blame the operator', () => {
+    // The read failure used to arrive here as `{}`, indistinguishable from "no
+    // zone has been classified" — so the finding told the operator to go and
+    // classify zones that may already all be classified, on the strength of a
+    // read SecVault could not complete. A failed read rendered as a fact about
+    // the customer's firewall, and handing them an action item for our outage.
+    const r = evaluateRulePropertyCheck(zoned, [bare()], null);
+    assert.equal(r.status, 'na');
+    assert.match(r.detail, /could not read/i);
+    assert.match(r.detail, /SecVault-side/i);
+    // ⛔ It must NOT be the instruction the unclassified case gives.
+    assert.equal(/Classify this device's zones/.test(r.detail), false,
+      'a read failure must not be reported as an operator omission');
+    assert.equal(r.detail, evaluateRulePropertyCheck(zoned, [bare()], undefined).detail);
+  });
+
+  it('and an EMPTY map still gives the actionable "classify your zones" na', () => {
+    // The distinction only exists if both sides keep their own wording.
+    const r = evaluateRulePropertyCheck(zoned, [bare()], {});
+    assert.equal(r.status, 'na');
+    assert.match(r.detail, /Classify this device's zones/);
+    assert.equal(/could not read/i.test(r.detail), false);
+  });
+});
+
+describe('⛔ the Panorama guard is INERT over SSH, and the finding must say so', () => {
+  // `undecidable_when_key: '@_panorama'` is an XML ATTRIBUTE. The `@_` prefix
+  // exists only because the API transport parses XML with
+  // attributeNamePrefix '@_'; the PAN-OS SSH transport builds raw_rule from a
+  // brace-parsed config and emits NO `@_*` key at all — while still collecting
+  // pre-rulebase/post-rulebase, i.e. Panorama-pushed rules with no origin
+  // marker on them. Same firewall, same rules: over `api` those rules are
+  // undecidable, over `ssh` they are named as definite failures.
+  const apiShaped = (attrs) => rule({ '@_name': `r${Math.random()}`, ...attrs });
+  const sshShaped = (attrs) => rule({ ...attrs });
+
+  it('over the API transport, nothing changes — the marker namespace is present', () => {
+    const r = evaluateRulePropertyCheck(CHECK, [apiShaped({ action: 'allow' })], ZONES);
+    assert.equal(r.status, 'fail');
+    assert.equal(r.originMarkerUnobservable, false);
+    assert.equal(/origin metadata/.test(r.detail), false,
+      'a transport that reports the marker needs no caveat');
+  });
+
+  it('over the SSH transport the count is still reported, but NOT as certain', () => {
+    // ⛔ The finding is kept: a real absence observed on a real rule is a real
+    // finding, and burying it behind a caveat is the mistake the
+    // definite-outranks-undecidable rule already refuses to make. What is
+    // removed is the CERTAINTY.
+    const r = evaluateRulePropertyCheck(CHECK, [sshShaped({ action: 'allow' }), sshShaped({ action: 'allow' })], ZONES);
+    assert.equal(r.status, 'fail');
+    assert.equal(r.originMarkerUnobservable, true);
+    assert.match(r.detail, /2 of 2 applicable/, 'the finding is not suppressed');
+    assert.match(r.detail, /origin metadata/, 'the limitation must be stated');
+    assert.match(r.detail, /upper bound/, 'and what to do with the number');
+  });
+
+  it('⛔ ONE marker-namespace key anywhere is enough to prove the channel works', () => {
+    // A firewall with genuinely no Panorama-pushed rules is a normal, correct
+    // state and must NOT attract the caveat — so the trigger is the absence of
+    // the whole `@_*` NAMESPACE, never the absence of `@_panorama` itself.
+    const r = evaluateRulePropertyCheck(
+      CHECK, [apiShaped({ action: 'allow' }), apiShaped({ action: 'allow' })], ZONES
+    );
+    assert.equal(r.originMarkerUnobservable, false);
+  });
+
+  it('a PASS carries no caveat — presence was observed on every rule', () => {
+    const r = evaluateRulePropertyCheck(CHECK, [sshShaped({ 'profile-setting': { group: { member: 's' } } })], ZONES);
+    assert.equal(r.status, 'pass');
+    assert.equal(/origin metadata/.test(r.detail), false);
+  });
+
+  it('a check declaring NO marker is never caveated', () => {
+    // Nothing is being claimed about central management, so there is no
+    // certainty to withdraw.
+    const noMarker = withCfg({ undecidable_when_key: undefined, undecidable_reason: undefined });
+    const r = evaluateRulePropertyCheck(noMarker, [sshShaped({ action: 'allow' })], ZONES);
+    assert.equal(r.status, 'fail');
+    assert.equal(r.originMarkerUnobservable, false);
+    assert.equal(/origin metadata/.test(r.detail), false);
+  });
+
+  it('a PLAIN-named marker is treated as observable — it has no separate channel', () => {
+    // `@_panorama` is special because `@_` is a PARSER namespace one transport
+    // produces and the other never does. A plain key like `origin` is an
+    // ordinary field of a rule object that was captured verbatim, so its
+    // absence IS the observation and caveating it would caveat every clean
+    // answer for ever.
+    const plain = withCfg({ undecidable_when_key: 'origin' });
+    const r = evaluateRulePropertyCheck(plain, [sshShaped({ action: 'allow' })], ZONES);
+    assert.equal(r.status, 'fail');
+    assert.equal(r.originMarkerUnobservable, false);
+  });
+});

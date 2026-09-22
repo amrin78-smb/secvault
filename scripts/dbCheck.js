@@ -65,8 +65,16 @@
 //
 // ── READ-ONLY, THREE INDEPENDENT GUARDS ────────────────────────────────────
 //
-// ⛔ 1. THE ROLE. It connects as `claude_readonly`, which holds SELECT and
-//       nothing else, so the database itself refuses a write.
+// ⛔ 1. THE ROLE, AND IT IS NOW ASSERTED RATHER THAN ASSUMED. It connects as
+//       `claude_readonly`, which holds SELECT and nothing else, so the
+//       database itself refuses a write. ⛔ That was a CLAIM until v2.173.0:
+//       `DBCHECK_URL` overrides the connection string, `current_user` was
+//       PRINTED and never CHECKED, and an operator chasing a missing grant
+//       types `DBCHECK_URL=$DATABASE_URL npm run dbcheck` — at which point
+//       every registered function runs as the table OWNER against production
+//       and guard 1 is a line of log output. `assertReadOnlyRole` now refuses
+//       to run at all unless the connected role can write NOTHING, and it
+//       tests the PRIVILEGE rather than the NAME (see its own comment).
 // ⛔ 2. THE NAME GUARD (`assertReadOnlyRegistry`, pure and tested). A function
 //       whose name implies a write — store/save/run/collect/dispatch/trim/
 //       drop/create/update/delete/upsert/insert/set/enqueue/claim/activate/
@@ -74,20 +82,32 @@
 //       unrecognised verb is refused, because the cost of refusing a harmless
 //       reader is one line in this file and the cost of the reverse is a write
 //       against a production security database.
-// ⛔ 3. THE POOL PROXY (`guardStatement`, pure and tested). Every statement is
-//       inspected before it leaves the process, and anything that is not a
-//       read is refused. Belt and braces on purpose, for the same reason
+// ⛔ 3. THE POOL PROXY (`guardStatement`, pure and tested). EVERY statement in
+//       the string is inspected before it leaves the process, and anything
+//       that is not a read is refused. ⛔ It used to read only the LEADING
+//       verb, and node-pg sends a multi-statement string as a simple query
+//       whenever no parameter array is passed — so
+//       `pool.query('SELECT 1; DELETE FROM advisories')` was a write that
+//       walked past the guard. No registered function does that today; the
+//       guard's job is to survive the day one does. Belt and braces on purpose, for the same reason
 //       config retention expresses each delete protection twice: guard 1 is
 //       the deployment's property and could be granted away by someone
 //       tidying `schema-grants.sql`, and guard 2 rests on my reading of a
 //       function name. Neither alone is the kind of guard this codebase
 //       accepts on a write path.
 //
-// ⛔ `syslog_events` IS NEVER READ WITHOUT A `received_at` BOUND — the proxy
-// refuses it. It ingests ~28M rows/day and a careless scan evicts the buffer
-// cache out from under an ingest running at ~1,000 inserts/sec. Every window
-// argument below is the SMALLEST the function will accept, and
-// `statement_timeout` is a hard ceiling under all of it.
+// ⛔ `syslog_events` IS NEVER READ WITHOUT A `received_at` LOWER BOUND — the
+// proxy refuses it. It ingests ~28M rows/day and a careless scan evicts the
+// buffer cache out from under an ingest running at ~1,000 inserts/sec. ⛔ The
+// test used to be that the word `received_at` appeared ANYWHERE in the
+// statement, which `SELECT received_at, src_ip FROM syslog_events` satisfies
+// with no predicate at all — a full scan of every retained partition, passed
+// by a guard whose own comment claimed "an entirely unbounded read is refused
+// outright". It now requires a COMPARISON that puts a floor under the
+// partition key (`received_at >= …`, `> …`, `BETWEEN …`, or the reversed
+// `… <= received_at`), which is the only shape that lets PostgreSQL skip the
+// other 29 days. Every window argument below is the SMALLEST the function
+// will accept, and `statement_timeout` is a hard ceiling under all of it.
 //
 // ── `blocked` IS ITS OWN STATE AND IS NEVER A PASS ─────────────────────────
 //
@@ -123,8 +143,13 @@
 //   npm run dbcheck -- --schema-only
 //   npm run dbcheck -- --list
 //
+// ⛔ DBCHECK_URL MUST NAME A ROLE THAT CAN WRITE NOTHING. The sweep refuses to
+// run otherwise — pointing it at DATABASE_URL to chase a missing grant would
+// run every registered function as the table owner against production.
+//
 // Exit 0 = every registered read ran and returned the expected shape.
-// Exit 1 = at least one did not.  Exit 2 = could not connect / harness error.
+// Exit 1 = at least one did not.  Exit 2 = could not connect, the connection
+//          is not read-only, or a harness error.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -148,6 +173,76 @@ const RAW_WINDOW_MINUTES = 20;
 // id only to parameterise its SQL: the statement still executes and is still
 // validated, and a fabricated row is never required to prove a query parses.
 const NO_SUCH_UUID = '00000000-0000-0000-0000-000000000000';
+
+// ───────────────────────────────────────────────────────────────────────────
+// 0. THE ROLE ASSERTION (pure) — guard 1, enforced
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * May this connection run the sweep at all?
+ *
+ * ⛔ IT TESTS THE PRIVILEGE, NOT THE NAME. A role spelled `claude_readonly`
+ * that has been granted INSERT by someone tidying `schema-grants.sql` is not
+ * read-only, and a customer running their diagnostics role under another name
+ * is not a defect. So the only question asked is the one that matters: can
+ * this role write ANYTHING in `public`? One writable table is enough to
+ * refuse — the registry is 100+ functions deep and this tool cannot read all
+ * of their SQL for the operator.
+ *
+ * ⛔ IT FAILS CLOSED, INCLUDING ON AN UNREADABLE ANSWER. "We could not
+ * determine who this is" is not "this is fine" — the same call every other
+ * authorisation-shaped check in this product makes, and the opposite of the
+ * licence guard, which fails open because it is only about billing.
+ *
+ * @param {{user?: string, superuser?: boolean, writableTables?: number, writableSample?: string}} who
+ * @returns {{ok: true, user: string} | {ok: false, reason: string}}
+ */
+function assertReadOnlyRole(who) {
+  const w = who || {};
+  const user = typeof w.user === 'string' ? w.user.trim() : '';
+  if (!user) {
+    return {
+      ok: false,
+      reason: 'the database did not report a current_user, so WHO this is connected as is unknown — refusing to run rather than guessing',
+    };
+  }
+  if (w.superuser === true) {
+    return {
+      ok: false,
+      reason: `connected as "${user}", which is a SUPERUSER. This tool calls 100+ functions against a production security database and its read-only guarantee starts with the role. Point DBCHECK_URL at claude_readonly.`,
+    };
+  }
+  if (w.superuser !== false) {
+    return {
+      ok: false,
+      reason: `could not determine whether "${user}" is a superuser (pg_roles returned nothing for it), so this connection's read-only status is UNKNOWN — refusing to run`,
+    };
+  }
+  // ⛔ NOT a bare `Number.isFinite(Number(x))`. `Number(null)` is 0 and 0 is
+  // finite, so an UNREADABLE count would come out as "may write nothing" —
+  // the same substitution CLAUDE.md names over the licence guard's maxDevices,
+  // here turning "we could not check" into a clean bill of health on the one
+  // check that decides whether this tool may talk to production at all.
+  const raw = w.writableTables;
+  const n = raw === null || raw === undefined || raw === '' || typeof raw === 'boolean'
+    ? NaN
+    : Number(raw);
+  if (!Number.isFinite(n)) {
+    return {
+      ok: false,
+      reason: `could not count the tables "${user}" may write, so this connection's read-only status is UNKNOWN — refusing to run`,
+    };
+  }
+  if (n > 0) {
+    const sample = w.writableSample ? ` (e.g. ${w.writableSample})` : '';
+    return {
+      ok: false,
+      reason: `connected as "${user}", which holds INSERT/UPDATE/DELETE on ${n} table(s)${sample}. That is the application role, not the diagnostics role — `
+        + 'most likely DBCHECK_URL was set to DATABASE_URL. Point it at claude_readonly, whose refusal is what makes this sweep safe to run against production.',
+    };
+  }
+  return { ok: true, user };
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // 1. THE READ-ONLY NAME GUARD (pure)
@@ -239,42 +334,167 @@ function assertReadOnlyRegistry(registry) {
 const READ_STARTERS = ['select', 'with', 'show', 'explain', 'table', 'values', 'begin', 'start', 'commit', 'rollback', 'set', 'discard'];
 
 // A data-modifying CTE is a WITH statement that writes. Matched on the SQL
-// keyword shapes only, so a string literal containing the word "delete" does
-// not trip it.
+// keyword shapes only, and against the literal-stripped copy below, so a
+// string containing the word "delete" does not trip it.
 const WRITING_CTE = /\b(insert\s+into|update\s+[a-z_."]+\s+set|delete\s+from|merge\s+into)\b/i;
+
+// The raw partitioned table, and a partition of it by name — reading one
+// partition directly is the same 28M rows with the guard spelled differently.
+const RAW_TABLE = /(^|[^a-z0-9_])syslog_events(_\d{8})?([^a-z0-9_]|$)/i;
+
+// A FLOOR under the partition key, in either direction it can be written.
+// `received_at < $2` alone is not one: it bounds the recent end and scans
+// every partition behind it.
+const RECEIVED_AT_LOWER_BOUND = [
+  /(^|[^a-z0-9_])received_at\s*(>=?|between\b)/i,
+  /(<=?)\s*received_at([^a-z0-9_]|$)/i,
+];
+
+/**
+ * Split SQL into its top-level statements, returning for each the raw text and
+ * a `stripped` copy with comments, string literals and dollar-quoted blocks
+ * blanked out — so no keyword test below can be fooled by text inside a
+ * literal, and no `;` inside one can fake a statement break.
+ *
+ * ⛔ DOUBLE-QUOTED IDENTIFIERS ARE KEPT, not blanked. They are names, not
+ * text, and blanking them would hide the table in `UPDATE "devices" SET …`
+ * from WRITING_CTE.
+ */
+function splitStatements(sql) {
+  const out = [];
+  let raw = '';
+  let stripped = '';
+  const flush = () => {
+    if (raw.trim() !== '') out.push({ text: raw, stripped });
+    raw = '';
+    stripped = '';
+  };
+  const take = (from, to, blank) => {
+    const chunk = sql.slice(from, to);
+    raw += chunk;
+    stripped += blank ? ' '.repeat(chunk.length) : chunk;
+  };
+
+  let i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.slice(i, i + 2);
+
+    if (two === '--') {
+      const nl = sql.indexOf('\n', i);
+      const stop = nl === -1 ? n : nl;
+      take(i, stop, true);
+      i = stop;
+      continue;
+    }
+    if (two === '/*') {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        if (sql.slice(j, j + 2) === '/*') { depth += 1; j += 2; } else if (sql.slice(j, j + 2) === '*/') { depth -= 1; j += 2; } else j += 1;
+      }
+      take(i, j, true);
+      i = j;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (sql[j] === ch) {
+          if (sql[j + 1] === ch) { j += 2; continue; } // a doubled quote is an escape
+          j += 1;
+          break;
+        }
+        j += 1;
+      }
+      take(i, j, ch === "'");
+      i = j;
+      continue;
+    }
+    if (ch === '$') {
+      const m = /^(\$[a-zA-Z_][a-zA-Z0-9_]*\$|\$\$)/.exec(sql.slice(i));
+      if (m) {
+        const tag = m[0];
+        const end = sql.indexOf(tag, i + tag.length);
+        const stop = end === -1 ? n : end + tag.length;
+        take(i, stop, true);
+        i = stop;
+        continue;
+      }
+    }
+    if (ch === ';') {
+      take(i, i + 1, true);
+      flush();
+      i += 1;
+      continue;
+    }
+    take(i, i + 1, false);
+    i += 1;
+  }
+  flush();
+  return out;
+}
+
+/** One statement's verdict. `where` names its position when there are several. */
+function guardOneStatement(st, where) {
+  const head = st.stripped.replace(/^\s+/, '');
+  const verb = (head.match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
+  const at = where ? ` (${where})` : '';
+
+  if (verb === '') return { ok: false, reason: `an empty statement${at}` };
+  if (!READ_STARTERS.includes(verb)) {
+    const V = verb.toUpperCase();
+    const article = 'AEIOU'.includes(V[0]) ? 'an' : 'a';
+    return { ok: false, reason: `${article} ${V} statement${at} — this tool only issues reads` };
+  }
+  // ⛔ CHECKED ON EVERY STATEMENT, not only on the `with` branch. A writing
+  // CTE can sit in the second statement of a chain, or be reached through
+  // `SELECT … FROM (WITH …)`; gating the check on the leading verb made it a
+  // guard that fires in one shape of the thing it is guarding against.
+  if (WRITING_CTE.test(st.stripped)) {
+    return { ok: false, reason: `a data-modifying CTE (WITH … INSERT/UPDATE/DELETE)${at}` };
+  }
+  if (verb === 'set' && /^set\s+(role|session\s+authorization)\b/i.test(head)) {
+    return { ok: false, reason: `a SET ROLE / SET SESSION AUTHORIZATION${at}, which would change who this is` };
+  }
+  // ⛔ THE RAW-TABLE BOUND. `syslog_events` at ~28M rows/day cannot be read
+  // without a FLOOR on received_at; the partition key is the only thing that
+  // lets PostgreSQL skip the other 29 days. This does not prove the bound is
+  // NARROW — that comes from the arguments the registry passes and from
+  // statement_timeout — but a read with no floor under it is refused outright.
+  if (RAW_TABLE.test(st.stripped) && !RECEIVED_AT_LOWER_BOUND.some((re) => re.test(st.stripped))) {
+    return {
+      ok: false,
+      reason: `a read of syslog_events with no received_at bound${at} — naming the column is not bounding it; `
+        + 'the statement needs a floor (received_at >= …, BETWEEN …) or it scans every retained partition',
+    };
+  }
+  return { ok: true, verb };
+}
 
 /**
  * Refuse anything that is not a read, BEFORE it reaches the socket.
  *
- * @returns {{ok: true, verb: string} | {ok: false, reason: string}}
+ * ⛔ EVERY STATEMENT IN THE STRING, NOT THE FIRST. node-pg sends a
+ * multi-statement string as a simple query whenever no parameter array is
+ * passed, and PostgreSQL executes all of it.
+ *
+ * @returns {{ok: true, verb: string, statements: number} | {ok: false, reason: string}}
  */
 function guardStatement(text) {
   const sql = typeof text === 'string' ? text : (text && text.text) || '';
-  // Strip leading line comments and whitespace to find the real first word.
-  const head = sql.replace(/^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)+/, '');
-  const verb = (head.match(/^[a-zA-Z]+/) || [''])[0].toLowerCase();
+  const statements = splitStatements(sql);
+  if (statements.length === 0) return { ok: false, reason: 'an empty statement' };
 
-  if (verb === '') return { ok: false, reason: 'an empty statement' };
-  if (!READ_STARTERS.includes(verb)) {
-    const V = verb.toUpperCase();
-    const article = 'AEIOU'.includes(V[0]) ? 'an' : 'a';
-    return { ok: false, reason: `${article} ${V} statement — this tool only issues reads` };
+  let first = null;
+  for (let i = 0; i < statements.length; i += 1) {
+    const where = statements.length > 1 ? `statement ${i + 1} of ${statements.length} in one chained query` : '';
+    const v = guardOneStatement(statements[i], where);
+    if (!v.ok) return v;
+    if (first === null) first = v.verb;
   }
-  if (verb === 'with' && WRITING_CTE.test(sql)) {
-    return { ok: false, reason: 'a data-modifying CTE (WITH … INSERT/UPDATE/DELETE)' };
-  }
-  if (verb === 'set' && /^set\s+(role|session\s+authorization)\b/i.test(head)) {
-    return { ok: false, reason: 'a SET ROLE / SET SESSION AUTHORIZATION, which would change who this is' };
-  }
-  // ⛔ THE RAW-TABLE BOUND. `syslog_events` at ~28M rows/day cannot be read
-  // without a received_at predicate; the partition key is the only thing that
-  // lets PostgreSQL skip the other 29 days. This does not prove the bound is
-  // NARROW — that comes from the arguments the registry passes and from
-  // statement_timeout — but an entirely unbounded read is refused outright.
-  if (/\bsyslog_events\b/i.test(sql) && !/received_at/i.test(sql)) {
-    return { ok: false, reason: 'a read of syslog_events with no received_at bound' };
-  }
-  return { ok: true, verb };
+  return { ok: true, verb: first, statements: statements.length };
 }
 
 /**
@@ -485,6 +705,34 @@ function harvestSwallowedErrors(value) {
     found.push(`${where}: ${msg}`);
   };
 
+  // ⛔ AN ARRAY-SHAPED RESULT CARRIES SWALLOWED ERRORS TOO, and this was blind
+  // to every one of them. `serverHealth.getServiceLiveness` returns
+  // `[{name, lastSeen, ageSeconds, error?}]` and catches PER ELEMENT, so
+  // renaming a column on `feed_sync_log` or `syslog_ingest_stats` leaves both
+  // of its queries throwing, both caught, the array the right length, its spec
+  // (`{}`) satisfied — and this tool reporting `ok` for the function whose job
+  // is telling the operator whether the Engine and the Collector are alive.
+  // That is the v2.86.1 defect inside the liveness report.
+  //
+  // ⛔ `error` IS ONLY READ ON AN ELEMENT WITH NO `id`. Rows from
+  // `background_jobs` and `compliance_report_log` carry a real `error` COLUMN
+  // whose value is a fact about a job, not about our query — harvesting those
+  // would be a false alarm, and a false alarm is what trains the next person
+  // to delete the check. Every such row carries its primary key; a
+  // status-report element like getServiceLiveness's does not.
+  if (Array.isArray(value)) {
+    value.forEach((el, i) => {
+      if (!el || typeof el !== 'object' || Array.isArray(el)) return;
+      const label = el.name || el.key || el.section || `#${i}`;
+      if (el.ok === false) {
+        push(`element "${label}"`, el.error || 'reported ok:false with no message');
+      } else if (el.error && !('id' in el)) {
+        push(`element "${label}"`, el.error);
+      }
+    });
+    return found;
+  }
+
   for (const key of ['errors', 'sectionErrors', 'failures']) {
     const list = value[key];
     if (Array.isArray(list)) for (const e of list) push(key, e);
@@ -583,31 +831,51 @@ function classifyResult({ name, ms, error, value, spec, statements }) {
  * rule lib/answers.js enforces product-wide. An unmeasured check is not a
  * passing one, and this tool's own report is the last place that distinction
  * should be allowed to slip.
+ *
+ * ⛔ AND THE GRANTS AUDIT IS PART OF IT. `deniedNowReadable` — a secret-bearing
+ * table this diagnostics role can suddenly SELECT, i.e. a blanket
+ * `GRANT SELECT ON ALL TABLES` having made `device_credentials` readable — was
+ * counted for the exit code and left OUT of the closing sentence, so the
+ * last and loudest line of a credential-exposure run read "All 104 reads
+ * executed and returned the expected shape…". It now LEADS the sentence:
+ * nothing else in this report outranks it.
  */
-function summariseRun(results, schema) {
+function summariseRun(results, schema, grants) {
   const counts = { ok: 0, fail: 0, blocked: 0 };
   let unverified = 0;
   for (const r of results) {
     counts[r.state] = (counts[r.state] || 0) + 1;
     unverified += (r.notes || []).filter((n) => /not verified/.test(n)).length;
   }
+  const g = grants || {};
+  const exposed = g.deniedNowReadable || [];
+  const ungranted = g.missingGrants || [];
   const schemaProblems = schema ? (schema.missingTables.length + schema.missingColumns.length) : 0;
-  const clean = counts.fail === 0 && schemaProblems === 0;
+  const grantProblems = exposed.length + ungranted.length;
+  const clean = counts.fail === 0 && schemaProblems === 0 && grantProblems === 0;
   const complete = clean && counts.blocked === 0 && unverified === 0;
 
   return {
     counts,
     unverified,
     schemaProblems,
+    grantProblems,
+    exposed,
     exitCode: clean ? 0 : 1,
     tone: complete ? 'ok' : (clean ? 'unknown' : 'fail'),
     sentence: !clean
       ? [
+        exposed.length
+          ? `${exposed.length} secret-bearing table(s) are READABLE by this diagnostics role (${exposed.join(', ')}) — a credential-exposure regression in lib/schema-grants.sql`
+          : null,
         counts.fail ? `${counts.fail} read(s) failed` : null,
         schemaProblems ? `${schemaProblems} declared schema item(s) are missing from the live database` : null,
-      ].filter(Boolean).join(' and ') + '.'
+        ungranted.length
+          ? `${ungranted.length} declared table(s) have no GRANT SELECT for this role (${ungranted.join(', ')})`
+          : null,
+      ].filter(Boolean).join('; ') + '.'
       : (complete
-        ? `All ${counts.ok} reads executed and returned the expected shape, and lib/schema.sql matches the live database.`
+        ? `All ${counts.ok} reads executed and returned the expected shape, lib/schema.sql matches the live database, and every grant is as lib/schema-grants.sql declares it.`
         : `${counts.ok} reads executed cleanly, but ${counts.blocked} could not run and ${unverified} shape(s) could not be verified — this is NOT an all-clear.`),
   };
 }
@@ -1015,15 +1283,53 @@ async function main(argv) {
   let whoami;
   try {
     // ⛔ FAILS LOUDLY. A skip here is the guard-that-cannot-fire pattern.
-    const { rows } = await pool.query('SELECT current_user, current_database(), version()');
-    whoami = rows[0];
+    // The privilege columns are read in the SAME round trip as the identity
+    // ones, so there is no window in which the sweep knows who it is and has
+    // not yet asked what that role may do.
+    const { rows } = await pool.query(
+      `SELECT current_user AS who,
+              current_database() AS db,
+              version() AS version,
+              (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser,
+              (SELECT count(*)::int FROM pg_class c
+                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+                  AND (has_table_privilege(current_user, c.oid, 'INSERT')
+                    OR has_table_privilege(current_user, c.oid, 'UPDATE')
+                    OR has_table_privilege(current_user, c.oid, 'DELETE'))) AS writable_tables,
+              (SELECT string_agg(t, ', ') FROM (
+                 SELECT c.relname AS t FROM pg_class c
+                   JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+                    AND (has_table_privilege(current_user, c.oid, 'INSERT')
+                      OR has_table_privilege(current_user, c.oid, 'UPDATE')
+                      OR has_table_privilege(current_user, c.oid, 'DELETE'))
+                  ORDER BY c.relname LIMIT 5) s) AS writable_sample`
+    );
+    whoami = rows[0] || {};
   } catch (err) {
     console.error(`[dbcheck] CANNOT CONNECT: ${err.message}`);
     console.error('[dbcheck] Set DBCHECK_URL, or check that PostgreSQL is reachable. Nothing was checked.');
     await pool.end().catch(() => {});
     return 2;
   }
-  console.log(`[dbcheck] ${whoami.current_database} as "${whoami.current_user}" — ${String(whoami.version).split(',')[0]}`);
+
+  // ⛔ GUARD 1, ENFORCED. Printing current_user and moving on is not a guard.
+  const role = assertReadOnlyRole({
+    user: whoami.who,
+    superuser: whoami.superuser,
+    writableTables: whoami.writable_tables,
+    writableSample: whoami.writable_sample,
+  });
+  if (!role.ok) {
+    console.error(`[dbcheck] REFUSING TO RUN: ${role.reason}`);
+    console.error('[dbcheck] Nothing was checked. This tool calls the product\'s own read functions against a live database; the read-only role is the first of its three guards and it is not optional.');
+    await pool.end().catch(() => {});
+    return 2;
+  }
+
+  console.log(`[dbcheck] ${whoami.db} as "${whoami.who}" — ${String(whoami.version).split(',')[0]}`);
+  console.log(`[dbcheck] role verified read-only: 0 writable tables in public, not a superuser`);
   console.log(`[dbcheck] statement_timeout ${STATEMENT_TIMEOUT_MS}ms, raw-table window ${RAW_WINDOW_MINUTES} min\n`);
 
   // ── schema ────────────────────────────────────────────────────────────
@@ -1099,10 +1405,14 @@ async function main(argv) {
   const slowest = [...results].sort((a, b) => b.ms - a.ms).slice(0, 5);
   console.log(`\n── slowest: ${slowest.map((r) => `${r.name} ${r.ms}ms`).join(' · ')}`);
 
-  const verdict = summariseRun(results, { missingTables: schema.missingTables, missingColumns: schema.missingColumns });
+  const verdict = summariseRun(
+    results,
+    { missingTables: schema.missingTables, missingColumns: schema.missingColumns },
+    grants
+  );
   const secs = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`\n[dbcheck] ${results.length} read functions, ${statements} statements, ${secs}s`);
-  console.log(`[dbcheck] ${verdict.counts.ok} ok · ${verdict.counts.fail} failed · ${verdict.counts.blocked} blocked · ${verdict.unverified} shape(s) unverified`);
+  console.log(`[dbcheck] ${verdict.counts.ok} ok · ${verdict.counts.fail} failed · ${verdict.counts.blocked} blocked · ${verdict.unverified} shape(s) unverified · ${verdict.grantProblems} grant problem(s)`);
   console.log(`[dbcheck] ${verdict.sentence}`);
 
   await pool.end().catch(() => {});
@@ -1122,8 +1432,10 @@ if (require.main === module) {
 module.exports = {
   // pure, and exported so tests/dbCheckHarness.test.js can feed them the
   // failure shapes a live green run never produces
+  assertReadOnlyRole,
   checkReadOnlyName,
   assertReadOnlyRegistry,
+  splitStatements,
   guardStatement,
   classifyError,
   checkShape,

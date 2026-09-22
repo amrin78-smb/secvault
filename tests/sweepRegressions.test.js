@@ -318,6 +318,42 @@ describe('⛔ a fallback that could never fire, on two write paths', () => {
     }
   });
 
+  it('⛔ and on a NON-GIT deploy too — the case the assertions above could not see', () => {
+    // ⛔ THE THREE ASSERTIONS ABOVE PASSED WITH THE BUG STILL IN PLACE. The
+    // not-found exit returned `start`, not the resolved fallback, so
+    // findGitRoot(null) was NULL and findGitRoot('') was '' — but only once
+    // the walk failed to find a `.git`, and this checkout has one, so the
+    // loop always returned early and the broken line never ran. The comments
+    // in lib/updateCheck.js explicitly anticipate "a non-git on-prem deploy",
+    // which is exactly where the guard was absent.
+    //
+    // Forcing that path needs a working directory outside any repository.
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'secvault-nogit-'));
+    const previous = process.cwd();
+    try {
+      process.chdir(tmp);
+      for (const v of [undefined, '', null]) {
+        const out = findGitRoot(v);
+        assert.equal(typeof out, 'string', `findGitRoot(${JSON.stringify(v)}) must still be a path`);
+        assert.ok(out.length > 0);
+        assert.ok(fs.existsSync(out), `${out} must be a directory a caller can cd into`);
+      }
+      // and an explicit path with no repository below it comes back as itself
+      // (or, if some ancestor of the temp directory happens to be a checkout,
+      // as that ancestor — never as null, '' or a filesystem root it invented).
+      const explicit = findGitRoot(tmp);
+      assert.equal(typeof explicit, 'string');
+      assert.ok(explicit.length > 0 && tmp.startsWith(explicit),
+        `findGitRoot(tmp) returned ${JSON.stringify(explicit)}, which is neither tmp nor an ancestor of it`);
+    } finally {
+      process.chdir(previous);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('a real path still resolves to the repo root', () => {
     assert.equal(findGitRoot(process.cwd()), findGitRoot());
   });

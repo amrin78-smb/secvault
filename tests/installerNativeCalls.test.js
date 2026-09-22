@@ -73,16 +73,25 @@ describe('⛔ every native 2>&1 in an installer script is inside Invoke-Native',
   });
 
   it('and every occurrence is routed through the helper', () => {
+    // ⛔ "ON THE SAME LINE AS Invoke-Native" IS NOT THE RULE — "inside an
+    // Invoke-Native block" is. This used to test the line, so routing a call
+    // through the helper across several lines (which is what capturing the
+    // exit code inside the block requires) reported the correctly-routed call
+    // as an offender. The scan now brace-matches the block.
     const offenders = [];
     for (const { file, text } of scriptsWithNativeRedirects()) {
-      const lines = text.split('\n');
-      lines.forEach((line, i) => {
-        if (!line.includes('2>&1') || isComment(line)) return;
-        if (line.includes('Invoke-Native')) return;
-        const where = `${file}:${i + 1}`;
-        if (KNOWN_UNROUTED.has(where)) return;
-        offenders.push(`${where}: ${line.trim().slice(0, 90)}`);
-      });
+      const ranges = invokeNativeRanges(text);
+      let at = text.indexOf('2>&1');
+      while (at !== -1) {
+        const lineNo = text.slice(0, at).split('\n').length;
+        const line = text.split('\n')[lineNo - 1];
+        const where = `${file}:${lineNo}`;
+        const inside = ranges.some(([open, close]) => at > open && at < close);
+        if (!isComment(line) && !inside && !KNOWN_UNROUTED.has(where)) {
+          offenders.push(`${where}: ${line.trim().slice(0, 90)}`);
+        }
+        at = text.indexOf('2>&1', at + 1);
+      }
     }
     assert.deepEqual(offenders, [],
       'these redirect a native command\'s stderr without Invoke-Native, so normal '
@@ -106,18 +115,86 @@ describe('⛔ every native 2>&1 in an installer script is inside Invoke-Native',
     }
   });
 
-  it('⛔ and it restores the previous preference rather than leaving Continue set', () => {
-    // A helper that set 'Continue' and never put it back would silently disable
+  it('⛔ and it cannot leak Continue out of the function — the assertion that replaced one that could not fail', () => {
+    // ⛔ WHAT WAS HERE BEFORE COULD NOT FAIL, TWICE OVER, and it is worth
+    // recording why rather than quietly replacing it.
+    //
+    // 1. `body` was `text.slice(indexOf('function Invoke-Native'))` — i.e.
+    //    everything from the declaration to END OF FILE. Any `finally { ... }`
+    //    anywhere later in an 1,100-line installer satisfied it, and both
+    //    scripts have several.
+    // 2. More fundamentally, `$ErrorActionPreference = 'Continue'` INSIDE a
+    //    PowerShell function is FUNCTION-SCOPED: it vanishes when the function
+    //    returns whether or not anything restores it. Deleting the `finally`
+    //    outright would change no behaviour at all, so the assertion pinned a
+    //    property the code did not depend on.
+    //
+    // What IS real is the one way this helper could genuinely leak: assigning
+    // to the SCRIPT or GLOBAL copy, which outlives the call and would disable
     // the script's own error handling for every step after the first native
-    // call — turning one false failure into a fleet of missed real ones.
+    // call. That is a mistake somebody could make while "fixing" a preference
+    // that did not seem to stick — so it is what gets pinned, against a
+    // brace-matched function body rather than the rest of the file.
     for (const { file, text } of scriptsWithNativeRedirects()) {
       if (!/function\s+Invoke-Native/.test(text)) continue;
-      const body = text.slice(text.search(/function\s+Invoke-Native/));
-      assert.match(body, /finally\s*\{[\s\S]{0,120}ErrorActionPreference\s*=\s*\$prevEAP/,
-        `${file}'s Invoke-Native must restore $ErrorActionPreference in a finally block`);
+      const body = functionBody(text, 'Invoke-Native');
+      assert.ok(body, `${file}: could not find the body of Invoke-Native`);
+      assert.doesNotMatch(body, /\$(script|global):ErrorActionPreference\s*=/,
+        `${file}'s Invoke-Native must not assign the script/global ErrorActionPreference — `
+        + 'that copy outlives the call and would silence every later step');
+      assert.match(body, /\$ErrorActionPreference\s*=\s*'Continue'/,
+        `${file}'s Invoke-Native must set the FUNCTION-scoped preference to Continue — that scope is what makes it safe`);
+      assert.match(body, /&\s*\$Command/,
+        `${file}'s Invoke-Native must actually invoke the scriptblock it was given`);
     }
   });
 });
+
+/**
+ * The text between the braces of `function <name> { ... }`, matched by
+ * counting braces. ⛔ NOT a slice to end-of-file: an assertion made against
+ * "everything after the declaration" is satisfied by any later line in the
+ * script and can never fail, which is how the assertion above got there.
+ */
+/**
+ * The character ranges of every `Invoke-Native { … }` block, brace-matched.
+ * A block whose braces do not balance yields no range, so anything inside it
+ * is reported as unrouted — loud rather than silently excused.
+ */
+function invokeNativeRanges(text) {
+  const ranges = [];
+  const re = /Invoke-Native\s*\{/g;
+  let m = re.exec(text);
+  while (m !== null) {
+    const open = text.indexOf('{', m.index);
+    let depth = 0;
+    for (let i = open; i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') {
+        depth -= 1;
+        if (depth === 0) { ranges.push([open, i]); break; }
+      }
+    }
+    m = re.exec(text);
+  }
+  return ranges;
+}
+
+function functionBody(text, name) {
+  const at = text.search(new RegExp(`function\\s+${name}\\b`));
+  if (at === -1) return null;
+  const open = text.indexOf('{', at);
+  if (open === -1) return null;
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return null;
+}
 
 describe('⛔ the allow-list is honest about itself', () => {
   it('every entry still exists, so a fixed line cannot sit here forever claiming debt', () => {

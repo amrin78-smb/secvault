@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { blockedSurfaceFor } from './lib/deviceScopePaths';
+import { blockedSurfaceFor, PATHNAME_HEADER } from './lib/deviceScopePaths';
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
@@ -39,7 +39,16 @@ export async function middleware(request) {
     return NextResponse.redirect(to);
   }
 
-  return NextResponse.next();
+  // ⛔ THE PATH IS FORWARDED SO THE DASHBOARD LAYOUT CAN RE-DECIDE AGAINST THE
+  // DATABASE. A server component is given no pathname by Next 14, and without
+  // one the authoritative check below middleware cannot know which surface it
+  // is on. This header is a HINT, never a permission: the layout treats an
+  // absent or unparseable value as "cannot resolve" and the fast path above
+  // has already run. It is set on the REQUEST, so it is not visible to the
+  // browser and a client-supplied copy is overwritten rather than trusted.
+  const forwarded = new Headers(request.headers);
+  forwarded.set(PATHNAME_HEADER, pathname);
+  return NextResponse.next({ request: { headers: forwarded } });
 }
 
 // ⛔ THE RUNTIME HALF OF THE COVERAGE REGISTER. Without this,
@@ -50,8 +59,27 @@ export async function middleware(request) {
 //
 // ⛔ ONLY SCOPED ACCOUNTS ARE AFFECTED. `deviceScoped` is false for every
 // account that has no scope rows, which is every account that exists today, so
-// this changes nothing for them. The flag is re-read from the database on every
-// token use beside the role (see the jwt callback) and fails closed to `true`.
+// this changes nothing for them.
+//
+// ⛔ THIS IS A FAST PATH OVER A POSSIBLY-STALE CLAIM, NOT THE BOUNDARY, AND AN
+// EARLIER COMMENT HERE CLAIMED OTHERWISE. It said the flag is "re-read from the
+// database on every token use". The jwt() callback does re-read it — but
+// `getToken()` only DECRYPTS the cookie and never runs a callback (verified:
+// next-auth/jwt has zero references to `callbacks`), so what middleware sees is
+// whatever was written the last time NextAuth RE-ISSUED the cookie. With
+// SESSION_IDLE_MINUTES=0 the window is NextAuth's own 30 days.
+//
+// The staleness is asymmetric, and only one direction matters:
+//
+//   scope REVOKED, claim still true   -> refused a surface it may now use.
+//                                        Less access; recoverable; visible.
+//   scope GRANTED, claim still false  -> WOULD BE SERVED THE WHOLE FLEET.
+//
+// The second is the one this feature exists to prevent, so it is decided again
+// in app/(dashboard)/layout.js against a live database read, which every
+// dashboard page renders through. ⛔ API ROUTES HAVE NO SUCH WRAPPER and are
+// therefore covered by this claim alone — see lib/deviceScopeCoverage.js's
+// header for what that costs and what closes it.
 function isRefusedByDeviceScope(token, pathname) {
   if (!token || token.deviceScoped !== true) return false;
   return blockedSurfaceFor(pathname) !== null;

@@ -5,7 +5,7 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { can, MANAGE_USERS, forbiddenResponse } from '../../../../../lib/rbac';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { logActivity } from '../../../../../lib/activityLog';
-import { scopeFromRows, SCOPE_STATES } from '../../../../../lib/deviceScope';
+import { scopeFromRows, SCOPE_STATES, scopeAssignmentRefusal } from '../../../../../lib/deviceScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,14 +89,36 @@ export async function PUT(request, { params }) {
   }
 
   const client = await pool.connect();
+  // ⛔ Tracks whether the WRITE landed, separately from whether the RESPONSE
+  // could be built. Everything after COMMIT — the audit line and the read-back
+  // — can still throw, and reporting that as a 500 would tell an administrator
+  // their change was rejected when the scope had in fact already been applied.
+  // They would then re-apply it, or worse, believe an account is unrestricted
+  // when it is not.
+  let committed = false;
   try {
     // ⛔ The user must exist and be LOCAL. An LDAP account has no `users` row,
     // so a scope written against its username could never be read back — see
     // loadScopeForSession()'s id-shape check.
-    const u = await client.query('SELECT id, username FROM users WHERE id = $1', [params.id]);
+    const u = await client.query('SELECT id, username, role FROM users WHERE id = $1', [params.id]);
     if (u.rows.length === 0) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    // ⛔ AN ACCOUNT THAT CAN MANAGE USERS MAY NOT BE SCOPED. This route is
+    // itself a BLOCKED surface (it returns the names of firewalls the caller
+    // may not hold), so a Super Admin who scoped themselves — or scoped the
+    // only other Super Admin — would be refused the one endpoint that can undo
+    // it, by every account able to reach it. There is no recovery short of a
+    // direct database edit, which is precisely the failure the last-super_admin
+    // guard in app/api/users/[id]/route.js exists to prevent; the authority
+    // being protected is the same one.
+    //
+    // ⛔ Checked on the CAPABILITY, never the word "admin" — `admin` does not
+    // hold manage_users and is scopable, which is the common case.
+    const lockout = scopeAssignmentRefusal(u.rows[0].role, ids);
+    if (lockout) return NextResponse.json({ error: lockout }, { status: 409 });
+
     const unique = Array.from(new Set(ids));
     if (unique.length) {
       const known = await client.query(
@@ -123,6 +145,7 @@ export async function PUT(request, { params }) {
       );
     }
     await client.query('COMMIT');
+    committed = true;
 
     try {
       await logActivity(pool, {
@@ -145,8 +168,30 @@ export async function PUT(request, { params }) {
         ? 'Scope cleared. This account now sees EVERY firewall again — clearing a scope widens '
           + 'access, it does not revoke it.'
         : `This account now sees only these ${rows.length} firewall(s).`,
+      // ⛔ STATED, NOT HIDDEN. Pages re-check against the database on every
+      // render (app/(dashboard)/layout.js), so a change applies at once there.
+      // API endpoints are gated by middleware, which reads a claim carried in
+      // the user's signed session cookie and cannot reach the database — so a
+      // NEWLY granted restriction reaches those endpoints only once that
+      // cookie is re-issued. Signing the account out applies it immediately.
+      appliesTo: unique.length === 0
+        ? 'Pages apply this immediately.'
+        : 'Pages apply this immediately. API endpoints apply it once this account’s '
+          + 'session refreshes — sign the account out to apply it at once.',
     });
   } catch (err) {
+    if (committed) {
+      // The scope IS set; only the confirmation could not be assembled.
+      console.warn(`[device-scope] post-commit failure for ${params.id}: ${err.message}`);
+      return NextResponse.json({
+        state: null,
+        devices: null,
+        restartRequired: false,
+        note: 'The scope was saved, but reading it back failed, so the list below could not be '
+          + 'refreshed. Reload this panel to see what is now in force — do not re-apply blindly.',
+        readBackFailed: true,
+      });
+    }
     try { await client.query('ROLLBACK'); } catch { /* the original error is what matters */ }
     return NextResponse.json({ error: err.message || 'Failed to set device scope' }, { status: 500 });
   } finally {

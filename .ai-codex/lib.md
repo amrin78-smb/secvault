@@ -107,6 +107,46 @@ Pinned by `tests/ruleRiskByTraffic.test.js` (19 cases, 5 mutations verified).
 
 `generateReportPdf(pool, { standard, deviceId })` — both axes optional and independent. `deviceId` narrows every read in SQL (scores, findings appendix, and BOTH coverage denominators); an unresolvable one returns `null` → 404. New export `summaryFromPerDevice`. Full rules: `.ai-codex/compliance-pipeline.md`.
 
+## configDiff readability — names, headings and corruption (v2.174.0)
+
+`lib/engines/configDiff.js` + `lib/configDiffDisplay.js`. Measured on 189 live
+`config_diffs`: entries carrying a plain-English description went **77.4% -> 94.9%**, and
+`tree.`-prefixed entries **55/573 -> 580/580**.
+
+- `nameTreePath(path)` names a PAN-OS CLI/brace-grammar path (`tree.address.<name>`,
+  `tree.shared.local-user-database.user-group.<group>.user[N]`). ⛔ It anchors on a SECTION
+  PREFIX and a FIELD SUFFIX and **never splits on `.`** — the names carry dots and spaces.
+  Called twice: LAST (as the fallback) and FIRST when the remainder holds a dot or space,
+  because those are exactly the names a dot-splitting builder states wrongly as fact
+  (`Address object "NW_GoogleCloud-10"`).
+  ⛔ A tail is a FIELD only when its first token is real PAN-OS schema (`TREE_FIELD_TOKENS`)
+  or the value is scalar — otherwise the live FQDN objects (`tree.address.adobe.com`) read
+  `Address object "adobe"'s com was added`: an object that is not on the device and a setting
+  that does not exist.
+- `classifyPath()` recovers a RULE name the same way. ⛔ It used to take the first segment, so
+  the live rule `Allow_URL_tfcc.fisheries.go.th` was reported as `Allow_URL_tfcc` — **a rule
+  that does not exist**, named on the page an operator reads to see what changed. 47 of 1,780
+  live rules carry a dot. The search for the field token starts at index 1, so a rule NAMED
+  after a field still resolves.
+- ⛔ `PATH_SHAPE_VIOLATION` was `/[\s{}]/` — ANY whitespace — and a space is LEGAL in a PAN-OS
+  name (`65.32 allow all`, `Batch Scan for 27.254.123.18`, `HR TO Jobsdb.`). Every one
+  rendered as "(unreadable path…)", including in the RULE NAME column. That is the
+  failed-read-as-a-fact rule inverted: a good read recorded as a failure, which costs the
+  operator's trust just as fast. Now braces, control characters or a RUN of whitespace only.
+- `sectionNoun` singularises every word and detects an acronym/proper noun by SHAPE (a capital
+  after the first letter), not a list that goes stale. Gone: `1 dn`, `2 global protects`,
+  `system infos`, `password policys`.
+- `headingNamesObject(description, value)` (`configDiffDisplay.js`) — does the heading already
+  contain the object's name? ⛔ Replaces `hasDescription`, which only meant "a description
+  exists": two builders are name-blind by design, so the name row was dropped from the table
+  while the heading never showed it.
+- Corruption is bounded AT THE SOURCE — a shape-violating or over-long segment becomes
+  `Other (unreadable)`, so the section HEADING is bounded too, not just the summary. The
+  `change-summary-readability` backfill is at **revision 2** so deployed servers re-derive.
+
+Tests: `configDiffTreePaths`, `configDiffHeadings`, `configDiffHeadingName`,
+`configDiffRuleNames`, `configDiffReadability`, `configDiffDisplay`.
+
 ## lib/configDiffDisplay.js (v2.172.0)
 
 Pure. Turns one changed config object into the rows of the Field | Value table under a diff row. `flattenForDisplay` presents one level of nesting (a PAN-OS service object's `protocol.tcp.port`) instead of dumping raw JSON; `displayRowsFor` also drops the object's own name row when the heading above already names it. ⛔ Past its depth/width bounds it returns `null` so the caller falls back to raw JSON — it never truncates a table into looking complete. ⛔ Extracted from `components/config/DiffViewer.js` so it could be tested at all.
@@ -2565,6 +2605,49 @@ Pure `resolveRole` + three pool-taking storage functions. Full rules in CLAUDE.m
 `app/api/auth/[...nextauth]/route.js` uses it twice: at `authorize()` (refusing the login when the
 mapping table is unreadable) and in `jwt()` on EVERY token use, so a revoked mapping applies at once
 rather than at JWT expiry. 24 tests, 7 mutations verified to bite.
+
+## deviceScope.js / deviceScopePaths.js / deviceScopeCoverage.js — per-user firewall scoping
+
+Full rules in CLAUDE.md's "Per-user device scoping". The surface:
+
+`lib/deviceScope.js` — pure except the pool-takers.
+- `SCOPE_STATES` `unscoped` | `scoped` | `unknown`. ⛔ `unknown` is a FAILED READ and denies
+  everywhere; it is a distinct value only so the REASON can be reported.
+- `scopeFromRows(rows)` — `null` => unknown, `[]` => unscoped, rows with no usable id => unknown.
+- `canSeeDevice` / `filterDevices` / `scopeSqlClause` (⛔ unknown yields ` AND FALSE`, never an
+  absent clause) / `isScoped` / `refusalMessage`.
+- `loadScopeForSession(session, pool)` — ⛔ **THREE cases, not two** (v2.174.0): no session or no
+  id => `unknown`; a non-empty non-UUID id => LDAP, `unscoped`; a UUID => read the table. An
+  id-less session previously took the LDAP branch and was handed the fleet.
+- `scopeAssignmentRefusal(role, deviceIds)` (v2.174.0) → refusal sentence or `null`. ⛔ An account
+  holding `manage_users` may not be scoped — the scope endpoint is itself `blocked`, so it would be
+  an unrecoverable lockout. Decided on the CAPABILITY; `admin` IS scopable. Clearing is always OK.
+- `scopesEmptiedByDeviceDeletion(pool, deviceId)` (v2.174.0) → usernames. ⛔ **THROWS** rather than
+  returning `[]` — `[]` here means "safe to delete". Both delete paths call it and refuse on a throw.
+
+`lib/deviceScopePaths.js` — edge-safe (no node imports, no pool), compiles the register to regexes.
+- `blockedSurfaceFor(pathname)` / `resolveSurface(patterns, pathname)` (patterns passed in so
+  first-match-wins is testable against a synthetic register).
+- `pageRefusal(pathname, scope)` (v2.174.0) → `{refused, surface, reason}`. The AUTHORITATIVE page
+  verdict, called by `app/(dashboard)/layout.js` with a live scope read, because middleware's
+  `getToken()` never runs the `jwt()` callback and its claim can be 30 days old. ⛔ An unresolvable
+  pathname refuses NOTHING (middleware did not run; refusing everything would be an outage).
+- `PATHNAME_HEADER` — `x-sv-pathname`, set by middleware on the FORWARDED REQUEST. A hint, never a
+  permission: overwritten, not appended.
+- `surfaceToPattern(file)` — ⛔ strips route groups GENERICALLY (v2.174.0); it previously named
+  `app/api/` and `app/(dashboard)/` and dropped anything else, pre-arming an unenforceable block.
+- `UNMAPPABLE_BLOCKED` — blocked surfaces that compile to no pattern. Logged loudly at load,
+  asserted empty by a test; deliberately not thrown, because middleware imports this module.
+
+`lib/deviceScopeCoverage.js` — `COVERAGE` (4 aware / 88 blocked / 23 no-device-data),
+`CLASSIFICATIONS`, `countByClassification`, `isScopeAware`, `touchesDeviceData`, and
+`TRANSITIVE_ALLOWED` (v2.174.0) — named exemptions WITH A REASON for surfaces that reach device
+data through an import. The transitive check found six routes classified `no-device-data` whose API
+backed an already-`blocked` page.
+
+Tests: `tests/deviceScope.test.js`, `tests/deviceScopePaths.test.js`,
+`tests/deviceScopeCoverage.test.js`, `tests/deviceScopeEnforcement.test.js` (41 cases, 4 mutations
+verified).
 
 ## `lib/feeds/cveHub.js` (v2.137.0) — central CVE feed consumer
 

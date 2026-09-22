@@ -19,15 +19,21 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  generateReportPdf, buildReportData, summaryFromPerDevice, STANDARD_KEYS,
+  generateReportPdf, buildReportData, summaryFromPerDevice, fleetForStandard, STANDARD_KEYS,
 } = require('../lib/engines/complianceReport');
 // The shared extractor — pdfkit compresses its content streams, so a plain
 // regex over the buffer finds nothing. Same helper the standard-scope tests use.
 const { contentStreams } = require('../lib/reports/pdfCompare');
 
 const DEVICES = [
-  { id: 'd1', name: 'fw-forti', vendor: 'fortinet' },
-  { id: 'd2', name: 'fw-palo', vendor: 'paloalto' },
+  { id: 'd1', name: 'fw-forti', vendor: 'fortinet', active: true },
+  { id: 'd2', name: 'fw-palo', vendor: 'paloalto', active: true },
+  // ⛔ A DECOMMISSIONED FIREWALL, and it is here because without one the
+  // `AND active = true` in resolveReportDevice could be deleted and every test
+  // still passed. A report titled with a retired firewall's name, over a body
+  // read at fleet scope, is an audit artefact claiming to be about something it
+  // never read.
+  { id: 'd3', name: 'fw-retired', vendor: 'fortinet', active: false },
 ];
 
 // One stub for every read the report makes, recording the SQL and the params
@@ -40,10 +46,17 @@ function stubPool({ devices = DEVICES, findings = [], library = null } = {}) {
     query: async (sql, params = []) => {
       seen.push({ sql, params });
       if (sql.includes('FROM devices WHERE id = $1')) {
-        return { rows: devices.filter((d) => d.id === params[0]) };
+        // ⛔ The stub HONOURS the active clause rather than ignoring it. A stub
+        // that returned the row either way would let the assertion below pass
+        // against a query that dropped the clause.
+        const wantsActive = /active\s*=\s*true/.test(sql);
+        return {
+          rows: devices.filter((d) => d.id === params[0] && (!wantsActive || d.active !== false)),
+        };
       }
       if (sql.includes('FROM devices WHERE active')) {
-        return { rows: params.length ? devices.filter((d) => d.id === params[0]) : devices };
+        const live = devices.filter((d) => d.active !== false);
+        return { rows: params.length ? live.filter((d) => d.id === params[0]) : live };
       }
       if (sql.includes('library_total')) {
         // ⛔ The stub APPLIES the vendor filter rather than echoing a constant.
@@ -113,9 +126,24 @@ function pdfText(buf) {
 }
 
 describe('an unresolvable device produces NO report, never the fleet one', () => {
-  it('returns null for an id that is not an active device', async () => {
+  it('returns null for an id that does not exist at all', async () => {
     assert.equal(await generateReportPdf(stubPool(), { deviceId: 'nope' }), null);
     assert.equal(await buildReportData(stubPool(), { deviceId: 'nope' }), null);
+  });
+
+  it('⛔ returns null for a real but DECOMMISSIONED firewall', async () => {
+    // The other half of "not an active device", and the half nothing exercised:
+    // the id resolves, the row exists, and the report must still not be
+    // produced. Without this, deleting `AND active = true` from the resolve
+    // query changes nothing anybody can see — it just starts producing reports
+    // about firewalls that left the estate.
+    assert.equal(await buildReportData(stubPool(), { deviceId: 'd3' }), null);
+    assert.equal(await generateReportPdf(stubPool(), { deviceId: 'd3' }), null);
+  });
+
+  it('a retired firewall is absent from the FLEET report too', async () => {
+    const fleet = await buildReportData(stubPool({ findings: [f('d1', 'pass')] }));
+    assert.deepEqual(fleet.perDevice.map((d) => d.deviceName), ['fw-forti', 'fw-palo']);
   });
 
   it('and the fleet report is still produced when NO device is asked for', async () => {
@@ -168,6 +196,65 @@ describe('the numbers are that firewall own, not the fleet ones', () => {
     assert.equal(s.overall, 67, '(3+1) pass of (4+2) measurable, summed per standard');
     assert.deepEqual(s.byStandardCounts.PCI_DSS, { pass: 3, fail: 1, warning: 0 });
   });
+
+  it('⛔ `na` is EXCLUDED from the denominator, in the per-standard score AND in overall', () => {
+    // A check SecVault cannot ask of a device is not a check the device failed.
+    // Adding `+ c.na` to either denominator survived every existing assertion,
+    // because no fixture paired a real score with a non-zero `na`.
+    const perDevice = [{
+      standards: {
+        // 3 pass, 1 fail, 4 na. Excluding na: 3/4 = 75%. Including it: 3/8 = 38%.
+        PCI_DSS: { pass: 3, fail: 1, warning: 0, na: 4 },
+        ISO_27001: { pass: 0, fail: 0, warning: 0, na: 0 },
+        CIS_V8: { pass: 0, fail: 0, warning: 0, na: 0 },
+        NIST: { pass: 0, fail: 0, warning: 0, na: 0 },
+        SANS: { pass: 0, fail: 0, warning: 0, na: 0 },
+      },
+    }];
+    assert.equal(fleetForStandard(perDevice, 'PCI_DSS').scorePct, 75);
+    const s = summaryFromPerDevice(perDevice);
+    assert.equal(s.byStandard.PCI_DSS, 75);
+    assert.equal(s.overall, 75, 'the overall denominator drops na too');
+    // The counts themselves are unchanged — `na` is reported, just not scored.
+    assert.equal(fleetForStandard(perDevice, 'PCI_DSS').na, 4);
+  });
+
+  it('⛔ `warning` IS in the denominator — it is a fact about the DEVICE', () => {
+    // The other side of the same rule, and it must not drift with it: an
+    // indeterminate answer to a question we COULD put is the device's
+    // uncertainty, and it counts.
+    const perDevice = [{
+      standards: {
+        PCI_DSS: { pass: 3, fail: 0, warning: 1, na: 0 },
+        ISO_27001: { pass: 0, fail: 0, warning: 0, na: 0 },
+        CIS_V8: { pass: 0, fail: 0, warning: 0, na: 0 },
+        NIST: { pass: 0, fail: 0, warning: 0, na: 0 },
+        SANS: { pass: 0, fail: 0, warning: 0, na: 0 },
+      },
+    }];
+    assert.equal(fleetForStandard(perDevice, 'PCI_DSS').scorePct, 75);
+  });
+
+  it('⛔ NOTHING MEASURABLE is null, never 0 — at every level', () => {
+    // A standard no device can be assessed against must not print as total
+    // non-compliance, and neither must a whole report. `overall` returning 0
+    // instead of null survived, because no fixture had an entirely unmeasurable
+    // fleet.
+    const blank = (na) => ({
+      standards: Object.fromEntries(
+        STANDARD_KEYS.map((k) => [k, { pass: 0, fail: 0, warning: 0, na }])
+      ),
+    });
+    for (const na of [0, 5]) {
+      const s = summaryFromPerDevice([blank(na)]);
+      assert.equal(s.overall, null, `na=${na}: nothing measurable is not a zero`);
+      assert.notEqual(s.overall, 0);
+      for (const k of STANDARD_KEYS) assert.equal(s.byStandard[k], null);
+      assert.equal(fleetForStandard([blank(na)], 'PCI_DSS').scorePct, null);
+    }
+    // And an empty fleet is the same answer, not a 0% report.
+    assert.equal(summaryFromPerDevice([]).overall, null);
+  });
 });
 
 describe('the coverage denominator is re-read at the device scope', () => {
@@ -191,6 +278,30 @@ describe('the coverage denominator is re-read at the device scope', () => {
     await buildReportData(pool, { deviceId: 'd2' });
     const lib = pool.seen.find((q) => q.sql.includes('library_total'));
     assert.deepEqual(lib.params, [['paloalto']], 'the vendor is bound, never interpolated');
+  });
+
+  it('⛔ the EVALUATED/ANSWERED denominators are re-read at the device scope', async () => {
+    // The rollup that answers "how many checks produced an answer" is the one
+    // denominator a JS-side filter would leave counted across the whole fleet
+    // while the scores came from one firewall — the exact overclaim v2.163.0
+    // removed. Nothing asserted it, so dropping `deviceId` from
+    // fleetCheckCoverage() survived with the suite green.
+    const mixed = [f('d1', 'pass'), f('d2', 'na'), f('d2', 'na')];
+    const scoped = await buildReportData(stubPool({ findings: mixed }), { deviceId: 'd1' });
+    const fleet = await buildReportData(stubPool({ findings: mixed }));
+
+    assert.equal(scoped.checkCoverage.PCI_DSS.evaluatedChecks, 1, "fw-forti's own checks only");
+    assert.equal(fleet.checkCoverage.PCI_DSS.evaluatedChecks, 3, 'the fleet counts all three');
+    // ⛔ An `na` row counts as EVALUATED but not as ANSWERED — the question was
+    // put and SecVault could not answer it, which is a third state.
+    assert.equal(scoped.checkCoverage.PCI_DSS.answeredChecks, 1);
+    assert.equal(fleet.checkCoverage.PCI_DSS.answeredChecks, 1, 'two na rows answered nothing');
+
+    const pool = stubPool({ findings: mixed });
+    await buildReportData(pool, { deviceId: 'd1' });
+    const rollup = pool.seen.find((q) => q.sql.includes('answered_checks'));
+    assert.deepEqual(rollup.params, ['d1'], 'the device id must reach the rollup as a parameter');
+    assert.match(rollup.sql, /AND d\.id = \$1/);
   });
 
   it('the coverage statement is built at device scope, not fleet scope', async () => {
@@ -297,7 +408,24 @@ describe('both axes at once', () => {
     const pool = stubPool({ findings: [f('d1', 'pass')] });
     await buildReportData(pool, { deviceId: 'd1' });
     const touching = pool.seen.filter((q) => q.params.some((x) => x === 'd1'));
-    assert.ok(touching.length >= 4, 'resolve + devices + findings + rollup all take it');
+    // ⛔ EXACT, NOT `>= 4`. A lower bound passes while a query silently stops
+    // taking the device id — which is the whole failure this test is named for,
+    // and the real count was 5 while the bound said 4. If a scoped read is
+    // added or removed this fails and has to be looked at, which is the point.
+    assert.equal(touching.length, 6,
+      'resolve + devices + per-device findings + appendix + rollup + collection ages');
+    // And each of those reads is present by NAME, so the count cannot be met by
+    // one query running twice.
+    for (const fragment of [
+      'FROM devices WHERE id = $1',
+      'FROM devices WHERE active',
+      'remediation_guidance',
+      'answered_checks',
+      'device_configs',
+    ]) {
+      assert.ok(touching.some((q) => q.sql.includes(fragment)),
+        `no device-scoped query matched "${fragment}"`);
+    }
     for (const q of pool.seen) {
       assert.equal(q.sql.includes('d1'), false,
         `device id interpolated into SQL: ${q.sql.slice(0, 60)}`);

@@ -39,6 +39,7 @@ const {
   STATE_LABELS,
   STATE_TONES,
   EXPIRING_WINDOW_DAYS,
+  MAX_EXPIRY_DAYS,
   validateExpiry,
   exceptionState,
   describeException,
@@ -77,6 +78,88 @@ function codeOf(rel) {
     })
     .join('\n');
 }
+
+// ── ⛔ THE ROUTE HARNESS — why this exists and what it replaces ──────────────
+//
+// The two route rules below (the OPERATE gate, and `accepted_by` coming from
+// the session) used to be pinned by READING THE ROUTE FILE AS A STRING. Three
+// separate mutations survived that with the whole suite green:
+//
+//   (a) the entire `if (!can(session, OPERATE)) return forbiddenResponse(OPERATE);`
+//       line REPLACED BY A COMMENT containing the same words — the positive
+//       assertions read the raw file, comments included, so a deleted
+//       authorisation gate matched its own tombstone;
+//   (b) the same line wrapped in `if (false) { ... }` — still present, never run;
+//   (c) actorOf() preferring a FIFTH body field name, past the end of the
+//       negative list's four fixed spellings.
+//
+// A grep cannot see any of that, because a grep never runs the code. So these
+// routes are now EXECUTED. There is no HTTP harness in this repo and none is
+// being added (package.json has no devDependencies and keeps none) — instead
+// the route's own bytes are rewritten from ESM to CommonJS and run with stubbed
+// modules, so the REAL rbac module makes the REAL decision and the REAL engine
+// writes to a recording stub pool.
+//
+// ⛔ THE TRANSFORM FAILS LOUDLY, NEVER SILENTLY. Every import and export must be
+// recognised, and the result is asserted to contain no surviving `import`/
+// `export` token. A loader that quietly dropped a line it did not understand
+// would be a test harness with this codebase's signature bug in it.
+const ROUTE_DIR = {
+  'app/api/compliance/[deviceId]/exceptions/route.js':
+    'app/api/compliance/[deviceId]/exceptions',
+  'app/api/compliance/[deviceId]/exceptions/[exceptionId]/route.js':
+    'app/api/compliance/[deviceId]/exceptions/[exceptionId]',
+};
+
+function loadRoute(rel, stubs) {
+  const src = read(rel);
+  const exported = [];
+  let out = src
+    .replace(/import\s*\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"];?/g,
+      (_m, names, spec) => `const {${names}} = __req(${JSON.stringify(spec)});`)
+    .replace(/import\s+(\w+)\s+from\s*['"]([^'"]+)['"];?/g,
+      (_m, name, spec) => `const ${name} = __req(${JSON.stringify(spec)});`)
+    .replace(/export\s+(async\s+)?function\s+(\w+)/g, (_m, asy, name) => {
+      exported.push(name);
+      return `${asy || ''}function ${name}`;
+    })
+    .replace(/export\s+const\s+/g, 'const ');
+
+  // ⛔ The guard that makes the rewrite trustworthy.
+  assert.equal(/(^|\n)\s*(?:import|export)\s/.test(out), false,
+    `the ESM->CJS rewrite left an unhandled import/export in ${rel}`);
+  assert.ok(exported.length > 0, `no handler was exported from ${rel}`);
+
+  const dir = path.join(REPO, ROUTE_DIR[rel]);
+  const __req = (spec) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, spec)) return stubs[spec];
+    // ⛔ Anything NOT stubbed is loaded FOR REAL — lib/rbac, lib/apiUtils and
+    // the engine itself. Stubbing the authoriser would make this test a test of
+    // the stub.
+    return require(spec.startsWith('.') ? path.join(dir, spec) : spec);
+  };
+  // eslint-disable-next-line no-new-func
+  const factory = new Function('__req', 'require', `${out}\n;return { ${exported.join(', ')} };`);
+  return factory(__req, require);
+}
+
+/** A route module wired to one session and one pool. */
+function routeWith(rel, { session = null, pool = null } = {}) {
+  const dbStub = { pool };
+  return loadRoute(rel, {
+    'next-auth/next': { getServerSession: async () => session },
+    // The route's relative specifiers, keyed exactly as it writes them.
+    '../../../../../lib/db': dbStub,
+    '../../../../../../lib/db': dbStub,
+    '../../../auth/[...nextauth]/route': { authOptions: {} },
+    '../../../../auth/[...nextauth]/route': { authOptions: {} },
+    '../../../../../lib/activityLog': { logActivity: async () => {} },
+    '../../../../../../lib/activityLog': { logActivity: async () => {} },
+  });
+}
+
+const jsonRequest = (body) => ({ json: async () => body });
+const sessionFor = (role, name = 'amrin') => ({ user: { id: 'u1', name, role } });
 
 const ENGINE_PATH = 'lib/engines/complianceExceptions.js';
 const POST_ROUTE = 'app/api/compliance/[deviceId]/exceptions/route.js';
@@ -292,6 +375,52 @@ describe('rule 2: expires_at is mandatory', () => {
     assert.ok(v.expiresAt instanceof Date);
   });
 
+  it('⛔ REFUSES a far-future expiry — "mandatory" needs an upper bound too', () => {
+    // The lower bound alone does not deliver the forced review this whole
+    // feature rests on: `2999-12-31` satisfied every refusal there was, and is
+    // a permanent silent pass with a date attached — exactly what the
+    // mandatory expiry exists to prevent, typed into the same box.
+    for (const far of ['2999-12-31', day(MAX_EXPIRY_DAYS + 1), day(3650)]) {
+      const v = validateExpiry(far, NOW);
+      assert.equal(v.ok, false, `${far} must be refused`);
+      assert.match(v.error, new RegExp(`more than ${MAX_EXPIRY_DAYS}`));
+      // ⛔ Its own message: the operator's next action is to shorten the date,
+      // not to supply one, so it must not read like the missing-expiry refusal.
+      assert.equal(/expiry date is required/i.test(v.error), false);
+      assert.equal(/not in the future/i.test(v.error), false);
+      // And it says what IS acceptable, rather than only what is not.
+      assert.match(v.error, /renew/i);
+    }
+  });
+
+  it('the upper bound is INCLUSIVE at the limit and refuses one day past it', () => {
+    // Pins the boundary itself, not a number comfortably either side of it.
+    assert.equal(validateExpiry(day(MAX_EXPIRY_DAYS), NOW).ok, true);
+    assert.equal(validateExpiry(day(MAX_EXPIRY_DAYS + 0.001), NOW).ok, false);
+  });
+
+  it('the maximum is a constant, comfortably longer than the warning window', () => {
+    // ⛔ A safety floor, not a tuning knob — an installation that could set it
+    // to 36,500 would be back where it started. And it must leave room for the
+    // `expiring` state to be seen at all.
+    assert.equal(typeof MAX_EXPIRY_DAYS, 'number');
+    assert.ok(MAX_EXPIRY_DAYS > EXPIRING_WINDOW_DAYS * 2,
+      'an acceptance shorter than two warning windows could never be seen as merely expiring');
+    assert.ok(!/process\.env/.test(read(ENGINE_PATH)));
+  });
+
+  it('createException REFUSES a far-future expiry BEFORE any write', async () => {
+    const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+    await assert.rejects(
+      () => createException(pool, {
+        deviceId: DEVICE_ID, checkSlug: SLUG, reason: 'r', acceptedBy: 'amrin',
+        expiresAt: '2999-12-31',
+      }, NOW),
+      (err) => err instanceof ExceptionRequestError && /more than/i.test(err.message)
+    );
+    assert.equal(pool.calls.length, 0, 'the far-future date is refused before the database is touched');
+  });
+
   it('createException THROWS BEFORE ANY WRITE when the expiry is missing', async () => {
     const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
     await assert.rejects(
@@ -374,6 +503,20 @@ describe('rule 3: expiry is a read-time computation', () => {
     );
   });
 
+  it('⛔ the read-time EXPIRED boundary is inclusive — exactly now has lapsed', () => {
+    // The identical boundary in validateExpiry is pinned ('refuses an expiry
+    // exactly equal to now'); this one was not, and a mutation from
+    // `msLeft <= 0` to `msLeft < 0` survived. At the instant an exception runs
+    // out it is NOT still covering a failing check — reporting it as `expiring`
+    // would be the one moment the label outlives the decision.
+    const atZero = row({ expires_at: NOW.toISOString() });
+    assert.equal(exceptionState(atZero, NOW), EXPIRED);
+    assert.equal(describeException(atZero, NOW).covers, false);
+    // One millisecond either side, so the test pins a boundary and not a branch.
+    assert.equal(exceptionState(row({ expires_at: new Date(NOW.getTime() + 1).toISOString() }), NOW), EXPIRING);
+    assert.equal(exceptionState(row({ expires_at: new Date(NOW.getTime() - 1).toISOString() }), NOW), EXPIRED);
+  });
+
   it('a lapsed exception stops counting as covering immediately', () => {
     const live = describeException(row({ expires_at: day(5) }), NOW);
     const lapsed = describeException(row({ expires_at: day(-5) }), NOW);
@@ -448,26 +591,97 @@ describe('rule 4: three states, never two, plus revoked history', () => {
 // ══════════════════════════════════════════════════════════════════════════
 
 describe('rule 5: accepted_by comes from the session', () => {
-  it('the POST route reads the actor from the session and never from the body', () => {
-    const src = read(POST_ROUTE);
-    // Positive: the actor is resolved off the session object.
-    assert.match(src, /session\.user\.name/);
-    assert.match(src, /acceptedBy,?\s*$|acceptedBy,/m);
-    // ⛔ Negative, and this is the assertion that matters: no body-supplied
-    // owner, in any spelling. A caller must not be able to attribute a risk
-    // acceptance to a colleague.
-    const code = codeOf(POST_ROUTE);
-    for (const re of [/body\.acceptedBy/, /body\.accepted_by/, /body\[['"]accepted/, /body\.owner/]) {
-      assert.ok(!re.test(code), `POST route must not read the acceptor from the body (${re})`);
+  // ⛔ EXECUTED, NOT GREPPED. The grep this replaces passed while actorOf()
+  // preferred a body field whose spelling was not on its four-item negative
+  // list — so a list of spellings is exactly the wrong shape for this
+  // assertion. Any list has an end, and the next mutation writes one more name.
+  //
+  // ⛔ SO THE BODY ANSWERS *EVERY* FIELD NAME. It is a Proxy: the four fields
+  // the route is entitled to read return real values, and ANY other property —
+  // `acceptedBy`, `owner`, `actor`, `custodian`, a spelling nobody has thought
+  // of yet — returns the impostor's name. The assertion is then on the value
+  // that REACHES THE DATABASE, which no spelling can get past.
+  const IMPOSTOR = 'not-the-signed-in-user';
+  const LEGITIMATE_FIELDS = {
+    checkSlug: SLUG,
+    reason: 'r',
+    expiresAt: day(60),
+    compensatingControl: null,
+  };
+  const impostorBody = new Proxy(LEGITIMATE_FIELDS, {
+    get(target, prop) {
+      if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+      // `then` must stay undefined or `await request.json()` would try to
+      // unwrap the body as a thenable.
+      if (typeof prop === 'symbol' || prop === 'then') return undefined;
+      return IMPOSTOR;
+    },
+  });
+
+  it('the acceptor written is the SESSION name, whatever the body claims', async () => {
+    const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+    const { POST } = routeWith(POST_ROUTE, { session: sessionFor('operator', 'amrin'), pool });
+    const res = await POST(jsonRequest(impostorBody), { params: { deviceId: DEVICE_ID } });
+    assert.equal(res.status, 201);
+
+    const ins = pool.calls.find((c) => isInsert(c.sql));
+    assert.ok(ins, 'expected the exception to be written');
+    assert.ok(ins.params.includes('amrin'), 'the session name must reach the INSERT');
+    // ⛔ The assertion that kills every spelling at once.
+    for (const c of pool.calls) {
+      assert.equal(
+        JSON.stringify(c.params || []).includes(IMPOSTOR), false,
+        `a body-supplied owner reached the database:\n${c.sql}`
+      );
     }
   });
 
-  it('the DELETE route resolves the revoker from the session too', () => {
-    const src = read(DELETE_ROUTE);
-    assert.match(src, /session\.user\.name/);
-    assert.ok(!/body\.revokedBy|body\.revoked_by/.test(src));
-    // A DELETE has no body to read in the first place; pin that it stays that way.
-    assert.ok(!/request\.json\(\)/.test(src), 'the revoke route must not parse a body');
+  it('a session with no usable name is REFUSED, and nothing is written', async () => {
+    // ⛔ 'unknown' is not an acceptor. An un-attributable risk acceptance is
+    // worth nothing in an audit, so the route refuses rather than inventing one.
+    for (const name of [undefined, null, '', '   ', 42]) {
+      const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+      const { POST } = routeWith(POST_ROUTE, {
+        session: { user: { id: 'u1', name, role: 'operator' } }, pool,
+      });
+      const res = await POST(jsonRequest(impostorBody), { params: { deviceId: DEVICE_ID } });
+      assert.equal(res.status, 400, `name=${JSON.stringify(name)} must be refused`);
+      assert.match((await res.json()).error, /could not determine who/i);
+      assert.equal(pool.calls.length, 0, 'nothing may be read or written without an acceptor');
+    }
+  });
+
+  it('the acceptor is TRIMMED, not stored with the session whitespace', async () => {
+    const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+    const { POST } = routeWith(POST_ROUTE, { session: sessionFor('operator', '  amrin  '), pool });
+    await POST(jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: day(60) }),
+      { params: { deviceId: DEVICE_ID } });
+    const ins = pool.calls.find((c) => isInsert(c.sql));
+    assert.ok(ins.params.includes('amrin'));
+  });
+
+  it('the DELETE route resolves the revoker from the session too', async () => {
+    const pool = stubPool(() => ({ rows: [row({ revoked_at: day(0), revoked_by: 'amrin' })], rowCount: 1 }));
+    const { DELETE } = routeWith(DELETE_ROUTE, { session: sessionFor('operator', 'amrin'), pool });
+    const res = await DELETE({}, { params: { deviceId: DEVICE_ID, exceptionId: EXC_ID } });
+    assert.equal(res.status, 200);
+    const upd = pool.calls.find((c) => isUpdate(c.sql));
+    assert.ok(upd.params.includes('amrin'), 'the session name must reach the UPDATE');
+
+    const noName = stubPool(() => ({ rows: [row()], rowCount: 1 }));
+    const bare = routeWith(DELETE_ROUTE, { session: { user: { id: 'u1', role: 'operator' } }, pool: noName });
+    const refused = await bare.DELETE({}, { params: { deviceId: DEVICE_ID, exceptionId: EXC_ID } });
+    assert.equal(refused.status, 400);
+    assert.equal(noName.calls.length, 0);
+  });
+
+  it('a DELETE has no body to read, and must not grow one', () => {
+    // The only surviving source assertion in this block, and it earns its
+    // place: "the route never parses a body" is a statement about code that
+    // does NOT exist, which no execution can demonstrate. Read over the code
+    // only, so the comment explaining the rule cannot satisfy it.
+    assert.ok(!/request\.json\(\)/.test(codeOf(DELETE_ROUTE)),
+      'the revoke route must not parse a body');
   });
 
   it('the panel never offers an acceptor field and never sends one', () => {
@@ -513,17 +727,79 @@ describe('rule 5: accepted_by comes from the session', () => {
     assert.ok(ins.params.includes('r'));
   });
 
-  it('both mutating routes are gated on OPERATE, and the UI gate is not stricter', () => {
+  // ── the OPERATE gate, EXECUTED ──────────────────────────────────────────
+  //
+  // ⛔ THE GREP THIS REPLACES PASSED WITH THE GATE DELETED. Replacing the whole
+  // `if (!can(session, OPERATE)) return forbiddenResponse(OPERATE);` line with a
+  // COMMENT carrying the same words satisfied every positive assertion, because
+  // they read the raw file; wrapping the line in `if (false) { ... }` satisfied
+  // them too, because the line was still there. Both are caught below by asking
+  // the route what it DOES.
+  const CALLS = {
+    [POST_ROUTE]: (mod) => mod.POST(
+      jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: day(60) }),
+      { params: { deviceId: DEVICE_ID } }
+    ),
+    [DELETE_ROUTE]: (mod) => mod.DELETE(
+      {}, { params: { deviceId: DEVICE_ID, exceptionId: EXC_ID } }
+    ),
+  };
+
+  for (const rel of [POST_ROUTE, DELETE_ROUTE]) {
+    it(`${rel} REFUSES a signed-in caller without operate`, async () => {
+      // ⛔ `viewer` is the retired role and an unknown/null role is what jwt()
+      // sets when the database is unreachable — lib/rbac.js resolves all three
+      // to no capabilities, and this route must act on that.
+      for (const role of ['viewer', 'nosuchrole', null, undefined]) {
+        const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+        const mod = routeWith(rel, { session: sessionFor(role), pool });
+        const res = await CALLS[rel](mod);
+        assert.equal(res.status, 403, `role ${JSON.stringify(role)} must not pass the gate`);
+        const body = await res.json();
+        // The 403 NAMES the missing capability — "admin role required" became
+        // actively misleading once there were three roles.
+        assert.equal(body.required, 'operate');
+        assert.match(body.error, /operate/);
+        // ⛔ AND NOTHING HAPPENED. A gate that returns 403 after the write is
+        // not a gate.
+        assert.equal(pool.calls.length, 0, 'a refused caller must not reach the database');
+      }
+    });
+
+    it(`${rel} refuses an UNAUTHENTICATED caller with 401, not 403`, async () => {
+      const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
+      const mod = routeWith(rel, { session: null, pool });
+      const res = await CALLS[rel](mod);
+      assert.equal(res.status, 401);
+      assert.equal(pool.calls.length, 0);
+    });
+
+    it(`${rel} ADMITS every role that holds operate`, async () => {
+      // ⛔ The other half, and it is not decoration: a gate that refuses
+      // everybody also passes the test above. All three live roles hold
+      // `operate`, and an operator who cannot act on findings has been denied
+      // the feature for no security benefit.
+      for (const role of ['operator', 'admin', 'super_admin']) {
+        const pool = rel === POST_ROUTE
+          ? poolForCreate([{ status: 'fail', check_name: 'x' }])
+          : stubPool(() => ({ rows: [row({ revoked_at: day(0) })], rowCount: 1 }));
+        const mod = routeWith(rel, { session: sessionFor(role), pool });
+        const res = await CALLS[rel](mod);
+        assert.notEqual(res.status, 403, `role ${role} holds operate and must be admitted`);
+        assert.ok(pool.calls.length > 0, `role ${role} must reach the engine`);
+      }
+    });
+  }
+
+  it('both routes are force-dynamic, and the UI gate is not stricter', () => {
+    // Read over CODE ONLY — a comment naming the rule must never satisfy it.
     for (const rel of [POST_ROUTE, DELETE_ROUTE]) {
-      const src = read(rel);
-      assert.match(src, /can\(session, OPERATE\)/, `${rel} must gate on OPERATE`);
-      assert.match(src, /forbiddenResponse\(OPERATE\)/, `${rel} must use forbiddenResponse`);
-      assert.match(src, /getServerSession\(authOptions\)/, `${rel} must resolve its own session`);
-      assert.match(src, /export const dynamic = 'force-dynamic'/, `${rel} must be force-dynamic`);
+      assert.match(codeOf(rel), /export const dynamic = 'force-dynamic'/, `${rel} must be force-dynamic`);
+      assert.match(codeOf(rel), /getServerSession\(authOptions\)/, `${rel} must resolve its own session`);
     }
     // ⛔ A UI gate must never be STRICTER than the API it fronts: the page
     // passes the SAME capability the routes check.
-    const page = read('app/(dashboard)/compliance/[deviceId]/page.js');
+    const page = codeOf('app/(dashboard)/compliance/[deviceId]/page.js');
     assert.match(page, /can\(session, OPERATE\)/);
     assert.match(page, /canWrite=\{canWrite\}/);
   });

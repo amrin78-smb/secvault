@@ -178,6 +178,39 @@ describe('⛔ the age belongs to the EVIDENCE, never to the evaluation', () => {
     assert.equal(f.evaluatedAgainstOldConfig, true);
   });
 
+  it('⛔ the flag fires at the CADENCE, not at any lag above zero', () => {
+    // The fixtures either side of this were lag 0 and lag 447, so a mutation
+    // from `lag > expectedHours` to `lag > 0` survived — and that version
+    // flags every device whose audit is even minutes newer than its config,
+    // which is ALL of them on a healthy fleet. A flag that is always on says
+    // nothing, and this one exists to mark the one shape that actually
+    // misleads: checks re-run over evidence that was ALREADY late.
+    const at = (evidenceH, evaluatedH, iv) => complianceFreshness(
+      { evidenceAt: hoursAgo(evidenceH), evaluatedAt: hoursAgo(evaluatedH) }, NOW, env(iv)
+    );
+    // lag 20h on a 24h cadence — the config was still current when the checks ran.
+    assert.equal(at(100, 80, 24).evaluatedAgainstOldConfig, false);
+    // lag 30h on the same cadence — it was not.
+    assert.equal(at(100, 70, 24).evaluatedAgainstOldConfig, true);
+    // ⛔ THE BOUNDARY ITSELF: exactly one cadence is not yet late.
+    assert.equal(at(100, 76, 24).evaluatedAgainstOldConfig, false);
+    assert.equal(at(100, 75.9, 24).evaluatedAgainstOldConfig, true);
+    // ⛔ AND IT MOVES WITH THE CADENCE. The identical 20h lag IS late on a
+    // 6-hourly pull — which is what makes this a multiple and not a constant.
+    assert.equal(at(100, 80, 6).evaluatedAgainstOldConfig, true);
+  });
+
+  it('⛔ a NEGATIVE lag is never a flag — the audit predating its evidence is not "old"', () => {
+    // evaluatedAt older than evidenceAt is the ordinary healthy shape (the
+    // config was collected after the last audit). It must not read as an
+    // evaluation run against a stale config.
+    const f = complianceFreshness(
+      { evidenceAt: hoursAgo(2), evaluatedAt: hoursAgo(50) }, NOW, env(24)
+    );
+    assert.ok(f.evaluationLagHours < 0);
+    assert.equal(f.evaluatedAgainstOldConfig, false);
+  });
+
   it('a healthy device has a near-zero lag and is not flagged', () => {
     const f = complianceFreshness(
       { evidenceAt: hoursAgo(12), evaluatedAt: hoursAgo(12) }, NOW, env(24));

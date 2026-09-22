@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { loadScopeForSession, canSeeDevice, refusalMessage } from '../../../../lib/deviceScope';
+import { loadScopeForSession, canSeeDevice, refusalMessage, scopesEmptiedByDeviceDeletion } from '../../../../lib/deviceScope';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
 import { getProfilePlaintext, createProfile } from '../../../../lib/credentialProfiles';
@@ -443,6 +443,53 @@ export async function DELETE(request, { params }) {
     device = found.rows[0];
   } catch (err) {
     return NextResponse.json({ error: err.message || 'Failed to load device' }, { status: 500 });
+  }
+
+  // ⛔ DELETING A FIREWALL CAN SILENTLY WIDEN SOMEBODY ELSE'S ACCESS.
+  // `user_device_scopes.device_id` is ON DELETE CASCADE, and zero rows for a
+  // user means UNSCOPED — sees the whole fleet. So removing the LAST firewall
+  // in an account's scope does not narrow that account to nothing, it hands it
+  // every remaining firewall, with no error and nothing on screen. An
+  // administrator retiring one device would have granted an outside contractor
+  // the rest of the estate.
+  //
+  // ⛔ REFUSED RATHER THAN REPAIRED. Rewriting the scope on their behalf means
+  // guessing which firewalls that account should have had, and this route
+  // cannot know. Naming the accounts and stopping is the only honest move; the
+  // administrator fixes the scope, then deletes.
+  //
+  // ⛔ ONLY THE EMPTYING CASE IS REFUSED. Shrinking a scope from three
+  // firewalls to two is exactly right — the device is gone and so is the grant.
+  try {
+    const emptied = await scopesEmptiedByDeviceDeletion(pool, params.id);
+    if (emptied.length > 0) {
+      const names = emptied.join(', ');
+      return NextResponse.json(
+        {
+          error: `${device.name} is the only firewall granted to ${names}. Deleting it would `
+            + 'leave those accounts with no device scope at all, which in SecVault means they '
+            + 'would see EVERY firewall. Grant them a different firewall (or change their '
+            + 'access) first, then delete this one.',
+          blockedBy: 'device_scope',
+          accounts: emptied,
+        },
+        { status: 409 }
+      );
+    }
+  } catch (err) {
+    // ⛔ A FAILED READ REFUSES THE DELETE. We cannot tell whether this deletion
+    // would widen someone's access, and a delete is irreversible — so the one
+    // safe answer is to not do it yet. This is the opposite call from the
+    // licence guard, and for the opposite reason: that one is billing, this one
+    // is authorisation.
+    return NextResponse.json(
+      {
+        error: 'Could not check whether any account is restricted to this firewall, so the '
+          + 'deletion was not attempted. Try again; if it persists, this is a fault to report.',
+        blockedBy: 'device_scope_unreadable',
+      },
+      { status: 503 }
+    );
   }
 
   try {

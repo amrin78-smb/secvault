@@ -5,6 +5,9 @@ import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import { STANDARDS, scoreColor, SCORE_COLOR_VAR } from '../../../../../components/compliance/ComplianceMatrix';
 import PrintReportButton from '../../../../../components/compliance/PrintReportButton';
 import { SEVERITY_LABEL, SEVERITY_TEXT_COLOR } from '../../../../../components/analysis/severityRamp';
+import {
+  complianceFreshness, ageLabel, freshnessNote, STATES,
+} from '../../../../../lib/engines/complianceFreshness';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +28,16 @@ export const dynamic = 'force-dynamic';
 // interactive Badge pill component -- simpler and prints better (a filled
 // pill can render as a solid block on some printers/PDF exporters).
 
+// ⛔ "Never run" is the right word for an AUDIT and the wrong one for a
+// COLLECTION, and an unreadable timestamp is neither of those — same three
+// outcomes the live sibling page distinguishes.
+function formatCollected(value) {
+  if (!value) return 'never collected';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'collection time unreadable';
+  return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
 function formatDateTime(value) {
   if (!value) return 'Never run';
   const d = new Date(value);
@@ -43,6 +56,23 @@ function scorePctFromCounts(counts) {
 async function getDevice(dbPool, id) {
   const result = await dbPool.query('SELECT id, name, vendor FROM devices WHERE id = $1', [id]);
   return result.rows[0] || null;
+}
+
+// ⛔ THE AGE OF THE EVIDENCE, WHICH IS NOT THE AGE OF THE AUDIT. This page
+// printed "Last audit run" alone, and that is the FLATTERING timestamp: the
+// audit reads the newest device_configs row WHATEVER ITS AGE and stamps
+// detected_at = now(). Measured on the live fleet 2026-09-22, TSR_EKC's
+// evidence was 1,116h old and its audit 669h old, so this report went out of
+// the door describing a 46-day-old configuration as a 27-day-old audit, with
+// no qualifier anywhere — and unlike the screen, a printed page has no hover,
+// no tooltip and no second chance to ask. Same read the live sibling page does.
+async function getLatestConfigCollectedAt(dbPool, deviceId) {
+  const { rows } = await dbPool.query(
+    `SELECT collected_at FROM device_configs
+     WHERE device_id = $1 ORDER BY collected_at DESC LIMIT 1`,
+    [deviceId]
+  );
+  return rows.length ? rows[0].collected_at : null;
 }
 
 async function getFindings(dbPool, deviceId) {
@@ -148,6 +178,16 @@ export default async function CompliancePrintPage({ params }) {
   }, null);
   const generatedAt = formatDateTime(new Date().toISOString());
 
+  const configCollectedAt = await getLatestConfigCollectedAt(pool, device.id);
+  const freshness = complianceFreshness(
+    { evidenceAt: configCollectedAt, evaluatedAt: lastRunAt }, new Date()
+  );
+  // ⛔ THE CAVEAT IS PRINTED, NOT HIDDEN BEHIND A TITLE ATTRIBUTE. Anything but
+  // a genuinely fresh result carries its own sentence on the page — never a
+  // green all-clear over evidence that stopped moving, and never a colour-only
+  // hint that a printer resolves to grey.
+  const needsCaveat = freshness.state !== STATES.FRESH || freshness.evaluatedAgainstOldConfig;
+
   return (
     <div>
       <div
@@ -167,8 +207,35 @@ export default async function CompliancePrintPage({ params }) {
             {device.name} <span style={{ color: 'var(--text-muted)' }}>({vendorLabel(device.vendor)})</span>
           </p>
           <p style={{ marginTop: 4, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-            Generated: {generatedAt} &middot; Last audit run: {formatDateTime(lastRunAt)}
+            Generated: {generatedAt} &middot; Configuration collected:{' '}
+            {formatCollected(configCollectedAt)} ({ageLabel(freshness)}) &middot; Checks last run:{' '}
+            {formatDateTime(lastRunAt)}
           </p>
+          {needsCaveat && (
+            /* ⛔ HUELESS, per the design system's "NOT MEASURED has no hue" rule,
+               and on paper that matters more than on screen: an amber warning
+               prints as grey anyway, so the words have to carry it. A stale
+               result is still real evidence about an old configuration — the
+               wording says so rather than calling the score garbage, which
+               would push a reader to ignore the page instead of fixing the
+               collection. */
+            <p
+              style={{
+                marginTop: 8,
+                padding: '8px 10px',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--unmeasured)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              {freshnessNote(freshness, device.name)}
+              {freshness.evaluatedAgainstOldConfig
+                && ' The checks were last run against a configuration that was already older than '
+                  + 'the expected collection cadence, so the audit timestamp above is more recent '
+                  + 'than the evidence behind these results.'}
+            </p>
+          )}
         </header>
 
         {STANDARDS.map((s) => {

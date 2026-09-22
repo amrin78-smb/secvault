@@ -30,9 +30,16 @@ describe('update-status: an unreadable local commit is not "up to date"', () => 
   });
 
   it('never reports up_to_date true on that branch', () => {
+    // ⛔ THE BRANCH IS BRACE-MATCHED, NOT A FIXED 700-CHARACTER WINDOW. A
+    // window reads whatever follows the block once the block is shorter than
+    // it — so `up_to_date: true` in the NEXT branch would fail this test, and
+    // (the direction that matters) a guard that grew past 700 characters would
+    // have its own `up_to_date: null` read out of the assertion's reach while
+    // the surrounding code supplied a passing one.
     const i = src.search(/if\s*\(\s*!localHash\s*\)/);
     assert.ok(i > -1, 'the guard must exist');
-    const branch = src.slice(i, i + 700);
+    const branch = braceBlockFrom(src, i);
+    assert.ok(branch, 'the guard must have a block');
     assert.match(branch, /up_to_date:\s*null/, 'unknown must be null, not true');
     assert.match(branch, /error:/, 'the branch must carry an error the UI can gate on');
     assert.ok(!/up_to_date:\s*true/.test(branch), 'must not claim up to date');
@@ -106,21 +113,144 @@ describe('every shipped version carries release notes', () => {
   });
 
   it('the entry is 3-6 bullets of real prose, not a placeholder', () => {
-    const at = src.indexOf(`'${pkg.version}': [`);
-    assert.ok(at > -1);
-    // From after the opening bracket, so the key line itself is not counted.
-    // ⛔ THE BLOCK ENDS AT THE CLOSING BRACKET ON ITS OWN LINE, not at the
-    // first `],` in the text. A bullet is allowed to QUOTE one — v2.170.0's
-    // notes quote the config path `devices.entry.vsys.entry.tag.entry[17], ...`
-    // that release exists to remove — and matching inside a string truncated
-    // the block to its first bullet and failed a perfectly good entry. The
-    // indentation is what distinguishes structure from content here.
-    const open = src.indexOf('[', at) + 1;
-    const close = src.indexOf('\n  ],', open);
-    assert.ok(close > open, 'could not find the closing bracket for this version block');
-    const block = src.slice(open, close);
-    const bullets = block.match(/^\s*['"]/gm) || [];
+    // ⛔ THE FINDER IS STRING-AWARE AND BRACKET-MATCHED, because the previous
+    // one failed VALID entries in three separate ways — each of which reads to
+    // whoever hits it as "my release notes are wrong" when they are not:
+    //   · it counted every LINE beginning with a quote as a bullet, so five
+    //     real bullets with two wrapped continuation lines counted as seven
+    //     and failed the 3-6 range;
+    //   · it ended the block at `\n  ],`, so the LAST version block (written
+    //     without a trailing comma) was never found at all — indexOf returned
+    //     -1 and the slice ran to end of file;
+    //   · any re-indentation of the object did the same.
+    // A bullet is also allowed to QUOTE a bracket — v2.170.0's notes quote the
+    // config path `...tag.entry[17], ...` that release exists to remove — which
+    // is why the matcher skips string literals rather than counting brackets
+    // blind.
+    const body = arrayLiteralAfterKey(src, pkg.version);
+    assert.ok(body !== null, `could not find the release-notes array for ${pkg.version}`);
+    const bullets = elementsOf(body);
     assert.ok(bullets.length >= 3 && bullets.length <= 6, `${bullets.length} bullets`);
-    assert.ok(!/TODO|TBD|placeholder/i.test(block), 'a placeholder is worse than an omission');
+    for (const b of bullets) {
+      assert.match(b, /^['"`]/, `every bullet must be a string literal, got: ${b.slice(0, 40)}`);
+    }
+    assert.ok(!/TODO|TBD|placeholder/i.test(body), 'a placeholder is worse than an omission');
   });
 });
+
+describe('⛔ the finder above, on the shapes that broke the last one', () => {
+  // A test whose helper silently finds nothing is a test that passes for the
+  // wrong reason, so the helper is driven directly with the three shapes that
+  // defeated its predecessor — plus one it must still refuse.
+  const sample = `const releaseNotes = {
+  '2.170.0': [
+    'A bullet that quotes a bracket: devices.entry.tag.entry[17], and keeps going '
+      + 'onto a continuation line that starts with a quote.',
+    'Second bullet.',
+    'Third bullet.',
+  ],
+      '2.171.0': [
+        'Re-indented, and the last entry in the object, with no trailing comma.',
+        'Second.',
+        'Third.',
+      ]
+};`;
+
+  it('a wrapped continuation line is part of its bullet, not a bullet of its own', () => {
+    const bullets = elementsOf(arrayLiteralAfterKey(sample, '2.170.0'));
+    assert.equal(bullets.length, 3);
+    assert.match(bullets[0], /entry\[17\]/, 'the quoted bracket must not have ended the block');
+  });
+
+  it('a re-indented last block with no trailing comma is still found', () => {
+    const body = arrayLiteralAfterKey(sample, '2.171.0');
+    assert.ok(body !== null, 'the last block in the object must be findable');
+    assert.equal(elementsOf(body).length, 3);
+  });
+
+  it('and a version that is not there is reported as absent, not as empty', () => {
+    assert.equal(arrayLiteralAfterKey(sample, '9.9.9'), null);
+  });
+});
+
+// ─── source-shape helpers ───────────────────────────────────────────────────
+//
+// These read JavaScript source, so they skip string literals: every one of the
+// defects above came from a regex reading structure out of prose.
+
+/** The index just past the string literal starting at `i`. */
+function endOfString(src, i) {
+  const quote = src[i];
+  let j = i + 1;
+  while (j < src.length) {
+    if (src[j] === '\\') { j += 2; continue; }
+    if (src[j] === quote) return j + 1;
+    j += 1;
+  }
+  return src.length;
+}
+
+/** The `{ … }` block that follows `from`, brace-matched and string-aware. */
+function braceBlockFrom(src, from) {
+  const open = src.indexOf('{', from);
+  if (open === -1) return null;
+  let depth = 0;
+  let i = open;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "'" || ch === '"' || ch === '`') { i = endOfString(src, i); continue; }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return src.slice(open + 1, i);
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/** The body of the array literal assigned to `key`, or null if there is none. */
+function arrayLiteralAfterKey(src, key) {
+  const escaped = String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(^|[\\s{,])[\'"`]' + escaped + '[\'"`]\\s*:\\s*\\[');
+  const m = re.exec(src);
+  if (!m) return null;
+  const open = src.indexOf('[', m.index);
+  let depth = 0;
+  let i = open;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === "'" || ch === '"' || ch === '`') { i = endOfString(src, i); continue; }
+    if (ch === '[' || ch === '(' || ch === '{') depth += 1;
+    else if (ch === ']' || ch === ')' || ch === '}') {
+      depth -= 1;
+      if (depth === 0) return src.slice(open + 1, i);
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/** Top-level, comma-separated elements of an array-literal body. */
+function elementsOf(body) {
+  const parts = [];
+  let cur = '';
+  let depth = 0;
+  let i = 0;
+  while (i < body.length) {
+    const ch = body[i];
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const end = endOfString(body, i);
+      cur += body.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === '[' || ch === '(' || ch === '{') depth += 1;
+    else if (ch === ']' || ch === ')' || ch === '}') depth -= 1;
+    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; i += 1; continue; }
+    cur += ch;
+    i += 1;
+  }
+  parts.push(cur);
+  return parts.map((p) => p.trim()).filter((p) => p !== '');
+}
