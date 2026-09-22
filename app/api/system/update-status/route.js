@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.164.0': [
+    'Fixed: the update reported "completed WITH ERRORS" when nothing had gone wrong. The new page check writes a routine warning to its error stream, and PowerShell 5.1 turns that into a fatal error — so a sweep that passed all 28 pages was logged as a failed step.',
+    'It only surfaced now because the check had been skipping on every previous deploy for want of credentials, so it had never actually run during an update.',
+    'The rule is now enforced by a test rather than by care: every such call in an installer script must go through the helper written for it, and four older instances are pinned on a list that can only shrink.',
+  ],
   '2.163.0': [
     'Compliance no longer implies a framework score it cannot measure. Every per-standard percentage now states what it rests on — "NIST: 7 of 45 checks in SecVault’s library", with the evidence graded thin, moderate or broad — on the page, the per-firewall tabs and the PDF. The scores themselves are unchanged.',
     'New: record an accepted risk against a failing check, with a compensating control, an owner and a mandatory expiry date. It shows as accepted, expiring, or lapsed, and lapses on its own with no job to run.',

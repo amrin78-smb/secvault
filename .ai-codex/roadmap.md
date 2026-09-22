@@ -64,7 +64,8 @@ Found by the 2026-09-21 sweep, triaged as not worth a release of their own. All 
 
 | # | Item | Done |
 |---|---|:--:|
-| 10 | `Update-SecVault.ps1` logs **"Step succeeded"** when the page sweep SKIPS — three deploys reported success for a gate that never ran. Cosmetic now the credentials are set, still dishonest. | [ ] |
+| 10 | ✅ **DONE v2.164.0** — the page sweep's `& node ... 2>&1` bypassed `Invoke-Native`, so node's TLS warning became a TERMINATING NativeCommandError and the first deploy that actually ran the sweep reported "completed WITH ERRORS" over a 28/28 pass. Four more unrouted redirects remain in `Restore-`/`Uninstall-SecVault.ps1` and `SecVault-Tls.ps1` (openssl), pinned as a SHRINKING allow-list in `tests/installerNativeCalls.test.js` rather than edited blind — those scripts are destructive or unexercised on a normal deploy. openssl is the one worth doing first: it writes progress to stderr routinely. | [ ] |
+| 10b | `Update-SecVault.ps1` logs **"Step succeeded"** when the page sweep SKIPS — three deploys reported success for a gate that never ran. Cosmetic now the credentials are set, still dishonest. | [ ] |
 | 11 | `drawBarChart` with more rows than fit a page shreds labels and bars onto different pages (`ensureSpace` can only add ONE page). Unreachable today — every call site caps at 15. | [ ] |
 | 12 | Chart captions sit OUTSIDE the height reservation, so the sentence stating a chart's denominator can land on the next page. | [ ] |
 | 13 | `drawDonut` has no `opts.format`, unlike `drawBarChart` — a byte-valued donut would print "1.1B" for one gigabyte. | [ ] |

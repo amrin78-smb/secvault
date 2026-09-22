@@ -185,7 +185,7 @@ $NssmExe = Join-Path $repoRoot 'nssm\nssm-2.24\win64\nssm.exe'
 # hardening pass already applied to the sibling NocVault apps' equivalent
 # scripts (e.g. netvault's Update-NetVault.ps1).
 try {
-    $null = & git config --global --add safe.directory $repoRoot 2>&1
+    $null = Invoke-Native { & git config --global --add safe.directory $repoRoot 2>&1 }
 } catch {
     Write-Log "  [WARN] Could not register safe.directory for $repoRoot -- $($_.Exception.Message)"
 }
@@ -288,7 +288,7 @@ if ($deployKey -ne $deployKeyMachineWide) {
             icacls $deployKeyMachineWide /reset | Out-Null
         }
         Copy-Item -Path $deployKey -Destination $deployKeyMachineWide -Force
-        $out = icacls $deployKeyMachineWide /inheritance:r /grant:r 'SYSTEM:R' /grant:r 'BUILTIN\Administrators:R' 2>&1
+        $out = Invoke-Native { icacls $deployKeyMachineWide /inheritance:r /grant:r 'SYSTEM:R' /grant:r 'BUILTIN\Administrators:R' 2>&1 }
         $out | Write-Host
         Write-Log "  [OK] Deploy key self-healed to $deployKeyMachineWide -- future SYSTEM-scheduled updates will find it directly."
     } catch {
@@ -1056,7 +1056,23 @@ if (-not $appStartSkipped) {
         $env:SMOKE_PASS = $smokePass
         try {
             # PS5 cannot pipe out of try/catch, so capture then log.
-            $out = & node (Join-Path $repoRoot 'scripts\smoke.js') 2>&1
+            # ⛔ Invoke-Native, NOT a bare call. This was `& node ... 2>&1`
+            # directly — the ONE native call in this script that bypassed the
+            # helper written for exactly this — and on PS 5.1 `2>&1` wraps each
+            # stderr line in a NativeCommandError which, under the ambient
+            # $ErrorActionPreference = 'Stop', is TERMINATING. smoke.js prints
+            # node's "NODE_TLS_REJECT_UNAUTHORIZED ... makes TLS connections
+            # insecure" warning to stderr on every run, so the very first deploy
+            # on which the sweep actually ran reported:
+            #   Step FAILED: Verify every page renders -- (node:5152) Warning: ...
+            # and the banner read "completed WITH ERRORS" — while the sweep had
+            # in fact passed 28/28 with exit code 0. A deploy that cries wolf is
+            # one nobody reads, which is the same argument CLAUDE.md makes about
+            # a permanently amber feed chip.
+            # It went unnoticed until now because the step returned early with a
+            # SKIP whenever SMOKE_USER/SMOKE_PASS were unset, so node was never
+            # launched.
+            $out = Invoke-Native { & node (Join-Path $repoRoot 'scripts\smoke.js') 2>&1 }
             $code = $LASTEXITCODE
             foreach ($line in $out) { Write-Log "  $line" }
             if ($code -ne 0) {
