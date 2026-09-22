@@ -9,9 +9,11 @@ import Card, { CardBody } from '../../../../components/ui/Card';
 import RunAuditButton from '../../../../components/compliance/RunAuditButton';
 import StandardCard from '../../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
+import ExceptionsPanel from '../../../../components/compliance/ExceptionsPanel';
 import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import { vendorLabel } from '../../../../components/devices/vendorMeta';
+import { getExceptionView } from '../../../../lib/engines/complianceExceptions';
 
 export const dynamic = 'force-dynamic';
 
@@ -132,6 +134,33 @@ function aggregateStandards(findings) {
   return result;
 }
 
+// Compliance exceptions for this device — the recorded "yes, and here is why
+// that is mitigated" beside each failing check.
+//
+// ⛔ THIS DOES NOT FEED aggregateStandards() OR scorePctFromCounts() ABOVE, AND
+// MUST NOT. The headline score is computed as if no exception existed: a
+// failing check with an accepted exception is still a `fail`, because the
+// firewall is still configured that way, and letting a label somebody typed
+// move a measurement is how a compliance score becomes a number people manage
+// instead of a fact they act on. The panel reports COUNTS beside the score and
+// deliberately never a second percentage.
+//
+// ⛔ A LOAD FAILURE IS REPORTED, NOT SWALLOWED. getDeviceZones() above degrades
+// to omitting its card because the zone list is a nice-to-have enrichment;
+// accepted risk is not. Silently dropping this panel would render a device with
+// three accepted exceptions identically to one with none, which is the
+// short-queue-reads-as-a-clean-queue failure in miniature.
+async function getExceptions(dbPool, deviceId) {
+  try {
+    // `now` is injected so expiry is a read-time computation with no cron job
+    // and no stored state column — see lib/engines/complianceExceptions.js.
+    return { view: await getExceptionView(dbPool, deviceId, new Date()), error: null };
+  } catch (err) {
+    console.warn(`[compliance/${deviceId}] getExceptionView failed:`, err.message);
+    return { view: null, error: err.message || 'unknown error' };
+  }
+}
+
 function notFound() {
   return (
     <div>
@@ -170,6 +199,7 @@ export default async function DeviceCompliancePage({ params }) {
 
   const findings = await getFindings(pool, device.id);
   const zones = await getDeviceZones(pool, device.id);
+  const exceptions = await getExceptions(pool, device.id);
 
   const standards = aggregateStandards(findings);
   const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
@@ -274,6 +304,36 @@ export default async function DeviceCompliancePage({ params }) {
           );
         })}
       </div>
+
+      {/* ⛔ BELOW the score grid, deliberately: the score is the measurement and
+          is read first; this panel annotates it and says in words that the
+          score above ignores every exception in it. */}
+      {exceptions.error ? (
+        <Card>
+          <CardBody>
+            <div
+              role="alert"
+              style={{
+                fontSize: 'var(--text-sm)',
+                color: 'var(--tint-danger-fg)',
+              }}
+            >
+              <strong>Accepted risk could not be loaded.</strong> Any exceptions recorded for
+              this firewall are not shown, so a failing check above may already have an
+              accepted exception you cannot see here. ({exceptions.error})
+            </div>
+          </CardBody>
+        </Card>
+      ) : (
+        <ExceptionsPanel
+          deviceId={device.id}
+          exceptions={exceptions.view.exceptions}
+          availableChecks={exceptions.view.availableChecks}
+          summary={exceptions.view.summary}
+          expiringWindowDays={exceptions.view.expiringWindowDays}
+          canWrite={canWrite}
+        />
+      )}
     </div>
   );
 }

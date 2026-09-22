@@ -151,6 +151,21 @@ GET /api/compliance/fleet [auth] [db] — one row per active device with the sam
 GET /api/compliance/report/pdf [auth] [db] — on-demand fleet compliance PDF download via `generateReportPdf()`; ungated like every other compliance GET route (ungated here means "no isAdmin check", not "no auth" — still behind the dashboard's session middleware). Does NOT touch `compliance_report_log` or email anyone (pure render-and-return).
 POST /api/compliance/report/generate [admin] [db] — manual trigger for `dispatchMonthlyReport()`, the SAME function the scheduled `compliance-report` job calls; still respects the per-calendar-month idempotency check (not a way to force a second send).
 
+### Compliance exceptions (added 2026-09-22)
+
+`GET    /api/compliance/[deviceId]/exceptions` [auth] [db] -> `{exceptions, failingChecks, availableChecks, summary, evaluatedAt, expiringWindowDays}` via `lib/engines/complianceExceptions.js`'s `getExceptionView(pool, deviceId, now)`. Ungated like every other compliance GET — an exception names a SecVault OPERATOR, not an end user, and the same names are already readable through `activity_log`.
+`POST   /api/compliance/[deviceId]/exceptions` [operate] [db] -> 201 `{exception}`. Record that a FAILING check is accepted here.
+`DELETE /api/compliance/[deviceId]/exceptions/[exceptionId]` [operate] [db] -> `{exception}`. ⛔ The VERB is DELETE; the OPERATION is a soft REVOKE (`revoked_at`/`revoked_by`) — the partial unique index is partial precisely so the audit trail survives. 404 covers both "no such exception" and "already revoked", deliberately undistinguished: re-stamping a fresh revocation time over the real one would falsify the trail.
+
+⛔ **Gated on `OPERATE`, not `MANAGE_SETTINGS`** — full reasoning in the POST route's header. Short form: the closest existing analogue (`finding_acknowledgements`) is already `operate`; segmentation/application INTENT set the precedent ("declaring intent changes no device, no rule and no score"); and the gate is only SAFE at `operate` BECAUSE an exception cannot move the score. ⛔ If anyone ever makes an exception move a score, this gate must be revisited in the same commit.
+
+⛔ **AN EXCEPTION NEVER CHANGES A FINDING'S STATUS, AND THE HEADLINE SCORE IS COMPUTED WITHOUT IT.** No score-computing file references `compliance_exceptions` (`configAuditor`, `dashboardSnapshot`, `securityScore`, `GET /api/compliance/[deviceId]`, `/fleet`) — pinned by a repo scan in `tests/complianceExceptions.test.js`, not by a comment. A presentation surface may show the accepted COUNT beside the score; the API returns counts and deliberately **no second percentage**.
+
+⛔ **`accepted_by`/`revoked_by` COME FROM `session.user.name`, NEVER THE BODY** — there is no such body field and a caller that sends one is ignored. An empty actor is REFUSED (400), never written as `'unknown'`.
+⛔ **`expires_at` IS MANDATORY**: missing / unparseable / not-in-the-future each get their own 400 message. Expiry is evaluated at READ TIME against an injected `now` — no cron job, no stored state column. States: `accepted` / `expiring` (30-day window) / `expired` / `revoked`.
+⛔ **POST 400s unless the check is ACTUALLY FAILING**, re-checked server-side against `audit_findings`; "no finding row at all" gets a DIFFERENT message from "currently pass/warning/na". Duplicate live exception -> **409** with the instruction to revoke first, never a 500.
+⛔ **THE SLUG/UUID JOIN**: `audit_findings.check_id` is a UUID FK to `audit_checks.id`; `compliance_exceptions.check_slug` holds `audit_checks.check_id`, the TEXT slug. Every join routes THROUGH `audit_checks` (`ON ac.id = af.check_id`, then `ac.check_id = $slug`). Comparing a slug to `af.check_id` or to `ac.id` is the single most likely bug here and is pinned negatively by test.
+
 ## /api/credential-profiles
 
 GET /api/credential-profiles [admin] [db] — list saved profiles, metadata only (never the encrypted secret). Admin-gated even for GET (credential-adjacent, same posture as `GET /api/users`).
