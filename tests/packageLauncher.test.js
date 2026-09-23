@@ -41,18 +41,56 @@ const code = source
   .filter((line) => !/^\s*#/.test(line))
   .join('\n');
 
-// The generated launcher is the $cmdText here-string. Pull out just that, so
-// an assertion can never be satisfied by a comment elsewhere in the script.
-function generatedCmd() {
+// The launcher is emitted from the $cmdText here-string, and the here-string is
+// an EXPANDING one (@" not @') because $version and $commit are baked in at
+// build time. So a runtime variable written plainly is substituted by the
+// PACKAGER and vanishes.
+//
+// ⛔ THAT IS EXACTLY WHAT HAPPENED, AND THE FIRST VERSION OF THIS TEST COULD
+// NOT SEE IT. It asserted against the packager's SOURCE, where
+// `-ArgumentList $env:SVARGS` reads perfectly -- while the emitted .cmd said
+//     if () { ... -ArgumentList  -Verb RunAs }
+// a PowerShell syntax error, so elevation failed outright. A guard that reads
+// the input instead of the output is the guard-that-cannot-fire pattern this
+// codebase names most often. So this test RENDERS the here-string the way
+// PowerShell would, and asserts against that.
+const BUILD_TIME_VARS = ['$version', '$commit'];
+
+function hereStringBody() {
   const start = source.indexOf('$cmdText = @"');
   assert.notEqual(start, -1, 'the $cmdText here-string is gone -- this test is pinning nothing');
-  const end = source.indexOf('\n"@', start);
+  const open = source.indexOf('\n', start) + 1;
+  const end = source.indexOf('\n"@', open);
   assert.notEqual(end, -1, 'the $cmdText here-string is unterminated');
-  return source.slice(start, end);
+  return source.slice(open, end);
 }
 
+// PowerShell's own expansion rules, narrowly: a backtick-escaped `$ is a
+// literal, anything else beginning with $ is substituted now.
+function renderHereString(body) {
+  const unescaped = [];
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] !== '$') continue;
+    if (i > 0 && body[i - 1] === '`') continue;           // escaped -- survives
+    const name = (body.slice(i).match(/^\$[A-Za-z_][\w:]*/) || [''])[0];
+    if (!BUILD_TIME_VARS.includes(name)) unescaped.push(name || '$');
+  }
+  assert.deepEqual(
+    unescaped,
+    [],
+    `unescaped variable(s) ${unescaped.join(', ')} in the launcher here-string: ` +
+      'PowerShell substitutes these at BUILD time, so they disappear from the ' +
+      'emitted .cmd. Prefix each with a backtick, or add it to BUILD_TIME_VARS ' +
+      'if it really is meant to be baked in.'
+  );
+  let out = body.replace(/`\$/g, '$');
+  out = out.replace(/\$version/g, '9.9.9').replace(/\$commit/g, 'abc1234');
+  return out;
+}
+
+const cmd = renderHereString(hereStringBody());
+
 describe('the generated installer launcher', () => {
-  const cmd = generatedCmd();
 
   it('stashes the arguments before it can lose them', () => {
     // `set "SVARGS=%*"` runs BEFORE the elevation branch. Put it after and the

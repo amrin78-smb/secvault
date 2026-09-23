@@ -299,6 +299,13 @@ Write-Step 'Writing the launchers'
 # gets an elevated window with NO arguments, which then prompts interactively
 # for everything they just supplied. It looks like the switches were ignored,
 # and on an imaged deployment it hangs forever on a prompt nobody is watching.
+# ⛔ THIS IS AN EXPANDING HERE-STRING (@" not @'"'"'), because $version and $commit
+# have to be baked in. That means EVERY OTHER `$` must be backtick-escaped or
+# PowerShell substitutes it at BUILD time. It did: `$env:SVARGS` expanded to
+# nothing here, and the emitted launcher read
+#     if () { ... -ArgumentList  -Verb RunAs }
+# which is a syntax error, so elevation failed outright. The packager reported
+# success and the .cmd was broken -- caught only by reading the generated file.
 $cmdText = @"
 @echo off
 setlocal
@@ -313,7 +320,7 @@ net session >nul 2>nul
 if errorlevel 1 (
   echo.
   echo  Requesting administrator rights...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "if ($env:SVARGS) { Start-Process -FilePath '%~f0' -ArgumentList $env:SVARGS -Verb RunAs } else { Start-Process -FilePath '%~f0' -Verb RunAs }"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "if (`$env:SVARGS) { Start-Process -FilePath '%~f0' -ArgumentList `$env:SVARGS -Verb RunAs } else { Start-Process -FilePath '%~f0' -Verb RunAs }"
   exit /b
 )
 
