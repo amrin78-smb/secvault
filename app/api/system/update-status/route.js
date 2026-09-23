@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.177.1': [
+    "Fixed the setup launcher losing whatever you typed when it asks Windows for administrator rights. Starting it with options from an ordinary console produced an elevated window with none of them, which looked like the options were ignored — and on an unattended deployment it would sit waiting on a prompt nobody was watching.",
+    "Added a test that fails the build if that ever regresses, or if the application source is put back inside the installer package.",
+  ],
   '2.177.0': [
     "SecVault now requires internet access to install, and says so before it changes anything on the server. It checks it can reach GitHub and the npm registry as its very first step, so an isolated server is turned away with a clear reason instead of failing halfway through provisioning.",
     "The installer package no longer carries the application inside it. That version could never update itself — an installation copied from a file has no link back to the repository, so the update button simply did nothing, with no error to explain it. An installation is now a real clone and updates in place, from Settings or from the update script.",

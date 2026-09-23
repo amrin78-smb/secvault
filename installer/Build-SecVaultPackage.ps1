@@ -292,16 +292,28 @@ Write-Step 'Writing the launchers'
 # services, installs MSIs and opens firewall rules; a non-elevated run gets
 # most of the way in and fails on the first service call, leaving a half-built
 # machine and an error naming none of that.
+#
+# ⛔ AND THE ELEVATED RE-LAUNCH MUST CARRY THE ARGUMENTS. Without that, an
+# operator who ran `Install-SecVault.cmd -ServerIp 10.0.0.10 -Unattended` from
+# a normal console -- the invocation this package's own README documents --
+# gets an elevated window with NO arguments, which then prompts interactively
+# for everything they just supplied. It looks like the switches were ignored,
+# and on an imaged deployment it hangs forever on a prompt nobody is watching.
 $cmdText = @"
 @echo off
 setlocal
 title SecVault Setup $version
 
+rem The arguments are stashed in the environment because the elevated
+rem re-launch below has to carry them across, and quoting %* through a
+rem PowerShell -Command string is where that normally goes wrong.
+set "SVARGS=%*"
+
 net session >nul 2>nul
 if errorlevel 1 (
   echo.
   echo  Requesting administrator rights...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "if ($env:SVARGS) { Start-Process -FilePath '%~f0' -ArgumentList $env:SVARGS -Verb RunAs } else { Start-Process -FilePath '%~f0' -Verb RunAs }"
   exit /b
 )
 
