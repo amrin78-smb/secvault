@@ -418,13 +418,25 @@ static class SecVaultSetup {
     Write-Warn 'csc.exe not found; shipping Install-SecVault.cmd without an .exe launcher.'
 }
 
+# ⛔ A DEPLOY KEY DOES NOT MAKE IN-PLACE UPDATES WORK, AND SAYING SO WOULD BE
+# A DOCUMENTED CONTROL THAT DOES NOT EXIST. This README used to claim that a
+# bundled key enabled Settings -> Update. It does not: $excludeDirs drops
+# .git, so a packaged installation has NO REPOSITORY AT ALL, and
+# Update-SecVault.ps1 step 3 is Already up to date.. A key without a repo
+# to pull into changes nothing. The key is still worth shipping internally --
+# it is what a later Reinitialized existing Git repository in C:/Users/amrin/Documents/Nocvault/secvault/.git// would need -- but on its own it
+# buys no update path, and an operator told otherwise finds out when they need
+# the update most.
 $updateLine = if ($hasDeployKey) {
-    "  A deploy key IS included, so Settings -> Update and
-  installer\Update-SecVault.ps1 can pull new versions in place.
-  Do not hand this folder to a customer."
+    "  A deploy key IS included -- do not hand this folder to a customer.
+  It does NOT by itself enable in-place updates: this package ships no
+  .git directory, so there is no repository for Update-SecVault.ps1 to
+  pull into. Update by running a newer copy of this installer folder,
+  or clone the repo over the install and then use the updater."
 } else {
-    "  No deploy key is included, so this installation has NO git remote:
-  Settings -> Update and installer\Update-SecVault.ps1 cannot pull.
+    "  No deploy key is included, and this package ships no .git directory,
+  so the installation has no repository to pull into: Settings -> Update
+  and installer\Update-SecVault.ps1 cannot fetch a new version.
   Update it by running a newer copy of this installer folder."
 }
 
