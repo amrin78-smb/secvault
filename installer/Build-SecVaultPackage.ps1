@@ -338,95 +338,45 @@ if ($leaks.Count -gt 0) {
 }
 Write-Note 'no secret-bearing files in the payload.'
 
-# -----------------------------------------------------------------------
-Write-Step 'Writing the bootstrap'
-# -----------------------------------------------------------------------
-# ⛔ IExpress FLATTENS EVERY FILE INTO ONE TEMP DIRECTORY -- it cannot carry a
-# directory tree. So the payload is zipped and the .exe ships exactly two
-# files: the zip and this bootstrap, which restores the tree.
-$bootstrap = @"
-@echo off
-setlocal
-title SecVault Setup $version
-
-echo.
-echo  ===============================================================
-echo    SecVault Setup   version $version   commit $commit
-echo  ===============================================================
-echo.
-
-REM Elevation is required: this registers Windows services, installs MSIs and
-REM opens firewall rules. Without this check a non-elevated run gets most of
-REM the way in and then fails on the first service call, leaving a half-built
-REM machine and an error that names none of the above.
-REM stderr goes to nul directly rather than being merged into stdout: the two
-REM are equivalent for this check, and the merging form is the one that
-REM tests\installerNativeCalls.test.js scans for. That scan guards PowerShell's
-REM native-stderr trap, which does not apply to batch -- but a scanner cannot
-REM tell the two apart inside a here-string, and an allow-list entry for a
-REM non-problem is debt that outlives the reason for it.
-net session >nul 2>nul
-if errorlevel 1 (
-  echo  [ERROR] This installer must be run AS ADMINISTRATOR.
-  echo.
-  echo    Right-click the .exe and choose "Run as administrator",
-  echo    or launch it from an elevated command prompt.
-  echo.
-  pause
-  exit /b 1
-)
-
-echo  Expanding the package. This takes a minute.
-echo.
-
-set "TARGET=%~dp0secvault-src"
-if exist "%TARGET%" rmdir /s /q "%TARGET%"
-mkdir "%TARGET%"
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "try { Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('%~dp0secvault-payload.zip', '%TARGET%'); exit 0 } catch { Write-Host `$(`$_.Exception.Message) -ForegroundColor Red; exit 1 }"
-
-if errorlevel 1 (
-  echo.
-  echo  [ERROR] Could not expand the package. Check free disk space on %%TEMP%%.
-  echo.
-  pause
-  exit /b 1
-)
-
-echo  Starting the installer...
-echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%\installer\Install-SecVault.ps1" %*
-set RC=%ERRORLEVEL%
-
-echo.
-if not "%RC%"=="0" (
-  echo  Setup exited with code %RC%. The source tree was left at:
-  echo    %TARGET%
-  echo  so the installer can be re-run without unpacking again.
-) else (
-  echo  Setup finished. Source tree: %TARGET%
-)
-echo.
-pause
-exit /b %RC%
-"@
-$bootstrapPath = Join-Path $stage 'Setup.cmd'
-Set-Content -Path $bootstrapPath -Value $bootstrap -Encoding ASCII
 
 # -----------------------------------------------------------------------
 Write-Step 'Compressing the payload'
 # -----------------------------------------------------------------------
 $zipPath = Join-Path $stage 'secvault-payload.zip'
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-# ⛔ Fastest, NOT Optimal. MEASURED on this payload (~20,000 mostly-small files
-# from node_modules): Optimal ran at roughly 3 MB/min and would have taken over
-# an hour and a half. Fastest finishes in minutes for a few percent more size,
-# and the size barely matters because IExpress re-compresses the result into a
-# CAB anyway. A build nobody is willing to wait for is a build that stops being
-# run before a release.
-[System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $appDir, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
+
+# ⛔ BUILT ENTRY BY ENTRY, NOT WITH CreateFromDirectory, FOR ONE REASON:
+# SEPARATORS. On this host CreateFromDirectory wrote entry names containing
+# BACKSLASHES (`installerInstall-SecVault.ps1`). The ZIP format requires forward
+# slashes; a backslash is a legal filename character, so a standards-compliant
+# reader sees ONE file with a odd name rather than a path, and the tree
+# silently flattens. It happened to work here only because the stub runs on
+# Windows and Path.Combine accepts either -- i.e. it worked by accident, and
+# anyone opening the package with a normal archiver would see something else
+# entirely. Verified after this change by listing the entries back.
+#
+# ⛔ Fastest, NOT Optimal. MEASURED on the full payload (~20,000 mostly-small
+# files from node_modules): Optimal ran at roughly 3 MB/min and would have
+# taken over an hour and a half; a build nobody is willing to wait for stops
+# being run before a release. Fastest costs a few percent of size.
+$zipStream = [System.IO.File]::Open($zipPath, 'Create')
+try {
+    $archive = New-Object System.IO.Compression.ZipArchive($zipStream, 'Create')
+    try {
+        $prefixLen = $appDir.Length + 1
+        $fastest = [System.IO.Compression.CompressionLevel]::Fastest
+        foreach ($f in (Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+            $rel = $f.FullName.Substring($prefixLen).Replace([char]92, [char]47)
+            $entry = $archive.CreateEntry($rel, $fastest)
+            $in = [System.IO.File]::OpenRead($f.FullName)
+            try {
+                $out = $entry.Open()
+                try { $in.CopyTo($out) } finally { $out.Dispose() }
+            } finally { $in.Dispose() }
+        }
+    } finally { $archive.Dispose() }
+} finally { $zipStream.Dispose() }
 $zipMb = (Get-Item $zipPath).Length / 1MB
 Write-Note ("payload.zip : {0:N0} MB" -f $zipMb)
 
@@ -439,63 +389,237 @@ if (-not $OutputPath) {
     $OutputPath = Join-Path $distDir "SecVault-Setup-$version.exe"
 }
 $OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+# ⛔ CREATE THE OUTPUT DIRECTORY WHATEVER THE PATH CAME FROM. This was created
+# only on the default path, so an explicit -OutputPath into a folder that did
+# not exist produced NOTHING: iexpress writes no file, reports no error, and
+# leaves an EMPTY exit code -- so even the exit-code check could not catch it.
+# The artifact check at the end is what finally said so, several minutes later.
+$outDir = Split-Path -Parent $OutputPath
+if ($outDir -and -not (Test-Path $outDir)) {
+    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+}
 if (Test-Path $OutputPath) { Remove-Item $OutputPath -Force }
 
-$iexpress = Join-Path $env:WINDIR 'System32\iexpress.exe'
-if (-not (Test-Path $iexpress)) {
-    Fail "iexpress.exe not found. It ships with Windows; this host is unusual. Ship $zipPath plus Setup.cmd instead."
+# ⛔ IEXPRESS WAS TRIED FIRST AND IS NOT USABLE HERE. It is a GUI program: `/N` alone
+# raises a progress dialog that is never dismissed in a non-interactive session
+# (measured: 0% CPU, idle indefinitely on a 99 MB payload), `/Q` suppresses that
+# but it then exits producing NO FILE and NO READABLE EXIT CODE -- even
+# $proc.ExitCode is empty because it hands off to a child. A release step whose
+# success cannot be determined is not a release step. Even `iexpress /?` opens
+# a dialog.
+#
+# So the stub is COMPILED here instead, with the C# compiler that ships in
+# .NET Framework 4 on every Windows Server. The payload rides as an embedded
+# resource. This is fully deterministic, has a real exit code, needs no GUI --
+# and, unlike IExpress, it FORWARDS ITS COMMAND LINE to the installer, so an
+# unattended install can pass -ServerIp and friends straight to the .exe.
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path $csc)) {
+    Fail "csc.exe not found at $csc. .NET Framework 4 is required to build the package (it ships with Windows Server). Ship $zipPath plus Setup.cmd instead."
 }
 
-# IExpress reads an .SED directive file. ShowInstallProgramWindow=1 keeps the
-# console visible, because the installer's own output IS the progress report.
-$sed = @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=0
-UseLongFileName=1
-InsideCompressed=0
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=%InstallPrompt%
-DisplayLicense=%DisplayLicense%
-FinishMessage=%FinishMessage%
-TargetName=%TargetName%
-FriendlyName=%FriendlyName%
-AppLaunched=%AppLaunched%
-PostInstallCmd=%PostInstallCmd%
-AdminQuietInstCmd=%AdminQuietInstCmd%
-UserQuietInstCmd=%UserQuietInstCmd%
-SourceFiles=SourceFiles
-[Strings]
-InstallPrompt=
-DisplayLicense=
-FinishMessage=
-TargetName=$OutputPath
-FriendlyName=SecVault $version Setup
-AppLaunched=cmd.exe /c Setup.cmd
-PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
-FILE0="Setup.cmd"
-FILE1="secvault-payload.zip"
-[SourceFiles]
-SourceFiles0=$stage
-[SourceFiles0]
-%FILE0%=
-%FILE1%=
-"@
-$sedPath = Join-Path $stage 'SecVault.sed'
-Set-Content -Path $sedPath -Value $sed -Encoding ASCII
+$stubSource = @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
+using System.Reflection;
+using System.Security.Principal;
 
-Write-Note 'running iexpress (this is slow on a large payload)...'
-$proc = Start-Process -FilePath $iexpress -ArgumentList @('/N', "`"$sedPath`"") -Wait -PassThru -NoNewWindow
-if ($proc.ExitCode -ne 0) {
-    Fail "iexpress exited with code $($proc.ExitCode). Staging left at $stage for inspection."
+static class SecVaultSetup
+{
+    const string Version = "__VERSION__";
+    const string Commit  = "__COMMIT__";
+
+    static int Main(string[] args)
+    {
+        Console.WriteLine();
+        Console.WriteLine("  ===============================================================");
+        Console.WriteLine("    SecVault Setup   version " + Version + "   commit " + Commit);
+        Console.WriteLine("  ===============================================================");
+        Console.WriteLine();
+
+        // Elevation is required: this registers Windows services, installs MSIs
+        // and opens firewall rules. Without this check a non-elevated run gets
+        // most of the way in and fails on the first service call, leaving a
+        // half-built machine and an error that names none of the above.
+        if (!IsElevated())
+        {
+            Console.WriteLine("  [ERROR] This installer must be run AS ADMINISTRATOR.");
+            Console.WriteLine();
+            Console.WriteLine("    Right-click the .exe and choose \"Run as administrator\",");
+            Console.WriteLine("    or launch it from an elevated command prompt.");
+            Console.WriteLine();
+            Pause();
+            return 1;
+        }
+
+        string exePath = Assembly.GetExecutingAssembly().Location;
+        string baseDir = Path.GetDirectoryName(exePath);
+        string target  = Path.Combine(baseDir, "secvault-" + Version);
+
+        // ⛔ FALL BACK TO %TEMP% RATHER THAN FAILING. The .exe is often run from
+        // a read-only share or a mounted ISO; refusing there would be a refusal
+        // for a reason the operator cannot act on from where they are standing.
+        try
+        {
+            Directory.CreateDirectory(target);
+            string probe = Path.Combine(target, ".writable");
+            File.WriteAllText(probe, "x");
+            File.Delete(probe);
+        }
+        catch
+        {
+            target = Path.Combine(Path.GetTempPath(), "secvault-" + Version);
+            Console.WriteLine("  Cannot write beside the .exe; unpacking to " + target);
+        }
+
+        Console.WriteLine("  Unpacking to " + target);
+        Console.WriteLine("  This takes a minute.");
+        Console.WriteLine();
+
+        try
+        {
+            ExtractPayload(target);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("  [ERROR] Could not unpack the package: " + ex.Message);
+            Console.WriteLine("          Check free disk space on the target volume.");
+            Pause();
+            return 1;
+        }
+
+        string installer = Path.Combine(target, "installer\\Install-SecVault.ps1");
+        if (!File.Exists(installer))
+        {
+            Console.WriteLine("  [ERROR] The package unpacked but " + installer + " is missing.");
+            Console.WriteLine("          This package is incomplete; do not use it.");
+            Pause();
+            return 1;
+        }
+
+        // Every argument given to the .exe is handed to the installer verbatim,
+        // so an unattended install works without unpacking by hand first.
+        string passThrough = "";
+        foreach (string a in args) passThrough += " " + Quote(a);
+
+        var psi = new ProcessStartInfo();
+        psi.FileName = "powershell.exe";
+        psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(installer) + passThrough;
+        psi.UseShellExecute = false;
+        psi.WorkingDirectory = target;
+
+        Console.WriteLine("  Starting the installer...");
+        Console.WriteLine();
+
+        int rc;
+        using (Process p = Process.Start(psi))
+        {
+            p.WaitForExit();
+            rc = p.ExitCode;
+        }
+
+        Console.WriteLine();
+        if (rc != 0)
+        {
+            Console.WriteLine("  Setup exited with code " + rc + ".");
+            Console.WriteLine("  The unpacked tree was LEFT at:");
+            Console.WriteLine("    " + target);
+            Console.WriteLine("  so the installer can be re-run without unpacking again.");
+        }
+        else
+        {
+            Console.WriteLine("  Setup finished. Unpacked tree: " + target);
+        }
+        Console.WriteLine();
+        Pause();
+        return rc;
+    }
+
+    static bool IsElevated()
+    {
+        try
+        {
+            using (WindowsIdentity id = WindowsIdentity.GetCurrent())
+            {
+                return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
+            }
+        }
+        catch { return false; }
+    }
+
+    static void ExtractPayload(string target)
+    {
+        Assembly asm = Assembly.GetExecutingAssembly();
+        using (Stream s = asm.GetManifestResourceStream("secvault-payload.zip"))
+        {
+            if (s == null) throw new Exception("the embedded payload is missing");
+            using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
+            {
+                int done = 0;
+                int total = zip.Entries.Count;
+                foreach (ZipArchiveEntry e in zip.Entries)
+                {
+                    string dest = Path.Combine(target, e.FullName);
+                    if (e.FullName.EndsWith("/") || e.FullName.EndsWith("\\"))
+                    {
+                        Directory.CreateDirectory(dest);
+                        continue;
+                    }
+                    string dir = Path.GetDirectoryName(dest);
+                    if (dir.Length > 0) Directory.CreateDirectory(dir);
+                    e.ExtractToFile(dest, true);
+                    done++;
+                    if (done % 2000 == 0)
+                    {
+                        Console.WriteLine("    " + done + " of " + total + " files...");
+                    }
+                }
+                Console.WriteLine("    " + done + " of " + total + " files.");
+            }
+        }
+    }
+
+    static string Quote(string s)
+    {
+        if (s.IndexOf(' ') < 0 && s.IndexOf('"') < 0) return s;
+        return "\"" + s.Replace("\"", "\\\"") + "\"";
+    }
+
+    static void Pause()
+    {
+        // Only wait when a human is watching; an unattended run must not block.
+        if (Environment.UserInteractive && !Console.IsInputRedirected)
+        {
+            Console.Write("  Press Enter to close...");
+            try { Console.ReadLine(); } catch { }
+        }
+    }
+}
+'@
+
+$stubSource = $stubSource.Replace('__VERSION__', $version).Replace('__COMMIT__', $commit)
+$stubPath = Join-Path $stage 'SecVaultSetup.cs'
+Set-Content -Path $stubPath -Value $stubSource -Encoding UTF8
+
+Write-Note 'compiling the setup stub...'
+$cscArgs = @(
+    '/nologo',
+    '/target:exe',
+    '/platform:anycpu',
+    '/optimize+',
+    ('/out:"{0}"' -f $OutputPath),
+    ('/resource:"{0}",secvault-payload.zip' -f $zipPath),
+    '/reference:System.dll',
+    '/reference:System.IO.Compression.dll',
+    '/reference:System.IO.Compression.FileSystem.dll',
+    ('"{0}"' -f $stubPath)
+)
+$cscOut = Invoke-Native { & $csc @cscArgs 2>&1 }
+if ($LASTEXITCODE -ne 0) {
+    $cscOut | Write-Host
+    Fail "csc.exe failed with exit code $LASTEXITCODE. Staging left at $stage for inspection."
 }
 
 # -----------------------------------------------------------------------
@@ -530,14 +654,11 @@ Write-Host ''
 Write-Host '  TO RUN IT: copy to the target server, right-click, Run as administrator.' -ForegroundColor White
 Write-Host '  It prompts for the server IP; everything else takes a documented default.' -ForegroundColor White
 Write-Host ''
-# ⛔ SAID PLAINLY BECAUSE IT IS EASY TO ASSUME OTHERWISE. IExpress does not
-# forward a .exe's command line to the program it launches, so switches typed
-# after the .exe name are NOT reliably delivered to Install-SecVault.ps1. An
-# unattended or parameterised install therefore runs the .ps1 directly; the
-# .exe unpacks to a folder beside itself and leaves it there for exactly that.
-Write-Host '  For an UNATTENDED or parameterised install, do not pass switches to the .exe' -ForegroundColor DarkGray
-Write-Host '  (IExpress does not forward them). Run it once to unpack, then call:' -ForegroundColor DarkGray
-Write-Host '    powershell -ExecutionPolicy Bypass -File <unpacked>\installer\Install-SecVault.ps1 -ServerIp ... ' -ForegroundColor DarkGray
+Write-Host '  Every switch given to the .exe is passed straight through to the installer,' -ForegroundColor DarkGray
+Write-Host '  so an unattended install needs no unpacking by hand:' -ForegroundColor DarkGray
+Write-Host ("    {0} -ServerIp 10.0.0.10 -SyslogPorts 514" -f (Split-Path -Leaf $OutputPath)) -ForegroundColor DarkGray
+Write-Host '  The .exe unpacks beside itself and leaves the tree there, so a failed run' -ForegroundColor DarkGray
+Write-Host '  can be retried without unpacking again.' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  Read docs\FRESH-INSTALL-CHECKLIST.md before the first run.' -ForegroundColor DarkGray
 Write-Host ''
