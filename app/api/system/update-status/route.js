@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.175.2': [
+    "Fixed the packaged installer failing outright. The setup .exe carries the whole application inside it, but the installer still insisted on a GitHub deploy key and tried to download the source — so it unpacked everything correctly and then stopped with a missing-key error, with the files it needed already on disk.",
+    "An installer that carries its own source now installs from it, with no GitHub access, no deploy key and no npm download required.",
+    "It also says plainly that an installation built this way updates by running a newer setup file rather than through Settings, instead of leaving you to discover that the update button does nothing.",
+  ],
   '2.175.1': [
     "The installer no longer demands the server address as a bare, unexplained prompt. It detects the address people will actually use to reach the console, offers it with the machine’s other addresses listed, and lets you pick one by number.",
     "It now refuses a server address that does not exist on the machine unless you confirm it. A single mistyped digit used to be accepted silently — the install would finish and then every sign-in would bounce back to the login page with no error, with the setting that fixes it sitting behind that sign-in.",

@@ -391,6 +391,44 @@ $SecVaultGitUrl = 'git@github.com:amrin78-smb/secvault.git'
 # distributable (dependencies bundled alongside it, e.g. C:\SecVault-Installer\)
 # and is NOT expected to already be sitting inside a clone of the repo -- do
 # not derive $repoRoot from $PSScriptRoot.
+# ── Is the application source already sitting beside this script? ────────
+#
+# ⛔ THIS IS THE OTHER HALF OF installer\Build-SecVaultPackage.ps1, AND IT WAS
+# MISSING. That script bundles the whole source tree and node_modules into the
+# setup .exe precisely so an install needs no GitHub and no npm registry -- and
+# this installer went on requiring a deploy key and running `git clone`
+# regardless. The packaged .exe therefore unpacked a complete, correct tree and
+# then FAILED on "dependencies\secvault_deploy not found", with the source it
+# needed already on disk one directory up. Found on the first real fresh-install
+# run. A feature built at one end and not wired at the other is worse than one
+# not started: it ships, it looks finished, and it fails at the customer.
+#
+# The stub runs <tree>\installer\Install-SecVault.ps1, so the tree is this
+# script's parent. It is only trusted when it actually looks like SecVault --
+# a package.json NAMING secvault, plus lib\schema.sql -- because copying an
+# arbitrary neighbouring folder into C:\Apps\SecVault would be worse than
+# cloning.
+$BundledRoot = Split-Path -Parent $PSScriptRoot
+$HasBundledSource = $false
+if ($BundledRoot -and (Test-Path (Join-Path $BundledRoot 'package.json')) -and
+    (Test-Path (Join-Path $BundledRoot 'lib\schema.sql'))) {
+    try {
+        $bundledPkg = Get-Content (Join-Path $BundledRoot 'package.json') -Raw | ConvertFrom-Json
+        if ($bundledPkg.name -eq 'secvault') { $HasBundledSource = $true }
+    } catch {
+        # An unreadable package.json is not a bundled tree. Fall through to the
+        # clone, which is the path that still works.
+    }
+}
+if ($HasBundledSource) {
+    Write-Host ''
+    Write-Host "  Source: bundled with this installer ($BundledRoot)" -ForegroundColor Cyan
+    Write-Host '          No GitHub access and no deploy key are required.'
+} else {
+    Write-Host ''
+    Write-Host '  Source: will be cloned from GitHub (no bundled tree beside this script)' -ForegroundColor Cyan
+}
+
 $repoRoot = $InstallRoot
 $DepsDir = Join-Path $PSScriptRoot 'dependencies'
 
@@ -648,12 +686,32 @@ Write-Step 'Configuring SSH deploy key for GitHub...'
 
 $DeployKeySource = Join-Path $DepsDir 'secvault_deploy'
 if (-not (Test-Path $DeployKeySource)) {
-    Write-Host '[FAIL] dependencies\secvault_deploy not found.' -ForegroundColor Red
-    Write-Host '       Obtain the SecVault deploy private key and place it at:' -ForegroundColor Red
-    Write-Host "         $DeployKeySource" -ForegroundColor Red
-    Write-Host '       (ed25519 private key, no passphrase, no file extension -- see' -ForegroundColor Red
-    Write-Host '       github.com -> amrin78-smb/secvault -> Settings -> Deploy keys)' -ForegroundColor Red
-    exit 1
+    if ($HasBundledSource) {
+        # ⛔ NOT FATAL when the source is bundled -- the key exists to clone and
+        # to pull, and there is nothing to clone. Shipping it inside a .exe
+        # handed to a customer would give whoever holds that file permanent read
+        # access to the whole private repository, and a key cannot be
+        # un-distributed. So its absence here is the DESIGNED state.
+        #
+        # ⛔ BUT THE CONSEQUENCE IS STATED, NOT SWALLOWED: without it
+        # Update-SecVault.ps1 and the in-app updater cannot 'git pull'. This
+        # installation updates by running a newer installer, and an operator who
+        # is not told that will conclude the updater is broken.
+        Write-Host '    [SKIP] No deploy key bundled, and none is needed: the source ships inside this installer.' -ForegroundColor Yellow
+        Write-Host '           ⛔ This installation therefore has NO git remote, so Settings -> Update and' -ForegroundColor Yellow
+        Write-Host '           installer\Update-SecVault.ps1 cannot pull. Update it by running a newer' -ForegroundColor Yellow
+        Write-Host '           SecVault-Setup .exe, or add a deploy key and re-run to enable in-place updates.' -ForegroundColor Yellow
+        $SkipDeployKey = $true
+    } else {
+        Write-Host '[FAIL] dependencies\secvault_deploy not found.' -ForegroundColor Red
+        Write-Host '       Obtain the SecVault deploy private key and place it at:' -ForegroundColor Red
+        Write-Host "         $DeployKeySource" -ForegroundColor Red
+        Write-Host '       (ed25519 private key, no passphrase, no file extension -- see' -ForegroundColor Red
+        Write-Host '       github.com -> amrin78-smb/secvault -> Settings -> Deploy keys)' -ForegroundColor Red
+        Write-Host '       Alternatively, build a package that BUNDLES the source with' -ForegroundColor Red
+        Write-Host '       installer\Build-SecVaultPackage.ps1, which needs no key at all.' -ForegroundColor Red
+        exit 1
+    }
 }
 Write-Host '    [OK] Deploy key found in dependencies\.'
 
@@ -813,6 +871,33 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
     Write-Step "SecVault already present at $InstallRoot -- skipping clone. Use Update-SecVault.ps1 to pull the latest code instead of re-running this installer."
 } elseif ((Test-Path $InstallRoot) -and ((Get-ChildItem $InstallRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)) {
     Fail "$InstallRoot exists and is not empty, but does not look like a SecVault checkout (no package.json). Refusing to clone into it -- clear it out or choose a different -ServerIp/InstallRoot and retry."
+} elseif ($HasBundledSource) {
+    # ⛔ COPY, NOT CLONE. The tree beside this script is the exact source the
+    # package was built from, including node_modules -- which is what lets the
+    # npm ci step be skipped and the whole install run with no internet.
+    Write-Step "Installing SecVault from the bundled source ($BundledRoot)..."
+    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+
+    # robocopy, because Copy-Item -Recurse on ~20,000 files with node_modules'
+    # path depths raises a MAX_PATH failure that aborts under 'Stop'.
+    # ⛔ Exit codes BELOW 8 ARE SUCCESS (1 = copied, 2 = extras, 3 = both);
+    # treating any non-zero as failure would fail every run that did something.
+    # ⛔ The installer's own directory is EXCLUDED FROM THE SOURCE SIDE ONLY by
+    # nothing at all -- it is wanted: Update-SecVault.ps1, the TLS helper and
+    # the backup script all live there and the deployment needs them.
+    $out = Invoke-Native { & robocopy $BundledRoot $InstallRoot /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1 }
+    if ($LASTEXITCODE -ge 8) {
+        Fail "Copying the bundled source to $InstallRoot failed (robocopy exit $LASTEXITCODE). Check free disk space."
+    }
+    # ⛔ VERIFY THE COPY RATHER THAN TRUST THE EXIT CODE -- the same rule the
+    # rest of this script follows. A missing package.json here would surface
+    # much later as an npm or next failure naming nothing useful.
+    foreach ($mustExist in 'package.json', 'lib\schema.sql', 'installer\Update-SecVault.ps1') {
+        if (-not (Test-Path (Join-Path $InstallRoot $mustExist))) {
+            Fail "The bundled source copied to $InstallRoot is incomplete (missing $mustExist). Do not use this installation."
+        }
+    }
+    Write-Step 'SecVault installed from the bundled source.'
 } else {
     Write-Step "Cloning SecVault from $SecVaultGitUrl..."
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
