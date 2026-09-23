@@ -921,7 +921,6 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
 } elseif ((Test-Path $InstallRoot) -and ((Get-ChildItem $InstallRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)) {
     Fail "$InstallRoot exists and is not empty, but does not look like a SecVault checkout (no package.json). Refusing to clone into it -- clear it out or choose a different -ServerIp/InstallRoot and retry."
 } else {
-} else {
     Write-Step "Cloning SecVault from $SecVaultGitUrl..."
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
     $out = Invoke-Native { & git clone $SecVaultGitUrl $InstallRoot 2>&1 }

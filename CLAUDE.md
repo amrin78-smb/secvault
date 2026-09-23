@@ -134,6 +134,25 @@ query, a renderer, or an engine; sort with `NULLS LAST`.
 - `$PID` is a reserved variable — use `$procPid` instead
 - Write multi-line PS scripts to temp `.ps1` files; never use `-Command` with newlines
 
+#### ⛔ A POWERSHELL PARSE CHECK IS NOT A SYNTAX GATE (measured 2026-09-23)
+
+`[Parser]::ParseFile` reported **7,611 tokens and ZERO ERRORS** over an
+`installer\Install-SecVault.ps1` carrying a DUPLICATED `} else {`. PowerShell parses a dangling
+`else { ... }` as a **call to a command named `else`** with a ScriptBlock argument; it fails only
+at RUNTIME, with *"The term 'else' is not recognized as the name of a cmdlet"*. Both halves were
+measured before this was written.
+
+⛔ **The cost was total:** on a fresh install the empty `else {}` ran, **nothing was cloned**, and
+the script then died on the bare `else` — so the packaged installer could not install SecVault
+at all. It cleared a parse check, a package build, and a read of the diff around it.
+
+⛔ **This is `node --check` on ESM wearing a different hat.** "It parses" has never been evidence
+in this repo, and now it is not evidence for the installer scripts either.
+`tests/installerKeywordsAsCommands.test.js` asks the REAL AST (never a brace-counting regex, which
+would be a second parser disagreeing with the authoritative one) and fails the build when any
+block keyword — `else`/`elseif`/`catch`/`finally`/`until` — is parsed as a command name. It has
+NO skip branch: these scripts only ever run on Windows, and so does their gate.
+
 ### External API Integrations
 - **Verify all field names against live responses before writing any parser — documentation lies.**
   Vendor APIs return different fields than documented, especially on older firmware. Log raw
