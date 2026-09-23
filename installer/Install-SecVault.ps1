@@ -27,6 +27,9 @@
     there before running this script.
 
 .PARAMETER ServerIp
+    Optional. The address a browser uses to reach the console. Blank means
+    detect it from the default-route interface and offer it for confirmation.
+    It is NOT the database host -- that is always loopback.
     IP address (or hostname) of this server. Used for DATABASE_URL / NEXTAUTH_URL
     and the final success banner.
 
@@ -68,8 +71,34 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ServerIp,
+    # The address a BROWSER will use to reach this console. Blank = detect it.
+    #
+    # ⛔ NOT Mandatory, AND THE REASON IS A REAL FIRST-INSTALL FAILURE.
+    # PowerShell's own mandatory-parameter prompt is a bare
+    #   "Supply values for the following parameters: ServerIp:"
+    # with no explanation, no default, no list of this machine's addresses and
+    # no validation. On the first genuine fresh-install test it took a
+    # one-digit typo -- 192.168.21.230 for a machine whose address is
+    # 192.168.31.230 -- and nothing rejected it. That value goes into
+    # NEXTAUTH_URL, so the install COMPLETES and then every sign-in bounces
+    # back to the login page with no error anywhere (CLAUDE.md documents that
+    # exact symptom), leaving the console unreachable by the person who just
+    # installed it. Settings -> Console address exists to repair this, and it
+    # is behind the sign-in that is broken.
+    #
+    # ⛔ THE DATABASE IS NOT AFFECTED -- DATABASE_URL is loopback by design.
+    # This value is ONLY the console's address.
+    [string]$ServerIp = '',
+
+    # Skip the confirmation when -ServerIp is not an address on this machine.
+    # ⛔ A wrong address is not refused outright: a server behind NAT, or one
+    # whose address is added later, is a real shape. It is CONFIRMED instead --
+    # the same call the console-address setting makes in the app (409 +
+    # needsConfirmation rather than a refusal).
+    [switch]$AcceptServerIp,
+
+    # Answer every prompt from defaults. For a scripted/imaged deployment.
+    [switch]$Unattended,
 
     # Alphanumeric-only, deliberately: these get embedded in a single combined
     # -ArgumentList string passed to Start-Process for msiexec/the PostgreSQL
@@ -244,6 +273,115 @@ function Wait-ServiceStatus {
 Write-Host '=================================================='
 Write-Host ' SecVault Installer'
 Write-Host '=================================================='
+
+# ── Console address: detect, offer, validate ─────────────────────────────
+#
+# ⛔ DETECTION IS BY DEFAULT ROUTE, NOT "the first IPv4 on the box".
+# The NocVault suite installer does
+#   Get-NetIPAddress -AddressFamily IPv4 | Where ... | Select -First 1
+# and on any machine with WSL or Hyper-V that picks a VIRTUAL SWITCH: measured
+# on the first SecVault test machine it returns 172.24.160.1 (WSL) in
+# preference to the real 192.168.31.230. An installer that auto-fills a wrong
+# answer is worse than one that asks, because nobody checks a filled field.
+#
+# The interface carrying the default route is the one that can actually carry
+# a browser to this console, so that is the one offered.
+function Get-SecVaultCandidateIps {
+    $all = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -notmatch '^(127\.|169\.254\.)' -and
+            $_.PrefixOrigin -ne 'WellKnown'
+        })
+
+    # Virtual switches answer on this host and are reachable from nothing else.
+    $virtualAlias = '(WSL|Hyper-V|Default Switch|vEthernet|Loopback|VirtualBox|VMware|Bluetooth|Docker)'
+    $physical = @($all | Where-Object { $_.InterfaceAlias -notmatch $virtualAlias })
+
+    $preferred = $null
+    try {
+        $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+            Sort-Object RouteMetric, ifMetric | Select-Object -First 1
+        if ($route) {
+            $preferred = ($all | Where-Object { $_.InterfaceIndex -eq $route.ifIndex } |
+                Select-Object -First 1)
+        }
+    } catch {
+        # No default route (an isolated/air-gapped server is a normal shape
+        # here). Fall through to the physical-interface list.
+    }
+
+    $ordered = @()
+    if ($preferred) { $ordered += $preferred }
+    foreach ($a in $physical) { if (-not ($ordered | Where-Object { $_.IPAddress -eq $a.IPAddress })) { $ordered += $a } }
+    foreach ($a in $all)      { if (-not ($ordered | Where-Object { $_.IPAddress -eq $a.IPAddress })) { $ordered += $a } }
+    return $ordered
+}
+
+$candidates = Get-SecVaultCandidateIps
+$detected = if ($candidates.Count -gt 0) { $candidates[0].IPAddress } else { '' }
+
+if (-not $ServerIp) {
+    Write-Host ''
+    Write-Host '  Console address' -ForegroundColor Cyan
+    Write-Host '  ---------------' -ForegroundColor Cyan
+    Write-Host '  The address people will type in a browser to reach SecVault.'
+    Write-Host '  (The database is not affected by this -- it always uses loopback.)'
+    Write-Host ''
+    if ($candidates.Count -gt 0) {
+        Write-Host '  Addresses found on this machine:'
+        $i = 0
+        foreach ($c in $candidates) {
+            $i += 1
+            $tag = if ($i -eq 1) { '  <- suggested (default route)' } else { '' }
+            Write-Host ("    [{0}] {1,-16} {2}{3}" -f $i, $c.IPAddress, $c.InterfaceAlias, $tag)
+        }
+        Write-Host ''
+    }
+    if ($Unattended) {
+        # ⛔ Unattended must never sit at a prompt nobody will answer.
+        $ServerIp = $detected
+        Write-Host "  Unattended: using $ServerIp"
+    } else {
+        $hint = if ($detected) { "[$detected]" } else { '(none detected -- type one)' }
+        $answer = Read-Host "  Address, or a number from the list, or Enter for $hint"
+        $answer = ($answer + '').Trim()
+        if (-not $answer) {
+            $ServerIp = $detected
+        } elseif ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $candidates.Count) {
+            $ServerIp = $candidates[[int]$answer - 1].IPAddress
+        } else {
+            $ServerIp = $answer
+        }
+    }
+}
+
+if (-not $ServerIp) {
+    Fail 'No console address was given and none could be detected. Re-run with -ServerIp <address>.'
+}
+
+# ⛔ VALIDATE, BECAUSE THIS IS THE FIELD THAT LOCKS PEOPLE OUT.
+# An address that is not on this machine produces a NEXTAUTH_URL no browser can
+# complete a sign-in against, and the repair lives behind that sign-in.
+$isLocal = [bool]($candidates | Where-Object { $_.IPAddress -eq $ServerIp })
+if (-not $isLocal -and $ServerIp -ne 'localhost' -and $ServerIp -notmatch '^127\.') {
+    Write-Host ''
+    Write-Host "  [WARN] $ServerIp is not an address on this machine." -ForegroundColor Yellow
+    if ($candidates.Count -gt 0) {
+        Write-Host ("         This machine answers on: {0}" -f (($candidates | ForEach-Object { $_.IPAddress }) -join ', ')) -ForegroundColor Yellow
+    }
+    Write-Host '         That is legitimate behind NAT or a load balancer, and it is also' -ForegroundColor Yellow
+    Write-Host '         exactly what a typo looks like. If it is wrong, sign-in will fail' -ForegroundColor Yellow
+    Write-Host '         with no error and the fix is behind that sign-in.' -ForegroundColor Yellow
+    Write-Host ''
+    if ($AcceptServerIp -or $Unattended) {
+        Write-Host '         Accepted (-AcceptServerIp / -Unattended).' -ForegroundColor Yellow
+    } else {
+        $ok = Read-Host '         Type YES to use it anyway, or Enter to choose again'
+        if ($ok -ne 'YES') {
+            Fail "Stopped before changing anything. Re-run and pick an address from the list, or pass -ServerIp <address> -AcceptServerIp if $ServerIp really is correct."
+        }
+    }
+}
 
 $SecVaultGitUrl = 'git@github.com:amrin78-smb/secvault.git'
 

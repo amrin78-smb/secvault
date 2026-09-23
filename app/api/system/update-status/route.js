@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.175.1': [
+    "The installer no longer demands the server address as a bare, unexplained prompt. It detects the address people will actually use to reach the console, offers it with the machine’s other addresses listed, and lets you pick one by number.",
+    "It now refuses a server address that does not exist on the machine unless you confirm it. A single mistyped digit used to be accepted silently — the install would finish and then every sign-in would bounce back to the login page with no error, with the setting that fixes it sitting behind that sign-in.",
+    "Address detection follows the interface that actually carries traffic off the machine. Picking the first address Windows lists, as the suite installer does, selects a WSL or Hyper-V virtual switch on any developer machine — an installer that pre-fills a wrong answer is worse than one that asks, because nobody re-checks a filled-in field.",
+  ],
   '2.175.0': [
     "The installer was audited end to end for the first time since v2.133.0 and had two faults that would have stopped a fresh install outright: it pointed the application at the server’s LAN address for its database connection, which a default PostgreSQL configuration refuses, and it crashed three lines before the success banner — so even a good install ended in a red error with no address, no credentials and no backup task.",
     "Re-running the installer over a working system used to generate a NEW credential encryption key, which would have made every stored firewall password permanently unreadable with no error — collection would simply start failing device by device as though the firewalls had changed their passwords. A re-run now preserves the key and backs up the settings file first.",
