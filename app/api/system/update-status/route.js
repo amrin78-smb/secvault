@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.177.0': [
+    "SecVault now requires internet access to install, and says so before it changes anything on the server. It checks it can reach GitHub and the npm registry as its very first step, so an isolated server is turned away with a clear reason instead of failing halfway through provisioning.",
+    "The installer package no longer carries the application inside it. That version could never update itself — an installation copied from a file has no link back to the repository, so the update button simply did nothing, with no error to explain it. An installation is now a real clone and updates in place, from Settings or from the update script.",
+    "The package is a folder you copy to the server, and it is now about a tenth of the size and builds in seconds.",
+    "The installer refuses to build a package that is missing a prerequisite or the repository key, rather than producing one that installs halfway and stops on a customer's server.",
+    "The fresh-install checklist now states the network requirement up front, and its troubleshooting entry for the database connection error has been corrected — that fault was the installer's own and was fixed, so the old instructions sent people to change a setting that is already right.",
+  ],
   '2.176.0': [
     "The installer now ships as a folder you copy to the server, matching how the rest of the NocVault suite is delivered: a small Install-SecVault.cmd and SecVault-Setup.exe beside the scripts and the bundled prerequisites.",
     "Building it takes seconds instead of twelve minutes. The previous single 555 MB self-extracting file needed a 750 MB working copy and over a gigabyte of memory to assemble, and twice produced a file that looked complete and was not.",

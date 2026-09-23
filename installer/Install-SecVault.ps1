@@ -7,6 +7,12 @@
     secvault repo, then provisions the database, configures .env.local,
     builds the app, and registers the NSSM services.
 
+    ⛔ THIS SERVER MUST HAVE INTERNET ACCESS. The PREREQUISITES are bundled
+    and install offline, but the APPLICATION is cloned from GitHub and its
+    dependencies come from the npm registry. That requirement is checked FIRST,
+    before anything is installed, so an air-gapped server is told at once
+    rather than after PostgreSQL, Node, Git and NSSM are already on it.
+
 .DESCRIPTION
     Written for PowerShell 5.1 (Windows Server) -- see CLAUDE.md "PowerShell
     (PS5 compatibility)". Do not introduce PS7-only syntax:
@@ -27,11 +33,23 @@
     there before running this script.
 
 .PARAMETER ServerIp
-    Optional. The address a browser uses to reach the console. Blank means
+    Optional. The address a BROWSER uses to reach the console -- it goes into
+    NEXTAUTH_URL, the certificate SAN and the closing banner. Blank means
     detect it from the default-route interface and offer it for confirmation.
-    It is NOT the database host -- that is always loopback.
-    IP address (or hostname) of this server. Used for DATABASE_URL / NEXTAUTH_URL
-    and the final success banner.
+    ⛔ It is NOT the database host: DATABASE_URL is always loopback.
+
+.PARAMETER AcceptServerIp
+    Accept a -ServerIp that is not an address on this machine, without the
+    confirmation prompt. For a server behind NAT, or one whose address is
+    added later.
+
+.PARAMETER SkipConnectivityCheck
+    Skip the raw TCP reachability PROBE -- never the internet requirement
+    itself. Only for a proxied network where the probe fails while git and npm
+    themselves work.
+
+.PARAMETER Unattended
+    Answer every prompt from its default. For a scripted or imaged deployment.
 
 .PARAMETER DbPassword
     Password to assign to the secvault_user PostgreSQL role.
@@ -96,6 +114,10 @@ param(
     # the same call the console-address setting makes in the app (409 +
     # needsConfirmation rather than a refusal).
     [switch]$AcceptServerIp,
+
+    # Skip the raw TCP reachability PROBE, never the requirement itself. Only
+    # for a proxied network where the probe fails but git and npm work.
+    [switch]$SkipConnectivityCheck,
 
     # Answer every prompt from defaults. For a scripted/imaged deployment.
     [switch]$Unattended,
@@ -408,43 +430,72 @@ $SecVaultGitUrl = 'git@github.com:amrin78-smb/secvault.git'
 # a package.json NAMING secvault, plus lib\schema.sql -- because copying an
 # arbitrary neighbouring folder into C:\Apps\SecVault would be worse than
 # cloning.
-# ⛔ TWO LAYOUTS, BOTH REAL, AND CHECKING ONLY ONE IS A SILENT FAILURE.
-#   <tree>\installer\Install-SecVault.ps1  with the source in <tree>
-#       -> the tree is the PARENT of this script's folder
-#   <folder>\installer\Install-SecVault.ps1  with the source in <folder>\app
-#       -> the tree is PARENT\app
+# ── Internet access is REQUIRED, and it is checked BEFORE anything is built ──
 #
-# The second is what installer\Build-SecVaultPackage.ps1 produces. Checking
-# only the first meant the packaged folder carried a complete, correct source
-# tree and this installer walked straight past it into the clone path -- the
-# exact failure the bundled-source support exists to remove, reintroduced by
-# a change to the package LAYOUT rather than to either piece of logic.
-$BundledRoot = $null
-$HasBundledSource = $false
-$bundledParent = Split-Path -Parent $PSScriptRoot
-foreach ($candidate in @($bundledParent, (Join-Path $bundledParent 'app'))) {
-    if (-not $candidate) { continue }
-    if (-not (Test-Path (Join-Path $candidate 'package.json'))) { continue }
-    if (-not (Test-Path (Join-Path $candidate 'lib\schema.sql'))) { continue }
+# ⛔ THIS INSTALLER CLONES ITS SOURCE AND RUNS `npm ci`, so a server with no
+# egress cannot complete an install -- by design, decided 2026-09-23. An
+# earlier build shipped the application inside the package to avoid that; it
+# was dropped because a bundled tree carries no .git, so the installation could
+# never update itself, and "cannot ever update" is a worse property for a
+# security product than "needs internet once".
+#
+# ⛔ CHECKED FIRST, NOT DISCOVERED LATE. Without this the run installs
+# PostgreSQL, Node, Git and NSSM -- minutes of work and real changes to the
+# machine -- and only then fails at the clone or at npm ci. Finding out at the
+# end what could have been known at the start is the difference between "not
+# supported here" and "a half-provisioned server".
+#
+# ⛔ A RAW TCP PROBE, because none of the tools exist yet at this point: git
+# is one of the prerequisites this step runs ahead of. Reachability is not
+# authentication -- the deploy key is proven separately, later, by an actual
+# ssh handshake.
+function Test-SecVaultEndpoint {
+    param([string]$Target, [int]$Port, [int]$TimeoutMs = 6000)
+    $client = New-Object System.Net.Sockets.TcpClient
     try {
-        $bundledPkg = Get-Content (Join-Path $candidate 'package.json') -Raw | ConvertFrom-Json
-        if ($bundledPkg.name -eq 'secvault') {
-            $BundledRoot = $candidate
-            $HasBundledSource = $true
-            break
-        }
+        $async = $client.BeginConnect($Target, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+        $client.EndConnect($async)
+        return $true
     } catch {
-        # An unreadable package.json is not a bundled tree; keep looking, and
-        # otherwise fall through to the clone, which is the path that works.
+        return $false
+    } finally {
+        $client.Close()
     }
 }
-if ($HasBundledSource) {
-    Write-Host ''
-    Write-Host "  Source: bundled with this installer ($BundledRoot)" -ForegroundColor Cyan
-    Write-Host '          No GitHub access and no deploy key are required.'
-} else {
-    Write-Host ''
-    Write-Host '  Source: will be cloned from GitHub (no bundled tree beside this script)' -ForegroundColor Cyan
+
+Write-Step 'Checking the internet access this installer requires...'
+$requiredEndpoints = @(
+    @{ Host = 'github.com';          Port = 22;  Why = 'to clone the application source' },
+    @{ Host = 'registry.npmjs.org';  Port = 443; Why = 'to install its dependencies (npm ci)' }
+)
+$unreachable = @()
+foreach ($ep in $requiredEndpoints) {
+    if (Test-SecVaultEndpoint -Target $ep.Host -Port $ep.Port) {
+        Write-Host ("    [OK] {0}:{1} reachable -- {2}" -f $ep.Host, $ep.Port, $ep.Why)
+    } else {
+        $unreachable += $ep
+        Write-Host ("    [FAIL] {0}:{1} NOT reachable -- needed {2}" -f $ep.Host, $ep.Port, $ep.Why) -ForegroundColor Red
+    }
+}
+if ($unreachable.Count -gt 0) {
+    if ($SkipConnectivityCheck) {
+        # ⛔ The switch skips the PROBE, never the requirement. A proxy can
+        # make a raw TCP test fail while git and npm work perfectly, which is
+        # the only reason this exists -- it is not a way to install offline.
+        Write-Host '    [WARN] -SkipConnectivityCheck was passed, so the install continues. If these are genuinely unreachable it will fail later, at the clone or at npm ci.' -ForegroundColor Yellow
+    } else {
+        Write-Host ''
+        Write-Host '  SecVault REQUIRES internet access to install:' -ForegroundColor Red
+        Write-Host '    github.com:22          the application source is cloned, not bundled' -ForegroundColor Red
+        Write-Host '    registry.npmjs.org:443 npm ci installs the runtime dependencies' -ForegroundColor Red
+        Write-Host ''
+        Write-Host '  Nothing has been installed or changed on this machine.' -ForegroundColor Red
+        Write-Host '  Open egress for the above and re-run. If a proxy makes the raw' -ForegroundColor Red
+        Write-Host '  connection test fail while git and npm themselves work, re-run with' -ForegroundColor Red
+        Write-Host '  -SkipConnectivityCheck.' -ForegroundColor Red
+        exit 1
+    }
 }
 
 $repoRoot = $InstallRoot
@@ -704,32 +755,12 @@ Write-Step 'Configuring SSH deploy key for GitHub...'
 
 $DeployKeySource = Join-Path $DepsDir 'secvault_deploy'
 if (-not (Test-Path $DeployKeySource)) {
-    if ($HasBundledSource) {
-        # ⛔ NOT FATAL when the source is bundled -- the key exists to clone and
-        # to pull, and there is nothing to clone. Shipping it inside a .exe
-        # handed to a customer would give whoever holds that file permanent read
-        # access to the whole private repository, and a key cannot be
-        # un-distributed. So its absence here is the DESIGNED state.
-        #
-        # ⛔ BUT THE CONSEQUENCE IS STATED, NOT SWALLOWED: without it
-        # Update-SecVault.ps1 and the in-app updater cannot 'git pull'. This
-        # installation updates by running a newer installer, and an operator who
-        # is not told that will conclude the updater is broken.
-        Write-Host '    [SKIP] No deploy key bundled, and none is needed: the source ships inside this installer.' -ForegroundColor Yellow
-        Write-Host '           ⛔ This installation therefore has NO git remote, so Settings -> Update and' -ForegroundColor Yellow
-        Write-Host '           installer\Update-SecVault.ps1 cannot pull. Update it by running a newer' -ForegroundColor Yellow
-        Write-Host '           SecVault-Setup .exe, or add a deploy key and re-run to enable in-place updates.' -ForegroundColor Yellow
-        $SkipDeployKey = $true
-    } else {
-        Write-Host '[FAIL] dependencies\secvault_deploy not found.' -ForegroundColor Red
-        Write-Host '       Obtain the SecVault deploy private key and place it at:' -ForegroundColor Red
-        Write-Host "         $DeployKeySource" -ForegroundColor Red
-        Write-Host '       (ed25519 private key, no passphrase, no file extension -- see' -ForegroundColor Red
-        Write-Host '       github.com -> amrin78-smb/secvault -> Settings -> Deploy keys)' -ForegroundColor Red
-        Write-Host '       Alternatively, build a package that BUNDLES the source with' -ForegroundColor Red
-        Write-Host '       installer\Build-SecVaultPackage.ps1, which needs no key at all.' -ForegroundColor Red
-        exit 1
-    }
+    Write-Host '[FAIL] dependencies\secvault_deploy not found.' -ForegroundColor Red
+    Write-Host '       SecVault clones its source from a private repository, so this key is' -ForegroundColor Red
+    Write-Host '       REQUIRED. Place the ed25519 private key (no passphrase, no extension) at:' -ForegroundColor Red
+    Write-Host "         $DeployKeySource" -ForegroundColor Red
+    Write-Host '       (github.com -> amrin78-smb/secvault -> Settings -> Deploy keys)' -ForegroundColor Red
+    exit 1
 }
 Write-Host '    [OK] Deploy key found in dependencies\.'
 
@@ -889,33 +920,7 @@ if (Test-Path (Join-Path $InstallRoot 'package.json')) {
     Write-Step "SecVault already present at $InstallRoot -- skipping clone. Use Update-SecVault.ps1 to pull the latest code instead of re-running this installer."
 } elseif ((Test-Path $InstallRoot) -and ((Get-ChildItem $InstallRoot -Force -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)) {
     Fail "$InstallRoot exists and is not empty, but does not look like a SecVault checkout (no package.json). Refusing to clone into it -- clear it out or choose a different -ServerIp/InstallRoot and retry."
-} elseif ($HasBundledSource) {
-    # ⛔ COPY, NOT CLONE. The tree beside this script is the exact source the
-    # package was built from, including node_modules -- which is what lets the
-    # npm ci step be skipped and the whole install run with no internet.
-    Write-Step "Installing SecVault from the bundled source ($BundledRoot)..."
-    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-
-    # robocopy, because Copy-Item -Recurse on ~20,000 files with node_modules'
-    # path depths raises a MAX_PATH failure that aborts under 'Stop'.
-    # ⛔ Exit codes BELOW 8 ARE SUCCESS (1 = copied, 2 = extras, 3 = both);
-    # treating any non-zero as failure would fail every run that did something.
-    # ⛔ The installer's own directory is EXCLUDED FROM THE SOURCE SIDE ONLY by
-    # nothing at all -- it is wanted: Update-SecVault.ps1, the TLS helper and
-    # the backup script all live there and the deployment needs them.
-    $out = Invoke-Native { & robocopy $BundledRoot $InstallRoot /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1 }
-    if ($LASTEXITCODE -ge 8) {
-        Fail "Copying the bundled source to $InstallRoot failed (robocopy exit $LASTEXITCODE). Check free disk space."
-    }
-    # ⛔ VERIFY THE COPY RATHER THAN TRUST THE EXIT CODE -- the same rule the
-    # rest of this script follows. A missing package.json here would surface
-    # much later as an npm or next failure naming nothing useful.
-    foreach ($mustExist in 'package.json', 'lib\schema.sql', 'installer\Update-SecVault.ps1') {
-        if (-not (Test-Path (Join-Path $InstallRoot $mustExist))) {
-            Fail "The bundled source copied to $InstallRoot is incomplete (missing $mustExist). Do not use this installation."
-        }
-    }
-    Write-Step 'SecVault installed from the bundled source.'
+} else {
 } else {
     Write-Step "Cloning SecVault from $SecVaultGitUrl..."
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -1238,62 +1243,20 @@ Write-Step ".env.local written to $envLocalPath"
 # -----------------------------------------------------------------------
 Write-Step 'Installing dependencies...'
 
-# ⛔ `npm ci` NEEDS registry.npmjs.org, AND CLAUDE.md NAMES AIR-GAPPED
-# NETWORKS AS THE TARGET CUSTOMER, NOT AN EDGE CASE.
-# installer\dependencies\README.txt says "no internet download required for
-# prerequisites" -- true of the prerequisites, but npm was never counted, so
-# every install has quietly required the public registry. A package built by
-# installer\Build-SecVaultPackage.ps1 ships node_modules and writes the marker
-# below, which is what makes an offline install actually possible.
-#
-# ⛔ THE MARKER MUST MATCH THIS package.json's VERSION. A node_modules tree
-# from a different build is worse than none: it resolves, it starts, and it
-# runs code that does not match the source beside it. A missing, unreadable or
-# mismatched marker falls through to the normal `npm ci` -- the safe direction,
-# because the cost is a download rather than a wrong dependency tree.
-$bundleMarker = Join-Path $repoRoot 'node_modules\.secvault-bundled'
-$bundledOk = $false
-if (Test-Path $bundleMarker) {
-    $markerVersion = ''
-    try {
-        $markerRaw = Get-Content $bundleMarker -Raw -ErrorAction Stop
-        if ($markerRaw -match '(?m)^version=(.+)$') { $markerVersion = $matches[1].Trim() }
-    } catch {
-        Write-Host "    [WARN] node_modules carries a bundle marker that could not be read; running npm ci instead." -ForegroundColor Yellow
-    }
-    $pkgVersion = ''
-    try {
-        $pkgVersion = ((Get-Content (Join-Path $repoRoot 'package.json') -Raw) | ConvertFrom-Json).version
-    } catch { }
-    if ($markerVersion -and $pkgVersion -and $markerVersion -eq $pkgVersion) {
-        $bundledOk = $true
-    } elseif ($markerVersion) {
-        Write-Host "    [WARN] Bundled node_modules is for version $markerVersion but this source is $pkgVersion -- ignoring it and running npm ci." -ForegroundColor Yellow
-    }
-}
-
-if ($bundledOk) {
-    Write-Host "    [OK] Using the node_modules bundled with this package (version $markerVersion)."
-    Write-Host '         npm ci SKIPPED -- no internet access required.'
-    # ⛔ Prove the tree is actually usable rather than merely present. A
-    # truncated extraction leaves the directory there and fails at first run
-    # with a message about a missing SWC binary that names nothing useful.
-    foreach ($mustExist in @('next\package.json', '@next\swc-win32-x64-msvc', 'pg\package.json', 'next-auth\package.json')) {
-        if (-not (Test-Path (Join-Path $repoRoot "node_modules\$mustExist"))) {
-            Fail "The bundled node_modules is incomplete (missing $mustExist). The package did not extract fully -- check free disk space and re-run."
-        }
-    }
-} else {
-    Write-Host '    Running npm ci (this needs access to registry.npmjs.org)...'
-    Push-Location $repoRoot
-    $out = Invoke-Native { & npm ci 2>&1 }
-    $out | Write-Host
-    if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        Fail "npm ci failed with exit code $LASTEXITCODE. If this server has no internet access, build the installer with installer\Build-SecVaultPackage.ps1 (it bundles node_modules) rather than installing from a bare checkout."
-    }
+# ⛔ npm ci ALWAYS RUNS, AND IT NEEDS registry.npmjs.org. An earlier build
+# shipped node_modules inside the package and skipped this when a version-
+# matched marker was present. That was dropped with the bundled source: the
+# install is online by design now, and a skip path that can never fire is a
+# guard that reads as handled and does nothing. Reachability was proven in the
+# preflight above, so a failure here is a real npm failure, not a surprise.
+Push-Location $repoRoot
+$out = Invoke-Native { & npm ci 2>&1 }
+$out | Write-Host
+if ($LASTEXITCODE -ne 0) {
     Pop-Location
+    Fail "npm ci failed with exit code $LASTEXITCODE. registry.npmjs.org answered the preflight check, so this is an npm or package problem rather than plain connectivity -- read the output above."
 }
+Pop-Location
 
 # -----------------------------------------------------------------------
 # 12. Run schema migration (tables -- as secvault_user, via node)

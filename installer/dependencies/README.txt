@@ -4,8 +4,24 @@
 
 Install-SecVault.ps1 installs its prerequisites from local files in this
 folder (no internet download required for prerequisites), the same
-convention used by the NocVault suite installer. Place the following files
-here before running Install-SecVault.ps1:
+convention used by the NocVault suite installer.
+
+⛔ THE PREREQUISITES ARE OFFLINE; THE INSTALL IS NOT.
+  Only what is listed below installs from local files. The APPLICATION
+  itself is cloned from GitHub and its dependencies are installed with
+  `npm ci`, so the target server must be able to reach:
+
+    github.com:22            to clone the source
+    registry.npmjs.org:443   to install its dependencies
+
+  Install-SecVault.ps1 probes both BEFORE it installs anything, and stops
+  with nothing changed on the machine if either is unreachable. An earlier
+  design bundled the source to avoid that; it was dropped because a bundled
+  tree carries no .git, so Settings -> Update and Update-SecVault.ps1 had
+  nothing to pull into and that installation could never update itself --
+  silently, with the update button simply doing nothing.
+
+Place the following files here before running Install-SecVault.ps1:
 
   node-v20.19.0-x64.msi         <- Node.js runtime     (required)
   postgresql-16.x-windows-x64.exe <- PostgreSQL 16     (required)
@@ -13,6 +29,12 @@ here before running Install-SecVault.ps1:
   secvault_deploy                <- SSH deploy key      (required -- see below)
   Git-2.54.0-64-bit.exe         <- Git                 (used if Git not already present)
   VC_redist.x64.exe             <- Visual C++ runtime  (installed if present; skipped if not)
+
+⛔ secvault_deploy IS NOT OPTIONAL, AND THIS FOLDER IS A CREDENTIAL.
+The repository is private and the installer clones from it, so without this
+key nothing can be installed at all. Anyone who obtains a copy of this folder
+has read access to the whole repository, permanently -- a key cannot be
+un-distributed. Distribute internally only, and ACL it.
 
 secvault_deploy is an ed25519 private key, no passphrase, no file extension --
 a GitHub deploy key for amrin78-smb/secvault (Settings > Deploy keys). The

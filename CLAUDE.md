@@ -2235,6 +2235,49 @@ pinned via SSH config, `known_hosts` pre-seeded, auth-tested before `git clone`)
 under a different profile than whoever installed. Both copies must exist — see `gotchas.md`'s Deploy
 section.
 
+### ⛔ INTERNET ACCESS IS MANDATORY, AND THE SOURCE IS NOT BUNDLED (decided 2026-09-23)
+
+The prerequisites above install offline; the APPLICATION does not. `Install-SecVault.ps1` clones
+from `github.com:22` and runs `npm ci` against `registry.npmjs.org:443`, and it PROBES BOTH WITH A
+RAW TCP CONNECT BEFORE IT INSTALLS ANYTHING — so an air-gapped server is refused with nothing
+changed on it, rather than after PostgreSQL, Node, Git and NSSM are already on the box. The probe
+is raw TCP because none of the tools exist yet at that point: git is one of the prerequisites it
+runs ahead of. `-SkipConnectivityCheck` skips the PROBE, never the requirement — a proxy can
+make a raw connect fail while git and npm work, and that is the only reason it exists.
+
+⛔ **A PACKAGE THAT SHIPPED THE SOURCE WAS BUILT, TESTED AND WITHDRAWN.** It bundled the tree
+and `node_modules` into the installer so a fresh install needed no network at all. It was dropped
+because a copied tree carries no `.git`: `Update-SecVault.ps1` and Settings → Update had nothing
+to pull into, so that installation could **never update itself** — silently, the update button
+simply doing nothing. On a firewall-security product "cannot ever update" is a worse property than
+"needs internet once", and it is the kind of failure this codebase names most often: every signal
+green, the thing itself not happening. Do not reintroduce it without solving the `.git` problem.
+
+⛔ **`secvault_deploy` IS THEREFORE REQUIRED AGAIN, AND THE PACKAGE FOLDER IS A CREDENTIAL.**
+The repo is private, so the clone cannot work without the key, and anyone holding a copy of the
+distribution folder has permanent read access to the whole repository. Internal distribution only.
+
+### The distribution folder (`installer\Build-SecVaultPackage.ps1`)
+
+Produces `dist\SecVault-Installer-v<version>\`: a self-elevating `Install-SecVault.cmd`, a small
+`SecVault-Setup.exe` that only STARTS the .cmd (no payload), a generated `README.txt`, the
+checklist, `installer\*.ps1` and `installer\dependencies\`. ⛔ **The version in the folder name
+is the INSTALLER'S.** The application comes from `origin/main` at install time, so a server built
+later gets whatever main holds then — which is the point of cloning, and is stated in the README
+so nobody reads the folder name as the version they will be running.
+
+⛔ **A BUILD THAT CANNOT NAME ITS COMMIT REFUSES TO RUN** unless `-AllowDirty` is passed: an
+artifact nobody can tie back to a commit cannot be supported when a customer reports a fault. git
+is RESOLVED, never invoked as a bare name — `& git` raises CommandNotFoundException and once
+aborted a whole build at step 1 on a machine that HAD git, in the machine PATH but not in the
+already-open shell's copy of it, which is the normal state of any console opened before a
+provisioning run.
+
+⛔ **The packager REFUSES TO SHIP a folder missing a required prerequisite, or missing the
+deploy key**, and scans the result for stray `.env*`/`.pem`/`.pfx`/`.key` files. A package missing
+a prerequisite is worse than no package: it ships, it runs, and it fails partway through
+provisioning a customer's server.
+
 ### Backup and restore (v2.133.0)
 
 `installer\Backup-SecVault.ps1` (daily `SecVaultBackup` SYSTEM task, 02:30) and

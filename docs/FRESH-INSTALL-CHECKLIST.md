@@ -73,9 +73,36 @@ Write the two numbers you chose down now — you will set them in step 5.
 | OS | Windows Server (PowerShell **5.1** — the scripts are written for it and use no PS7 syntax) |
 | Rights | Run the installer from an **elevated** PowerShell. `Install-SecVault.ps1` declares `#Requires -RunAsAdministrator`. |
 | Install path | `C:\Apps\SecVault` — **fixed**, not a parameter. NSSM path casing is load-bearing (see 7.2). |
-| Network | Inbound TCP on the console port; inbound UDP+TCP on the syslog ports. The installer creates these rules — see 6.5. |
+| Network (in) | Inbound TCP on the console port; inbound UDP+TCP on the syslog ports. The installer creates these rules — see 6.5. |
+| Network (out) | ⛔ **Mandatory.** `github.com:22` and `registry.npmjs.org:443` — see 1.2. |
 
-### 1.2 The bundled dependency binaries
+### 1.2 Internet access — mandatory, and checked before anything is installed
+
+⛔ **SecVault cannot be installed on an air-gapped server.** The prerequisites in
+`installer\dependencies\` install from local files, but the **application itself** is cloned from
+GitHub and its dependencies come from the npm registry:
+
+| Destination | Why |
+|---|---|
+| `github.com:22` | `git clone` of the private `amrin78-smb/secvault` repo, over SSH with the deploy key |
+| `registry.npmjs.org:443` | `npm ci` |
+
+`Install-SecVault.ps1` probes both with a raw TCP connect **before it installs a single
+prerequisite**, and stops with **nothing changed on the machine** if either is unreachable. Finding
+this out at the end — after PostgreSQL, Node, Git and NSSM are already on the server — is the
+difference between "not supported here" and "a half-provisioned server".
+
+⛔ **A proxy can make the raw probe fail while `git` and `npm` themselves work.** That is the only
+reason `-SkipConnectivityCheck` exists. It skips the **probe**, never the requirement: if the
+endpoints really are unreachable the install still fails, just later and less clearly.
+
+**Why the source is not bundled.** An earlier package shipped the application and `node_modules`
+inside the installer so it could run offline. It was dropped deliberately: a copied tree carries no
+`.git`, so `Update-SecVault.ps1` and Settings → Update had nothing to pull into and that
+installation could **never update itself** — with no error, the update button simply doing nothing.
+For a security product, "cannot ever update" is a worse property than "needs internet once".
+
+### 1.3 The bundled dependency binaries
 
 `Install-SecVault.ps1` installs its prerequisites **from local files**, with no internet download.
 Place these in `installer\dependencies\` next to the script before running it
@@ -96,13 +123,13 @@ which `installer\SecVault-Tls.ps1` uses to mint the certificate. `New-SelfSigned
 be used — on PS 5.1 it can only export a PFX, and node's `https.createServer` is being handed PEM.
 
 ⛔ `secvault_deploy` is an **ed25519 private key, no passphrase, no file extension**. Without it the
-installer stops at step 2 with an explicit message; the repo is private and `git clone` cannot
+installer stops at step 3 with an explicit message; the repo is private and `git clone` cannot
 authenticate any other way on a clean server.
 
 ⛔ These binaries are **not** in the git repository (`.gitignore`); only `README.txt` is tracked.
 Copy them from the NocVault-Suite distribution package rather than re-downloading, so versions match.
 
-### 1.3 Anything already holding a syslog port
+### 1.4 Anything already holding a syslog port
 
 If the server already runs a syslog collector (ManageEngine Firewall Analyzer, a Splunk forwarder,
 rsyslog-for-Windows), decide now whether it keeps 514. `SecVault-Collector` binding a port another
@@ -122,7 +149,10 @@ Every parameter:
 
 | Parameter | Default | What it does, and what to watch for |
 |---|---|---|
-| **`-ServerIp`** | *(mandatory)* | This server's IP **or hostname**. Used for `DATABASE_URL`, `NEXTAUTH_URL`, the certificate's SAN and the closing banner. ⛔ **See 7.6 — this one value is also used as the database host, which is the most likely reason a fresh install fails.** |
+| **`-ServerIp`** | *(detected)* | The address a **browser** uses to reach the console — `NEXTAUTH_URL`, the certificate SAN, the closing banner. Leave it out: the installer lists this machine's own addresses, default-route interface first, and asks you to pick. ⛔ **It is NOT the database host** — `DATABASE_URL` is always loopback. ⛔ A value that is not an address on this machine is **confirmed, not refused** (a server behind NAT is a real shape) — a one-digit typo here completes the install and then bounces every sign-in with no error anywhere, which is exactly what happened on the first real fresh-install test. |
+| `-AcceptServerIp` | off | Accept a `-ServerIp` that is not an address on this machine, without the confirmation. |
+| `-SkipConnectivityCheck` | off | Skip the reachability **probe** (see 1.2), never the requirement. |
+| `-Unattended` | off | Answer every prompt from its default. For a scripted or imaged deployment. |
 | `-DbPassword` | `NVAdmin2026Secure` | Password for the `secvault_user` PostgreSQL role. **Change it.** Alphanumeric only, deliberately: it is embedded in a combined `-ArgumentList` string, and `#`/`@`/quotes can be silently re-parsed by the BitRock installer into a *different* password than the script thinks it set. |
 | `-AppPort` | `3010` | Console port. HTTPS and the same-port plaintext→301 redirect both live here; the port does **not** change when TLS is on, so bookmarks and firewall rules keep resolving. |
 | `-SpoolDir` | `C:\Apps\SecVault\spool` | Durable syslog spool — fsync'd **before** the DB insert and replayed on restart. Must exist and have room; the installer creates it. Point it at a data volume on a busy fleet. |
@@ -164,18 +194,20 @@ in `pg_hba.conf`, restoring the original file in a `finally` whether or not the 
 
 Useful for knowing where you are when it stops.
 
-1. Bundled prerequisites: VC++ → Git → Node.js → PostgreSQL → NSSM
-2. SSH deploy key → `%USERPROFILE%\.ssh\` **and** `C:\ProgramData\SecVault\ssh\`
-3. Auth test against GitHub, then `git clone` to `C:\Apps\SecVault`
-4. `CREATE DATABASE` / `CREATE USER` / `GRANT ALL ON SCHEMA public` (all via `-h localhost`)
-5. `.env.local` written from `.env.local.example`, secrets generated
-6. `npm ci` → `node lib\migrate.js` → `lib\schema-grants.sql` → `npm run build`
-7. TLS: mint certificate, set `ENABLE_TLS`/`TLS_*`/`NEXTAUTH_URL`, choose the service entry point
-8. Register the three NSSM services
-9. Create the spool directory; add firewall rules
-10. `sc.exe start` × 3, verify they stayed running, probe `/api/health`
-11. Register the `SecVaultBackup` daily task (02:30, SYSTEM) — best effort
-12. Closing banner
+1. **Connectivity preflight** — `github.com:22` and `registry.npmjs.org:443`. ⛔ Deliberately
+   first: if it stops here, nothing on the machine has been changed.
+2. Bundled prerequisites: VC++ → Git → Node.js → PostgreSQL → NSSM
+3. SSH deploy key → `%USERPROFILE%\.ssh\` **and** `C:\ProgramData\SecVault\ssh\`
+4. Auth test against GitHub, then `git clone` to `C:\Apps\SecVault`
+5. `CREATE DATABASE` / `CREATE USER` / `GRANT ALL ON SCHEMA public` (all via `-h localhost`)
+6. `.env.local` written from `.env.local.example`, secrets generated
+7. `npm ci` → `node lib\migrate.js` → `lib\schema-grants.sql` → `npm run build`
+8. TLS: mint certificate, set `ENABLE_TLS`/`TLS_*`/`NEXTAUTH_URL`, choose the service entry point
+9. Register the three NSSM services
+10. Create the spool directory; add firewall rules
+11. `sc.exe start` × 3, verify they stayed running, probe `/api/health`
+12. Register the `SecVaultBackup` daily task (02:30, SYSTEM) — best effort
+13. Closing banner
 
 ⛔ **Both the SSH key copies are required.** `%USERPROFILE%\.ssh\` serves the admin running the
 installer by hand; `C:\ProgramData\SecVault\ssh\` serves the in-app "Update Now" button, which runs
@@ -588,48 +620,40 @@ panel validates the value (it refuses a scheme that disagrees with the transport
 a query/fragment and embedded credentials) and guards against the typo that makes the console
 unreachable. ⛔ **A restart is required either way** — NextAuth reads its options once, at startup.
 
-### 7.6 ⛔ The install fails at `node lib\migrate.js` with a `pg_hba.conf` error
-
-Symptom, at step 12 of the install:
+### 7.6 ⛔ A `pg_hba.conf` error at `node lib\migrate.js`
 
 ```
 error: no pg_hba.conf entry for host "192.168.7.69", user "secvault_user", database "secvault"
 [FATAL] Schema migration failed with exit code 1.
 ```
 
-**Cause.** `Install-SecVault.ps1` builds `DATABASE_URL` as
-`postgresql://secvault_user:<pw>@<-ServerIp>:5432/secvault` — using the **LAN address you passed
-for the console**, not loopback. Every `psql` call the installer itself makes uses `-h localhost`
-and therefore succeeds; only the application's own connection uses the LAN address. A default
-PostgreSQL `pg_hba.conf` admits `127.0.0.1/32` and `::1/128` and nothing else.
+⛔ **THIS WAS THE INSTALLER'S OWN BUG AND IT IS FIXED — if you see it now, the cause is
+different.** `Install-SecVault.ps1` used to build `DATABASE_URL` from `-ServerIp`, i.e. the **LAN
+address you gave for the console**, while a default `pg_hba.conf` admits `127.0.0.1/32` and
+`::1/128` and nothing else. Every `psql` call the installer itself makes uses `-h localhost` and
+therefore succeeded; only the application's own connection used the LAN address, so the failure
+arrived late and pointed at the wrong thing. It now writes `$DbHost = '127.0.0.1'` unconditionally,
+and all three services run on this box so loopback is also the correct answer. `SERVER_IP` and
+`NEXTAUTH_URL` keep the LAN address — that is the **console's** address, a different question.
 
-Every sibling NocVault product uses `@localhost:5432`, and CryptoVault carries a separate `-DbHost`
-parameter defaulting to `127.0.0.1` with the comment that it exists *"to prevent the exact 'no
-pg_hba.conf entry for host ...' failure"* — and notes it is **not** the same value as `-ServerIp`.
-
-**This is a loud failure, not a silent one** — the installer stops with `[FATAL]`. Two fixes:
-
-*Preferred — point the app at loopback and leave PostgreSQL closed:*
+**So on a current installer this error means PostgreSQL is not admitting loopback**, which happens
+when PostgreSQL was pre-installed here (see 0.1) with a hardened or replaced `pg_hba.conf`. Check
+it, and note the installer verifies the connection itself before going near `migrate.js`:
 
 ```powershell
-sc.exe stop SecVault-App
-sc.exe stop SecVault-Engine
-sc.exe stop SecVault-Collector
-# In C:\Apps\SecVault\.env.local, change the HOST portion of DATABASE_URL only:
-#   postgresql://secvault_user:<pw>@127.0.0.1:5432/secvault
-# Leave SERVER_IP and NEXTAUTH_URL on the LAN address -- they are the CONSOLE's
-# address and have nothing to do with the database.
-cd C:\Apps\SecVault; node lib\migrate.js
-sc.exe start SecVault-Engine; sc.exe start SecVault-Collector; sc.exe start SecVault-App
+Select-String -Path 'C:\Program Files\PostgreSQL\16\data\pg_hba.conf' -Pattern '^host'
+& 'C:\Program Files\PostgreSQL\16\bin\psql.exe' -U secvault_user -h 127.0.0.1 -d secvault -c 'SELECT 1'
+Select-String -Path C:\Apps\SecVault\.env.local -Pattern '^DATABASE_URL='
 ```
 
-*Alternative — widen `pg_hba.conf`:* add a host line for the server's own subnet with
-`scram-sha-256` and reload PostgreSQL. ⛔ **Only do this knowingly**: it also exposes
-`claude_readonly` / `nocvault_readonly` (see 6.7), and their password is in the repository.
+⛔ **Widening `pg_hba.conf` is not the fix here and carries its own cost**: it also exposes
+`claude_readonly` / `nocvault_readonly` (see 6.7), whose password is in the repository. Admit
+loopback rather than a subnet.
 
-If the installer already reached this point, everything before it — dependencies, clone, database,
-`.env.local`, secrets — completed successfully. Fix the URL and resume from `node lib\migrate.js`;
-do not re-run the whole installer, which would generate a **new `CREDENTIAL_KEY`**.
+If the installer did reach this point, everything before it — prerequisites, clone, database,
+`.env.local`, secrets — completed. Fix the connection and resume from `node lib\migrate.js`;
+do **not** re-run the whole installer, which would generate a **new `CREDENTIAL_KEY`** and make
+every already-stored firewall credential undecryptable.
 
 ### 7.7 TLS did not come up
 

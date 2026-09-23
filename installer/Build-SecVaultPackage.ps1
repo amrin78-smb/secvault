@@ -1,51 +1,47 @@
 ﻿<#
 .SYNOPSIS
-    Builds the SecVault distribution FOLDER an operator copies to a server.
+    Builds the SecVault installer distribution FOLDER.
 
 .DESCRIPTION
     Produces dist\SecVault-Installer-v<version>\ :
 
         Install-SecVault.cmd      double-click; elevates, then runs the installer
         SecVault-Setup.exe        the same, for operators who expect an .exe
+        README.txt                generated, including the internet requirement
         installer\*.ps1           installer, updater, backup, restore, TLS helper
-        installer\dependencies\   the bundled prerequisite installers
-        app\                      the application source, including node_modules
+        installer\dependencies\   prerequisite installers + the git deploy key
 
-    ⛔ A FOLDER, NOT A SINGLE SELF-EXTRACTING .exe, AND THE REASON IS MEASURED.
-    The previous design embedded a ~500 MB payload as a managed resource inside
-    a compiled stub. It worked, and it cost 555 MB, ~12 minutes, a 750 MB
-    staging copy and a csc process at 1.4 GB working set -- and TWO consecutive
-    builds were killed by the host for memory pressure, one of them leaving a
-    555 MB file 436 bytes short of a valid assembly that threw
-    BadImageFormatException on load. An artifact that looks finished and is not
-    is the worst thing a release step can produce.
+    ⛔ THE APPLICATION SOURCE IS NOT IN HERE. The installer CLONES it, and then
+    runs `npm ci`, so a target server MUST have internet access. That is a
+    deliberate decision (2026-09-23), and it reverses an earlier design that
+    shipped the source and node_modules inside the package.
 
-    It is also the shape the NocVault suite already ships
-    (C:\NocVault-Suite-v1.2): scripts and small launchers beside a
-    dependencies\ directory. Following it costs nothing and gains consistency.
+    Why it was reversed: a bundled tree carries no .git, so
+    Update-SecVault.ps1 and Settings -> Update had nothing to pull into and
+    that installation could NEVER update itself. For a firewall-security
+    product, "can never update" is a worse property than "needs internet once",
+    and it fails silently -- the update button simply does nothing.
 
-    ⛔ WHAT THIS DOES DIFFERENTLY FROM THE SUITE, DELIBERATELY: the suite
-    `git clone`s each app at install time, so it needs network access and a
-    credential for a private repo. This ships app\ inside the folder, so an
-    install needs neither -- CLAUDE.md names segmented and air-gapped networks
-    as the TARGET customer, not an edge case. Install-SecVault.ps1 detects a
-    bundled tree and installs from it.
+    ⛔ THE REQUIREMENT IS ENFORCED EARLY, NOT DISCOVERED LATE.
+    Install-SecVault.ps1 probes github.com:22 and registry.npmjs.org:443 BEFORE
+    installing anything, so an air-gapped server is told at once rather than
+    after PostgreSQL, Node, Git and NSSM have been installed.
 
-    ⛔ NO DEPLOY KEY IS INCLUDED unless you put one in dependencies\ yourself.
-    Anyone holding a copy would have permanent read access to the private
-    repository, and a key cannot be un-distributed. The consequence -- no git
-    remote, so no in-place update -- is printed by the installer and written
-    into the folder's README rather than left to be discovered.
+    ⛔ THE DEPLOY KEY IS REQUIRED and travels in this folder. The repository is
+    private, so the clone cannot work without it. That makes this folder
+    SENSITIVE: anyone holding a copy has read access to the whole repository,
+    and a key cannot be un-distributed. It is for internal deployment, not for
+    handing to a customer.
+
+    Shape follows the NocVault suite (C:\NocVault-Suite-v1.2): scripts and
+    small launchers beside a dependencies\ directory.
 
 .PARAMETER OutputPath
     Folder to create. Defaults to dist\SecVault-Installer-v<version>.
 
 .PARAMETER DependenciesPath
-    Where the prerequisite installers live. Defaults to installer\dependencies.
-
-.PARAMETER IncludeNodeModules
-    Default $true. $false makes a much smaller folder that REQUIRES the target
-    to reach registry.npmjs.org.
+    Where the prerequisite installers and the deploy key live. Defaults to
+    installer\dependencies.
 
 .PARAMETER AllowDirty
     Build from a working tree with uncommitted changes, or one whose commit
@@ -53,10 +49,7 @@
     commit cannot be supported.
 
 .PARAMETER Zip
-    Also produce a .zip of the folder. OFF BY DEFAULT -- compressing ~750 MB is
-    the most memory-hungry thing this script can do, and it is exactly what got
-    the old design killed mid-build. Copy the folder instead, or zip it when
-    the machine is quiet.
+    Also produce a .zip of the folder.
 
 .EXAMPLE
     .\installer\Build-SecVaultPackage.ps1
@@ -65,7 +58,6 @@
 param(
     [string]$OutputPath,
     [string]$DependenciesPath,
-    [bool]$IncludeNodeModules = $true,
     [switch]$AllowDirty,
     [switch]$SkipDependencyCheck,
     [switch]$Zip
@@ -118,10 +110,10 @@ $version = $pkg.version
 if (-not $version) { Fail 'package.json has no version.' }
 
 # ⛔ git is RESOLVED, never invoked as a bare name, and its absence is not
-# fatal. `& git` raises CommandNotFoundException when it cannot be resolved,
-# and that once aborted a whole build at step 1 on a machine where git WAS
-# installed and in the MACHINE path -- just not in the already-open shell's
-# copy of it, which is the normal state of any console opened before a
+# fatal here. `& git` raises CommandNotFoundException when it cannot be
+# resolved, and that once aborted a whole build at step 1 on a machine where
+# git WAS installed and in the MACHINE path -- just not in the already-open
+# shell's copy of it, which is the normal state of any console opened before a
 # provisioning run. Same approach as Find-SecVaultOpenSsl.
 function Find-SecVaultGit {
     foreach ($candidate in @(
@@ -158,34 +150,16 @@ Write-Note "commit  : $commit"
 
 # ⛔ An artifact that cannot be tied to a commit cannot be supported: when the
 # customer reports a fault there is no way to know what they are running.
+#
+# ⛔ AND THE VERSION IN THIS FOLDER IS ONLY THE INSTALLER'S. The application it
+# clones comes from origin/main at install time, so a server installed next
+# month gets whatever main holds then, not this build. That is the point of
+# cloning, and it is stated in the README so nobody reads the folder name as
+# the version they will be running.
 if (($dirty -or $commit -eq 'unknown') -and -not $AllowDirty) {
     Fail 'The working tree is dirty, or the commit could not be determined. Commit your changes (or install git), or pass -AllowDirty and accept an artifact that matches no commit.'
 }
 if ($dirty) { Write-Warn 'Working tree is DIRTY -- this package matches no commit.' }
-
-# -----------------------------------------------------------------------
-Write-Step 'Checking the build host matches the target'
-# -----------------------------------------------------------------------
-# ⛔ node_modules is COPIED, not reinstalled, so the tree must already be the
-# right platform. A macOS or Linux tree carries a different @next/swc binary
-# and Next fails at startup naming neither this script nor the real cause.
-if ($IncludeNodeModules) {
-    $nmPath = Join-Path $repoRoot 'node_modules'
-    if (-not (Test-Path $nmPath)) {
-        Fail "node_modules not found. Run 'npm ci' first, or pass -IncludeNodeModules:`$false."
-    }
-    if (-not (Test-Path (Join-Path $nmPath '@next\swc-win32-x64-msvc'))) {
-        Fail "node_modules does not contain @next/swc-win32-x64-msvc, so it was not installed on Windows x64. Re-run 'npm ci' on a Windows x64 host, or pass -IncludeNodeModules:`$false."
-    }
-    $nodeV = Invoke-Native { & node -v 2>$null }
-    if ($LASTEXITCODE -eq 0 -and $nodeV) {
-        $nodeV = ($nodeV | Select-Object -First 1).ToString().Trim()
-        Write-Note "node on this host : $nodeV"
-        if ($nodeV -notlike 'v20.*') {
-            Write-Warn "node_modules was installed under $nodeV but the bundled runtime is Node 20."
-        }
-    }
-}
 
 # -----------------------------------------------------------------------
 Write-Step 'Verifying the prerequisite bundle'
@@ -194,11 +168,15 @@ if (-not $DependenciesPath) { $DependenciesPath = Join-Path $PSScriptRoot 'depen
 if (-not (Test-Path $DependenciesPath)) { Fail "Dependencies folder not found: $DependenciesPath" }
 
 # Patterns, not exact names: the versions move, the roles do not.
+# ⛔ THE DEPLOY KEY IS REQUIRED. The repository is private and the installer
+# clones from it, so a package without the key cannot install anything. It was
+# optional while the source was bundled; it is not optional now.
 $required = @(
     @{ Role = 'Node.js runtime';      Pattern = 'node-v*-x64.msi';               Required = $true },
     @{ Role = 'PostgreSQL 16';        Pattern = 'postgresql-16*windows-x64.exe'; Required = $true },
     @{ Role = 'NSSM service manager'; Pattern = 'nssm-*.zip';                    Required = $true },
     @{ Role = 'Git for Windows';      Pattern = 'Git-*-64-bit.exe';              Required = $true },
+    @{ Role = 'GitHub deploy key';    Pattern = 'secvault_deploy';               Required = $true },
     @{ Role = 'VC++ runtime';         Pattern = 'VC_redist.x64.exe';             Required = $false }
 )
 
@@ -209,7 +187,8 @@ foreach ($r in $required) {
         Select-Object -First 1
     if ($hit) {
         $found += $hit
-        Write-Note ("ok       {0,-22} {1} ({2:N0} MB)" -f $r.Role, $hit.Name, ($hit.Length / 1MB))
+        $size = if ($hit.Length -ge 1MB) { "{0:N0} MB" -f ($hit.Length / 1MB) } else { "{0:N0} KB" -f ($hit.Length / 1KB) }
+        Write-Note ("ok       {0,-22} {1} ({2})" -f $r.Role, $hit.Name, $size)
     } elseif ($r.Required) {
         $missing += $r
         Write-Host ("    MISSING  {0,-22} expected {1}" -f $r.Role, $r.Pattern) -ForegroundColor Red
@@ -224,14 +203,12 @@ if ($missing.Count -gt 0) {
         Write-Warn 'SkipDependencyCheck: building an INCOMPLETE folder that WILL fail on a clean server.'
     } else {
         Write-Host ''
-        Write-Host '  Copy them from the NocVault-Suite distribution; see' -ForegroundColor Yellow
-        Write-Host "  $DependenciesPath\README.txt for the list." -ForegroundColor Yellow
-        Fail "$($missing.Count) required prerequisite installer(s) missing from $DependenciesPath"
+        Write-Host "  See $DependenciesPath\README.txt for what belongs there." -ForegroundColor Yellow
+        Write-Host '  The prerequisite installers come from the NocVault-Suite distribution;' -ForegroundColor Yellow
+        Write-Host '  secvault_deploy is the repo deploy key (Settings -> Deploy keys).' -ForegroundColor Yellow
+        Fail "$($missing.Count) required item(s) missing from $DependenciesPath"
     }
 }
-
-$deployKey = Join-Path $DependenciesPath 'secvault_deploy'
-$hasDeployKey = Test-Path $deployKey
 
 # -----------------------------------------------------------------------
 Write-Step 'Creating the distribution folder'
@@ -254,92 +231,59 @@ if (Test-Path $OutputPath) {
     }
 }
 New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
-$appDir = Join-Path $OutputPath 'app'
 $instDest = Join-Path $OutputPath 'installer'
-
-# ⛔ NEVER PACKAGE THESE. `.env.local` holds CREDENTIAL_KEY, the database
-# password and NEXTAUTH_SECRET; certs\ holds a private key. Shipping any of them
-# turns one server's secrets into every customer's. A scan below re-checks the
-# result, because an exclusion list is only as good as the next person's edit.
-$excludeDirs = @('node_modules', '.next', '.git', 'certs', 'logs', 'spool', 'archive', 'dist', 'coverage')
-$excludeFiles = @('.env.local', '.env', '*.pfx', '*.key', '*.pem', 'secvault_deploy', 'secvault_deploy.pub')
-
-Write-Note 'copying application source...'
-# ⛔ robocopy, NOT `Get-ChildItem -Recurse | Copy-Item`: the latter enumerates
-# the WHOLE tree before any filter runs, so it walks every node_modules entry
-# just to discard it, and raises a MAX_PATH failure that aborts under 'Stop'.
-# ⛔ robocopy exit codes BELOW 8 ARE SUCCESS (1 = copied, 2 = extras, 3 = both);
-# treating any non-zero as failure would fail every build that did something.
-$xd = @()
-foreach ($d in $excludeDirs) { $xd += (Join-Path $repoRoot $d) }
-$xd += (Join-Path $repoRoot 'installer\dependencies')
-$roboArgs = @($repoRoot, $appDir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP', '/R:1', '/W:1')
-$roboArgs += '/XD'; $roboArgs += $xd
-$roboArgs += '/XF'; $roboArgs += $excludeFiles
-Invoke-Native { & robocopy @roboArgs } | Out-Null
-if ($LASTEXITCODE -ge 8) { Fail "robocopy failed copying the source tree (exit $LASTEXITCODE)." }
-Write-Note ("  {0:N0} source files" -f (Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue).Count)
-
-if ($IncludeNodeModules) {
-    Write-Note 'copying node_modules (this takes a minute)...'
-    $nmDest = Join-Path $appDir 'node_modules'
-    Invoke-Native { & robocopy (Join-Path $repoRoot 'node_modules') $nmDest /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1 } | Out-Null
-    if ($LASTEXITCODE -ge 8) { Fail "robocopy failed copying node_modules (exit $LASTEXITCODE)." }
-    Write-Note ("  {0:N0} files" -f (Get-ChildItem $nmDest -Recurse -File -ErrorAction SilentlyContinue).Count)
-
-    # ⛔ THE MARKER IS WHAT MAKES THE OFFLINE INSTALL REAL. Install-SecVault.ps1
-    # skips `npm ci` ONLY when this file is present and its version matches the
-    # package.json beside it, so shipping node_modules without it buys nothing.
-    # The version match stops one build's tree being used against another
-    # build's source, which resolves, starts, and runs the wrong code.
-    $marker = @(
-        "# Written by installer\Build-SecVaultPackage.ps1. Do not edit.",
-        "# Install-SecVault.ps1 skips 'npm ci' when version= matches its package.json.",
-        "version=$version",
-        "commit=$commit",
-        "built=$((Get-Date).ToString('o'))"
-    ) -join "`r`n"
-    Set-Content -Path (Join-Path $nmDest '.secvault-bundled') -Value $marker -Encoding ASCII
-    Write-Note "  offline marker written (version $version)"
-}
+New-Item -ItemType Directory -Path $instDest -Force | Out-Null
 
 Write-Note 'copying the installer scripts...'
-New-Item -ItemType Directory -Path $instDest -Force | Out-Null
 Get-ChildItem $PSScriptRoot -Filter '*.ps1' -File | ForEach-Object {
     Copy-Item $_.FullName (Join-Path $instDest $_.Name) -Force
 }
 
-Write-Note 'copying the prerequisite installers...'
+Write-Note 'copying the prerequisites and the deploy key...'
 $depDest = Join-Path $instDest 'dependencies'
 New-Item -ItemType Directory -Path $depDest -Force | Out-Null
 foreach ($f in $found) { Copy-Item $f.FullName $depDest -Force }
 $readmeSrc = Join-Path $DependenciesPath 'README.txt'
 if (Test-Path $readmeSrc) { Copy-Item $readmeSrc $depDest -Force }
-if ($hasDeployKey) {
-    Copy-Item $deployKey $depDest -Force
-    Write-Warn 'secvault_deploy (a PRIVATE repo key) IS included. Do not hand this folder to a customer.'
+
+# The checklist travels with the package: it is the document the operator is
+# told to read, and a link to a repo they cannot yet clone would be useless.
+$checklist = Join-Path $repoRoot 'docs\FRESH-INSTALL-CHECKLIST.md'
+if (Test-Path $checklist) {
+    Copy-Item $checklist (Join-Path $OutputPath 'FRESH-INSTALL-CHECKLIST.md') -Force
+    Write-Note 'included docs\FRESH-INSTALL-CHECKLIST.md'
 }
 
 # -----------------------------------------------------------------------
-Write-Step 'Scanning the package for secrets'
+Write-Step 'Checking what the package carries'
 # -----------------------------------------------------------------------
-# ⛔ THIS IS THE POINT OF THE EXCLUSION LIST, NOT A DUPLICATE OF IT. The list
-# above is what we MEANT to exclude; this is what actually landed. Handing a
-# folder to somebody is irreversible, so the check runs against the result.
+# ⛔ THE DEPLOY KEY IS SUPPOSED TO BE HERE, AND THAT MAKES THIS FOLDER
+# SENSITIVE. It is stated loudly at build time rather than only in a README,
+# because the person who builds it is the person who decides where it goes.
+$keyInPackage = Test-Path (Join-Path $depDest 'secvault_deploy')
+if ($keyInPackage) {
+    Write-Host '    This folder contains secvault_deploy, a PRIVATE repository key.' -ForegroundColor Yellow
+    Write-Host '    Anyone who obtains it can read the whole repository, permanently.' -ForegroundColor Yellow
+    Write-Host '    Treat the folder as a credential: internal distribution only.' -ForegroundColor Yellow
+} elseif (-not $SkipDependencyCheck) {
+    Fail 'The deploy key did not reach the package, so the install could not clone. Refusing to ship it.'
+}
+
+# ⛔ Nothing else secret may ride along. The app source is not copied at all
+# now, so there is no .env.local to leak -- but the check stays, because the
+# next person to add a copy step will not remember that.
 $leaks = @()
-Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch '\\node_modules\\' } | ForEach-Object {
-        $n = $_.Name
-        if ($n -eq '.env.local' -or $n -eq '.env' -or $n -eq 'secvault_deploy' -or
-            $n -like '*.pem' -or $n -like '*.pfx' -or $n -like '*.key') {
-            $leaks += $_.FullName.Substring($OutputPath.Length)
-        }
+Get-ChildItem $OutputPath -Recurse -File -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    $n = $_.Name
+    if ($n -eq '.env.local' -or $n -eq '.env' -or $n -like '*.pem' -or $n -like '*.pfx' -or $n -like '*.key') {
+        $leaks += $_.FullName.Substring($OutputPath.Length)
     }
+}
 if ($leaks.Count -gt 0) {
     $leaks | ForEach-Object { Write-Host "    LEAK  $_" -ForegroundColor Red }
-    Fail "$($leaks.Count) secret-bearing file(s) reached the package. Refusing to ship it."
+    Fail "$($leaks.Count) unexpected secret-bearing file(s) reached the package. Refusing to ship it."
 }
-Write-Note 'no secret-bearing files in the package.'
+Write-Note 'no unexpected secret-bearing files.'
 
 # -----------------------------------------------------------------------
 Write-Step 'Writing the launchers'
@@ -363,8 +307,11 @@ if errorlevel 1 (
 
 echo.
 echo  ===============================================================
-echo    SecVault Setup   version $version   commit $commit
+echo    SecVault Setup   installer $version   commit $commit
 echo  ===============================================================
+echo.
+echo  This server needs internet access: the application is cloned from
+echo  GitHub and its dependencies are installed with npm.
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\Install-SecVault.ps1" %*
@@ -379,7 +326,7 @@ Set-Content -Path (Join-Path $OutputPath 'Install-SecVault.cmd') -Value $cmdText
 
 # A small .exe beside it for operators who expect one. It carries NO payload --
 # it only starts the .cmd -- so it compiles in about a second and costs no
-# memory, unlike the embedded-resource design this replaced.
+# memory, unlike the 555 MB embedded-resource design this replaced.
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (Test-Path $csc) {
     $stub = @'
@@ -418,31 +365,23 @@ static class SecVaultSetup {
     Write-Warn 'csc.exe not found; shipping Install-SecVault.cmd without an .exe launcher.'
 }
 
-# ⛔ A DEPLOY KEY DOES NOT MAKE IN-PLACE UPDATES WORK, AND SAYING SO WOULD BE
-# A DOCUMENTED CONTROL THAT DOES NOT EXIST. This README used to claim that a
-# bundled key enabled Settings -> Update. It does not: $excludeDirs drops
-# .git, so a packaged installation has NO REPOSITORY AT ALL, and
-# Update-SecVault.ps1 step 3 is Already up to date.. A key without a repo
-# to pull into changes nothing. The key is still worth shipping internally --
-# it is what a later Reinitialized existing Git repository in C:/Users/amrin/Documents/Nocvault/secvault/.git// would need -- but on its own it
-# buys no update path, and an operator told otherwise finds out when they need
-# the update most.
-$updateLine = if ($hasDeployKey) {
-    "  A deploy key IS included -- do not hand this folder to a customer.
-  It does NOT by itself enable in-place updates: this package ships no
-  .git directory, so there is no repository for Update-SecVault.ps1 to
-  pull into. Update by running a newer copy of this installer folder,
-  or clone the repo over the install and then use the updater."
-} else {
-    "  No deploy key is included, and this package ships no .git directory,
-  so the installation has no repository to pull into: Settings -> Update
-  and installer\Update-SecVault.ps1 cannot fetch a new version.
-  Update it by running a newer copy of this installer folder."
-}
-
 $readmeText = @"
-SecVault $version   (commit $commit)
+SecVault installer $version   (built from commit $commit)
 ===============================================================
+
+⛔ THIS SERVER MUST HAVE INTERNET ACCESS.
+  The application is CLONED at install time and its dependencies are
+  installed with npm. Without egress the install cannot complete, and
+  it will tell you so BEFORE it changes anything on the machine.
+
+  Required:
+    github.com:22            to clone the application
+    registry.npmjs.org:443   to install its dependencies
+
+⛔ THIS FOLDER IS A CREDENTIAL.
+  installer\dependencies\secvault_deploy is a private repository key.
+  Anyone who obtains this folder can read the whole repository, and a
+  key cannot be un-distributed. Internal distribution only.
 
 TO INSTALL
   Copy this WHOLE FOLDER to the server, then run Install-SecVault.cmd
@@ -451,23 +390,20 @@ TO INSTALL
   It offers this machine's own addresses for the console and lets you
   pick one from a list -- you do not need to know it in advance.
 
-WHAT IS IN HERE
-  app\                      the application, including node_modules
-  installer\                installer, updater, backup, restore, TLS helper
-  installer\dependencies\   Node, PostgreSQL, NSSM, Git, VC++ runtime
-
-OFFLINE
-  Nothing here needs the internet: the application and all of its
-  dependencies are included.
+WHICH VERSION YOU GET
+  $version is the version of THIS INSTALLER. The application comes from
+  the main branch at the moment you install, so a server built later
+  gets whatever main holds then.
 
 UPDATES
-$updateLine
+  This installs a real git clone, so Settings -> Update and
+  installer\Update-SecVault.ps1 both work and pull in place.
 
 UNATTENDED
   Install-SecVault.cmd -ServerIp 10.0.0.10 -SyslogPorts 514 -Unattended
 
 BEFORE THE FIRST RUN
-  Read app\docs\FRESH-INSTALL-CHECKLIST.md -- section 0 covers two
+  Read FRESH-INSTALL-CHECKLIST.md in this folder -- section 0 covers two
   decisions that are awkward to reverse afterwards (where PostgreSQL
   keeps its data, and syslog sizing).
 "@
@@ -484,15 +420,10 @@ $mustHave = @(
     'README.txt',
     'installer\Install-SecVault.ps1',
     'installer\Update-SecVault.ps1',
-    'app\package.json',
-    'app\lib\schema.sql',
-    'app\services\engine-worker.js'
+    'installer\SecVault-Tls.ps1',
+    'installer\Backup-SecVault.ps1',
+    'installer\Restore-SecVault.ps1'
 )
-if ($IncludeNodeModules) {
-    $mustHave += 'app\node_modules\.secvault-bundled'
-    $mustHave += 'app\node_modules\next\package.json'
-    $mustHave += 'app\node_modules\@next\swc-win32-x64-msvc'
-}
 $absent = @()
 foreach ($m in $mustHave) { if (-not (Test-Path (Join-Path $OutputPath $m))) { $absent += $m } }
 if (-not $SkipDependencyCheck) {
@@ -513,8 +444,6 @@ $total = Get-ChildItem $OutputPath -Recurse -File -Force -ErrorAction SilentlyCo
 Write-Note ("{0:N0} files, {1:N0} MB" -f $total.Count, ($total.Sum / 1MB))
 
 if ($Zip) {
-    # ⛔ Off by default: compressing ~750 MB is the most memory-hungry thing
-    # here, and it is what got the previous design killed mid-build twice.
     Write-Step 'Compressing (requested with -Zip)'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipPath = "$OutputPath.zip"
@@ -528,12 +457,15 @@ Write-Host ''
 Write-Host '===============================================================' -ForegroundColor Green
 Write-Host '  Package built' -ForegroundColor Green
 Write-Host '===============================================================' -ForegroundColor Green
-Write-Host ("  folder   : {0}" -f $OutputPath)
-Write-Host ("  size     : {0:N0} MB in {1:N0} files" -f ($total.Sum / 1MB), $total.Count)
-Write-Host ("  version  : {0}   commit {1}{2}" -f $version, $commit, $(if ($dirty) { ' (DIRTY)' } else { '' }))
-Write-Host ("  offline  : {0}" -f $(if ($IncludeNodeModules) { 'yes -- no npm registry needed' } else { 'NO -- the target must reach registry.npmjs.org' }))
-Write-Host ("  updates  : {0}" -f $(if ($hasDeployKey) { 'in-place (deploy key included -- internal use only)' } else { 'by running a newer installer folder (no deploy key)' }))
+Write-Host ("  folder    : {0}" -f $OutputPath)
+Write-Host ("  size      : {0:N0} MB in {1:N0} files" -f ($total.Sum / 1MB), $total.Count)
+Write-Host ("  installer : {0}   commit {1}{2}" -f $version, $commit, $(if ($dirty) { ' (DIRTY)' } else { '' }))
+Write-Host '  app source: CLONED at install time -- the target needs internet' -ForegroundColor White
+Write-Host '  updates   : in place (a real git clone, so the updater works)'
 Write-Host ''
+if ($keyInPackage) {
+    Write-Host '  ⛔ Contains a private repository key. Internal distribution only.' -ForegroundColor Yellow
+    Write-Host ''
+}
 Write-Host '  Copy the WHOLE folder to the server and run Install-SecVault.cmd.' -ForegroundColor White
-Write-Host '  It elevates itself and offers the server address from a list.' -ForegroundColor White
 Write-Host ''
