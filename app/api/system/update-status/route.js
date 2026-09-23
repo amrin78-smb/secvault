@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.175.0': [
+    "The installer was audited end to end for the first time since v2.133.0 and had two faults that would have stopped a fresh install outright: it pointed the application at the server’s LAN address for its database connection, which a default PostgreSQL configuration refuses, and it crashed three lines before the success banner — so even a good install ended in a red error with no address, no credentials and no backup task.",
+    "Re-running the installer over a working system used to generate a NEW credential encryption key, which would have made every stored firewall password permanently unreadable with no error — collection would simply start failing device by device as though the firewalls had changed their passwords. A re-run now preserves the key and backs up the settings file first.",
+    "SecVault can now be packaged as a single setup .exe that carries the application, its dependencies and the prerequisite installers, so it can be installed on a server with no internet access at all. Previously every install quietly needed the public npm registry, which the segmented networks this product is built for do not have.",
+    "Uninstall now removes what it used to leave behind: the console’s inbound firewall rule, both scheduled tasks, and the git deploy key — a decommissioned server kept a working credential to the private source repository.",
+    "Backups now verify that every table is actually present in the dump rather than only that the file is readable, and the restore no longer reports success when it restored nothing.",
+    "Device performance metrics were being collected every 30 minutes on a setting that says 15: the metric poll and the VPN poll landed on the same tick and the metric poll lost every time, reporting it only as an information line. The two schedules no longer collide.",
+  ],
   '2.174.0': [
     "Firewall change records now read as English. Palo Alto changes captured over SSH arrived as raw configuration paths; every one of them is now described in a sentence — measured across the live fleet, 573 of 573 such entries went from unreadable to named, and the Changes page overall from 77% described to 95%.",
     "Fixed a rule name that did not exist. A rule whose name contains a dot — 47 of the 1,780 rules on this fleet — was shown truncated, so the Changes page confidently named a rule nobody could find. Rule names with spaces were worse: they were reported as an unreadable path.",

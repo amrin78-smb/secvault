@@ -2428,6 +2428,19 @@ APP_PORT=3010
 
 # Database
 DATABASE_URL=postgresql://secvault_user:PASSWORD@SERVER_IP:5432/secvault
+# ⛔ DATABASE_URL's HOST IS NOT -ServerIp. It is the LOOPBACK address, because
+# a default pg_hba.conf admits 127.0.0.1/32 and ::1/128 ONLY, and nothing in
+# this repo ever widens it. All three services run on the box, so loopback is
+# also the correct answer. Writing the LAN address here makes node's first
+# connection fail with "no pg_hba.conf entry for host ..." -- verified: the
+# reference deployment's own DATABASE_URL carries NO host at all.
+# SERVER_IP / NEXTAUTH_URL keep the LAN address: that is the CONSOLE's address,
+# which is a different question.
+#
+# The postgres SUPERUSER password, generated at install. NOT used by the app --
+# only by the installer and Update-SecVault.ps1 to re-apply schema-grants.sql,
+# which needs CREATEROLE. Kept here because it exists nowhere else.
+PG_ADMIN_PASSWORD=
 
 # Auth (standalone — not shared with NocVault suite)
 NEXTAUTH_URL=http://SERVER_IP:3010
@@ -2438,6 +2451,17 @@ NEXTAUTH_SECRET=                           # Generate: openssl rand -base64 32
 # Settable from Settings -> Security, which writes it here; NextAuth reads it
 # ONCE at startup, so a change needs a SecVault-App restart and the panel says so.
 SESSION_IDLE_MINUTES=30
+
+# TLS transport (v2.112.0). ⛔ THESE ARE WHAT MAKE THE CONSOLE SPEAK HTTPS, and
+# they were absent from this list entirely -- a session reading only CLAUDE.md
+# would not know the transport is configurable from this file. server.js reads
+# them ONCE at startup. Three states, never two: active / disabled (no certs,
+# how this product shipped for its whole life) / failed (certs configured,
+# could not be loaded) -- and `failed` must never look like `disabled`.
+ENABLE_TLS=true
+TLS_CERT_PATH=                             # PEM. Blank + ENABLE_TLS=true => disabled, not failed
+TLS_KEY_PATH=                              # PEM private key; pairs with the cert
+HTTP_REDIRECT_PORT=3080                    # plain HTTP, redirect only
 
 # Credentials encryption (SEPARATE from NEXTAUTH_SECRET)
 CREDENTIAL_KEY=                            # 32-byte hex — generate at install
@@ -2455,6 +2479,17 @@ ALLOW_SELF_SIGNED_SSL=true                 # Accept self-signed certs from SMC
 FEED_POLL_INTERVAL_HOURS=6
 CONFIG_PULL_INTERVAL_HOURS=24
 NVD_API_KEY=                               # Optional — increases NVD rate limit
+# Central CVE feed (v2.137.0). ⛔ WITHOUT CVE_HUB_LICENSE_KEY THE FEED IS NOT AN
+# ERROR -- it returns notRun and is logged `skipped` WITH A REASON, because a
+# feed that simply stops appearing is indistinguishable from one that silently
+# broke. On a site whose egress cannot reach NVD this feed is the ONLY source
+# with usable version ranges, so leaving it unset there means 439 of 1,006
+# advisories can never match a device.
+CVE_HUB_LICENSE_KEY=                       # blank = feed not configured (skipped, with a reason)
+CVE_HUB_URL=                               # blank = the built-in nocvault-eol endpoint
+CVE_HUB_PUBLIC_KEY=                        # ⛔ overrides the key PINNED IN SOURCE. Only for a
+                                           # customer running their own hub: fetching the key
+                                           # from the feed's own host would verify nothing.
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup
@@ -2507,6 +2542,8 @@ SYSLOG_ROLLUP_RECENT_HOURS=1               # frequent narrow re-aggregation (+1h
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep, SLICED 6h/pass; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5
 LOG_HIT_LOOKBACK_DAYS=7                    # [log-hit] window; SHORTER than retention on purpose
+DISCOVERY_LOOKBACK_HOURS=24                 # window for "firewalls sending syslog that are not in
+                                            # the inventory" (/devices/discovered)
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -2527,6 +2564,16 @@ SMOKE_PASS=
 # the value you chose. No installer provisions it. Leave it blank unless you are
 # deliberately isolating one deployment.
 SECVAULT_LICENSE_SECRET=
+# ⛔ AND THE PRODUCT ALSO HONOURS **NETVAULT_LICENSE_SECRET** AS A FALLBACK
+# (lib/productLicense.js: SECVAULT_ || NETVAULT_ || the compiled-in literal).
+# That is deliberate -- one generator serves the whole range -- and it is a
+# TRAP ON A CO-HOSTED SERVER: NSSM passes the machine environment through, so a
+# machine-wide NETVAULT_LICENSE_SECRET set for a sibling suite app is silently
+# inherited here, and every legitimately-issued SecVault key is then refused as
+# `unreadable` with nothing naming the cause. ⛔ Adding a BLANK line for it below
+# does NOT clear it: both the Next env loader and dotenv skip a key already
+# present in process.env.
+NETVAULT_LICENSE_SECRET=
 
 # Suite integration (optional — leave blank for standalone)
 NETVAULT_URL=

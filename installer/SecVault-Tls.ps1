@@ -1,4 +1,4 @@
-<#
+﻿<#
     SecVault-Tls.ps1 — shared TLS helpers, dot-sourced by BOTH installer scripts.
 
     ⛔ ONE COPY, TWO CALLERS. Install-SecVault.ps1 and Update-SecVault.ps1 both
@@ -220,7 +220,33 @@ function Set-SecVaultEnvValue {
         $updated = $raw + $sep + $line + "`r`n"
     }
 
-    Set-Content -Path $EnvPath -Value $updated -Encoding utf8 -NoNewline
+    # ⛔ BOM-FREE UTF-8, WRITTEN VIA .NET RATHER THAN `Set-Content -Encoding utf8`.
+    # In Windows PowerShell 5.1 `-Encoding utf8` ALWAYS emits a byte-order mark
+    # (measured: the file's first three bytes become EF BB BF), and this function
+    # rewrites the WHOLE file, so one call stamps a BOM on .env.local permanently.
+    #
+    # It is harmless only by accident today: .env.local.example happens to open
+    # with a `# Server` COMMENT, so the mangled first line is one nothing parses.
+    # The moment a KEY is the first line -- a reorder, a hand-edited file, a
+    # customer's own .env.local -- that key's NAME silently becomes
+    # "﻿DATABASE_URL" and the app reads it as ABSENT. Neither the Next env
+    # loader, dotenv, nor lib/envFile.js strips a BOM, and lib/envFile.js's
+    # verify-after-write would then compare two equally-mangled copies and pass.
+    #
+    # A missing DATABASE_URL or CREDENTIAL_KEY is exactly the failure this product
+    # is worst at diagnosing: the service starts, sc.exe reports Running, and the
+    # cause is three invisible bytes. Do not "simplify" this back to Set-Content.
+    #
+    # ⛔ Convert-Path FIRST. .NET resolves a RELATIVE path against the process's
+    # own current directory, which PowerShell's Set-Location does not change --
+    # so a relative $EnvPath would write a second .env.local somewhere else and
+    # report success. The file is known to exist (checked above), so this cannot
+    # throw here.
+    $fullEnvPath = (Convert-Path -LiteralPath $EnvPath)
+    [System.IO.File]::WriteAllText(
+        $fullEnvPath,
+        $updated,
+        (New-Object System.Text.UTF8Encoding($false)))
     return $true
 }
 

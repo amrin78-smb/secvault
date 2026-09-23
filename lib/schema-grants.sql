@@ -8,6 +8,29 @@
 -- This file must be applied by a superuser (e.g. `psql -U postgres`), separately
 -- from lib/schema.sql, and its failure must never block application startup —
 -- see the best-effort handling in lib/migrate.js.
+--
+-- ⛔ FRESH INSTALL: THESE TWO ROLES SHIP WITH A PASSWORD THAT IS IN THIS FILE,
+-- IN A GIT REPOSITORY, IDENTICAL ON EVERY INSTALLATION. That is a deliberate
+-- development convenience (CLAUDE.md "Readonly Access for Diagnostics"), and on
+-- a CUSTOMER server it is a standing login to the security database.
+--
+-- What keeps it bounded, and what does not:
+--   * They are SELECT-only and granted PER TABLE -- never GRANT ... ON ALL --
+--     and device_credentials, credential_profiles, notification_channels and
+--     user_mfa are excluded, as are the admin/user password hashes (via the
+--     settings_readonly and users_readonly views below). The encrypted secrets
+--     are genuinely not reachable through these roles. That property is real.
+--   * They are NOT reachable remotely on a default PostgreSQL install, because
+--     the bundled installer's pg_hba.conf admits only 127.0.0.1/32 and ::1/128.
+--     ⛔ That is an accident of the DEFAULT, not a control this file asserts.
+--     Anyone who widens pg_hba.conf -- to reach the database from a workstation,
+--     or to make DATABASE_URL resolve against a LAN address -- exposes both
+--     roles with it, and nothing in this file or in either installer says so.
+--
+-- On a customer deployment either ALTER ROLE both roles to a local password, or
+-- DROP them; nothing the application does depends on either one. The CREATE
+-- below is guarded by IF NOT EXISTS, so a changed password SURVIVES every
+-- update -- re-running this file recreates a role only when it is absent.
 
 DO $$
 BEGIN

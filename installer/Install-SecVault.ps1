@@ -78,6 +78,19 @@ param(
     # installers in particular treat '#' as a comment delimiter in some
     # internal config paths) -- silently setting a DIFFERENT actual password
     # than what this script thinks it set, with no error at install time.
+    #
+    # ⛔ THE "ALPHANUMERIC-ONLY" RULE ABOVE WAS DOCUMENTED AND NOT ENFORCED,
+    # and both ways of breaking it fail SILENTLY rather than loudly:
+    #   - a single quote ends the string literal in
+    #     "CREATE USER secvault_user WITH PASSWORD '$DbPassword'", so the
+    #     statement errors, the step only WARNS ("may already exist") and
+    #     continues, and the install proceeds with a role whose password is
+    #     not what DATABASE_URL says it is;
+    #   - '$&' / '$`' / '$+' are .NET regex SUBSTITUTIONS in the replacement
+    #     half of -replace, so the value written into .env.local would differ
+    #     from the value handed to PostgreSQL.
+    # Refuse it at the parameter instead of discovering it at first login.
+    [ValidatePattern('^[A-Za-z0-9]{8,}$')]
     [string]$DbPassword = 'NVAdmin2026Secure',
 
     [int]$AppPort = 3010,
@@ -109,6 +122,20 @@ $ErrorActionPreference = 'Stop'
 $InstallRoot = 'C:\Apps\SecVault'
 $LogDir = 'C:\Apps\SecVault\logs'
 
+# ⛔ THE DATABASE HOST IS LOOPBACK, NOT -ServerIp, AND THAT IS A FRESH-INSTALL
+# CORRECTNESS FIX, NOT A PREFERENCE. DATABASE_URL used to be written as
+# postgresql://secvault_user:...@<ServerIp>:5432/secvault. All three services
+# run on THIS machine, so a connection to the box's own LAN address leaves and
+# re-enters through the NIC and arrives at PostgreSQL with that LAN address as
+# its source -- and a stock PostgreSQL pg_hba.conf permits exactly two hosts,
+# 127.0.0.1/32 and ::1/128. Nothing in this repo (verified: pg_hba appears in
+# no other file) ever widens it. So on a genuinely clean server every
+# connection the application makes is refused with "no pg_hba.conf entry for
+# host", starting with lib/migrate.js. Loopback needs no pg_hba edit, needs no
+# firewall rule, and does not expose 5432 to the network. SERVER_IP and
+# NEXTAUTH_URL still carry -ServerIp: they are what a BROWSER must reach.
+$DbHost = '127.0.0.1'
+
 function Write-Step {
     param([string]$Message)
     $ts = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
@@ -139,11 +166,55 @@ function Invoke-Native {
     param([Parameter(Mandatory = $true)][scriptblock]$Command)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    # ⛔ $LASTEXITCODE IS STALE, NOT EMPTY, WHEN A COMMAND NEVER RAN. If the
+    # executable inside $Command cannot be resolved (psql at a path that does
+    # not exist on this server, npm missing from a PATH this process never
+    # refreshed), PowerShell raises CommandNotFoundException -- which
+    # 'Continue' above downgrades to a printed error -- and LEAVES
+    # $LASTEXITCODE holding the previous command's value. That is almost
+    # always 0, so every caller below reads "exit code 0" and reports the step
+    # as successful when it did not happen at all: a failed read recorded as a
+    # fact, the bug class CLAUDE.md names most often, in the installer.
+    # Seeding 9009 (cmd.exe's own "command not found") makes the un-run case
+    # fail the `-ne 0` checks at every call site instead of passing them.
+    $global:LASTEXITCODE = 9009
     try {
         & $Command
     } finally {
         $ErrorActionPreference = $prevEAP
     }
+}
+
+# Upsert one KEY=VALUE inside an in-memory copy of .env.local.
+#
+# ⛔ THE REPLACEMENT IS LITERAL, NOT A -replace PATTERN. PowerShell's
+# -replace runs the RIGHT-hand side through .NET's regex substitution engine,
+# where '$&', '$`', "$'" and '$+' are all expansions -- so a password or a
+# hostname containing one would write a DIFFERENT value into .env.local than
+# the one this script handed to PostgreSQL, with nothing to notice it. A
+# MatchEvaluator returns the string verbatim. Same shape as
+# Set-SecVaultEnvValue in SecVault-Tls.ps1, kept here because .env.local is
+# written in step 10, before the TLS helpers are dot-sourced.
+#
+# ⛔ A MISSING KEY IS APPENDED, NEVER DROPPED. -replace on a key that is not
+# in the file is a silent no-op: the value simply never reaches .env.local and
+# the app falls back to a default nobody chose. Appending means template drift
+# (a key added to .env.local.example, or a re-run against an older file)
+# degrades to a correctly-written line instead of a missing one.
+function Set-EnvLine {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value
+    )
+    $pattern = '(?m)^' + [regex]::Escape($Key) + '=.*$'
+    $line = "$Key=$Value"
+    if ($Text -match $pattern) {
+        return [regex]::Replace($Text, $pattern, [System.Text.RegularExpressions.MatchEvaluator] { param($m) $line })
+    }
+    $sep = ''
+    if (-not $Text.EndsWith("`n")) { $sep = "`r`n" }
+    return $Text + $sep + $line + "`r`n"
 }
 
 # `sc.exe start`/`sc.exe stop` return as soon as the SCM accepts the
@@ -682,6 +753,15 @@ $PgBin = 'C:\Program Files\PostgreSQL\16\bin'
 if (Test-Path (Join-Path $PgBin 'psql.exe')) {
     Write-Step 'PostgreSQL already installed.'
 } else {
+    # ⛔ $PgInstaller comes from a NARROWER glob than step 1d used
+    # ('postgresql-16*windows-x64.exe' vs 'postgresql-*.exe') and is left $null
+    # when step 1d took its "already installed" branch. Start-Process with a
+    # null -FilePath throws a raw ParameterBindingValidationException, which
+    # under $ErrorActionPreference = 'Stop' ends the install with a .NET
+    # message that says nothing about PostgreSQL. Say what is actually wrong.
+    if (-not $PgInstaller) {
+        Fail "PostgreSQL is not present at $PgBin and no bundled installer matching dependencies\postgresql-16*windows-x64.exe was found. Either place one there, or -- if this server already runs PostgreSQL from a different path/version -- install PostgreSQL 16 to the default location first; every psql call below is hardcoded to $PgBin."
+    }
     Write-Step 'Installing PostgreSQL 16 from bundled installer (this can take a few minutes)...'
     $out = Start-Process -Wait -PassThru -FilePath $PgInstaller -ArgumentList `
         '--mode unattended', `
@@ -695,6 +775,21 @@ if (Test-Path (Join-Path $PgBin 'psql.exe')) {
     Write-Step 'PostgreSQL 16 installed.'
 }
 $env:Path = "$PgBin;" + $env:Path
+
+# ⛔ EVERY psql CALL BELOW IS "$PgBin\psql.exe", HARDCODED TO THE POSTGRESQL 16
+# DEFAULT PATH. If this server runs PostgreSQL from anywhere else (a 15
+# install that satisfied step 1d's PATH lookup, a non-default directory), that
+# file does not exist -- and a missing executable does not fail loudly here:
+# it raises CommandNotFoundException inside Invoke-Native, which runs at
+# 'Continue', so the script carries on. Before the $LASTEXITCODE sentinel
+# added to Invoke-Native above, every one of those steps then read the
+# PREVIOUS command's exit code and reported CREATE DATABASE / CREATE USER /
+# GRANT as successful against a database that was never touched. Prove the
+# binary exists once, here, rather than relying on the sentinel to catch it
+# five times with a less useful message each time.
+if (-not (Test-Path (Join-Path $PgBin 'psql.exe'))) {
+    Fail "psql.exe was not found at $PgBin. This script addresses PostgreSQL through that exact path for database creation, grants and the readonly roles. Install PostgreSQL 16 to the default location, or update `$PgBin in this script, and retry."
+}
 
 $PgSvcName = (Get-Service | Where-Object { $_.Name -like 'postgresql*' } | Select-Object -First 1).Name
 if (-not $PgSvcName) { $PgSvcName = 'postgresql-x64-16' }
@@ -741,6 +836,23 @@ if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
     Write-Host "[WARN] CREATE USER exited with code $LASTEXITCODE (may already exist) -- continuing." -ForegroundColor Yellow
 }
 
+# ⛔ "MAY ALREADY EXIST" IS THE DANGEROUS HALF OF THAT WARNING. CREATE USER
+# does NOTHING to an existing role's password, and DATABASE_URL further down
+# is written from $DbPassword unconditionally. So on any re-run -- or on a
+# cluster that already carried a secvault_user -- the connection string would
+# carry a password the role does not have, and every service would fail
+# authentication with an error that reads like a broken build rather than a
+# wrong password. ALTER makes this script the single source of truth for the
+# role's password, exactly as step 1d already does for the superuser, and it
+# is FATAL rather than a warning because the value is about to be baked into
+# .env.local as though it were true.
+$alterUserSql = "ALTER USER secvault_user WITH PASSWORD '$DbPassword'"
+$out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c $alterUserSql 2>&1 }
+$out | Write-Host
+if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
+    Fail "ALTER USER secvault_user failed with exit code $LASTEXITCODE -- the password about to be written into DATABASE_URL would not be the role's actual password."
+}
+
 $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -c "GRANT ALL PRIVILEGES ON DATABASE secvault TO secvault_user" 2>&1 }
 $out | Write-Host
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
@@ -762,6 +874,23 @@ if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
 
 Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
 
+# ⛔ PROVE THE APPLICATION'S OWN CREDENTIAL WORKS, AS THE APPLICATION'S OWN
+# USER, BEFORE ANYTHING DEPENDS ON IT. Everything above authenticated as the
+# POSTGRES SUPERUSER; nothing has yet shown that secvault_user can connect at
+# all. The first thing that does is `node lib/migrate.js`, several minutes and
+# one npm ci later, and it reports the failure as a node stack trace that says
+# nothing about which of the three plausible causes it was (wrong password,
+# no pg_hba entry for the host in DATABASE_URL, database not created).
+$env:PGPASSWORD = $DbPassword
+$out = Invoke-Native { & "$PgBin\psql.exe" -U secvault_user -h $DbHost -d secvault -c "SELECT 1" 2>&1 }
+$out | Write-Host
+$dbConnectOk = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1)
+Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
+if (-not $dbConnectOk) {
+    Fail "secvault_user could not connect to the secvault database on $DbHost (psql exit code $LASTEXITCODE). This is the exact connection DATABASE_URL describes, so nothing downstream can work. Check the psql output above -- 'no pg_hba.conf entry' means PostgreSQL is not accepting connections from that address; 'password authentication failed' means the role password and -DbPassword disagree."
+}
+Write-Host "    [OK] secvault_user authenticated against the secvault database on $DbHost."
+
 Write-Step 'Database and user provisioned.'
 
 # -----------------------------------------------------------------------
@@ -776,55 +905,154 @@ if (-not (Test-Path $envExamplePath)) {
     Fail ".env.local.example not found at $envExamplePath"
 }
 
-Copy-Item -Path $envExamplePath -Destination $envLocalPath -Force
+# ⛔ AN EXISTING .env.local IS NEVER OVERWRITTEN WITH THE TEMPLATE. This was
+# an unconditional `Copy-Item -Force`, and step 3 above deliberately does NOT
+# exit when it finds an existing deployment ("skipping clone") -- it carries
+# on into this step. So re-running this installer over a working SecVault, the
+# obvious thing to do after a partial failure, blanked the file and then wrote
+# a FRESH CREDENTIAL_KEY over the old one. That key is the AES-256-GCM key for
+# device_credentials and it exists nowhere else on the machine: every SMC API
+# key and SSH password already stored becomes permanently undecryptable, with
+# no error -- collection just starts failing device by device as though the
+# firewalls had changed their passwords. A new NEXTAUTH_SECRET additionally
+# invalidates every session, and the copy discarded every operator-set value
+# in the file (retention windows, licence key, TLS paths, SMOKE_*).
+#
+# Fresh install: copy the template, as before. Re-run: keep the file, back it
+# up, and upsert only the keys this script owns.
+$envExisted = Test-Path $envLocalPath
+$existingCredKey = ''
+$existingNextAuthSecret = ''
+if ($envExisted) {
+    $envBackupPath = "$envLocalPath.pre-install-" + (Get-Date).ToString('yyyyMMdd-HHmmss')
+    Copy-Item -Path $envLocalPath -Destination $envBackupPath -Force
+    $existingEnvRaw = Get-Content -Path $envLocalPath -Raw
+    if ($existingEnvRaw -match '(?m)^CREDENTIAL_KEY=(.*)$')  { $existingCredKey = $matches[1].Trim() }
+    if ($existingEnvRaw -match '(?m)^NEXTAUTH_SECRET=(.*)$') { $existingNextAuthSecret = $matches[1].Trim() }
+    Write-Host "    [OK] Existing .env.local kept in place (backed up to $envBackupPath)."
+} else {
+    Copy-Item -Path $envExamplePath -Destination $envLocalPath -Force
+}
 
 # See the $pgPassBytes comment in step 1d above: GetBytes needs a
 # pre-allocated array, not an int -- passing an int silently yields $null.
-$credKeyBytes = New-Object byte[] 32
-(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($credKeyBytes)
-$credKey = [System.BitConverter]::ToString($credKeyBytes).Replace('-', '').ToLower()
+if ($existingCredKey) {
+    $credKey = $existingCredKey
+    Write-Host '    [OK] Existing CREDENTIAL_KEY preserved -- stored device credentials stay decryptable.'
+} else {
+    $credKeyBytes = New-Object byte[] 32
+    (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($credKeyBytes)
+    $credKey = [System.BitConverter]::ToString($credKeyBytes).Replace('-', '').ToLower()
+}
 
-$secretBytes = New-Object byte[] 32
-(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($secretBytes)
-$nextAuthSecret = [Convert]::ToBase64String($secretBytes)
+if ($existingNextAuthSecret) {
+    $nextAuthSecret = $existingNextAuthSecret
+    Write-Host '    [OK] Existing NEXTAUTH_SECRET preserved -- signed-in sessions survive.'
+} else {
+    $secretBytes = New-Object byte[] 32
+    (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($secretBytes)
+    $nextAuthSecret = [Convert]::ToBase64String($secretBytes)
+}
 
-$databaseUrl = "postgresql://secvault_user:$DbPassword@$ServerIp:5432/secvault"
+$databaseUrl = "postgresql://secvault_user:$DbPassword@${DbHost}:5432/secvault"
 $nextAuthUrl = "http://$($ServerIp):$($AppPort)"
 
 $envContent = Get-Content -Path $envLocalPath -Raw
 
-$envContent = $envContent -replace '(?m)^SERVER_IP=.*$', "SERVER_IP=$ServerIp"
-$envContent = $envContent -replace '(?m)^APP_PORT=.*$', "APP_PORT=$AppPort"
-$envContent = $envContent -replace '(?m)^DATABASE_URL=.*$', "DATABASE_URL=$databaseUrl"
-$envContent = $envContent -replace '(?m)^NEXTAUTH_URL=.*$', "NEXTAUTH_URL=$nextAuthUrl"
-$envContent = $envContent -replace '(?m)^NEXTAUTH_SECRET=.*$', "NEXTAUTH_SECRET=$nextAuthSecret"
-$envContent = $envContent -replace '(?m)^CREDENTIAL_KEY=.*$', "CREDENTIAL_KEY=$credKey"
-$envContent = $envContent -replace '(?m)^PG_ADMIN_PASSWORD=.*$', "PG_ADMIN_PASSWORD=$PgAdminPassword"
-$envContent = $envContent -replace '(?m)^SYSLOG_SPOOL_DIR=.*$', "SYSLOG_SPOOL_DIR=$SpoolDir"
-$envContent = $envContent -replace '(?m)^SYSLOG_UDP_PORT=.*$', "SYSLOG_UDP_PORT=$SyslogPorts"
-$envContent = $envContent -replace '(?m)^SYSLOG_TCP_PORT=.*$', "SYSLOG_TCP_PORT=$SyslogPorts"
+$envContent = Set-EnvLine -Text $envContent -Key 'SERVER_IP'          -Value $ServerIp
+$envContent = Set-EnvLine -Text $envContent -Key 'APP_PORT'           -Value "$AppPort"
+$envContent = Set-EnvLine -Text $envContent -Key 'DATABASE_URL'       -Value $databaseUrl
+$envContent = Set-EnvLine -Text $envContent -Key 'NEXTAUTH_URL'       -Value $nextAuthUrl
+$envContent = Set-EnvLine -Text $envContent -Key 'NEXTAUTH_SECRET'    -Value $nextAuthSecret
+$envContent = Set-EnvLine -Text $envContent -Key 'CREDENTIAL_KEY'     -Value $credKey
+$envContent = Set-EnvLine -Text $envContent -Key 'PG_ADMIN_PASSWORD'  -Value $PgAdminPassword
+$envContent = Set-EnvLine -Text $envContent -Key 'SYSLOG_SPOOL_DIR'   -Value $SpoolDir
+$envContent = Set-EnvLine -Text $envContent -Key 'SYSLOG_UDP_PORT'    -Value $SyslogPorts
+$envContent = Set-EnvLine -Text $envContent -Key 'SYSLOG_TCP_PORT'    -Value $SyslogPorts
 
 if ($NetVaultUrl) {
-    $envContent = $envContent -replace '(?m)^NETVAULT_URL=.*$', "NETVAULT_URL=$NetVaultUrl"
+    $envContent = Set-EnvLine -Text $envContent -Key 'NETVAULT_URL' -Value $NetVaultUrl
 }
 
 Set-Content -Path $envLocalPath -Value $envContent -NoNewline
+
+# ⛔ VERIFY WHAT WAS ACTUALLY WRITTEN. A -replace that matches nothing is not
+# an error in PowerShell -- it returns the string unchanged -- so a key that
+# drifted out of .env.local.example would have been silently dropped here and
+# the first symptom would be the app failing to decrypt a credential or
+# NextAuth refusing to start. Set-EnvLine now appends a missing key rather
+# than losing it, and this read-back proves the three secrets that cannot be
+# regenerated from anywhere else are present in the file on disk.
+$writtenEnv = Get-Content -Path $envLocalPath -Raw
+foreach ($mustHave in @('CREDENTIAL_KEY', 'NEXTAUTH_SECRET', 'DATABASE_URL', 'PG_ADMIN_PASSWORD')) {
+    if ($writtenEnv -notmatch ('(?m)^' + [regex]::Escape($mustHave) + '=\S')) {
+        Fail "$mustHave is missing or empty in $envLocalPath after writing it. Refusing to continue -- an install that proceeds from here looks healthy and cannot decrypt a credential or sign anyone in."
+    }
+}
 
 Write-Step ".env.local written to $envLocalPath"
 
 # -----------------------------------------------------------------------
 # 11. npm ci
 # -----------------------------------------------------------------------
-Write-Step 'Installing dependencies (npm ci)...'
+Write-Step 'Installing dependencies...'
 
-Push-Location $repoRoot
-$out = Invoke-Native { & npm ci 2>&1 }
-$out | Write-Host
-if ($LASTEXITCODE -ne 0) {
-    Pop-Location
-    Fail "npm ci failed with exit code $LASTEXITCODE."
+# ⛔ `npm ci` NEEDS registry.npmjs.org, AND CLAUDE.md NAMES AIR-GAPPED
+# NETWORKS AS THE TARGET CUSTOMER, NOT AN EDGE CASE.
+# installer\dependencies\README.txt says "no internet download required for
+# prerequisites" -- true of the prerequisites, but npm was never counted, so
+# every install has quietly required the public registry. A package built by
+# installer\Build-SecVaultPackage.ps1 ships node_modules and writes the marker
+# below, which is what makes an offline install actually possible.
+#
+# ⛔ THE MARKER MUST MATCH THIS package.json's VERSION. A node_modules tree
+# from a different build is worse than none: it resolves, it starts, and it
+# runs code that does not match the source beside it. A missing, unreadable or
+# mismatched marker falls through to the normal `npm ci` -- the safe direction,
+# because the cost is a download rather than a wrong dependency tree.
+$bundleMarker = Join-Path $repoRoot 'node_modules\.secvault-bundled'
+$bundledOk = $false
+if (Test-Path $bundleMarker) {
+    $markerVersion = ''
+    try {
+        $markerRaw = Get-Content $bundleMarker -Raw -ErrorAction Stop
+        if ($markerRaw -match '(?m)^version=(.+)$') { $markerVersion = $matches[1].Trim() }
+    } catch {
+        Write-Host "    [WARN] node_modules carries a bundle marker that could not be read; running npm ci instead." -ForegroundColor Yellow
+    }
+    $pkgVersion = ''
+    try {
+        $pkgVersion = ((Get-Content (Join-Path $repoRoot 'package.json') -Raw) | ConvertFrom-Json).version
+    } catch { }
+    if ($markerVersion -and $pkgVersion -and $markerVersion -eq $pkgVersion) {
+        $bundledOk = $true
+    } elseif ($markerVersion) {
+        Write-Host "    [WARN] Bundled node_modules is for version $markerVersion but this source is $pkgVersion -- ignoring it and running npm ci." -ForegroundColor Yellow
+    }
 }
-Pop-Location
+
+if ($bundledOk) {
+    Write-Host "    [OK] Using the node_modules bundled with this package (version $markerVersion)."
+    Write-Host '         npm ci SKIPPED -- no internet access required.'
+    # ⛔ Prove the tree is actually usable rather than merely present. A
+    # truncated extraction leaves the directory there and fails at first run
+    # with a message about a missing SWC binary that names nothing useful.
+    foreach ($mustExist in @('next\package.json', '@next\swc-win32-x64-msvc', 'pg\package.json', 'next-auth\package.json')) {
+        if (-not (Test-Path (Join-Path $repoRoot "node_modules\$mustExist"))) {
+            Fail "The bundled node_modules is incomplete (missing $mustExist). The package did not extract fully -- check free disk space and re-run."
+        }
+    }
+} else {
+    Write-Host '    Running npm ci (this needs access to registry.npmjs.org)...'
+    Push-Location $repoRoot
+    $out = Invoke-Native { & npm ci 2>&1 }
+    $out | Write-Host
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Fail "npm ci failed with exit code $LASTEXITCODE. If this server has no internet access, build the installer with installer\Build-SecVaultPackage.ps1 (it bundles node_modules) rather than installing from a bare checkout."
+    }
+    Pop-Location
+}
 
 # -----------------------------------------------------------------------
 # 12. Run schema migration (tables -- as secvault_user, via node)
@@ -901,23 +1129,41 @@ Write-Step 'Configuring TLS...'
 $appEntryPoint = "node_modules\next\dist\bin\next start -p $AppPort"
 $tlsEnabled = $false
 
+# ⛔ DOT-SOURCED UNCONDITIONALLY, NOT INSIDE THE TLS BRANCH. SecVault-Tls.ps1
+# carries Test-SecVaultResponding as well as the certificate helpers, and that
+# probe is the ONLY evidence this script ever gets that the console actually
+# serves -- "Service Running" is not "app serving", because NSSM restarts a
+# crash-looping process forever. Loading it only on the TLS path meant a
+# -EnableTls $false install (and every TLS failure that fell back to HTTP)
+# reached the success banner on service state alone. Step 18b uses it on both
+# paths now.
+#
+# Prefer the CLONED copy over the one next to this script: this installer may
+# be run from a distribution package that is older than the repo it just
+# checked out, and the helpers are the half that touches certificates.
+$tlsHelpers = Join-Path $repoRoot 'installer\SecVault-Tls.ps1'
+if (-not (Test-Path -LiteralPath $tlsHelpers)) {
+    $tlsHelpers = Join-Path $PSScriptRoot 'SecVault-Tls.ps1'
+}
+$tlsHelpersLoaded = $false
+if (Test-Path -LiteralPath $tlsHelpers) {
+    try {
+        . $tlsHelpers
+        $tlsHelpersLoaded = $true
+    } catch {
+        Write-Host "[WARN] SecVault-Tls.ps1 could not be loaded: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+if (-not $tlsHelpersLoaded) {
+    Write-Host "[WARN] SecVault-Tls.ps1 was not found or failed to load (looked in $repoRoot\installer and $PSScriptRoot). TLS cannot be enabled and the console cannot be probed -- the banner will say so rather than claiming a pass." -ForegroundColor Yellow
+}
+
 if (-not $EnableTls) {
     Write-Step "TLS: skipped (-EnableTls was `$false). The console will serve plain HTTP on port $AppPort."
+} elseif (-not $tlsHelpersLoaded) {
+    Write-Step "TLS: skipped -- SecVault-Tls.ps1 is unavailable. The console will serve plain HTTP on port $AppPort."
 } else {
-    # Prefer the CLONED copy over the one next to this script: this installer
-    # may be run from a distribution package that is older than the repo it just
-    # checked out, and the helpers are the half that touches certificates.
-    $tlsHelpers = Join-Path $repoRoot 'installer\SecVault-Tls.ps1'
-    if (-not (Test-Path -LiteralPath $tlsHelpers)) {
-        $tlsHelpers = Join-Path $PSScriptRoot 'SecVault-Tls.ps1'
-    }
-
     try {
-        if (-not (Test-Path -LiteralPath $tlsHelpers)) {
-            throw "SecVault-Tls.ps1 was not found (looked in $repoRoot\installer and $PSScriptRoot)."
-        }
-        . $tlsHelpers
-
         # ⛔ NEVER OVERWRITES AN EXISTING PAIR -- New-SecVaultCertificate returns
         # the existing one untouched. Re-running this installer over a deployment
         # that already has a real corporate certificate must not replace it with a
@@ -978,6 +1224,18 @@ Invoke-Native { & $NssmExe remove SecVault-App confirm 2>&1 } | Out-Null
 
 $out = Invoke-Native { & $NssmExe install SecVault-App node 2>&1 }
 $out | Write-Host
+# ⛔ `nssm install` FAILS IF THE SERVICE STILL EXISTS, and the `remove` above
+# is not guaranteed to have taken: a service with an open handle (services.msc
+# left open, a stopping process) goes to DELETE_PENDING instead of vanishing.
+# Nothing downstream would notice -- every `nssm set` that follows would fail
+# too, each printing to a stream the script does not read -- and the service
+# would keep running its PREVIOUS configuration, including the previous
+# AppParameters. On a TLS install that is a certificate on disk, ENABLE_TLS=true
+# in .env.local, and a service still executing `next start`, which cannot serve
+# it. Fail here, where the cause is still on screen.
+if ($LASTEXITCODE -ne 0) {
+    Fail "nssm install SecVault-App failed with exit code $LASTEXITCODE. If the service already exists, it is most likely pending deletion -- close any open Services window, confirm with 'sc.exe query SecVault-App', and re-run."
+}
 # NOT node_modules\.bin\next -- that's npm's generated POSIX shell-script
 # wrapper (`basedir=$(dirname ...)`, actual bash, not JavaScript). `node`
 # tries to parse it as JS and crashes immediately with a SyntaxError on
@@ -994,6 +1252,14 @@ $out | Write-Host
 # every single file and is plain HTTP in the browser.
 $out = Invoke-Native { & $NssmExe set SecVault-App AppParameters $appEntryPoint 2>&1 }
 $out | Write-Host
+# ⛔ THE ONE SETTING WHOSE FAILURE IS INVISIBLE. A service registered with no
+# AppParameters starts `node` with no script: the process exits immediately,
+# NSSM restarts it forever, and sc.exe reports Running the whole time. The
+# probe in step 18b would eventually catch it, but on the TLS path it would be
+# read as "HTTPS did not come up" and trigger a rollback that cannot help.
+if ($LASTEXITCODE -ne 0) {
+    Fail "nssm set SecVault-App AppParameters failed with exit code $LASTEXITCODE -- the service would start node with no script and crash-loop while reporting Running."
+}
 $out = Invoke-Native { & $NssmExe set SecVault-App AppDirectory "C:\Apps\SecVault" 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-App AppEnvironmentExtra "NODE_ENV=production" 2>&1 }
@@ -1022,6 +1288,11 @@ Invoke-Native { & $NssmExe remove SecVault-Engine confirm 2>&1 } | Out-Null
 
 $out = Invoke-Native { & $NssmExe install SecVault-Engine node 2>&1 }
 $out | Write-Host
+# Same reasoning as SecVault-App above: an install that silently did not
+# happen leaves every `nssm set` below it operating on nothing.
+if ($LASTEXITCODE -ne 0) {
+    Fail "nssm install SecVault-Engine failed with exit code $LASTEXITCODE. Check whether the service already exists ('sc.exe query SecVault-Engine') and re-run."
+}
 $out = Invoke-Native { & $NssmExe set SecVault-Engine AppParameters "services\engine-worker.js" 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-Engine AppDirectory "C:\Apps\SecVault" 2>&1 }
@@ -1052,6 +1323,12 @@ Invoke-Native { & $NssmExe remove SecVault-Collector confirm 2>&1 } | Out-Null
 
 $out = Invoke-Native { & $NssmExe install SecVault-Collector node 2>&1 }
 $out | Write-Host
+# Same reasoning again. A collector registered with no AppParameters binds
+# nothing and reports itself perfectly healthy while receiving no syslog at
+# all -- the failure shape the firewall rules below exist to avoid.
+if ($LASTEXITCODE -ne 0) {
+    Fail "nssm install SecVault-Collector failed with exit code $LASTEXITCODE. Check whether the service already exists ('sc.exe query SecVault-Collector') and re-run."
+}
 $out = Invoke-Native { & $NssmExe set SecVault-Collector AppParameters "services\collector.js" 2>&1 }
 $out | Write-Host
 $out = Invoke-Native { & $NssmExe set SecVault-Collector AppDirectory "C:\Apps\SecVault" 2>&1 }
@@ -1183,7 +1460,15 @@ $collectorRunning = Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status
 # `nssm set` truncated AppParameters to "n" and left a service that could not
 # start at all -- a safety net becoming the outage it exists to prevent. On a
 # fresh install the correct value is known here without asking anyone.
-if ($tlsEnabled -and $appRunning) {
+#
+# ⛔ THE PLAIN-HTTP PATH IS PROBED TOO, AND USED NOT TO BE. This whole block
+# was gated on $tlsEnabled, so an install run with -EnableTls $false -- or any
+# install whose TLS setup failed and fell back -- printed "SecVault installed
+# successfully" on the strength of Get-Service alone. That is precisely the
+# reading NSSM makes untrustworthy. A failed probe does not roll anything back
+# on this path (there is nothing to roll back to) but it DOES clear
+# $appRunning, so the banner reports a degraded install instead of a green one.
+if ($tlsEnabled -and $appRunning -and $tlsHelpersLoaded) {
     Write-Step 'Verifying the console answers over HTTPS...'
     if (Test-SecVaultResponding -Port $AppPort -UseHttps -TimeoutSeconds 90) {
         Write-Step "Console is answering on https://$($ServerIp):$($AppPort)"
@@ -1220,6 +1505,11 @@ if ($tlsEnabled -and $appRunning) {
             if (Test-SecVaultResponding -Port $AppPort -TimeoutSeconds 90) {
                 Write-Step 'Rolled back. The console is answering over plain HTTP; TLS is OFF.'
             } else {
+                # ⛔ The banner must not call this a success. Without clearing
+                # $appRunning, a console that answers on NEITHER transport still
+                # printed "SecVault installed successfully" because the service
+                # object said Running.
+                $appRunning = $false
                 Write-Host "[ERROR] The console is not answering after the rollback either -- check $LogDir\app-error.log." -ForegroundColor Red
             }
         } catch {
@@ -1229,22 +1519,32 @@ if ($tlsEnabled -and $appRunning) {
             # machine was actually left in.
             Write-Host "[ERROR] TLS rollback failed: $($_.Exception.Message)" -ForegroundColor Red
             $tlsEnabled = $false
+            $appRunning = $false
         }
     }
+} elseif ($appRunning -and $tlsHelpersLoaded) {
+    # The plain-HTTP case: no rollback is possible or needed, but the console
+    # still has to be shown to ANSWER before the banner claims an install.
+    Write-Step 'Verifying the console answers over HTTP...'
+    if (Test-SecVaultResponding -Port $AppPort -TimeoutSeconds 90) {
+        Write-Step "Console is answering on http://$($ServerIp):$($AppPort)"
+    } else {
+        $appRunning = $false
+        Write-Host "[ERROR] SecVault-App reports Running but the console did not answer on http://127.0.0.1:$AppPort within 90s. NSSM keeps restarting a process that crashes on startup, so 'Running' is not 'serving' -- check $LogDir\app-error.log." -ForegroundColor Red
+    }
+} elseif ($appRunning) {
+    Write-Host '[WARN] The console was NOT probed (SecVault-Tls.ps1 unavailable), so the banner below reports service state only, not that the app is serving.' -ForegroundColor Yellow
 }
 
 # -----------------------------------------------------------------------
-# 19. Success banner
+# 18c. Daily backup task
 # -----------------------------------------------------------------------
-Write-Host ''
-Write-Host '=================================================='
-# ⛔ PRINT THE SCHEME THE CONSOLE IS ACTUALLY ON. This line said
-# http:// unconditionally. Once the installer can enable TLS, a hardcoded
-# scheme is a URL that fails in the operator's browser on the very first
-# click -- and, worse, a plaintext request into a TLS listener is a protocol
-# error, not a redirect, so it fails with no explanation at all. (server.js
-# handles that case on the app port; the banner should still be right.)
-# ── Daily backup task ───────────────────────────────────────────────────────
+# ⛔ MOVED OUT OF THE BANNER SECTION. This block used to sit BETWEEN the
+# banner's opening '=====' line and the banner text itself, so its [OK]/[WARN]
+# lines printed inside the summary box -- and its leading comment had been
+# spliced into the middle of the banner's own comment, leaving two unrelated
+# explanations reading as one. Nothing functional, but the banner is the only
+# thing most operators read.
 #
 # ⛔ A SYSTEM-scheduled task, not a service and not a job inside the engine. The
 # engine runs as a limited service account; pg_dump has to write outside the
@@ -1254,7 +1554,16 @@ Write-Host '=================================================='
 # ⛔ Best effort: a machine where this cannot be registered still has a working
 # SecVault. It warns rather than failing the install, and the script can always
 # be run by hand.
-$backupScript = Join-Path $InstallDir 'installer\Backup-SecVault.ps1'
+# ⛔ $InstallDir DOES NOT EXIST IN THIS SCRIPT -- the variable is $InstallRoot.
+# Join-Path refuses a null -Path with a ParameterBindingValidationException,
+# which is TERMINATING under this script's $ErrorActionPreference = 'Stop', and
+# this line sits OUTSIDE the try below. So every install -- including a
+# completely successful one -- died here, three lines before the success
+# banner: no URL, no default-login line, no backup task, and a red .NET error
+# as the last thing the operator sees on a machine that is in fact working.
+# (Verified locally under PS 5.1: "Cannot bind argument to parameter 'Path'
+# because it is null.")
+$backupScript = Join-Path $InstallRoot 'installer\Backup-SecVault.ps1'
 if (Test-Path $backupScript) {
     try {
         $tr = 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "' + $backupScript + '"'
@@ -1271,6 +1580,17 @@ if (Test-Path $backupScript) {
     Write-Host '    [WARN] installer\Backup-SecVault.ps1 not found -- no backup task registered.' -ForegroundColor Yellow
 }
 
+# -----------------------------------------------------------------------
+# 19. Success banner
+# -----------------------------------------------------------------------
+Write-Host ''
+Write-Host '=================================================='
+# ⛔ PRINT THE SCHEME THE CONSOLE IS ACTUALLY ON. This line said
+# http:// unconditionally. Once the installer can enable TLS, a hardcoded
+# scheme is a URL that fails in the operator's browser on the very first
+# click -- and, worse, a plaintext request into a TLS listener is a protocol
+# error, not a redirect, so it fails with no explanation at all. (server.js
+# handles that case on the app port; the banner should still be right.)
 $consoleScheme = 'http'
 if ($tlsEnabled) { $consoleScheme = 'https' }
 
@@ -1287,6 +1607,15 @@ if ($appRunning -and $engineRunning -and $collectorRunning) {
         Write-Host ' TLS: OFF -- the console is serving PLAIN HTTP. Set ENABLE_TLS=true in .env.local and run installer\Update-SecVault.ps1 to turn it on.'
     }
     Write-Host ' Default login: admin / changeme (change immediately via Settings)'
+    # A SKIP IS STATED, NEVER SILENT -- the same rule .env.local.example states
+    # for this pair. Update-SecVault.ps1 runs the page-render sweep only when
+    # both are set; left blank, every future deploy logs a SKIP that nobody
+    # here was told to expect, and the deploy that ships a blank page looks
+    # exactly like the deploy that does not.
+    if ($envContent -match '(?m)^SMOKE_USER=\s*$') {
+        Write-Host ' Note: SMOKE_USER/SMOKE_PASS are unset, so the deploy-time page-render sweep will be SKIPPED on every update.'
+        Write-Host '       Set them in .env.local to a dedicated local account WITHOUT MFA to turn it on.'
+    }
 } else {
     Write-Host ' SecVault installed, but one or more services did not stay running.' -ForegroundColor Yellow
     if (-not $appRunning) {

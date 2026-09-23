@@ -65,3 +65,6 @@ certs/
 # secret in the product to the repository.
 .env.local.*.bak
 *.env.local.bak
+
+# Built installer packages (Build-SecVaultPackage.ps1). Large binaries, not source.
+dist/

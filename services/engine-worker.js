@@ -224,13 +224,36 @@ function getVpnPollIntervalMinutes() {
   return fallback;
 }
 
-function buildMinutelyCron(intervalMinutes) {
+// ⛔ `*/n` ALWAYS STARTS AT MINUTE 0, SO TWO JOBS WHOSE INTERVALS DIVIDE
+// COLLIDE ON EVERY SHARED TICK — AND ONE OF THEM SILENTLY LOSES.
+// Measured on the reference deployment 2026-09-23: the shipped defaults are
+// SNMP_POLL_INTERVAL_MINUTES=15 and VPN_POLL_INTERVAL_MINUTES=30, 15 divides
+// 30, and `[snmp-poll] vpn-session-poll is in progress — deferring this tick`
+// appeared 82 times in one log window, on every :00 and :30. Device CPU/memory
+// /session metrics were therefore polled every 30 minutes on a setting that
+// says 15, reported only as an INFO line nobody reads. That is the
+// documented-value-is-not-the-running-value bug this codebase keeps finding.
+//
+// `offsetMinutes` PHASE-SHIFTS a schedule off minute 0 by enumerating the
+// minutes explicitly (`7,22,37,52` rather than `*/15`), which keeps the
+// INTERVAL exactly as configured and documented while removing the collision.
+// ⛔ It does not and cannot remove every collision — a user is free to pick two
+// values that still meet — so the deferral logic stays as the backstop. This
+// only stops the SHIPPED DEFAULTS from colliding on every single tick.
+function buildMinutelyCron(intervalMinutes, offsetMinutes = 0) {
   let n = parseInt(intervalMinutes, 10);
   if (!Number.isInteger(n) || n < 5 || n > 59) {
     logger.warn(`Invalid cron interval minutes "${intervalMinutes}" — falling back to 30.`);
     n = 30;
   }
-  return `*/${n} * * * *`;
+  const offset = Number.isInteger(offsetMinutes) ? ((offsetMinutes % n) + n) % n : 0;
+  if (offset === 0) return `*/${n} * * * *`;
+  const minutes = [];
+  for (let m = offset; m < 60; m += n) minutes.push(m);
+  // A tail shorter than the interval would make the last gap of the hour
+  // shorter than `n`; that is inherent to any non-divisor of 60 and is true of
+  // `*/n` too, so it is accepted rather than papered over.
+  return `${minutes.join(',')} * * * *`;
 }
 
 // SNMP metric polling (added 2026-07-21, see CLAUDE.md's "SNMP Monitoring"
@@ -1594,7 +1617,11 @@ async function scheduleJobs() {
   });
 
   const snmpPollIntervalMinutes = getSnmpPollIntervalMinutes();
-  const snmpCronExpr = buildMinutelyCron(snmpPollIntervalMinutes);
+  // ⛔ OFFSET BY 7 MINUTES so the shipped defaults (snmp 15, vpn 30) stop
+  // landing on the same tick. snmp-poll is the one that moves because it is
+  // the cheaper job and the one currently LOSING every collision — see
+  // buildMinutelyCron's comment for the measurement.
+  const snmpCronExpr = buildMinutelyCron(snmpPollIntervalMinutes, 7);
   logger.info(`Scheduling [snmp-poll] with cron "${snmpCronExpr}" (every ${snmpPollIntervalMinutes}m).`);
   const snmpTask = cron.schedule(snmpCronExpr, () => {
     if (shuttingDown) return;

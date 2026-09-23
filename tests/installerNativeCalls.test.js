@@ -59,10 +59,14 @@ function scriptsWithNativeRedirects() {
 // openssl is the one worth doing first — it writes progress to stderr as a
 // matter of course, so it is the likeliest of the four to bite.
 const KNOWN_UNROUTED = new Set([
-  'Restore-SecVault.ps1:221',
+  // Restore-SecVault.ps1:221 was here and is GONE -- the v2.175.0 lifecycle
+  // audit routed that call through Invoke-Native. The list shrank, which is
+  // the only direction it is allowed to move.
+  // Uninstall-SecVault.ps1:107 and :113 were here and are GONE for the same
+  // reason. ⛔ ONE ENTRY LEFT, and it is the one the header called out as
+  // worth doing first: openssl writes key-generation progress to stderr as a
+  // matter of course, so it is the likeliest of the original four to bite.
   'SecVault-Tls.ps1:135',
-  'Uninstall-SecVault.ps1:107',
-  'Uninstall-SecVault.ps1:113',
 ]);
 
 describe('⛔ every native 2>&1 in an installer script is inside Invoke-Native', () => {

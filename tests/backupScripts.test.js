@@ -137,7 +137,31 @@ describe('⛔ a backup verifies itself while a good copy still exists', () => {
 describe('⛔ the restore is a dry run until told otherwise', () => {
   it('requires -Force to change anything', () => {
     assert.match(restore, /\[switch\]\$Force/);
-    assert.match(restore, /if \(-not \$Force\)[\s\S]{0,400}exit 0/);
+
+    // ⛔ BRACE-MATCHED, NOT A FIXED CHARACTER WINDOW. This asserted
+    // `if \(-not \$Force\)[\s\S]{0,400}exit 0` and broke the moment the block
+    // grew past 400 characters -- which it did by gaining two lines of
+    // explanation, with the guard itself completely intact. A test that fails
+    // when correct code is DOCUMENTED teaches the next person to widen the
+    // number, and the time after that to delete the test. Find the block and
+    // read what is actually in it.
+    const at = restore.indexOf('if (-not $Force)');
+    assert.ok(at !== -1, 'the dry-run gate is gone entirely');
+    const open = restore.indexOf('{', at);
+    assert.ok(open !== -1, 'the dry-run gate has no block');
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < restore.length; i += 1) {
+      if (restore[i] === '{') depth += 1;
+      else if (restore[i] === '}') {
+        depth -= 1;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    assert.ok(close !== -1, 'the dry-run gate block is unterminated');
+    const block = restore.slice(open, close);
+    assert.match(block, /\bexit 0\b/,
+      'without -Force the restore must EXIT, not fall through into a destructive path');
   });
 
   it('stops services with sc.exe, never the PowerShell cmdlets', () => {
