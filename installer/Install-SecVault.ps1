@@ -408,16 +408,34 @@ $SecVaultGitUrl = 'git@github.com:amrin78-smb/secvault.git'
 # a package.json NAMING secvault, plus lib\schema.sql -- because copying an
 # arbitrary neighbouring folder into C:\Apps\SecVault would be worse than
 # cloning.
-$BundledRoot = Split-Path -Parent $PSScriptRoot
+# ⛔ TWO LAYOUTS, BOTH REAL, AND CHECKING ONLY ONE IS A SILENT FAILURE.
+#   <tree>\installer\Install-SecVault.ps1  with the source in <tree>
+#       -> the tree is the PARENT of this script's folder
+#   <folder>\installer\Install-SecVault.ps1  with the source in <folder>\app
+#       -> the tree is PARENT\app
+#
+# The second is what installer\Build-SecVaultPackage.ps1 produces. Checking
+# only the first meant the packaged folder carried a complete, correct source
+# tree and this installer walked straight past it into the clone path -- the
+# exact failure the bundled-source support exists to remove, reintroduced by
+# a change to the package LAYOUT rather than to either piece of logic.
+$BundledRoot = $null
 $HasBundledSource = $false
-if ($BundledRoot -and (Test-Path (Join-Path $BundledRoot 'package.json')) -and
-    (Test-Path (Join-Path $BundledRoot 'lib\schema.sql'))) {
+$bundledParent = Split-Path -Parent $PSScriptRoot
+foreach ($candidate in @($bundledParent, (Join-Path $bundledParent 'app'))) {
+    if (-not $candidate) { continue }
+    if (-not (Test-Path (Join-Path $candidate 'package.json'))) { continue }
+    if (-not (Test-Path (Join-Path $candidate 'lib\schema.sql'))) { continue }
     try {
-        $bundledPkg = Get-Content (Join-Path $BundledRoot 'package.json') -Raw | ConvertFrom-Json
-        if ($bundledPkg.name -eq 'secvault') { $HasBundledSource = $true }
+        $bundledPkg = Get-Content (Join-Path $candidate 'package.json') -Raw | ConvertFrom-Json
+        if ($bundledPkg.name -eq 'secvault') {
+            $BundledRoot = $candidate
+            $HasBundledSource = $true
+            break
+        }
     } catch {
-        # An unreadable package.json is not a bundled tree. Fall through to the
-        # clone, which is the path that still works.
+        # An unreadable package.json is not a bundled tree; keep looking, and
+        # otherwise fall through to the clone, which is the path that works.
     }
 }
 if ($HasBundledSource) {

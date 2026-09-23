@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.176.0': [
+    "The installer now ships as a folder you copy to the server, matching how the rest of the NocVault suite is delivered: a small Install-SecVault.cmd and SecVault-Setup.exe beside the scripts and the bundled prerequisites.",
+    "Building it takes seconds instead of twelve minutes. The previous single 555 MB self-extracting file needed a 750 MB working copy and over a gigabyte of memory to assemble, and twice produced a file that looked complete and was not.",
+    "The setup launcher asks Windows for administrator rights itself, rather than failing partway through because it was started without them.",
+    "The installer recognises the application source shipped alongside it in either layout, so a packaged installation needs no source download and no repository credentials.",
+  ],
   '2.175.2': [
     "Fixed the packaged installer failing outright. The setup .exe carries the whole application inside it, but the installer still insisted on a GitHub deploy key and tried to download the source — so it unpacked everything correctly and then stopped with a missing-key error, with the files it needed already on disk.",
     "An installer that carries its own source now installs from it, with no GitHub access, no deploy key and no npm download required.",

@@ -1,73 +1,77 @@
 ﻿<#
 .SYNOPSIS
-    Builds a single self-extracting SecVault-Setup .exe from this repository.
+    Builds the SecVault distribution FOLDER an operator copies to a server.
 
 .DESCRIPTION
-    Produces ONE file an operator can copy to a clean Windows Server and run.
-    It bundles the application source, the prerequisite installers, and
-    (by default) node_modules, so the install needs no internet access at all.
+    Produces dist\SecVault-Installer-v<version>\ :
 
-    ⛔ WHY node_modules IS BUNDLED BY DEFAULT.
-    Install-SecVault.ps1 runs `npm ci`, which needs registry.npmjs.org.
-    installer\dependencies\README.txt says "no internet download required for
-    prerequisites" and that is true of the PREREQUISITES -- but npm was never
-    counted, so a fresh install has always needed the public npm registry.
-    CLAUDE.md names segmented and air-gapped networks as the TARGET CUSTOMER,
-    not an edge case, so an installer that silently requires a registry fails
-    exactly the customer it was written for. Bundling node_modules closes that.
+        Install-SecVault.cmd      double-click; elevates, then runs the installer
+        SecVault-Setup.exe        the same, for operators who expect an .exe
+        installer\*.ps1           installer, updater, backup, restore, TLS helper
+        installer\dependencies\   the bundled prerequisite installers
+        app\                      the application source, including node_modules
 
-    Safe to bundle here, verified rather than assumed: the tree carries exactly
-    ONE native binary (@next/swc-win32-x64-msvc), it is already the win32-x64
-    build, and the bundled Node MSI is the same v20 the tree was installed
-    against. A tree built on another OS or another Node major MUST NOT be
-    shipped -- this script checks and refuses.
+    ⛔ A FOLDER, NOT A SINGLE SELF-EXTRACTING .exe, AND THE REASON IS MEASURED.
+    The previous design embedded a ~500 MB payload as a managed resource inside
+    a compiled stub. It worked, and it cost 555 MB, ~12 minutes, a 750 MB
+    staging copy and a csc process at 1.4 GB working set -- and TWO consecutive
+    builds were killed by the host for memory pressure, one of them leaving a
+    555 MB file 436 bytes short of a valid assembly that threw
+    BadImageFormatException on load. An artifact that looks finished and is not
+    is the worst thing a release step can produce.
 
-    ⛔ WHY THE SOURCE IS BUNDLED RATHER THAN CLONED (-SourceMode Bundle).
-    The clone path authenticates with `secvault_deploy`, a PRIVATE GitHub
-    deploy key. Putting it inside a file handed to a customer gives whoever
-    holds that file permanent read access to the whole private repository, and
-    a key cannot be un-distributed. Bundling the source needs no key and works
-    offline. -SourceMode Clone is kept because the in-app updater does
-    `git pull`, so an installation that must self-update needs the git remote;
-    choosing it is an explicit decision and this script says what it costs.
+    It is also the shape the NocVault suite already ships
+    (C:\NocVault-Suite-v1.2): scripts and small launchers beside a
+    dependencies\ directory. Following it costs nothing and gains consistency.
+
+    ⛔ WHAT THIS DOES DIFFERENTLY FROM THE SUITE, DELIBERATELY: the suite
+    `git clone`s each app at install time, so it needs network access and a
+    credential for a private repo. This ships app\ inside the folder, so an
+    install needs neither -- CLAUDE.md names segmented and air-gapped networks
+    as the TARGET customer, not an edge case. Install-SecVault.ps1 detects a
+    bundled tree and installs from it.
+
+    ⛔ NO DEPLOY KEY IS INCLUDED unless you put one in dependencies\ yourself.
+    Anyone holding a copy would have permanent read access to the private
+    repository, and a key cannot be un-distributed. The consequence -- no git
+    remote, so no in-place update -- is printed by the installer and written
+    into the folder's README rather than left to be discovered.
 
 .PARAMETER OutputPath
-    Where to write the .exe. Defaults to dist\SecVault-Setup-<version>.exe.
+    Folder to create. Defaults to dist\SecVault-Installer-v<version>.
 
 .PARAMETER DependenciesPath
-    Folder holding the prerequisite installers. Defaults to
-    installer\dependencies. See its README.txt for the exact file list.
-
-.PARAMETER SourceMode
-    Bundle (default) ships the source and needs no deploy key.
-    Clone ships secvault_deploy and clones from GitHub at install time.
+    Where the prerequisite installers live. Defaults to installer\dependencies.
 
 .PARAMETER IncludeNodeModules
-    Default $true. $false produces a smaller package that REQUIRES the target
+    Default $true. $false makes a much smaller folder that REQUIRES the target
     to reach registry.npmjs.org.
 
 .PARAMETER AllowDirty
-    Permit a build from a working tree with uncommitted changes. Off by
-    default: an artifact nobody can tie back to a commit cannot be supported.
+    Build from a working tree with uncommitted changes, or one whose commit
+    cannot be determined. Off by default: an artifact nobody can tie back to a
+    commit cannot be supported.
+
+.PARAMETER Zip
+    Also produce a .zip of the folder. OFF BY DEFAULT -- compressing ~750 MB is
+    the most memory-hungry thing this script can do, and it is exactly what got
+    the old design killed mid-build. Copy the folder instead, or zip it when
+    the machine is quiet.
 
 .EXAMPLE
     .\installer\Build-SecVaultPackage.ps1
-.EXAMPLE
-    .\installer\Build-SecVaultPackage.ps1 -SourceMode Clone -IncludeNodeModules:$false
 #>
 [CmdletBinding()]
 param(
     [string]$OutputPath,
     [string]$DependenciesPath,
-    [ValidateSet('Bundle', 'Clone')]
-    [string]$SourceMode = 'Bundle',
     [bool]$IncludeNodeModules = $true,
     [switch]$AllowDirty,
-    [switch]$SkipDependencyCheck
+    [switch]$SkipDependencyCheck,
+    [switch]$Zip
 )
 
 $ErrorActionPreference = 'Stop'
-Set-StrictMode -Version 2.0
 
 $script:StepNo = 0
 function Write-Step {
@@ -85,10 +89,9 @@ function Fail {
     exit 1
 }
 
-# ⛔ A NATIVE CALL UNDER $ErrorActionPreference='Stop' THROWS ON stderr OUTPUT
-# EVEN WHEN IT EXITED 0. Update-SecVault.ps1 carries the same helper and the
-# same comment; git writes progress to stderr routinely, so without this a
-# perfectly good `git status` aborts the build.
+# ⛔ A native call under $ErrorActionPreference='Stop' throws on ordinary stderr
+# output even when the command exited 0, and git writes progress to stderr
+# routinely. Same helper, same reason, as Update-SecVault.ps1.
 function Invoke-Native {
     param([scriptblock]$Command)
     $prev = $ErrorActionPreference
@@ -103,7 +106,7 @@ if (-not (Test-Path (Join-Path $repoRoot 'package.json'))) {
 
 Write-Host ''
 Write-Host '===============================================================' -ForegroundColor White
-Write-Host '  SecVault -- build a self-extracting installer' -ForegroundColor White
+Write-Host '  SecVault -- build the installer distribution folder' -ForegroundColor White
 Write-Host '===============================================================' -ForegroundColor White
 Write-Host ''
 
@@ -114,18 +117,12 @@ $pkg = Get-Content (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
 $version = $pkg.version
 if (-not $version) { Fail 'package.json has no version.' }
 
-# ⛔ GIT IS RESOLVED, NOT ASSUMED TO BE ON PATH, AND ITS ABSENCE IS NOT FATAL.
-# Both halves were wrong and both bit on the same run. `& git` raises
-# CommandNotFoundException when it cannot be resolved, and that ABORTED the
-# whole build at step 1 -- on a machine where git was installed and present in
-# the MACHINE path, just not in the already-open shell's copy of it. That is
-# the normal state of any console opened before a provisioning run, which is
-# exactly when a release gets built.
-#
-# The commit is PROVENANCE, not a build input: without it the package is
-# stamped 'unknown' and says so, which is strictly better than refusing to
-# build. Same shape as Find-SecVaultOpenSsl in installer\SecVault-Tls.ps1 --
-# search the known locations, then PATH, and never invoke a bare name.
+# ⛔ git is RESOLVED, never invoked as a bare name, and its absence is not
+# fatal. `& git` raises CommandNotFoundException when it cannot be resolved,
+# and that once aborted a whole build at step 1 on a machine where git WAS
+# installed and in the MACHINE path -- just not in the already-open shell's
+# copy of it, which is the normal state of any console opened before a
+# provisioning run. Same approach as Find-SecVaultOpenSsl.
 function Find-SecVaultGit {
     foreach ($candidate in @(
         'C:\Program Files\Git\cmd\git.exe',
@@ -143,7 +140,7 @@ $commit = 'unknown'
 $dirty = $false
 $gitExe = Find-SecVaultGit
 if (-not $gitExe) {
-    Write-Warn 'git not found, so this package cannot record which commit it was built from. It will be stamped "unknown".'
+    Write-Warn 'git not found, so the commit cannot be recorded; it will be stamped "unknown".'
 } else {
     Push-Location $repoRoot
     try {
@@ -152,56 +149,40 @@ if (-not $gitExe) {
         $status = Invoke-Native { & $gitExe status --porcelain 2>$null }
         if ($LASTEXITCODE -eq 0 -and $status) { $dirty = $true }
     } catch {
-        # ⛔ Provenance is worth having and never worth failing a build over.
         Write-Warn "git could not report the commit ($($_.Exception.Message)); stamping 'unknown'."
     } finally { Pop-Location }
 }
 
-# ⛔ AN UNKNOWN COMMIT STILL COUNTS AS UNVERIFIABLE PROVENANCE. -AllowDirty is
-# the switch that says "I accept an artifact I cannot tie to a commit", so it
-# governs this too; without it, a build that cannot name its source stops.
-if ($commit -eq 'unknown' -and -not $AllowDirty) {
-    Fail 'Could not determine the commit this build comes from. Install git, or pass -AllowDirty to accept a package that cannot be traced to a commit.'
-}
-
 Write-Note "version : $version"
 Write-Note "commit  : $commit"
-if ($dirty) {
-    # ⛔ An artifact that cannot be tied to a commit cannot be supported: when
-    # the customer reports a fault there is no way to know what they are running.
-    if (-not $AllowDirty) {
-        Fail 'The working tree has uncommitted changes. Commit them, or pass -AllowDirty and accept that this .exe matches no commit.'
-    }
-    Write-Warn 'Working tree is DIRTY -- this package matches no commit.'
+
+# ⛔ An artifact that cannot be tied to a commit cannot be supported: when the
+# customer reports a fault there is no way to know what they are running.
+if (($dirty -or $commit -eq 'unknown') -and -not $AllowDirty) {
+    Fail 'The working tree is dirty, or the commit could not be determined. Commit your changes (or install git), or pass -AllowDirty and accept an artifact that matches no commit.'
 }
+if ($dirty) { Write-Warn 'Working tree is DIRTY -- this package matches no commit.' }
 
 # -----------------------------------------------------------------------
 Write-Step 'Checking the build host matches the target'
 # -----------------------------------------------------------------------
 # ⛔ node_modules is COPIED, not reinstalled, so the tree must already be the
-# right platform. A macOS or Linux tree installs a different @next/swc binary
-# and Next fails at startup with a message about a missing SWC binary that
-# names neither this script nor the real cause.
+# right platform. A macOS or Linux tree carries a different @next/swc binary
+# and Next fails at startup naming neither this script nor the real cause.
 if ($IncludeNodeModules) {
     $nmPath = Join-Path $repoRoot 'node_modules'
     if (-not (Test-Path $nmPath)) {
         Fail "node_modules not found. Run 'npm ci' first, or pass -IncludeNodeModules:`$false."
     }
-    $swcWin = Join-Path $nmPath '@next\swc-win32-x64-msvc'
-    if (-not (Test-Path $swcWin)) {
+    if (-not (Test-Path (Join-Path $nmPath '@next\swc-win32-x64-msvc'))) {
         Fail "node_modules does not contain @next/swc-win32-x64-msvc, so it was not installed on Windows x64. Re-run 'npm ci' on a Windows x64 host, or pass -IncludeNodeModules:`$false."
-    }
-    $foreign = Get-ChildItem (Join-Path $nmPath '@next') -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'swc-*' -and $_.Name -ne 'swc-win32-x64-msvc' }
-    if ($foreign) {
-        Write-Warn ("node_modules also carries non-Windows SWC builds ({0}); they are harmless but add size." -f (($foreign | Select-Object -ExpandProperty Name) -join ', '))
     }
     $nodeV = Invoke-Native { & node -v 2>$null }
     if ($LASTEXITCODE -eq 0 -and $nodeV) {
         $nodeV = ($nodeV | Select-Object -First 1).ToString().Trim()
         Write-Note "node on this host : $nodeV"
         if ($nodeV -notlike 'v20.*') {
-            Write-Warn "node_modules was installed under $nodeV but the bundled runtime is Node 20. Install under Node 20 to be certain."
+            Write-Warn "node_modules was installed under $nodeV but the bundled runtime is Node 20."
         }
     }
 }
@@ -210,21 +191,16 @@ if ($IncludeNodeModules) {
 Write-Step 'Verifying the prerequisite bundle'
 # -----------------------------------------------------------------------
 if (-not $DependenciesPath) { $DependenciesPath = Join-Path $PSScriptRoot 'dependencies' }
-if (-not (Test-Path $DependenciesPath)) {
-    Fail "Dependencies folder not found: $DependenciesPath"
-}
+if (-not (Test-Path $DependenciesPath)) { Fail "Dependencies folder not found: $DependenciesPath" }
 
-# Patterns rather than exact names: the versions move, the roles do not.
+# Patterns, not exact names: the versions move, the roles do not.
 $required = @(
-    @{ Role = 'Node.js runtime';     Pattern = 'node-v*-x64.msi';                Required = $true },
-    @{ Role = 'PostgreSQL 16';       Pattern = 'postgresql-16*windows-x64.exe';  Required = $true },
-    @{ Role = 'NSSM service manager';Pattern = 'nssm-*.zip';                     Required = $true },
-    @{ Role = 'Git for Windows';     Pattern = 'Git-*-64-bit.exe';               Required = $true },
-    @{ Role = 'VC++ runtime';        Pattern = 'VC_redist.x64.exe';              Required = $false }
+    @{ Role = 'Node.js runtime';      Pattern = 'node-v*-x64.msi';               Required = $true },
+    @{ Role = 'PostgreSQL 16';        Pattern = 'postgresql-16*windows-x64.exe'; Required = $true },
+    @{ Role = 'NSSM service manager'; Pattern = 'nssm-*.zip';                    Required = $true },
+    @{ Role = 'Git for Windows';      Pattern = 'Git-*-64-bit.exe';              Required = $true },
+    @{ Role = 'VC++ runtime';         Pattern = 'VC_redist.x64.exe';             Required = $false }
 )
-if ($SourceMode -eq 'Clone') {
-    $required += @{ Role = 'GitHub deploy key'; Pattern = 'secvault_deploy'; Required = $true }
-}
 
 $missing = @()
 $found = @()
@@ -238,467 +214,314 @@ foreach ($r in $required) {
         $missing += $r
         Write-Host ("    MISSING  {0,-22} expected {1}" -f $r.Role, $r.Pattern) -ForegroundColor Red
     } else {
-        Write-Warn ("optional {0,-22} not present ({1}) -- the installer skips it" -f $r.Role, $r.Pattern)
+        Write-Warn ("optional {0,-22} not present -- the installer skips it" -f $r.Role)
     }
 }
-
 if ($missing.Count -gt 0) {
-    # ⛔ A PACKAGE MISSING A PREREQUISITE IS WORSE THAN NO PACKAGE. It builds,
-    # it ships, it runs, and it fails on the customer's server partway through
-    # provisioning -- by which point services may exist and a database may have
-    # been created. Refuse here, where it costs nothing.
+    # ⛔ A PACKAGE MISSING A PREREQUISITE IS WORSE THAN NO PACKAGE: it ships, it
+    # runs, and it fails partway through provisioning a customer's server.
     if ($SkipDependencyCheck) {
-        Write-Warn 'SkipDependencyCheck was passed: building an INCOMPLETE package that WILL fail on a clean server.'
+        Write-Warn 'SkipDependencyCheck: building an INCOMPLETE folder that WILL fail on a clean server.'
     } else {
         Write-Host ''
-        Write-Host '  Copy them from the NocVault-Suite distribution package; see' -ForegroundColor Yellow
-        Write-Host "  $DependenciesPath\README.txt for the exact file list." -ForegroundColor Yellow
+        Write-Host '  Copy them from the NocVault-Suite distribution; see' -ForegroundColor Yellow
+        Write-Host "  $DependenciesPath\README.txt for the list." -ForegroundColor Yellow
         Fail "$($missing.Count) required prerequisite installer(s) missing from $DependenciesPath"
     }
 }
 
-# -----------------------------------------------------------------------
-Write-Step 'Staging the payload'
-# -----------------------------------------------------------------------
-# ⛔ SWEEP UP AFTER EARLIER RUNS FIRST. The cleanup at the end only runs on
-# success, so every failed build used to leave a ~300 MB staging tree in %TEMP%
-# for ever -- and the builds most likely to fail are the ones being iterated on.
-# Anything older than a few hours cannot belong to a run in progress.
-Get-ChildItem ([System.IO.Path]::GetTempPath()) -Directory -Filter 'secvault-pkg-*' -ErrorAction SilentlyContinue |
-    Where-Object { $_.CreationTime -lt (Get-Date).AddHours(-2) } |
-    ForEach-Object {
-        Write-Note ("removing stale staging dir {0}" -f $_.Name)
-        Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    }
+$deployKey = Join-Path $DependenciesPath 'secvault_deploy'
+$hasDeployKey = Test-Path $deployKey
 
-$stage = Join-Path ([System.IO.Path]::GetTempPath()) ("secvault-pkg-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
-New-Item -ItemType Directory -Path $stage -Force | Out-Null
-$appDir = Join-Path $stage 'app'
-New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+# -----------------------------------------------------------------------
+Write-Step 'Creating the distribution folder'
+# -----------------------------------------------------------------------
+if (-not $OutputPath) {
+    $OutputPath = Join-Path $repoRoot ("dist\SecVault-Installer-v{0}" -f $version)
+}
+$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+
+# ⛔ Refuse to write into a folder holding something else: a partial overlay of
+# two versions is a package nobody can reason about afterwards.
+if (Test-Path $OutputPath) {
+    $existing = @(Get-ChildItem $OutputPath -Force -ErrorAction SilentlyContinue)
+    if ($existing.Count -gt 0) {
+        if (-not (Test-Path (Join-Path $OutputPath 'installer\Install-SecVault.ps1'))) {
+            Fail "$OutputPath is not empty and does not look like a SecVault package. Refusing to overwrite it."
+        }
+        Write-Note 'replacing the previous build of this version...'
+        Remove-Item $OutputPath -Recurse -Force
+    }
+}
+New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+$appDir = Join-Path $OutputPath 'app'
+$instDest = Join-Path $OutputPath 'installer'
 
 # ⛔ NEVER PACKAGE THESE. `.env.local` holds CREDENTIAL_KEY, the database
-# password and NEXTAUTH_SECRET; `certs\` holds a private key; `secvault_deploy`
-# is a private repo key. Shipping any of them turns one server's secrets into
-# every customer's. A scan below re-checks the staged tree, because an
-# exclusion list is only as good as the next person who edits it.
+# password and NEXTAUTH_SECRET; certs\ holds a private key. Shipping any of them
+# turns one server's secrets into every customer's. A scan below re-checks the
+# result, because an exclusion list is only as good as the next person's edit.
 $excludeDirs = @('node_modules', '.next', '.git', 'certs', 'logs', 'spool', 'archive', 'dist', 'coverage')
 $excludeFiles = @('.env.local', '.env', '*.pfx', '*.key', '*.pem', 'secvault_deploy', 'secvault_deploy.pub')
 
 Write-Note 'copying application source...'
-# ⛔ robocopy, NOT `Get-ChildItem -Recurse | Copy-Item`. The obvious form
-# enumerates the WHOLE tree before any filter runs, so it walks all ~19,500
-# node_modules entries just to discard them -- and on those deep paths it
-# raises "The system cannot find the file specified" (a Win32 MAX_PATH
-# failure), which under this script's $ErrorActionPreference='Stop' aborts the
-# build. robocopy prunes excluded directories before descending, so it never
-# visits them, and it handles long paths natively.
-#
-# /XD prunes directories, /XF excludes files. The exclusion lists are the same
-# ones declared above, expanded here so the two cannot drift.
+# ⛔ robocopy, NOT `Get-ChildItem -Recurse | Copy-Item`: the latter enumerates
+# the WHOLE tree before any filter runs, so it walks every node_modules entry
+# just to discard it, and raises a MAX_PATH failure that aborts under 'Stop'.
+# ⛔ robocopy exit codes BELOW 8 ARE SUCCESS (1 = copied, 2 = extras, 3 = both);
+# treating any non-zero as failure would fail every build that did something.
 $xd = @()
 foreach ($d in $excludeDirs) { $xd += (Join-Path $repoRoot $d) }
-# The prerequisite binaries are staged separately, below.
 $xd += (Join-Path $repoRoot 'installer\dependencies')
-
 $roboArgs = @($repoRoot, $appDir, '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP', '/R:1', '/W:1')
 $roboArgs += '/XD'; $roboArgs += $xd
 $roboArgs += '/XF'; $roboArgs += $excludeFiles
-
-# ⛔ robocopy EXIT CODES BELOW 8 ARE SUCCESS: 1 = files copied, 2 = extra
-# files present, 3 = both. Treating any non-zero as failure would fail every
-# build that actually copied something.
-$rc = Invoke-Native { & robocopy @roboArgs }
+Invoke-Native { & robocopy @roboArgs } | Out-Null
 if ($LASTEXITCODE -ge 8) { Fail "robocopy failed copying the source tree (exit $LASTEXITCODE)." }
 Write-Note ("  {0:N0} source files" -f (Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue).Count)
 
 if ($IncludeNodeModules) {
     Write-Note 'copying node_modules (this takes a minute)...'
     $nmDest = Join-Path $appDir 'node_modules'
-    # robocopy is dramatically faster than Copy-Item for ~20k files.
-    # ⛔ robocopy EXIT CODES BELOW 8 ARE SUCCESS, not failure: 1 = files copied,
-    # 2 = extra files, 3 = both. Treating non-zero as an error here would fail
-    # every build that actually did something.
-    $rc = Invoke-Native { & robocopy (Join-Path $repoRoot 'node_modules') $nmDest /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1 }
+    Invoke-Native { & robocopy (Join-Path $repoRoot 'node_modules') $nmDest /E /NFL /NDL /NJH /NJS /NC /NS /NP /R:1 /W:1 } | Out-Null
     if ($LASTEXITCODE -ge 8) { Fail "robocopy failed copying node_modules (exit $LASTEXITCODE)." }
     Write-Note ("  {0:N0} files" -f (Get-ChildItem $nmDest -Recurse -File -ErrorAction SilentlyContinue).Count)
 
-    # ⛔ THE MARKER IS WHAT MAKES THE OFFLINE INSTALL REAL.
-    # Install-SecVault.ps1 skips `npm ci` ONLY when this file is present and
-    # its version matches the package.json beside it. Without it the installer
-    # runs npm ci as usual and an air-gapped install fails -- so shipping
-    # node_modules without writing this would be a bundle that buys nothing.
-    # The version match is what stops a tree from one build being used against
-    # another build's source, which resolves, starts, and runs the wrong code.
+    # ⛔ THE MARKER IS WHAT MAKES THE OFFLINE INSTALL REAL. Install-SecVault.ps1
+    # skips `npm ci` ONLY when this file is present and its version matches the
+    # package.json beside it, so shipping node_modules without it buys nothing.
+    # The version match stops one build's tree being used against another
+    # build's source, which resolves, starts, and runs the wrong code.
     $marker = @(
         "# Written by installer\Build-SecVaultPackage.ps1. Do not edit.",
         "# Install-SecVault.ps1 skips 'npm ci' when version= matches its package.json.",
         "version=$version",
         "commit=$commit",
-        "built=$((Get-Date).ToString('o'))",
-        "node=$nodeV"
+        "built=$((Get-Date).ToString('o'))"
     ) -join "`r`n"
     Set-Content -Path (Join-Path $nmDest '.secvault-bundled') -Value $marker -Encoding ASCII
     Write-Note "  offline marker written (version $version)"
 }
 
-Write-Note 'copying prerequisite installers...'
-$depDest = Join-Path $appDir 'installer\dependencies'
-if (-not (Test-Path $depDest)) { New-Item -ItemType Directory -Path $depDest -Force | Out-Null }
-foreach ($f in $found) { Copy-Item -Path $f.FullName -Destination $depDest -Force }
-$readme = Join-Path $DependenciesPath 'README.txt'
-if (Test-Path $readme) { Copy-Item $readme $depDest -Force }
+Write-Note 'copying the installer scripts...'
+New-Item -ItemType Directory -Path $instDest -Force | Out-Null
+Get-ChildItem $PSScriptRoot -Filter '*.ps1' -File | ForEach-Object {
+    Copy-Item $_.FullName (Join-Path $instDest $_.Name) -Force
+}
+
+Write-Note 'copying the prerequisite installers...'
+$depDest = Join-Path $instDest 'dependencies'
+New-Item -ItemType Directory -Path $depDest -Force | Out-Null
+foreach ($f in $found) { Copy-Item $f.FullName $depDest -Force }
+$readmeSrc = Join-Path $DependenciesPath 'README.txt'
+if (Test-Path $readmeSrc) { Copy-Item $readmeSrc $depDest -Force }
+if ($hasDeployKey) {
+    Copy-Item $deployKey $depDest -Force
+    Write-Warn 'secvault_deploy (a PRIVATE repo key) IS included. Do not hand this folder to a customer.'
+}
 
 # -----------------------------------------------------------------------
-Write-Step 'Scanning the staged payload for secrets'
+Write-Step 'Scanning the package for secrets'
 # -----------------------------------------------------------------------
-# ⛔ THIS GATE IS THE POINT OF THE EXCLUSION LIST, NOT A DUPLICATE OF IT.
-# The list above is what we MEANT to exclude; this is what actually got staged.
-# Publishing a package is irreversible, so the check runs against the artifact.
+# ⛔ THIS IS THE POINT OF THE EXCLUSION LIST, NOT A DUPLICATE OF IT. The list
+# above is what we MEANT to exclude; this is what actually landed. Handing a
+# folder to somebody is irreversible, so the check runs against the result.
 $leaks = @()
 Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -notmatch '\\node_modules\\' } | ForEach-Object {
         $n = $_.Name
-        if ($n -eq '.env.local' -or $n -eq '.env' -or $n -eq 'secvault_deploy') {
-            $leaks += $_.FullName.Substring($appDir.Length)
-        } elseif ($n -like '*.pem' -or $n -like '*.pfx' -or $n -like '*.key') {
-            $leaks += $_.FullName.Substring($appDir.Length)
+        if ($n -eq '.env.local' -or $n -eq '.env' -or $n -eq 'secvault_deploy' -or
+            $n -like '*.pem' -or $n -like '*.pfx' -or $n -like '*.key') {
+            $leaks += $_.FullName.Substring($OutputPath.Length)
         }
     }
-if ($SourceMode -eq 'Clone') {
-    # In Clone mode the deploy key is deliberately included, and that decision
-    # is stated out loud rather than hidden behind a default.
-    $leaks = $leaks | Where-Object { $_ -notlike '*secvault_deploy*' }
-    Write-Warn 'Clone mode: secvault_deploy (a PRIVATE repo key) is being shipped inside this .exe.'
-    Write-Warn 'Anyone who obtains the .exe can read the whole private repository, permanently.'
-}
 if ($leaks.Count -gt 0) {
-    Write-Host ''
     $leaks | ForEach-Object { Write-Host "    LEAK  $_" -ForegroundColor Red }
-    Fail "$($leaks.Count) secret-bearing file(s) reached the staging tree. Refusing to package."
+    Fail "$($leaks.Count) secret-bearing file(s) reached the package. Refusing to ship it."
 }
-Write-Note 'no secret-bearing files in the payload.'
-
-
-# -----------------------------------------------------------------------
-Write-Step 'Compressing the payload'
-# -----------------------------------------------------------------------
-$zipPath = Join-Path $stage 'secvault-payload.zip'
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-# ⛔ BUILT ENTRY BY ENTRY, NOT WITH CreateFromDirectory, FOR ONE REASON:
-# SEPARATORS. On this host CreateFromDirectory wrote entry names containing
-# BACKSLASHES (`installerInstall-SecVault.ps1`). The ZIP format requires forward
-# slashes; a backslash is a legal filename character, so a standards-compliant
-# reader sees ONE file with a odd name rather than a path, and the tree
-# silently flattens. It happened to work here only because the stub runs on
-# Windows and Path.Combine accepts either -- i.e. it worked by accident, and
-# anyone opening the package with a normal archiver would see something else
-# entirely. Verified after this change by listing the entries back.
-#
-# ⛔ Fastest, NOT Optimal. MEASURED on the full payload (~20,000 mostly-small
-# files from node_modules): Optimal ran at roughly 3 MB/min and would have
-# taken over an hour and a half; a build nobody is willing to wait for stops
-# being run before a release. Fastest costs a few percent of size.
-$zipStream = [System.IO.File]::Open($zipPath, 'Create')
-try {
-    $archive = New-Object System.IO.Compression.ZipArchive($zipStream, 'Create')
-    try {
-        $prefixLen = $appDir.Length + 1
-        $fastest = [System.IO.Compression.CompressionLevel]::Fastest
-        foreach ($f in (Get-ChildItem $appDir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
-            $rel = $f.FullName.Substring($prefixLen).Replace([char]92, [char]47)
-            $entry = $archive.CreateEntry($rel, $fastest)
-            $in = [System.IO.File]::OpenRead($f.FullName)
-            try {
-                $out = $entry.Open()
-                try { $in.CopyTo($out) } finally { $out.Dispose() }
-            } finally { $in.Dispose() }
-        }
-    } finally { $archive.Dispose() }
-} finally { $zipStream.Dispose() }
-$zipMb = (Get-Item $zipPath).Length / 1MB
-Write-Note ("payload.zip : {0:N0} MB" -f $zipMb)
+Write-Note 'no secret-bearing files in the package.'
 
 # -----------------------------------------------------------------------
-Write-Step 'Building the self-extracting .exe'
+Write-Step 'Writing the launchers'
 # -----------------------------------------------------------------------
-if (-not $OutputPath) {
-    $distDir = Join-Path $repoRoot 'dist'
-    if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir -Force | Out-Null }
-    $OutputPath = Join-Path $distDir "SecVault-Setup-$version.exe"
-}
-$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
-# ⛔ CREATE THE OUTPUT DIRECTORY WHATEVER THE PATH CAME FROM. This was created
-# only on the default path, so an explicit -OutputPath into a folder that did
-# not exist produced NOTHING: iexpress writes no file, reports no error, and
-# leaves an EMPTY exit code -- so even the exit-code check could not catch it.
-# The artifact check at the end is what finally said so, several minutes later.
-$outDir = Split-Path -Parent $OutputPath
-if ($outDir -and -not (Test-Path $outDir)) {
-    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-}
-if (Test-Path $OutputPath) { Remove-Item $OutputPath -Force }
+# ⛔ THE .cmd SELF-ELEVATES rather than telling the operator to. This registers
+# services, installs MSIs and opens firewall rules; a non-elevated run gets
+# most of the way in and fails on the first service call, leaving a half-built
+# machine and an error naming none of that.
+$cmdText = @"
+@echo off
+setlocal
+title SecVault Setup $version
 
-# ⛔ IEXPRESS WAS TRIED FIRST AND IS NOT USABLE HERE. It is a GUI program: `/N` alone
-# raises a progress dialog that is never dismissed in a non-interactive session
-# (measured: 0% CPU, idle indefinitely on a 99 MB payload), `/Q` suppresses that
-# but it then exits producing NO FILE and NO READABLE EXIT CODE -- even
-# $proc.ExitCode is empty because it hands off to a child. A release step whose
-# success cannot be determined is not a release step. Even `iexpress /?` opens
-# a dialog.
-#
-# So the stub is COMPILED here instead, with the C# compiler that ships in
-# .NET Framework 4 on every Windows Server. The payload rides as an embedded
-# resource. This is fully deterministic, has a real exit code, needs no GUI --
-# and, unlike IExpress, it FORWARDS ITS COMMAND LINE to the installer, so an
-# unattended install can pass -ServerIp and friends straight to the .exe.
+net session >nul 2>nul
+if errorlevel 1 (
+  echo.
+  echo  Requesting administrator rights...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  exit /b
+)
+
+echo.
+echo  ===============================================================
+echo    SecVault Setup   version $version   commit $commit
+echo  ===============================================================
+echo.
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\Install-SecVault.ps1" %*
+set RC=%ERRORLEVEL%
+echo.
+if not "%RC%"=="0" echo  Setup exited with code %RC%.
+echo.
+pause
+exit /b %RC%
+"@
+Set-Content -Path (Join-Path $OutputPath 'Install-SecVault.cmd') -Value $cmdText -Encoding ASCII
+
+# A small .exe beside it for operators who expect one. It carries NO payload --
+# it only starts the .cmd -- so it compiles in about a second and costs no
+# memory, unlike the embedded-resource design this replaced.
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-if (-not (Test-Path $csc)) {
-    Fail "csc.exe not found at $csc. .NET Framework 4 is required to build the package (it ships with Windows Server). Ship $zipPath plus Setup.cmd instead."
-}
-
-$stubSource = @'
+if (Test-Path $csc) {
+    $stub = @'
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
 using System.Reflection;
-using System.Security.Principal;
-
-static class SecVaultSetup
-{
-    const string Version = "__VERSION__";
-    const string Commit  = "__COMMIT__";
-
-    static int Main(string[] args)
-    {
-        Console.WriteLine();
-        Console.WriteLine("  ===============================================================");
-        Console.WriteLine("    SecVault Setup   version " + Version + "   commit " + Commit);
-        Console.WriteLine("  ===============================================================");
-        Console.WriteLine();
-
-        // Elevation is required: this registers Windows services, installs MSIs
-        // and opens firewall rules. Without this check a non-elevated run gets
-        // most of the way in and fails on the first service call, leaving a
-        // half-built machine and an error that names none of the above.
-        if (!IsElevated())
-        {
-            Console.WriteLine("  [ERROR] This installer must be run AS ADMINISTRATOR.");
-            Console.WriteLine();
-            Console.WriteLine("    Right-click the .exe and choose \"Run as administrator\",");
-            Console.WriteLine("    or launch it from an elevated command prompt.");
-            Console.WriteLine();
-            Pause();
+static class SecVaultSetup {
+    static int Main(string[] args) {
+        string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        string cmd = Path.Combine(dir, "Install-SecVault.cmd");
+        if (!File.Exists(cmd)) {
+            Console.WriteLine("Install-SecVault.cmd is missing from " + dir + ".");
+            Console.WriteLine("Keep this .exe inside the SecVault installer folder.");
+            Console.Write("Press Enter to close..."); Console.ReadLine();
             return 1;
         }
-
-        string exePath = Assembly.GetExecutingAssembly().Location;
-        string baseDir = Path.GetDirectoryName(exePath);
-        string target  = Path.Combine(baseDir, "secvault-" + Version);
-
-        // ⛔ FALL BACK TO %TEMP% RATHER THAN FAILING. The .exe is often run from
-        // a read-only share or a mounted ISO; refusing there would be a refusal
-        // for a reason the operator cannot act on from where they are standing.
-        try
-        {
-            Directory.CreateDirectory(target);
-            string probe = Path.Combine(target, ".writable");
-            File.WriteAllText(probe, "x");
-            File.Delete(probe);
-        }
-        catch
-        {
-            target = Path.Combine(Path.GetTempPath(), "secvault-" + Version);
-            Console.WriteLine("  Cannot write beside the .exe; unpacking to " + target);
-        }
-
-        Console.WriteLine("  Unpacking to " + target);
-        Console.WriteLine("  This takes a minute.");
-        Console.WriteLine();
-
-        try
-        {
-            ExtractPayload(target);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("  [ERROR] Could not unpack the package: " + ex.Message);
-            Console.WriteLine("          Check free disk space on the target volume.");
-            Pause();
-            return 1;
-        }
-
-        string installer = Path.Combine(target, "installer\\Install-SecVault.ps1");
-        if (!File.Exists(installer))
-        {
-            Console.WriteLine("  [ERROR] The package unpacked but " + installer + " is missing.");
-            Console.WriteLine("          This package is incomplete; do not use it.");
-            Pause();
-            return 1;
-        }
-
-        // Every argument given to the .exe is handed to the installer verbatim,
-        // so an unattended install works without unpacking by hand first.
-        string passThrough = "";
-        foreach (string a in args) passThrough += " " + Quote(a);
-
-        var psi = new ProcessStartInfo();
-        psi.FileName = "powershell.exe";
-        psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Quote(installer) + passThrough;
-        psi.UseShellExecute = false;
-        psi.WorkingDirectory = target;
-
-        Console.WriteLine("  Starting the installer...");
-        Console.WriteLine();
-
-        int rc;
-        using (Process p = Process.Start(psi))
-        {
-            p.WaitForExit();
-            rc = p.ExitCode;
-        }
-
-        Console.WriteLine();
-        if (rc != 0)
-        {
-            Console.WriteLine("  Setup exited with code " + rc + ".");
-            Console.WriteLine("  The unpacked tree was LEFT at:");
-            Console.WriteLine("    " + target);
-            Console.WriteLine("  so the installer can be re-run without unpacking again.");
-        }
-        else
-        {
-            Console.WriteLine("  Setup finished. Unpacked tree: " + target);
-        }
-        Console.WriteLine();
-        Pause();
-        return rc;
-    }
-
-    static bool IsElevated()
-    {
-        try
-        {
-            using (WindowsIdentity id = WindowsIdentity.GetCurrent())
-            {
-                return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
-            }
-        }
-        catch { return false; }
-    }
-
-    static void ExtractPayload(string target)
-    {
-        Assembly asm = Assembly.GetExecutingAssembly();
-        using (Stream s = asm.GetManifestResourceStream("secvault-payload.zip"))
-        {
-            if (s == null) throw new Exception("the embedded payload is missing");
-            using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
-            {
-                int done = 0;
-                int total = zip.Entries.Count;
-                foreach (ZipArchiveEntry e in zip.Entries)
-                {
-                    string dest = Path.Combine(target, e.FullName);
-                    if (e.FullName.EndsWith("/") || e.FullName.EndsWith("\\"))
-                    {
-                        Directory.CreateDirectory(dest);
-                        continue;
-                    }
-                    string dir = Path.GetDirectoryName(dest);
-                    if (dir.Length > 0) Directory.CreateDirectory(dir);
-                    e.ExtractToFile(dest, true);
-                    done++;
-                    if (done % 2000 == 0)
-                    {
-                        Console.WriteLine("    " + done + " of " + total + " files...");
-                    }
-                }
-                Console.WriteLine("    " + done + " of " + total + " files.");
-            }
-        }
-    }
-
-    static string Quote(string s)
-    {
-        if (s.IndexOf(' ') < 0 && s.IndexOf('"') < 0) return s;
-        return "\"" + s.Replace("\"", "\\\"") + "\"";
-    }
-
-    static void Pause()
-    {
-        // Only wait when a human is watching; an unattended run must not block.
-        if (Environment.UserInteractive && !Console.IsInputRedirected)
-        {
-            Console.Write("  Press Enter to close...");
-            try { Console.ReadLine(); } catch { }
-        }
+        string pass = ""; foreach (string a in args) pass += " \"" + a + "\"";
+        var psi = new ProcessStartInfo("cmd.exe", "/c \"" + cmd + "\"" + pass);
+        psi.UseShellExecute = false; psi.WorkingDirectory = dir;
+        using (Process p = Process.Start(psi)) { p.WaitForExit(); return p.ExitCode; }
     }
 }
 '@
+    $stubPath = Join-Path $env:TEMP ("secvault-stub-" + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.cs')
+    Set-Content -Path $stubPath -Value $stub -Encoding UTF8
+    $exeOut = Join-Path $OutputPath 'SecVault-Setup.exe'
+    Invoke-Native { & $csc '/nologo' '/target:exe' '/platform:anycpu' ('/out:"{0}"' -f $exeOut) ('"{0}"' -f $stubPath) } | Out-Null
+    Remove-Item $stubPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path $exeOut) {
+        Write-Note ("SecVault-Setup.exe ({0:N0} KB)" -f ((Get-Item $exeOut).Length / 1KB))
+    } else {
+        Write-Warn 'the .exe launcher did not build; Install-SecVault.cmd works on its own.'
+    }
+} else {
+    Write-Warn 'csc.exe not found; shipping Install-SecVault.cmd without an .exe launcher.'
+}
 
-$stubSource = $stubSource.Replace('__VERSION__', $version).Replace('__COMMIT__', $commit)
-$stubPath = Join-Path $stage 'SecVaultSetup.cs'
-Set-Content -Path $stubPath -Value $stubSource -Encoding UTF8
+$updateLine = if ($hasDeployKey) {
+    "  A deploy key IS included, so Settings -> Update and
+  installer\Update-SecVault.ps1 can pull new versions in place.
+  Do not hand this folder to a customer."
+} else {
+    "  No deploy key is included, so this installation has NO git remote:
+  Settings -> Update and installer\Update-SecVault.ps1 cannot pull.
+  Update it by running a newer copy of this installer folder."
+}
 
-Write-Note 'compiling the setup stub...'
-$cscArgs = @(
-    '/nologo',
-    '/target:exe',
-    '/platform:anycpu',
-    '/optimize+',
-    ('/out:"{0}"' -f $OutputPath),
-    ('/resource:"{0}",secvault-payload.zip' -f $zipPath),
-    '/reference:System.dll',
-    '/reference:System.IO.Compression.dll',
-    '/reference:System.IO.Compression.FileSystem.dll',
-    ('"{0}"' -f $stubPath)
+$readmeText = @"
+SecVault $version   (commit $commit)
+===============================================================
+
+TO INSTALL
+  Copy this WHOLE FOLDER to the server, then run Install-SecVault.cmd
+  (or SecVault-Setup.exe). It asks for administrator rights itself.
+
+  It offers this machine's own addresses for the console and lets you
+  pick one from a list -- you do not need to know it in advance.
+
+WHAT IS IN HERE
+  app\                      the application, including node_modules
+  installer\                installer, updater, backup, restore, TLS helper
+  installer\dependencies\   Node, PostgreSQL, NSSM, Git, VC++ runtime
+
+OFFLINE
+  Nothing here needs the internet: the application and all of its
+  dependencies are included.
+
+UPDATES
+$updateLine
+
+UNATTENDED
+  Install-SecVault.cmd -ServerIp 10.0.0.10 -SyslogPorts 514 -Unattended
+
+BEFORE THE FIRST RUN
+  Read app\docs\FRESH-INSTALL-CHECKLIST.md -- section 0 covers two
+  decisions that are awkward to reverse afterwards (where PostgreSQL
+  keeps its data, and syslog sizing).
+"@
+Set-Content -Path (Join-Path $OutputPath 'README.txt') -Value $readmeText -Encoding UTF8
+
+# -----------------------------------------------------------------------
+Write-Step 'Verifying the package'
+# -----------------------------------------------------------------------
+# ⛔ "The steps ran" is not "the package is usable" -- the same distinction
+# Update-SecVault.ps1 draws between a service reporting Running and the console
+# actually answering. Check the files that have to be there.
+$mustHave = @(
+    'Install-SecVault.cmd',
+    'README.txt',
+    'installer\Install-SecVault.ps1',
+    'installer\Update-SecVault.ps1',
+    'app\package.json',
+    'app\lib\schema.sql',
+    'app\services\engine-worker.js'
 )
-$cscOut = Invoke-Native { & $csc @cscArgs 2>&1 }
-if ($LASTEXITCODE -ne 0) {
-    $cscOut | Write-Host
-    Fail "csc.exe failed with exit code $LASTEXITCODE. Staging left at $stage for inspection."
+if ($IncludeNodeModules) {
+    $mustHave += 'app\node_modules\.secvault-bundled'
+    $mustHave += 'app\node_modules\next\package.json'
+    $mustHave += 'app\node_modules\@next\swc-win32-x64-msvc'
+}
+$absent = @()
+foreach ($m in $mustHave) { if (-not (Test-Path (Join-Path $OutputPath $m))) { $absent += $m } }
+if (-not $SkipDependencyCheck) {
+    foreach ($r in $required) {
+        if (-not $r.Required) { continue }
+        if (-not (Get-ChildItem $depDest -Filter $r.Pattern -ErrorAction SilentlyContinue)) {
+            $absent += "installer\dependencies\$($r.Pattern)"
+        }
+    }
+}
+if ($absent.Count -gt 0) {
+    $absent | ForEach-Object { Write-Host "    MISSING  $_" -ForegroundColor Red }
+    Fail 'The package is incomplete. Do not ship it.'
 }
 
-# -----------------------------------------------------------------------
-Write-Step 'Verifying the artifact'
-# -----------------------------------------------------------------------
-# ⛔ "iexpress exited 0" IS NOT "the package exists and is usable" -- the same
-# distinction Update-SecVault.ps1 draws between a service reporting Running and
-# the console actually answering. Check the file.
-if (-not (Test-Path $OutputPath)) {
-    Fail "iexpress reported success but $OutputPath does not exist."
-}
-$exe = Get-Item $OutputPath
-$exeMb = $exe.Length / 1MB
-if ($exeMb -lt ($zipMb * 0.5)) {
-    Fail ("The .exe is {0:N0} MB but the payload alone is {1:N0} MB -- it is truncated. Do not ship it." -f $exeMb, $zipMb)
-}
-$sha = (Get-FileHash -Path $OutputPath -Algorithm SHA256).Hash
+$total = Get-ChildItem $OutputPath -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Measure-Object -Property Length -Sum
+Write-Note ("{0:N0} files, {1:N0} MB" -f $total.Count, ($total.Sum / 1MB))
 
-Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+if ($Zip) {
+    # ⛔ Off by default: compressing ~750 MB is the most memory-hungry thing
+    # here, and it is what got the previous design killed mid-build twice.
+    Write-Step 'Compressing (requested with -Zip)'
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zipPath = "$OutputPath.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $OutputPath, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $true)
+    Write-Note ("{0} ({1:N0} MB)" -f (Split-Path -Leaf $zipPath), ((Get-Item $zipPath).Length / 1MB))
+}
 
 Write-Host ''
 Write-Host '===============================================================' -ForegroundColor Green
 Write-Host '  Package built' -ForegroundColor Green
 Write-Host '===============================================================' -ForegroundColor Green
-Write-Host ("  file     : {0}" -f $OutputPath)
-Write-Host ("  size     : {0:N0} MB" -f $exeMb)
+Write-Host ("  folder   : {0}" -f $OutputPath)
+Write-Host ("  size     : {0:N0} MB in {1:N0} files" -f ($total.Sum / 1MB), $total.Count)
 Write-Host ("  version  : {0}   commit {1}{2}" -f $version, $commit, $(if ($dirty) { ' (DIRTY)' } else { '' }))
-Write-Host ("  source   : {0}" -f $SourceMode)
 Write-Host ("  offline  : {0}" -f $(if ($IncludeNodeModules) { 'yes -- no npm registry needed' } else { 'NO -- the target must reach registry.npmjs.org' }))
-Write-Host ("  sha256   : {0}" -f $sha)
+Write-Host ("  updates  : {0}" -f $(if ($hasDeployKey) { 'in-place (deploy key included -- internal use only)' } else { 'by running a newer installer folder (no deploy key)' }))
 Write-Host ''
-Write-Host '  TO RUN IT: copy to the target server, right-click, Run as administrator.' -ForegroundColor White
-Write-Host '  It prompts for the server IP; everything else takes a documented default.' -ForegroundColor White
-Write-Host ''
-Write-Host '  Every switch given to the .exe is passed straight through to the installer,' -ForegroundColor DarkGray
-Write-Host '  so an unattended install needs no unpacking by hand:' -ForegroundColor DarkGray
-Write-Host ("    {0} -ServerIp 10.0.0.10 -SyslogPorts 514" -f (Split-Path -Leaf $OutputPath)) -ForegroundColor DarkGray
-Write-Host '  The .exe unpacks beside itself and leaves the tree there, so a failed run' -ForegroundColor DarkGray
-Write-Host '  can be retried without unpacking again.' -ForegroundColor DarkGray
-Write-Host ''
-Write-Host '  Read docs\FRESH-INSTALL-CHECKLIST.md before the first run.' -ForegroundColor DarkGray
+Write-Host '  Copy the WHOLE folder to the server and run Install-SecVault.cmd.' -ForegroundColor White
+Write-Host '  It elevates itself and offers the server address from a list.' -ForegroundColor White
 Write-Host ''
