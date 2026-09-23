@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.177.4': [
+    "The installer can now be handed over as a single .zip. The instructions that matter before you decide where to put it — that the server needs internet access, and that the file contains a repository key — travel beside the archive as well as inside it.",
+    "A .zip that arrives over a network or a browser marks every file it extracts as untrusted, and Windows then challenges each script partway through the install. The setup launcher now clears that mark from its own files before it starts.",
+    "The instructions say plainly to extract the .zip before running the launcher. Starting it from inside Windows' zip viewer fails with an error that names the wrong problem.",
+  ],
   '2.177.3': [
     "Fixed the installer never downloading the application. A stray duplicated line meant the step that fetches SecVault was skipped entirely, and the install then stopped with an unhelpful error — so the packaged installer could not install anything.",
     "It looked correct to every check we had: PowerShell accepts that mistake when reading the file and only fails when the line is reached. Added a check that inspects the script the way PowerShell itself does, so this class of fault fails the build instead of reaching a server.",

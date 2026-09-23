@@ -333,6 +333,13 @@ echo  This server needs internet access: the application is cloned from
 echo  GitHub and its dependencies are installed with npm.
 echo.
 
+rem A .zip that arrived over a network or a browser carries Mark-of-the-Web
+rem on every file it extracts, and Windows then challenges each script. The
+rem prompts appear one per file, midway through provisioning, on a console
+rem nobody may be watching. Clearing it is idempotent and costs nothing when
+rem the files were never marked.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -LiteralPath '%~dp0installer' -Recurse -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue"
+
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\Install-SecVault.ps1" %*
 set RC=%ERRORLEVEL%
 echo.
@@ -403,8 +410,15 @@ SecVault installer $version   (built from commit $commit)
   key cannot be un-distributed. Internal distribution only.
 
 TO INSTALL
-  Copy this WHOLE FOLDER to the server, then run Install-SecVault.cmd
-  (or SecVault-Setup.exe). It asks for administrator rights itself.
+  If you received this as a .zip, EXTRACT IT FIRST. Running the launcher
+  from inside Windows' zip viewer extracts only that one file to a temp
+  folder, so it cannot find the installer beside it and fails with a
+  missing-path error that names the wrong problem.
+
+  Copy the WHOLE EXTRACTED FOLDER to the server, then run
+  Install-SecVault.cmd (or SecVault-Setup.exe). It asks for administrator
+  rights itself, and it clears the "downloaded from the internet" mark
+  from its own scripts before it starts.
 
   It offers this machine's own addresses for the console and lets you
   pick one from a list -- you do not need to know it in advance.
@@ -467,9 +481,23 @@ if ($Zip) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipPath = "$OutputPath.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    # ⛔ A ZIP IS THE EASY THING TO EMAIL, AND IT HOLDS THE DEPLOY KEY.
+    # The folder warning is easy to heed because moving a folder is
+    # deliberate; attaching a single file is not. So it is said again, here.
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $OutputPath, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $true)
     Write-Note ("{0} ({1:N0} MB)" -f (Split-Path -Leaf $zipPath), ((Get-Item $zipPath).Length / 1MB))
+
+    # The README travels BESIDE the archive as well as inside it: the
+    # requirements it states -- internet access, and that this is a
+    # credential -- are things somebody needs to know BEFORE deciding where
+    # to put the file, not after extracting it.
+    Copy-Item (Join-Path $OutputPath 'README.txt') "$OutputPath-README.txt" -Force
+    Write-Note ("{0}" -f (Split-Path -Leaf "$OutputPath-README.txt"))
+    if ($keyInPackage) {
+        Write-Host '    This .zip contains a PRIVATE repository key. Do not email it or put it' -ForegroundColor Yellow
+        Write-Host '    on a shared drive; a key cannot be un-distributed.' -ForegroundColor Yellow
+    }
 }
 
 Write-Host ''
