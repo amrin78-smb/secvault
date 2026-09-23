@@ -114,15 +114,55 @@ $pkg = Get-Content (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json
 $version = $pkg.version
 if (-not $version) { Fail 'package.json has no version.' }
 
+# ⛔ GIT IS RESOLVED, NOT ASSUMED TO BE ON PATH, AND ITS ABSENCE IS NOT FATAL.
+# Both halves were wrong and both bit on the same run. `& git` raises
+# CommandNotFoundException when it cannot be resolved, and that ABORTED the
+# whole build at step 1 -- on a machine where git was installed and present in
+# the MACHINE path, just not in the already-open shell's copy of it. That is
+# the normal state of any console opened before a provisioning run, which is
+# exactly when a release gets built.
+#
+# The commit is PROVENANCE, not a build input: without it the package is
+# stamped 'unknown' and says so, which is strictly better than refusing to
+# build. Same shape as Find-SecVaultOpenSsl in installer\SecVault-Tls.ps1 --
+# search the known locations, then PATH, and never invoke a bare name.
+function Find-SecVaultGit {
+    foreach ($candidate in @(
+        'C:\Program Files\Git\cmd\git.exe',
+        'C:\Program Files\Git\bin\git.exe',
+        'C:\Program Files (x86)\Git\cmd\git.exe'
+    )) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    $onPath = Get-Command git -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+    return $null
+}
+
 $commit = 'unknown'
 $dirty = $false
-Push-Location $repoRoot
-try {
-    $rev = Invoke-Native { & git rev-parse --short HEAD 2>$null }
-    if ($LASTEXITCODE -eq 0 -and $rev) { $commit = ($rev | Select-Object -First 1).ToString().Trim() }
-    $status = Invoke-Native { & git status --porcelain 2>$null }
-    if ($LASTEXITCODE -eq 0 -and $status) { $dirty = $true }
-} finally { Pop-Location }
+$gitExe = Find-SecVaultGit
+if (-not $gitExe) {
+    Write-Warn 'git not found, so this package cannot record which commit it was built from. It will be stamped "unknown".'
+} else {
+    Push-Location $repoRoot
+    try {
+        $rev = Invoke-Native { & $gitExe rev-parse --short HEAD 2>$null }
+        if ($LASTEXITCODE -eq 0 -and $rev) { $commit = ($rev | Select-Object -First 1).ToString().Trim() }
+        $status = Invoke-Native { & $gitExe status --porcelain 2>$null }
+        if ($LASTEXITCODE -eq 0 -and $status) { $dirty = $true }
+    } catch {
+        # ⛔ Provenance is worth having and never worth failing a build over.
+        Write-Warn "git could not report the commit ($($_.Exception.Message)); stamping 'unknown'."
+    } finally { Pop-Location }
+}
+
+# ⛔ AN UNKNOWN COMMIT STILL COUNTS AS UNVERIFIABLE PROVENANCE. -AllowDirty is
+# the switch that says "I accept an artifact I cannot tie to a commit", so it
+# governs this too; without it, a build that cannot name its source stops.
+if ($commit -eq 'unknown' -and -not $AllowDirty) {
+    Fail 'Could not determine the commit this build comes from. Install git, or pass -AllowDirty to accept a package that cannot be traced to a commit.'
+}
 
 Write-Note "version : $version"
 Write-Note "commit  : $commit"
