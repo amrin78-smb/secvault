@@ -338,6 +338,100 @@ describe('when the whole window cannot be read', () => {
   });
 });
 
+describe('the coverage claim survives the row ceiling', () => {
+  // ⛔ THE DEFECT THIS BLOCK EXISTS FOR, FOUND BY REVIEW 2026-09-24.
+  // `cursor` advanced to the slice start BEFORE the ceiling check, so the run
+  // claimed a whole slice after discarding part of it -- and `shortened` was
+  // derived from `coveredFrom > asked.from`, which cannot see a ceiling that
+  // fires on the LAST slice. The default /logs search is exactly that shape
+  // (DEFAULT_WINDOW_HOURS = 1 = one slice), so it produced an unmarked partial
+  // file named for the full hour. The earlier test passed because its ceiling
+  // fired on slice 2 of 12 -- the favourable case.
+
+  const ASK = { from: '2026-09-24T11:00:00Z', to: '2026-09-24T12:00:00Z' }; // ONE slice
+
+  function timedPool(total) {
+    // Rows one second apart, newest first, as searchEvents returns them.
+    return slicingPool((slice) => Array.from(
+      { length: Math.min(total, slice.limit) },
+      (_, i) => dbRow({ receivedAt: new Date(Date.parse(ASK.to) - 60000 - i * 1000) })
+    ));
+  }
+
+  it('marks a ceiling that fires on the LAST slice', async () => {
+    const out = await exportEvents(timedPool(200), ASK, NOW, { sliceMs: 3600000, maxRows: 50 });
+    assert.equal(out.rowCount, 50);
+    assert.equal(out.stopReason, 'row_ceiling');
+    assert.equal(out.shortened, true, 'a truncated file went out unmarked');
+    assert.match(out.filename, /-window-shortened\.csv$/);
+  });
+
+  it('never claims a row it discarded', async () => {
+    const out = await exportEvents(timedPool(200), ASK, NOW, { sliceMs: 3600000, maxRows: 50 });
+    // Everything in the file must fall inside the range the file NAMES.
+    const stamps = lines(out.csv).slice(1).map((l) => l.slice(1, 25));
+    for (const t of stamps) {
+      assert.ok(t >= out.from.toISOString(), `row at ${t} is older than the stated start ${out.from.toISOString()}`);
+      assert.ok(t <= out.to.toISOString(), `row at ${t} is newer than the stated end`);
+    }
+    // And the stated start must be LATER than the slice start, because rows
+    // before it were dropped.
+    assert.ok(
+      out.from.getTime() > Date.parse(ASK.from),
+      'the covered range still starts at the slice boundary, claiming discarded rows'
+    );
+  });
+
+  it('shortened is a fact about the RUN, not a timestamp comparison', async () => {
+    const out = await exportEvents(timedPool(200), ASK, NOW, { sliceMs: 3600000, maxRows: 50 });
+    assert.notEqual(out.stopReason, 'complete');
+    assert.equal(out.shortened, true);
+  });
+});
+
+describe('a filter the query could not understand', () => {
+  it('REFUSES rather than exporting a wider answer under a narrower name', async () => {
+    // ⛔ buildSearchQuery drops a malformed value and searches WITHOUT it,
+    // so `srcIp=10.1.1` returns every source address. It used to produce a file
+    // called `secvault-logs-10.1.1-....csv` with `filters: {}` in the audit row
+    // -- named after a host it had not filtered on.
+    const out = await exportEvents(slicingPool(() => [dbRow()]), { srcIp: '10.1.1' }, NOW);
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'rejected_filter');
+    assert.ok(!('csv' in out), 'a refusal carried a document');
+    assert.match(out.detail, /10\.1\.1/, 'the refusal must name the value that was wrong');
+  });
+
+  it('the filename can never carry a filter that was not applied', async () => {
+    const out = await exportEvents(slicingPool(() => [dbRow()]), { srcUser: 'jsmith' }, NOW);
+    assert.equal(out.ok, true);
+    assert.match(out.filename, /-jsmith-/);
+  });
+});
+
+describe('empty is not the same as unreadable', () => {
+  it('slices that came back EMPTY are a complete answer, not a refusal', async () => {
+    // ⛔ The gate used to be `rows.length === 0`, which is also true when
+    // every slice answered honestly with nothing. The operator was then told
+    // "not even the most recent hour could be read" -- false -- and a correct
+    // empty result was thrown away.
+    const pool = slicingPool((slice, n) => (n <= 2 ? [] : 'timeout'));
+    const out = await exportEvents(pool, { from: '2026-09-24T00:00:00Z', to: '2026-09-24T12:00:00Z' },
+      NOW, { sliceMs: 3600000 });
+    assert.equal(out.ok, true, 'two readable empty hours were reported as unreadable');
+    assert.equal(out.rowCount, 0);
+    assert.equal(out.stopReason, 'timed_out');
+    assert.equal(out.shortened, true);
+  });
+
+  it('still refuses when not one slice completed', async () => {
+    const out = await exportEvents(slicingPool(() => 'timeout'),
+      { from: '2026-09-24T00:00:00Z', to: '2026-09-24T12:00:00Z' }, NOW, { sliceMs: 3600000 });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'timed_out');
+  });
+});
+
 describe('the filename says what the file holds', () => {
   const built = { from: new Date('2026-09-23T10:00:00Z'), to: new Date('2026-09-24T09:35:00Z') };
 

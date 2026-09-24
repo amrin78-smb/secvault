@@ -146,8 +146,19 @@ cp1252 character and re-encoded as one or two bytes: each character ROUGHLY DOUB
 The seed was an em-dash in a COMMENT that `.env.local.example` ships (`# Auth (standalone — ...)`).
 Nothing ever read that line. It grew to a single **2,209,122,508-byte** line, at which point node
 refused the file outright (`ERR_STRING_TOO_LONG`, 0x1fffffe8 chars) — **no environment loaded at
-all**, `server.js` took its documented degrade-to-HTTP path, and the console came up on PLAINTEXT
-with no `CREDENTIAL_KEY` and no `NEXTAUTH_SECRET`. `sc.exe` reported Running throughout.
+all**, and the console came up on PLAINTEXT with no `CREDENTIAL_KEY` and no `NEXTAUTH_SECRET`.
+`sc.exe` reported Running throughout.
+
+⛔ **AND IT WAS THE `disabled` BRANCH, NOT THE `failed` ONE — this file said `failed` and that was
+the more dangerous mistake in the sentence.** The documented degrade-to-HTTP path applies when certs
+ARE configured and cannot be loaded, and it is only safe BECAUSE it logs an error banner every
+start and reports itself in Settings. Here `.env.local` never parsed, so `ENABLE_TLS` and
+`TLS_CERT_PATH` were simply ABSENT — indistinguishable from an install that never had TLS. The
+server took the `disabled` branch and came up on plaintext **saying nothing at all**, which is
+correct behaviour for that branch and exactly wrong for this cause. The three-state rule held; the
+input to it was a lie. ⛔ A total environment failure must not be able to present as a deliberate
+configuration choice — which is what the size tripwire on BOTH env writers now prevents upstream,
+since nothing in `server.js` can tell the two apart from what it is handed.
 
 ⛔ **Checking one half of a round trip proves nothing.** Either half alone looks defensible; it is
 the DISAGREEMENT that corrupts. ⛔ **And the damage is invisible until it is total** — doubling a

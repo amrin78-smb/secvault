@@ -38,6 +38,8 @@ const {
   filenameFromDisposition,
   describeFailure,
   coverageNote,
+  fileResponseRefusal,
+  FILE_CONTENT_TYPES,
   DONE_LINGER_MS,
 } = require('../lib/downloadState');
 
@@ -627,5 +629,98 @@ describe('coverageNote', () => {
       assert.doesNotThrow(() => coverageNote(bad));
       assert.equal(coverageNote(bad), null);
     }
+  });
+});
+
+describe('⛔ fileResponseRefusal — never save a page as a file', () => {
+  it('accepts the content types a real export is served as', () => {
+    for (const ct of FILE_CONTENT_TYPES) {
+      assert.equal(
+        fileResponseRefusal({ contentType: ct, redirected: false }),
+        null,
+        `${ct} was refused, so a legitimate export would fail to save`
+      );
+    }
+  });
+
+  it('tolerates parameters and casing on the content type', () => {
+    assert.equal(fileResponseRefusal({ contentType: 'text/csv; charset=utf-8' }), null);
+    assert.equal(fileResponseRefusal({ contentType: 'TEXT/CSV' }), null);
+    assert.equal(fileResponseRefusal({ contentType: '  text/csv  ' }), null);
+  });
+
+  it('refuses an HTML page', () => {
+    const r = fileResponseRefusal({ contentType: 'text/html; charset=utf-8' });
+    assert.ok(r, 'an HTML page was accepted as a file');
+    assert.equal(r.reason, 'text/html');
+    assert.match(r.detail, /did not return a file/);
+  });
+
+  it('refuses a type nobody thought to name', () => {
+    // ⛔ THE DENYLIST'S BLIND SPOT. The first version asked
+    // `ctype.includes('text/html')`, so every one of these was SAVED AS A FILE.
+    for (const ct of ['application/xhtml+xml', 'text/xml', 'image/png', 'text/html-sandboxed']) {
+      assert.ok(fileResponseRefusal({ contentType: ct }), `${ct} was accepted as a file`);
+    }
+  });
+
+  it('refuses a response with NO content type at all', () => {
+    // ⛔ `(res.headers.get('content-type') || '')` turned a missing header into
+    // an empty string, which does not contain 'text/html', which passed. An
+    // absent type is not evidence that a file was sent.
+    for (const missing of [undefined, null, '', '   ']) {
+      const r = fileResponseRefusal({ contentType: missing });
+      assert.ok(r, `a missing content-type (${JSON.stringify(missing)}) was accepted as a file`);
+      assert.equal(r.reason, 'no-content-type');
+    }
+  });
+
+  it('refuses a REDIRECTED response even when it looks like a file', () => {
+    // ⛔ THE CASE THAT ACTUALLY HAPPENS. /api/logs/export answers a refusal
+    // with a 303 to /logs; fetch follows it and the final response is an
+    // ordinary 200 from a different route. Nothing but `redirected` records
+    // that a refusal took place.
+    const r = fileResponseRefusal({ contentType: 'text/csv', redirected: true });
+    assert.ok(r, 'a followed redirect was accepted as a file');
+    assert.equal(r.reason, 'redirected');
+    assert.match(r.detail, /somewhere else/);
+  });
+
+  it('never throws on junk', () => {
+    for (const bad of JUNK) {
+      assert.doesNotThrow(() => fileResponseRefusal(bad));
+    }
+    assert.doesNotThrow(() => fileResponseRefusal());
+  });
+});
+
+describe('⛔ a thrown fetch reaches describeFailure’s no-response branch', () => {
+  // ⛔ THAT BRANCH WAS UNREACHABLE FROM THE ONLY CALLER. DownloadButton's catch
+  // passed the browser's own string as `detail`, and describeFailure gives
+  // `detail` absolute priority — correct for a refusal the ROUTE worded, wrong
+  // for a throw that has no server words at all. So the function short-circuited
+  // on its first line and the operator was shown the raw "Failed to fetch."
+  // A guard that cannot fire, in the error path.
+  it('status 0 produces the connection sentence, not a bare HTTP code', () => {
+    const s = describeFailure({ status: 0, reason: 'Failed to fetch' });
+    assert.match(s, /before the server answered/);
+    assert.doesNotMatch(s, /HTTP 0/);
+  });
+
+  it('carries the browser’s raw message parenthesised, for a ticket', () => {
+    assert.match(describeFailure({ status: 0, reason: 'Failed to fetch' }), /\(Failed to fetch\)/);
+  });
+
+  it('does not let the raw message become the whole sentence', () => {
+    const s = describeFailure({ status: 0, reason: 'Failed to fetch' });
+    assert.notEqual(s, 'Failed to fetch.');
+    assert.ok(s.length > 40, `the operator was shown a bare browser string: ${s}`);
+  });
+
+  it('still lets a REAL server detail win, which is the rule this preserves', () => {
+    assert.equal(
+      describeFailure({ status: 400, detail: 'Stopped at the row cap; narrow the window.' }),
+      'Stopped at the row cap; narrow the window.'
+    );
   });
 });

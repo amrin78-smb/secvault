@@ -120,10 +120,34 @@ describe('what each finding may be narrowed by', () => {
     assert.equal(p.get('srcCountry'), null, 'filtered to one of the two countries');
   });
 
-  it('a new country filters both the account and that country', () => {
+  it('a new country filters the ACCOUNT ONLY, never the country name', () => {
+    // ⛔ THIS TEST PINNED THE BUG. It asserted srcCountry === 'Brazil'
+    // with a fixture that already held a NORMALISED name, so no change to the
+    // raw/normalised handling could ever fail it.
+    //
+    // The finding's country is normalizeCountry()'s output (an ISO code
+    // rewritten to an English name); `src_country` in syslog_events holds the
+    // raw vendor spelling, mostly 2-letter codes. Measured live: `CH` 195 rows
+    // vs `Switzerland` 5. Filtering on the normalised name opened an EMPTY
+    // results table on the page whose only job is to show the finding's
+    // evidence.
     const p = paramsOf(buildDetectionLogHref(FINDINGS.new_country_for_user, WINDOW).href);
     assert.equal(p.get('srcUser'), 'jdoe');
-    assert.equal(p.get('srcCountry'), 'Brazil');
+    assert.equal(p.get('srcCountry'), null, 'the normalised country name reached the query again');
+  });
+
+  it('no link anywhere emits srcCountry', () => {
+    // A repo-level guard: the mismatch is a property of the COLUMN, so it would
+    // be wrong for any finding kind, not just this one.
+    for (const finding of Object.values(FINDINGS)) {
+      const link = buildDetectionLogHref(finding, WINDOW);
+      if (!link) continue;
+      assert.equal(
+        paramsOf(link.href).get('srcCountry'),
+        null,
+        `${finding.kind} emitted srcCountry, which cannot match the raw column reliably`
+      );
+    }
   });
 
   it('off-hours covers the whole window, because an hour-of-day is not expressible', () => {

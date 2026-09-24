@@ -285,10 +285,26 @@ which are deliberately absent: the export is the whole result set for the window
 operator's current page would produce a file named after the full range holding fifty rows from the
 middle of it.
 
-⛔ **It refuses rather than truncating.** Above `EXPORT_MAX_ROWS` (50,000) it answers **413**
-with the remedy named; a search that hit the 10s statement timeout answers **504**. Neither ever
-returns a CSV — an empty-but-valid file reads as "nothing matched", and unlike the page there is no
-banner on a downloaded file to say otherwise.
+⛔ **It NARROWS THE WINDOW rather than truncating the rows** (v2.180.0 — this section described the
+pre-v2.180.0 behaviour and was wrong on every number in it). The export walks the window newest-first
+in one-hour slices and stops at `EXPORT_MAX_ROWS` (50,000), a wall-clock budget, or a slice that hits
+the 10s statement timeout. What it returns is then **complete for a SHORTER window**, never a sample
+of the one asked for: a truncated row list is indistinguishable from a quiet period, while a stated
+narrower window is a fact the operator can act on.
+
+`stopReason` is one of `complete` / `row_ceiling` / `budget` / `timed_out`, and anything but
+`complete` makes the file **shortened**, declared THREE ways so no consumer can miss it: the
+`X-SecVault-Window-Shortened: true` header, the covered range in `X-SecVault-Covered-From`/`-To`,
+and a `-window-shortened` suffix on the filename. `X-SecVault-Rows` carries the count.
+
+⛔ **There is no 413.** The only refusals are `rejected_filter` (a malformed filter value — it
+REFUSES rather than dropping the filter and exporting everything, which would produce a file named
+after a host it never filtered on) and `timed_out` **when not one slice could be read**, which is
+distinct from a slice reading zero rows. A refusal answers **504** to a caller sending
+`Accept: application/json`, and otherwise **303** back to `/logs?exportError=…` so the page can
+render a banner — a refusal delivered into the download manager is one the operator never sees.
+⛔ The `Location` is RELATIVE: under `server.js` `request.nextUrl.origin` is `https://localhost:3000`,
+so an absolute one points at a host that does not exist.
 
 ⛔ **Audited.** Writes an `activity_log` row (`export-logs`) recording the window, the applied
 filters and the row count — the query, never the rows. It is the only gated read in this app that

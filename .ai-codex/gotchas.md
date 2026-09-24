@@ -518,6 +518,36 @@ corrupt line is huge:
 ⛔ **The deploy's own verification is what caught it**, by failing. Had those two steps been
 skipped, the banner would have read "completed successfully" over a console serving plaintext.
 
+### ⛔ THE FIRST FIX ONLY CORRECTED THE READ, AND THE WRITE WAS STILL ANSI (found the same day)
+
+`-Encoding UTF8` went onto every `Get-Content` of an env file, and the test written to hold it
+filtered on `/Get-Content/` and asserted **nothing about any write**. So
+`Set-Content -Path $envLocalPath -Value $envContent -NoNewline` in `Install-SecVault.ps1` — the
+script that CREATES the file, nine lines above a read that had just been corrected — passed the new
+guard cleanly. Measured in a PS 5.1.26100 harness: that write emits an em-dash as the single ANSI
+byte `0x97`, which `Get-Content -Encoding UTF8` then reads back as `U+FFFD`.
+
+**The same disagreement as the outage, running the other way.** It bites on a RE-RUN over a server
+built before the ASCII template landed: a value containing a non-ASCII character (an `LDAP_BASE_DN`
+with an accented OU, a localised `SYSLOG_ARCHIVE_DIR`) is corrupted irreversibly, and a character
+with no cp1252 mapping silently becomes `?`. The read-back verification only asserts `^KEY=\S`, so a
+mangled value passes it.
+
+⛔ **AN ENCODING IS A ROUND TRIP, AND SO IS ITS TEST.** Fixing one half and testing only that half
+is what left this. Writes now go through
+`[System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding($false)))`
+(no BOM, matching `Set-SecVaultEnvLine`), and `tests/installerEnvEncoding.test.js` scans READS and
+WRITES separately, over `Get-Content`/`Select-String`/`switch -File` and
+`Set-Content`/`Add-Content`/`Out-File`, matching env-path variables by CASE-INSENSITIVE PREFIX —
+the near-miss spellings `$envLocal` and `$envLocalForScheme` are already in `Update-SecVault.ps1`
+and the original fixed-string list matched neither.
+
+⛔ **The 1 MB tripwire was also on only ONE of the two read-modify-write paths.** It lived in
+`SecVault-Tls.ps1`'s `Set-SecVaultEnvLine`; `Install-SecVault.ps1` step 10 had none, so on the 2.2 GB
+file it exists to catch it first made a **2.2 GB `Copy-Item` backup**, then died inside
+`Get-Content -Raw` with an opaque .NET `OutOfMemoryException` instead of printing the recovery
+instructions above. Both writers now carry it, and the test asserts both.
+
 ## ⛔ THE PRODUCT COULD NOT BE INSTALLED FROM SCRATCH (found 2026-09-24)
 
 The first genuine fresh-install test of the packaged installer failed at

@@ -6,12 +6,55 @@ an already-deployed table) + `lib/schema-grants.sql` (readonly roles, applied se
 PostgreSQL 16. All PKs are `UUID DEFAULT gen_random_uuid()` except `settings` (TEXT key-value PK).
 No `SERIAL` anywhere — a deliberate choice, see "Known schema debt" below.
 
-65 tables total in `lib/schema.sql` (`grep -c "^CREATE TABLE IF NOT EXISTS"` — recount rather than
+69 tables total in `lib/schema.sql` (`grep -c "^CREATE TABLE IF NOT EXISTS"` — recount rather than
 trusting this line; it read 36 for a long stretch while the file held far more, and `segmentation_intents`
 is still not written up below). Dense format per table:
 ```
 col_name          TYPE  CONSTRAINTS                    -- notes / FK target
 ```
+
+---
+
+## ⛔ ORDER IN `schema.sql` IS LOAD-BEARING, AND NOTHING ON A DEPLOYED SERVER CAN SHOW YOU THAT
+
+`lib/migrate.js` sends the whole file to PostgreSQL as ONE multi-statement batch, so a statement
+naming a table declared LATER aborts the entire migration and the installer stops with
+`[FATAL] Schema migration failed`. Found 2026-09-24 by the first genuine fresh-install test — after
+months of clean deploys:
+
+```
+cve_assessment_acknowledgements  REFERENCES advisories(id)      declared 430 lines early
+ALTER TABLE snmp_metric_snapshots ADD COLUMN ...                declared 140 lines early
+  relation "advisories" does not exist            (SQLSTATE 42P01)
+  relation "snmp_metric_snapshots" does not exist (SQLSTATE 42P01)
+```
+
+⛔ **`CREATE TABLE IF NOT EXISTS` GUARDS CREATION AND SAYS NOTHING ABOUT ORDER**, and
+`ADD COLUMN IF NOT EXISTS` tolerates a missing COLUMN, never a missing TABLE. Wherever the table
+already existed both ran clean, so **the defect could only ever appear on a database that had never
+been migrated** — i.e. on a customer's first install, and never on ours. This is the mirror image of
+the trap CLAUDE.md already records (a new column needs its own `ALTER`, because the `CREATE` body is
+a no-op on a deployed server): both are cases where the file that looks correct in the diff behaves
+differently on a fresh database than on an established one.
+
+⛔ **`npm run dbcheck` CANNOT CATCH IT** — it executes SQL against an ESTABLISHED database, which is
+exactly the condition under which both statements succeed. `tests/schemaOrder.test.js` is the guard:
+it lexes the file into statements (handling `''` escapes, dollar-quoting, quoted identifiers and
+block comments) and fails the build on a forward dependency.
+
+⛔ **That guard has been too narrow TWICE, the same way both times** — first checking only
+`REFERENCES` (the next live migration then failed on the `ALTER`), then matching one PHYSICAL LINE at
+a time, which saw only ~72% of `CREATE INDEX` statements because 30 of 109 wrap their `ON <table>`
+onto a second line. **Widen it, never narrow it**, and when adding a statement kind, add it to
+`DEPENDS_ON_TABLE`.
+
+**So: a new table goes AFTER everything it references, and any `ALTER TABLE`/`CREATE INDEX`/
+`INSERT INTO` goes AFTER the `CREATE TABLE` it names.** Run `npm test` — that one file is the only
+thing standing between a reordering and an un-installable product.
+
+⛔ `data_backfills` is a related trap: `lib/schema-grants.sql` GRANTs on it but `schema.sql` never
+CREATEs it — `lib/backfillLedger.js` does, at runtime. Safe only because both installers run
+`migrate.js` before the grants file, and invisible to the order test, which reads `schema.sql` alone.
 
 ---
 

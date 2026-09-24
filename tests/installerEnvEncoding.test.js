@@ -41,11 +41,33 @@ const path = require('node:path');
 
 const INSTALLER_DIR = path.join(__dirname, '..', 'installer');
 
-// The variables the installer scripts use for a path to an env file. A read of
-// any of these is a read of .env.local (or a backup copy of it).
-const ENV_PATH_VARS = [
-  '$EnvPath', '$envLocalPath', '$EnvFile', '$envCopy', '$envBackupPath',
+// Anything that names an env file: the variables the scripts hold one in, plus
+// the literal filename for an inline Join-Path.
+//
+// ⛔ MATCHED CASE-INSENSITIVELY AND AS A PREFIX, because PowerShell
+// variables are case-insensitive and the near-miss name is ALREADY IN THE TREE:
+// Update-SecVault.ps1 holds the same path in `$envLocal` and
+// `$envLocalForScheme`, neither of which contains the substring
+// `$envLocalPath`. Both only feed a reader that is already correct, so nothing
+// is missed today -- but one `Get-Content $envLocal -Raw` added beside them
+// reintroduces the 2.2 GB outage with this test still green. A guard that
+// matches the exact spellings that happen to exist today is a guard that
+// cannot fire tomorrow.
+const ENV_PATH_PATTERNS = [
+  /\$env(Local|File|Path|Copy|Backup)/i,   // $envLocal, $envLocalPath, $envLocalForScheme, $envFile, $envCopy...
+  /\$EnvPath\b/i,
+  /\.env\.local/i,                         // an inline Join-Path / literal
 ];
+const namesAnEnvFile = (text) => ENV_PATH_PATTERNS.some((re) => re.test(text));
+
+// ⛔ EVERY WAY PS 5.1 CAN DECODE OR ENCODE A FILE, not just the two
+// that were used on the day. Each of these has its OWN default: Get-Content
+// and Set-Content/Add-Content/Out-File use the ANSI codepage, Select-String
+// and `switch -File` have their own, and the .NET helpers default to UTF-8
+// (correct, and exempt -- they state their encoding by construction).
+const READERS = /\b(Get-Content|Select-String|switch\s+-File)\b/i;
+const WRITERS = /\b(Set-Content|Add-Content|Out-File)\b/i;
+const STATES_UTF8 = /-Encoding\s+UTF8/i;
 
 const isComment = (line) => /^\s*#/.test(line);
 
@@ -67,15 +89,15 @@ describe('⛔ every env-file read states its encoding', () => {
     assert.ok(lines.length > 500, `only ${lines.length} lines scanned — the glob is wrong`);
   });
 
-  it('never reads an env file without -Encoding UTF8', () => {
-    const offenders = lines
-      .filter((l) => /Get-Content/.test(l.text))
-      .filter((l) => ENV_PATH_VARS.some((v) => l.text.includes(v)))
-      .filter((l) => !/-Encoding\s+UTF8/i.test(l.text))
-      .map((l) => `${l.file}:${l.line}  ${l.text.trim()}`);
+  const offendersMatching = (cmdlets) => lines
+    .filter((l) => cmdlets.test(l.text))
+    .filter((l) => namesAnEnvFile(l.text))
+    .filter((l) => !STATES_UTF8.test(l.text))
+    .map((l) => `${l.file}:${l.line}  ${l.text.trim()}`);
 
+  it('never READS an env file without -Encoding UTF8', () => {
     assert.deepEqual(
-      offenders,
+      offendersMatching(READERS),
       [],
       'Get-Content decodes with the ANSI codepage on PowerShell 5.1. These scripts '
         + 'write .env.local back as UTF-8, so a read without -Encoding UTF8 doubles '
@@ -84,10 +106,56 @@ describe('⛔ every env-file read states its encoding', () => {
     );
   });
 
+  it('never WRITES an env file without stating its encoding', () => {
+    // ⛔ THIS HALF WAS MISSING, AND SO WAS THE DEFECT IT CATCHES.
+    // The original scan filtered on /Get-Content/ and asserted nothing about any
+    // write, so `Set-Content -Path $envLocalPath -Value $envContent -NoNewline`
+    // -- in Install-SecVault.ps1, the script that CREATES the file, nine lines
+    // above a read that had been corrected -- passed it cleanly. Measured in a
+    // PS 5.1.26100 harness: that write emits an em-dash as the single ANSI byte
+    // 0x97, and `Get-Content -Encoding UTF8` reads it back as U+FFFD.
+    //
+    // The same disagreement as the outage, running the other way. Fixing one
+    // half of a round trip and testing only that half is what left it.
+    assert.deepEqual(
+      offendersMatching(WRITERS),
+      [],
+      'Set-Content/Add-Content/Out-File encode with the ANSI codepage on PowerShell '
+        + '5.1, while every read of these files now decodes UTF-8. Write with '
+        + '[System.IO.File]::WriteAllText(path, text, (New-Object System.Text.UTF8Encoding($false))) '
+        + 'or pass -Encoding UTF8. An encoding is a ROUND TRIP -- both ends have to agree.'
+    );
+  });
+
+  it('every pattern the scan is built from still matches something', () => {
+    // ⛔ A SCAN THAT MATCHES NOTHING PASSES. Both assertions above are
+    // negative, so a typo'd regex or a renamed variable turns this file into
+    // decoration that reports success for ever.
+    //
+    // The three patterns are pinned SEPARATELY rather than as an intersection,
+    // because the intersection of WRITERS and namesAnEnvFile is now legitimately
+    // EMPTY -- that is the fix: the one cmdlet-based env write in the tree became
+    // [System.IO.File]::WriteAllText, which states its encoding by construction.
+    // Requiring a compliant example of the thing we just abolished would fail the
+    // moment the codebase got it right.
+    const matching = (re) => lines.filter((l) => re.test(l.text)).length;
+    assert.ok(matching(READERS) >= 6, `READERS matched ${matching(READERS)} lines -- the cmdlet pattern has drifted`);
+    assert.ok(matching(WRITERS) >= 6, `WRITERS matched ${matching(WRITERS)} lines -- the cmdlet pattern has drifted`);
+    assert.ok(
+      lines.filter((l) => namesAnEnvFile(l.text)).length >= 10,
+      'no line names an env file any more -- ENV_PATH_PATTERNS has drifted'
+    );
+    // And the reads it polices are really there, stating UTF8.
+    const envReads = lines.filter((l) => READERS.test(l.text)).filter((l) => namesAnEnvFile(l.text));
+    assert.ok(envReads.length >= 6, `only ${envReads.length} env-file reads matched -- the patterns have drifted`);
+  });
+
   it('keeps .env.local.example pure ASCII', () => {
     // ⛔ THE THIRD LAYER, AND THE ONLY ONE THAT REMOVES THE FUEL.
-    // Layer 1 is -Encoding UTF8 on every read; layer 2 is the writer refusing an
-    // oversized file. Both stop the DOUBLING. This stops there being anything to
+    // Layer 1 is a STATED ENCODING ON BOTH ENDS of every round trip (read AND
+    // write -- the write side was the half originally left out, and left
+    // unchecked); layer 2 is both writers refusing an oversized file. Both stop
+    // the DOUBLING. This stops there being anything to
     // double: .env.local.example is copied verbatim to .env.local on a fresh
     // install, so every byte in it is a byte the installer will read and rewrite
     // on every deploy for the life of that server.
@@ -115,11 +183,17 @@ describe('⛔ every env-file read states its encoding', () => {
     // coming back. A real .env.local is a few KB; the writer refuses to rewrite
     // anything remotely larger rather than laundering corruption into a
     // freshly-written file.
-    const tls = fs.readFileSync(path.join(INSTALLER_DIR, 'SecVault-Tls.ps1'), 'utf8');
-    assert.match(
-      tls,
-      /\$envSize\s*-gt\s*1MB/,
-      'the oversized-.env.local guard in Set-SecVaultEnvLine is gone'
-    );
+    // ⛔ ON BOTH READ-MODIFY-WRITE PATHS. It was only on
+    // SecVault-Tls.ps1's Set-SecVaultEnvLine; Install-SecVault.ps1's step 10
+    // (Copy-Item backup -> two Get-Content -Raw -> write) had none, so the
+    // corrupt file it exists to catch produced a 2.2 GB backup copy and an
+    // opaque OutOfMemoryException instead of the recovery instructions.
+    for (const file of ['SecVault-Tls.ps1', 'Install-SecVault.ps1']) {
+      assert.match(
+        fs.readFileSync(path.join(INSTALLER_DIR, file), 'utf8'),
+        /-gt\s*1MB/,
+        `the oversized-.env.local guard is gone from ${file}`
+      );
+    }
   });
 });

@@ -132,6 +132,23 @@ function Invoke-Native {
     param([Parameter(Mandatory = $true)][scriptblock]$Command)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    # ⛔ $LASTEXITCODE IS STALE, NOT EMPTY, WHEN A COMMAND NEVER RAN.
+    # Same seed and same reason as Install-SecVault.ps1's copy of this helper.
+    # If the executable inside $Command cannot be resolved -- pg_restore at a
+    # path this server does not have, psql missing from a PATH this process
+    # never refreshed -- PowerShell raises CommandNotFoundException, which
+    # 'Continue' downgrades to a printed error, and LEAVES $LASTEXITCODE
+    # holding the PREVIOUS command's value. That is almost always 0.
+    #
+    # ⛔ IN THIS SCRIPT THAT MEANT A RESTORE THAT NEVER RAN COULD REPORT
+    # SUCCESS: `$restoreExit = $LASTEXITCODE` immediately after the pg_restore
+    # call would inherit the 0 left behind by the connection-terminate psql a
+    # few lines above, and the `if ($restoreExit -ne 0)` check would pass. A
+    # failed read recorded as a fact -- the bug class CLAUDE.md names most
+    # often -- on the one operation whose whole job is to bring a database
+    # back. 9009 is cmd.exe's own "command not found", so the un-run case fails
+    # every `-ne 0` check instead of passing it.
+    $global:LASTEXITCODE = 9009
     try { & $Command } finally { $ErrorActionPreference = $prevEAP }
 }
 

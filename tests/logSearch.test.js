@@ -100,11 +100,37 @@ describe('logSearch: results are capped and the cap is honest', () => {
     assert.equal(clampLimit(0), 1);
     assert.equal(clampLimit(-5), 1);
     // ⛔ Reads the constant rather than repeating it. This asserted a
-    // literal 100 and broke the moment the default page size changed to 25 —
+    // literal 100 and broke the moment the default page size changed to 50 —
     // the behaviour under test is 'an unparseable limit falls back to the
     // default', not 'the default is 100'.
     assert.equal(clampLimit('abc'), DEFAULT_LIMIT);
     assert.equal(clampLimit(250), 250);
+  });
+
+  it('⛔ a stated ceiling that arrives as a STRING lowers the cap, not raises it', () => {
+    // Number.isFinite does NOT coerce: Number.isFinite('100') is false. The
+    // guard read a string ceiling as 'not a number' and fell back to MAX_LIMIT,
+    // so a caller asking for 100 got 500 -- a bound that WIDENS itself when it
+    // does not understand its own argument. Every value off a URL is a string.
+    assert.equal(clampLimit(9999, '100'), 100);
+    assert.equal(clampLimit(9999, 100), 100);
+    assert.equal(clampLimit(50, '100'), 50, 'a request below the ceiling is still honoured');
+  });
+
+  it('⛔ a ceiling ABOVE MAX_LIMIT is honoured -- that is the point of the parameter', () => {
+    // The export asks for one slice's share of a multi-thousand-row file.
+    // MAX_LIMIT is the default for a caller that states nothing, never an upper
+    // bound on one that does; clamping it here would silently truncate every
+    // CSV export to 500 rows.
+    assert.equal(clampLimit(20000, 20000), 20000);
+    assert.ok(clampLimit(20000, 20000) > MAX_LIMIT);
+  });
+
+  it('⛔ an unusable ceiling falls back to MAX_LIMIT, never to no bound', () => {
+    for (const bad of [null, undefined, NaN, 0, -1, 'abc', {}, [], Infinity]) {
+      const got = clampLimit(999999, bad);
+      assert.equal(got, MAX_LIMIT, 'ceiling ' + String(bad) + ' produced ' + got);
+    }
   });
 
   it('asks for limit + 1 so "more exist" is detectable without a COUNT', () => {

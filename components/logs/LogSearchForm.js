@@ -158,9 +158,10 @@ export default function LogSearchForm({ params, devices, options }) {
                     distinct rows per page in 18-25ms. Only the word was wrong. */}
                 <label style={LABEL} htmlFor="f-limit">Rows per page</label>
                 <select id="f-limit" name="limit" defaultValue={p.limit || '50'} style={FIELD}>
-                  {/* 25 first and default: it fits on one screen together with
-                      the pagination control below the table. The larger sizes
-                      remain for deliberate wide scans. */}
+                  {/* 50 first and default, matching DEFAULT_LIMIT in
+                      lib/syslog/logSearch.js: it fits on one screen together
+                      with the pagination control below the table. The larger
+                      sizes remain for deliberate wide scans. */}
                   {['50', '100', '200', '500'].map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}

@@ -1169,6 +1169,20 @@ $envExisted = Test-Path $envLocalPath
 $existingCredKey = ''
 $existingNextAuthSecret = ''
 if ($envExisted) {
+    # ⛔ REFUSE AN OVERSIZED .env.local BEFORE READING OR COPYING IT.
+    # The same tripwire SecVault-Tls.ps1's Set-SecVaultEnvLine carries, on the
+    # OTHER read-modify-write path -- this one had none. On the 2.2 GB file that
+    # guard exists to catch, the next three statements are a 2.2 GB Copy-Item
+    # followed by TWO `Get-Content -Raw` calls, which die with an opaque
+    # .NET OutOfMemoryException instead of saying what is wrong or how to fix it.
+    # Checked BEFORE the backup copy, so a corrupt file is not duplicated first.
+    $envSizeNow = (Get-Item -LiteralPath $envLocalPath).Length
+    if ($envSizeNow -gt 1MB) {
+        Fail ("$envLocalPath is $([int]($envSizeNow / 1MB)) MB. A real .env.local is a few KB, so this file is corrupt and will NOT be read or rewritten. " +
+              "This is the PS 5.1 encoding round trip: a non-ASCII character read in the ANSI codepage and written back as UTF-8 roughly doubles on every deploy. " +
+              "Recover the keys from a backup (.env.local.bak-*/.pre-install-*) or from an earlier copy, write a clean file by hand, then re-run. " +
+              "CREDENTIAL_KEY and NEXTAUTH_SECRET are the two that cannot be regenerated.")
+    }
     $envBackupPath = "$envLocalPath.pre-install-" + (Get-Date).ToString('yyyyMMdd-HHmmss')
     Copy-Item -Path $envLocalPath -Destination $envBackupPath -Force
     # ⛔ UTF8: Get-Content defaults to the ANSI codepage on PS 5.1, and this
@@ -1223,7 +1237,23 @@ if ($NetVaultUrl) {
     $envContent = Set-EnvLine -Text $envContent -Key 'NETVAULT_URL' -Value $NetVaultUrl
 }
 
-Set-Content -Path $envLocalPath -Value $envContent -NoNewline
+# ⛔ THE WRITE HALF OF THE SAME ROUND TRIP, AND IT WAS THE HALF LEFT OUT.
+# `Set-Content` with no -Encoding writes the ANSI CODEPAGE on PS 5.1 -- an
+# em-dash becomes the single byte 0x97 -- while the read nine lines below, and
+# every read in every other installer script, now uses -Encoding UTF8 and
+# decodes that byte as U+FFFD. The disagreement was INSIDE ONE SCREENFUL of one
+# script, running the opposite way to the 2.2 GB doubling bug.
+#
+# It bites on a RE-RUN over a server built before the ASCII template landed:
+# that .env.local still carries the old non-ASCII comments, and a value that
+# contains one -- an LDAP_BASE_DN with an accented OU, a localised
+# SYSLOG_ARCHIVE_DIR -- is corrupted irreversibly, with a character that has no
+# cp1252 mapping silently becoming `?`. The read-back below only asserts
+# `^KEY=\S`, so a mangled value passes it.
+#
+# UTF8Encoding($false) = no BOM, matching Set-SecVaultEnvLine in SecVault-Tls.ps1.
+# An encoding is a ROUND TRIP; both ends are now stated explicitly.
+[System.IO.File]::WriteAllText($envLocalPath, $envContent, (New-Object System.Text.UTF8Encoding($false)))
 
 # ⛔ VERIFY WHAT WAS ACTUALLY WRITTEN. A -replace that matches nothing is not
 # an error in PowerShell -- it returns the string unchanged -- so a key that

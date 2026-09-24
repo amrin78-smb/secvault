@@ -43,6 +43,7 @@ import {
   filenameFromDisposition,
   describeFailure,
   coverageNote,
+  fileResponseRefusal,
   DONE_LINGER_MS,
 } from '../../lib/downloadState';
 import LoadingSpinner from './LoadingSpinner';
@@ -107,6 +108,34 @@ export default function DownloadButton({
     };
   }, []);
 
+  // ⛔ A MESSAGE BELONGS TO THE FILE IT CAME FROM. This component is not
+  // remounted when the surrounding page changes what it points at: every call
+  // site builds `href` from the CURRENT filters, so on /logs a failed export
+  // followed by an edited search leaves the old sentence sitting under a button
+  // that now targets something else. The operator reads "stopped at the row
+  // cap; narrow the window" as a verdict on the search they just narrowed, and
+  // concludes narrowing did not work.
+  //
+  // The same applies to `note`, which is worse: a coverage caveat is a claim
+  // ABOUT A FILE ("covers 11:58 to 12:00 of the window you asked for"), so
+  // leaving it attached to a different target states something untrue rather
+  // than merely stale.
+  //
+  // Clearing DONE too, because "Received — your browser is saving it." under a
+  // changed target reads as a file that was never fetched.
+  useEffect(() => {
+    setFailure(null);
+    setNote(null);
+    if (lingerRef.current) {
+      clearTimeout(lingerRef.current);
+      lingerRef.current = null;
+    }
+    // ⛔ Only from a settled state. An in-flight request keeps its PREPARING
+    // label — it is still genuinely running, and the response is discarded by
+    // the mounted/abort guards rather than written against the new target.
+    setState((s) => (s === STATES.PREPARING ? s : STATES.IDLE));
+  }, [href]);
+
   async function handleClick(event) {
     // Ctrl/cmd/middle/shift-click, or anything already handled: the browser's job, not
     // ours. Leaving these alone is what keeps "open in a new tab" working.
@@ -169,15 +198,16 @@ export default function DownloadButton({
       // but that coupling lives in two files and is easy to break from either
       // end. This is the independent check: if the server did not send a file,
       // we do not write one, whatever the status said.
-      const ctype = (res.headers.get('content-type') || '').toLowerCase();
-      if (ctype.includes('text/html')) {
+      // The judgement itself is pure and unit-tested in lib/downloadState.js —
+      // this is only the plumbing. See fileResponseRefusal's own comment for
+      // why it is an allowlist and why `redirected` is the stronger signal.
+      const notAFile = fileResponseRefusal({
+        contentType: res.headers.get('content-type'),
+        redirected: res.redirected,
+      });
+      if (notAFile) {
         if (!mountedRef.current) return;
-        setFailure(describeFailure({
-          status: res.status,
-          detail:
-            'The server returned a web page instead of a file, so nothing was saved. '
-            + 'Reload the page and try again; if it persists, the export route is misrouting.',
-        }));
+        setFailure(describeFailure({ status: res.status, ...notAFile }));
         setState((s) => nextState(s, 'failure'));
         return;
       }
@@ -199,7 +229,21 @@ export default function DownloadButton({
       // An abort is OUR doing (unmount), not a failure to report to anyone.
       if (controller.signal.aborted) return;
       if (!mountedRef.current) return;
-      setFailure(describeFailure({ detail: err && err.message ? err.message : String(err) }));
+      // ⛔ THE BROWSER'S MESSAGE IS A TOKEN, NOT A SENTENCE — so it rides in
+      // `reason`, never in `detail`. describeFailure gives `detail` absolute
+      // priority ("the server's own words win"), which is right for a refusal
+      // the ROUTE worded, and wrong here: a thrown fetch has no server words at
+      // all. Passing err.message as detail short-circuited the function at its
+      // first line, so its own no-response branch — written for exactly this
+      // case — could never run, and the operator was shown the raw string
+      // "Failed to fetch." A guard that cannot fire, in the error path.
+      //
+      // status 0 is what reaches that branch. The raw message is still carried,
+      // parenthesised, because it is the only durable fact for a ticket.
+      setFailure(describeFailure({
+        status: 0,
+        reason: err && err.message ? String(err.message) : String(err),
+      }));
       setState((s) => nextState(s, 'failure'));
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
@@ -261,8 +305,10 @@ export default function DownloadButton({
         )}
 
         {failure && (
-          // Persists until the next click. An error that clears itself after a few
-          // seconds is an error the operator never read.
+          // Persists until the next click, or until the button's target changes
+          // (see the href effect above — a verdict on one file must not sit
+          // under another). An error that clears itself after a few seconds is
+          // an error the operator never read.
           <span style={{ color: 'var(--sev-crit)' }}>{failure}</span>
         )}
 

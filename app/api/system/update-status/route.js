@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.183.0': [
+    "Fixed a link on the VPN detections page that could never find anything: clicking a \"new country\" finding opened the log explorer filtered on a country name the logs do not store, so it always showed an empty result — which reads as \"this did not happen\" on the page whose job is to show the evidence. The link now filters on the account alone.",
+    "Fixed the settings file being written back in the wrong character encoding during a repeat installation, which could permanently corrupt values containing accented characters. This was the other half of the fault fixed in 2.182.0, and the check added then could not see it.",
+    "The installer now refuses an oversized settings file before reading or copying it, instead of failing with an out-of-memory error and no explanation.",
+    "Log and report downloads now tell you when the server returned something that is not a file, instead of silently saving an error page under the name of your export. A failed download also no longer leaves its error message attached to a different export after you change your search.",
+    "The uninstaller no longer widens permissions on the repository key while trying to delete it, and restores them if the deletion fails. A backup or restore that could not start now reports a failure rather than success.",
+  ],
   '2.182.2': [
     "The settings template is now plain ASCII, removing the last of the characters that could be corrupted by the encoding fault fixed in 2.182.0.",
     "That fault doubled every accented character in the settings file on each update. It is fixed at the source, but the template was still shipping 27 such characters into every new installation; there is now nothing left for a future mistake to damage.",

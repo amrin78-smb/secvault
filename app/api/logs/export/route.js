@@ -113,7 +113,13 @@ export async function GET(request) {
         + (out.shortened
           ? ` (window SHORTENED from ${out.requestedFrom.toISOString()}; stopped: ${out.stopReason})`
           : '')
-        + (out.clamped ? ' (window clamped to the maximum searchable span)' : ''),
+        + (out.clamped ? ' (window clamped to the maximum searchable span)' : '')
+        // ⛔ Recorded even though a rejected filter now refuses the export: if a
+        // future change ever lets one through, the audit row is where that has
+        // to be visible, and an empty object here is a fact worth having.
+        + (out.rejected && Object.keys(out.rejected).length
+          ? ` (REJECTED filters: ${JSON.stringify(out.rejected)})`
+          : ''),
     });
 
     return new Response(out.csv, {

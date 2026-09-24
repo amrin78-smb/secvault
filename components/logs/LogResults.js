@@ -237,8 +237,14 @@ export default function LogResults({ result, deviceNames, searchParams, exportEr
           <DownloadButton
             href={exportHref(searchParams)}
             className="btn btn-secondary"
+            // ⛔ marginLeft BELONGS ON THE WRAPPER, NOT THE ANCHOR. DownloadButton
+            // renders a <span> around the link to carry its status region, and
+            // that span — not the <a> — is the flex item this header row lays
+            // out. Left on `style` the rule applied to a child that is no longer
+            // participating in the parent's flex, so the button quietly stopped
+            // sitting hard right and drifted next to the heading.
+            wrapperStyle={{ marginLeft: 'auto' }}
             style={{
-              marginLeft: 'auto',
               color: 'var(--primary)',
               borderColor: 'var(--primary)',
               fontWeight: 600,

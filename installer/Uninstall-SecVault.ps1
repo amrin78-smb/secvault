@@ -91,7 +91,27 @@ function Invoke-Native {
     param([Parameter(Mandatory = $true)][scriptblock]$Command)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    # ⛔ $LASTEXITCODE IS STALE, NOT EMPTY, WHEN A COMMAND NEVER RAN.
+    # Same seed and same reason as Install-SecVault.ps1's copy of this helper:
+    # an unresolvable executable raises CommandNotFoundException, which
+    # 'Continue' downgrades to a printed error, and leaves $LASTEXITCODE holding
+    # the PREVIOUS command's value -- almost always 0. Every caller then reads
+    # "exit code 0" for a step that did not happen. 9009 is cmd.exe's own
+    # "command not found", so the un-run case fails a `-ne 0` check instead of
+    # passing it.
+    $global:LASTEXITCODE = 9009
     try { & $Command } finally { $ErrorActionPreference = $prevEAP }
+}
+
+# Is this process elevated? The deploy-key removal and `sc.exe delete` both
+# need it, and a non-elevated run fails them one at a time with errors that
+# each look like something else.
+function Test-IsElevated {
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        return (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { return $false }
 }
 
 # sc.exe only. Returns the state word, or '' when the service is not installed.
@@ -406,12 +426,90 @@ if ($KeepDeployKeys) {
     )
     foreach ($kp in $keyPaths) {
         if (Test-Path -LiteralPath $kp) {
+            # ⛔ THE INSTALLER'S OWN HARDENING CAN DEFEAT THIS DELETE, and
+            # the thing left behind is a PRIVATE REPOSITORY KEY. Install-SecVault.ps1
+            # locks each key with
+            #     icacls <key> /inheritance:r /grant:r "<principal>:R"
+            # which strips every other ACE and grants READ ONLY -- no DELETE, for
+            # anyone. Measured 2026-09-24: both Remove-Item calls failed with
+            # "Access to the path is denied" and the uninstaller exited 1 having
+            # left the key on a machine it had just declared decommissioned.
+            #
+            # ⛔ THE ESCALATION IS TRIED ONLY AFTER A PLAIN DELETE FAILS, AND
+            # IT IS NOT `icacls /reset`. Two reasons, and the second is the
+            # important one:
+            #
+            #  1. An ELEVATED run usually deletes the file with no help at all --
+            #     the parent directories grant FILE_DELETE_CHILD (the installer
+            #     hardens the FILES, never the directories), so the unconditional
+            #     takeown+icacls was doing nothing on the path that already worked.
+            #     The reported failure is only consistent with a NON-ELEVATED run,
+            #     where takeown fails for the very same reason the delete did --
+            #     so the old remedy could not have helped the case it was written
+            #     for. That case is now DETECTED and named instead.
+            #
+            #  2. ⛔ `/reset` DISCARDS THE HARDENED DACL AND INHERITS THE PARENT'S.
+            #     For C:\ProgramData\SecVault\ssh that parent is C:\ProgramData,
+            #     whose default ACL includes BUILTIN\Users: Read & Execute. Running
+            #     it UNCONDITIONALLY and BEFORE the delete meant that if the delete
+            #     then failed for any other reason -- a handle held by the SYSTEM
+            #     update task's ssh.exe, AV, a locked profile -- the private key was
+            #     left READABLE BY EVERY LOCAL USER, where a moment earlier it had
+            #     been SYSTEM + Administrators only. The remedy hardened the path
+            #     that already worked and weakened the exact one it was written for.
+            #
+            # So: delete; if that fails, take ownership and grant DELETE to THIS
+            # user alone (/grant:r touches only that principal and leaves
+            # /inheritance:r intact, so no new principal is admitted); delete
+            # again; and if it is STILL there, PUT THE HARDENING BACK before
+            # warning, so a failed uninstall never leaves the key more exposed
+            # than it found it.
+            $removed = $false
+            $escalated = $false
             try {
                 Remove-Item -LiteralPath $kp -Force -ErrorAction Stop
-                if (Test-Path -LiteralPath $kp) { Write-Warn "Deploy key still present at $kp" }
-                else { Write-Step "  Removed $kp" }
+                $removed = $true
             } catch {
-                Write-Warn "Could not remove the deploy key at ${kp}: $($_.Exception.Message). A private key for the source repository is still on this machine."
+                $firstErr = $_.Exception.Message
+                if (-not (Test-IsElevated)) {
+                    Write-Warn ("Could not remove the deploy key at ${kp}: $firstErr. This uninstaller is NOT RUNNING ELEVATED, " +
+                                "so it cannot take ownership either. Re-run it as Administrator. A private key for the source repository is still on this machine.")
+                } else {
+                    $escalated = $true
+                    $me = "${env:USERDOMAIN}\${env:USERNAME}"
+                    $toOut = Invoke-Native { & takeown.exe /F $kp 2>&1 }
+                    $toExit = $LASTEXITCODE
+                    if ($toExit -ne 0) { Write-Warn "takeown failed on ${kp} (exit $toExit): $($toOut -join ' ')" }
+                    $icOut = Invoke-Native { & icacls.exe $kp /grant:r "${me}:(D,WDAC,RC)" 2>&1 }
+                    $icExit = $LASTEXITCODE
+                    if ($icExit -ne 0) { Write-Warn "icacls grant failed on ${kp} (exit $icExit): $($icOut -join ' ')" }
+                    try {
+                        Remove-Item -LiteralPath $kp -Force -ErrorAction Stop
+                        $removed = $true
+                    } catch {
+                        Write-Warn ("Could not remove the deploy key at ${kp}: $($_.Exception.Message). " +
+                                    "A private key for the source repository is still on this machine. Remove it by hand with takeown /F, " +
+                                    "icacls /grant:r for your own account, then del.")
+                    }
+                }
+            }
+            # ⛔ VERIFY, THEN RE-HARDEN IF IT SURVIVED. Remove-Item can
+            # report success and leave the file (a pending-delete handle), so the
+            # answer is Test-Path, not the absence of an exception.
+            if ($removed -and -not (Test-Path -LiteralPath $kp)) {
+                Write-Step "  Removed $kp"
+            } else {
+                if ($removed) { Write-Warn "Deploy key still present at $kp despite a successful delete call" }
+                if ($escalated -and (Test-Path -LiteralPath $kp)) {
+                    # Put back exactly what Install-SecVault.ps1 set, so the
+                    # failure path leaves the key no more readable than before.
+                    if ($kp -like 'C:\ProgramData\*') {
+                        Invoke-Native { & icacls.exe $kp /inheritance:r /grant:r 'SYSTEM:R' /grant:r 'BUILTIN\Administrators:R' 2>&1 } | Out-Null
+                    } else {
+                        Invoke-Native { & icacls.exe $kp /inheritance:r /grant:r "${env:USERNAME}:R" 2>&1 } | Out-Null
+                    }
+                    Write-Warn "Re-applied the read-only ACL to $kp -- it could not be deleted, so it must not be left carrying the widened permissions used to try."
+                }
             }
         }
     }
