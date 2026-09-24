@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.182.2': [
+    "The settings template is now plain ASCII, removing the last of the characters that could be corrupted by the encoding fault fixed in 2.182.0.",
+    "That fault doubled every accented character in the settings file on each update. It is fixed at the source, but the template was still shipping 27 such characters into every new installation; there is now nothing left for a future mistake to damage.",
+    "A build check keeps the template ASCII-only.",
+    "Comments only — no setting, name or value changed.",
+  ],
   '2.182.1': [
     "Fixed SecVault being unable to install on a new server at all. The database setup script referred to two tables before it created them, which fails on an empty database and stops the installation.",
     "It was invisible on every running server, because those statements work wherever the tables already exist — so the script ran cleanly on every update for months while a fresh install could never have worked.",

@@ -84,6 +84,32 @@ describe('⛔ every env-file read states its encoding', () => {
     );
   });
 
+  it('keeps .env.local.example pure ASCII', () => {
+    // ⛔ THE THIRD LAYER, AND THE ONLY ONE THAT REMOVES THE FUEL.
+    // Layer 1 is -Encoding UTF8 on every read; layer 2 is the writer refusing an
+    // oversized file. Both stop the DOUBLING. This stops there being anything to
+    // double: .env.local.example is copied verbatim to .env.local on a fresh
+    // install, so every byte in it is a byte the installer will read and rewrite
+    // on every deploy for the life of that server.
+    //
+    // It held 27 non-ASCII characters -- 19 marker glyphs and 8 em-dashes, all in
+    // COMMENTS that nothing ever read. One of them reached 2,209,122,508 bytes.
+    const example = fs.readFileSync(path.join(__dirname, '..', '.env.local.example'), 'utf8');
+    const offenders = [...example]
+      .map((ch, i) => ({ ch, i }))
+      .filter((c) => c.ch.codePointAt(0) > 127)
+      .slice(0, 10)
+      .map((c) => `offset ${c.i}: U+${c.ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`);
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'A non-ASCII character reached .env.local.example. It will be copied into every '
+        + 'new .env.local and re-encoded on every deploy. Use -- for a dash and !! for '
+        + 'the emphasis marker.'
+    );
+  });
+
   it('keeps the size tripwire on the writer', () => {
     // ⛔ THE SECOND LAYER, because the first is one forgotten flag away from
     // coming back. A real .env.local is a few KB; the writer refuses to rewrite
