@@ -105,6 +105,27 @@ export default function LogSearchForm({ params, devices, options }) {
               <Field name="ruleName" label="Rule" value={p.ruleName} placeholder="exact match" />
             </div>
             <div style={grid}>
+              {/* ⛔ A PARAM WITH NO FIELD IS DROPPED BY THE FIRST RE-SUBMIT.
+                  This form is the whole query — it carries no hidden inputs —
+                  so anything the page accepts but the form cannot render
+                  disappears the moment an operator presses Search, silently
+                  WIDENING their search while looking like the same one.
+                  Both of these arrive on links from the VPN detections tab:
+                  srcCountry was accepted by the page and had no control at
+                  all, and authOutcome is new. */}
+              <Field name="srcCountry" label="Source country" value={p.srcCountry} placeholder="Poland" />
+              <div>
+                <label style={LABEL} htmlFor="f-authOutcome">VPN login</label>
+                <select id="f-authOutcome" name="authOutcome" defaultValue={p.authOutcome || ''} style={FIELD}>
+                  <option value="">Any event</option>
+                  {/* "Logins only" is IS NOT NULL, not a third outcome: most
+                      log_class='vpn' rows are portal probes and keepalives,
+                      not authentications. */}
+                  <option value="any">Logins only</option>
+                  <option value="success">Succeeded</option>
+                  <option value="failure">Failed</option>
+                </select>
+              </div>
               <Field name="dstCountry" label="Dest country" value={p.dstCountry} placeholder="Singapore" />
               <Field name="application" label="Application" value={p.application} placeholder="ssl" />
               <Field name="threatName" label="Threat" value={p.threatName} placeholder="exact match" />

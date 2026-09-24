@@ -343,7 +343,23 @@ states how much history exists rather than letting the blanks imply absence.
 
 ## components/vpn/VpnDetections.js (added 2026-09-10)
 
-Single prop `data` — the return value of `getVpnDetections(pool, {hours})` passed through unmodified.
+Props: `data` — the return value of `getVpnDetections(pool, {hours})` passed through unmodified —
+and `canSearchLogs` (v2.178.0), which the PAGE decides from the session.
+
+⛔ **Each row's leading identifier links to /logs**, via the pure `lib/vpnDetectionLinks.js`.
+The identifier cell is the link rather than a new "view logs" column, because these tables'
+column widths are load-bearing (the note on `Usernames tried` records that at 12% the heading
+itself truncated) and an added column would scale every other one down — on the unverifiable
+table, which already appends a reason column, back under the width that broke.
+
+⛔ **No link without `view_log_search`.** /logs refuses an Operator outright, and a link into
+a refusal teaches the reader the product is broken rather than that they lack access. It is a
+SEPARATE capability from the `view_identity` that reveals the tab; they cover the same two roles
+today, and the branch exists because they may not stay that way.
+
+⛔ **No link when the builder refuses** — nothing to filter on, or no usable window. And the
+"these are clickable" line is conditioned on a link actually being produced, not on the
+capability, so it never describes something absent from the page.
 Server component, no client JS, two native `<details>`.
 
 ⛔ **A `measured` detection with no findings prints a plain sentence; an `insufficient_baseline` one

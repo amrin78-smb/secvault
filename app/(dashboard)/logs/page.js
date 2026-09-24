@@ -55,6 +55,7 @@ export default async function LogsPage({ searchParams }) {
     'from', 'to', 'limit', 'deviceId', 'vendor', 'action', 'logClass', 'logSubtype',
     'protocol', 'application', 'ruleName', 'srcUser', 'srcCountry', 'dstCountry',
     'threatName', 'urlCategory', 'urlHostname', 'sourceIp', 'srcIp', 'dstIp',
+    'authOutcome',
     'srcPort', 'dstPort', 'q', 'page',
   ]) {
     const v = first(sp[k]);

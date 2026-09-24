@@ -361,6 +361,40 @@ a normal state and must not be caveated — and discloses the limitation in the 
 names are KEPT: a real absence on a real rule is a real finding, and burying it is the
 mistake `undecidableNote` already refuses. A `pass` carries no caveat — presence was observed.
 
+## ⛔ `log_class='vpn'` IS NOT "a VPN login", and no SUBTYPE fixes it (2026-09-24)
+
+Measured on the live fleet over two hours: of **19,600** `log_class='vpn'` rows only **4,871** are
+authentications. The rest are `portal-prelogin` (the bot hitting the portal page before it tries a
+password), HIP checks, tunnel-latency, getconfig, register, logout.
+
+| vendor | what the subtype says |
+|---|---|
+| `paloalto` | `portal-auth` / `gateway-auth` for logins, a dozen other subtypes for the rest |
+| `fortinet` | **`vpn` for every row** — auth and non-auth alike |
+
+⛔ **So a `log_subtype` filter works for Palo Alto and silently returns nothing for Fortinet**,
+which on a forensics page reads as "this user did nothing" rather than "this filter cannot express
+your question". The ONLY column that separates them is `auth_outcome`, which is exactly why
+`lib/syslog/rollups.js` builds `syslog_vpn_auth_hourly` on `auth_outcome IS NOT NULL` and why
+`logSearch.js` grew an `authOutcome=any` enum rather than reusing `logSubtype`.
+
+⛔ **Class alone is ~70% noise, and that is worse than it sounds.** `/logs` orders by
+`received_at DESC` and pages at 50, so the first screen of a class-only VPN search can contain NO
+authentication at all — and the reader concludes the finding that linked them there has nothing
+behind it. A filter that is merely imprecise becomes a confident wrong answer once a page size is
+applied to it.
+
+## ⛔ A SEARCH PARAM WITH NO FORM FIELD IS DROPPED BY THE FIRST RE-SUBMIT (2026-09-24)
+
+`components/logs/LogSearchForm.js` is a plain GET `<form>` with **no hidden inputs** — the URL is
+the query. So any param `app/(dashboard)/logs/page.js` accepts but the form cannot render
+disappears the moment the operator presses Search. The search does not error and does not narrow:
+it **widens**, and the wider result looks like the same query.
+
+`srcCountry` sat in the page whitelist with no control at all until v2.178.0. It went unnoticed
+because nothing linked to it; the VPN detection links do. When adding a filter, add the control in
+the same commit — `tests/logSearch.test.js` asserts that every param those links emit is on the
+`FILTERS` whitelist, but only a control keeps it there across a re-submit.
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

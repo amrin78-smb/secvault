@@ -4,6 +4,7 @@ import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
 import { SEVERITY_FILL, SEVERITY_TEXT_COLOR, SEVERITY_LABEL } from '../analysis/severityRamp';
 import { timeAgo, absoluteUtc } from '../../lib/formatDisplay';
+import { buildDetectionLogHref } from '../../lib/vpnDetectionLinks';
 
 // Named VPN threat detections — the render half of lib/engines/vpnDetections.js.
 //
@@ -57,6 +58,50 @@ const TH = {
 };
 
 const MONO = { fontFamily: 'var(--font-mono)' };
+
+// ⛔ THE IDENTIFIER CELL IS THE LINK, and that is deliberate rather than an
+// extra "view logs" column. These tables carry EVIDENCE columns whose widths
+// are load-bearing -- the note on 'Usernames tried' records that at 12% the
+// HEADING itself truncated to "Usernames tr...". A new column would scale every
+// other one down, and on the unverifiable table (which already appends a
+// reason column) it would push that heading back under the width that broke.
+// Linking the cell costs no width at all, and the thing you click is exactly
+// the value the query filters on, so the link needs no label to explain it.
+const LINK = {
+  color: 'var(--primary)',
+  textDecoration: 'none',
+  borderBottom: '1px dotted var(--primary)',
+};
+
+/**
+ * The leading identifier of a row: an address or an account name.
+ *
+ * ⛔ NO LINK WITHOUT THE CAPABILITY. /logs is gated on view_log_search and
+ * refuses an Operator outright. Offering a link into a refusal teaches the
+ * reader the product is broken rather than that they lack access -- the same
+ * rule CLAUDE.md states in the other direction for a UI gate stricter than its
+ * route. Today view_identity and view_log_search happen to cover the same two
+ * roles, so this branch is dormant; it is written because they are separate
+ * capabilities and may not stay that way.
+ *
+ * ⛔ NO LINK WHEN THE BUILDER REFUSES either. It returns null when the
+ * finding carries nothing to filter on, or when the window is unusable -- and
+ * a window-less link would silently land on /logs' one-hour default and make
+ * an 18-hour finding look overstated.
+ */
+function idCell(text, finding, ctx) {
+  const value = text === null || text === undefined || text === '' ? null : text;
+  if (!value) return <NotMeasured reason="This finding carries no identifier." />;
+  const link = ctx && ctx.canSearchLogs
+    ? buildDetectionLogHref(finding, ctx)
+    : null;
+  if (!link) return <span style={MONO}>{value}</span>;
+  return (
+    <a href={link.href} style={{ ...MONO, ...LINK }} title={link.title}>
+      {value}
+    </a>
+  );
+}
 const NUM = { textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
 
 // How many rows a detection lists before it says "showing N of M".
@@ -142,7 +187,7 @@ function listCell(values, emptyReason) {
 
 const COLUMNS = {
   credential_spray: [
-    { label: 'Source', width: '16%', cell: (f) => <span style={MONO}>{f.srcIp}</span> },
+    { label: 'Source', width: '16%', cell: (f, ctx) => idCell(f.srcIp, f, ctx) },
     { label: 'Country', width: '14%', cell: (f) => countryCell(f.country) },
     // ⛔ 15%, not 12%: at 12 the HEADING itself truncated to "Usernames tr…".
     // A clipped header makes the reader guess what the number counts, which is
@@ -155,7 +200,7 @@ const COLUMNS = {
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],
   brute_force: [
-    { label: 'Account', width: '20%', cell: (f) => <span style={MONO}>{f.username}</span> },
+    { label: 'Account', width: '20%', cell: (f, ctx) => idCell(f.username, f, ctx) },
     { label: 'Source', width: '15%', cell: (f) => <span style={MONO}>{f.srcIp}</span> },
     { label: 'Country', width: '13%', cell: (f) => countryCell(f.country) },
     { label: 'Attempts', width: '10%', style: NUM, cell: (f) => atLeast(f.attemptsFloor, f.attemptsIsFloor) },
@@ -174,7 +219,7 @@ const COLUMNS = {
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],
   account_targeted: [
-    { label: 'Account', width: '32%', cell: (f) => <span style={MONO}>{f.username}</span> },
+    { label: 'Account', width: '32%', cell: (f, ctx) => idCell(f.username, f, ctx) },
     { label: 'Source addresses', width: '14%', style: NUM, cell: (f) => n(f.sources) },
     { label: 'Countries', width: '11%', style: NUM, cell: (f) => n(f.countries) },
     { label: 'Attempts', width: '11%', style: NUM, cell: (f) => atLeast(f.attemptsFloor, f.attemptsIsFloor) },
@@ -183,7 +228,7 @@ const COLUMNS = {
     { label: 'Severity', width: '11%', cell: (f) => severityCell(f.severity) },
   ],
   new_country_for_user: [
-    { label: 'Account', width: '28%', cell: (f) => <span style={MONO}>{f.username}</span> },
+    { label: 'Account', width: '28%', cell: (f, ctx) => idCell(f.username, f, ctx) },
     { label: 'New country', width: '16%', cell: (f) => countryCell(f.country) },
     {
       label: 'Known countries',
@@ -195,7 +240,7 @@ const COLUMNS = {
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],
   country_change: [
-    { label: 'Account', width: '26%', cell: (f) => <span style={MONO}>{f.username}</span> },
+    { label: 'Account', width: '26%', cell: (f, ctx) => idCell(f.username, f, ctx) },
     {
       label: 'Countries',
       width: '18%',
@@ -221,7 +266,7 @@ const COLUMNS = {
     { label: 'Severity', width: '10%', cell: (f) => severityCell(f.severity) },
   ],
   off_hours_success: [
-    { label: 'Account', width: '32%', cell: (f) => <span style={MONO}>{f.username}</span> },
+    { label: 'Account', width: '32%', cell: (f, ctx) => idCell(f.username, f, ctx) },
     { label: 'Hour (UTC)', width: '13%', style: NUM, cell: (f) => `${String(f.hourUtc).padStart(2, '0')}:00` },
     { label: 'Auth hours', width: '12%', style: NUM, cell: (f) => n(f.authHours) },
     { label: 'From', width: '18%', cell: (f) => listCell(f.countries, 'The firewall did not report a country.') },
@@ -232,7 +277,7 @@ const COLUMNS = {
 
 // ── Table renderers ──────────────────────────────────────────────────────
 
-function findingsTable(id, rows, extraColumn) {
+function findingsTable(id, rows, extraColumn, ctx) {
   const cols = COLUMNS[id] || [];
   const shown = rows.slice(0, ROWS_SHOWN);
   return (
@@ -256,7 +301,7 @@ function findingsTable(id, rows, extraColumn) {
           {shown.map((f, i) => (
             <tr key={`${id}-${i}`} style={{ borderBottom: '1px solid var(--border-light)' }}>
               {cols.map((c) => (
-                <td key={c.label} style={{ ...CELL, ...(c.style || {}) }}>{c.cell(f)}</td>
+                <td key={c.label} style={{ ...CELL, ...(c.style || {}) }}>{c.cell(f, ctx)}</td>
               ))}
               {extraColumn ? <td style={CELL}>{extraColumn.cell(f)}</td> : null}
             </tr>
@@ -314,7 +359,7 @@ function baselinePanel(detection) {
   );
 }
 
-function unverifiableBlock(detection) {
+function unverifiableBlock(detection, ctx) {
   const rows = detection.unverifiable || [];
   const total = detection.unverifiableTotal || 0;
   if (total === 0) return null;
@@ -341,7 +386,7 @@ function unverifiableBlock(detection) {
                 : ''}
             </span>
           ),
-        })}
+        }, ctx)}
       </div>
     </details>
   );
@@ -361,7 +406,7 @@ function caveatList(caveats) {
   );
 }
 
-function detectionCard(detection) {
+function detectionCard(detection, ctx) {
   const badge = STATUS_BADGE[detection.status] || STATUS_BADGE.no_data;
   const findings = detection.findings || [];
   const measured = detection.status === 'measured';
@@ -400,7 +445,22 @@ function detectionCard(detection) {
           </div>
         ) : null}
 
-        {measured && findings.length > 0 ? findingsTable(detection.id, findings) : null}
+        {measured && findings.length > 0 ? findingsTable(detection.id, findings, null, ctx) : null}
+
+        {/* ⛔ SAID ONCE, AND ONLY WHEN IT IS TRUE. A dotted underline is a
+            link affordance but it does not say WHERE it goes, and hovering
+            every row to find out is not discovery. The condition is
+            deliberately the builder itself rather than the capability: a
+            detection whose findings carry nothing to filter on renders no
+            links, and a sentence promising them would then be describing
+            something that is not on the page. */}
+        {measured && ctx && ctx.canSearchLogs
+          && findings.some((f) => buildDetectionLogHref(f, ctx)) ? (
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+              The highlighted identifier in each row opens the raw VPN logins behind it,
+              over this same window.
+            </div>
+          ) : null}
 
         {measured && findings.length === 0 ? (
           // ⛔ An EARNED all-clear, in ordinary text. Reachable only when the
@@ -412,7 +472,7 @@ function detectionCard(detection) {
 
         {!measured ? baselinePanel(detection) : null}
 
-        {unverifiableBlock(detection)}
+        {unverifiableBlock(detection, ctx)}
         {caveatList(detection.caveats)}
       </CardBody>
     </Card>
@@ -523,8 +583,13 @@ function reportingGapBanner(data) {
  * @param {object}  props.data   the return value of
  *                               lib/engines/vpnDetections.js `getVpnDetections(pool, { hours })`
  *                               — passed straight through, unmodified.
+ * @param {boolean} props.canSearchLogs  whether this session holds
+ *                               view_log_search. ⛔ Decided by the PAGE from the
+ *                               session, never assumed here: a link into a
+ *                               page that will refuse the reader is worse than
+ *                               no link.
  */
-export default function VpnDetections({ data }) {
+export default function VpnDetections({ data, canSearchLogs = false }) {
   if (!data || !Array.isArray(data.detections)) {
     return (
       // EmptyState takes `message` only — passing a `title` it does not accept
@@ -535,11 +600,22 @@ export default function VpnDetections({ data }) {
 
   const windowLabel = `${data.windowHours} h`;
 
+  // ⛔ THE LINK WINDOW IS THE DETECTION'S OWN WINDOW, taken from the engine
+  // rather than recomputed here. Two files deriving "the last 24 hours"
+  // independently would eventually disagree by a tick, and the disagreement
+  // would show up as a finding whose raw events are one event short of the
+  // count printed beside them.
+  const ctx = {
+    canSearchLogs: Boolean(canSearchLogs),
+    windowStart: data.windowStart,
+    windowEnd: data.generatedAt,
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
       {historyStrip(data)}
       {reportingGapBanner(data)}
-      {data.detections.map((d) => detectionCard({ ...d, windowLabel }))}
+      {data.detections.map((d) => detectionCard({ ...d, windowLabel }, ctx))}
     </div>
   );
 }

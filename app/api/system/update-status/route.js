@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.178.0': [
+    "VPN detections are now clickable. The address or account in each row opens the raw VPN logins behind that finding, already filtered and already set to the same time window the detection used.",
+    "Log search gained a \"VPN login\" filter. Most traffic a firewall files under VPN is portal probes and keepalives rather than logins — on this fleet roughly seven rows in ten — so without it a page of results could contain no login at all.",
+    "Added a Source country field to log search. It was already accepted in a link or a bookmark but had no box on the form, so pressing Search quietly dropped it and widened the results.",
+    "A link is never offered to someone whose role cannot open log search, and never offered at all when it could not be made accurate — a link that lands on the wrong hour would make a finding look overstated.",
+  ],
   '2.177.4': [
     "The installer can now be handed over as a single .zip. The instructions that matter before you decide where to put it — that the server needs internet access, and that the file contains a repository key — travel beside the archive as well as inside it.",
     "A .zip that arrives over a network or a browser marks every file it extracts as untrusted, and Windows then challenges each script partway through the install. The setup launcher now clears that mark from its own files before it starts.",

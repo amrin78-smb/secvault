@@ -978,6 +978,42 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/vpnDetectionLinks.js (added 2026-09-24, v2.178.0)
+
+Pure. Turns ONE VPN detection finding into a `/logs` query showing the raw events it was computed
+from. `buildDetectionLogHref(finding, {windowStart, windowEnd})` -> `{href, title, filters}`, or
+**null**. Consumed by `components/vpn/VpnDetections.js`; pinned by `tests/vpnDetectionLinks.test.js`.
+
+⛔ **The filters ARE the rollup's own predicate.** `syslog_vpn_auth_hourly` is built with
+`WHERE log_class = 'vpn' AND auth_outcome IS NOT NULL`, grouping on `src_ip`/`src_country`/
+`device_id` and aggregating `src_user`. Every link is built from those same columns, so it lands on
+the population the finding was counted from BY CONSTRUCTION. A link assembled from some other notion
+of "VPN login" would drift from the number printed beside it.
+
+⛔ **The window always travels with the link.** `/logs` defaults to the LAST HOUR when given
+none. A spray finding reading "2,106 failures over 18 hours" that opens onto the last hour does not
+look like a narrower view — it looks like the detection was wrong.
+
+⛔ **A filter is never invented to make a link look precise.** `credential_spray` -> srcIp only
+(many usernames); `brute_force` -> srcIp + srcUser (the only one precise in both);
+`account_targeted` -> srcUser only (dozens of sources); `country_change` -> srcUser only (TWO
+addresses, and the pair is the finding); `new_country_for_user` -> srcUser + srcCountry;
+`off_hours_success` -> srcUser only, because an hour-of-day is not expressible as a contiguous
+window. An unfilterable finding gets NO link rather than a window-only one that would dump the whole
+fleet's VPN traffic as this finding's evidence.
+
+⛔ **`new Date(null)` IS EPOCH 0, not an invalid date.** A missing windowStart would otherwise
+emit `1970-01-01T07:00` — a well-formed link `/logs` clamps to eight days ending in 1970 and
+reports as an ordinary empty result, from which the only reading is that the finding has no events
+behind it. Rejected before the Date constructor, the same call `lib/consoleUrl.js` makes on a
+missing scheme.
+
+⛔ **`from`/`to` are `datetime-local`, in the SERVER's zone, not ISO `Z`.** `searchEvents`
+would parse either, but `<input type="datetime-local">` renders BLANK for a value carrying a zone —
+results covering 24 hours above two empty window boxes, one re-submit from silently becoming the
+default hour. Local because a zone-less string re-parses as local, so it round-trips; UTC digits
+would shift the window by the server's offset on the way back in.
+
 ## lib/syslog/logSearch.js
 
 `buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `clampPage` / `MAX_PAGE` (200) · `STATEMENT_TIMEOUT_MS` (10000).
@@ -988,6 +1024,21 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ **A time window is MANDATORY and BOUNDED** (`MAX_WINDOW_DAYS`=8, default last hour). `resolveWindow()` never returns an unbounded or inverted range whatever it is handed. At ~133 GB/day an open-ended search is not a slow query, it is an outage for the ~1,500 rows/sec ingest on the same disk. A clamped range sets `clamped:true` and the UI says so.
 ⛔ **Truncation is REPORTED**, never silent: the query asks for `limit + 1`, drops the probe row, and returns `truncated`. "Here are 100 of many" and "here are the only 100" are different answers and only one is true.
 ⛔ **A malformed filter is REJECTED and surfaced** in `rejected`, never silently ignored — dropping `srcIp=10.1.1` would return every host's traffic and read as a confident answer about that one host.
+⛔ **`authOutcome` is the only honest "VPN login" filter** (added v2.178.0, `kind: 'enum'`).
+Values `success`/`failure`, plus **`any` = `IS NOT NULL` with no bind parameter**. Measured live over
+two hours: only **4,871 of 19,600** `log_class='vpn'` rows are authentications — the rest are
+portal-prelogin, HIP checks, tunnel latency, getconfig. ⛔ **And a subtype cannot stand in for it**:
+Palo Alto names them (`portal-auth`, `gateway-auth`) but **Fortinet labels every VPN row `vpn`**,
+auth and non-auth alike, so a subtype filter works for one vendor and silently returns nothing for
+the other. An unrecognised value is REJECTED, never dropped — dropping it widens the search to every
+VPN event and returns a confident answer to a question nobody asked.
+
+⛔ **A param the FORM cannot render is dropped by the first re-submit.** `LogSearchForm` carries
+no hidden inputs, so anything the page accepts without a control disappears the moment an operator
+presses Search, silently WIDENING their search while looking like the same one. `srcCountry` had
+been in the page's whitelist with no field at all; it and `authOutcome` both got controls in
+v2.178.0 because the VPN detection links emit them.
+
 ⛔ **Every value is a bind parameter and every column name comes from the `FILTERS` whitelist.** This is the only query in the codebase assembled from user-supplied input, on a security product; `tests/logSearch.test.js` carries the injection guard. LIKE metacharacters are escaped so a literal `%` cannot silently widen a search to everything.
 A bare address filters by equality, a CIDR by containment (`<<=`).
 

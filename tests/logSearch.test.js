@@ -48,6 +48,7 @@ const {
   MAX_LIMIT,
   DEFAULT_LIMIT,
   MAX_WINDOW_DAYS,
+  FILTERS,
 } = require('../lib/syslog/logSearch');
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
@@ -431,5 +432,62 @@ describe('logSearch: the transaction is set up in the right order, with the righ
     assert.ok('ruleId' in applied, 'the filter must be accepted, not dropped');
     assert.match(sql, /rule_id\s*=/);
     assert.ok(params.includes('42'));
+  });
+});
+
+describe('⛔ logSearch: "a VPN login" is auth_outcome, never a subtype', () => {
+  // Measured on the live fleet over two hours: of 19,600 log_class='vpn' rows
+  // only 4,871 are authentications. The rest are portal-prelogin, HIP checks,
+  // tunnel latency, getconfig. So class alone is ~70% noise, and a page of it
+  // ordered by time can hold no login at all.
+  //
+  // ⛔ AND A SUBTYPE CANNOT STAND IN FOR THIS. Palo Alto names them
+  // (portal-auth, gateway-auth); Fortinet labels EVERY vpn row 'vpn', auth and
+  // non-auth alike. A subtype filter would work for one vendor and silently
+  // return nothing for the other -- which reads as 'this user did nothing'.
+
+  it('"any" is a presence test, with no bind parameter', () => {
+    const { sql, params, applied } = buildSearchQuery({ authOutcome: 'any' }, NOW);
+    assert.match(sql, /auth_outcome IS NOT NULL/);
+    assert.equal(applied.authOutcome, 'any');
+    // from, to, limit, offset -- and nothing for this filter.
+    assert.equal(params.length, 4, 'a presence test must not bind a value');
+  });
+
+  it('a named outcome binds, and is never interpolated', () => {
+    for (const v of ['success', 'failure']) {
+      const { sql, params, applied } = buildSearchQuery({ authOutcome: v }, NOW);
+      assert.match(sql, /auth_outcome = \$\d+/);
+      assert.ok(params.includes(v));
+      assert.equal(applied.authOutcome, v);
+      assert.ok(!sql.includes(v), 'the value reached the SQL text');
+    }
+  });
+
+  it('an unrecognised outcome is REJECTED, never dropped', () => {
+    // ⛔ Dropping it would widen the search to every VPN event and
+    // return a confident answer to a question nobody asked -- the same reason
+    // a malformed srcIp is surfaced rather than ignored.
+    const { sql, applied, rejected } = buildSearchQuery({ authOutcome: 'maybe' }, NOW);
+    assert.equal(rejected.authOutcome, 'maybe');
+    assert.ok(!('authOutcome' in applied));
+    assert.ok(!sql.includes('auth_outcome'), 'a rejected filter must add no predicate');
+  });
+
+  it('is case-insensitive, and reports the value it actually used', () => {
+    const { sql, applied } = buildSearchQuery({ authOutcome: 'ANY' }, NOW);
+    assert.match(sql, /auth_outcome IS NOT NULL/);
+    // ⛔ `applied` drives what the UI tells the operator was searched,
+    // so it carries the NORMALISED value rather than what was typed.
+    assert.equal(applied.authOutcome, 'any');
+  });
+
+  it('every filter the VPN detection links emit is on the whitelist', () => {
+    // ⛔ A link carrying a param /logs does not accept is a filter that
+    // silently does nothing: the page would return a WIDER result than the
+    // link promised, with nothing on screen saying so.
+    for (const key of ['srcIp', 'srcUser', 'srcCountry', 'logClass', 'authOutcome']) {
+      assert.ok(key in FILTERS, `${key} is not a searchable filter`);
+    }
   });
 });

@@ -13,7 +13,7 @@ import TabBar from '../../../components/ui/TabBar';
 import { FLEET_VPN_TABS, resolveFleetVpnTab, buildVpnTabHrefs, visibleVpnTabs } from '../../../lib/vpnTabs';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
-import { can, roleOf, VIEW_IDENTITY } from '../../../lib/rbac';
+import { can, roleOf, VIEW_IDENTITY, VIEW_LOG_SEARCH } from '../../../lib/rbac';
 import NoAccess from '../../../components/ui/NoAccess';
 import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
 import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
@@ -164,6 +164,12 @@ export default async function VpnFleetPage({ searchParams }) {
   // first would leave every identity view one typed ?vtab= away.
   const session = await getServerSession(authOptions);
   const canViewIdentity = can(session, VIEW_IDENTITY);
+  // ⛔ A SECOND, SEPARATE CAPABILITY. The detections tab links each finding
+  // through to the raw events behind it, and /logs is gated on its own
+  // view_log_search rather than on view_identity. They cover the same two
+  // roles today; asking the right one anyway means the link disappears
+  // rather than leading to a refusal if that ever changes.
+  const canSearchLogs = can(session, VIEW_LOG_SEARCH);
   const requestedTab = FLEET_VPN_TABS.find((t) => t.key === tab);
   const identityBlocked = !canViewIdentity && !!(requestedTab && requestedTab.identity);
   const { tabs, activeHref } = buildVpnTabHrefs(
@@ -269,7 +275,10 @@ export default async function VpnFleetPage({ searchParams }) {
            never render as a green all-clear. Computed at read time (~1.0s),
            no table and no cron job: a stored severity would stop matching its
            own evidence the moment a threshold moved. */
-        <VpnDetections data={await getVpnDetections(pool, { hours: 24 })} />
+        <VpnDetections
+          data={await getVpnDetections(pool, { hours: 24 })}
+          canSearchLogs={canSearchLogs}
+        />
       )}
 
       {canViewIdentity && tab === 'locations' && (
