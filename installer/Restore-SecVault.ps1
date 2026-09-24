@@ -156,7 +156,7 @@ if (-not $Psql) {
 
 $EnvFile = Join-Path $InstallRoot '.env.local'
 if (-not (Test-Path $EnvFile)) { Write-Log "  [FAIL] $EnvFile not found."; exit 1 }
-$envText = Get-Content $EnvFile -Raw
+$envText = Get-Content $EnvFile -Raw -Encoding UTF8
 
 # ── Find the dump ───────────────────────────────────────────────────────────
 if (-not $DumpPath) {
@@ -219,7 +219,7 @@ if (-not (Test-Path $envCopy)) {
     Write-Log '         firewall credential in the restored database will be undecryptable and'
     Write-Log '         collection will fail on every device with authentication errors.'
 } else {
-    $backupEnv = Get-Content $envCopy -Raw
+    $backupEnv = Get-Content $envCopy -Raw -Encoding UTF8
     $backupKey = ''
     $liveKey = ''
     if ($backupEnv -match '(?m)^CREDENTIAL_KEY=(.*)$') { $backupKey = $Matches[1].Trim() }

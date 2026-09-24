@@ -1171,7 +1171,11 @@ $existingNextAuthSecret = ''
 if ($envExisted) {
     $envBackupPath = "$envLocalPath.pre-install-" + (Get-Date).ToString('yyyyMMdd-HHmmss')
     Copy-Item -Path $envLocalPath -Destination $envBackupPath -Force
-    $existingEnvRaw = Get-Content -Path $envLocalPath -Raw
+    # ⛔ UTF8: Get-Content defaults to the ANSI codepage on PS 5.1, and this
+    # value is carried forward into the rewritten .env.local. Reading
+    # CREDENTIAL_KEY through the wrong decoder would preserve a MANGLED key --
+    # and a mangled key decrypts nothing, while looking present.
+    $existingEnvRaw = Get-Content -Path $envLocalPath -Raw -Encoding UTF8
     if ($existingEnvRaw -match '(?m)^CREDENTIAL_KEY=(.*)$')  { $existingCredKey = $matches[1].Trim() }
     if ($existingEnvRaw -match '(?m)^NEXTAUTH_SECRET=(.*)$') { $existingNextAuthSecret = $matches[1].Trim() }
     Write-Host "    [OK] Existing .env.local kept in place (backed up to $envBackupPath)."
@@ -1202,7 +1206,7 @@ if ($existingNextAuthSecret) {
 $databaseUrl = "postgresql://secvault_user:$DbPassword@${DbHost}:5432/secvault"
 $nextAuthUrl = "http://$($ServerIp):$($AppPort)"
 
-$envContent = Get-Content -Path $envLocalPath -Raw
+$envContent = Get-Content -Path $envLocalPath -Raw -Encoding UTF8
 
 $envContent = Set-EnvLine -Text $envContent -Key 'SERVER_IP'          -Value $ServerIp
 $envContent = Set-EnvLine -Text $envContent -Key 'APP_PORT'           -Value "$AppPort"
@@ -1228,7 +1232,7 @@ Set-Content -Path $envLocalPath -Value $envContent -NoNewline
 # NextAuth refusing to start. Set-EnvLine now appends a missing key rather
 # than losing it, and this read-back proves the three secrets that cannot be
 # regenerated from anywhere else are present in the file on disk.
-$writtenEnv = Get-Content -Path $envLocalPath -Raw
+$writtenEnv = Get-Content -Path $envLocalPath -Raw -Encoding UTF8
 foreach ($mustHave in @('CREDENTIAL_KEY', 'NEXTAUTH_SECRET', 'DATABASE_URL', 'PG_ADMIN_PASSWORD')) {
     if ($writtenEnv -notmatch ('(?m)^' + [regex]::Escape($mustHave) + '=\S')) {
         Fail "$mustHave is missing or empty in $envLocalPath after writing it. Refusing to continue -- an install that proceeds from here looks healthy and cannot decrypt a credential or sign anyone in."

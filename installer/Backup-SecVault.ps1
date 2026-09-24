@@ -177,7 +177,12 @@ if (-not (Test-Path $EnvFile)) {
     Write-Log "  [FAIL] $EnvFile not found -- cannot determine the database to back up."
     exit 1
 }
-$envText = Get-Content $EnvFile -Raw
+# ⛔ UTF8: Get-Content decodes with the ANSI codepage on PS 5.1. See the
+# long note in installer\SecVault-Tls.ps1 -- that mismatch grew a comment in
+# .env.local to 2.2 GB and took the console down to plaintext HTTP. Here a
+# wrong decoder would make the CREDENTIAL_KEY presence check compare
+# mojibake, so a backup could report a key it had not really verified.
+$envText = Get-Content $EnvFile -Raw -Encoding UTF8
 
 if ($envText -notmatch '(?m)^DATABASE_URL=(.+)$') {
     Write-Log '  [FAIL] DATABASE_URL not found in .env.local.'
@@ -498,7 +503,7 @@ try {
     Write-Log "  [FAIL] Could not copy .env.local beside the dump: $($_.Exception.Message)"
 }
 if ((Test-Path $envCopy) -and ((Get-Item $envCopy).Length -gt 0)) {
-    $copyText = Get-Content $envCopy -Raw
+    $copyText = Get-Content $envCopy -Raw -Encoding UTF8
     if ($copyText -match '(?m)^CREDENTIAL_KEY=(.+)$' -and $Matches[1].Trim()) {
         $keyBackedUp = $true
         Write-Log '  Copied .env.local, and CREDENTIAL_KEY is present in the copy. Stored firewall credentials will be decryptable from this set.'

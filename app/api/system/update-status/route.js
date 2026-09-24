@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.182.0': [
+    "Fixed a fault that had been quietly corrupting the server's settings file on every update, and which had just taken the console off HTTPS onto unencrypted HTTP.",
+    "The update scripts read the settings file using the wrong character encoding and wrote it back in another, which made every accented character in it roughly double in size each time. A single comment line had grown to 2.2 GB, at which point the file could no longer be read at all — so the server started with no settings, no encryption key and no certificate.",
+    "Every read of that file now states its encoding, and the updater refuses to rewrite a settings file that has grown implausibly large rather than saving the damage back.",
+    "A build check now fails if anyone reintroduces the bare read, and the recovery procedure is written down.",
+    "The affected server has been repaired and is back on HTTPS. No settings were lost.",
+  ],
   '2.181.2': [
     "Straightened the Rows per page, Search and Reset controls on Log search, which sat at three slightly different heights.",
     "The Search button and Reset link were the last two hand-built controls in the product — one had a border and the other did not, so they were two pixels apart before anything else. They now use the same button styling as every other page.",

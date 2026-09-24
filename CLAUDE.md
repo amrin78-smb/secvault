@@ -133,6 +133,30 @@ query, a renderer, or an engine; sort with `NULLS LAST`.
 - No `-Parallel` on `ForEach-Object`, no `-TimeoutSeconds` on `Test-Connection` (both PS7-only)
 - `$PID` is a reserved variable — use `$procPid` instead
 - Write multi-line PS scripts to temp `.ps1` files; never use `-Command` with newlines
+- ⛔ **`Get-Content` DECODES WITH THE ANSI CODEPAGE, NOT UTF-8.** Always pass `-Encoding UTF8`
+  when reading a file this repo writes as UTF-8 — above all `.env.local`. See the incident below.
+
+#### ⛔ AN ENCODING IS A ROUND TRIP (production outage, 2026-09-24)
+
+`installer/SecVault-Tls.ps1` read `.env.local` with a bare `Get-Content -Raw` and wrote it back as
+UTF-8 through .NET — the write side deliberately hand-rolled, with sixteen lines of comment
+explaining why. The **read** was never looked at. So every non-ASCII byte was decoded as a separate
+cp1252 character and re-encoded as one or two bytes: each character ROUGHLY DOUBLES, once per deploy.
+
+The seed was an em-dash in a COMMENT that `.env.local.example` ships (`# Auth (standalone — ...)`).
+Nothing ever read that line. It grew to a single **2,209,122,508-byte** line, at which point node
+refused the file outright (`ERR_STRING_TOO_LONG`, 0x1fffffe8 chars) — **no environment loaded at
+all**, `server.js` took its documented degrade-to-HTTP path, and the console came up on PLAINTEXT
+with no `CREDENTIAL_KEY` and no `NEXTAUTH_SECRET`. `sc.exe` reported Running throughout.
+
+⛔ **Checking one half of a round trip proves nothing.** Either half alone looks defensible; it is
+the DISAGREEMENT that corrupts. ⛔ **And the damage is invisible until it is total** — doubling a
+comment is harmless at 40 bytes, at 400, at 40,000, right up to the deploy where it crosses a limit
+in a different language's runtime.
+
+Fixed in every installer script; `Set-SecVaultEnvLine` now also REFUSES to rewrite a `.env.local`
+over 1 MB rather than laundering corruption into a freshly-written file, and
+`tests/installerEnvEncoding.test.js` fails the build on a bare `Get-Content` of an env path.
 
 #### ⛔ A POWERSHELL PARSE CHECK IS NOT A SYNTAX GATE (measured 2026-09-23)
 

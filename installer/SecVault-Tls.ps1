@@ -208,7 +208,39 @@ function Set-SecVaultEnvValue {
 
     if (-not (Test-Path -LiteralPath $EnvPath)) { return $false }
 
-    $raw = Get-Content -Path $EnvPath -Raw
+    # ⛔ A TRIPWIRE, BECAUSE THE FAILURE ABOVE WAS SILENT AND CUMULATIVE.
+    # A real .env.local is a couple of kilobytes. Anything far larger is not
+    # configuration, it is corruption -- and rewriting it would launder the
+    # corruption into a new file that looks freshly written. Refusing here
+    # stops the doubling at the first pass rather than the twentieth, and says
+    # what to do about it.
+    $envSize = (Get-Item -LiteralPath $EnvPath).Length
+    if ($envSize -gt 1MB) {
+        Write-Host "[FAIL] $EnvPath is $([int]($envSize / 1MB)) MB. A real .env.local is a few KB, so this file is corrupt and will NOT be rewritten." -ForegroundColor Red
+        Write-Host '       Recover the KEY=VALUE lines from it (they are usually intact) or from a .env.local.bak-* beside it, then re-run.' -ForegroundColor Red
+        return $false
+    }
+
+    # ⛔ -Encoding UTF8 IS LOAD-BEARING, AND ITS ABSENCE COST A PRODUCTION
+    # OUTAGE. In Windows PowerShell 5.1 `Get-Content` decodes with the ANSI
+    # CODEPAGE, not UTF-8. This function then writes the result back as UTF-8
+    # (see the long note below on why the write side is hand-rolled). So every
+    # non-ASCII byte is read as a separate cp1252 character and re-encoded as
+    # 1-2 bytes -- each character ROUGHLY DOUBLES on every pass, and this runs
+    # once per deploy.
+    #
+    # Measured 2026-09-24 on the reference deployment: the em-dash in the
+    # `# Auth (standalone -- ...)` COMMENT that .env.local.example seeds had
+    # grown into a single 2.2 GB line. node then refused the file outright
+    # (ERR_STRING_TOO_LONG: "Cannot create a string longer than 0x1fffffe8
+    # characters"), so NO environment loaded at all and server.js fell back to
+    # `TLS: not configured -- serving plain HTTP`. The console came up on
+    # PLAINTEXT with no CREDENTIAL_KEY, and every health signal said Running.
+    #
+    # ⛔ The previous author reasoned carefully about the WRITE encoding and
+    # never looked at the READ. An encoding is a ROUND TRIP; checking one half
+    # of it proves nothing.
+    $raw = Get-Content -Path $EnvPath -Raw -Encoding UTF8
     $pattern = '(?m)^' + [regex]::Escape($Key) + '=.*$'
     $line = "$Key=$Value"
 
@@ -256,7 +288,10 @@ function Get-SecVaultEnvValue {
         [Parameter(Mandatory = $true)][string]$Key
     )
     if (-not (Test-Path -LiteralPath $EnvPath)) { return $null }
-    $raw = Get-Content -Path $EnvPath -Raw
+    # ⛔ UTF8 for the same reason as the writer above: without it a value
+    # containing any non-ASCII character is returned mojibake, and a caller
+    # comparing it against the real value decides they differ.
+    $raw = Get-Content -Path $EnvPath -Raw -Encoding UTF8
     $pattern = '(?m)^' + [regex]::Escape($Key) + '=(.*)$'
     if ($raw -match $pattern) { return $matches[1].Trim() }
     return $null

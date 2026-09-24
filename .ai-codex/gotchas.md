@@ -483,6 +483,41 @@ address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to eit
 needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
 thing that can be misconfigured. A relative URL avoids the question entirely.
 
+## ⛔ `.env.local` GREW TO 2.2 GB AND TOOK THE CONSOLE TO PLAINTEXT (2026-09-24)
+
+**Symptom:** a deploy reported `completed WITH ERRORS` — both verification steps failed with
+*"Insufficient memory to continue the execution of the program"*. Services reported RUNNING.
+`https://…:3010` refused every connection; the port WAS listening and accepted the TCP connection,
+which is what made it look like a TLS fault.
+
+**Actual state:** the console was serving **plain HTTP on 3010** with no `CREDENTIAL_KEY` and no
+`NEXTAUTH_SECRET`. `app-error.log` had the only honest line:
+
+```
+Failed to load env from .env.local Error: Cannot create a string longer than 0x1fffffe8 characters
+  code: ERR_STRING_TOO_LONG
+```
+
+**Cause:** PowerShell 5.1 `Get-Content` decodes with the ANSI codepage. The installer read
+`.env.local` that way and wrote it back as UTF-8, so every non-ASCII character roughly doubled per
+deploy. An em-dash inside a COMMENT seeded from `.env.local.example` became one 2,209,122,508-byte
+line. Nothing ever read that comment.
+
+**Recovery, if it recurs** — the `KEY=VALUE` lines survive intact at the head and tail; only the
+corrupt line is huge:
+1. ⛔ Do NOT delete `.env.local`. It holds `CREDENTIAL_KEY`, which exists nowhere else, and
+   `.env.local.bak-*` files sit beside it.
+2. Stream it with node, keeping every line under ~8 KB and discarding the rest. PowerShell byte
+   loops are far too slow at this size — one took >10 minutes and had to be killed, and it held a
+   LOCK that then blocked the repair.
+3. Verify before swapping: compare the key SET and per-value hashes against the newest
+   `.env.local.bak-*`. Print fingerprints, never values.
+4. Rename the corrupt file aside rather than deleting; restart `SecVault-App`; confirm `app.log`
+   says `TLS: ACTIVE` and that `https://127.0.0.1:3010/login` answers 200.
+
+⛔ **The deploy's own verification is what caught it**, by failing. Had those two steps been
+skipped, the banner would have read "completed successfully" over a console serving plaintext.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

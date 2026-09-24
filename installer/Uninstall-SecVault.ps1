@@ -123,7 +123,7 @@ $archiveDir = ''
 $backupDirGuess = ''
 $envText = ''
 if (Test-Path $EnvFile) {
-    $envText = Get-Content $EnvFile -Raw
+    $envText = Get-Content $EnvFile -Raw -Encoding UTF8
     # Host and port are OPTIONAL and the reference deployment omits both
     # (postgresql://secvault_user:<pass>@/secvault) -- see the long note in
     # Backup-SecVault.ps1 for why [System.Uri] cannot be used on that form.

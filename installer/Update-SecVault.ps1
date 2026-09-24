@@ -449,7 +449,7 @@ Invoke-Step 'Collector prerequisites (service registration + firewall)' {
         $envLocalPath = Join-Path $repoRoot '.env.local'
         $portList = @()
         if (Test-Path $envLocalPath) {
-            foreach ($line in (Get-Content -LiteralPath $envLocalPath)) {
+            foreach ($line in (Get-Content -LiteralPath $envLocalPath -Encoding UTF8)) {
                 if ($line -match '^\s*SYSLOG_(UDP|TCP)_PORT\s*=\s*(.+)$') {
                     $val = $Matches[2]
                     # Strip an inline comment the same way the app's env loader does.
@@ -590,7 +590,7 @@ Invoke-Step 'lib\pg-server-settings.sql (server diagnostics)' {
             Write-Log '  [WARN] .env.local not found -- skipping server settings (not fatal).'
             return
         }
-        $envContent = Get-Content -Path $envLocalPath -Raw
+        $envContent = Get-Content -Path $envLocalPath -Raw -Encoding UTF8
         $pgAdminPassword = $null
         if ($envContent -match '(?m)^PG_ADMIN_PASSWORD=(.*)$') {
             $pgAdminPassword = $matches[1].Trim()
@@ -637,7 +637,7 @@ Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
             return
         }
 
-        $envContent = Get-Content -Path $envLocalPath -Raw
+        $envContent = Get-Content -Path $envLocalPath -Raw -Encoding UTF8
         $pgAdminPassword = $null
         if ($envContent -match '(?m)^PG_ADMIN_PASSWORD=(.*)$') {
             $pgAdminPassword = $matches[1].Trim()
