@@ -462,6 +462,27 @@ decides that, not the attribute), while a refusal answers **303** back to the pa
 banner. Content negotiation keeps the JSON answer for an `Accept: application/json` caller, so the
 route stays usable as an API.
 
+## ⛔ `request.nextUrl.origin` IS `localhost:3000` UNDER server.js (2026-09-24)
+
+SecVault serves TLS through `server.js`, which wraps the Next request handler rather than running
+`next start`. Under that wrapper `request.nextUrl.origin` resolves to Next's internal default —
+**`https://localhost:3000`** — not the host the request arrived on. Measured live on the reference
+deployment, which answers on `:3010`.
+
+`/api/logs/export` built its 303 refusal redirect from it, so a refusal on the no-JS path pointed
+the browser at an address that does not exist. The banner it redirects to was never reached, and
+the failure was a dead page instead of an explanation — worse than the JSON it replaced.
+
+⛔ **Never build an absolute redirect URL from a derived origin.** A RELATIVE `Location` is legal
+(RFC 7231 §7.1.2), is resolved by the browser against the URL it actually used, and cannot be wrong
+about a host because it never names one. `Response.redirect()` requires an absolute URL, so a
+relative one needs `new Response(null, {status: 303, headers: {Location: '/path'}})`.
+
+⛔ **The console address is configurable at runtime** (Settings -> Certificate -> Console
+address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to either. Anything that
+needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
+thing that can be misconfigured. A relative URL avoids the question entirely.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

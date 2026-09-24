@@ -80,10 +80,21 @@ export async function GET(request) {
       if (accept.includes('application/json')) {
         return Response.json({ error: out.detail, reason: out.reason }, { status: 504 });
       }
-      const back = new URL('/logs', request.nextUrl.origin);
-      for (const [k, v] of sp.entries()) back.searchParams.set(k, v);
-      back.searchParams.set('exportError', out.reason);
-      return Response.redirect(back, 303);
+      // ⛔ A RELATIVE Location, NEVER AN ABSOLUTE ONE BUILT FROM nextUrl.origin.
+      // Measured on the live server: under server.js (the TLS wrapper this
+      // product runs on) `request.nextUrl.origin` is `https://localhost:3000`
+      // — Next's internal default, not the host the request actually arrived
+      // on. The 303 therefore pointed the browser at an address that does not
+      // exist, so a refusal on the no-JS path led to a dead page instead of
+      // the banner it was built to show. A relative Location is legal (RFC
+      // 7231 §7.1.2), is resolved by the browser against the URL it actually
+      // used, and cannot be wrong about a host because it never names one.
+      const back = new URLSearchParams(sp);
+      back.set('exportError', out.reason);
+      return new Response(null, {
+        status: 303,
+        headers: { Location: `/logs?${back.toString()}`, 'Cache-Control': 'no-store' },
+      });
     }
 
     await logActivity(pool, {

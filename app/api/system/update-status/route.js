@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.181.1': [
+    "Fixed a refused export sending the browser to an address that does not exist. The page it should have returned you to — the one explaining why no file was produced — was never reached.",
+    "Only affected the case where JavaScript is unavailable, which is also the case where the explanation matters most.",
+    "Found by testing the failure path against the live server rather than only the success path.",
+  ],
   '2.181.0': [
     "Exports and reports now show 'Preparing…' while the server builds the file, and say so when it arrives. Previously you clicked and nothing happened on screen — sometimes for the better part of a minute.",
     "If an export cannot be produced, the reason now appears next to the button and stays there until you try again, instead of vanishing into the browser's download list.",
