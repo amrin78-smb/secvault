@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.179.1': [
+    "Exported log files now say UTC in their name. The search form takes local time but the file and every timestamp in it are UTC, so on this server a search for 08:00 produced a file named 0100 — correct, and indistinguishable from a bug.",
+    "Verified against the live server: a seven-day fleet-wide export is refused rather than cut short, and a search that runs out of time produces an error instead of an empty spreadsheet.",
+    "No change to the contents of an export.",
+  ],
   '2.179.0': [
     "Log search results can be exported to CSV. The file covers every event matching the search over the same window — not just the page on screen — and opens in Excel with accents and Thai text intact.",
     "Above 50,000 matches the export is refused rather than quietly cut short, and a search that runs out of time produces no file at all. A spreadsheet that leaves the product carries no warning banner, so a short file would look like a complete answer to whoever opens it weeks later.",

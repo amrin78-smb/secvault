@@ -279,7 +279,8 @@ describe('the filename says what the file holds', () => {
 
   it('states the window, which is the one filter the rows cannot show', () => {
     const name = exportFilename(built, {});
-    assert.match(name, /^secvault-logs-20260923-1000_to_20260924-0935\.csv$/);
+    // The `Z` is required: the form takes local time, the file is UTC.
+    assert.match(name, /^secvault-logs-20260923-1000Z_to_20260924-0935Z\.csv$/);
   });
 
   it('names the subject when there is a single one', () => {
