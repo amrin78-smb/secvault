@@ -518,6 +518,44 @@ corrupt line is huge:
 ⛔ **The deploy's own verification is what caught it**, by failing. Had those two steps been
 skipped, the banner would have read "completed successfully" over a console serving plaintext.
 
+## ⛔ THE PRODUCT COULD NOT BE INSTALLED FROM SCRATCH (found 2026-09-24)
+
+The first genuine fresh-install test of the packaged installer failed at
+`node lib\migrate.js` with:
+
+```
+relation "advisories" does not exist            (SQLSTATE 42P01)
+```
+
+and, once that was fixed, again with:
+
+```
+relation "snmp_metric_snapshots" does not exist (SQLSTATE 42P01)
+```
+
+`lib/schema.sql` had a foreign key 430 lines before its target table, and two
+`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 140 lines before theirs. `migrate.js` sends the file as
+ONE batch, so each aborted the whole migration and the installer stopped `[FATAL]`.
+
+⛔ **NEITHER COULD EVER HAVE BEEN SEEN ON A RUNNING SERVER.** Both statements are legal and
+succeed wherever the table already exists — which is every install that has ever migrated. The file
+ran on every deploy for months. `npm run dbcheck` executes real SQL and did not catch it either,
+because it runs against an ESTABLISHED database.
+
+⛔ **`IF NOT EXISTS` IS NOT AN ORDERING GUARANTEE.** `CREATE TABLE IF NOT EXISTS` guards creation;
+`ADD COLUMN IF NOT EXISTS` guards the COLUMN, not the TABLE. Both read as defensive and neither is.
+
+⛔ **AND THE FIRST GUARD WRITTEN FOR THIS WAS TOO NARROW.** It checked `REFERENCES` only, passed,
+and the next live migration failed on the `ALTER`. A guard covering one shape of a defect reports
+clean about the others, and the green is then read as coverage. `tests/schemaOrder.test.js` checks
+REFERENCES / CREATE INDEX / ALTER TABLE / CREATE TRIGGER / COMMENT ON / INSERT INTO — widen that
+list rather than narrow it.
+
+⛔ **The lesson beyond the schema: an install path that is never run is not tested.** Everything
+else about the installer had been verified statically — parse checks, AST checks, package contents,
+the deploy key authenticating for real, the zip round-tripping. All of it passed. The product still
+could not be installed.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

@@ -332,6 +332,17 @@ process, passed as parameter to all functions, never instantiated per-request.
 - `lib/schema.sql` uses `CREATE TABLE IF NOT EXISTS` on every table — safe to re-run. `lib/migrate.js` runs it via the `pg` client, connected as `secvault_user`.
 - `lib/schema-grants.sql` (readonly role creation + per-table grants) is a **separate file**, run under the `postgres` superuser — **not** run by `migrate.js`, which only has DB-level (not CREATEROLE/superuser) privileges. Both installer scripts apply it automatically, idempotently, every run — Update reads the superuser password back out of the deployed `.env.local`'s `PG_ADMIN_PASSWORD`.
 - Never use `DROP TABLE` in schema.sql — destructive and irreversible in production.
+- ⛔ **ORDER IS LOAD-BEARING IN `schema.sql`, AND `IF NOT EXISTS` DOES NOT SAVE YOU.**
+  `migrate.js` sends the whole file as ONE multi-statement batch, so any statement needing a table
+  declared LATER aborts the entire migration. `CREATE TABLE IF NOT EXISTS` guards CREATION and says
+  nothing about order; `ADD COLUMN IF NOT EXISTS` tolerates a missing COLUMN, never a missing TABLE.
+  ⛔ **This is invisible on every deployed server** — wherever the table already exists the
+  statement runs clean, so the file is exercised on every deploy and the defect appears ONLY on a
+  database that has never been migrated. Two shipped undetected and were found 2026-09-24 by the
+  first real fresh-install test: a `REFERENCES advisories(id)` 430 lines early, and two
+  `ALTER TABLE snmp_metric_snapshots ADD COLUMN` 140 lines early — **SecVault could not be installed
+  from scratch at all.** `tests/schemaOrder.test.js` now fails the build on any forward dependency
+  (REFERENCES / CREATE INDEX / ALTER TABLE / CREATE TRIGGER / COMMENT ON / INSERT INTO).
 
 ### Primary Keys
 

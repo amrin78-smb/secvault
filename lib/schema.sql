@@ -844,25 +844,6 @@ CREATE TABLE IF NOT EXISTS finding_acknowledgements (
 
 CREATE INDEX IF NOT EXISTS idx_fa_device_id ON finding_acknowledgements(device_id);
 
--- Fleet Alerts/Events page: same ack pattern as finding_acknowledgements above,
--- but for device_cve_assessments rows (which have no ack column of their own).
--- Keyed on (device_id, advisory_id) -- NOT device_cve_assessments.id -- because
--- although that table is upserted (ON CONFLICT DO UPDATE, not delete+reinsert,
--- see versionMatcher.js), the natural key is what versionMatcher already
--- upserts on, so keying the ack the same way keeps both tables joinable on
--- the same pair reliably regardless of internal id churn.
-CREATE TABLE IF NOT EXISTS cve_assessment_acknowledgements (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
-  advisory_id UUID NOT NULL REFERENCES advisories(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'acknowledged' | 'dismissed' | 'actioned'
-  note TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (device_id, advisory_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_caa_device_id ON cve_assessment_acknowledgements(device_id);
-
 -- Phase 7: Compliance engine. Curated check library (audit_checks) + per-device
 -- results (audit_findings), reusing lib/engines/applicability.js's predicate
 -- evaluator (predicate_config is the SAME shape as advisory_conditions.predicate_config
@@ -1092,20 +1073,6 @@ CREATE TABLE IF NOT EXISTS device_connectivity_history (
 CREATE INDEX IF NOT EXISTS idx_dch_device_time ON device_connectivity_history(device_id, checked_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dch_checked_at ON device_connectivity_history(checked_at);
 
--- Provenance for each metric sample (added 2026-08-05, v2.55.0). Until now the
--- UI decided whether a reading was low-confidence from a HARDCODED vendor list
--- (LOW_CONFIDENCE_VENDORS in the SNMP page), which was wrong the moment a
--- vendor gained a better source: Palo Alto's getPerformanceMetrics() reads the
--- management transport and is NOT low-confidence, but the vendor was on the
--- list, so every reading was captioned as unreliable regardless of where it
--- came from. The adapter already returns both facts per sample -- store them.
--- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY.
--- Nullable, no default: a row written before this shipped genuinely does not
--- know its own provenance, and defaulting to either value would assert
--- something untrue about historical samples.
-ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS source TEXT; -- 'metrics' (mgmt transport) | 'snmp'
-ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS low_confidence BOOLEAN;
-
 -- Headline-tile history, added 2026-08-05 (v2.53.0) so the dashboard's stat
 -- cards can show a real "vs yesterday" delta instead of a decorative arrow.
 -- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY — every already
@@ -1259,6 +1226,27 @@ CREATE TABLE IF NOT EXISTS snmp_metric_snapshots (
 CREATE INDEX IF NOT EXISTS idx_sms_device_id ON snmp_metric_snapshots(device_id);
 CREATE INDEX IF NOT EXISTS idx_sms_sampled_at ON snmp_metric_snapshots(sampled_at);
 
+-- ⛔ THESE ALTERs MUST FOLLOW THE CREATE TABLE ABOVE. They sat ~140 lines
+-- EARLIER until 2026-09-24, next to the prose that explains them, and that
+-- could not be installed: `ADD COLUMN IF NOT EXISTS` tolerates a missing
+-- COLUMN, never a missing TABLE, so on an empty database this aborted the
+-- whole migration with
+--     relation "snmp_metric_snapshots" does not exist   (SQLSTATE 42P01)
+-- Invisible on every deployed server, where the table already existed.
+-- Provenance for each metric sample (added 2026-08-05, v2.55.0). Until now the
+-- UI decided whether a reading was low-confidence from a HARDCODED vendor list
+-- (LOW_CONFIDENCE_VENDORS in the SNMP page), which was wrong the moment a
+-- vendor gained a better source: Palo Alto's getPerformanceMetrics() reads the
+-- management transport and is NOT low-confidence, but the vendor was on the
+-- list, so every reading was captioned as unreliable regardless of where it
+-- came from. The adapter already returns both facts per sample -- store them.
+-- ⛔ CREATE TABLE IF NOT EXISTS above guards CREATION ONLY.
+-- Nullable, no default: a row written before this shipped genuinely does not
+-- know its own provenance, and defaulting to either value would assert
+-- something untrue about historical samples.
+ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS source TEXT; -- 'metrics' (mgmt transport) | 'snmp'
+ALTER TABLE snmp_metric_snapshots ADD COLUMN IF NOT EXISTS low_confidence BOOLEAN;
+
 -- Operator-action audit trail (NOT a general app log -- scheduled/background
 -- jobs already have C:\Apps\SecVault\logs\engine.log for that). Populated
 -- only at HTTP route call-sites representing a meaningful in-app action
@@ -1351,6 +1339,41 @@ CREATE INDEX IF NOT EXISTS idx_advisories_kev_listed ON advisories(kev_listed);
 CREATE INDEX IF NOT EXISTS idx_advisories_cvss_score ON advisories(cvss_score);
 CREATE INDEX IF NOT EXISTS idx_advisories_published_at ON advisories(published_at);
 CREATE INDEX IF NOT EXISTS idx_advisories_vulnerability_category ON advisories(vulnerability_category);
+
+-- ⛔ THIS TABLE LIVES *AFTER* `advisories` BECAUSE IT REFERENCES IT, AND THAT
+-- ORDER IS LOAD-BEARING. It used to sit ~430 lines earlier, beside
+-- finding_acknowledgements, which reads better and could not be installed.
+-- `lib/migrate.js` sends this whole file as ONE multi-statement batch, so a
+-- forward foreign key aborts the entire migration:
+--
+--     relation "advisories" does not exist   (SQLSTATE 42P01)
+--
+-- ⛔ AND IT WAS INVISIBLE ON EVERY EXISTING SERVER. `CREATE TABLE IF NOT
+-- EXISTS` guards CREATION; it says nothing about ORDER. Anywhere the table
+-- already existed the reference resolved and the file ran clean, so this only
+-- ever failed on a genuinely empty database -- found 2026-09-24 by the first
+-- real fresh-install test, having shipped undetected. Do not move it back for
+-- readability. tests/schemaOrder.test.js fails the build on a forward
+-- reference so the next one cannot reach an installer.
+
+-- Fleet Alerts/Events page: same ack pattern as finding_acknowledgements above,
+-- but for device_cve_assessments rows (which have no ack column of their own).
+-- Keyed on (device_id, advisory_id) -- NOT device_cve_assessments.id -- because
+-- although that table is upserted (ON CONFLICT DO UPDATE, not delete+reinsert,
+-- see versionMatcher.js), the natural key is what versionMatcher already
+-- upserts on, so keying the ack the same way keeps both tables joinable on
+-- the same pair reliably regardless of internal id churn.
+CREATE TABLE IF NOT EXISTS cve_assessment_acknowledgements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  advisory_id UUID NOT NULL REFERENCES advisories(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'new', -- 'new' | 'acknowledged' | 'dismissed' | 'actioned'
+  note TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (device_id, advisory_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caa_device_id ON cve_assessment_acknowledgements(device_id);
 
 -- Applicability predicates — curated data, not code. Empty until Phase 6 builds the
 -- predicate evaluator; device_cve_assessments.config_applies defaults to 'unknown'

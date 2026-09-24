@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.182.1': [
+    "Fixed SecVault being unable to install on a new server at all. The database setup script referred to two tables before it created them, which fails on an empty database and stops the installation.",
+    "It was invisible on every running server, because those statements work wherever the tables already exist — so the script ran cleanly on every update for months while a fresh install could never have worked.",
+    "A build check now fails if any part of the database script depends on a table defined later in the file.",
+    "Existing installations are unaffected; this changes only the order of statements, not the schema itself.",
+  ],
   '2.182.0': [
     "Fixed a fault that had been quietly corrupting the server's settings file on every update, and which had just taken the console off HTTPS onto unencrypted HTTP.",
     "The update scripts read the settings file using the wrong character encoding and wrote it back in another, which made every accented character in it roughly double in size each time. A single comment line had grown to 2.2 GB, at which point the file could no longer be read at all — so the server started with no settings, no encryption key and no certificate.",
