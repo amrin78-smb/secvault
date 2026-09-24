@@ -395,6 +395,36 @@ it **widens**, and the wider result looks like the same query.
 because nothing linked to it; the VPN detection links do. When adding a filter, add the control in
 the same commit — `tests/logSearch.test.js` asserts that every param those links emit is on the
 `FILTERS` whitelist, but only a control keeps it there across a re-submit.
+## ⛔ A CSV FORMULA GUARD THAT COULD NOT FIRE, PINNED BY A TEST THAT NAMED IT (2026-09-24)
+
+`csvEscape` neutralises spreadsheet formula injection by prefixing an apostrophe to a cell
+beginning `=`, `+`, `-` or `@`. Its comment said, correctly, that Excel strips a leading tab or CR
+and *then* re-reads the leading character, so a naive check on index 0 is defeated by `"	=cmd..."`.
+
+The code then did exactly that:
+
+```js
+s = s.replace(/[
+	]+/g, ' ');   // 	 becomes a SPACE
+if (/^[=+\-@]/.test(s)) s = `'${s}`;  // ...so index 0 is ' ', and this never fires
+```
+
+⛔ **The case the comment named was the one case not covered.** And
+`tests/ruleChangeRequestReport.test.js` asserted the broken output —
+`assert.equal(csvEscape('
+=1+1'), '" =1+1"')` — under a test called *"newlines and tabs are folded
+so they cannot hide a leading character"*. The name stated the property; the assertion pinned its
+opposite. Found only because the log export wrote a fresh test for the behaviour the comment
+described rather than for the behaviour the code had.
+
+⛔ **When a comment describes a defence, test the defence, not the code.** A test written by
+reading the implementation agrees with the implementation by construction, including where it is
+wrong — and then makes the bug look deliberate to everyone after.
+
+Fixed to `/^\s*[=+\-@]/`, keeping the whitespace: the apostrophe is what neutralises the value, and
+deleting leading characters from an attacker-controlled log line would tidy the evidence rather
+than protect the reader.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

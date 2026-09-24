@@ -471,7 +471,12 @@ describe('⛔ logSearch: "a VPN login" is auth_outcome, never a subtype', () => 
     const { sql, applied, rejected } = buildSearchQuery({ authOutcome: 'maybe' }, NOW);
     assert.equal(rejected.authOutcome, 'maybe');
     assert.ok(!('authOutcome' in applied));
-    assert.ok(!sql.includes('auth_outcome'), 'a rejected filter must add no predicate');
+    // Checked against the WHERE clause, not the whole statement:
+    // auth_outcome is a SELECTED column now, so a substring test over the
+    // full SQL would fail for a reason that has nothing to do with the
+    // filter being rejected.
+    const where = sql.slice(sql.indexOf(' WHERE '));
+    assert.ok(!where.includes('auth_outcome'), 'a rejected filter must add no predicate');
   });
 
   it('is case-insensitive, and reports the value it actually used', () => {

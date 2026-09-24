@@ -222,6 +222,7 @@ const API_ROUTES = [
   { path: '/api/jobs/{id}', methods: ['GET'], capability: null },
   { path: '/api/ldap-mappings', methods: ['GET', 'POST', 'DELETE'], capability: 'manage_users' },
   { path: '/api/license', methods: ['GET', 'POST', 'DELETE'], capability: 'manage_license' },
+  { path: '/api/logs/export', methods: ['GET'], capability: 'view_log_search' },
   { path: '/api/logs/search', methods: ['GET'], capability: 'view_log_search' },
   { path: '/api/mfa', methods: ['GET', 'POST', 'PUT', 'DELETE'], capability: null },
   { path: '/api/notification-channels', methods: ['GET', 'POST'], capability: 'manage_settings' },

@@ -26,6 +26,12 @@ export async function GET(request) {
     'protocol', 'application', 'ruleName', 'ruleId', 'srcUser', 'srcCountry', 'dstCountry',
     'threatName', 'urlCategory', 'urlHostname', 'sourceIp', 'srcIp', 'dstIp',
     'srcPort', 'dstPort', 'q',
+    // ⛔ ADDED WITH THE FILTER, NOT AFTER IT. `authOutcome` shipped in
+    // v2.178.0 and this list was not updated, so an API caller asking for
+    // failed VPN logins silently got EVERY VPN event back — a wider answer
+    // than asked for, with nothing saying so. Exactly the shape of the `page`
+    // omission documented below.
+    'authOutcome',
     // ⛔ `page` was missing from this list, so `buildSearchQuery` always read
     // `f.page === undefined`, `clampPage` returned 1, and OFFSET was always 0.
     // The response still reported `hasMore: true` / `maxPage: 200`, so an API

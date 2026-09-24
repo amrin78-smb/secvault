@@ -277,9 +277,30 @@ whoever made it, so it takes a second deliberate action. 400 on any shape that w
 silently (scheme vs transport, path, query, credentials, no scheme). Returns `backupPath`,
 `restartRequired` and a `recovery` sentence naming the file and the service to restart.
 
+## /api/logs/export
+
+GET /api/logs/export [auth: `view_log_search`] [db] — the current log search as a **CSV
+download**. Takes the SAME params as `/logs` and `/api/logs/search` EXCEPT `page` and `limit`,
+which are deliberately absent: the export is the whole result set for the window, and honouring the
+operator's current page would produce a file named after the full range holding fifty rows from the
+middle of it.
+
+⛔ **It refuses rather than truncating.** Above `EXPORT_MAX_ROWS` (50,000) it answers **413**
+with the remedy named; a search that hit the 10s statement timeout answers **504**. Neither ever
+returns a CSV — an empty-but-valid file reads as "nothing matched", and unlike the page there is no
+banner on a downloaded file to say otherwise.
+
+⛔ **Audited.** Writes an `activity_log` row (`export-logs`) recording the window, the applied
+filters and the row count — the query, never the rows. It is the only gated read in this app that
+produces an artefact which can be forwarded, which is what makes "who took a copy of this, and
+when" worth being able to answer.
+
+Rendered by `lib/syslog/logExport.js`; cells escaped by `lib/csv.js`.
+
 ## /api/logs/search
 
-GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit`/`page` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, ruleId, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, and `q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
+GET /api/logs/search [auth] [db] — raw log search over `syslog_events`. Params mirror `logSearch.FILTERS`: `from`/`to`/`limit`/`page` plus deviceId, vendor, action, logClass, logSubtype, protocol, application, ruleName, ruleId, srcUser, srcCountry, dstCountry, threatName, urlCategory, urlHostname, sourceIp, srcIp, dstIp, srcPort, dstPort, `authOutcome` (`success`/`failure`/`any`), and
+`q` (raw-message contains). Returns `{rows, truncated, limit, from, to, clamped, applied, rejected, ms}`.
 ⛔ **A search stopped by the 10s statement timeout answers 504, not 200** (v2.148.0), carrying the same body including `timedOut:true` and the reason. `searchEvents` already refuses to return an empty result set as an answer; wrapping that in a 200 with `rows: []` reintroduced the exact failure one layer up, for any consumer that checks `res.ok` and reads `rows`.
 Deliberately NOT admin-gated — read-only, persists nothing, same reasoning as `access-path`/`path-query`. ⛔ A query error returns **500**, never an empty `rows` array: "0 results" from a failed query reads as "that traffic never happened". Added 2026-09-08.
 

@@ -1014,6 +1014,55 @@ results covering 24 hours above two empty window boxes, one re-submit from silen
 default hour. Local because a zone-less string re-parses as local, so it round-trips; UTC digits
 would shift the window by the server's offset on the way back in.
 
+## lib/csv.js (added 2026-09-24, v2.179.0)
+
+`csvEscape` / `csvRow` / `csvDocument`. Pure. Extracted from
+`lib/engines/ruleChangeRequestReport.js` when the log export became the second caller: two files
+deciding independently how to neutralise a spreadsheet formula would eventually disagree, and the
+one that disagreed quietly would be the one writing a document that runs code on open.
+
+⛔ **The formula guard could not fire on the case its own comment named.** The original folded
+`
+	` to a SPACE and *then* tested `/^[=+\-@]/`, so `"	=cmd|..."` — the exact input the comment
+described as the thing being defended against — arrived at the test with a space at index 0 and
+went out unneutralised. Worse, `tests/ruleChangeRequestReport.test.js` PINNED the broken output
+under a test whose NAME stated the correct property. Now `/^\s*[=+\-@]/`, and the whitespace is
+kept rather than trimmed: the apostrophe neutralises it, and deleting leading characters from an
+attacker-controlled log line would tidy the evidence instead of protecting the reader.
+
+⛔ **The BOM is opt-in, not the default.** Excel ignores `charset=utf-8` on a downloaded file, so
+a Thai or accented username opens as mojibake — a corrupted identifier on an evidence export. But a
+BOM also confuses strict parsers, so each caller chooses: the change-request CSV (also diffed by
+hand) goes without; the log export takes it.
+
+## lib/syslog/logExport.js (added 2026-09-24, v2.179.0)
+
+The CSV a log search leaves the product as. `exportEvents(pool, filters, now, {deviceNames})` is
+`searchEvents` with a bigger ceiling — the query, the bounds and the timeout handling are NOT
+reimplemented. Every column the search returns is exported, `message` last.
+
+⛔ **THE FILE OUTLIVES THE SCREEN, AND THAT CHANGES EVERY TRADE-OFF.** `/logs` can show a
+partial answer because a banner above it says so; a CSV is mailed, attached to a ticket, opened in
+six weeks by someone who never saw the search. So every state the page renders as a CAVEAT, this
+refuses: beyond `EXPORT_MAX_ROWS` (50,000) -> `{ok:false, reason:"too_many"}` (HTTP 413), and a
+timed-out query -> `{ok:false, reason:"timed_out"}` (HTTP 504). ⛔ **Neither carries a `csv`
+key at all**, so the route cannot serve one by accident — an empty-but-valid CSV is byte-identical
+to "nothing matched" and the reader has no way back to the difference.
+
+⛔ **`page` and `limit` are stripped, in two places** (the route's param list and `exportEvents`
+itself). The export is the whole result set for the window; honouring the operator's current page
+would hand them fifty rows from the middle of the range in a file named after all of it.
+
+⛔ **No metadata rows above the header**, however much a forensic file wants provenance: a
+leading `# query: ...` line is not CSV, and every importer would read it as the header. The window
+travels in the FILENAME — the one filter a reader cannot reconstruct from the rows — and the full
+query in `activity_log`.
+
+⛔ **Timestamps are ISO-8601 UTC with the `Z`**, never the operator's display format: a sheet
+opened in another office must not read them as a different instant. `event_time_zone_assumed` is
+its own column, because `tz_assumed` means the collector's zone was assumed and a reader who
+cannot see that treats an assumed time as a measured one.
+
 ## lib/syslog/logSearch.js
 
 `buildSearchQuery(filters, now)` -> `{sql, params, from, to, clamped, limit, applied, rejected}` · `searchEvents(pool, filters, now)` · `getFilterOptions(pool, hours)` · `clampPage` / `MAX_PAGE` (200) · `STATEMENT_TIMEOUT_MS` (10000).

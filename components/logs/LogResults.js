@@ -8,6 +8,11 @@ import { classifyAction } from '../../lib/syslog/actions';
 // Results for a raw log search. Server component — the rows arrive already
 // queried by the page.
 //
+// ⛔ THE EXPORT LINK IS BUILT FROM THE SAME PARAMS THE PAGE WAS RENDERED
+// FROM, never from the result. A link assembled from anything else could
+// produce a file that does not match the screen above it, and the file is the
+// half that survives.
+//
 // ⛔ THE TRUNCATION NOTICE IS NOT DECORATION. Presenting the first 100 of
 // 4,000,000 matches as if it were the whole answer is how an investigator
 // concludes "that host made three connections" and is wrong. Both the cap and
@@ -28,6 +33,22 @@ import { classifyAction } from '../../lib/syslog/actions';
 //
 // lib/syslog/actions.js exists precisely to end this: a verb in neither set is
 // UNKNOWN and must never be folded into either one.
+// ⛔ `page` AND `limit` ARE STRIPPED. The export is the whole result set
+// for the window; carrying the operator's current page into it would hand them
+// fifty rows from the middle of the range in a file named after all of it. The
+// route drops them again — this is the first of two places, not the only one.
+const EXPORT_DROP = new Set(['page', 'limit']);
+
+function exportHref(searchParams) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams || {})) {
+    if (EXPORT_DROP.has(k)) continue;
+    if (v === undefined || v === null || String(v) === '') continue;
+    p.set(k, String(v));
+  }
+  return `/api/logs/export?${p.toString()}`;
+}
+
 function actionTone(a) {
   const verdict = classifyAction(a);
   if (verdict === 'allowed') return 'success';
@@ -191,6 +212,36 @@ export default function LogResults({ result, deviceNames, searchParams }) {
               count did not describe the window. */}
           <span>Window: {windowText}</span>
           <span>· {result.ms} ms</span>
+
+          {/* ⛔ A PLAIN <a download>, NOT next/link. This is an API route
+              returning a file: next/link would prefetch it, which on a route
+              that WRITES AN AUDIT ROW means an export recorded against an
+              operator who only hovered the button. The export is also
+              deliberately offered on an empty result — a header-only CSV is a
+              real answer ("nothing matched in this window") and refusing to
+              produce one would make the button look broken exactly when the
+              search was most conclusive. */}
+          <a
+            href={exportHref(searchParams)}
+            download
+            style={{
+              marginLeft: 'auto',
+              padding: '5px 12px',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+              color: 'var(--primary)',
+              textDecoration: 'none',
+              border: '1px solid var(--primary)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+            title={
+              'Download every event matching this search as CSV — not just this page, and '
+              + 'over the same window. Above 50,000 matches the export is refused rather than '
+              + 'quietly cut short; narrow the window and try again.'
+            }
+          >
+            Export CSV
+          </a>
         </div>
 
         {result.truncated ? (

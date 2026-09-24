@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.179.0': [
+    "Log search results can be exported to CSV. The file covers every event matching the search over the same window — not just the page on screen — and opens in Excel with accents and Thai text intact.",
+    "Above 50,000 matches the export is refused rather than quietly cut short, and a search that runs out of time produces no file at all. A spreadsheet that leaves the product carries no warning banner, so a short file would look like a complete answer to whoever opens it weeks later.",
+    "Every export is recorded in the activity log — the search that was run and how many events came back, never the log lines themselves.",
+    "Fixed a flaw in the spreadsheet protection used by this and the rule-change export: a log line crafted to run as a formula could evade it by starting with a tab or a newline. That was the exact case the code claimed to handle, and a test was holding the wrong behaviour in place.",
+  ],
   '2.178.0': [
     "VPN detections are now clickable. The address or account in each row opens the raw VPN logins behind that finding, already filtered and already set to the same time window the detection used.",
     "Log search gained a \"VPN login\" filter. Most traffic a firewall files under VPN is portal probes and keepalives rather than logins — on this fleet roughly seven rows in ten — so without it a page of results could contain no login at all.",

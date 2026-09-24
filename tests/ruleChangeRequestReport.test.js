@@ -232,8 +232,17 @@ describe('CSV is safe to open in a spreadsheet', () => {
   });
 
   test('newlines and tabs are folded so they cannot hide a leading character', () => {
-    assert.equal(csvEscape('\n=1+1'), '" =1+1"');
+    // ⛔ THIS TEST'S NAME WAS RIGHT AND ITS ASSERTION WAS BACKWARDS, which is
+    // how the defect survived. It pinned `'" =1+1"'` — the folded tab or
+    // newline leaves a SPACE at index 0, the old `/^[=+\-@]/` check therefore
+    // did not fire, and the cell went out unneutralised. The case the name
+    // describes was the one case not covered, and the test actively held the
+    // bug in place. Corrected 2026-09-24 alongside lib/csv.js.
+    assert.equal(csvEscape('\n=1+1'), `"' =1+1"`);
+    assert.equal(csvEscape('\t@SUM(A1)'), `"' @SUM(A1)"`);
     assert.ok(!csvEscape('a\r\nb').includes('\n'));
+    // A value that merely begins with a space is left alone.
+    assert.equal(csvEscape(' hello'), '" hello"');
   });
 
   test('the tri-state reaches the CSV as both a sentence and a filterable state', () => {
