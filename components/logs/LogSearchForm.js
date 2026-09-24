@@ -18,8 +18,21 @@ const LABEL = {
   marginBottom: 4,
 };
 
+// ⛔ ONE HEIGHT FOR EVERY CONTROL ON THE ACTION ROW, stated once.
+// The row is `align-items: flex-end`, so it lines up the BOTTOM of each
+// control and lets the tops fall where they may. That is only invisible while
+// the controls happen to be the same height, and they were not: the Search
+// button was hand-rolled with `border: none` and the Reset link with
+// `border: 1px`, which is a two-pixel difference on its own, and a <select>'s
+// intrinsic height is a user-agent decision that differs again between
+// browsers and platforms. Pinning the height is what makes the row square on
+// every machine rather than only on the one it was eyeballed on.
+const CONTROL_H = 34;
+
 const FIELD = {
   width: '100%',
+  height: CONTROL_H,
+  boxSizing: 'border-box',
   padding: '7px 9px',
   fontSize: 'var(--text-sm)',
   border: '1px solid var(--border)',
@@ -153,31 +166,19 @@ export default function LogSearchForm({ params, devices, options }) {
                   ))}
                 </select>
               </div>
-              <button
-                type="submit"
-                style={{
-                  padding: '8px 20px',
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 600,
-                  color: '#fff',
-                  background: 'var(--primary)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-sm)',
-                  cursor: 'pointer',
-                }}
-              >
+              {/* ⛔ THE SHARED .btn CLASSES, not a hand-rolled pair. These two
+                  were the only raw <button>/<a> controls left in the app —
+                  everything else goes through components/ui/Button.js or the
+                  same classes — so they drifted from each other AND from every
+                  other button in the product. globals.css already owns the
+                  padding, border, radius and hover state. */}
+              <button type="submit" className="btn btn-primary" style={{ height: CONTROL_H }}>
                 Search
               </button>
               <a
                 href="/logs"
-                style={{
-                  padding: '8px 16px',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--text-secondary)',
-                  textDecoration: 'none',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                }}
+                className="btn btn-secondary"
+                style={{ height: CONTROL_H }}
               >
                 Reset
               </a>

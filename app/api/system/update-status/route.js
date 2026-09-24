@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.181.2': [
+    "Straightened the Rows per page, Search and Reset controls on Log search, which sat at three slightly different heights.",
+    "The Search button and Reset link were the last two hand-built controls in the product — one had a border and the other did not, so they were two pixels apart before anything else. They now use the same button styling as every other page.",
+    "Every control on that row is pinned to one height, so the row stays square on any browser rather than only on the one it was checked in.",
+  ],
   '2.181.1': [
     "Fixed a refused export sending the browser to an address that does not exist. The page it should have returned you to — the one explaining why no file was produced — was never reached.",
     "Only affected the case where JavaScript is unavailable, which is also the case where the explanation matters most.",
