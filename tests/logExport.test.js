@@ -206,71 +206,135 @@ describe('the columns are the evidence, not a summary of it', () => {
   });
 });
 
-describe('what the export refuses to produce', () => {
-  it('refuses a timed-out search instead of an empty file', async () => {
-    const out = await exportEvents(stubPool([], { timeout: true }), { srcIp: '1.2.3.4' }, NOW);
-    assert.equal(out.ok, false);
-    assert.equal(out.reason, 'timed_out');
-    // ⛔ THE POINT: no document at all. An empty CSV here reads as "nothing
-    // matched", and the reader has no route back to "the query was killed".
-    assert.ok(!('csv' in out), 'a refusal carried a document the route could serve');
+// A pool that answers each SLICE from a handler, so a test can make one slice
+// time out, or count how the window was walked. params[0]/[1] are from/to.
+function slicingPool(handler) {
+  const seen = [];
+  return {
+    seen,
+    query: async () => { throw new Error('must not use pool.query'); },
+    connect: async () => ({
+      query: async (sql, params) => {
+        const q = String(sql).trim();
+        if (/^(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(q)) return { rows: [] };
+        const slice = { from: params[0], to: params[1], limit: params[params.length - 2] };
+        seen.push(slice);
+        const out = handler(slice, seen.length);
+        if (out === 'timeout') {
+          const e = new Error('canceling statement due to statement timeout');
+          e.code = '57014';
+          throw e;
+        }
+        return { rows: out };
+      },
+      release() {},
+    }),
+  };
+}
+
+describe('the window is walked in slices, newest first', () => {
+  // ⛔ THE MEASUREMENT THIS EXISTS FOR: one source address over
+  // log_class='vpn' on the live fleet took 0.25s for ONE HOUR and 97s for 23 —
+  // superlinear, because recent partitions are hot and older ones come off the
+  // disk the collector is writing to. A single `LIMIT 50001` statement can
+  // never stop early, so it paid the whole scan and was cancelled at 10s. The
+  // same query on /logs answers in 12ms BECAUSE it stops at 51 rows.
+  const ASK = { from: '2026-09-24T06:00:00Z', to: '2026-09-24T12:00:00Z' };
+
+  it('asks for the most recent hour first', async () => {
+    const pool = slicingPool(() => []);
+    await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
+    assert.equal(pool.seen[0].to.toISOString(), '2026-09-24T12:00:00.000Z');
+    assert.equal(pool.seen[0].from.toISOString(), '2026-09-24T11:00:00.000Z');
   });
 
-  it('refuses rather than truncating past the ceiling', async () => {
-    // searchEvents fetches limit+1; seeing that extra row means more exist.
-    const rows = Array.from({ length: EXPORT_MAX_ROWS + 1 }, () => dbRow());
-    const out = await exportEvents(stubPool(rows), {}, NOW);
-    assert.equal(out.ok, false);
-    assert.equal(out.reason, 'too_many');
-    assert.equal(out.maxRows, EXPORT_MAX_ROWS);
-    assert.ok(!('csv' in out));
-    assert.match(out.detail, /Narrow the time window/i);
-  });
-
-  it('exports right up to the ceiling', async () => {
-    const rows = Array.from({ length: 3 }, () => dbRow());
-    const out = await exportEvents(stubPool(rows), {}, NOW, { maxRows: 3 });
+  it('walks the whole window when it can, and marks nothing', async () => {
+    const pool = slicingPool(() => []);
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
     assert.equal(out.ok, true);
-    assert.equal(out.rowCount, 3);
+    assert.equal(pool.seen.length, 6, 'six one-hour slices for a six-hour window');
+    assert.equal(out.shortened, false);
+    assert.equal(out.stopReason, 'complete');
+    assert.equal(out.from.toISOString(), '2026-09-24T06:00:00.000Z');
+    assert.ok(!out.filename.includes('window-shortened'));
+  });
+
+  it('never asks beyond the requested start', async () => {
+    const pool = slicingPool(() => []);
+    await exportEvents(pool, ASK, NOW, { sliceMs: 5 * 3600000 });
+    const earliest = pool.seen[pool.seen.length - 1].from;
+    assert.equal(earliest.toISOString(), '2026-09-24T06:00:00.000Z');
   });
 });
 
-describe('the export is the result set, not the page', () => {
-  it('drops page and limit from the caller filters', async () => {
-    let sawSql = null;
-    const pool = {
-      query: async () => { throw new Error('must not use pool.query'); },
-      connect: async () => ({
-        query: async (sql, params) => {
-          const q = String(sql).trim();
-          if (/^(BEGIN|COMMIT|ROLLBACK|SET LOCAL)/i.test(q)) return { rows: [] };
-          sawSql = { sql: q, params };
-          return { rows: [dbRow()] };
-        },
-        release() {},
-      }),
-    };
-    const out = await exportEvents(pool, { srcIp: '1.2.3.4', page: '7', limit: '25' }, NOW);
+describe('when the whole window cannot be read', () => {
+  const ASK = { from: '2026-09-24T00:00:00Z', to: '2026-09-24T12:00:00Z' };
+
+  it('a later slice timing out yields a COMPLETE file for a shorter window', async () => {
+    // ⛔ NOT A REFUSAL, AND NOT A PARTIAL FILE. Two slices were read
+    // in full, so the answer "every matching event between 10:00 and 12:00" is
+    // complete — it is a complete answer to a NARROWER question, which is
+    // something an investigator can reason about. "Some of the last twelve
+    // hours" is not.
+    const pool = slicingPool((slice, n) => (n <= 2 ? [dbRow()] : 'timeout'));
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
     assert.equal(out.ok, true);
-    // OFFSET is the last parameter; honouring page=7 would make it non-zero
-    // and hand back rows from the middle of the range in a file named after
-    // all of it.
-    assert.equal(sawSql.params[sawSql.params.length - 1], 0, 'the export paged');
-    // And limit=25 must not have capped it to a screenful.
-    assert.ok(
-      sawSql.params[sawSql.params.length - 2] > 1000,
-      'the export honoured the page size instead of the export ceiling'
-    );
+    assert.equal(out.rowCount, 2);
+    assert.equal(out.stopReason, 'timed_out');
+    assert.equal(out.shortened, true);
+    assert.equal(out.from.toISOString(), '2026-09-24T10:00:00.000Z');
+    assert.equal(out.to.toISOString(), '2026-09-24T12:00:00.000Z');
+    assert.equal(out.requestedFrom.toISOString(), '2026-09-24T00:00:00.000Z');
   });
 
-  it('carries a clamped window rather than swallowing it', async () => {
-    const out = await exportEvents(
-      stubPool([dbRow()]),
-      { from: '2020-01-01T00:00', to: '2026-09-24T12:00' },
-      NOW
-    );
+  it('the covered range starts at the last slice READ, never the one that failed', async () => {
+    // Nothing inside the failed slice was seen, so claiming any of it would be
+    // claiming rows that were never read.
+    const pool = slicingPool((slice, n) => (n === 1 ? [dbRow()] : 'timeout'));
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
+    assert.equal(out.from.toISOString(), '2026-09-24T11:00:00.000Z');
+  });
+
+  it('refuses ONLY when not one slice could be read', async () => {
+    // ⛔ The single case with no window to name. Everything else is a
+    // file; this is the one shape where a CSV would be a lie.
+    const pool = slicingPool(() => 'timeout');
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'timed_out');
+    assert.ok(!('csv' in out), 'a refusal carried a document the route could serve');
+  });
+
+  it('stops at the row ceiling and says the window was shortened', async () => {
+    const pool = slicingPool(() => [dbRow(), dbRow(), dbRow()]);
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000, maxRows: 4 });
     assert.equal(out.ok, true);
-    assert.equal(out.clamped, true, 'the file names a narrower window than was asked for');
+    assert.equal(out.rowCount, 4, 'the probe row is dropped, not exported');
+    assert.equal(out.stopReason, 'row_ceiling');
+    assert.equal(out.shortened, true);
+    assert.match(out.filename, /-window-shortened\.csv$/);
+  });
+
+  it('stops when the wall-clock budget is spent', async () => {
+    let t = 0;
+    const pool = slicingPool(() => [dbRow()]);
+    // Each slice costs 20s of the 45s budget.
+    const out = await exportEvents(pool, ASK, NOW, {
+      sliceMs: 3600000,
+      budgetMs: 45000,
+      clock: () => { const v = t; t += 20000; return v; },
+    });
+    assert.equal(out.ok, true);
+    assert.equal(out.stopReason, 'budget');
+    assert.equal(out.shortened, true);
+    assert.match(out.filename, /-window-shortened\.csv$/);
+  });
+
+  it('a shortened run still produces a readable, complete CSV', async () => {
+    const pool = slicingPool((slice, n) => (n <= 1 ? [dbRow()] : 'timeout'));
+    const out = await exportEvents(pool, ASK, NOW, { sliceMs: 3600000 });
+    const parsed = lines(out.csv);
+    assert.equal(parsed.length, 2, 'header plus the one row that was read');
   });
 });
 

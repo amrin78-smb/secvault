@@ -129,7 +129,7 @@ function inline(parts) {
 
 const DOT = <span style={{ color: 'var(--text-muted)' }}> · </span>;
 
-export default function LogResults({ result, deviceNames, searchParams }) {
+export default function LogResults({ result, deviceNames, searchParams, exportError = null }) {
   if (!result) return null;
 
   if (result.error) {
@@ -213,17 +213,28 @@ export default function LogResults({ result, deviceNames, searchParams }) {
           <span>Window: {windowText}</span>
           <span>· {result.ms} ms</span>
 
-          {/* ⛔ A PLAIN <a download>, NOT next/link. This is an API route
-              returning a file: next/link would prefetch it, which on a route
-              that WRITES AN AUDIT ROW means an export recorded against an
-              operator who only hovered the button. The export is also
-              deliberately offered on an empty result — a header-only CSV is a
-              real answer ("nothing matched in this window") and refusing to
-              produce one would make the button look broken exactly when the
-              search was most conclusive. */}
+          {/* ⛔ A PLAIN <a>, NOT next/link. This is an API route returning a
+              file: next/link would prefetch it, which on a route that WRITES
+              AN AUDIT ROW means an export recorded against an operator who
+              only hovered the button.
+
+              ⛔ AND DELIBERATELY WITHOUT `download`, which was the first
+              version and hid every failure. With it the browser owns the
+              response, so a refusal arrives as JSON nobody ever sees — Edge
+              reported it as "export.json — Couldn't download. Something went
+              wrong." A carefully worded server-side reason that reaches nobody
+              is the same as no reason at all. Without it the browser
+              NAVIGATES: a success still downloads and leaves the page where it
+              was (Content-Disposition decides that, not this attribute), while
+              a refusal redirects back to /logs and renders as a banner that
+              can actually be read.
+
+              The export is also deliberately offered on an empty result — a
+              header-only CSV is a real answer ("nothing matched in this
+              window") and refusing to produce one would make the button look
+              broken exactly when the search was most conclusive. */}
           <a
             href={exportHref(searchParams)}
-            download
             style={{
               marginLeft: 'auto',
               padding: '5px 12px',
@@ -243,6 +254,29 @@ export default function LogResults({ result, deviceNames, searchParams }) {
             Export CSV
           </a>
         </div>
+
+        {exportError ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '9px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--tint-warn)',
+              color: 'var(--tint-warn-fg)',
+              fontSize: 'var(--text-sm)',
+            }}
+          >
+            {/* ⛔ THE EXPORT CAME BACK HERE RATHER THAN INTO A FILE, which is
+                the whole reason the link carries no `download` attribute: the
+                browser would have shown "Something went wrong" and swallowed
+                this sentence. */}
+            <strong>No file was produced.</strong>{' '}
+            Not even the most recent hour of this search could be read inside SecVault&apos;s
+            query limit. Raw events are indexed by device and time, not by address, application
+            or rule, so a value with few matches is found by scanning. Narrow the window, or add
+            a filter that matches more.
+          </div>
+        ) : null}
 
         {result.truncated ? (
           <div

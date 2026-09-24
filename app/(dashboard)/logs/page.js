@@ -107,7 +107,12 @@ export default async function LogsPage({ searchParams }) {
       />
       <LogSearchForm params={params} devices={devices} options={options} />
       {hasQuery ? (
-        <LogResults result={result} deviceNames={deviceNames} searchParams={params} />
+        <LogResults
+        result={result}
+        deviceNames={deviceNames}
+        searchParams={params}
+        exportError={first(sp.exportError) || null}
+      />
       ) : (
         <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)', padding: '4px 2px' }}>
           Choose a filter and search. With nothing set, the window defaults to the last hour.

@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.180.0': [
+    "Fixed CSV export failing on ordinary searches. Asking the database for the whole result set at once meant it could never stop early, so it scanned the entire time window and was cut off after ten seconds — while the same search filled the page in twelve milliseconds.",
+    "The export now reads the window an hour at a time, newest first. If the whole range cannot be read in time it gives you a complete file for a shorter range and says so in the filename, instead of failing or handing you a file with events missing.",
+    "When an export cannot be produced at all, the reason now appears on the page. Previously the browser reported only 'Couldn't download — something went wrong', with the explanation going nowhere.",
+    "The activity log now records the range an export actually covered rather than the range that was asked for.",
+  ],
   '2.179.1': [
     "Exported log files now say UTC in their name. The search form takes local time but the file and every timestamp in it are UTC, so on this server a search for 08:00 produced a file named 0100 — correct, and indistinguishable from a bug.",
     "Verified against the live server: a seven-day fleet-wide export is refused rather than cut short, and a search that runs out of time produces an error instead of an empty spreadsheet.",

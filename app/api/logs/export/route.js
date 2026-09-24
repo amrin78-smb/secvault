@@ -64,14 +64,26 @@ export async function GET(request) {
     const out = await exportEvents(pool, filters, undefined, { deviceNames });
 
     if (!out.ok) {
-      // ⛔ A REFUSAL IS JSON WITH A REASON, NEVER A CSV. Both refusals mean
-      // "this file would have misrepresented the search", so serving any file
-      // at all would be the thing being refused.
-      const status = out.reason === 'too_many' ? 413 : 504;
-      return Response.json(
-        { error: out.detail, reason: out.reason, maxRows: out.maxRows ?? null },
-        { status }
-      );
+      // ⛔ A REFUSAL GOES BACK TO THE PAGE, NOT INTO THE DOWNLOAD MANAGER.
+      // The first version answered with JSON, which is right for an API and
+      // useless behind a link: the browser owned the response and showed
+      // "export.json — Couldn't download. Something went wrong", with the
+      // carefully worded reason visible to nobody. A refusal the operator
+      // cannot read is indistinguishable from a broken button.
+      //
+      // ⛔ 303, NOT 302: the redirect must be followed as a GET whatever the
+      // original method was, and 303 is the status that says so.
+      //
+      // An API caller asking for JSON still gets JSON — content negotiation,
+      // so /api/logs/export stays usable as an API while the UI gets a page.
+      const accept = request.headers.get('accept') || '';
+      if (accept.includes('application/json')) {
+        return Response.json({ error: out.detail, reason: out.reason }, { status: 504 });
+      }
+      const back = new URL('/logs', request.nextUrl.origin);
+      for (const [k, v] of sp.entries()) back.searchParams.set(k, v);
+      back.searchParams.set('exportError', out.reason);
+      return Response.redirect(back, 303);
     }
 
     await logActivity(pool, {
@@ -84,6 +96,12 @@ export async function GET(request) {
       detail:
         `${out.rowCount} event(s), ${out.from.toISOString()} to ${out.to.toISOString()}`
         + `, filters: ${JSON.stringify(out.applied)}`
+        // The audit records what the file ACTUALLY contains. A row claiming the
+        // full requested range for a file covering six hours of it would make
+        // the trail wrong in exactly the way the trail exists to prevent.
+        + (out.shortened
+          ? ` (window SHORTENED from ${out.requestedFrom.toISOString()}; stopped: ${out.stopReason})`
+          : '')
         + (out.clamped ? ' (window clamped to the maximum searchable span)' : ''),
     });
 
@@ -94,8 +112,12 @@ export async function GET(request) {
         'Content-Disposition': `attachment; filename="${out.filename}"`,
         // Nothing may cache an evidence file on the way to the operator.
         'Cache-Control': 'no-store',
-        // Read by the UI so a clamped window can be stated after the download.
+        // Stated on the response as well as in the filename, for any caller
+        // driving this as an API rather than clicking it.
         'X-SecVault-Rows': String(out.rowCount),
+        'X-SecVault-Covered-From': out.from.toISOString(),
+        'X-SecVault-Covered-To': out.to.toISOString(),
+        'X-SecVault-Window-Shortened': out.shortened ? 'true' : 'false',
       },
     });
   } catch (err) {

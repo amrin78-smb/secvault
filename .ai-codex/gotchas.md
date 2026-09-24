@@ -425,6 +425,43 @@ Fixed to `/^\s*[=+\-@]/`, keeping the whitespace: the apostrophe is what neutral
 deleting leading characters from an attacker-controlled log line would tidy the evidence rather
 than protect the reader.
 
+## ⛔ A ROW CEILING MADE THE QUERY SLOW, NOT SAFE (2026-09-24)
+
+The CSV export ran the same query `/logs` runs, with `LIMIT 50001` instead of `LIMIT 51`. The page
+answers in **12ms**; the export was cancelled at the 10s statement timeout. Same filters, same
+window.
+
+`ORDER BY received_at DESC LIMIT n` **only exits early if enough rows MATCH.** A result set smaller
+than the ceiling therefore forces a full scan of the window — so the bound that existed to keep the
+work small was the thing that made it large, for every query the operator was most likely to run.
+
+Measured on one source address with `log_class='vpn'`:
+
+| window | rows | time |
+|---|---|---|
+| 1 hour | 123 | **0.25s** |
+| 23 hours | 2,254 | **97s** |
+
+Superlinear: recent partitions are hot in the buffer cache, older ones come off the disk the
+collector is writing to. ⛔ **Raising the timeout was not the fix** — the scan needs ~100s, and
+`syslog_events` has no `src_ip` index by deliberate design. The window is now walked in one-hour
+slices, newest first, each its own bounded statement.
+
+⛔ **A bound is not automatically a protection. Ask what it makes the planner do.**
+
+## ⛔ `<a download>` SWALLOWS EVERY SERVER-SIDE REFUSAL (2026-09-24)
+
+The export answered a refusal with JSON and a 4xx/5xx, carrying a carefully worded reason and the
+remedy. With the `download` attribute the browser owns the response and never renders it: Edge
+showed **"export.json — Couldn't download. Something went wrong."** and nothing else. The operator
+cannot tell a refusal from a broken button, and the reason reaches nobody.
+
+⛔ **A message the user cannot see is the same as no message.** Drop the attribute and let the
+browser NAVIGATE: a success still downloads and leaves the page in place (`Content-Disposition`
+decides that, not the attribute), while a refusal answers **303** back to the page and renders as a
+banner. Content negotiation keeps the JSON answer for an `Accept: application/json` caller, so the
+route stays usable as an API.
+
 ## Schema
 - `CREATE TABLE IF NOT EXISTS` is a no-op on a table that already exists — adding a column to an
   EXISTING table needs a companion `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` too, or already-deployed

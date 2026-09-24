@@ -1035,33 +1035,50 @@ a Thai or accented username opens as mojibake — a corrupted identifier on an e
 BOM also confuses strict parsers, so each caller chooses: the change-request CSV (also diffed by
 hand) goes without; the log export takes it.
 
-## lib/syslog/logExport.js (added 2026-09-24, v2.179.0)
+## lib/syslog/logExport.js (added 2026-09-24, v2.179.0; rewritten v2.180.0)
 
-The CSV a log search leaves the product as. `exportEvents(pool, filters, now, {deviceNames})` is
-`searchEvents` with a bigger ceiling — the query, the bounds and the timeout handling are NOT
-reimplemented. Every column the search returns is exported, `message` last.
+The CSV a log search leaves the product as. `exportEvents(pool, filters, now, opts)` walks the
+requested window in SLICES, newest first, each slice a separate `searchEvents` call. Every column
+the search returns is exported, `message` last.
 
-⛔ **THE FILE OUTLIVES THE SCREEN, AND THAT CHANGES EVERY TRADE-OFF.** `/logs` can show a
-partial answer because a banner above it says so; a CSV is mailed, attached to a ticket, opened in
-six weeks by someone who never saw the search. So every state the page renders as a CAVEAT, this
-refuses: beyond `EXPORT_MAX_ROWS` (50,000) -> `{ok:false, reason:"too_many"}` (HTTP 413), and a
-timed-out query -> `{ok:false, reason:"timed_out"}` (HTTP 504). ⛔ **Neither carries a `csv`
-key at all**, so the route cannot serve one by accident — an empty-but-valid CSV is byte-identical
-to "nothing matched" and the reader has no way back to the difference.
+⛔ **THE COST IS THE WINDOW, NOT THE ROW COUNT.** Measured live, one source address with
+`log_class='vpn'`: **1 hour -> 123 rows in 0.25s; 23 hours -> 2,254 rows in 97s.** Superlinear,
+because recent partitions are hot in the buffer cache and older ones come off the disk the
+collector is writing to at ~1,000 rows/sec. `syslog_events` has no `src_ip` index and deliberately
+never will.
+
+⛔ **THE FIRST VERSION ASKED FOR `LIMIT 50001` IN ONE STATEMENT AND SO COULD NEVER STOP EARLY.**
+`/logs` answers that same query in **12ms** precisely BECAUSE it stops at 51 rows; asking for fifty
+thousand destroys that property. Every export of a result set smaller than the ceiling therefore
+paid for a full-window scan and was cancelled at the 10s statement timeout — **the ceiling meant to
+bound the work was what caused it.** Raising the timeout would not have helped: the scan needs ~100s.
+
+⛔ **THE FILE IS NEVER PARTIAL WITHIN THE WINDOW IT NAMES.** When the whole range cannot be read,
+the export returns a COMPLETE answer to a NARROWER question rather than an incomplete answer to the
+one asked. Stops on whichever arrives first: the row ceiling (`EXPORT_MAX_ROWS`), the wall-clock
+budget (`BUDGET_MS` 45s), or the start of the window. `shortened`/`stopReason`/`requestedFrom` are
+returned, the filename carries `-window-shortened`, and the `activity_log` row records the range
+ACTUALLY covered — a trail claiming the full request for a six-hour file would be wrong in exactly
+the way the trail exists to prevent.
+
+⛔ **A TIMED-OUT SLICE ENDS THE RUN AT ITS OWN END, NOT ITS START.** Nothing inside it was read,
+so claiming any of that hour would be claiming rows never seen.
+
+⛔ **THE ONLY REFUSAL LEFT IS "NOT ONE SLICE COULD BE READ"** — the single shape with no window
+to name. It carries no `csv` key at all, so the route cannot serve one by accident.
 
 ⛔ **`page` and `limit` are stripped, in two places** (the route's param list and `exportEvents`
-itself). The export is the whole result set for the window; honouring the operator's current page
-would hand them fifty rows from the middle of the range in a file named after all of it.
+itself). The export is the whole result set for the window, not the page on screen.
 
-⛔ **No metadata rows above the header**, however much a forensic file wants provenance: a
-leading `# query: ...` line is not CSV, and every importer would read it as the header. The window
-travels in the FILENAME — the one filter a reader cannot reconstruct from the rows — and the full
-query in `activity_log`.
+⛔ **No metadata rows above the header**: a leading `# query: ...` line is not CSV and every
+importer would read it as the header. The window travels in the FILENAME and the full query in
+`activity_log`.
 
-⛔ **Timestamps are ISO-8601 UTC with the `Z`**, never the operator's display format: a sheet
-opened in another office must not read them as a different instant. `event_time_zone_assumed` is
-its own column, because `tz_assumed` means the collector's zone was assumed and a reader who
-cannot see that treats an assumed time as a measured one.
+⛔ **Timestamps are ISO-8601 UTC with the `Z`**, and the FILENAME says `Z` too — the search form
+takes a zone-less local time, so on the +07:00 reference deployment a search for 08:00 produces a
+file named 0100, correct and indistinguishable from a bug unless marked.
+`event_time_zone_assumed` is its own column, because a reader who cannot see that an event time was
+assumed treats it as measured.
 
 ## lib/syslog/logSearch.js
 
