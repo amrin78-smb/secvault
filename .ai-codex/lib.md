@@ -1014,6 +1014,32 @@ results covering 24 hours above two empty window boxes, one re-submit from silen
 default hour. Local because a zone-less string re-parses as local, so it round-trips; UTC digits
 would shift the window by the server's offset on the way back in.
 
+## lib/downloadState.js (added 2026-09-24, v2.181.0)
+
+Pure, zero-dependency. The judgement half of `components/ui/DownloadButton.js`: `STATES`,
+`nextState`, `shouldIntercept`, `filenameFromDisposition`, `describeFailure`, `coverageNote`,
+`DONE_LINGER_MS`. 74 tests, 12 mutations verified.
+
+⛔ **`shouldIntercept` refuses anything but a plain left click.** Ctrl/cmd/middle/shift-click mean
+"open in a new tab"; hijacking them breaks muscle memory AND loses the download.
+
+⛔ **`nextState` ignores a terminal event outside `preparing`.** A late response from a superseded
+request must not revive a finished control.
+
+⛔ **`filenameFromDisposition` SANITISES.** Path separators, `..`, control characters, quotes,
+and (for Windows) `:` are stripped, so a `Content-Disposition` cannot steer the browser's save path
+or name an NTFS alternate data stream. An empty result falls back rather than yielding `""`.
+
+⛔ **`describeFailure` can never return an empty string**, and an ABSENT or `0` status gets its
+own sentence rather than "HTTP 0" — `Number(null)` is 0 and 0 is finite, the same trap CLAUDE.md
+records against `maxDevices`. This function exists because the browser used to swallow the reason
+entirely and the operator saw only "Something went wrong".
+
+⛔ **`coverageNote` matches `true` CASE-INSENSITIVELY, and the asymmetry is the argument.** Only
+the word `true` can match in any case, so relaxing it cannot manufacture a false warning — while an
+exact match would MISS a real one the day a producer or proxy changes case, and a missed warning
+means an operator reads a six-hour file as a twenty-four-hour one.
+
 ## lib/csv.js (added 2026-09-24, v2.179.0)
 
 `csvEscape` / `csvRow` / `csvDocument`. Pure. Extracted from

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import DownloadButton from '../ui/DownloadButton';
 
 // Shortcuts to things an operator actually does from the dashboard.
 //
@@ -37,12 +38,27 @@ export default function QuickActions() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {ACTIONS.map((a) =>
             a.external ? (
-              // A file download, not an app route — a plain <a> so Next's
-              // client router doesn't try to treat the PDF as a page.
-              <a key={a.href} href={a.href} style={ITEM_STYLE}>
-                <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{a.label}</span>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{a.hint}</span>
-              </a>
+              // A file download, not an app route — never next/link, which would
+              // try to treat the PDF as a page.
+              //
+              // ⛔ CONVERTED TOGETHER WITH ITS TWIN ON /compliance, on purpose.
+              // Both point at the same pdfkit route; leaving one as a bare link
+              // would mean the same action gives feedback in one place and
+              // nothing in the other, which reads as one of them being broken.
+              <DownloadButton
+                key={a.href}
+                href={a.href}
+                className=""
+                wrapperStyle={{ display: 'flex', width: '100%' }}
+                style={{ ...ITEM_STYLE, flex: 1, alignItems: 'flex-start' }}
+                fallbackName="secvault-compliance-report.pdf"
+                preparingLabel="Building…"
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{a.label}</span>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{a.hint}</span>
+                </span>
+              </DownloadButton>
             ) : (
               <Link key={a.href} href={a.href} style={ITEM_STYLE}>
                 <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{a.label}</span>

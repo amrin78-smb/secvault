@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Card, { CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
 import Badge from '../ui/Badge';
+import DownloadButton from '../ui/DownloadButton';
 import {
   IconActivity,
   IconTrendingUp,
@@ -113,7 +114,6 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
   // the catalogue — a hook per parameter would mean the hook count changes
   // with the selected report, which React forbids outright.
   const [paramValues, setParamValues] = useState({});
-  const [busy, setBusy] = useState(false);
 
   const report = reports.find((r) => r.id === selectedId) || reports[0] || null;
   if (!report) return null;
@@ -169,17 +169,14 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
     // document. Parameter keys are also not unique across reports, so a
     // carried-over value could land on an unrelated parameter entirely.
     setParamValues({});
-    setBusy(false);
   }
 
-  function onDownload() {
-    // ⛔ A TIMER, NOT A COMPLETION SIGNAL. A plain <a download> gives the page
-    // no event when the bytes arrive, so this can only report that the request
-    // was made. It clears so the control becomes usable again; it is never
-    // presented as proof the file exists.
-    setBusy(true);
-    setTimeout(() => setBusy(false), 4000);
-  }
+  // ⛔ THE 4-SECOND TIMER THAT USED TO LIVE HERE IS GONE. Its own comment
+  // admitted it "can only report that the request was made" and was "never
+  // presented as proof the file exists" — so on a slow PDF it said Building…
+  // for four seconds and then went quiet while generation was still running,
+  // which reads as finished. components/ui/DownloadButton.js resolves when the
+  // bytes are actually in hand, which is a measurement rather than a guess.
 
   return (
     <div className="rpt-workspace">
@@ -496,9 +493,14 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                       Download PDF
                     </span>
                   ) : (
-                    <a href={href} className="btn btn-primary" onClick={onDownload}>
-                      {busy ? 'Building…' : 'Download PDF'}
-                    </a>
+                    <DownloadButton
+                      href={href}
+                      className="btn btn-primary"
+                      fallbackName="secvault-report.pdf"
+                      preparingLabel="Building…"
+                    >
+                      Download PDF
+                    </DownloadButton>
                   )}
 
                   <span
@@ -508,9 +510,7 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                       paddingBottom: 6,
                     }}
                   >
-                    {busy
-                      ? 'Your browser will save the file when it is ready.'
-                      : 'Generated fresh each time, from the data as it stands now.'}
+                    {'Generated fresh each time, from the data as it stands now.'}
                   </span>
 
                   {/* ⛔ AN EMPTY LIST AND AN UNREADABLE ONE ARE DIFFERENT

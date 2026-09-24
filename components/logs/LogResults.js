@@ -3,6 +3,7 @@ import Card, { CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
+import DownloadButton from '../ui/DownloadButton';
 import { classifyAction } from '../../lib/syslog/actions';
 
 // Results for a raw log search. Server component — the rows arrive already
@@ -233,26 +234,24 @@ export default function LogResults({ result, deviceNames, searchParams, exportEr
               header-only CSV is a real answer ("nothing matched in this
               window") and refusing to produce one would make the button look
               broken exactly when the search was most conclusive. */}
-          <a
+          <DownloadButton
             href={exportHref(searchParams)}
+            className="btn btn-secondary"
             style={{
               marginLeft: 'auto',
-              padding: '5px 12px',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 600,
               color: 'var(--primary)',
-              textDecoration: 'none',
-              border: '1px solid var(--primary)',
-              borderRadius: 'var(--radius-sm)',
+              borderColor: 'var(--primary)',
+              fontWeight: 600,
             }}
+            fallbackName="secvault-logs.csv"
             title={
-              'Download every event matching this search as CSV — not just this page, and '
-              + 'over the same window. Above 50,000 matches the export is refused rather than '
-              + 'quietly cut short; narrow the window and try again.'
+              'Download every event matching this search as CSV — not just this page. The file '
+              + 'is complete for the window named in its filename; if the whole range could not '
+              + 'be read in time, that name is shorter than the search and says so.'
             }
           >
             Export CSV
-          </a>
+          </DownloadButton>
         </div>
 
         {exportError ? (

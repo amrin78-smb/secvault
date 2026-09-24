@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.181.0': [
+    "Exports and reports now show 'Preparing…' while the server builds the file, and say so when it arrives. Previously you clicked and nothing happened on screen — sometimes for the better part of a minute.",
+    "If an export cannot be produced, the reason now appears next to the button and stays there until you try again, instead of vanishing into the browser's download list.",
+    "The report download no longer says 'Building…' for a fixed four seconds regardless of what the server is doing. It now waits for the file itself.",
+    "A download that comes back as a web page rather than a file is refused instead of being saved. A corrupt file that downloads successfully is worse than an error, because you would trust it.",
+    "Applied to log search, the report workspace, and both places the fleet compliance PDF can be started from.",
+  ],
   '2.180.0': [
     "Fixed CSV export failing on ordinary searches. Asking the database for the whole result set at once meant it could never stop early, so it scanned the entire time window and was cut off after ten seconds — while the same search filled the page in twelve milliseconds.",
     "The export now reads the window an hour at a time, newest first. If the whole range cannot be read in time it gives you a complete file for a shorter range and says so in the filename, instead of failing or handing you a file with events missing.",

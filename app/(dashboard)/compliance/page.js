@@ -21,6 +21,7 @@ import ZoneClassificationBanner from '../../../components/compliance/ZoneClassif
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
 import { vendorLabel } from '../../../components/devices/vendorMeta';
 import { isValidUuid } from '../../../lib/apiUtils';
+import DownloadButton from '../../../components/ui/DownloadButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -560,12 +561,21 @@ export default async function CompliancePage({ searchParams }) {
           subtitle="Compare PCI DSS, ISO 27001, CIS v8, NIST, and SANS scores across every active device. Switch to Cards to see one firewall's full donut breakdown."
           actions={
             <span style={{ display: 'flex', gap: 8 }}>
-              <a href="/api/compliance/fleet?format=csv" className="btn btn-secondary">
+              <DownloadButton
+                href="/api/compliance/fleet?format=csv"
+                fallbackName="secvault-compliance-fleet.csv"
+                title="Every finding on every active firewall. This scan is unbounded, so it can take a while on a large fleet."
+              >
                 Export CSV
-              </a>
-              <a href="/api/compliance/report/pdf" className="btn btn-secondary">
+              </DownloadButton>
+              <DownloadButton
+                href="/api/compliance/report/pdf"
+                fallbackName="secvault-compliance-report.pdf"
+                preparingLabel="Building…"
+                title="The fleet compliance PDF, rendered fresh from the data as it stands now."
+              >
                 Download PDF Report
-              </a>
+              </DownloadButton>
             </span>
           }
         />
