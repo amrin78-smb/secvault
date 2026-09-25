@@ -15,7 +15,7 @@
 
 'use strict';
 
-const { test, describe } = require('node:test');
+const { test, describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
@@ -531,5 +531,79 @@ describe('snapshotLogEnabled', () => {
     // claim. Not knowing is not a claim, and must stay distinguishable.
     assert.equal(snapshotLogEnabled({}, new Map(), 'R1'), undefined);
     assert.equal(snapshotLogEnabled({ logEnabled: null }, new Map(), 'R1'), undefined);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// A3 — the grade travels with the sentence (2026-09-25)
+//
+// This document is handed to whoever EDITS THE FIREWALL. A caveat that lives
+// in a field they never see is not a caveat.
+
+describe('⛔ A3 — insufficient history is OURS, no-coverage is the DEVICE’S', () => {
+  const { logEvidenceDisplay, byNameCaveat } = require('../lib/engines/ruleChangeRequestReport');
+
+  it('the two produce different sentences, and neither reads as "no traffic"', () => {
+    const ours = logEvidenceDisplay({ logEvidence: 'insufficient-history' }, 30);
+    const theirs = logEvidenceDisplay({ logEvidence: 'no-coverage' }, 30);
+    assert.notEqual(ours.text, theirs.text);
+    assert.equal(ours.state, 'not_measured');
+    assert.equal(theirs.state, 'not_measured');
+    for (const r of [ours, theirs]) {
+      assert.match(r.text, /^Not measured/, 'must never read as an observation');
+    }
+  });
+
+  it('⛔ the insufficient-history sentence blames SecVault, not the firewall', () => {
+    const r = logEvidenceDisplay({ logEvidence: 'insufficient-history' }, 30);
+    assert.match(r.text, /SecVault/);
+    assert.match(r.text, /our own history|not a fault on the firewall/i,
+      'the whole point is that this is not the device’s failing');
+  });
+
+  it('no-rule-identity says the LOGS name no rule, not that the rule is idle', () => {
+    const r = logEvidenceDisplay({ logEvidence: 'no-rule-identity' }, 30);
+    assert.equal(r.state, 'not_measured');
+    assert.match(r.text, /do not name a rule/i);
+    assert.match(r.text, /means nothing/i);
+  });
+
+  it('an unknown code still falls to not_measured, never to a measurement', () => {
+    for (const code of [undefined, null, '', 'something-new']) {
+      const r = logEvidenceDisplay({ logEvidence: code }, 30);
+      assert.equal(r.state, 'not_measured', `${code} must fail closed`);
+    }
+  });
+});
+
+describe('⛔ A3 — a NAME-matched answer carries its caveat into the document', () => {
+  const { logEvidenceDisplay, byNameCaveat } = require('../lib/engines/ruleChangeRequestReport');
+
+  it('log-name grade adds the rename caveat to a HITS sentence', () => {
+    const r = logEvidenceDisplay(
+      { logEvidence: 'hits', loggedHits: 12, usageGrade: 'log-name' }, 30);
+    assert.match(r.text, /rule NAME/);
+    assert.match(r.text, /not sufficient evidence to remove the rule/i);
+  });
+
+  it('⛔ and to a MEASURED-ZERO sentence, which is the dangerous one', () => {
+    // A zero is what proposes a deletion. If the caveat only appeared on the
+    // "in use" sentence it would be decorating the safe case and absent from
+    // the one that removes a rule from a firewall.
+    const r = logEvidenceDisplay(
+      { logEvidence: 'measured-zero', logCoverageRatio: 0.98, usageGrade: 'log-name' }, 30);
+    assert.match(r.text, /rule NAME/);
+    assert.match(r.text, /name being unchanged/i);
+    assert.match(r.text, /not sufficient evidence to remove the rule/i);
+  });
+
+  it('is SILENT on every other grade, so it stays meaningful where it appears', () => {
+    for (const grade of ['device', 'log-id', null, undefined]) {
+      assert.equal(byNameCaveat({ usageGrade: grade }), '');
+      const r = logEvidenceDisplay(
+        { logEvidence: 'measured-zero', usageGrade: grade }, 30);
+      assert.ok(!/rule NAME/.test(r.text), `${grade} must carry no caveat`);
+    }
+    assert.equal(byNameCaveat(null), '');
   });
 });
