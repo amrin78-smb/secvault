@@ -19,8 +19,13 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 - `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
 - `.ai-codex/application-view-plan.md` — PROPOSAL ONLY (not built): the application-centric view
-- `.ai-codex/central-cve-feed-proposal.md` — PROPOSAL ONLY (not built): moving CVE collection
-  into the central nocvault-eol service and syncing a signed feed
+- `.ai-codex/central-cve-feed-proposal.md` — ⛔ **BUILT in v2.137.0-v2.139.0**, this line said
+  "PROPOSAL ONLY (not built)" for thirty-odd versions after it shipped. Kept as the design record
+  for `lib/feeds/cveHub.js`; read the "Central CVE feed" section of this file for what actually runs
+- `.ai-codex/analytics-proposal.md` — PROPOSAL ONLY (not built, one item is a pointer to existing
+  roadmap work): analytics with no LLM and no local AI — upgrade planner, blind-spot register,
+  log-derived rule usage, object/rule consolidation, fleet conformance. Carries a tracking table,
+  measured 2026-09-25, and the SQL to re-measure
 
 ### Maintaining the index — MANDATORY
 

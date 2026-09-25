@@ -79,6 +79,30 @@ Found by the 2026-09-21 sweep, triaged as not worth a release of their own. All 
 | 19 | `backfillPaloAltoVersionRanges` still reports `cleaned up 302` every deploy, rewriting 351 advisory rows to identical values. Gated but flagged; first place to look if advisory matching regresses. | [ ] |
 | 20 | Stale `E:\SecVault_Backups` (~4.7 GB) left beside the current backup set. | [ ] |
 
+### New analytics, measured 2026-09-25 — tracked in `analytics-proposal.md`
+
+Nine analytics buildable with **no LLM and no local AI**, each grounded in a live measurement.
+⛔ **The tracking table lives in `analytics-proposal.md`, not here** — one Done column, not two, or
+they drift. Three items were nearly written as new proposals and are NOT: seasonal baselines are
+Tier 1 #2 below, bandwidth forecasting is Tier 2, and a general flow rollup was already refused.
+
+The headline, because it reorders the usual instinct: **the analytics are bounded by EVIDENCE
+COVERAGE, not by algorithms.** So decisions-from-existing-findings come first, coverage second,
+detection third.
+
+| # | Item | Measured justification | Done |
+|---|---|---|:--:|
+| A1 | **Upgrade planner** | 246 assessments → ~16 decisions. Every Palo Alto carries **17 advisories across 7 target versions**, so one upgrade clears all 17. ⛔ **30 of 246 have no fix version — including ALL THREE `patch_now`** (CVE-2026-24858, CVSS 9.4, KEV, on three Fortinets): the fleet's only urgent CVEs are un-actionable and nothing says so | [ ] |
+| A2 | **Blind-spot register** | **PAKFood is fully collected and sends ZERO syslog**; all five Fortinets are 100% unmeasured `hit_count` while being the highest-logging devices on the fleet; TUG is 54/54 unmeasured. All three render beside fully-evidenced devices with nothing distinguishing them | [ ] |
+| A3 | **Log-derived rule usage** | ~84 of 235 unmeasured rules gain evidence (54 Fortinet by rule-id, 30 Palo Alto by name). ⛔ Never written into `hit_count`; name-matching is a weaker grade and may not authorise a deletion | [ ] |
+| A4 | **Object & rule consolidation** | 3,298 of 10,092 objects (33%) referenced by nothing; 771 duplicates; up to 405 rule rows removable. ⛔ Needs **no hit counts**, so it is the one cleanup analytic that is conclusive on Fortinet | [ ] |
+| A5 | **Fleet conformance / odd-one-out** | 11 Palo Altos, 5 Fortinets. The only one that DISCOVERS checks the 45-check library lacks. ⛔ Majority ≠ correctness — reports "1 of 11 differs", never "misconfigured" | [ ] |
+| A7-A9 | change→outcome correlation, remediation survival, VPN behavioural profiles | Tier 3. ⛔ A8's honest output today is an indictment: **0 version changes across 16 devices in 70 days** | [ ] |
+
+⛔ **`eol_catalogue` IS NOT IN THIS DATABASE.** The nocvault-eol hub holds 2,770 rows; here the
+table is absent entirely. Probably the largest missing DATASET available to this product — it would
+need a signed feed mirroring `cveHub.js`. Not proposed yet, recorded so it is not forgotten.
+
 ### ⛔ Deliberately NOT doing — do not re-propose without new evidence
 
 - **More vendors, more reports, more CVE feeds.** Eleven reports, six vendors, eight advisory
@@ -100,8 +124,8 @@ moved the monthly compliance PDF). Re-measure before committing to 4-9.
 |---|---|
 | Syslog ingestion, spool, archive, partitioned raw store | ~74M events/day, 30-day raw window |
 | Ten traffic/security rollups + a separate fast threat rollup | 219k talker, 146k blocked-dst, 114k app rows |
-| **Rule-hit correlation from logs (Phase 8b)** | 8,803 rule-hit rows, all 15 devices |
-| **Tri-state `hit_count`** | 164 unmeasured / 466 measured-zero / 1,086 with hits |
+| **Rule-hit correlation from logs (Phase 8b)** | 139,926 rows, all 15 devices (2026-09-25; was 8,803 on 2026-09-09). ⛔ **BY RULE ID IT IS FORTINET ONLY** — Palo Alto logs carry **0 distinct rule ids across 78,733 rows**, names only. This row read as fleet-wide coverage and is not; see `analytics-proposal.md` A3 |
+| **Tri-state `hit_count`** | 235 unmeasured / 446 measured-zero / 1,101 with hits (2026-09-25). ⛔ **181 of the 235 are Fortinet — all five are 100% unmeasured**, and TUG is the only Palo Alto like it (54/54) |
 | Rule analysis, 10 finding types | 185 `unused`, 252 `overly_permissive`, 153 `shadow` |
 | **Rule cleanup loop, request → export → verified against the ruleset** | v2.93.0 |
 | CVE pipeline + KEV + priority tree | 159 live assessments |
@@ -183,6 +207,14 @@ credential spraying found on 2026-09-08 would have fired this), collector ingest
 
 ⛔ Thresholds must be explicit and per-rule, never a magic "anomaly score" — see CLAUDE.md's
 rejection of a composite `log_hit` definition for the same reason.
+
+⛔ **IT CANNOT ARM YET, MEASURED 2026-09-25.** `syslog_rollup_hourly` spans **2.4 weeks / 405
+distinct hours**, and a 168-bucket hour-of-week model needs ≥3 weeks to hold more than ~2
+observations per bucket. Build it GATED, reporting `insufficient_baseline` with the baseline it
+needed beside the one that exists — the pattern the six VPN detections already use, hatched and
+hueless, never a green all-clear. It then arms itself with no code change. ⛔ And use **median +
+MAD, not mean + σ**: firewall traffic is heavy-tailed, one spike poisons a mean, and the detector
+under-reports for a week afterwards. The baseline is an input to a NAMED threshold, not a score.
 
 ### 3. Report library and scheduling
 **Why.** FWA's real stickiness is not any single report; it is that a manager receives one every
