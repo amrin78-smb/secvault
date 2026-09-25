@@ -170,15 +170,27 @@ describe('shared csvEscape neutralises spreadsheet formulas', () => {
 // tolerated rather than silently suppressed. Each one is the same hazard as the
 // fleet route's was; all of them are reachable by an authenticated operator,
 // and all of their cells originate in firewall configuration.
-const KNOWN_UNMIGRATED = {
+// ⛔ THE MIGRATION IS COMPLETE, AND THIS LIST IS NOW A PIN RATHER THAN A
+// TOLERANCE. All eight routes that hand-rolled the defective escape now use
+// lib/csv.js, so `KNOWN_UNMIGRATED` is gone: there is nothing left to tolerate,
+// and a list that has emptied itself must be REPLACED, not left to loop over
+// nothing. A vacuous forEach is this repo's own "a scan over nothing passes"
+// trap, and it would have gone green over all eight reverting at once.
+//
+// Each entry is asserted to CARRY NO LOCAL ESCAPE and to IMPORT THE SHARED ONE,
+// so a revert in any single file fails by name instead of sliding back under a
+// threshold that no longer exists.
+const MIGRATED = {
+  'app/api/compliance/fleet/route.js':
+    'device and vendor names, per-standard scores (v2.185.0)',
   'app/api/compliance/[deviceId]/route.js':
     'check names, detail, remediation guidance, matched rule names',
   'app/api/devices/[id]/analysis/route.js': 'rule names, finding detail, remediation',
   'app/api/devices/[id]/reorder-recommendation/route.js': 'rule names, vendor rule ids',
   'app/api/devices/[id]/rules/route.js':
-    'the whole ruleset — names, comments, zones, addresses, services',
-  'app/api/devices/[id]/snmp/route.js': 'numeric samples only, but the same escape',
-  'app/api/devices/[id]/vpn/route.js': 'numeric samples only, but the same escape',
+    'the whole ruleset -- names, operator-typed comments, zones, addresses, services',
+  'app/api/devices/[id]/snmp/route.js': 'numeric samples only TODAY, same defective escape',
+  'app/api/devices/[id]/vpn/route.js': 'numeric samples only TODAY, same defective escape',
   'app/api/vpn/fleet/route.js': 'device names and vendors',
 };
 
@@ -192,8 +204,14 @@ function walk(dir, out = []) {
   return out;
 }
 
-describe('no NEW hand-rolled CSV escape', () => {
-  it('every local csvEscape is one of the known, named ones', () => {
+describe('⛔ no hand-rolled CSV escape survives anywhere', () => {
+  it('lib/csv.js is the ONLY definition in the repo', () => {
+    // No tolerance list any more. Eight routes carried an identical copy that
+    // quoted conditionally on a comma/quote/newline test and neutralised nothing -- which
+    // meant the most dangerous payload of all, `=cmd|'/c calc'!A1`, contained
+    // no comma, no quote and no newline, so it was written out RAW AND
+    // UNQUOTED. A new export written by copying its neighbour is exactly how
+    // that spread.
     const found = [];
     for (const root of ['app', 'lib', 'services', 'components', 'scripts']) {
       const dir = path.join(REPO, root);
@@ -202,33 +220,55 @@ describe('no NEW hand-rolled CSV escape', () => {
         const rel = path.relative(REPO, full).split(path.sep).join('/');
         if (rel === 'lib/csv.js') continue; // the shared implementation itself
         const src = fs.readFileSync(full, 'utf8');
-        // A DEFINITION, not a call — `const { csvEscape } = require('../csv')`
+        // A DEFINITION, not a call -- `const { csvEscape } = require('../csv')`
         // is the correct thing and must not be flagged.
-        if (/function\s+csvEscape\s*\(/.test(src) || /(?:const|let|var)\s+csvEscape\s*=\s*(?:\(|function|async)/.test(src)) {
+        if (/function\s+csvEscape\s*\(/.test(src)
+          || /(?:const|let|var)\s+csvEscape\s*=\s*(?:\(|function|async)/.test(src)) {
           found.push(rel);
         }
       }
     }
-    const unexpected = found.filter((f) => !(f in KNOWN_UNMIGRATED));
     assert.deepEqual(
-      unexpected,
+      found,
       [],
-      `New hand-rolled CSV escape(s): ${unexpected.join(', ')}. ` +
-        'Use lib/csv.js — it always quotes and neutralises a leading =, +, - or @.'
+      `Hand-rolled CSV escape(s): ${found.join(', ')}. Use lib/csv.js -- it always quotes `
+        + 'and neutralises a leading =, +, - or @.'
     );
-    // ⛔ The fleet route is asserted OUT of the known list, so a revert cannot
-    // land quietly under the ratchet's tolerance.
-    assert.ok(!found.includes(FLEET_ROUTE), `${FLEET_ROUTE} has regressed to a local escape`);
   });
 
-  it('the known list names no file that has already been migrated', () => {
-    // A stale exemption reads as outstanding work that is already done, and
-    // the next reader trusts the list instead of the code.
-    for (const rel of Object.keys(KNOWN_UNMIGRATED)) {
+  it('the scan actually looked at something', () => {
+    // ⛔ THE ASSERTION ABOVE IS NEGATIVE, so a broken walk() or a wrong root
+    // list passes it silently for ever. The list it replaced had the same
+    // shape and emptied itself the moment the work was done.
+    let files = 0;
+    for (const root of ['app', 'lib', 'services', 'components', 'scripts']) {
+      const dir = path.join(REPO, root);
+      if (fs.existsSync(dir)) files += walk(dir).length;
+    }
+    assert.ok(files > 400, `only ${files} files scanned -- the walk is wrong`);
+  });
+
+  it('⛔ every migrated route still uses the shared escape', () => {
+    // Pinned BY NAME. A revert in any one of the eight fails here, saying
+    // which -- rather than quietly reoccupying a tolerance that is gone.
+    assert.ok(Object.keys(MIGRATED).length === 8, 'the pin list lost an entry');
+    for (const [rel, why] of Object.entries(MIGRATED)) {
       const src = read(rel);
       assert.ok(
-        /function\s+csvEscape\s*\(/.test(src),
-        `${rel} no longer hand-rolls csvEscape — remove it from KNOWN_UNMIGRATED`
+        !/function\s+csvEscape\s*\(/.test(src)
+        && !/(?:const|let|var)\s+csvEscape\s*=\s*(?:\(|function|async)/.test(src),
+        `${rel} has regressed to a local csvEscape (at risk: ${why})`
+      );
+      assert.match(
+        src,
+        /from\s+'(?:\.\.\/)+lib\/csv'/,
+        `${rel} no longer imports lib/csv -- at risk: ${why}`
+      );
+      const joins = src.match(/\.join\(\s*','\s*\)/g) || [];
+      assert.deepEqual(
+        joins,
+        [],
+        `${rel} joins values with ',' by hand again: ${joins.length} site(s)`
       );
     }
   });

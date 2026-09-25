@@ -1,5 +1,18 @@
 import { pool } from '../../../../lib/db';
 import { summarizeVpnConfig } from '../../../../lib/engines/vpnSummary';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25). This route
+// carried its own `csvEscape` that predated lib/csv.js: it quoted
+// CONDITIONALLY -- only on /[",\n\r]/ -- and neutralised NOTHING, so a cell
+// beginning `=`, `+`, `-` or `@` was written raw and EXECUTED as a formula
+// when the export was opened in Excel, LibreOffice or Sheets.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+// ⛔ `Device` and `Vendor` are the cells at risk: a device name is typed by
+// an operator and a vendor slug is stored beside it. Verified against the
+// migration fixture: a device named `=cmd|'/c calc'!A1` went into the
+// document RAW AND UNQUOTED.
+import { csvRow, csvDocument } from '../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,42 +70,54 @@ async function getFleetVpnStatus(dbPool) {
   });
 }
 
-function csvEscape(value) {
+// ⛔ PRESERVED FROM THE ESCAPE THIS ROUTE USED TO CARRY -- NOT AN ADDITION.
+// That function ran JSON.stringify over anything whose `typeof` was 'object',
+// and a TIMESTAMPTZ column arrives from pg as a JS Date, so every timestamp in
+// this export has always been written as a JSON date literal with its own
+// quotes included. lib/csv.js does a bare String(), which would silently
+// rewrite every timestamp in the file into Date#toString in the SERVER's local
+// zone. Keeping the transform at the call site keeps the column byte-identical;
+// only the encoding changes.
+// ⛔ The sibling SNMP export never had this branch and so already writes the
+// local-zone form. That inconsistency is PRE-EXISTING and is deliberately left
+// alone here: changing a timestamp format is a data decision, not part of a
+// formula-injection fix.
+function cell(value) {
   if (value === null || value === undefined) return '';
-  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
+// ⛔ COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE MIGRATION -- only the
+// encoding is: every cell is now quoted, a leading =/+/-/@ is neutralised, and
+// the document ends with a CRLF. The header still goes out on zero rows.
 function buildCsv(rows) {
-  const headers = [
-    'Device',
-    'Vendor',
-    'VPN Supported',
-    'Has VPN Config',
-    'Enabled',
-    'Config As Of',
-    'Active Sessions',
-    'Sessions Sampled At',
+  const out = [
+    csvRow([
+      'Device',
+      'Vendor',
+      'VPN Supported',
+      'Has VPN Config',
+      'Enabled',
+      'Config As Of',
+      'Active Sessions',
+      'Sessions Sampled At',
+    ]),
   ];
-  const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push(
-      [
-        csvEscape(r.deviceName),
-        csvEscape(r.vendor),
-        csvEscape(r.supported),
-        csvEscape(r.hasConfig),
-        csvEscape(r.enabled),
-        csvEscape(r.lastConfigAt),
-        csvEscape(r.activeSessionCount),
-        csvEscape(r.sessionSampledAt),
-      ].join(',')
+    out.push(
+      csvRow([
+        cell(r.deviceName),
+        cell(r.vendor),
+        cell(r.supported),
+        cell(r.hasConfig),
+        cell(r.enabled),
+        cell(r.lastConfigAt),
+        cell(r.activeSessionCount),
+        cell(r.sessionSampledAt),
+      ])
     );
   }
-  return lines.join('\r\n');
+  return csvDocument(out);
 }
 
 export async function GET(request) {

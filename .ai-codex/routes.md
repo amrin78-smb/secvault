@@ -267,7 +267,7 @@ escaping is `lib/csv.js`.
 
 ## /api/vpn/fleet
 
-GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`. ⚠️ Hand-rolls its CSV escaping with no formula neutralisation — see the `lib/csv.js` migration note in `gotchas.md`.
+GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
 
 ## /api/system/session-policy
 

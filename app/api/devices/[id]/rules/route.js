@@ -1,6 +1,23 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25). This route
+// carried its own `csvEscape` that predated lib/csv.js: it quoted
+// CONDITIONALLY and neutralised NOTHING, so a cell beginning `=`, `+`, `-` or
+// `@` was EXECUTED as a formula when the export was opened in Excel,
+// LibreOffice or Sheets.
+// ⛔ THIS IS THE LARGEST EXPORT IN THE PRODUCT and the most exposed one. It
+// emits the WHOLE ruleset, `comment` included — free text an administrator
+// types into the firewall, i.e. a value that originates entirely outside
+// SecVault. Live proof from the fixture used to verify this migration: the
+// old escape wrote `=cmd|'/c calc'!A1` into the document raw AND unquoted,
+// because the value contains no comma, quote or newline and so failed the
+// conditional-quoting test. A firewall rule comment was a direct path to code
+// running on an operator's workstation.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+import { csvRow, csvDocument } from '../../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,15 +74,33 @@ function buildFilters(deviceId, searchParams) {
   return { where: `WHERE ${conditions.join(' AND ')}`, params };
 }
 
-function csvEscape(value) {
+// ⛔ THE ONE TRANSFORMATION THE OLD LOCAL ESCAPE DID THAT THE SHARED ONE DOES
+// NOT, AND IT IS LOAD-BEARING HERE. `csvEscape` in lib/csv.js does a bare
+// `String(value)`. SIX of this export's fourteen columns are JSONB —
+// src_zones, dst_zones, src_addresses, dst_addresses, services, applications —
+// and node-postgres hands JSONB back ALREADY PARSED, as real JS arrays. The
+// old escape carried `typeof value === 'object' ? JSON.stringify(value) : …`,
+// so `["10.0.0.0/8","192.168.1.1","SRV-WEB"]` is what the customer's file has
+// always contained. Passing the array straight to the shared escape instead
+// would render it `10.0.0.0/8,192.168.1.1,SRV-WEB` — commas inside a cell,
+// harmless only because the shared escape now always quotes — and any JSONB
+// value that is an OBJECT rather than an array would become `[object Object]`.
+// Either way the product's biggest export silently changes shape.
+// ⛔ So the transformation stays HERE, at the call site, and a STRING is what
+// reaches csvRow. The null check comes FIRST because `typeof null === 'object'`
+// and JSON.stringify(null) is the four-character string `"null"`, not an empty
+// cell — which is `hit_count`'s NOT-MEASURED NULL rendered as a fact.
+function cell(value) {
   if (value === null || value === undefined) return '';
-  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
+  return typeof value === 'object' ? JSON.stringify(value) : value;
 }
 
+// ⛔ THE COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE ESCAPE MIGRATION, and
+// deliberately so: this is the export customers save, script against and hand
+// to auditors. Only the ENCODING of a cell changed — every cell is now quoted
+// (the shared escape always quotes, because deciding per value whether it
+// contains a separator shifts every column after the one call you get wrong)
+// and a leading formula character is prefixed with an apostrophe.
 function buildCsv(rows) {
   const headers = [
     '#',
@@ -83,28 +118,35 @@ function buildCsv(rows) {
     'Log Enabled',
     'Hit Count',
   ];
-  const lines = [headers.join(',')];
+  // The header goes through csvRow too, matching every other export in this
+  // repo: one escape for the whole document means no row can be encoded by a
+  // different set of rules than the row above it.
+  const lines = [csvRow(headers)];
   for (const r of rows) {
     lines.push(
-      [
-        csvEscape(r.sequence_number),
-        csvEscape(r.rule_name),
-        csvEscape(r.enabled),
-        csvEscape(r.action),
-        csvEscape(r.src_zones),
-        csvEscape(r.dst_zones),
-        csvEscape(r.src_addresses),
-        csvEscape(r.dst_addresses),
-        csvEscape(r.services),
-        csvEscape(r.comment),
-        csvEscape(r.applications),
-        csvEscape(r.schedule),
-        csvEscape(r.log_enabled),
-        csvEscape(r.hit_count),
-      ].join(',')
+      csvRow([
+        cell(r.sequence_number),
+        cell(r.rule_name),
+        cell(r.enabled),
+        cell(r.action),
+        cell(r.src_zones),
+        cell(r.dst_zones),
+        cell(r.src_addresses),
+        cell(r.dst_addresses),
+        cell(r.services),
+        cell(r.comment),
+        cell(r.applications),
+        cell(r.schedule),
+        cell(r.log_enabled),
+        cell(r.hit_count),
+      ])
     );
   }
-  return lines.join('\r\n');
+  // ⛔ No BOM: this export has never carried one, and adding it is a separate,
+  // visible decision (see lib/csv.js for why it is opt-in per caller). A
+  // filter that matches no rules still gets its header row — "the export is
+  // broken" and "no rule matched this filter" must never look the same.
+  return csvDocument(lines);
 }
 
 // GET /api/devices/[id]/rules — JSON list (paginated) by default; ?format=csv streams a

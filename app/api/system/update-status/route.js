@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.185.1': [
+    "Fixed the same spreadsheet-formula fault in the remaining seven CSV exports: firewall rules, per-device compliance, rule analysis, rule reordering, fleet VPN, and the SNMP and VPN sample exports.",
+    "The firewall rules export was the most exposed, because it includes the comments an administrator types onto a rule, and it is the largest export in the product.",
+    "Every export keeps exactly the same columns in the same order; only the way a cell is written has changed.",
+    "A build check now fails if any export goes back to its own copy of the faulty encoding.",
+  ],
   '2.185.0': [
     "VPN & identity → Detections has been rebuilt as a threat page: four headline figures with their change against the previous window, a search and country/severity filters across all six detections, a selectable time window, and a CSV export per detection.",
     "All six detections are now shown. Two of them needed more authentication history than existed before and could not previously run; there are now 16 days of history and both are active.",

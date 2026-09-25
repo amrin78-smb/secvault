@@ -94,6 +94,16 @@ const STATIC_ROUTES = [
   { path: '/compliance', markers: ['Compare PCI DSS', 'No active devices', 'PCI DSS'] },
   { path: '/settings', markers: ['Manage app configuration, users, and updates.'] },
   { path: '/vpn', markers: ['Fleet-wide VPN/remote-access exposure'] },
+  // ⛔ THE DETECTIONS TAB IS SWEPT SEPARATELY, because `/vpn` alone only ever
+  // loads the DEFAULT tab (`status`) — so the other six were never rendered by
+  // any gate. This one is now the densest page in the product (a headline
+  // strip, a client filter bar, six detection panels and six export buttons)
+  // and it is IDENTITY-GATED, which the sweep only reaches because SMOKE_USER
+  // is a super_admin; an operator account would 403 here and the marker would
+  // fail for a reason that is not a bug. The marker is a headline tile label
+  // that only this tab produces — never a detection title, which predates the
+  // rebuild and would pass over the old page.
+  { path: '/vpn?vtab=detections', markers: ['Firewalls reporting'] },
 ];
 
 // ─── plumbing ───────────────────────────────────────────────────────────────

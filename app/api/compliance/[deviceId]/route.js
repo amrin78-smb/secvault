@@ -1,5 +1,18 @@
 import { pool } from '../../../../lib/db';
 import { isValidUuid } from '../../../../lib/apiUtils';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25), for the same
+// reason app/api/compliance/fleet/route.js was: the local `csvEscape` this
+// replaces quoted CONDITIONALLY and neutralised NOTHING, so a cell beginning
+// `=`, `+`, `-` or `@` was EXECUTED as a formula when the export was opened in
+// Excel, LibreOffice or Sheets. Every text cell in this export originates
+// outside SecVault — the check name, the detail and the remediation guidance
+// are curated check data, and the matched rule names are read straight off
+// firewall configuration — so this document was a path from a firewall config
+// into code running on an operator's workstation.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+import { csvRow, csvDocument } from '../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,22 +21,36 @@ export const dynamic = 'force-dynamic';
 // drift (missing 'SANS'), same silent-drop consequence.
 const STANDARDS = ['PCI_DSS', 'ISO_27001', 'CIS_V8', 'NIST', 'SANS'];
 
-function csvEscape(value) {
+// ⛔ THE OBJECT BRANCH THE LOCAL ESCAPE CARRIED, MOVED TO THE CALL SITE.
+// `csvEscape` does a bare `String(value)`, which renders any object as
+// `[object Object]`. The escape this file used to own stringified one instead,
+// and dropping that would silently turn a readable cell into that literal —
+// so the transformation happens HERE and a STRING is what reaches `csvRow`.
+// ⛔ The null guard stays AHEAD of the object test, exactly as it did before:
+// `typeof null === 'object'`, so checking the other way round would write the
+// four characters `null` into a cell that has always been left empty.
+function cellText(value) {
   if (value === null || value === undefined) return '';
-  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
 // `ruleNamesById` is a Map(id -> rule_name), resolved by the caller via one
 // bulk query (see the "Matched Rules" bulk lookup below) -- semicolon-joined
-// per row, empty string when null/empty, matching this file's own
-// csvEscape() convention for the other columns.
+// per row, empty string when null/empty, matching this file's own convention
+// for the other columns.
+//
+// ⛔ THE COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE ESCAPE MIGRATION, and
+// deliberately so: this is a file customers already save, script against and
+// attach to audits. Only the ENCODING of a cell changed — every cell is now
+// quoted (the shared escape always quotes, because deciding per value whether
+// it contains a separator shifts every column after the one call you get
+// wrong) and a leading formula character is prefixed with an apostrophe.
 function buildCsv(rows, ruleNamesById) {
   const headers = ['Check Name', 'Severity', 'Standards', 'Status', 'Detail', 'Remediation', 'Matched Rules'];
-  const lines = [headers.join(',')];
+  // The header goes through csvRow too: one escape for the whole document
+  // means no row can be encoded by a different set of rules than the row
+  // above it.
+  const lines = [csvRow(headers)];
   for (const r of rows) {
     const matchedRuleIds = Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [];
     const matchedRuleNames = matchedRuleIds
@@ -31,18 +58,25 @@ function buildCsv(rows, ruleNamesById) {
       .filter(Boolean)
       .join('; ');
     lines.push(
-      [
-        csvEscape(r.name),
-        csvEscape(r.severity),
-        csvEscape(Array.isArray(r.standards) ? r.standards.join('; ') : r.standards),
-        csvEscape(r.status),
-        csvEscape(r.detail),
-        csvEscape(r.remediation_guidance),
-        csvEscape(matchedRuleNames),
-      ].join(',')
+      csvRow([
+        cellText(r.name),
+        cellText(r.severity),
+        // The array join is preserved ahead of cellText: without it a TEXT[]
+        // `standards` would fall into the object branch and export as JSON
+        // rather than as `PCI_DSS; CIS_V8`.
+        cellText(Array.isArray(r.standards) ? r.standards.join('; ') : r.standards),
+        cellText(r.status),
+        cellText(r.detail),
+        cellText(r.remediation_guidance),
+        cellText(matchedRuleNames),
+      ])
     );
   }
-  return lines.join('\r\n');
+  // ⛔ No BOM: this export has never carried one, and adding it is a separate,
+  // visible decision (see lib/csv.js for why it is opt-in per caller). A
+  // device that has never been audited still gets its header row — "the export
+  // is broken" and "nothing matched" must never look the same.
+  return csvDocument(lines);
 }
 
 // Sanitizes user-entered device data (device.name) before it lands in an HTTP

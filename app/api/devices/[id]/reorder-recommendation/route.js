@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { computeRecommendedOrder } from '../../../../../lib/engines/ruleReorder';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25). This route
+// carried its own `csvEscape` that predated lib/csv.js: it quoted
+// CONDITIONALLY -- only on /[",\n\r]/ -- and neutralised NOTHING, so a cell
+// beginning `=`, `+`, `-` or `@` was written raw and EXECUTED as a formula
+// when the export was opened in Excel, LibreOffice or Sheets.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+// ⛔ `Rule Name` and `Vendor Rule ID` are read off the firewall, i.e. free
+// text that originates entirely outside SecVault. Verified against the
+// migration fixture: the old escape wrote `=cmd|'/c calc'!A1` into the
+// document RAW AND UNQUOTED, because that value contains no comma, quote or
+// newline and so failed the conditional-quoting test.
+import { csvRow, csvDocument } from '../../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,30 +40,37 @@ async function getReorderFindings(dbPool, deviceId) {
   return result.rows;
 }
 
-function csvEscape(value) {
-  if (value === null || value === undefined) return '';
-  const str = String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
-}
-
+// ⛔ COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE MIGRATION -- only the
+// encoding is: every cell is now quoted, a leading =/+/-/@ is neutralised, and
+// the document ends with a CRLF. The header still goes out on zero rows, so
+// "the export is broken" and "nothing to reorder" stay distinguishable.
+//
+// ⛔ PRE-EXISTING GAP, NOT INTRODUCED AND NOT CLOSED HERE: the escape this
+// replaced had dropped the `typeof value === 'object'` branch its siblings in
+// app/api/vpn/* carry, so an unexpected object serialised as `[object Object]`.
+// csvEscape does a bare String(value) too, so this migration is NEUTRAL on that
+// -- it neither fixes nor worsens it. Every column here is a scalar today
+// (INTEGER, TEXT, TEXT) so nothing reaches it; it is reported separately so the
+// object case can be decided on its own rather than smuggled in as a side
+// effect of a security fix.
 function buildCsv(recommendedOrder, changedRuleIdSet) {
-  const headers = ['New Position', 'Current Position', 'Rule Name', 'Vendor Rule ID', 'Moved'];
-  const lines = [headers.join(',')];
+  const rows = [
+    csvRow(['New Position', 'Current Position', 'Rule Name', 'Vendor Rule ID', 'Moved']),
+  ];
   recommendedOrder.forEach((rule, i) => {
-    lines.push(
-      [
-        csvEscape(i + 1),
-        csvEscape(rule.sequence_number),
-        csvEscape(rule.rule_name),
-        csvEscape(rule.rule_id_vendor),
-        csvEscape(changedRuleIdSet.has(rule.id) ? 'yes' : ''),
-      ].join(',')
+    rows.push(
+      csvRow([
+        String(i + 1),
+        rule.sequence_number,
+        rule.rule_name,
+        rule.rule_id_vendor,
+        // Preserved verbatim: the call site, not the escape, decides this is a
+        // 'yes'/empty pair rather than a boolean.
+        changedRuleIdSet.has(rule.id) ? 'yes' : '',
+      ])
     );
   });
-  return lines.join('\r\n');
+  return csvDocument(rows);
 }
 
 // GET /api/devices/[id]/reorder-recommendation

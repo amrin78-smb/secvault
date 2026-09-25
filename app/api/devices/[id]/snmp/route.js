@@ -7,6 +7,21 @@ import { isValidUuid } from '../../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { isAdmin, forbiddenResponse } from '../../../../../lib/rbac';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25). This route
+// carried its own `csvEscape` that predated lib/csv.js: it quoted
+// CONDITIONALLY -- only on /[",\n\r]/ -- and neutralised NOTHING, so a cell
+// beginning `=`, `+`, `-` or `@` was written raw and EXECUTED as a formula
+// when the export was opened in Excel, LibreOffice or Sheets.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+// ⛔ THIS EXPORT IS NOT CURRENTLY EXPLOITABLE, AND IT IS MIGRATED ANYWAY.
+// Every column it emits is a numeric sample or a timestamp, so nothing an
+// attacker writes reaches a cell TODAY. That is a property of today's query,
+// not of the escaping: the defective function was the same one, and the next
+// column added here -- a device name, an interface, an error string -- would
+// have inherited it silently.
+import { csvRow, csvDocument } from '../../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,30 +56,36 @@ async function getSnmpHistory(dbPool, deviceId) {
   return result.rows;
 }
 
-function csvEscape(value) {
-  if (value === null || value === undefined) return '';
-  const str = String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
-}
-
+// ⛔ COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE MIGRATION -- only the
+// encoding is: every cell is now quoted, a leading =/+/-/@ is neutralised, and
+// the document ends with a CRLF. The numbers themselves are untouched --
+// NUMERIC arrives from pg as a string and BIGINT likewise, and csvEscape's
+// String() is the same String() the old escape ran, so `12.50` stays `12.50`
+// rather than being reformatted or rounded.
+//
+// ⛔ PRE-EXISTING GAP, NOT INTRODUCED AND NOT CLOSED HERE: the escape this
+// replaced had dropped the `typeof value === 'object'` branch its siblings in
+// app/api/vpn/* carry, so an unexpected object serialised as `[object Object]`.
+// csvEscape does a bare String(value) too, so this migration is NEUTRAL on that
+// -- it neither fixes nor worsens it. Reported separately so the object case
+// can be decided on its own rather than smuggled in as a side effect of a
+// security fix. (`sampled_at` IS an object -- a Date -- but Date#toString is a
+// real rendering, not `[object Object]`, and it is what this route has always
+// written; see the note in app/api/vpn/fleet/route.js.)
 function buildCsv(rows) {
-  const headers = ['Sampled At', 'CPU %', 'Memory %', 'Session Count', 'Uptime (s)'];
-  const lines = [headers.join(',')];
+  const out = [csvRow(['Sampled At', 'CPU %', 'Memory %', 'Session Count', 'Uptime (s)'])];
   for (const r of rows) {
-    lines.push(
-      [
-        csvEscape(r.sampled_at),
-        csvEscape(r.cpu_percent),
-        csvEscape(r.memory_percent),
-        csvEscape(r.session_count),
-        csvEscape(r.uptime_seconds),
-      ].join(',')
+    out.push(
+      csvRow([
+        r.sampled_at,
+        r.cpu_percent,
+        r.memory_percent,
+        r.session_count,
+        r.uptime_seconds,
+      ])
     );
   }
-  return lines.join('\r\n');
+  return csvDocument(out);
 }
 
 export async function GET(request, { params }) {

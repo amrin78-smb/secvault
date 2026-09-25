@@ -1575,27 +1575,39 @@ folded whitespace to a space BEFORE testing `^[=+\-@]`, so the guard could never
 opened in Excel or LibreOffice. These exports carry values that originate OUTSIDE SecVault — device
 names, rule names, firewall rule COMMENTS an administrator typed, compliance finding reasons.
 
-Only two callers use the shared module (`lib/engines/ruleChangeRequestReport.js`,
-`lib/syslog/logExport.js`). `app/api/compliance/fleet/route.js` was migrated in v2.185.0.
-⛔ **SEVEN ROUTES STILL CARRY THE IDENTICAL DEFECTIVE COPY** — conditional quoting on
-`/[",\n\r]/`, no formula neutralisation:
+**RESOLVED 2026-09-25 (v2.185.0 + v2.185.1): ALL EIGHT ARE MIGRATED.** `lib/csv.js` is now the
+only CSV escape in the repo.
 
-| file | cells at risk |
-|---|---|
-| `app/api/devices/[id]/rules/route.js` | **the worst** — rule names, **operator-typed comments**, zones, addresses, services; the biggest export in the product |
-| `app/api/compliance/[deviceId]/route.js` | check name, **detail**, **remediation guidance**, matched rule names |
-| `app/api/devices/[id]/analysis/route.js` | rule names, finding detail, remediation |
-| `app/api/devices/[id]/reorder-recommendation/route.js` | rule names, vendor rule ids |
-| `app/api/vpn/fleet/route.js` | device names, vendors |
-| `app/api/devices/[id]/snmp/route.js` | numeric today, same defective escape |
-| `app/api/devices/[id]/vpn/route.js` | numeric today, same defective escape |
+⛔ **THE SHARPEST FORM OF THE DEFECT, worth keeping because it explains why nobody noticed:** the old
+test was `/[",
+]/`, and the canonical payload `=cmd|'/c calc'!A1` contains no comma, no quote
+and no newline. So the most dangerous value in the export was not "quoted but un-neutralised" — it
+was written out **RAW AND UNQUOTED**. `@SUM(1,1)` got quoted only by the luck of its comma, and was
+still a live formula.
 
-Two of them (`reorder-recommendation`, `snmp`) also dropped the `typeof value === 'object'` branch,
-so an unexpected object serialises as `[object Object]`.
+⛔ **THE MIGRATION TRAP, hit in three of the eight:** `csvEscape` does a bare `String(value)`. Several
+routes ran `typeof value === 'object' ? JSON.stringify(value) : String(value)` BEFORE escaping, and
+that transformation is load-bearing — `devices/[id]/rules` has **six JSONB columns** (src/dst
+addresses, services, applications, src/dst zones) which node-postgres hands back as real arrays, and
+`vpn/fleet` + `devices/[id]/vpn` export `TIMESTAMPTZ` as JS `Date` objects. Dropping the branch turns
+an address list into `[object Object]` and silently rewrites every timestamp to the server's local
+zone. Each migration kept it at the CALL SITE so a string reaches `csvRow`.
+⛔ And the null guard must stay AHEAD of the object test: `typeof null === 'object'`, so the wrong
+order writes the literal text `null` into cells that were always empty.
 
-⛔ `tests/csvInjection.test.js` carries a RATCHET (`KNOWN_UNMIGRATED`, one reason per entry): it
-fails on an EIGHTH hand-roller, fails on a regression in the migrated route, **and fails if a listed
-file has since been migrated** — so the list cannot go stale by being quietly fixed.
+⛔ `tests/csvInjection.test.js` is now an ABSOLUTE invariant rather than a tolerance list: no file
+outside `lib/csv.js` may define a CSV escape at all, each of the eight routes is pinned BY NAME (a
+revert fails saying which, and naming the cells at risk), and a separate case asserts the scan
+actually walked >400 files — the previous version's second assertion looped over a list that emptied
+itself as the work completed, which is this file's own "a scan over nothing passes" trap.
+
+⛔ **TWO PRE-EXISTING GAPS FOUND AND DELIBERATELY NOT FIXED** (an encoding commit is not the place):
+1. `compliance/[deviceId]`'s Matched Rules does `.map(id => ruleNamesById.get(id)).filter(Boolean)`,
+   and `firewall_rules` is DELETE+reinserted every pull — so "matched rules we can no longer name"
+   exports IDENTICALLY to "matched no rules", in the evidence column of a compliance export.
+2. Timestamp formats disagree between siblings: `vpn/fleet` and `devices/[id]/vpn` emit a JSON date
+   literal (quotes and all), `devices/[id]/snmp` emits the server-local `Date#toString`. Caused by
+   one family having the object branch and the other not.
 
 ⛔ Not defects: `lib/syslog/actions.js`'s `sqlList` `.join(',')` builds a SQL fragment from module
 constants, and the other `join(',')` hits are query-string or SQL builders, not CSV.

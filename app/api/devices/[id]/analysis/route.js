@@ -6,35 +6,66 @@ import { authOptions } from '../../../auth/[...nextauth]/route';
 import { logActivity } from '../../../../../lib/activityLog';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { can, OPERATE, forbiddenResponse } from '../../../../../lib/rbac';
+// ⛔ THE SHARED ESCAPE, NOT A LOCAL ONE (migrated 2026-09-25), for the same
+// reason app/api/compliance/fleet/route.js was: the local `csvEscape` this
+// replaces quoted CONDITIONALLY and neutralised NOTHING, so a cell beginning
+// `=`, `+`, `-` or `@` was EXECUTED as a formula when the export was opened in
+// Excel, LibreOffice or Sheets. `Rule Name` is read straight off firewall
+// configuration and the finding detail quotes it back, so this document was a
+// path from a firewall config into code running on an operator's workstation.
+// ⛔ Do not reintroduce a local copy. Two files deciding independently how to
+// neutralise a spreadsheet formula would eventually disagree, and the one that
+// disagreed quietly would be the one writing the document that executes.
+import { csvRow, csvDocument } from '../../../../../lib/csv';
 
 export const dynamic = 'force-dynamic';
 
-function csvEscape(value) {
+// ⛔ THE OBJECT BRANCH THE LOCAL ESCAPE CARRIED, MOVED TO THE CALL SITE.
+// `csvEscape` does a bare `String(value)`, which renders any object as
+// `[object Object]`. The escape this file used to own stringified one instead,
+// and dropping that would silently turn a readable cell into that literal —
+// so the transformation happens HERE and a STRING is what reaches `csvRow`.
+// ⛔ The null guard stays AHEAD of the object test, exactly as it did before:
+// `typeof null === 'object'`, so checking the other way round would write the
+// four characters `null` into a cell that has always been left empty. It also
+// keeps a NUMERIC `sequence_number` of 0 exporting as `0` rather than as an
+// empty cell — a falsy check here would be this codebase's own
+// failed-read-as-a-fact bug, one rule position out.
+function cellText(value) {
   if (value === null || value === undefined) return '';
-  const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
-  if (/[",\n\r]/.test(str)) {
-    return '"' + str.replace(/"/g, '""') + '"';
-  }
-  return str;
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
+// ⛔ THE COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE ESCAPE MIGRATION, and
+// deliberately so: this is a file customers already save, script against and
+// attach to change requests. Only the ENCODING of a cell changed — every cell
+// is now quoted (the shared escape always quotes, because deciding per value
+// whether it contains a separator shifts every column after the one call you
+// get wrong) and a leading formula character is prefixed with an apostrophe.
 function buildCsv(rows) {
   const headers = ['Severity', 'Finding Type', 'Rule Sequence', 'Rule Name', 'Action', 'Detail', 'Remediation'];
-  const lines = [headers.join(',')];
+  // The header goes through csvRow too: one escape for the whole document
+  // means no row can be encoded by a different set of rules than the row
+  // above it.
+  const lines = [csvRow(headers)];
   for (const r of rows) {
     lines.push(
-      [
-        csvEscape(r.severity),
-        csvEscape(r.finding_type),
-        csvEscape(r.sequence_number),
-        csvEscape(r.rule_name),
-        csvEscape(r.action),
-        csvEscape(r.detail),
-        csvEscape(r.remediation),
-      ].join(',')
+      csvRow([
+        cellText(r.severity),
+        cellText(r.finding_type),
+        cellText(r.sequence_number),
+        cellText(r.rule_name),
+        cellText(r.action),
+        cellText(r.detail),
+        cellText(r.remediation),
+      ])
     );
   }
-  return lines.join('\r\n');
+  // ⛔ No BOM: this export has never carried one, and adding it is a separate,
+  // visible decision (see lib/csv.js for why it is opt-in per caller). A
+  // device with no findings still gets its header row — "the export is broken"
+  // and "this device is clean" must never look the same.
+  return csvDocument(lines);
 }
 
 // GET /api/devices/[id]/analysis
