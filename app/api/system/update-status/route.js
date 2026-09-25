@@ -7,6 +7,15 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.186.2': [
+    "The upgrade target for the fleet's most urgent vulnerability findings now actually reaches the product. The previous two releases fixed the logic but a second, duplicated safety check still refused the update, so nothing changed on screen.",
+    "The sync log had been reporting these repairs as successful when the database was rejecting all of them. It now counts what was actually written.",
+    "No change to which vulnerabilities are reported or how they are prioritised — only to whether the upgrade target is filled in.",
+  ],
+  '2.186.1': [
+    "Stopped the Fortinet advisory feed from overwriting better version data that had just been imported from the central feed moments earlier.",
+    "Where the vendor genuinely has the better information it still takes precedence — only a change that would lose the upgrade target is refused.",
+  ],
   '2.186.0': [
     "The three most urgent vulnerability findings on the fleet now say which version to upgrade to. They are known-exploited and critical, and until now every one of them showed no target version at all — the information was being discarded on the way in.",
     "Fixed a fault that could stop vulnerability assessment for the entire fleet: a single malformed advisory record aborted the run for every remaining advisory and every remaining firewall.",

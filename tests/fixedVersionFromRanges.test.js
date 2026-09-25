@@ -226,3 +226,54 @@ describe('⛔ the Fortinet upsert never trades a fix boundary for none', () => {
       'the vendor must still win in every case that is not a downgrade');
   });
 });
+
+// ── 4. The doubled guard must not drift ──────────────────────────────────
+
+describe('⛔ hubIsBetter and the UPDATE’s WHERE clause express the SAME rule', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'feeds', 'cveHub.js'), 'utf8');
+
+  it('the WHERE clause admits the widened case, not just a blank row', () => {
+    // ⛔ THIS COST THREE DEPLOYS. Rule 3 is deliberately expressed TWICE -- in
+    // the JS predicate AND in the statement -- so that an unsafe repair is
+    // IMPOSSIBLE rather than merely unreached. v2.186.0 widened the predicate
+    // and left the statement on the old rule, so every widened repair passed
+    // the predicate and was then refused by the database. Measured live:
+    // `repaired: 80` reported on three consecutive cycles, zero rows written.
+    //
+    // The doubling worked exactly as designed. It made the unsafe outcome
+    // impossible including the one I had decided was safe -- which is the point
+    // of a doubled guard, and the reason both halves must move together.
+    const where = src.slice(src.indexOf('WHERE cve_id = $1'), src.indexOf('[\n            cveId'));
+    assert.ok(where.length > 0, 'the UPDATE WHERE clause is gone');
+    assert.match(where, /jsonb_array_length\(affected_version_ranges\) = 0/,
+      'the blank-row case must survive');
+    assert.match(where, /NOT \(affected_version_ranges @> '\[\{"exclude_fixed": true\}\]'/,
+      'the WHERE clause no longer admits the widened case — repairs will be silently refused');
+    assert.match(where, /\$2::jsonb @> '\[\{"exclude_fixed": true\}\]'/,
+      'the WHERE clause must require the INCOMING row to carry the boundary');
+    assert.match(where, /jsonb_array_length\(\$2::jsonb\)\s*>=\s*jsonb_array_length\(affected_version_ranges\)/,
+      'the WHERE clause must keep the "at least as many ranges" condition');
+  });
+
+  it('⛔ the repair counts what the DATABASE did, not what we asked', () => {
+    // `stats.repaired++` fired whether or not the WHERE matched, so
+    // feed_sync_log reported repairs that never happened -- and that number is
+    // what made the failure look like a different bug entirely. This file
+    // already states the rule forty lines up, for the INSERT.
+    assert.match(src, /stats\.repaired \+= Number\(res && res\.rowCount\) \|\| 0/,
+      'stats.repaired is a blind increment again — it will report repairs the database refused');
+    // ⛔ COMMENTS STRIPPED FIRST. The only remaining `stats.repaired++` in that
+    // file is inside the comment EXPLAINING why it is gone, so a raw scan reads
+    // its own explanation as the defect. Third time this exact trap has bitten
+    // in one day: deviceScopeCoverage's transitive check read prose as
+    // evidence, and the button-contrast extractor read a token name out of a
+    // comment and produced NaN:1.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+    assert.doesNotMatch(code, /stats\.repaired\+\+/,
+      'a blind increment came back');
+    // And the INSERT half, which was always right, must stay right.
+    assert.match(src, /stats\.inserted \+= Number\(res && res\.rowCount\) \|\| 0/);
+  });
+});
