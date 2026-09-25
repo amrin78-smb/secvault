@@ -181,6 +181,45 @@ Reuses `ruleHitCorrelation.js`'s existing tri-state rather than re-deriving it; 
 
 ---
 
+## ⛔ A4 CORRECTION — HALF OF IT WAS ALREADY BUILT (measured 2026-09-25)
+
+The section below reads as though object consolidation needs building. **It does not.**
+`lib/engines/objectUsage.js` has existed since 2026-08-03, runs after every object collection, and
+holds **4,297 `unused` + 1,361 `duplicate` findings across 13 devices** in `object_analysis_results`,
+refreshed 2026-09-24. It already does transitive group closure, and it is already namespace-
+partitioned (a 2026-07-18 fix, because an address object and a service object may share a name).
+
+⛔ **A stale "not built" is the costliest kind of index error** — CLAUDE.md says so about Phase 8b,
+and this file reproduced it. Anyone acting on the table below without checking would have rebuilt a
+working engine.
+
+What was ACTUALLY missing, measured:
+
+| | |
+|---|---|
+| `nat_rules` as a reference surface | **NOT counted** — 155 NAT rules across 15 devices |
+| objects reported `unused` that a NAT rule references | **11**, across 6 Palo Altos |
+| rule consolidation (any field) | **does not exist at all** |
+
+Each of those 11 is a suggestion to delete an object NAT depends on.
+
+⛔ **AND THE RULE-CONSOLIDATION COUNTS BELOW OVER-COUNT — INCLUDING MY OWN FIRST PASS AT THEM.**
+A quick `GROUP BY` over zones/addresses/services gives ~181 removable rows. The real figure is
+**156**, because the canonical key must ALSO include `applications`, `log_enabled`, `nat_enabled`,
+`schedule` and `expiry_date`. Measured incrementally on the live fleet for the SERVICE case:
+zones-only 46 groups/69 rows → **+applications 10/13** → +schedule/expiry/log/nat 9/11.
+
+`firewall_rules.applications` is the vendor L7 app-ID — a **matching constraint, not metadata**.
+Two rules differing in service AND in app-ID are not one rule written twice, and merging them
+changes what the firewall matches. Same for the other four: merging a logged rule with an
+unlogged one silently changes what is recorded.
+
+Live result from the real engine: **92 groups / 156 removable rows — 41 `safe_to_merge` (55 rows),
+51 `needs_review` (101 rows)**, in 272 ms over 1,782 rules. `needs_review` dominating by rows is
+the honest outcome, not a bug.
+
+---
+
 ## A4 — Object & rule consolidation *(Tier 2, medium)*
 
 Exact set algebra. ⛔ **Needs NO hit counts**, which makes it the one cleanup analytic that is
@@ -207,6 +246,40 @@ already verifies against the re-collected ruleset. No second verifier, no "mark 
 
 ⛔ **"Referenced by nothing" is not "safe to delete" either** — an object may be referenced by a
 config path this product does not parse. It is a review list.
+
+---
+
+## ⛔ A5 MEASUREMENT — THE COHORT IS `(vendor, mgmt_method)` (measured 2026-09-25)
+
+The section below says "for each (vendor, config path)". **Grouping by VENDOR ALONE would have made
+this a false-finding machine on its first run**, which is the exact failure its own ⛔ rule warns
+about:
+
+**TUG is the only Palo Alto collected over SSH.** Its parser emits an entirely different structure
+(`tree`/`hostname`/`sw_version`) from the ten on the API (`devices`/`shared`/`mgt-config`), so
+grouped by vendor it deviates on essentially EVERY path — and every one of those findings is false.
+The real fact is "it was collected a different way". Live cohorts: `paloalto/api` 10 ·
+`fortinet/ssh` 5 · `paloalto/ssh` **1** (which must, and does, yield nothing).
+
+**Depth 3, measured.** Fortinet plateaus at 377 paths at any depth; Palo Alto averages 55/65/78/152
+at depth 2/3/4/6 while `present-on-exactly-1` grows 14→17→40→97 against `all agree` 46→48→50→75
+— **noise outpaces comparable ground ~3:1 with depth.**
+
+**The signal is real.** At depth 3, same path present everywhere and values disagreeing:
+`fortinet/ssh` **21 findings**, `paloalto/api` **4**. Examples: `dns.protocol` 4× `dot` vs OKF(F2)
+`cleartext`; `global.admin-https-redirect` 4× `enable` vs OKF(F2) `disable`;
+`system_info.device-certificate-status` 8× `Valid` vs HRIS + PAKFood `None`. **OKF(F2) is the
+minority in 10 of the 12 strongest** — one firewall built to a different standard, which is exactly
+the insight this analytic promises.
+
+⛔ **AND THE PROOF OF ITS OWN CENTRAL RULE IS IN THAT LIST.** `global.admin-ssh-port` is 4× `22`
+against OKF(F2)'s `5022` — OKF is the ONLY firewall not on the default SSH port, i.e. the HARDENED
+one, and the majority is the weaker configuration. Reporting the deviation is right; calling it
+misconfigured would be exactly backwards.
+
+⛔ **Device-IDENTITY paths must be excluded** or they manufacture guaranteed-useless findings:
+`system_info.netmask` fires 9v1 on HRIS, and every firewall legitimately has its own management
+address.
 
 ---
 

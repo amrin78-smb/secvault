@@ -483,6 +483,45 @@ address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to eit
 needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
 thing that can be misconfigured. A relative URL avoids the question entirely.
 
+## ⛔ A REFERENCE SURFACE THE ENGINE CANNOT SEE BECOMES A DELETE LIST (2026-09-25)
+
+`lib/engines/objectUsage.js` decides which `network_objects` nothing references, and its output is
+shown to an operator as objects to remove. It took `(objects, rules)`. **`nat_rules` was not a
+surface it could see**, so an object referenced ONLY by a NAT rule was reported unused.
+
+Measured live: **11 objects across 6 Palo Altos** — all address objects named as bare IPs, reached
+through `translated_dst_addresses` / `original_dst_addresses`. 4,297 unused → 4,286, with no object
+anywhere becoming NEWLY unused and duplicates unchanged at 1,361.
+
+⛔ **THE ENGINE WAS NOT WRONG ABOUT WHAT IT MEASURED — IT WAS ASKED AN INCOMPLETE QUESTION.** It
+already did transitive group closure, and already partitioned the address and service namespaces
+(a 2026-07-18 fix, because an address object and a service object may legitimately share a name).
+All of that care was correct and none of it helps when a whole referencing table is absent from the
+inputs. Before adding a table that names objects, ask what already decides those objects are unused.
+
+⛔ **A FAILED READ OF A REFERENCE SURFACE MUST ABORT, NOT DEFAULT TO `[]`.** `natRules` is a
+REQUIRED parameter with no default: `undefined`/`null`/non-array throws. A defaulted empty array is
+exactly how "we could not read NAT" becomes "NAT references nothing", and here that difference is a
+list of objects to delete. `[]` is reachable only as a positive claim that the device has no NAT
+rules — and a successful empty read stays structurally distinguishable from a failed one.
+
+⛔ **AND ORDER IS PART OF THE FIX.** `collectAndStore` collects NAT in its TOPOLOGY block, which
+used to run AFTER the usage analysis — so the analysis read the PREVIOUS pull's NAT against this
+pull's objects and rules. Same mismatched-freshness defect as the 2026-07-18 bug, one table over,
+and the dangerous direction is asymmetric: a NAT rule DELETED this cycle merely keeps an object off
+the unused list (safe), while one ADDED this cycle is invisible and its object is reported unused.
+The analysis now runs after the topology block and is gated on `natRulesCollected === true` —
+testing the adapter CAPABILITY, so a device with no NAT to collect is not treated as having failed
+to collect it. `tests/objectUsageOrdering.test.js` pins the order.
+
+⛔ **That ordering test almost passed while measuring nothing.** `storeNatRules` is DEFINED in
+`lib/adapters/index.js` as well as called there, ~570 lines above the analysis, so `indexOf(
+'storeNatRules(')` found the DECLARATION and the "is the call after it" assertion was trivially
+true. Caught only because a neighbouring "exactly once" assertion returned 2. Match `await
+storeNatRules(` — and in a file that defines what it calls, assume a bare name matches both.
+
+---
+
 ## ⛔ A COVERAGE RATIO OVER A WINDOW LONGER THAN YOUR DATA MEASURES *YOU* (2026-09-25)
 
 `ruleHitCorrelation.getDeviceLogCoverage()` certified a log-derived "this rule saw no traffic" only

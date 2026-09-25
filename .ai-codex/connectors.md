@@ -823,3 +823,29 @@ command) and the parser merges it under `system_info`.
 object is exactly what produced Palo Alto's false "12 removed / 12 added" change
 alerts (see gotchas.md). Expect ONE genuine `added` diff per Fortinet device on the
 first pull after upgrade: the data really did appear, so it is a real change, not noise.
+
+## ⛔ RULE NEGATION — where it lives, and why a consolidation engine must ask (verified 2026-09-25)
+
+`firewall_rules` has **NO negation column**, and no adapter parses one (`grep -rn negate lib/adapters/`
+returns nothing). Negation INVERTS a field's extent, so any engine concluding "these two rules are
+disjoint" gets exactly the wrong answer on a negated field. `ruleConsolidation.js` therefore scans
+`raw_rule` for a truthy `/negate/i` key and falls to `unknown` — which lands on `needs_review`.
+
+Verified on the live fleet that `raw_rule` actually carries it:
+
+| vendor | rules | `raw_rule` populated | mentions `negate` | negate ENABLED |
+|---|---|---|---|---|
+| `paloalto` | 1,601 | 1,601 | **133** | **0** |
+| `fortinet` | 181 | 181 | 0 | 0 |
+
+⛔ **Palo Alto is PROVEN**: PAN-OS emits `negate-source`/`negate-destination` and they survive into
+`raw_rule` (133 rules carry them, none enabled). ⛔ **Fortinet's zero is an ABSENCE, not a proof** —
+but the passthrough is verifiable: `withVdomRaw()` in `fortinet/parser.js` spreads the whole policy
+object, and the live SSH captures carry **24 distinct keys** including optional ones
+(`av-profile`, `dnsfilter-profile`, `ips-sensor`, `port-preserve`). A whitelist of the fields the
+normaliser needs would hold about eight. So a set `srcaddr-negate`/`dstaddr-negate` would appear,
+and the guard would see it.
+
+⛔ **IF AN ADAPTER IS EVER CHANGED TO NORMALISE `raw_rule` INTO A FIXED SHAPE, THIS GUARD GOES
+BLIND** and the engine can return `safe_to_merge` on a pair that is not. `raw_rule` being a verbatim
+vendor dump is a load-bearing property, not an implementation detail.
