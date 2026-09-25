@@ -93,6 +93,11 @@ const STATIC_ROUTES = [
   { path: '/analysis', markers: ['Rule hygiene — Fleet', 'Rule hygiene &#x2014; Fleet'] },
   { path: '/compliance', markers: ['Compare PCI DSS', 'No active devices', 'PCI DSS'] },
   { path: '/settings', markers: ['Manage app configuration, users, and updates.'] },
+  // ⛔ SWEPT SEPARATELY, because `/vulnerability` alone only loads the DEFAULT
+  // tab (`posture`) — so `advisories` and `upgrade` were never rendered by any
+  // gate. The marker is the recommendation heading, which only this tab
+  // produces; a tab LABEL would be satisfied by the tab bar around a dead body.
+  { path: '/vulnerability?tab=upgrade', markers: ['Recommended — patch within this branch', 'Firewalls with an upgrade to make'] },
   { path: '/vpn', markers: ['Fleet-wide VPN/remote-access exposure'] },
   // ⛔ THE DETECTIONS TAB IS SWEPT SEPARATELY, because `/vpn` alone only ever
   // loads the DEFAULT tab (`status`) — so the other six were never rendered by
