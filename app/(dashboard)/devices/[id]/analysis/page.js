@@ -17,6 +17,7 @@ import RuleStatsBarChart from '../../../../../components/analysis/RuleStatsBarCh
 import CleanupTab from '../../../../../components/analysis/CleanupTab';
 import OptimizationTab from '../../../../../components/analysis/OptimizationTab';
 import ReorderTab from '../../../../../components/analysis/ReorderTab';
+import ConsolidationTab from '../../../../../components/analysis/ConsolidationTab';
 import RiskTab from '../../../../../components/analysis/RiskTab';
 import RiskyRulesTab from '../../../../../components/analysis/RiskyRulesTab';
 import ObjectsTab from '../../../../../components/analysis/ObjectsTab';
@@ -248,6 +249,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     'cleanup',
     'optimization',
     'reorder',
+    'consolidation',
     'risk',
     'risky-rules',
     'objects',
@@ -302,6 +304,7 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         {tabLink(device.id, tab, 'cleanup', 'Cleanup')}
         {tabLink(device.id, tab, 'optimization', 'Optimization')}
         {tabLink(device.id, tab, 'reorder', 'Reorder')}
+        {tabLink(device.id, tab, 'consolidation', 'Consolidation')}
         {tabLink(device.id, tab, 'risk', 'Risk')}
         {tabLink(device.id, tab, 'risky-rules', 'Risky Rules')}
         {tabLink(device.id, tab, 'objects', 'Objects')}
@@ -437,6 +440,13 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
           tab value into the params it hands to Pagination, so a page link
           can never navigate away from the tab it belongs to. */}
       {tab === 'reorder' && <ReorderTab deviceId={device.id} canWrite={canWrite} searchParams={searchParams} />}
+
+      {/* ⛔ No canWrite. This tab has no write path at all — a consolidation
+          group is a proposal for a human, never a change SecVault makes — so
+          there is no control for a capability to gate. */}
+      {tab === 'consolidation' && (
+        <ConsolidationTab deviceId={device.id} searchParams={searchParams} />
+      )}
 
       {tab === 'risk' && <RiskTab deviceId={device.id} />}
 

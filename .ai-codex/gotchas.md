@@ -483,6 +483,36 @@ address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to eit
 needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
 thing that can be misconfigured. A relative URL avoids the question entirely.
 
+## ⛔ A WRITE-TIME BYTE-COMPARISON DEDUPE WOULD DO NOTHING ON PALO ALTO (measured 2026-09-25)
+
+CLAUDE.md's config-retention section defers snapshot dedupe with: *"Deduping belongs in
+`collectAndStore` at WRITE time, not in a retention job."* Before building that, know what it would
+actually catch. Measured over every `device_configs` row with a predecessor:
+
+| vendor | snapshots with a predecessor | byte-identical to it | |
+|---|---|---|---|
+| `fortinet` | 377 | **369** | **97.9%** |
+| `paloalto` | 1,295 | **1** | **0.1%** |
+
+⛔ **ALL 11 PALO ALTOS CARRY A LIVE CLOCK INSIDE `config_parsed`** — `system_info.time` and
+`system_info.uptime`, both present on every one, neither present on any Fortinet. So every Palo Alto
+snapshot differs from its predecessor no matter what, and a naive
+`md5(new) === md5(previous)` gate at write time would skip **one row in 1,295** on the vendor that
+is 77% of the snapshots.
+
+⛔ **`configDiff.js` ALREADY SOLVES THIS FOR DIFFS AND IS THE THING TO REUSE.** It has carried
+volatile-subtree filtering since v2.2.0 precisely because vendor parsers merge live telemetry into
+the config, so `config_diffs` is NOT polluted by the clock — the noise problem and the STORAGE
+problem are separate, and only the second is still open. A write-time dedupe must compare the
+NOISE-FILTERED form, not the bytes; comparing bytes is the version that is easy to write, looks
+correct, and measures no improvement.
+
+⛔ **And the two vendors would need opposite expectations.** A dedupe that reports "369 rows
+skipped" after a Fortinet-only test would look like a success and then achieve nothing on the fleet
+it was built for. Check the per-vendor split before believing any figure this produces.
+
+---
+
 ## ⛔ A REFERENCE SURFACE THE ENGINE CANNOT SEE BECOMES A DELETE LIST (2026-09-25)
 
 `lib/engines/objectUsage.js` decides which `network_objects` nothing references, and its output is
