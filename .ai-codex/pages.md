@@ -37,7 +37,7 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 ## Vulnerability / CVE
 
-[server] /vulnerability — VulnerabilityPage — tabbed shell (`?tab=posture|advisories`, default `posture`); renders `CvePostureTab` or `AdvisoriesTab`; "Assess Now" button (admin-gated, `AssessNowButton`) shown only on `posture` tab.
+[server] /vulnerability — VulnerabilityPage — tabbed shell (`?tab=posture|advisories|upgrade`, default `posture`, list in `VULN_TABS`); renders `CvePostureTab`, `AdvisoriesTab` or `UpgradePlan`; "Assess Now" button (admin-gated, `AssessNowButton`) shown only on `posture` tab.
 [server] /vulnerability/cve/[cveId] — CveDetailPage — one advisory's fleet view: CVSS/published/vendor + description + table of affected devices (current version/fixed-in/priority band/is-fixed-recommended) sourced from `device_cve_assessments`.
 [server] /vulnerability/advisories — AdvisoryCurationPage — the applicability CURATION WORKLIST (added 2026-09-08): every advisory with >=1 assessment, sorted KEV-first then LEAST-curated then CVSS, with a per-row "not curated" vs "N conditions" badge, CISA SSVC exploitation badge, and the affected-product list read out of the stored CVE record. Exists because `advisory_conditions` was empty fleet-wide, which parks every advisory at `config_applies=unknown` -> rule 5 -> `scheduled`. Backed by `lib/engines/advisoryCuration.js`; states published facts only, never a recommendation.
 [server] /vulnerability/advisories/[cveId] — AdvisoryDetailPage — advisory record detail: KEV badge+date, CVSS score/vector, description, affected-version-ranges table, fixed-in-versions badges, applicability-condition count + link to conditions page, affected-devices list, external NVD link.
@@ -150,6 +150,11 @@ so no ratio may be drawn". Three of eight VPN-reporting firewalls are success-bl
 ⛔ **FILTERS NARROW WHAT IS LISTED, NEVER WHAT WAS MEASURED**, and each panel prints "showing N of M"
 when one bites. The reporting-gap banner stays ABOVE the panels and no filter may move it — it
 bounds every claim below it.
+
+**`/vulnerability?tab=upgrade` — Upgrade plan (v2.187.0).** Turns 246 open assessments into 16
+upgrade decisions. ⛔ Tab key APPENDED, never inserted — it is a URL contract. Backed by
+`lib/engines/upgradePlan.js`; see lib.md for the branch-jump rule, which is the whole point of the
+feature.
 
 ## app/(dashboard)/applications/page.js  -> `/applications`  (v2.124.0)
 

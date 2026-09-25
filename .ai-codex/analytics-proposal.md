@@ -19,7 +19,7 @@ Tick `Done` in the SAME commit as the work, per `roadmap.md`'s own rule. `[ ]` n
 
 | # | Item | Tier | Effort | New table? | Done |
 |---|---|---|---|---|:--:|
-| A1 | **Upgrade planner** — collapse 246 assessments into ~16 upgrade decisions | 1 | S | no | [ ] |
+| A1 | **Upgrade planner** — collapse 246 assessments into ~16 upgrade decisions | 1 | S | no | ✅ v2.187.0 |
 | A2 | **Blind-spot register** — which devices look healthy because we cannot see them | 1 | S–M | no | [ ] |
 | A3 | **Log-derived rule usage** — a second evidence source for `hit_count` | 1 | M | no | [ ] |
 | A4 | **Object & rule consolidation** — exact set algebra, needs no hit counts | 2 | M | no | [ ] |
@@ -34,6 +34,17 @@ collected, which is also why none of them may store a verdict — the same rule 
 `/applications` already follow.
 
 ---
+
+## ✅ A1 BUILT (v2.187.0) — and the design rule it needed was not in the proposal
+
+Live: **246 open assessments across 16 firewalls -> 16 upgrade decisions**, 27 unplannable.
+
+⛔ **THE PROPOSAL MISSED THE ONE RULE THAT MATTERS.** It said "take the Pareto frontier — the
+lowest version clearing the most weighted risk". Implemented literally, that told three FortiGates
+running 7.4.9 to go to **7.6.7** — a platform migration — because it cleared 8 where the in-branch
+7.4.12 cleared 3. Both numbers correct, the advice wrong. `inBranch` and `crossBranch` are separate
+fields and the in-branch option is recommended EVEN WHEN a branch move clears more. A ranking
+proposal is not a recommendation design; that only showed up against real versions.
 
 ## The finding that should shape the ordering
 

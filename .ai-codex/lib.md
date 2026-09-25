@@ -978,6 +978,38 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/engines/upgradePlan.js + upgradePlanData.js (added 2026-09-25, v2.187.0)
+
+One upgrade DECISION per firewall, from the CVE assessments already computed. `upgradePlan.js` is
+PURE (`buildUpgradePlan` / `rankPlans` / `summarisePlans` / `branchOf`); `upgradePlanData.js` is the
+plumbing (`getFleetUpgradePlan`). Read-time, no table, no cron job.
+Measured live: **246 open assessments across 16 firewalls -> 16 decisions**, 27 unplannable.
+
+⛔ **A BRANCH JUMP IS NOT A PATCH.** The first prototype ranked on "clears the most, KEV first"
+and told three FortiGates on 7.4.9 to go to **7.6.7** — a platform migration — because it cleared 8
+against the in-branch 7.4.12's 3. Both numbers were right; the advice was wrong. `inBranch` and
+`crossBranch` are SEPARATE FIELDS, never one ranked list, and the in-branch option is recommended
+EVEN WHEN a branch move clears more. `branchOf` takes TWO components — FortiOS 7.4 and 7.6 are both
+"7", and a one-component branch reintroduces the conflation.
+
+⛔ **THREE BUGS THE TESTS AND THE DATA AGENT FOUND, NOT THE AUTHOR.**
+(a) `parseVersion(vendor, 'nope')` returns FABRICATED ZEROS, so `branchOf` produced the branch
+`"0.0"` and two unreadable versions were in-branch with each other — guarded by requiring a digit.
+⛔ That is a property of `versionComparator.parseVersion` itself and OTHER CALL SITES INHERIT IT;
+not audited.
+(b) `rankPlans` threw on a non-array.
+(c) With no running version every target fell into `crossBranch` and the recommendation became
+`cross_branch_only` — a branch move for a device whose current version is UNKNOWN, contradicting the
+file's own header. Now `blockedReason`: `no_running_version` vs `unreadable_running_version`.
+⛔ The author's test asserted `inBranch === null` and stopped — two SYMPTOMS checked and mistaken
+for the fix, while nothing asserted what was RECOMMENDED.
+
+⛔ `upgradePlanData` is DEVICES-DRIVEN, not assessments-driven, so no firewall can vanish from
+the plan, and it carries FOUR coverage states — `never_assessed` / `assessed_no_version` /
+`assessed_clear` / `assessed` — because `openCount: 0` means the same thing for "clear" and "never
+asked" on the one page whose job is to say what still needs doing. It reuses
+`fleetHeadline.isAssessed()` unchanged rather than writing a second definition.
+
 ## lib/vpnDetectionFilters.js (added 2026-09-25, v2.185.0)
 
 `matchesFilters` / `filtersActive` / `countriesIn` / `countriesOf` / `searchableOf`. PURE — the

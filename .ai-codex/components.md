@@ -220,6 +220,22 @@ LogResults  result, deviceNames, searchParams, exportError — the results table
 (c) SnmpMetricsCharts  points — full CPU/Memory + Sessions trend line charts (device SNMP page)
 (c) SnmpTrendMini  points — compact sparkline pair for the Overview-tab summary card
 
+## vulnerability/
+
+UpgradePlan (server)  no props — the Upgrade plan tab on `/vulnerability` (v2.187.0). Reads
+`getFleetUpgradePlan`; one card per firewall. ⛔ **A BRANCH JUMP IS RENDERED AS A DIFFERENT KIND
+OF CHANGE, NOT A BIGGER ONE.** `OPTION_WEIGHT` declares the two weights as DATA so a test can
+compare them: the recommendation is a solid `--primary` border at 700/`--text-lg`; the branch-move
+offer is a dashed `--border` at 600/`--text-sm` on `--surface-subtle`. The build fails if the
+borders converge, if the offer wears `--primary`, if its type weight reaches the recommendation's,
+or if either touches the severity ramp. An unrecognised option kind falls to the QUIETER weight —
+it may be under-sold, never dressed as an instruction. ⛔ The offer keeps offer weight even when
+it is the ONLY route (`cross_branch_only`), saying so in words, and its `adds` is `null` rather
+than the raw total, which would promote it into the slot the recommendation vacated.
+⛔ `unplannable` appears TWICE — a hatched fleet table ABOVE the cards (ordering pinned) and a
+per-device hueless block; the count falls back to the named list's length, never to 0.
+50 cases in `tests/upgradePlanView.test.js`, 9 mutations verified.
+
 ## vpn/
 
 VpnThreatFilters (c)  countries, hours — the filter bar on `/vpn?vtab=detections` (v2.185.0):

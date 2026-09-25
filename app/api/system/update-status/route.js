@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.187.0': [
+    "New Upgrade plan tab under Vulnerabilities: it turns 246 open vulnerability findings into 16 upgrade decisions, one per firewall, by working out which single version clears the most on each.",
+    "It separates staying on your current version branch from moving to a new one. A branch move is a different kind of change, so it is offered with what it would additionally clear rather than recommended.",
+    "Anything that cannot be planned — a finding with no published fix version — is counted and listed rather than quietly left out.",
+    "A firewall whose running version is unknown gets no recommendation at all, and says why.",
+  ],
   '2.186.2': [
     "The upgrade target for the fleet's most urgent vulnerability findings now actually reaches the product. The previous two releases fixed the logic but a second, duplicated safety check still refused the update, so nothing changed on screen.",
     "The sync log had been reporting these repairs as successful when the database was rejecting all of them. It now counts what was actually written.",
