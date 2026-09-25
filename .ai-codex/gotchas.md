@@ -483,6 +483,41 @@ address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to eit
 needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
 thing that can be misconfigured. A relative URL avoids the question entirely.
 
+## ⛔ `Number.isFinite(Number(v))` IS NOT A "DID WE READ THIS?" GUARD (2026-09-25)
+
+`Number(null)` is **0**, and 0 is finite. So is `Number('')`, `Number([])` and `Number(false)`.
+The idiom that looks like it separates a real measurement from an unreadable one:
+
+```js
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };  // ⛔ WRONG
+```
+
+…converts **every** unreadable input into a MEASURED ZERO — this codebase's signature bug, inside
+the helper written to prevent it. CLAUDE.md already documents the exact trap for `maxDevices`
+("`Number(null)` is 0 and 0 is finite, so a bare `Number.isFinite` guard on `maxDevices` would turn
+'this licence does not state a count' into 'this licence covers no firewalls'"), and it recurred
+anyway, in `lib/engines/coverageRegister.js`, hours after that paragraph was read.
+
+The form that works — accept a number, or a non-empty numeric STRING (which is how `pg` returns
+`count(*)`), and nothing else:
+
+```js
+const num = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+```
+
+⛔ **WHAT CAUGHT IT WAS THE MANDATED TEST CASE, NOT REVIEW.** CLAUDE.md's Testing section requires
+every new test to include the "we could not measure this" case, not just pass and fail. Reading the
+helper did not reveal it — it looks correct, and every pass/fail fixture went green. `withCap()` in
+`workQueueData.js` has carried the correct form (and a comment explaining why) since it was
+written; copy from there rather than re-deriving it.
+
 ## ⛔ `.env.local` GREW TO 2.2 GB AND TOOK THE CONSOLE TO PLAINTEXT (2026-09-24)
 
 **Symptom:** a deploy reported `completed WITH ERRORS` — both verification steps failed with
@@ -1580,7 +1615,8 @@ only CSV escape in the repo.
 
 ⛔ **THE SHARPEST FORM OF THE DEFECT, worth keeping because it explains why nobody noticed:** the old
 test was `/[",
-]/`, and the canonical payload `=cmd|'/c calc'!A1` contains no comma, no quote
+
+]/`, and the canonical payload `=cmd|'/c calc'!A1` contains no comma, no quote
 and no newline. So the most dangerous value in the export was not "quoted but un-neutralised" — it
 was written out **RAW AND UNQUOTED**. `@SUM(1,1)` got quoted only by the luck of its comma, and was
 still a live formula.

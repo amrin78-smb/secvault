@@ -187,6 +187,29 @@ its own cost inside `gatherApplications`, with a COUNT on `application_flows` st
 the whole-fleet load. If this page ever gains an `evaluateAllApplications()` call of its own, pass
 the result in as `opts.applications` rather than letting both run.
 
+## app/(dashboard)/coverage/page.js  -> `/coverage`  (v2.188.0)
+
+The blind-spot register — A2. Fully SERVER-rendered, no client fetch and no API route: reads
+`getCoverageRegister(pool, {deviceIds})` and hands the result straight to
+`components/devices/CoverageRegister.js`. Sidebar: **Monitor → Coverage** (`IconEyeOff`).
+
+⛔ **SCOPE-AWARE** — one of only five, and `lib/deviceScopeCoverage.js` classifies it `aware`.
+The page's whole subject is what is MISSING, so a fleet-wide register shown to a scoped account
+would disclose the existence AND the collection health of every firewall outside that scope. It
+narrows in SQL via `deviceIds`, never by filtering the returned entries (which would leave the
+summary computed over devices the operator cannot see).
+
+⛔ **AN UNKNOWN SCOPE RENDERS AN EXPLICIT REFUSAL, not an empty register.** On this page an empty
+result reads as "no blind spots" — the single most misleading thing this product could print — so
+the refusal is a distinct branch and says the fleet has not been measured.
+
+⛔ **NOT A SECURITY VERDICT.** "Fully visible" means SecVault can see the firewall and says
+nothing about whether it is configured safely. On the reference fleet **0 of 16 devices are fully
+covered**, which is why the engine ranks by CONSEQUENCE rather than gap count.
+
+Smoke markers: `Gaps by evidence source` / `Coverage could not be shown` — deliberately NOT the nav
+label, which the shared shell renders into every page.
+
 ## app/(dashboard)/reports/page.js  -> `/reports`  (v2.120.0, rebuilt v2.121.0)
 
 `server` — `ReportsPage` — the report catalogue. Lists via `visibleReports(caps).map(clientSafe)`

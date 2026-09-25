@@ -92,8 +92,8 @@ detection third.
 
 | # | Item | Measured justification | Done |
 |---|---|---|:--:|
-| A1 | **Upgrade planner** | 246 assessments → ~16 decisions. Every Palo Alto carries **17 advisories across 7 target versions**, so one upgrade clears all 17. ⛔ **30 of 246 have no fix version — including ALL THREE `patch_now`** (CVE-2026-24858, CVSS 9.4, KEV, on three Fortinets): the fleet's only urgent CVEs are un-actionable and nothing says so | [ ] |
-| A2 | **Blind-spot register** | **PAKFood is fully collected and sends ZERO syslog**; all five Fortinets are 100% unmeasured `hit_count` while being the highest-logging devices on the fleet; TUG is 54/54 unmeasured. All three render beside fully-evidenced devices with nothing distinguishing them | [ ] |
+| A1 | **Upgrade planner** | 246 assessments → ~16 decisions. Every Palo Alto carries **17 advisories across 7 target versions**, so one upgrade clears all 17. ⛔ **30 of 246 have no fix version — including ALL THREE `patch_now`** (CVE-2026-24858, CVSS 9.4, KEV, on three Fortinets): the fleet's only urgent CVEs are un-actionable and nothing says so | **[x]** v2.187.0 |
+| A2 | **Blind-spot register** | **PAKFood is fully collected and sends ZERO syslog**; all five Fortinets are 100% unmeasured `hit_count` while being the highest-logging devices on the fleet; TUG is 54/54 unmeasured. All three render beside fully-evidenced devices with nothing distinguishing them | **[x]** v2.188.0 |
 | A3 | **Log-derived rule usage** | ~84 of 235 unmeasured rules gain evidence (54 Fortinet by rule-id, 30 Palo Alto by name). ⛔ Never written into `hit_count`; name-matching is a weaker grade and may not authorise a deletion | [ ] |
 | A4 | **Object & rule consolidation** | 3,298 of 10,092 objects (33%) referenced by nothing; 771 duplicates; up to 405 rule rows removable. ⛔ Needs **no hit counts**, so it is the one cleanup analytic that is conclusive on Fortinet | [ ] |
 | A5 | **Fleet conformance / odd-one-out** | 11 Palo Altos, 5 Fortinets. The only one that DISCOVERS checks the 45-check library lacks. ⛔ Majority ≠ correctness — reports "1 of 11 differs", never "misconfigured" | [ ] |

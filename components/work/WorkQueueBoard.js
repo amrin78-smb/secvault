@@ -67,6 +67,11 @@ const TYPE_LABEL = {
   collection_gap: 'Collection',
   segmentation: 'Segmentation',
   ingest_drop: 'Log ingest',
+  // Fell through to the raw key ('application_flow') until 2026-09-25 — the
+  // fallback renders the type verbatim, so a missing entry shows a snake_case
+  // identifier in the UI rather than failing visibly.
+  application_flow: 'Application',
+  coverage_gap: 'Coverage',
 };
 
 

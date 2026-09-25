@@ -312,3 +312,18 @@ export function IconApplications(p) {
     </svg>
   );
 }
+
+// Coverage / blind-spot register. ⛔ An eye with a slash: the nav rule is that
+// every entry keeps a DISTINCT GLYPH, and "what SecVault cannot see" has no
+// near neighbour in this set — IconSearch, IconGrid and IconChecklist are all
+// already spoken for by pages that mean something else.
+export function IconEyeOff(p) {
+  return (
+    <svg {...base(p)}>
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <path d="M6.61 6.61A18.15 18.15 0 0 0 2 12s3 8 10 8a9.12 9.12 0 0 0 5.39-1.61" />
+      <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  );
+}

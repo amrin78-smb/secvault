@@ -21,7 +21,7 @@ import {
   IconGrid,
   IconChecklist,
   IconReport,
-  IconApplications,
+  IconApplications, IconEyeOff,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -81,6 +81,10 @@ const NAV_GROUPS = [
     // first thing a new evaluator sees a to-do list rather than a posture.
     { href: '/work', label: 'Work queue', Icon: IconChecklist },
     { href: '/alerts', label: 'Alerts', Icon: IconBell },
+    // Where SecVault cannot see. Sits in Monitor rather than Risk because it
+    // is not a finding about the firewalls -- it is a statement about how
+    // much of everything else on this product is actually measured.
+    { href: '/coverage', label: 'Coverage', Icon: IconEyeOff },
     // ⛔ The only nav entry with a capability requirement today. Log search
     // returns unredacted syslog; the Operator role does not include it. Hiding
     // it here stops discovery — app/(dashboard)/logs/page.js is what actually

@@ -978,6 +978,57 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/engines/coverageRegister.js + coverageRegisterData.js (added 2026-09-25, v2.188.0)
+
+The A2 blind-spot register: where SecVault cannot see, and what that costs. `coverageRegister.js`
+is PURE (`assessDevice` / `rankRegister` / `summariseRegister` / `branchOf`-free — no pool);
+`coverageRegisterData.js` is the plumbing (`getCoverageRegister(pool, {deviceIds?, now?})` →
+`{entries, summary, failures, generatedAt}`, entries already ranked).
+
+Seven evidence sources per device, each naming the product engines it gates: `ruleset`,
+`ruleUsage` (hit counts), `syslog`, `interfaces`, `objects`, `config`, `version`. Four states:
+`measured` / `partial` / `absent` / `stale`.
+
+⛔ **RANK BY CONSEQUENCE, NOT GAP COUNT.** All 16 devices on the reference fleet have at least one
+gap, so a list of devices-with-gaps is a list of the fleet. `answersWithheld` = sum over gaps of
+(state weight × number of engines that source gates). A device missing ONE source that gates five
+engines outranks one missing three that gate nothing.
+
+⛔ **STALE IS WORSE THAN ABSENT AND IS ITS OWN STATE**, ranked above a heavier pure gap. Absent
+evidence reads as a gap; stale evidence reads as an ANSWER. Live: **TSR_EKC's rule analysis last
+ran 2026-08-07, `last_rules_collected_at` is NULL, and its 22 `unused` findings PREDATE the
+`hit_count` tri-state fix** — artefacts of a bug corrected a month earlier, still rendering beside
+today's findings with nothing distinguishing them.
+
+⛔ **`fullyCovered` IS NAMED FOR VISIBILITY AND IS NOT AN ALL-CLEAR.** It means SecVault can see
+the firewall, nothing more. A test rejects any field here that reads as a security verdict.
+
+⛔ **`num()` DOES NOT USE A BARE `Number.isFinite(Number(v))`.** `Number(null)` is 0 and 0 is
+finite — the same trap CLAUDE.md documents for `maxDevices` — so the naive guard turns every
+unreadable count into a MEASURED ZERO, which is the precise bug class this engine exists to
+surface. It was live here until the mandated "we could not measure this" test caught it; the test
+now covers the whole coercion family (`null`/`undefined`/`''`/`[]`/`false`/`NaN`), and a real `0`
+and pg's string `'0'` still read as measurements.
+
+⛔ **A FAILED READ RETURNS EMPTY `entries` PLUS `failures`, and the two are indistinguishable from
+a clean fleet by the summary alone** (both give `devices: 0`). Two tests assert that, so the
+obligation is explicitly on the caller: no consumer may render a verdict, a count or an all-clear
+while `failures` is non-empty.
+
+⛔ **`syslog_events` IS FORBIDDEN** — coverage counts come from `syslog_rollup_hourly`. Pinned by a
+source scan with comments STRIPPED FIRST.
+
+⛔ `rule_analysis_results` has **`analyzed_at`, not `created_at`** — verified against
+`schema.sql:681`. The probe SQL this was designed from used `created_at`, which would have thrown
+and returned an empty register that looked like a clean fleet.
+
+**Work queue source #11** (`coverage_gap`, `gatherCoverageGaps`): always `evidence: 'unmeasured'`,
+so it can never reach `act_now`. ⛔ **It EXCLUDES devices `collection_gap` already reports**, reusing
+that source's own `COLLECTION_STALE_DAYS` rather than a second copy — an unreachable firewall has
+one problem, not two, and its coverage gaps are a symptom of the collection failure. ⛔ An
+incomplete register THROWS so `runSource` banners it, rather than contributing zero items silently.
+⛔ Cells with `certain:false` do not become work: an unchecked cell is not an established gap.
+
 ## lib/engines/upgradePlan.js + upgradePlanData.js (added 2026-09-25, v2.187.0)
 
 One upgrade DECISION per firewall, from the CVE assessments already computed. `upgradePlan.js` is

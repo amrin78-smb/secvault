@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.188.0': [
+    "New Coverage page under Monitor: it shows where SecVault cannot see, and what each gap costs. A firewall nothing can be collected from produces no vulnerabilities, no failing checks and no rule findings — so today it renders as the healthiest device on the fleet.",
+    "Every firewall on the reference fleet has at least one gap, so the register ranks by consequence — how many answers a gap withholds — rather than by how many gaps there are.",
+    "Findings that are stale are called out separately from evidence that is missing. One firewall's rule analysis last ran seven weeks ago and its findings still appear alongside today's with nothing marking them as that old.",
+    "\"We could not check\" is kept distinct from \"there is a gap\", and a register that failed to load withholds every count rather than reporting zero blind spots.",
+    "Coverage gaps also feed the work queue, always in the \"Needs a human\" band — they are a statement about what is unmeasured, never an urgent finding. A firewall that cannot be reached at all is still reported once, by the existing collection check.",
+  ],
   '2.187.0': [
     "New Upgrade plan tab under Vulnerabilities: it turns 246 open vulnerability findings into 16 upgrade decisions, one per firewall, by working out which single version clears the most on each.",
     "It separates staying on your current version branch from moving to a new one. A branch move is a different kind of change, so it is offered with what it would additionally clear rather than recommended.",

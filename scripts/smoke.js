@@ -78,6 +78,10 @@ const STATIC_ROUTES = [
   { path: '/', markers: ['Security Score', 'Overview sections'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
   { path: '/alerts', markers: ['Fleet-wide items needing attention'] },
+  // ⛔ NOT a nav label: the sidebar renders 'Coverage' into every page from
+  // the shared layout, so such a marker is satisfied by a working shell
+  // around a dead page -- the exact failure this sweep exists to catch.
+  { path: '/coverage', markers: ['Gaps by evidence source', 'Coverage could not be shown'] },
   { path: '/logs', markers: ['Search raw firewall logs', 'Log search is not available', 'received_at'] },
   { path: '/reports', markers: ['Point-in-time PDFs you can hand to an auditor'] },
   { path: '/devices', markers: ['Firewalls sending syslog from an address that is not in the inventory', 'Add firewall'] },

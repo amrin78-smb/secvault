@@ -222,6 +222,21 @@ LogResults  result, deviceNames, searchParams, exportError — the results table
 
 ## vulnerability/
 
+CoverageRegister (server)  `{entries, summary, failures, generatedAt}` — the whole of `/coverage`
+(v2.188.0). ⛔ **RENDERS `entries` IN THE ORDER GIVEN**; there is deliberately no `.sort(` in the
+file and a test asserts it, because the engine's consequence ranking is the feature.
+⛔ `CELL_WEIGHT` declares the five visual weights AS DATA so a test can compare them rather than
+grep CSS strings — `stale`(0) > `absent`/`unknown`(1) > `partial`(2) > `measured`(3). **`stale` is
+the only hued state in the file** (`--tint-warn`), louder than `absent`, because a stale answer is
+ACTED ON where a missing one is not; `absent` is hueless (`--unmeasured` + `--hatch` + a dashed
+border). An unrecognised state falls to `unknown`, never `measured` — the asymmetry is the safety
+property. ⛔ `certain:false` OVERRIDES the claimed state: the chip reads **"Not checked"**, so a
+count we could not read can never be reported as a confirmed gap.
+⛔ **While `failures` is non-empty EVERY headline count is withheld** (rendered hueless, not `0`)
+— a failed register and a clean fleet produce identical summary totals, so the caller must not
+print either. ⛔ A test rejects all-clear vocabulary (`healthy`/`clean`/`secure`/`✓`) reaching the
+screen, comments stripped first.
+
 UpgradePlan (server)  no props — the Upgrade plan tab on `/vulnerability` (v2.187.0). Reads
 `getFleetUpgradePlan`; one card per firewall. ⛔ **A BRANCH JUMP IS RENDERED AS A DIFFERENT KIND
 OF CHANGE, NOT A BIGGER ONE.** `OPTION_WEIGHT` declares the two weights as DATA so a test can
