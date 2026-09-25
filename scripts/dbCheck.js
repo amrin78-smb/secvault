@@ -1016,6 +1016,18 @@ const REGISTRY = [
   { mod: 'lib/engines/exposureQuery.js', fn: 'computeDeviceExposure', args: (c) => [c.deviceId, {}], needsDevice: true, spec: { object: [] } },
   { mod: 'lib/engines/exposureQuery.js', fn: 'computeFleetExposure', args: () => [{}], spec: { object: ['totals', 'devices', 'errors'] } },
 
+  // ⛔ THE FOUR ANALYTICS DATA LAYERS SHIPPED 2026-09-25 (A1–A5). Every one of
+  // them was outside this registry when it landed, which means `npm run dbcheck`
+  // reported clean while their SQL had never once been executed against the real
+  // schema — the gate whose entire purpose is catching schema drift, silently
+  // not covering the newest code. `tests/dbcheckRegistry.test.js` now fails the
+  // build on a `lib/engines/*Data.js` that is absent from here -- and it did,
+  // catching fleetConformanceData the moment it landed.
+  { mod: 'lib/engines/upgradePlanData.js', fn: 'getFleetUpgradePlan', args: () => [{}], spec: { object: [] } },
+  { mod: 'lib/engines/coverageRegisterData.js', fn: 'getCoverageRegister', args: () => [{}], spec: { object: ['entries', 'summary', 'failures'] } },
+  { mod: 'lib/engines/ruleConsolidationData.js', fn: 'getFleetConsolidation', args: () => [], spec: { object: [] } },
+  { mod: 'lib/engines/fleetConformanceData.js', fn: 'getFleetConformance', args: () => [{}], spec: { object: ['cohorts', 'summary', 'failures'] } },
+
   { mod: 'lib/engines/segmentationData.js', fn: 'listFleetZones', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'listIntents', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'loadFleetRulesWithEvidence', args: (c) => [1, c.now], spec: { object: ['rules', 'rulesCollected', 'deviceCount'] } },

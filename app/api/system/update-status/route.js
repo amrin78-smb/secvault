@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.190.0': [
+    "New Conformance page: it compares each firewall against the others of its kind and shows where one differs — finding deviations nobody wrote a compliance check for. On this fleet one firewall accounts for 18 of the 21 differences among the FortiGates.",
+    "⛔ A difference is not a fault, and the page never says otherwise. One firewall here is the only one NOT on the default SSH port — it is the hardened one and the majority is weaker. Firewalls are only compared against others collected the same way, and a group too small to have a majority says so instead of reporting nothing.",
+    "New Consolidation tab under a firewall's Rule hygiene: rules that are identical except in one field, which could be merged. 92 such groups across the fleet covering 156 rule rows. It needs no hit counters, so it works on the FortiGates where every other cleanup analysis is blocked.",
+    "Merging rules that are far apart in the list can change what the firewall does, so each group is checked against the rules in between and says whether that check could be completed. Nothing is ever applied automatically.",
+    "Fixed: 11 objects were being reported as unused while a NAT rule still referenced them — NAT was not being counted as a use. Object checks now also run after NAT is collected rather than before, so a newly added NAT rule no longer leaves its object looking unused for a cycle.",
+  ],
   '2.189.0': [
     "Rule usage taken from firewall logs now says what it rests on. Where a firewall cannot report its own hit counters, SecVault reads usage from the logs instead — but some firewalls identify a rule in their logs by an exact rule ID and others only by its name, and those are not equally reliable.",
     "A name-based answer can no longer justify removing a rule. A rule renamed during the period looks like it carried no traffic when it may be busy, so that evidence now informs you without authorising a deletion, and says so on the change request handed to whoever edits the firewall.",

@@ -327,3 +327,18 @@ export function IconEyeOff(p) {
     </svg>
   );
 }
+
+// Fleet conformance / odd-one-out. Four bars of equal height and one that
+// differs — the whole question the page asks, and distinct from IconChart's
+// ascending bars and IconGrid's squares at 16px.
+export function IconOddOneOut(p) {
+  return (
+    <svg {...base(p)}>
+      <line x1="4" y1="9" x2="4" y2="20" />
+      <line x1="9" y1="9" x2="9" y2="20" />
+      <line x1="14" y1="9" x2="14" y2="20" />
+      <line x1="19" y1="3" x2="19" y2="20" />
+      <circle cx="19" cy="3" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

@@ -82,6 +82,10 @@ const STATIC_ROUTES = [
   // the shared layout, so such a marker is satisfied by a working shell
   // around a dead page -- the exact failure this sweep exists to catch.
   { path: '/coverage', markers: ['Gaps by evidence source', 'Coverage could not be shown'] },
+  // ⛔ Column headers from ConformanceBoard, not the nav label: the shell
+  // renders 'Conformance' into every page, so such a marker is satisfied by a
+  // working shell around a dead page.
+  { path: '/conformance', markers: ['In the smaller group', 'Conformance could not be shown'] },
   { path: '/logs', markers: ['Search raw firewall logs', 'Log search is not available', 'received_at'] },
   { path: '/reports', markers: ['Point-in-time PDFs you can hand to an auditor'] },
   { path: '/devices', markers: ['Firewalls sending syslog from an address that is not in the inventory', 'Add firewall'] },

@@ -1021,6 +1021,77 @@ a rule" (live: PAKFood). Getting this wrong makes a quiet ruleset permanently un
 stub pool feeding `getDeviceLogCoverage` must supply `first_bucket`, or history reads as unknown
 and nothing certifies — deliberately.
 
+## lib/engines/fleetConformance.js + fleetConformanceData.js (A5, v2.190.0)
+
+*Which firewall is configured unlike its peers?* The ONLY analytic here that DISCOVERS checks
+rather than evaluating the curated 45-check library. `fleetConformance.js` is PURE
+(`buildCohorts`/`enumeratePaths`/`findDeviations`/`summariseConformance`);
+`fleetConformanceData.js` is the plumbing (`getFleetConformance(pool, {deviceIds?, now?})`).
+
+⛔ **MAJORITY IS NOT CORRECTNESS. ABSOLUTE.** Output is "1 of 5 differs", never "misconfigured".
+`CONFORMANCE_CLAIM` is exported and a test rejects that whole vocabulary from every string BOTH
+files emit — and the stripper is PROVEN, not assumed: the header deliberately contains
+"misconfigured" and a test asserts the raw source matches it while the stripped source does not.
+**The live fleet contains the proof of the rule**: `global.admin-ssh-port` is 4x `22` against
+OKF(F2) `5022` — OKF is the only firewall NOT on the default port, i.e. the HARDENED one, and
+the majority is weaker. ⛔ No score, no grade, no percentage, no band; a test asserts their absence.
+
+⛔ **THE COHORT IS `(vendor, mgmt_method)`, AND THAT IS THE WHOLE DESIGN.** TUG is the only Palo
+Alto collected over SSH and its parser emits a different structure entirely (`tree`/`hostname` vs
+`devices`/`shared`), so grouped by VENDOR it deviates on nearly every path and every finding is
+false. Live cohorts: `paloalto/api` 10 -> **3 value** deviations, `fortinet/ssh` 5 -> **21**,
+`paloalto/ssh` 1 -> `insufficient_cohort`. Ranking leads with OKF(F2) at **18 of 21**.
+
+⛔ **THREE STATUSES, NOT TWO**: `measured` / `insufficient_cohort` / `threshold_unreachable` —
+the third covers a cohort of exactly 3, which is compared and structurally incapable of producing
+a minority inside the threshold. It reports what it compared, so an empty list cannot read as an
+all-clear. ⛔ **MINORITY = 25% floored**, derived not chosen: at n=5 a 4-v-1 qualifies and a 3-v-2
+does not (a fleet split down the middle is not an odd one out); at n=10, 9-v-1 and 8-v-2 qualify
+and 7-v-3 does not.
+
+⛔ **VALUE and PRESENCE deviations are separate and never summed** — presence is much weaker, and
+at depth 4+ it produced 40-97 near-useless items. Depth is **3**, measured: noise
+(`present-on-exactly-1`) outpaces comparable ground ~3:1 as depth grows. ⛔ **Device-IDENTITY leaves
+are excluded by a NAMED list with a reason each** — `system_info.netmask` fires 9v1 and every
+firewall legitimately has its own address; matching is on the WHOLE normalised last segment, never
+a substring, because `dns.server-hostname` is a real deviation a regex would eat along with
+`dns.primary`/`dns.secondary`. ⛔ A device with no parsed config is EXCLUDED and COUNTED, never
+treated as agreeing; `devicesCompared` / `devicesInUnreportableCohorts` / `devicesExcluded` are
+three different facts.
+
+⛔ The board's failure banner is `--tint-warn`, NOT `--tint-danger` (which `CoverageRegister`
+uses for the same job): on a page whose every row is a difference and not a fault, a red panel at
+the top lends its reading to the rows beneath it.
+
+## lib/engines/ruleConsolidation.js + ruleConsolidationData.js (A4, v2.190.0)
+
+Rules identical except in ONE of `src_addresses`/`dst_addresses`/`services`, and whether merging
+them is safe. ⛔ **NOT `generalization`** — that is a pairwise SUBSUMPTION relation inside the
+O(n^2) block that `PAIRWISE_FINDING_TYPES` marks as SKIPPED above 1000 rules. This is O(n)
+canonical-key grouping: 272 ms over 1,782 rules including IDC FW 721. ⛔ **Needs NO hit counts**,
+so it is the one cleanup analytic conclusive on Fortinet.
+
+Live: **92 groups / 156 removable rows — 41 `safe_to_merge` (55 rows), 51 `needs_review` (101)**.
+
+⛔ **MERGING NON-ADJACENT RULES CHANGES SEMANTICS** if anything between them matches the same
+traffic, so interference is TESTED against every intervening rule, and an UNDETERMINABLE check
+falls to `needs_review`, NEVER `safe_to_merge`. 24 groups carry `undetermined` (unresolved object
+names). Resolution is `objectResolver`'s, unchanged. ⛔ `safe_to_merge` renders as **"Ordering
+checked"**, never "safe": it means no interfering rule was FOUND, not that the change is safe to
+make. `MERGE_CLAIM` is exported, rendered verbatim, and there is no write path.
+
+⛔ **THE CANONICAL KEY INCLUDES `applications`** — the vendor L7 app-ID is a MATCHING CONSTRAINT,
+not metadata, and two rules differing in service AND app-ID are not one rule written twice. Also
+`log_enabled`/`nat_enabled`/`schedule`/`expiry_date` (merging a logged rule with an unlogged one
+changes what is recorded). A key omitting these over-counts by ~25 rows — the first pass at this
+measured 181 and the real figure is 156. ⛔ Set fields are SORTED (they are matched as unions); the
+rule LIST never is, because its order is the entire subject of the interference check.
+
+⛔ **NEGATION IS A KNOWN RESIDUAL**: `firewall_rules` has no negation column and no adapter parses
+one, so the engine scans `raw_rule` for a truthy `/negate/i`. Verified live — PAN-OS emits it on
+133 rules (0 enabled) and Fortinet passthrough preserves 24 distinct keys — but see
+`connectors.md`: normalising `raw_rule` into a fixed shape would blind the guard.
+
 ## A3 consumers — where the grade travels (v2.189.0)
 
 `usageGrade` / `deletionEvidence` are ADDED to the pass-through shape of both downstream engines,

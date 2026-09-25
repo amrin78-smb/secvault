@@ -196,6 +196,23 @@ falls back to hand-built `device`-grade fields — a read failure of OURS must n
 in the firewall. ⛔ `?sort=hits` is relabelled "(device counter only)": the ORDER BY cannot reach
 the rollup, and a sort quietly meaning less than the column it names is the same class of mistake.
 
+## app/(dashboard)/conformance/page.js  -> `/conformance`  (v2.190.0)
+
+A5, the odd-one-out lens. Server-rendered, no API route, no stored verdict. Sidebar: **Risk ->
+Conformance** (`IconOddOneOut`).
+
+⛔ **SCOPE-AWARE, AND SCOPE CHANGES THE COHORTS rather than just filtering rows.** An account
+granted 2 of the 5 Fortinets gets a cohort of 2, which the engine reports as `insufficient_cohort`
+and refuses to draw a majority from. That is the correct answer, not a degraded one: you cannot say
+which firewall is the odd one out of a group you cannot see. An UNKNOWN scope renders an explicit
+refusal.
+
+⛔ **A DIFFERENCE IS NOT A FAULT** and the subtitle says so. See `lib.md` for the live proof
+(`admin-ssh-port`: the minority firewall is the hardened one).
+
+Smoke markers: `In the smaller group` / `Conformance could not be shown` — column headers, not the
+nav label the shared shell renders into every page.
+
 ## app/(dashboard)/coverage/page.js  -> `/coverage`  (v2.188.0)
 
 The blind-spot register — A2. Fully SERVER-rendered, no client fetch and no API route: reads

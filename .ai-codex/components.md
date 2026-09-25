@@ -222,7 +222,23 @@ LogResults  result, deviceNames, searchParams, exportError — the results table
 
 ## vulnerability/
 
-UsageGrade (server)  `components/analysis/UsageGrade.js` (v2.189.0). The ONLY place a rule-usage
+ConformanceBoard (server)  `{cohorts, summary, failures, generatedAt, claim}` — the whole of
+`/conformance` (v2.190.0). Props only, no fetching. ⛔ Renders `CONFORMANCE_CLAIM` verbatim; a test
+rejects *misconfigured*/*wrong*/*should*/*fix*/*violation* from the comment-STRIPPED source (JSX
+prose included) and proves the stripper rather than assuming it. ⛔ No score/grade/percentage.
+⛔ `insufficient_cohort` and `threshold_unreachable` are VISIBLE hueless states, never an empty
+all-clear. ⛔ Value and presence deviations are never summed into one tile. ⛔ Its failure banner
+is `--tint-warn`, deliberately NOT danger — a red panel would lend its reading to rows that are
+differences, not faults; a test asserts it is the only tint pair and that no severity token appears.
+
+ConsolidationTab (server)  `{deviceId, searchParams}` — the Consolidation tab on
+`/devices/[id]/analysis` (v2.190.0). ⛔ `VERDICT_WEIGHT` is DATA and `needs_review` is the LOUDER
+rank; an unrecognised verdict falls to it, and `orderGroups()` sorts on the same rank the colour
+comes from, so colour and reading order cannot disagree — the v2.122.0 SegmentationBoard failure.
+⛔ `safe_to_merge` is labelled **"Ordering checked"**, never "safe". ⛔ No form, button, onClick or
+POST — asserted by test; this proposes and never applies.
+
+UsageGrade (server)UsageGrade (server)  `components/analysis/UsageGrade.js` (v2.189.0). The ONLY place a rule-usage
 grade is drawn. Exports `USAGE_GRADES` / `LOG_EVIDENCE_REASONS` as DATA so tests compare them
 rather than grep CSS. `device` teal · `log-id` info · `log-name` **warning + rename caveat** ·
 `null` **hueless** (`NotMeasured`, never a muted Badge — a flat grey chip reads as a real but quiet

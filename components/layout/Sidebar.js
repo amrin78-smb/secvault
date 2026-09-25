@@ -21,7 +21,7 @@ import {
   IconGrid,
   IconChecklist,
   IconReport,
-  IconApplications, IconEyeOff,
+  IconApplications, IconEyeOff, IconOddOneOut,
 } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
@@ -104,6 +104,10 @@ const NAV_GROUPS = [
     { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
     { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
     { href: '/segmentation', label: 'Segmentation', Icon: IconGrid },
+    // Which firewall is unlike its peers. In Risk rather than Inventory
+    // because a deviation is a triage lead -- though never, on its own, a
+    // fault: the odd one out may be the only one configured deliberately.
+    { href: '/conformance', label: 'Conformance', Icon: IconOddOneOut },
     // ⛔ FILED UNDER RISK, BESIDE SEGMENTATION, AND NOT UNDER INVENTORY.
     // It is tempting to read "applications" as a list of things you have.
     // What this page actually produces is VERDICTS: a declared flow that a
