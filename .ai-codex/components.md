@@ -222,6 +222,17 @@ LogResults  result, deviceNames, searchParams, exportError — the results table
 
 ## vulnerability/
 
+UsageGrade (server)  `components/analysis/UsageGrade.js` (v2.189.0). The ONLY place a rule-usage
+grade is drawn. Exports `USAGE_GRADES` / `LOG_EVIDENCE_REASONS` as DATA so tests compare them
+rather than grep CSS. `device` teal · `log-id` info · `log-name` **warning + rename caveat** ·
+`null` **hueless** (`NotMeasured`, never a muted Badge — a flat grey chip reads as a real but quiet
+category). ⛔ Red and violet are both refused by a test: red is danger only, violet is
+`EvidenceMark`'s alone. ⛔ No descriptor may claim sufficiency to remove a rule — a test rejects
+*safe to remove* / *can be removed* / *sufficient evidence* / *proves* / *guarantee*. ⛔ The
+`logEvidence` vocabulary is HARVESTED FROM `ruleHitCorrelation.js`'s own source, so a new engine
+state cannot silently render as "no evidence available". Exports `UsageGradeBadge` and a default
+`RuleUsageCell`.
+
 CoverageRegister (server)  `{entries, summary, failures, generatedAt}` — the whole of `/coverage`
 (v2.188.0). ⛔ **RENDERS `entries` IN THE ORDER GIVEN**; there is deliberately no `.sort(` in the
 file and a test asserts it, because the engine's consequence ranking is the feature.

@@ -187,6 +187,15 @@ its own cost inside `gatherApplications`, with a COUNT on `application_flows` st
 the whole-fleet load. If this page ever gains an `evaluateAllApplications()` call of its own, pass
 the result in as `opts.applications` rather than letting both run.
 
+## app/(dashboard)/devices/[id]/rules/page.js — usage column (changed v2.189.0)
+
+The `Hits` column became **`Usage`** and now calls `correlateDeviceRules`, so a rule whose device
+cannot report a counter shows a log-derived figure with its GRADE instead of a bare em-dash. Before
+this, neither `log-id` nor `log-name` appeared anywhere in the product. ⛔ A failed correlation
+falls back to hand-built `device`-grade fields — a read failure of OURS must never render as a gap
+in the firewall. ⛔ `?sort=hits` is relabelled "(device counter only)": the ORDER BY cannot reach
+the rollup, and a sort quietly meaning less than the column it names is the same class of mistake.
+
 ## app/(dashboard)/coverage/page.js  -> `/coverage`  (v2.188.0)
 
 The blind-spot register — A2. Fully SERVER-rendered, no client fetch and no API route: reads

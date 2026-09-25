@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { pool } from '../../../../../lib/db';
+import { correlateDeviceRules } from '../../../../../lib/engines/ruleHitCorrelation';
 import Table from '../../../../../components/ui/Table';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import PageHeader from '../../../../../components/ui/PageHeader';
+import RuleUsageCell, { USAGE_CLAIM } from '../../../../../components/analysis/UsageGrade';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,14 @@ const SORT_OPTIONS = {
   // NULLS LAST is required, not cosmetic: Postgres sorts NULLs FIRST in a
   // DESC ordering, so without it every UNMEASURED rule would head the
   // "most hits" list ahead of the genuinely busiest rules.
+  //
+  // ⛔ THIS SORTS THE DEVICE'S OWN COUNTER, NOT THE DISPLAYED FIGURE. The Usage
+  // column below can also answer from the firewall's logs, and that answer
+  // lives in syslog_rollup_hourly — it cannot be reached from this ORDER BY at
+  // all. So a log-answered rule still sorts as a NULL, i.e. last. Stated in the
+  // option label rather than left for someone to discover: a sort that quietly
+  // means something narrower than the column it names is the same class of
+  // mistake as a number whose window is smaller than its sentence claims.
   hits: 'hit_count DESC NULLS LAST',
 };
 
@@ -138,6 +148,35 @@ export default async function DeviceRulesPage({ params, searchParams }) {
   const { rows, total, page, sortKey } = await getRules(pool, device.id, searchParams || {});
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // ⛔ THE HIT COUNTER IS NOT THE ONLY SOURCE, AND THIS COLUMN USED TO PRETEND
+  // IT WAS. `hit_count` is NULL for every vendor/transport that cannot report
+  // one (Fortinet SSH, Palo Alto SSH, Sangfor), and this page drew every one of
+  // those as a bare em-dash — while the firewall's own logs could answer 84 of
+  // them on the live fleet. Correlating here is what lets the four grades
+  // actually appear in the product.
+  //
+  // ⛔ AND IT MAY NOT TAKE THE PAGE DOWN. The correlation reads the syslog
+  // rollups; on an installation with no collector, or one whose rollup read
+  // fails, the honest outcome is the device counter alone — NOT a blank rule
+  // list. A failure therefore falls back to the un-enriched rows, which render
+  // exactly as they did before: a real count, or "not measured".
+  //
+  // ⛔ The fallback still has to produce the DEVICE-grade fields by hand. Left
+  // as the raw rows, every rule with a perfectly good counter would render
+  // "not measured" — a read failure of OURS shown as a gap in the FIREWALL,
+  // which is the exact substitution this whole feature exists to refuse.
+  const deviceGradeOnly = (r) => Object.assign({}, r, {
+    effectiveHitCount: r.hit_count === null || r.hit_count === undefined ? null : Number(r.hit_count),
+    usageGrade: r.hit_count === null || r.hit_count === undefined ? null : 'device',
+    logEvidence: null,
+  });
+  let usageRows;
+  try {
+    usageRows = await correlateDeviceRules(pool, device.id, rows);
+  } catch {
+    usageRows = rows.map(deviceGradeOnly);
+  }
+
   const csvHref = `/api/devices/${device.id}/rules?format=csv&${buildQueryString(searchParams || {}, { page: undefined })}`;
 
   return (
@@ -200,7 +239,7 @@ export default async function DeviceRulesPage({ params, searchParams }) {
           <label htmlFor="sort">Sort</label>
           <select id="sort" name="sort" defaultValue={sortKey} className="input">
             <option value="sequence">Sequence #</option>
-            <option value="hits">Hit Count</option>
+            <option value="hits">Hit count (device counter only)</option>
           </select>
         </div>
         <button type="submit" className="btn btn-secondary">
@@ -222,11 +261,13 @@ export default async function DeviceRulesPage({ params, searchParams }) {
             <col style={{ width: '8%' }} />
             <col style={{ width: '8%' }} />
             <col style={{ width: '10%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '9%' }} />
+            {/* Comment and Applications each give up 2% so Usage can carry a
+                grade chip and, where it needs one, a visible caveat. */}
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '7%' }} />
             <col style={{ width: '6%' }} />
             <col style={{ width: '5%' }} />
-            <col style={{ width: '4%' }} />
+            <col style={{ width: '8%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -243,11 +284,11 @@ export default async function DeviceRulesPage({ params, searchParams }) {
               <th>Applications</th>
               <th>Schedule</th>
               <th>Log</th>
-              <th>Hits</th>
+              <th title={USAGE_CLAIM}>Usage</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {usageRows.map((r) => (
               <tr key={r.id} style={{ borderLeft: `4px solid ${actionBorderColor(r.action)}` }}>
                 <td>{r.sequence_number ?? '—'}</td>
                 <td title={r.rule_name || ''}>{r.rule_name || '—'}</td>
@@ -262,8 +303,11 @@ export default async function DeviceRulesPage({ params, searchParams }) {
                 <td title={joinArray(r.applications)}>{joinArray(r.applications)}</td>
                 <td title={r.schedule || ''}>{r.schedule || '—'}</td>
                 <td>{r.log_enabled ? 'Yes' : 'No'}</td>
-                {/* ⛔ null = not measured, NOT zero hits. See lib/schema.sql. */}
-                <td>{r.hit_count === null || r.hit_count === undefined ? '—' : r.hit_count}</td>
+                {/* ⛔ null = not measured, NOT zero hits — and the cell now also
+                    says WHAT the figure rests on, because a log answer matched
+                    by rule NAME is not the same kind of answer as the device's
+                    own counter. See components/analysis/UsageGrade.js. */}
+                <td><RuleUsageCell rule={r} /></td>
               </tr>
             ))}
           </tbody>

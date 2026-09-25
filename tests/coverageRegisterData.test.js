@@ -53,20 +53,105 @@ const CODE = stripComments(SRC);
 // --------------------------------------------------------------------------
 
 /**
- * @param {object[]|Error} result rows to return, or an Error to throw.
+ * ⛔ THE STUB ROUTES ON THE STATEMENT, and it has to since A3: the register is
+ * no longer one query. A stub that returned the same canned rows to every
+ * `pool.query` fed register rows to the log-coverage reader and to
+ * `getLoggedRuleHits`, which did not throw — it quietly produced garbage grades
+ * — so every log-evidence assertion below would have been measuring the stub.
+ *
+ * Unrouted statements return NO rows, deliberately: a query this file has not
+ * thought about must read as "nothing there" rather than inherit another
+ * source's fixture.
+ *
+ * @param {object[]|Error} result register rows, or an Error to throw.
+ * @param {object} [extra]
+ * @param {object[]|Error} [extra.coverage]  rows for getDeviceLogCoverage
+ * @param {object|Error} [extra.hits]  deviceId → rows for getLoggedRuleHits
+ * @param {object[]|Error} [extra.nullRules]  rows for the hit_count IS NULL fetch
  */
-function stubPool(result) {
+function stubPool(result, extra = {}) {
   const calls = [];
+  const give = (v) => {
+    if (v instanceof Error) throw v;
+    const rows = (v || []).map((r) => ({ ...r }));
+    return { rows, rowCount: rows.length };
+  };
   return {
     calls,
     async query(sql, params) {
-      calls.push({ sql: String(sql), params });
-      if (result instanceof Error) throw result;
-      const rows = (result || []).map((r) => ({ ...r }));
-      return { rows, rowCount: rows.length };
+      const text = String(sql);
+      calls.push({ sql: text, params });
+      // ⛔ ORDER IS LOAD-BEARING. The register statement itself NAMES
+      // `syslog_rollup_hourly` and `firewall_rules` in its subqueries, so it
+      // has to be recognised FIRST — by the one thing only it has, its
+      // `FROM devices d` driver. Matching on a table name alone routed the
+      // register's own query to the coverage fixture and made every failure
+      // test below pass for the wrong reason.
+      if (/FROM\s+devices\s+d\b/i.test(text)) return give(result);
+      if (/hours_with_events/i.test(text)) return give(extra.coverage);
+      if (/syslog_rule_hits_hourly/.test(text)) {
+        if (extra.hits instanceof Error) throw extra.hits;
+        return give((extra.hits || {})[params && params[0]]);
+      }
+      if (/FROM\s+firewall_rules/i.test(text)) return give(extra.nullRules);
+      return give([]);
     },
   };
 }
+
+// ── log-evidence fixtures ────────────────────────────────────────────────
+//
+// The clock every log-evidence test pins, so the 30-day window and the history
+// test are deterministic rather than being whatever the suite ran at.
+const AT = '2026-09-25T12:00:00.000Z';
+
+/**
+ * A firewall that logged EVERY hour of the window, on an installation with
+ * years of history — i.e. one whose silence about a rule IS evidence. That is
+ * what lets a rule absent from the logs certify as a measured zero; drop either
+ * field and `enrichRulesWithLogEvidence` correctly refuses to certify anything.
+ */
+const fullCoverage = (deviceId) => ({
+  device_id: deviceId,
+  hours_with_events: 720,
+  first_seen: '2026-08-26T00:00:00.000Z',
+  last_seen: AT,
+  events: '1000000',
+  first_bucket: '2025-01-01T00:00:00.000Z',
+});
+
+/**
+ * A firewall SecVault has not been listening to long enough for silence to
+ * mean anything. ⛔ This is the LIVE shape — the rollup began the day the
+ * collector shipped — and it is why "some answered" is the common case: a rule
+ * the logs MATCHED is still answered, while a rule absent from them is not.
+ */
+const thinCoverage = (deviceId) => ({
+  device_id: deviceId,
+  hours_with_events: 400,
+  first_seen: '2026-09-08T00:00:00.000Z',
+  last_seen: AT,
+  events: '500000',
+  first_bucket: '2026-09-08T00:00:00.000Z',
+});
+
+const nullRule = (deviceId, over = {}) => ({
+  device_id: deviceId,
+  rule_id_vendor: null,
+  rule_name: null,
+  log_enabled: true,
+  hit_count: null,
+  ...over,
+});
+
+const loggedHit = (over = {}) => ({
+  rule_id: null,
+  rule_name: null,
+  hits: '1234',
+  first_hit: '2026-09-10T00:00:00.000Z',
+  last_hit: AT,
+  ...over,
+});
 
 // ⛔ COUNTS ARE STRINGS AND AGES ARE NUMBERS, exactly as `pg` hands them back:
 // `count(*)` is bigint (string, so 2^53 cannot be silently truncated) while the
@@ -291,6 +376,286 @@ describe('the live fleet shapes', () => {
 });
 
 // --------------------------------------------------------------------------
+// ⛔ A3 — the gap was OVERSTATED: logs answer 84 of the 235 unmeasured rules
+// --------------------------------------------------------------------------
+//
+// `hit_count IS NULL` alone said "we cannot see this rule's usage". Live, the
+// firewall's OWN LOGS answer 84 of those: 54 by the vendor's rule ID (Fortinet)
+// and 30 by NAME only (Palo Alto, whose rollup rows carry no rule id at all).
+// The register has to say so — a blind-spot list that names firewalls it CAN
+// see teaches an operator to discount the ones it cannot.
+
+describe('log-derived rule usage', () => {
+  // A Fortinet whose logs carry rule IDs and answer all three of its
+  // unmeasurable rules.
+  const allAnswered = () => stubPool(
+    [row({ id: 'd-ekm', name: 'TSR_EKM', vendor: 'fortinet', rules: '3', rules_unmeasured: '3' })],
+    {
+      coverage: [thinCoverage('d-ekm')],
+      nullRules: [
+        nullRule('d-ekm', { rule_id_vendor: '11', rule_name: 'to-wan' }),
+        nullRule('d-ekm', { rule_id_vendor: '12', rule_name: 'to-dmz' }),
+        nullRule('d-ekm', { rule_id_vendor: '13', rule_name: 'to-lan' }),
+      ],
+      hits: {
+        'd-ekm': [
+          loggedHit({ rule_id: '11', rule_name: 'to-wan' }),
+          loggedHit({ rule_id: '12', rule_name: 'to-dmz' }),
+          loggedHit({ rule_id: '13', rule_name: 'to-lan' }),
+        ],
+      },
+    },
+  );
+
+  it('every unmeasured rule answered from logs is PARTIAL, never ABSENT', async () => {
+    const { entries } = await getCoverageRegister(allAnswered(), { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.PARTIAL, 'the gap is real but smaller than absent');
+    assert.equal(c.certain, true);
+    assert.match(c.detail, /logs answer all 3/i);
+    assert.doesNotMatch(c.detail, /refuse every rule on this firewall/i,
+      'cleanup will NOT refuse rules the logs answered by ID');
+  });
+
+  it('the per-device counts are exposed for a renderer', async () => {
+    const { entries } = await getCoverageRegister(allAnswered(), { now: AT });
+    // Surfaced through the engine input; the cell is what a page renders, but
+    // the counts must be derivable and must agree with it.
+    assert.match(cellFor(entries[0], 'ruleUsage').detail, /3 of 3 rules report no hit count/);
+  });
+
+  it('SOME answered is PARTIAL and the detail names both numbers', async () => {
+    // ⛔ THE LIVE SHAPE. Thin history means a rule ABSENT from the logs
+    // certifies nothing, while a rule the logs MATCHED is still answered.
+    const pool = stubPool(
+      [row({ id: 'd-ekm', name: 'TSR_EKM', vendor: 'fortinet', rules: '10', rules_unmeasured: '4' })],
+      {
+        coverage: [thinCoverage('d-ekm')],
+        nullRules: [
+          nullRule('d-ekm', { rule_id_vendor: '11', rule_name: 'to-wan' }),
+          nullRule('d-ekm', { rule_id_vendor: '12', rule_name: 'to-dmz' }),
+          nullRule('d-ekm', { rule_id_vendor: '13', rule_name: 'quiet-a' }),
+          nullRule('d-ekm', { rule_id_vendor: '14', rule_name: 'quiet-b' }),
+        ],
+        hits: { 'd-ekm': [loggedHit({ rule_id: '11' }), loggedHit({ rule_id: '12' })] },
+      },
+    );
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.PARTIAL);
+    assert.match(c.detail, /4 of 10 rules report no hit count/);
+    assert.match(c.detail, /answer 2/);
+    assert.match(c.detail, /leaving 2 with no usage evidence at all/i);
+  });
+
+  it('NONE answered leaves the cell exactly as it was', async () => {
+    const pool = stubPool([TSR_EKM()], {
+      coverage: [thinCoverage('d-ekm')],
+      nullRules: [nullRule('d-ekm', { rule_id_vendor: '11' })],
+      hits: { 'd-ekm': [] },
+    });
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.ABSENT);
+    assert.equal(c.certain, true, 'we DID check the logs; they answer none of them');
+    assert.match(c.detail, /78 of 78/);
+    assert.match(c.detail, /cleanup will refuse/i);
+  });
+
+  it('⛔ AN UNREADABLE LOG-EVIDENCE COUNT LEAVES THE CELL WORSE AND UNCERTAIN', async () => {
+    // The one that regresses silently: a failed read that quietly improved the
+    // picture would report a blind spot as covered, on the page whose entire
+    // job is to name blind spots.
+    const pool = stubPool([TSR_EKM()], {
+      coverage: [thinCoverage('d-ekm')],
+      nullRules: [nullRule('d-ekm', { rule_id_vendor: '11' })],
+      hits: new Error('canceling statement due to statement timeout'),
+    });
+    const { entries, summary, failures } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.ABSENT, 'it must stay at its WORSE state');
+    assert.equal(c.certain, false, 'and say we could not even check');
+    assert.match(c.detail, /could not be read/i);
+    assert.match(c.detail, /overstate/i);
+    assert.equal(summary.devicesWithUnreadableChecks, 1);
+    // ⛔ And it lands in failures, never silently reducing the register.
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].source, /rule_log_evidence/);
+    assert.match(failures[0].error, /statement timeout/);
+  });
+
+  it('a failed SHARED read leaves every affected firewall uncertain, and the counts stand', async () => {
+    const pool = stubPool(
+      [row(), TSR_EKM()],
+      { coverage: new Error('relation "syslog_rollup_hourly" does not exist') },
+    );
+    const { entries, failures } = await getCoverageRegister(pool, { now: AT });
+
+    assert.equal(entries.length, 2, 'the register itself is still built');
+    assert.equal(cellFor(byName(entries, 'TSR_EKM'), 'ruleUsage').certain, false);
+    // The firewall that reports its own hit counts is untouched by this failure.
+    assert.equal(cellFor(byName(entries, 'IDC FW'), 'ruleUsage').state, STATE.MEASURED);
+    assert.equal(cellFor(byName(entries, 'IDC FW'), 'ruleUsage').certain, true);
+    assert.deepEqual(failures.map((f) => f.source), ['rule_log_evidence']);
+  });
+
+  it('one unreadable firewall does not blank the other', async () => {
+    const pool = stubPool(
+      [
+        row({ id: 'd-a', name: 'Alpha', vendor: 'fortinet', rules: '2', rules_unmeasured: '2' }),
+        row({ id: 'd-b', name: 'Bravo', vendor: 'fortinet', rules: '2', rules_unmeasured: '2' }),
+      ],
+      {
+        coverage: [thinCoverage('d-a'), thinCoverage('d-b')],
+        nullRules: [
+          nullRule('d-a', { rule_id_vendor: '1' }), nullRule('d-a', { rule_id_vendor: '2' }),
+          nullRule('d-b', { rule_id_vendor: '1' }), nullRule('d-b', { rule_id_vendor: '2' }),
+        ],
+        hits: {
+          'd-a': [loggedHit({ rule_id: '1' }), loggedHit({ rule_id: '2' })],
+          'd-b': new Error('connection terminated unexpectedly'),
+        },
+      },
+    );
+    const { entries, failures } = await getCoverageRegister(pool, { now: AT });
+
+    assert.equal(cellFor(byName(entries, 'Alpha'), 'ruleUsage').state, STATE.PARTIAL);
+    assert.equal(cellFor(byName(entries, 'Alpha'), 'ruleUsage').certain, true);
+    // Bravo stays at its worse state and says it could not be checked — it is
+    // never handed Alpha's answer, and never a zero it did not earn.
+    assert.equal(cellFor(byName(entries, 'Bravo'), 'ruleUsage').state, STATE.ABSENT);
+    assert.equal(cellFor(byName(entries, 'Bravo'), 'ruleUsage').certain, false);
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].source, /rule_log_evidence:Bravo/);
+  });
+
+  it('good coverage with no logged hits certifies a measured zero — at NAME grade only', async () => {
+    // ⛔ The engine's own conservatism, pinned here because it is the case a
+    // reader is most likely to expect the opposite of: when the logs carry no
+    // rule IDs AT ALL there was no ID to have searched by, so even a Fortinet
+    // rule that HAS a vendor id certifies only at name grade — and therefore
+    // still may not be removed.
+    const pool = stubPool(
+      [row({ id: 'd-q', name: 'Quiet', vendor: 'fortinet', rules: '2', rules_unmeasured: '2' })],
+      {
+        coverage: [fullCoverage('d-q')],
+        nullRules: [
+          nullRule('d-q', { rule_id_vendor: '1', rule_name: 'a' }),
+          nullRule('d-q', { rule_id_vendor: '2', rule_name: 'b' }),
+        ],
+        hits: { 'd-q': [] },
+      },
+    );
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.PARTIAL, 'a certified silence IS an answer');
+    assert.match(c.detail, /logs answer all 2/i);
+    assert.match(c.detail, /NAME only/);
+    assert.match(c.detail, /never authorise removing a rule/i);
+  });
+
+  // ── ID grade vs NAME grade ─────────────────────────────────────────────
+
+  it('a Palo Alto answered by NAME is reported as name-grade, never as removable', async () => {
+    // ⛔ LIVE: every Palo Alto rollup row carries a NULL rule_id — names only.
+    const pool = stubPool(
+      [row({ id: 'd-pa', name: 'ITC-SLY', vendor: 'paloalto', rules: '2', rules_unmeasured: '2' })],
+      {
+        coverage: [thinCoverage('d-pa')],
+        nullRules: [
+          nullRule('d-pa', { rule_name: 'allow-web' }),
+          nullRule('d-pa', { rule_name: 'allow-dns' }),
+        ],
+        hits: {
+          'd-pa': [
+            loggedHit({ rule_id: null, rule_name: 'allow-web' }),
+            loggedHit({ rule_id: null, rule_name: 'allow-dns' }),
+          ],
+        },
+      },
+    );
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.equal(c.state, STATE.PARTIAL);
+    assert.match(c.detail, /NAME only/);
+    assert.match(c.detail, /never authorise removing a rule/i);
+    assert.match(c.detail, /renamed rule reads as unused/i);
+    assert.match(c.detail, /cleanup will refuse all 2/i,
+      'name-grade evidence buys an operator nothing at the cleanup step');
+  });
+
+  it('a Fortinet answered by rule ID is reported as exact and as removable', async () => {
+    const { entries } = await getCoverageRegister(allAnswered(), { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+    assert.match(c.detail, /rule ID, which is exact/i);
+    assert.match(c.detail, /cleanup will accept them/i);
+    assert.doesNotMatch(c.detail, /NAME only/);
+  });
+
+  it('a mixed fleet keeps the two grades apart in one detail', async () => {
+    const pool = stubPool(
+      [row({ id: 'd-mx', name: 'Mixed', vendor: 'fortinet', rules: '3', rules_unmeasured: '3' })],
+      {
+        coverage: [thinCoverage('d-mx')],
+        nullRules: [
+          nullRule('d-mx', { rule_id_vendor: '11', rule_name: 'by-id' }),
+          // No vendor id on the rule, so only its NAME can be looked up.
+          nullRule('d-mx', { rule_name: 'by-name' }),
+          nullRule('d-mx', { rule_id_vendor: '99', rule_name: 'silent' }),
+        ],
+        hits: {
+          'd-mx': [
+            loggedHit({ rule_id: '11', rule_name: 'by-id' }),
+            loggedHit({ rule_id: null, rule_name: 'by-name' }),
+          ],
+        },
+      },
+    );
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+
+    assert.match(c.detail, /1 are matched by the vendor's own rule ID/);
+    assert.match(c.detail, /1 by rule NAME only/);
+    assert.match(c.detail, /never authorise removing a rule/i);
+    assert.match(c.detail, /refuse the other 2/i, 'the name-grade one and the unanswered one');
+  });
+
+  // ── the things it must not do ──────────────────────────────────────────
+
+  it('a firewall reporting all its hit counts stays MEASURED and costs no query', async () => {
+    const pool = stubPool([row()]);
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    assert.equal(cellFor(entries[0], 'ruleUsage').state, STATE.MEASURED);
+    assert.equal(pool.calls.length, 1);
+  });
+
+  it('an UNREADABLE rule count is never paired with a confident log verdict', async () => {
+    // Nothing can improve a gap we could not measure in the first place, and no
+    // log query is issued for it.
+    const pool = stubPool([row({ rules: null, rules_unmeasured: null })]);
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    assert.equal(cellFor(entries[0], 'ruleset').certain, false);
+    assert.equal(cellFor(entries[0], 'ruleUsage'), undefined, 'no cell without a rule count');
+    assert.equal(pool.calls.length, 1);
+  });
+
+  it('log evidence can never promote the cell to MEASURED', async () => {
+    // ⛔ A bounded-window observation is not the device's own lifetime counter.
+    const { entries } = await getCoverageRegister(allAnswered(), { now: AT });
+    const c = cellFor(entries[0], 'ruleUsage');
+    assert.notEqual(c.state, STATE.MEASURED);
+    assert.ok(c.weight > 0, 'a log-answered firewall is still a partial blind spot');
+    assert.deepEqual(c.gates, SOURCES.ruleUsage.gates);
+  });
+});
+
+// --------------------------------------------------------------------------
 // Ranking — by consequence, and stale first
 // --------------------------------------------------------------------------
 
@@ -349,10 +714,70 @@ describe('the SQL', () => {
     assert.ok(/syslog_rollup_hourly/.test(CODE), 'the rollup is what it counts');
   });
 
-  it('issues exactly ONE statement — no per-device query', async () => {
-    const pool = stubPool([row(), PAKFOOD(), TSR_EKM()]);
+  it('issues exactly ONE statement when every firewall reports its hit counts', async () => {
+    // ⛔ The counts themselves are, and must stay, a single statement. The
+    // log-evidence source below is the ONLY thing that may add queries, and it
+    // adds none at all when there is nothing for it to answer.
+    const pool = stubPool([row(), PAKFOOD(), row({ id: 'd-3', name: 'Third' })]);
     await getCoverageRegister(pool);
     assert.equal(pool.calls.length, 1);
+  });
+
+  it('the log-evidence fetch is BOUNDED to firewalls with an unmeasured rule', async () => {
+    // Two healthy firewalls and one that cannot report hit counts: the extra
+    // cost is two shared statements plus ONE per affected firewall, never one
+    // per firewall on the fleet.
+    const pool = stubPool(
+      [row(), row({ id: 'd-3', name: 'Third' }), TSR_EKM()],
+      { coverage: [thinCoverage('d-ekm')], nullRules: [nullRule('d-ekm')] },
+    );
+    await getCoverageRegister(pool, { now: AT });
+
+    const hitCalls = pool.calls.filter((c) => /syslog_rule_hits_hourly/.test(c.sql));
+    assert.equal(hitCalls.length, 1, 'only the firewall with unmeasured rules is visited');
+    assert.equal(hitCalls[0].params[0], 'd-ekm');
+    assert.equal(pool.calls.length, 4, 'register + coverage + rules + one per affected firewall');
+  });
+
+  it('the unmeasured-rule fetch is parameterised and selects the tri-state\'s third state', async () => {
+    const pool = stubPool([TSR_EKM()], {
+      coverage: [thinCoverage('d-ekm')], nullRules: [nullRule('d-ekm')],
+    });
+    await getCoverageRegister(pool, { now: AT });
+    // ⛔ `rule_id_vendor` is the discriminator: the REGISTER statement also
+    // names firewall_rules and also tests `hit_count IS NULL`, so matching on
+    // either would assert against the wrong query.
+    const call = pool.calls.find((c) => /rule_id_vendor/.test(c.sql));
+
+    assert.match(call.sql, /hit_count\s+IS\s+NULL/i);
+    assert.match(call.sql, /=\s*ANY\(\$1::uuid\[\]\)/);
+    assert.ok(!/\$\{/.test(call.sql), 'no string interpolation in SQL, ever');
+    assert.ok(!/d-ekm/.test(call.sql), 'an id must never appear in the statement text');
+    assert.deepEqual(call.params, [['d-ekm']]);
+  });
+
+  it('⛔ does not re-implement the grading in SQL — it selects inputs and calls the engine', () => {
+    // ⛔ Two files deciding "is this rule in use" would eventually disagree, and
+    // the wrong one would be recommending that rules be deleted from a
+    // firewall. The grade is ruleHitCorrelation.js's answer and this file only
+    // ever COUNTS it.
+    assert.ok(/require\(['"]\.\/ruleHitCorrelation['"]\)/.test(CODE),
+      'the correlation engine must be imported, not reproduced');
+    assert.ok(/enrichRulesWithLogEvidence\(/.test(CODE), 'the engine does the grading');
+    assert.ok(!/syslog_rule_hits_hourly/.test(CODE),
+      'the rollup belongs to the correlation engine, not to this file');
+  });
+
+  it('the unmeasured-rule statement decides nothing — no CASE, no join, no aggregate', async () => {
+    const pool = stubPool([TSR_EKM()], {
+      coverage: [thinCoverage('d-ekm')], nullRules: [nullRule('d-ekm')],
+    });
+    await getCoverageRegister(pool, { now: AT });
+    const sql = pool.calls.find((c) => /rule_id_vendor/.test(c.sql)).sql;
+
+    assert.ok(!/\bCASE\b/i.test(sql), 'a CASE here would be a second grader');
+    assert.ok(!/\bJOIN\b/i.test(sql), 'joining the rollup here would reproduce the engine');
+    assert.ok(!/\bcount\(|\bsum\(/i.test(sql), 'this statement counts nothing — the engine grades');
   });
 
   it('uses a bound parameter for deviceIds — no interpolation anywhere', async () => {

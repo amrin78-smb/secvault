@@ -21,6 +21,10 @@ const {
 const healthy = () => ({
   deviceId: 'd-ok', deviceName: 'IDC FW', vendor: 'paloalto',
   rules: 721, rulesUnmeasured: 0, logBuckets: 2009, interfaces: 72,
+  // ⛔ CHECKED, AND THE LOGS ANSWER NONE — not "we did not check". Every
+  // fixture derived from this one therefore asserts the DEVICE-ONLY state; the
+  // unreadable case is a null, and has its own tests below.
+  rulesLogAnswered: 0, rulesLogAnsweredDeletionGrade: 0,
   objectRefs: 878, objectUnresolvable: 0, configAgeDays: 0,
   versionRows: 3, analysisAgeDays: 1, ruleFindings: 377,
   rulesCollectedAt: '2026-09-25T00:00:00Z',
@@ -284,4 +288,204 @@ test('full coverage is named for VISIBILITY and never claims safety', () => {
   assert.ok(/fullyCovered/.test(code));
   assert.ok(!/\b(secure|allClear|all_clear|healthy|clean)\s*[:=]/i.test(code),
     'no field here may read as a security verdict — coverage is visibility, not safety');
+});
+
+// ── A3: log-derived rule usage shrinks an OVERSTATED gap ─────────────────
+//
+// ⛔ `hit_count IS NULL` alone overstated the `ruleUsage` gap by 84 rules
+// fleet-wide. A device that cannot report a hit count is not a device whose
+// rule usage is unknown: its own logs may answer instead — live, 54 by the
+// vendor's rule ID and 30 by NAME only. The register has to say so, and has to
+// keep the two grades apart, because only an ID-grade answer may ever support
+// removing a rule from a firewall.
+
+// A firewall that reports no hit counts at all, with the log-evidence counts
+// supplied literally.
+const unmeasuredDevice = (answered, idGrade, over = {}) => assessDevice({
+  ...healthy(),
+  deviceName: 'TSR_EKM',
+  vendor: 'fortinet',
+  rules: 78,
+  rulesUnmeasured: 78,
+  rulesLogAnswered: answered,
+  rulesLogAnsweredDeletionGrade: idGrade,
+  ...over,
+});
+
+test('ALL unmeasured rules answered from logs is PARTIAL, not ABSENT', () => {
+  const c = cellFor(unmeasuredDevice(78, 78), 'ruleUsage');
+  assert.equal(c.state, STATE.PARTIAL, 'the gap is smaller than absent, so it must not read as absent');
+  assert.equal(c.certain, true);
+  assert.match(c.detail, /78 of 78 rules report no hit count/);
+  assert.match(c.detail, /logs answer all 78/i);
+  assert.doesNotMatch(c.detail, /refuse every rule on this firewall/i);
+});
+
+test('SOME answered is PARTIAL and the detail names BOTH numbers', () => {
+  const c = cellFor(unmeasuredDevice(54, 54), 'ruleUsage');
+  assert.equal(c.state, STATE.PARTIAL);
+  assert.match(c.detail, /logs answer 54/i);
+  assert.match(c.detail, /leaving 24 with no usage evidence at all/i);
+  assert.match(c.detail, /refuse the other 24/i);
+});
+
+test('NONE answered leaves the cell exactly as it was', () => {
+  const c = cellFor(unmeasuredDevice(0, 0), 'ruleUsage');
+  assert.equal(c.state, STATE.ABSENT);
+  assert.equal(c.certain, true, 'we DID check the logs — they answer none of them');
+  assert.match(c.detail, /No hit counts at all \(78 of 78 rules\)/);
+  assert.match(c.detail, /cleanup will refuse every rule on this firewall/i);
+  assert.doesNotMatch(c.detail, /could not be read/i);
+});
+
+test('a PARTIAL device with no log answers keeps its original wording', () => {
+  const c = cellFor(assessDevice({
+    ...healthy(), rules: 100, rulesUnmeasured: 40, rulesLogAnswered: 0, rulesLogAnsweredDeletionGrade: 0,
+  }), 'ruleUsage');
+  assert.equal(c.state, STATE.PARTIAL);
+  assert.equal(c.detail, '40 of 100 rules report no hit count.');
+});
+
+// ⛔ THE ONE THAT REGRESSES SILENTLY. A failed read must never improve the
+// picture: "we could not check whether the logs answer these" is not "the logs
+// answer these".
+test('an UNREADABLE log-evidence count leaves the cell at its WORSE state, uncertain', () => {
+  const e = unmeasuredDevice(null, null);
+  const c = cellFor(e, 'ruleUsage');
+  assert.equal(c.state, STATE.ABSENT, 'it must stay where the device evidence left it');
+  assert.equal(c.certain, false);
+  assert.match(c.detail, /78 of 78/);
+  assert.match(c.detail, /could not be read/i);
+  assert.match(c.detail, /overstate/i);
+  assert.equal(e.uncertainCount, 1);
+  // ⛔ And it must not claim a NUMBER of log answers. The sentence names the
+  // logs to say they could not be read, which is the opposite of a claim.
+  assert.doesNotMatch(c.detail, /logs answer (all )?\d/i);
+});
+
+test('an unreadable count on a PARTIAL device also stays partial and uncertain', () => {
+  const c = cellFor(assessDevice({
+    ...healthy(), rules: 100, rulesUnmeasured: 40,
+    rulesLogAnswered: null, rulesLogAnsweredDeletionGrade: null,
+  }), 'ruleUsage');
+  assert.equal(c.state, STATE.PARTIAL);
+  assert.equal(c.certain, false);
+});
+
+// ⛔ `Number(null)` is 0 and 0 is finite. The whole coercion family has to stay
+// unreadable here, exactly as it does for every other count in this engine —
+// this is the field where a coercion would IMPROVE the register, which is the
+// direction that never gets noticed.
+test('no falsy log-evidence input is ever read as "the logs answer none"', () => {
+  for (const bad of [null, undefined, '', '   ', [], false, {}, NaN, 'n/a']) {
+    const c = cellFor(unmeasuredDevice(bad, bad), 'ruleUsage');
+    assert.equal(c.certain, false, `${JSON.stringify(bad)} was read as a measurement`);
+    assert.equal(c.state, STATE.ABSENT, `${JSON.stringify(bad)} moved the cell`);
+  }
+  for (const real of [0, '0']) {
+    const c = cellFor(unmeasuredDevice(real, real), 'ruleUsage');
+    assert.equal(c.certain, true, `${JSON.stringify(real)} is a real measured zero`);
+  }
+});
+
+// ⛔ KNOWING HOW MANY are answered without knowing how many are ID-GRADE cannot
+// be rendered: the detail would imply a deletion authority it has not
+// established. Either count unreadable holds the whole cell back.
+test('a readable total with an unreadable grade split is still uncertain', () => {
+  const c = cellFor(unmeasuredDevice(54, null), 'ruleUsage');
+  assert.equal(c.certain, false);
+  assert.equal(c.state, STATE.ABSENT);
+  assert.doesNotMatch(c.detail, /54/);
+});
+
+test('an unreadable grade split with a zero total is also uncertain', () => {
+  const c = cellFor(unmeasuredDevice(0, null), 'ruleUsage');
+  assert.equal(c.certain, false);
+});
+
+// ── ID grade vs NAME grade ───────────────────────────────────────────────
+
+test('NAME-grade evidence is never described as enough to remove a rule', () => {
+  const c = cellFor(unmeasuredDevice(30, 0), 'ruleUsage');
+  assert.match(c.detail, /NAME only/);
+  assert.match(c.detail, /never authorise removing a rule/i);
+  assert.match(c.detail, /renamed rule reads as unused/i);
+  // ⛔ The consequence: cleanup still refuses every one of them.
+  assert.match(c.detail, /cleanup will refuse all 78/i);
+  assert.doesNotMatch(c.detail, /cleanup will accept/i);
+});
+
+test('ID-grade evidence is described as exact and as removable', () => {
+  const c = cellFor(unmeasuredDevice(78, 78), 'ruleUsage');
+  assert.match(c.detail, /rule ID, which is exact/i);
+  assert.match(c.detail, /cleanup will accept them/i);
+  assert.doesNotMatch(c.detail, /NAME only/);
+});
+
+test('a mix of the two grades reports them separately, never as one figure', () => {
+  const c = cellFor(unmeasuredDevice(70, 54), 'ruleUsage');
+  assert.match(c.detail, /54 are matched by the vendor's own rule ID/);
+  assert.match(c.detail, /16 by rule NAME only/);
+  assert.match(c.detail, /never authorise removing a rule/i);
+  assert.match(c.detail, /refuse the other 24/i, '78 unmeasured minus 54 ID-grade');
+});
+
+test('the deletion figure counts ID grade only — name grade is refused alongside the unanswered', () => {
+  // 40 answered on a 100-rule device with 40 unmeasured: 10 by ID, 30 by name.
+  const c = cellFor(assessDevice({
+    ...healthy(), rules: 100, rulesUnmeasured: 40,
+    rulesLogAnswered: 40, rulesLogAnsweredDeletionGrade: 10,
+  }), 'ruleUsage');
+  assert.match(c.detail, /logs answer all 40/i);
+  assert.match(c.detail, /10 are matched by the vendor's own rule ID/);
+  assert.match(c.detail, /30 by rule NAME only/);
+  assert.match(c.detail, /refuse the other 30/i, '40 unmeasured minus 10 ID-grade');
+});
+
+// ── the ceiling, and the arithmetic ──────────────────────────────────────
+
+test('log evidence can NEVER promote the cell to MEASURED', () => {
+  // ⛔ A bounded-window observation is not the device's own lifetime counter.
+  for (const [a, i] of [[78, 78], [78, 0], [40, 20]]) {
+    const c = cellFor(unmeasuredDevice(a, i), 'ruleUsage');
+    assert.notEqual(c.state, STATE.MEASURED, `${a}/${i} promoted the cell`);
+    assert.ok(c.weight > 0, `${a}/${i} stopped counting as a blind spot`);
+    assert.deepEqual(c.gates, SOURCES.ruleUsage.gates);
+  }
+});
+
+test('a log-answered firewall withholds fewer answers than an unanswered one', () => {
+  const answered = unmeasuredDevice(78, 78);
+  const not = unmeasuredDevice(0, 0);
+  assert.ok(cellFor(answered, 'ruleUsage').weight < cellFor(not, 'ruleUsage').weight);
+  assert.deepEqual(
+    rankRegister([answered, not]).map((e) => cellFor(e, 'ruleUsage').state),
+    [STATE.ABSENT, STATE.PARTIAL],
+    'the firewall the logs cannot answer for must rank first',
+  );
+});
+
+test('more answers than questions is CLAMPED, never reported as a surplus', () => {
+  // Two reads disagreeing is not licence to claim more answers than there were
+  // questions; the honest response is the smaller number.
+  const c = cellFor(unmeasuredDevice(500, 500), 'ruleUsage');
+  assert.match(c.detail, /logs answer all 78/i);
+  assert.doesNotMatch(c.detail, /500/);
+  assert.match(c.detail, /cleanup will accept them/i);
+});
+
+test('an ID-grade count larger than the answered count is clamped too', () => {
+  const c = cellFor(unmeasuredDevice(30, 99), 'ruleUsage');
+  assert.match(c.detail, /All 30 are matched by the vendor's own rule ID/);
+  assert.doesNotMatch(c.detail, /99/);
+});
+
+test('a negative log-evidence count is not a measurement', () => {
+  // Not reachable from the plumbing, but a negative is a broken read, not a
+  // smaller gap, and it must not silently behave like zero.
+  const c = cellFor(unmeasuredDevice(-3, 0), 'ruleUsage');
+  assert.equal(c.state, STATE.ABSENT);
+  assert.equal(c.certain, false, 'a negative must not render as "we checked; none"');
+  assert.match(c.detail, /could not be read/i);
+  assert.equal(cellFor(unmeasuredDevice(30, -1), 'ruleUsage').certain, false);
 });

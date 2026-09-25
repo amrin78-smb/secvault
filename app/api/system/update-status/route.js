@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.189.0': [
+    "Rule usage taken from firewall logs now says what it rests on. Where a firewall cannot report its own hit counters, SecVault reads usage from the logs instead — but some firewalls identify a rule in their logs by an exact rule ID and others only by its name, and those are not equally reliable.",
+    "A name-based answer can no longer justify removing a rule. A rule renamed during the period looks like it carried no traffic when it may be busy, so that evidence now informs you without authorising a deletion, and says so on the change request handed to whoever edits the firewall.",
+    "Fixed: rules were reported as \"this firewall was not logging\" when the firewalls were logging perfectly and SecVault simply had not been collecting for as long as the question asked about. 1,444 rules carried that wrong explanation. The two situations are now told apart.",
+    "That same fault would have reversed itself automatically in early October and begun producing unused-rule findings across the fleet with no change to the product. It no longer can.",
+    "A firewall whose logs never name a rule at all is now reported as such, instead of its whole ruleset being treated as idle.",
+    "The Firewalls → Rules table now shows usage for firewalls that cannot report their own counters, where the logs can answer instead — with a plain note when that answer rests on a rule name.",
+  ],
   '2.188.0': [
     "New Coverage page under Monitor: it shows where SecVault cannot see, and what each gap costs. A firewall nothing can be collected from produces no vulnerabilities, no failing checks and no rule findings — so today it renders as the healthiest device on the fleet.",
     "Every firewall on the reference fleet has at least one gap, so the register ranks by consequence — how many answers a gap withholds — rather than by how many gaps there are.",

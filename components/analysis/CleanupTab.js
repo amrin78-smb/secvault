@@ -20,6 +20,7 @@ import Badge from '../ui/Badge';
 import SeverityBadge from './SeverityBadge';
 import FindingTypeBadge from './FindingTypeBadge';
 import AcknowledgeControl from './AcknowledgeControl';
+import { UsageGradeBadge } from './UsageGrade';
 import RuleChangeRequests, { CleanupRequestPanel } from './RuleChangeRequests';
 
 // Cleanup tab (Rule Analysis Dashboard Phase 2): unused / redundant /
@@ -402,7 +403,17 @@ function CandidateTable({ candidates, canWrite, impacts }) {
           </th>
           <th>Rule</th>
           <th>Why</th>
-          <th>Hits</th>
+          {/* ⛔ THE WHOLE COLUMN IS ONE GRADE, SO IT IS STATED ONCE. Every rule
+              that reaches this table cleared getCleanupCandidates, which
+              accepts only a non-NULL `hit_count` — the firewall's OWN counter.
+              A log-derived figure, and above all one matched by rule NAME, is
+              deliberately not accepted here (see ruleHitCorrelation.js's
+              deletionEvidence), and the operator ticking a box to delete a rule
+              should be able to see which of those they are acting on. Per-row
+              chips would be 136 copies of the same word. */}
+          <th title="Every candidate here is measured by the firewall's own hit counter. A log-derived figure is not accepted as grounds for a removal.">
+            Hits <UsageGradeBadge grade="device" />
+          </th>
           <th>Enabled</th>
           <th title="Declared applications whose flows this rule permits.">Applications</th>
           <th>Evidence</th>

@@ -800,3 +800,69 @@ describe('⛔ the board colours the three violations in its own action order', (
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// A3 — a NAME-grade zero cannot license closing a rule (2026-09-25)
+//
+// `violation_permitted` is this board's deletion recommendation: its own hover
+// text calls it "the safest kind to close". Every Palo Alto's logs identify
+// rules by NAME only (80,203 rollup rows, rule id NULL on all of them), and a
+// name is neither unique nor stable across a config change — so a rule RENAMED
+// during the window is absent under its new name while passing traffic under
+// its old one. That licence cannot rest on a name.
+
+describe('⛔ A3 — a name-grade zero is unknown, not "never used"', () => {
+  it('a DEVICE-grade zero still reaches violation_permitted', () => {
+    const r = evaluateIntent(DENY_INTENT, [
+      rule({ effectiveHitCount: 0, usageGrade: 'device' }),
+    ]);
+    assert.equal(r.verdict, 'violation_permitted');
+    assert.equal(r.did, false);
+  });
+
+  it('an ID-grade zero also reaches it — logs by rule id are exact', () => {
+    const r = evaluateIntent(DENY_INTENT, [
+      rule({ effectiveHitCount: 0, usageGrade: 'log-id', logEvidence: 'measured-zero' }),
+    ]);
+    assert.equal(r.verdict, 'violation_permitted');
+    assert.equal(r.did, false);
+  });
+
+  it('⛔ a NAME-grade zero falls to violation_unverified instead', () => {
+    const r = evaluateIntent(DENY_INTENT, [
+      rule({ effectiveHitCount: 0, usageGrade: 'log-name', logEvidence: 'measured-zero' }),
+    ]);
+    assert.equal(r.did, null, 'must be unknown, never false');
+    assert.equal(r.verdict, 'violation_unverified');
+    assert.notEqual(r.verdict, 'violation_permitted',
+      'this file already says unverified must be "assumed live" — that is the right reading');
+  });
+
+  it('⛔ ONLY the zero — a name-grade HIT still counts as a hit', () => {
+    // The asymmetry is deliberate. A wrong "in use" yields violation_active or
+    // ok_in_use, i.e. "do not close this", which errs toward KEEPING a rule. A
+    // wrong "unused" deletes one.
+    const r = evaluateIntent(DENY_INTENT, [
+      rule({ effectiveHitCount: 500, usageGrade: 'log-name' }),
+    ]);
+    assert.equal(r.verdict, 'violation_active');
+    assert.equal(r.did, true);
+  });
+
+  it('trafficEvidence names the reason, so the board can explain itself', () => {
+    const e = trafficEvidence([
+      { effectiveHitCount: 0, usageGrade: 'log-name', logEvidence: 'measured-zero' },
+    ]);
+    assert.equal(e.did, null);
+    assert.equal(e.unmeasured, 1);
+    assert.equal(e.measured, 0);
+    assert.ok(e.reasons.includes('name-grade-zero'));
+  });
+
+  it('a rule with no grade at all behaves exactly as before', () => {
+    // Nothing in this change may alter a device-counter fleet, which is 1,547
+    // of the 1,782 rules live.
+    assert.equal(trafficEvidence([{ effectiveHitCount: 0 }]).did, false);
+    assert.equal(trafficEvidence([{ effectiveHitCount: 9 }]).did, true);
+  });
+});

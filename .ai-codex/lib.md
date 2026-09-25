@@ -1021,6 +1021,34 @@ a rule" (live: PAKFood). Getting this wrong makes a quiet ruleset permanently un
 stub pool feeding `getDeviceLogCoverage` must supply `first_bucket`, or history reads as unknown
 and nothing certifies — deliberately.
 
+## A3 consumers — where the grade travels (v2.189.0)
+
+`usageGrade` / `deletionEvidence` are ADDED to the pass-through shape of both downstream engines,
+because a UI that cannot see the grade renders a name-matched zero exactly like a device counter:
+
+- **`segmentation.js`** — `exampleOf()` carries both. ⛔ **AND `trafficEvidence()` COUNTS A
+  NAME-GRADE ZERO AS UNMEASURED.** `violation_permitted` is this board's deletion recommendation
+  (its own hover text: "the safest kind to close") and `unused_permission` is the same for an allow
+  intent; neither licence can rest on a rule NAME. A name-grade zero now yields
+  `violation_unverified`, which this engine already documents as "assume it is live".
+  ⛔ **ONLY THE ZERO.** A name-grade HIT stays a hit: at worst a collision attributes another
+  rule's traffic here, producing `violation_active`/`ok_in_use` — "do not close this" — and
+  erring toward KEEPING a rule is the safe side. The asymmetry is the design.
+- **`applicationView.js`** — the permitting/denying rule summaries carry both, so "a rule
+  permitting this flow is in use" is not asserted from a name match without saying so.
+
+⛔ **`workQueueData.gatherCoverage` SPLITS TWO SEVERITIES THAT MUST NOT SHARE A FATE.** A failure
+of the register's own query empties `entries`, so a fleet with blind spots is indistinguishable
+from one without — it throws and the source is banner'd. A `rule_log_evidence` failure is an
+ENRICHMENT failure: every device is still present, the affected `ruleUsage` cells fall back to the
+DEVICE-ONLY (worse) reading and are marked `certain: false`. Treating that as fatal would discard
+~14 real open items of security work to protest a cosmetically pessimistic gap number.
+
+⛔ **STILL NOT WIRED, deliberately named rather than left implied**: `/analysis`'s fleet tri-state
+counter reads `firewall_rules.hit_count` only, so it reports 151+ rules as having no usage data
+that logs can now answer; and `GET /api/devices/[id]/rules` (CSV) exports the raw counter with no
+grade column, so the export and the screen disagree. Both need `lib/` changes beyond A3's scope.
+
 ## lib/engines/coverageRegister.js + coverageRegisterData.js (added 2026-09-25, v2.188.0)
 
 The A2 blind-spot register: where SecVault cannot see, and what that costs. `coverageRegister.js`
@@ -1057,6 +1085,15 @@ and pg's string `'0'` still read as measurements.
 a clean fleet by the summary alone** (both give `devices: 0`). Two tests assert that, so the
 obligation is explicitly on the caller: no consumer may render a verdict, a count or an all-clear
 while `failures` is non-empty.
+
+⛔ **`rulesLogAnswered` / `rulesLogAnsweredDeletionGrade` (v2.189.0)** shrink the `ruleUsage` gap
+where a device's LOGS answer what its counters cannot — 84 of 235 rules fleet-wide, so the cell
+used to overstate the gap on six firewalls. ⛔ It shrinks to `partial`, **NEVER to `measured`**:
+a bounded-window observation is not the device's own lifetime counter. ⛔ An unreadable
+log-evidence count leaves the cell exactly where it was with `certain: false` — it may never
+improve the picture. ⛔ Costs a BOUNDED N+1 (165ms -> ~420ms live): only devices with at least
+one unmeasured rule are visited, and a fleet whose devices all report counters issues zero extra
+queries, pinned by a test. Collapsing them would mean reimplementing `getLoggedRuleHits`.
 
 ⛔ **`syslog_events` IS FORBIDDEN** — coverage counts come from `syslog_rollup_hourly`. Pinned by a
 source scan with comments STRIPPED FIRST.
