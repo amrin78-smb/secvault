@@ -8,6 +8,7 @@ import EmptyState from '../../../../../../components/ui/EmptyState';
 import RuleEvidenceTable from '../../../../../../components/compliance/RuleEvidenceTable';
 import { isValidUuid } from '../../../../../../lib/apiUtils';
 import { vendorLabel } from '../../../../../../components/devices/vendorMeta';
+import { resolveMatchedRules } from '../../../../../../lib/matchedRuleEvidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,15 +77,24 @@ async function getFinding(dbPool, deviceId, findingId) {
   return result.rows[0] || null;
 }
 
-async function getRuleEvidence(dbPool, ruleIds) {
-  if (!ruleIds || ruleIds.length === 0) return [];
+// ⛔ RETURNS A MAP, NOT A ROW LIST (changed 2026-09-25). `id = ANY($1)` returns
+// FEWER ROWS for ids that are no longer in `firewall_rules` — which is every id
+// whose rule was replaced by a later collection, since the table is fully
+// DELETE+reinserted on every pull. Handing the caller just those rows threw the
+// discrepancy away, and a finding whose matched rules had all been replaced
+// rendered exactly like a finding that matched nothing. The caller now
+// reconciles the map against the ids the finding actually recorded.
+async function getRuleEvidenceMap(dbPool, ruleIds) {
+  if (!Array.isArray(ruleIds) || ruleIds.length === 0) return new Map();
   const result = await dbPool.query(
     `SELECT id, rule_name, action, src_addresses, dst_addresses, services, src_zones, dst_zones
      FROM firewall_rules
      WHERE id = ANY($1::uuid[])`,
     [ruleIds]
   );
-  return result.rows;
+  const map = new Map();
+  for (const row of result.rows) map.set(row.id, row);
+  return map;
 }
 
 function backLink(deviceId, standardKey) {
@@ -132,7 +142,13 @@ export default async function ComplianceCheckDetailPage({ params }) {
     );
   }
 
-  const ruleEvidence = await getRuleEvidence(pool, finding.matched_rule_ids);
+  const matchedRuleIds = Array.isArray(finding.matched_rule_ids) ? finding.matched_rule_ids : [];
+  const ruleMap = await getRuleEvidenceMap(pool, matchedRuleIds);
+  const matched = resolveMatchedRules(matchedRuleIds, ruleMap);
+  // The rows we can actually draw, in the order the finding recorded them.
+  const ruleEvidence = matchedRuleIds
+    .map((id) => (typeof id === 'string' ? ruleMap.get(id) : null))
+    .filter(Boolean);
   const sev = SEVERITY_BADGE[finding.severity] || SEVERITY_BADGE.info;
   const st = STATUS_BADGE[finding.status] || STATUS_BADGE.na;
   const standards = Array.isArray(finding.standards) ? finding.standards : [];
@@ -190,13 +206,19 @@ export default async function ComplianceCheckDetailPage({ params }) {
         </CardBody>
       </Card>
 
-      {ruleEvidence.length > 0 && (
+      {/* ⛔ GATED ON WHAT THE FINDING RECORDED, NOT ON WHAT RESOLVED. Gating on
+          `ruleEvidence.length` meant a check whose matched rules had all been
+          replaced by a later collection rendered NO card — identical to a check
+          that matched nothing. The heading counts the rules the audit matched;
+          the table shows the ones we can still describe; RuleEvidenceTable's
+          own footer states the difference. */}
+      {matched.total > 0 && (
         <Card>
           <CardBody>
             <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 8 }}>
-              Offending rule{ruleEvidence.length === 1 ? '' : 's'} ({ruleEvidence.length})
+              Offending rule{matched.total === 1 ? '' : 's'} ({matched.total})
             </div>
-            <RuleEvidenceTable rules={ruleEvidence} />
+            <RuleEvidenceTable rules={ruleEvidence} unnamed={matched} />
           </CardBody>
         </Card>
       )}

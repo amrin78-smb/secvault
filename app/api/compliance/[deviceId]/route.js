@@ -13,6 +13,17 @@ import { isValidUuid } from '../../../../lib/apiUtils';
 // neutralise a spreadsheet formula would eventually disagree, and the one that
 // disagreed quietly would be the one writing the document that executes.
 import { csvRow, csvDocument } from '../../../../lib/csv';
+// ⛔ THE EVIDENCE COLUMN COULD NOT TELL "MATCHED NOTHING" FROM "MATCHED RULES
+// WE CAN NO LONGER NAME" (fixed 2026-09-25). `firewall_rules` is fully
+// DELETE+reinserted on every collection, so an id `audit_findings` recorded at
+// audit time may not exist at export time — and the resolution here was
+// `.map(id => map.get(id)).filter(Boolean)`, which dropped such an id, and a
+// NULL `rule_name` with it, leaving an EMPTY CELL indistinguishable from a
+// check that matched no rules at all. In the evidence column of a document an
+// auditor reads, that is CLAUDE.md's failed-read-as-a-fact rule at its most
+// expensive. The count now always survives; see lib/matchedRuleEvidence.js for
+// why it may not be called a deletion.
+import { resolveMatchedRules, matchedRulesCell } from '../../../../lib/matchedRuleEvidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +47,14 @@ function cellText(value) {
 
 // `ruleNamesById` is a Map(id -> rule_name), resolved by the caller via one
 // bulk query (see the "Matched Rules" bulk lookup below) -- semicolon-joined
-// per row, empty string when null/empty, matching this file's own convention
-// for the other columns.
+// per row, empty string when the finding recorded NO rule ids, matching this
+// file's own convention for the other columns.
+//
+// ⛔ AN EMPTY CELL NOW MEANS EXACTLY ONE THING: the check matched no rules.
+// A check that matched rules SecVault can no longer name carries the count
+// instead, bracketed inside the same cell. The column list is unchanged for
+// the reason given below -- a caveat in a new column is a caveat every
+// existing consumer of this file would skip.
 //
 // ⛔ THE COLUMNS AND THEIR ORDER ARE UNCHANGED BY THE ESCAPE MIGRATION, and
 // deliberately so: this is a file customers already save, script against and
@@ -52,11 +69,12 @@ function buildCsv(rows, ruleNamesById) {
   // above it.
   const lines = [csvRow(headers)];
   for (const r of rows) {
-    const matchedRuleIds = Array.isArray(r.matched_rule_ids) ? r.matched_rule_ids : [];
-    const matchedRuleNames = matchedRuleIds
-      .map((id) => (ruleNamesById ? ruleNamesById.get(id) : null))
-      .filter(Boolean)
-      .join('; ');
+    // ⛔ NOT `.filter(Boolean)`. Every id the finding recorded is accounted
+    // for: named, or counted as unnameable with the reason. `matchedRulesCell`
+    // returns '' only when there were no ids to begin with.
+    const matchedRuleNames = matchedRulesCell(
+      resolveMatchedRules(r.matched_rule_ids, ruleNamesById)
+    );
     lines.push(
       csvRow([
         cellText(r.name),

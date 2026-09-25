@@ -8,6 +8,7 @@ import Card, { CardBody } from '../../../../../components/ui/Card';
 import { EvidenceMark } from '../../../../../components/ui/Evidence';
 import { STANDARDS } from '../../../../../components/compliance/ComplianceMatrix';
 import { isValidUuid } from '../../../../../lib/apiUtils';
+import { resolveMatchedRules } from '../../../../../lib/matchedRuleEvidence';
 import { vendorLabel } from '../../../../../components/devices/vendorMeta';
 import {
   COVERAGE_CLAIM,
@@ -263,10 +264,20 @@ export default async function ComplianceStandardsPage({ params }) {
   const findingsRaw = await getFindings(pool, device.id);
   const allRuleIds = Array.from(new Set(findingsRaw.flatMap((f) => f.matchedRuleIds || [])));
   const ruleMap = await getRuleEvidenceMap(pool, allRuleIds);
-  const findings = findingsRaw.map((f) => ({
-    ...f,
-    ruleEvidence: (f.matchedRuleIds || []).map((id) => ruleMap.get(id)).filter(Boolean),
-  }));
+  // ⛔ `.filter(Boolean)` ALONE WAS THE DEFECT. `firewall_rules` is fully
+  // DELETE+reinserted on every collection, so an id recorded in
+  // `audit_findings` at audit time may not be in today's ruleset — and dropping
+  // it made "matched 3 rules we can no longer name" render exactly like
+  // "matched nothing". The resolved rows are still what the table draws; the
+  // count of what could not be named now travels beside them.
+  const findings = findingsRaw.map((f) => {
+    const ids = Array.isArray(f.matchedRuleIds) ? f.matchedRuleIds : [];
+    return {
+      ...f,
+      ruleEvidence: ids.map((id) => (typeof id === 'string' ? ruleMap.get(id) : null)).filter(Boolean),
+      matchedRules: resolveMatchedRules(ids, ruleMap),
+    };
+  });
 
   const library = await getCheckLibraryCoverage(pool, device.vendor);
   const { coverage } = perStandardCoverage(findings, library, device.vendor);

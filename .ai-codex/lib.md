@@ -2916,3 +2916,45 @@ only measured when it shares a volume with a path SecVault writes to.
 
 Tests: `tests/serverHealth.test.js` (15 cases, all could-not-measure shaped, plus a
 test that the comment stripper in its own source guards actually strips).
+
+## lib/matchedRuleEvidence.js (added 2026-09-25)
+
+`resolveMatchedRules` / `matchedRulesNote` / `matchedRulesReason` / `matchedRulesCell`. Pure, no
+pool. Resolves `audit_findings.matched_rule_ids` against the ruleset held NOW, and keeps the count
+of what it could not name.
+
+⛔ **"THIS CHECK MATCHED THREE RULES WE CAN NO LONGER NAME" EXPORTED IDENTICALLY TO "THIS CHECK
+MATCHED NO RULES"** — an empty cell either way, in the EVIDENCE column of the per-device compliance
+CSV an auditor reads, and nothing at all on the check detail page (`RuleEvidenceTable` returned
+`null`). `firewall_rules` is fully DELETE+reinserted on every collection, so an id recorded at audit
+time is not guaranteed to exist at export time; every call site used
+`.map(id => map.get(id)).filter(Boolean)` (or an `id = ANY($1)` that simply returned fewer rows), so
+an unresolvable id — and a rule collected with a NULL `rule_name` — vanished with no trace and no
+count. CLAUDE.md's failed-read-as-a-fact rule in the highest-stakes column in the product.
+
+⛔ **MEASURED BEFORE THE FIX AND THE LIVE IMPACT WAS ZERO, WHICH IS WHY IT NEEDED A TEST.** Live
+2026-09-25: 404 `audit_findings`, 77 carrying matched rule ids, **1,473 ids, all 1,473 resolving,
+0 nameless**. The audit runs inside the same collection cycle that reinserts the rules (`detected_at`
+is 1-45s after `last_rules_collected_at` on all 16 devices), so the window is seconds wide today. It
+widens the moment an audit outlives a collection. Nothing in production would ever have shown this.
+
+⛔ **THREE REASONS, KEPT APART**: `notInRuleset` (a question about the ruleset) / `unnamedInRuleset`
+(the vendor collected the rule with no name — the row IS still rendered) / `unusableId` (a defect in
+what SecVault stored). Collapsing the third into the first would report a storage bug as a fact
+about the customer's firewall.
+
+⛔ **IT MAY NOT SAY "(deleted)".** A failed collection, a partial pull, a re-added device and a
+genuine deletion all look the same from here. It also never prints a bare UUID where a name goes.
+Following `vpnDetections.js`'s `unverifiable`/`unverifiableTotal`: a caller may shorten the LIST, it
+may never shorten the COUNT.
+
+⛔ **ONE COLUMN, NOT A NEW ONE** — the CSV header list is unchanged (that file is saved, scripted
+against and attached to audits), so the caveat is bracketed inside the cell it qualifies, ASCII, and
+cannot start with a formula character. An empty cell now means exactly one thing: matched nothing.
+
+Consumers: `app/api/compliance/[deviceId]/route.js` (CSV), `compliance/[deviceId]/checks/[findingId]`
++ `compliance/[deviceId]/standards` (pages), `components/compliance/RuleEvidenceTable.js` +
+`StandardTabs.js` (on-screen, via the hueless `NotMeasured` vocabulary).
+
+Tests: `tests/matchedRuleEvidence.test.js` (22 cases, 3 mutations verified — including a mutation
+that restores the original `.filter(Boolean)` behaviour and is caught by 4 assertions).

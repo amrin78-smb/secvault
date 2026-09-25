@@ -7,6 +7,7 @@ import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
 import { paginateArray } from '../../lib/pagination';
+import { matchedRulesNote, matchedRulesReason } from '../../lib/matchedRuleEvidence';
 
 // Deliberate deviation from this app's usual `?tab=` server-navigation
 // convention (see app/(dashboard)/devices/[id]/analysis/page.js) -- see
@@ -286,7 +287,18 @@ export default function StandardTabs({ standards, findings, deviceId }) {
             {pageInfo.rows.map((f) => {
               const sev = SEVERITY_BADGE[f.severity] || SEVERITY_BADGE.info;
               const st = STATUS_BADGE[f.status] || STATUS_BADGE.na;
-              const hasEvidence = f.status === 'fail' && Array.isArray(f.ruleEvidence) && f.ruleEvidence.length > 0;
+              // ⛔ COUNTED FROM WHAT THE AUDIT MATCHED, NOT FROM WHAT STILL
+              // RESOLVES. `f.ruleEvidence.length` omitted every rule id that a
+              // later collection replaced (`firewall_rules` is fully
+              // DELETE+reinserted on every pull), so a check whose matched
+              // rules had all been replaced showed no evidence line at all —
+              // indistinguishable from a check that matched nothing.
+              const matched = f.matchedRules || null;
+              const matchedTotal = matched
+                ? matched.total
+                : (Array.isArray(f.ruleEvidence) ? f.ruleEvidence.length : 0);
+              const hasEvidence = f.status === 'fail' && matchedTotal > 0;
+              const unnamedNote = matchedRulesNote(matched);
               return (
                 <tr key={f.id}>
                   <td title={f.name}>
@@ -328,7 +340,12 @@ export default function StandardTabs({ standards, findings, deviceId }) {
                     )}
                     {hasEvidence && (
                       <div style={{ marginTop: 4, fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-                        {f.ruleEvidence.length} offending rule{f.ruleEvidence.length === 1 ? '' : 's'} — click the check name for details
+                        {matchedTotal} offending rule{matchedTotal === 1 ? '' : 's'} — click the check name for details
+                        {unnamedNote && (
+                          <div style={{ marginTop: 2 }}>
+                            <NotMeasured reason={matchedRulesReason(matched)} text={unnamedNote} />
+                          </div>
+                        )}
                       </div>
                     )}
                   </td>

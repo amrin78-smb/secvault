@@ -16,8 +16,20 @@
 // <colgroup>, column widths come from the colgroup, NOT the td max-width --
 // so overriding these td styles to wrap grows the row taller within its
 // allocated column width and does not disturb the fixed layout.
+//
+// ⛔ THIS TABLE USED TO RENDER ONLY THE RULES IT COULD RESOLVE, AND RETURNED
+// NULL WHEN THERE WERE NONE (fixed 2026-09-25). `firewall_rules` is fully
+// DELETE+reinserted on every collection, so a matched rule id recorded in
+// `audit_findings` at audit time may not be in the ruleset held now — and the
+// `id = ANY($1)` lookups that feed this component simply return fewer rows for
+// those ids. "This check matched three rules we can no longer name" therefore
+// rendered IDENTICALLY to "this check matched no rules": nothing at all. The
+// `unnamed` prop carries the count that used to be lost, and it is rendered
+// even when `rules` is empty — see lib/matchedRuleEvidence.js for why the
+// wording stops short of calling it a deletion.
 import Table from '../ui/Table';
 import NotMeasured from '../ui/NotMeasured';
+import { matchedRulesNote, matchedRulesReason } from '../../lib/matchedRuleEvidence';
 
 // Identical logic to devices/[id]/rules/page.js's joinArray() -- that file
 // doesn't export it, so it's mirrored here rather than imported. Used for the
@@ -85,10 +97,34 @@ function ListPills({ value }) {
   );
 }
 
-export default function RuleEvidenceTable({ rules }) {
-  if (!Array.isArray(rules) || rules.length === 0) return null;
+// Module-level, never nested inside RuleEvidenceTable (CLAUDE.md's React rule).
+// The hueless NotMeasured vocabulary, deliberately: "we cannot name these" is
+// neither good news nor bad news, and a severity hue either way would be the
+// same lie in a different direction.
+function UnnamedRuleNote({ unnamed }) {
+  const note = matchedRulesNote(unnamed);
+  if (!note) return null;
+  return (
+    <div style={{ marginTop: 8, fontSize: 'var(--text-sm)' }}>
+      <NotMeasured reason={matchedRulesReason(unnamed)} text={note} />
+    </div>
+  );
+}
+
+export default function RuleEvidenceTable({ rules, unnamed }) {
+  const hasRules = Array.isArray(rules) && rules.length > 0;
+  const note = matchedRulesNote(unnamed);
+
+  // ⛔ Only NOTHING RECORDED renders nothing. Previously an unresolvable id set
+  // took this branch too, which is the whole defect.
+  if (!hasRules && !note) return null;
+
+  // Every recorded rule is unnameable: there is no table to draw, but there IS
+  // something to say, and saying it is the point.
+  if (!hasRules) return <UnnamedRuleNote unnamed={unnamed} />;
 
   return (
+    <>
     <Table>
       <colgroup>
         <col style={{ width: '16%' }} />
@@ -142,5 +178,7 @@ export default function RuleEvidenceTable({ rules }) {
         ))}
       </tbody>
     </Table>
+    <UnnamedRuleNote unnamed={unnamed} />
+    </>
   );
 }
