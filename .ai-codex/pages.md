@@ -12,7 +12,7 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 ## Auth
 
-[client] /login — LoginPage — local-admin username/password form; calls `signIn('local', ...)`, redirects to `/` on success. No LDAP option in the UI (LDAP auth works server-side but has no login-page entry point — known gap, see CLAUDE.md).
+[client] /login — LoginPage — local-admin username/password form; calls `signIn('local', ...)`, redirects to `/` on success. No LDAP option in the UI (LDAP auth works server-side but has no login-page entry point — known gap, see CLAUDE.md). Redesigned v2.184.0 against `netvault/app/(auth)/login/page.tsx` as an explicit benchmark: one continuous `--navy` ground (it used to be a navy panel welded to a `--bg-primary` one, i.e. a hard navy/white seam in light theme) + `components/auth/LoginBackdrop.js` + a glass card. ⛔ **FOUR things in the sibling were deliberately NOT taken, and `tests/loginPage.test.js` fails the build on each**: the suite red (red means danger here), a hardcoded "Platform Status: Operational" badge that measures nothing, the version + build number in the footer (pre-auth, it maps a visitor onto this build's exact advisory set — it once read "SecVault v2.61.2"), and the two-step MFA precheck that reveals which accounts have MFA. ⛔ Still statically prerendered (`○` in the build output) — it reads the query string from `window.location` in an effect, never `useSearchParams()`.
 
 ## Dashboard
 

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.184.0': [
+    "The sign-in page has been redesigned: one continuous background instead of a split panel, an animated motif of traffic being inspected and filtered, and a raised sign-in card.",
+    "It previously changed appearance with the light and dark setting, which left a hard seam down the middle of the page in light mode. It is now one consistent screen in both.",
+    "The \"Sign in\" button was white text on bright cyan in dark mode, which was difficult to read. It now meets the contrast standard.",
+    "The animation stops for anyone whose system is set to reduce motion, and pauses when the page is not the active tab.",
+    "No change to how signing in works, and the page still shows no version number before you sign in.",
+  ],
   '2.183.0': [
     "Fixed a link on the VPN detections page that could never find anything: clicking a \"new country\" finding opened the log explorer filtered on a country name the logs do not store, so it always showed an empty result — which reads as \"this did not happen\" on the page whose job is to show the evidence. The link now filters on the account alone.",
     "Fixed the settings file being written back in the wrong character encoding during a repeat installation, which could permanently corrupt values containing accented characters. This was the other half of the fault fixed in 2.182.0, and the check added then could not see it.",

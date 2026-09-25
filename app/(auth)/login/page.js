@@ -1,19 +1,42 @@
 'use client';
 
+// app/(auth)/login/page.js
+//
+// ⛔ THE LEVEL WAS TAKEN FROM NETVAULT'S LOGIN; NONE OF ITS CONTENT WAS.
+// Benchmarked against `netvault/app/(auth)/login/page.tsx` on 2026-09-25 at the
+// user's request. What is worth copying there is the FINISH — an animated
+// ground, a glass card with real depth, page chrome instead of bare panels.
+// Four things in it are actively wrong for this product and are deliberately
+// absent. Each is listed at its own site below, because a later session
+// comparing the two files will otherwise "fix" the difference:
+//
+//   1. the suite RED               → SecVault reserves red for danger (v2.87.0)
+//   2. a hardcoded "Platform Status: Operational" badge
+//   3. the version + build number in the footer
+//   4. the two-step MFA precheck that reveals whether an account has MFA
+//
+// ⛔ AND (2) IS THE ONE THAT MATTERS MOST. NetVault paints a green dot and the
+// word "Operational" as static markup — it measures nothing. On a product whose
+// entire thesis is that it does not assert what it has not measured, a
+// decorative health indicator on the FIRST screen anybody sees would be the
+// failed-read-as-a-fact rule broken before the user has even signed in. If a
+// status indicator is ever wanted here it must read a real probe, and an
+// unreadable probe must render as unknown, not green.
+
 import { useState, useEffect, useRef } from 'react';
-import { PRODUCT_NAME } from '../../../lib/branding';
 import { useRouter } from 'next/navigation';
 import { signIn } from 'next-auth/react';
+import { PRODUCT_NAME } from '../../../lib/branding';
 // ⛔ A PURE MODULE, NOT A LOCAL HELPER. The first version lived here, could
 // not be imported by a test, and was bypassable with an embedded tab.
 import { safeReturnPath } from '../../../lib/returnPath';
-import Button from '../../../components/ui/Button';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+import LoginBackdrop from '../../../components/auth/LoginBackdrop';
 
-// Large watermark version of Header.js's SecVaultLogo shield path -- reused
-// (not reinvented) so the login page's brand panel is recognizably the same
-// product identity as the rest of the app, not a generic auth-template shape.
-function ShieldWatermark(props) {
+// The shield from Header.js's SecVaultLogo — reused, not reinvented, so the
+// sign-in page is recognisably the same product as the rest of the app rather
+// than a generic auth template.
+function Shield(props) {
   return (
     <svg viewBox="0 0 38 40" fill="none" aria-hidden="true" {...props}>
       <path
@@ -22,12 +45,36 @@ function ShieldWatermark(props) {
         strokeWidth="1.4"
         strokeLinejoin="round"
       />
-      <path d="M13 19l4 4 8-9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M13 19l4 4 8-9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-const FEATURES = [
+function Check(props) {
+  return (
+    <svg viewBox="0 0 24 24" width={15} height={15} fill="none" stroke="currentColor"
+      strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function Wordmark({ size = 20 }) {
+  return (
+    <span style={{ fontSize: size, fontWeight: 700, letterSpacing: '-0.3px' }}>
+      <span style={{ color: 'var(--shell-fg)' }}>Sec</span>
+      <span style={{ color: 'var(--primary)' }}>Vault</span>
+    </span>
+  );
+}
+
+const PROOF = [
   'CVE tracking across every managed firewall vendor',
   'Rule hygiene, shadow, and redundancy analysis',
   'PCI DSS, ISO 27001, CIS v8, NIST, and SANS compliance scoring',
@@ -89,137 +136,76 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      {/* Brand panel -- hidden on narrow viewports (min-width media query via
-          inline-style-unfriendly CSS, so this uses a plain className hook
-          instead), watermark shield + product context. Nothing here is
-          interactive, so it's safe as a server-renderable static block even
-          though the page itself is a client component. */}
-      <div className="login-brand-panel">
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundImage:
-              'radial-gradient(circle at 15% 20%, rgba(8,145,178,0.16), transparent 45%), ' +
-              'radial-gradient(circle at 85% 85%, rgba(200,16,46,0.14), transparent 45%)',
-          }}
-        />
-        <ShieldWatermark
-          style={{
-            position: 'absolute',
-            right: '-6%',
-            bottom: '-8%',
-            width: '65%',
-            height: 'auto',
-            color: 'rgba(255,255,255,0.05)',
-          }}
-        />
-        <div style={{ position: 'relative', maxWidth: 420 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 28 }}>
-            <ShieldWatermark style={{ width: 30, height: 30, color: 'var(--accent-teal)' }} />
-            <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.3px' }}>
-              <span style={{ color: '#fff' }}>Sec</span>
-              <span style={{ color: 'var(--accent-teal)' }}>Vault</span>
-            </span>
-          </div>
-          <h1
-            style={{
-              fontSize: 30,
-              fontWeight: 700,
-              lineHeight: 1.25,
-              letterSpacing: '-0.5px',
-              color: '#fff',
-              marginBottom: 16,
-            }}
-          >
-            Firewall security posture, in one place.
-          </h1>
-          <p style={{ fontSize: 'var(--text-md)', color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, marginBottom: 32 }}>
+    <div className="login-page">
+      <LoginBackdrop />
+
+      {/* Page chrome. ⛔ The sibling puts a green "Platform Status: Operational"
+          pill opposite this one; see the file header for why there is none
+          here. */}
+      <div className="login-chrome login-chrome-top">
+        <Shield style={{ width: 30, height: 30, color: 'var(--primary)' }} />
+        <div>
+          <Wordmark size={20} />
+          <div className="login-eyebrow">FIREWALL SECURITY PLATFORM</div>
+        </div>
+      </div>
+
+      <div className="login-center">
+        <div className="login-pitch">
+          {/* ⛔ This sentence is the /login smoke marker (scripts/smoke.js).
+              Changing it without changing the marker turns the one gate that
+              actually loads this page green over a page that did not render. */}
+          <h1>Firewall security posture, in one place.</h1>
+          <div className="login-rule" />
+          <p className="login-lede">
             Standalone CVE tracking, rule analysis, and compliance scoring across your entire
             managed firewall fleet.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {FEATURES.map((f) => (
-              <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <svg
-                  viewBox="0 0 24 24"
-                  width={16}
-                  height={16}
-                  style={{ marginTop: 2, flexShrink: 0, color: 'var(--accent-teal)' }}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                <span style={{ fontSize: 'var(--text-base)', color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>
-                  {f}
-                </span>
+          <div className="login-proof">
+            {PROOF.map((p) => (
+              <div key={p} className="login-proof-row">
+                <Check />
+                <span>{p}</span>
               </div>
             ))}
           </div>
         </div>
-      </div>
 
-      {/* Form panel */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '32px 16px',
-          background: 'var(--bg-primary)',
-        }}
-      >
-        <div style={{ width: '100%', maxWidth: 360 }}>
-          {/* Compact brand mark, shown only when the wide brand panel is hidden
-              (narrow viewports) -- see .login-brand-panel/.login-compact-brand
-              in globals.css for the responsive swap. */}
-          <div className="login-compact-brand" style={{ textAlign: 'center', marginBottom: 28 }}>
-            <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.3px', color: 'var(--text-primary)' }}>
-              Sec<span style={{ color: 'var(--primary)' }}>Vault</span>
-            </span>
+        <div className="login-card">
+          <div className="login-compact-brand" style={{ textAlign: 'center', marginBottom: 'var(--s5)' }}>
+            <Wordmark size={22} />
           </div>
 
-          <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Sign in
-          </h2>
-          <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)', marginBottom: 28 }}>
-            Enter your credentials to access the platform.
-          </p>
+          <h2>Sign in</h2>
+          <p className="login-card-sub">Enter your credentials to access the platform.</p>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="form-field">
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
+            <div className="login-field">
               <label htmlFor="username">Username</label>
               <input
                 id="username"
                 name="username"
                 type="text"
                 autoComplete="username"
+                className="login-input"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
-                className="input"
                 autoFocus
               />
             </div>
 
-            <div className="form-field">
+            <div className="login-field">
               <label htmlFor="password">Password</label>
               <input
                 id="password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
+                className="login-input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="input"
               />
             </div>
 
@@ -227,25 +213,32 @@ export default function LoginPage() {
                 only for accounts that have MFA would turn the login form into an
                 oracle: type a username, watch whether the box appears, and you
                 know which accounts are protected and which are worth attacking.
-                It is optional for everyone and ignored for accounts without
-                MFA. */}
-            <div className="form-field">
+                It is optional for everyone and ignored for accounts without MFA.
+                ⛔ NetVault's login does the opposite — it POSTs the credentials
+                to /api/auth/mfa/precheck and shows the field only when the
+                answer is yes. Do not port that here: it is the oracle this
+                comment exists to prevent, and CLAUDE.md's single-form rule
+                ("NextAuth v4's authorize() is ONE call") is the other half of
+                the same decision. */}
+            <div className="login-field">
               <label htmlFor="totp">
                 Authenticator code
-                <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> — if enabled</span>
+                <span className="login-hint"> — if enabled</span>
               </label>
               <input
                 id="totp"
                 name="totp"
                 type="text"
-                /* one-time-code lets a phone offer the SMS/authenticator code */
+                /* one-time-code lets a phone offer the SMS/authenticator code.
+                   ⛔ Not type="number": it strips a leading zero, and a TOTP
+                   starting 0 is perfectly ordinary. */
                 autoComplete="one-time-code"
                 inputMode="numeric"
                 placeholder="123456"
+                className="login-input"
                 value={totp}
                 onChange={(e) => setTotp(e.target.value)}
-                className="input"
-                style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.12em' }}
+                style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.14em' }}
               />
             </div>
 
@@ -255,40 +248,19 @@ export default function LoginPage() {
                 in the danger colour it reads as a rejected sign-in, and the
                 next thing they do is doubt their password. */}
             {timedOut && !error && (
-              <p
-                style={{
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--tint-info)',
-                  color: 'var(--tint-info-fg)',
-                  padding: '8px 12px',
-                  fontSize: 'var(--text-base)',
-                }}
-              >
+              <p className="login-note login-note-info">
                 You were signed out because there was no activity. Sign in again and you will go
                 back to the page you were on.
               </p>
             )}
 
             {error && (
-              <p
-                style={{
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--tint-danger)',
-                  color: 'var(--tint-danger-fg)',
-                  padding: '8px 12px',
-                  fontSize: 'var(--text-base)',
-                }}
-              >
+              <p className="login-note login-note-error" role="alert">
                 {error}
               </p>
             )}
 
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={submitting}
-              style={{ width: '100%', justifyContent: 'center' }}
-            >
+            <button type="submit" className="login-submit" disabled={submitting}>
               {submitting ? (
                 <>
                   <LoadingSpinner size={14} /> Signing in...
@@ -296,20 +268,20 @@ export default function LoginPage() {
               ) : (
                 'Sign in'
               )}
-            </Button>
+            </button>
           </form>
         </div>
-
-        {/* ⛔ No version number here. This page is PRE-AUTH, and the exact
-            version maps an unauthenticated visitor straight onto the precise
-            advisory set for this build — measured live, the login HTML read
-            "SecVault v2.61.2". The product name is fine; the version is not.
-            It is still shown to signed-in users under Settings -> About, which
-            is where support actually needs it. */}
-        <div style={{ marginTop: 40, fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-          {PRODUCT_NAME}
-        </div>
       </div>
+
+      {/* ⛔ No version number here. This page is PRE-AUTH, and the exact
+          version maps an unauthenticated visitor straight onto the precise
+          advisory set for this build — measured live, the login HTML read
+          "SecVault v2.61.2". The product name is fine; the version is not.
+          It is still shown to signed-in users under Settings -> About, which
+          is where support actually needs it. ⛔ NetVault's login prints
+          "NocVault v1.2.0 • Build 2026.06.11" in this exact position. Do not
+          copy it back. */}
+      <div className="login-chrome login-chrome-bottom">{PRODUCT_NAME}</div>
     </div>
   );
 }

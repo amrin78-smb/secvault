@@ -53,6 +53,20 @@ StatCard  label, value, sub, color, className, compact, icon, iconColor, iconBg,
 AnswerHeader  answer (from lib/answers.js), evidence, context, actions — the answer-first page header (v2.107.0; wired on the dashboard, /vulnerability, /compliance and /analysis as of v2.108.0): one plain-English sentence above the grid that proves it. ⛔ The coverage line sits in the SAME BLOCK as the claim, never a footnote — a fleet claim made over a partial fleet is the most dangerous thing this product renders. ⛔ Tone `unknown` carries NO HUE; the lead fragment uses --tint-*-fg text-safe forms, not raw ramp hues.
 (c) RowActionsMenu  actions[] — "⋮" overflow menu for table-row actions (2026-07-23 UI audit; replaces stacked underlined text links). actions: {type:'link'|'button', label, href|onClick, disabled?, pending?, pendingLabel?, danger?}. Does NOT auto-close on a pending button click (needs somewhere to show "Collecting…"/etc.) — only closes on outside-click or a link navigation.
 
+## auth/
+
+(c) LoginBackdrop  no props — the animated ground on `/login` (v2.184.0): lanes of packets drifting
+into an inspection plane, most passing and brightening, ~1 in 7 stopping and dissolving. Canvas +
+RAF, ~120 rects/frame. ⛔ **The motif is SecVault's own, not NetVault's** — the sibling's login draws
+a drifting node graph, which is a topology metaphor on a product that filters against a rulebase.
+What was taken from it is the LEVEL of finish, never its content. ⛔ Honours
+`prefers-reduced-motion` by painting ONE static frame (not an empty ground), pauses on
+`visibilitychange` (a login page sits in a background tab all day), scales for `devicePixelRatio`,
+and cancels its frame and both listeners on unmount. Colours are LITERALS: it only ever sits on the
+`--navy` ground, which is dark in both themes, so the flipping tokens are wrong for it — the same
+rule that gives the header `--shell-fg`. Seeded PRNG, so the composition is identical on every load
+and a visual regression is reviewable. Pinned by `tests/loginPage.test.js`.
+
 ## layout/
 
 Header (async server)  session — top navy header bar: logo, search, sync pill, bell, theme, user
