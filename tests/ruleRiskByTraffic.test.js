@@ -49,6 +49,9 @@ function stubPool({ rollupHours = 169, rules = [], hits = [], findings = [], dev
         return {
           rows: devs.map((d) => ({
             device_id: d.id,
+            // first_bucket: how far back the rollup goes. A window longer
+            // than this can never certify a measured zero.
+            first_bucket: new Date(Date.now() - 400 * 24 * 3600 * 1000),
             hours_with_events: rollupHours,
             first_seen: new Date(), last_seen: new Date(), events: 1000,
           })),

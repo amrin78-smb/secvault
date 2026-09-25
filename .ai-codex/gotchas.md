@@ -483,6 +483,85 @@ address, `NEXTAUTH_URL`), so there is no compile-time origin to fall back to eit
 needs the real one must read it from `NEXTAUTH_URL` or the `Host` header — and then it is one more
 thing that can be misconfigured. A relative URL avoids the question entirely.
 
+## ⛔ A COVERAGE RATIO OVER A WINDOW LONGER THAN YOUR DATA MEASURES *YOU* (2026-09-25)
+
+`ruleHitCorrelation.getDeviceLogCoverage()` certified a log-derived "this rule saw no traffic" only
+when the device logged through >= 90% of the window. Measured on the live fleet:
+
+| | |
+|---|---|
+| rollup history (collector shipped 2026-09-08) | **413 hours** |
+| default window | 30 days = **720 hours** |
+| every device's ratio | **0.572 — FAIL** |
+| hours those devices actually missed | **0** |
+
+Every firewall was logging **100% of every hour it was possible to log**, and all 15 were reported
+`no-coverage` — a phrase that names the DEVICE. The gate was measuring SecVault's own install date.
+1,444 rules carried that attribution.
+
+⛔ **NOBODY NOTICED BECAUSE THE EFFECT WAS CONSERVATIVE.** The whole log-derived measured-zero
+path had never armed once, so there was no wrong number on screen to investigate — only a feature
+silently doing nothing.
+
+⛔ **AND IT WOULD HAVE ARMED ITSELF, FLEET-WIDE, ON A DATE NOBODY WROTE DOWN.** At ~100% logging
+density the trailing 720-hour window crosses the 0.9 ratio around **2026-10-05** purely by the
+passage of time — no deploy, no review. Log-derived `unused` findings would have begun appearing
+across the fleet, including NAME-grade ones on every Palo Alto (see the grading note below). A guard
+that flips from "never fires" to "fires everywhere" by calendar is not a guard.
+
+The fix separates the two questions and gives the second its own state:
+
+```js
+// history is OURS; the ratio is the DEVICE'S. Test history FIRST -- a young
+// rollup also produces a low ratio, so a ratio-first order reports the wrong
+// cause and the real one never surfaces.
+covered: sufficientHistory && hours >= MIN_WINDOW_HOURS && ratio >= MIN_COVERAGE_RATIO
+```
+
+`insufficient-history` is now distinct from `no-coverage`, which is the same `na`-vs-`warning`
+distinction this codebase already draws for compliance: **an uncertainty that is ours must not be
+recorded as a negative fact about the device.** An unreadable history is `null` — never 0, never
+"assume plenty" — and denies.
+
+⛔ **The history comes from an UNCORRELATED SCALAR SUBQUERY in the same statement**
+(`(SELECT min(bucket_hour) FROM syslog_rollup_hourly) AS first_bucket`), not a second round trip.
+A separate query also breaks every caller's stub pool in a way that looks like the guard is broken
+rather than new — which is exactly what happened on the first attempt, across five test files.
+
+---
+
+## ⛔ A RULE NAME IS NOT A RULE ID, AND AN ABSENCE IS ONLY AS STRONG AS WHAT YOU SEARCHED BY (2026-09-25)
+
+`syslog_rule_hits_hourly` identifies rules differently per vendor, and the split is **total**:
+
+| vendor | rows | with `rule_id` | with `rule_name` |
+|---|---|---|---|
+| Fortinet | 61,835 | **all of them** (44 distinct) | 48,061 |
+| Palo Alto | 80,203 | **NONE — NULL on every row** | all (223 distinct) |
+
+`enrichRulesWithLogEvidence` matched by id, fell back to name, and labelled both `logEvidence:
+'hits'`. Two different qualities of evidence, indistinguishable downstream.
+
+⛔ **THE MATCH DIRECTION IS SAFE; THE ABSENCE DIRECTION IS NOT.** A match says "in use", which
+only ever REFUSES a deletion. An ABSENCE says "unused", which is what `ruleAnalysis.js` turns into
+an `unused` finding and a cleanup candidate — and a rule **renamed** during the window is absent
+under its new name while passing traffic under its old one. On a name-only vendor that is a live
+rule proposed for deletion, from a rename.
+
+So `usageGrade` (`device` / `log-id` / `log-name` / `null`) and `deletionEvidence` (true only for
+the first two). ⛔ `logEvidence` KEPT its existing values rather than splitting `'hits'` into
+`'hits-id'`/`'hits-name'`: `ruleAnalysis.js` compares `logEvidence === 'hits'` to decide a
+device-reported zero is CONTRADICTED by observed traffic, and moving the string would have silently
+disarmed it.
+
+⛔ **AND "NO ROWS" IS NOT "ROWS THAT NAME NOTHING".** The first guard written here refused to
+certify whenever both hit maps were empty — which is also what a genuinely idle firewall looks
+like, so it would have made an honestly quiet ruleset permanently unanswerable. The format case has
+its own signature: the device DID produce rule-hit rows and not one carried an id or a name
+(`rowsSeen > 0` with empty maps). Live example: PAKFood's single rollup row carries neither.
+
+---
+
 ## ⛔ `Number.isFinite(Number(v))` IS NOT A "DID WE READ THIS?" GUARD (2026-09-25)
 
 `Number(null)` is **0**, and 0 is finite. So is `Number('')`, `Number([])` and `Number(false)`.

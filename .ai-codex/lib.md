@@ -978,6 +978,49 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/engines/ruleHitCorrelation.js — A3 grading + history (changed 2026-09-25, v2.189.0)
+
+Phase 8b's log-evidence engine gained the two things A3 is actually about. Fields ADDED to every
+enriched rule (nothing renamed — see below):
+
+| field | values |
+|---|---|
+| `usageGrade` | `device` / `log-id` / `log-name` / `null` |
+| `deletionEvidence` | `true` only for `device` and `log-id` |
+| `logGrade` | `log-id` / `log-name` / `null` — how the LOG answer was reached |
+| `logHistoryHours` | how far back the rollup goes |
+
+`logEvidence` gained two values: **`insufficient-history`** and **`no-rule-identity`**.
+
+⛔ **THE VENDOR SPLIT IS TOTAL** (measured 2026-09-25): Fortinet's 61,835 rule-hit rows carry a
+`rule_id` on every one; Palo Alto's 80,203 carry NULL on every one and are matched by NAME. Of 235
+unmeasured rules, logs answer **84 — 54 by ID, 30 by NAME**. Live grades across the fleet:
+`device` 1,547 / `log-id` 54 / `log-name` 30 / `null` 151.
+
+⛔ **A NAME MATCH MAY NOT AUTHORISE A DELETION.** Names are neither unique nor stable across a
+config change, so a RENAMED rule is absent under its new name while passing traffic. The match
+direction is safe (it only refuses deletions); the ABSENCE direction is what removes a rule from a
+firewall. `ruleChangeRequests.getCleanupCandidates` still gates on the DEVICE's own `hit_count`,
+and a test pins that it does not read `effectiveHitCount` — which silently includes name grade.
+
+⛔ **`logEvidence: 'hits'` WAS NOT SPLIT INTO `'hits-id'`/`'hits-name'`.** `ruleAnalysis.js`
+compares `logEvidence === 'hits'` to decide a device-reported zero is CONTRADICTED by observed
+traffic; moving that string would have disarmed the check silently. The grade is ADDITIVE.
+
+⛔ **`insufficient-history` IS OURS, `no-coverage` IS THE DEVICE'S**, and history is tested FIRST
+because a young rollup also produces a low ratio. Full measurement in `gotchas.md` — 1,444 rules
+were blaming the firewalls for SecVault's install date, and the gate would have armed itself
+fleet-wide around 2026-10-05 with no deploy.
+
+⛔ **`no-rule-identity` NEEDS `rowsSeen > 0`.** Empty hit maps alone are also what a genuinely
+idle firewall looks like; the format case is "the device produced rule-hit rows and not one named
+a rule" (live: PAKFood). Getting this wrong makes a quiet ruleset permanently unanswerable.
+
+⛔ **ONE QUERY, NOT TWO.** History arrives as an uncorrelated scalar subquery
+(`(SELECT min(bucket_hour) FROM syslog_rollup_hourly) AS first_bucket`) on the same statement. Any
+stub pool feeding `getDeviceLogCoverage` must supply `first_bucket`, or history reads as unknown
+and nothing certifies — deliberately.
+
 ## lib/engines/coverageRegister.js + coverageRegisterData.js (added 2026-09-25, v2.188.0)
 
 The A2 blind-spot register: where SecVault cannot see, and what that costs. `coverageRegister.js`

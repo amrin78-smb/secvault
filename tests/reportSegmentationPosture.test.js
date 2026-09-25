@@ -154,7 +154,7 @@ function fixture(overrides = {}) {
     // 720 of 720 hours: DEV_PA's silence is real evidence. DEV_FG sends nothing,
     // so its rules can never be certified as measured zeroes.
     coverage: [
-      { device_id: DEV_PA, hours_with_events: 720, first_seen: new Date('2026-08-16T00:00:00Z'), last_seen: NOW, events: '1000000' },
+      { device_id: DEV_PA, hours_with_events: 720, first_bucket: new Date('2026-06-01T00:00:00Z'), first_seen: new Date('2026-08-16T00:00:00Z'), last_seen: NOW, events: '1000000' },
     ],
     loggedHits: {},
     zones: ['dmz', 'internal', 'lan', 'private', 'server', 'untrust', 'wan', 'wifi'],

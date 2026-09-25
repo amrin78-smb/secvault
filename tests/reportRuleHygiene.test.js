@@ -106,7 +106,11 @@ function fixture(overrides = {}) {
       { device_id: DEV_SSH, finding_type: 'risky_service', severity: 'high', detail: 'Rule "FD-Mgmt" allows high-risk service(s): snmp-v1 (161).', remediation: 'Use SNMPv3.', analyzed_at: new Date(), rule_id_vendor: '4', rule_name: 'FD-Mgmt', sequence_number: 4, enabled: true, hit_count: null, log_enabled: true, vdom: 'root', ack_status: 'acknowledged', ack_note: 'Accepted by network team', ack_at: new Date('2026-09-01T00:00:00Z') },
     ],
     coverage: [
-      { device_id: DEV_SSH, hours_with_events: 720, first_seen: new Date('2026-08-16T00:00:00Z'), last_seen: new Date('2026-09-15T00:00:00Z'), events: '1000000' },
+      // ⛔ `first_bucket` states how far back the ROLLUP goes. Without it the
+      // history reads as unknown and nothing can be certified as a measured zero
+      // -- deliberately, because a young rollup must not certify a 30-day claim.
+
+      { device_id: DEV_SSH, hours_with_events: 720, first_bucket: new Date('2026-06-01T00:00:00Z'), first_seen: new Date('2026-08-16T00:00:00Z'), last_seen: new Date('2026-09-15T00:00:00Z'), events: '1000000' },
     ],
     nullRules: {
       [DEV_SSH]: [
