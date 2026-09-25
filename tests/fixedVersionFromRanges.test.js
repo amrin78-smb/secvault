@@ -179,3 +179,50 @@ describe('⛔ hubIsBetter accepts strictly better data, never merely different',
     }
   });
 });
+
+// ── 3. The vendor feed must not undo the hub's repair ────────────────────
+
+describe('⛔ the Fortinet upsert never trades a fix boundary for none', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'feeds', 'fortinet.js'), 'utf8'
+  );
+
+  it('refuses a strict downgrade of affected_version_ranges', () => {
+    // ⛔ THIS FEED RUNS NINE SECONDS AFTER cve_hub. Measured 2026-09-25: the
+    // hub repaired 80 advisory rows at 12:56:27 and not one survived the
+    // cycle, because a resolved CSAF takes the ELSE branch and overwrites.
+    // The vendor is normally the better source; FortiGuard's CSAF is PROSE,
+    // and "7.4.0 through 7.4.10" parses to an inclusive bound with no fix
+    // version where NVD's versionEndExcluding gives 7.4.11.
+    const clause = src.slice(
+      src.indexOf('affected_version_ranges = CASE'),
+      src.indexOf('fixed_in_versions = CASE')
+    );
+    assert.ok(clause.length > 0, 'the affected_version_ranges CASE is gone');
+    assert.match(
+      clause,
+      /advisories\.affected_version_ranges\s*@>\s*'\[\{"exclude_fixed":\s*true\}\]'/,
+      'the downgrade guard is gone — the vendor feed can overwrite a fix boundary again'
+    );
+    assert.match(
+      clause,
+      /NOT\s*\(\s*EXCLUDED\.affected_version_ranges\s*@>/,
+      'the guard must test the INCOMING row too, or it becomes an unconditional refusal'
+    );
+  });
+
+  it('⛔ stays ONE-DIRECTIONAL — an incoming row WITH a boundary still wins', () => {
+    // This is not a preference for the hub over the vendor. FortiGuard keeps
+    // authority wherever it actually has the better data; only the strict
+    // downgrade is refused. A guard that always kept ours would freeze the
+    // vendor out of its own advisories.
+    const clause = src.slice(
+      src.indexOf('affected_version_ranges = CASE'),
+      src.indexOf('fixed_in_versions = CASE')
+    );
+    assert.match(clause, /ELSE EXCLUDED\.affected_version_ranges END/,
+      'the vendor must still win in every case that is not a downgrade');
+  });
+});
