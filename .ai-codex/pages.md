@@ -136,6 +136,21 @@ entries in `lib/vpnTabs.js`'s `FLEET_VPN_TABS` — the temporary local shim in `
 ⛔ APPENDED, never inserted: `status` stays first so a bare `/vpn` bookmark still lands on it, and
 `key` is a URL contract — add and deprecate, never rename.
 
+**`detections` rebuilt as a threat page, v2.185.0** — benchmarked against a mockup, and three of its
+panels turned out to be SecVault's own text verbatim (the mockup's threshold sentences match
+`MIN_USERNAMES_FOR_SPRAY` = 5, `MIN_BRUTE_FORCE_ATTEMPTS` = 10, `MIN_TARGETED_SOURCES` = 10 exactly),
+so it was a RESTYLE, not a new feature. Added: a four-figure headline strip with per-window deltas,
+`VpnThreatFilters` (search / country / severity / window), and a per-detection CSV export.
+⛔ **Params: `dHours` (default 24, engine allows 192), `dq`, `dCountry`, `dSeverity`.** The window
+was hardcoded at this call site even though the engine always accepted more.
+⛔ **THE MOCKUP'S TWO WORLD MAPS WERE REFUSED** — see the `/vpn?vtab=locations` entry above; that
+decision is recorded in three places and its strongest reason is structural, not size: a dot has one
+position and one colour and cannot express "247 failures, success count not reported by this vendor,
+so no ratio may be drawn". Three of eight VPN-reporting firewalls are success-blind.
+⛔ **FILTERS NARROW WHAT IS LISTED, NEVER WHAT WAS MEASURED**, and each panel prints "showing N of M"
+when one bites. The reporting-gap banner stays ABOVE the panels and no filter may move it — it
+bounds every claim below it.
+
 ## app/(dashboard)/applications/page.js  -> `/applications`  (v2.124.0)
 
 `server` — `ApplicationsPage` — declared business applications, each flow re-checked against the

@@ -978,6 +978,35 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/vpnDetectionFilters.js (added 2026-09-25, v2.185.0)
+
+`matchesFilters` / `filtersActive` / `countriesIn` / `countriesOf` / `searchableOf`. PURE — the
+narrowing behind `/vpn?vtab=detections`, kept out of the JSX so the judgement is testable directly
+rather than by scanning a component for the right words.
+
+⛔ **THE SIX DETECTIONS CARRY COUNTRY IN THREE SHAPES** — `country` (spray, brute force),
+`countries[]` (account targeted, off hours) and a from/to PAIR (country change). A filter written
+against the first shape silently drops three detections out of every country query, and the reader
+concludes nothing came from that country.
+
+⛔ **A FINDING NAMING NO COUNTRY IS EXCLUDED BY A COUNTRY FILTER, not passed through.** "We do not
+know where this came from" is not a match for "Switzerland". The cost — that narrowing hides
+findings whose country the firewall never reported — is why the caller prints "showing N of M".
+
+⛔ **`countriesIn` READS `unverifiable` AS WELL AS `findings`.** Those items are shown on the page;
+a dropdown built from findings alone offers no option for a country that appears only among the
+observations we could not judge, so filtering for it returns nothing and looks like an answer.
+Pinned by `tests/vpnDetectionFilters.test.js` (25).
+
+## lib/engines/vpnDetectionsExport.js (added 2026-09-25, v2.185.0)
+
+One detection object -> a CSV document, pure. Columns are PER DETECTION rather than a union of all
+six, so a field a detection does not emit is ABSENT and an empty cell means exactly one thing.
+Exports `findings` AND `unverifiable` separated by a `record_class` column, with trailing `note`
+rows disclosing truncation and a non-`measured` status. Escaping via `lib/csv.js`; BOM on by default
+(these rows carry Thai usernames and Excel ignores `charset=utf-8` on a download). Backs
+`GET /api/vpn/detections/export`. Pinned by `tests/vpnDetectionsExport.test.js` (38).
+
 ## lib/vpnDetectionLinks.js (added 2026-09-24, v2.178.0)
 
 Pure. Turns ONE VPN detection finding into a `/logs` query showing the raw events it was computed

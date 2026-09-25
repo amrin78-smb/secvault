@@ -46,6 +46,7 @@ const {
   NEW_COUNTRY_MIN_USER_DAYS,
   COUNTRY_CHANGE_MAX_GAP_HOURS,
   OFF_HOURS_MIN_BASELINE_DAYS,
+  buildHeadline,
 } = require('../lib/engines/vpnDetections');
 
 // --------------------------------------------------------------------------
@@ -760,5 +761,88 @@ describe('country spellings are folded before grouping', () => {
     ];
     const d = buildCountryChangeDetection({ successRows: rows, baseline: DEEP_BASELINE, windowStart: WINDOW_START });
     assert.ok(d.findings.length > 0, 'TH -> Singapore is a real change');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+describe('⛔ buildHeadline — the strip at the top of the threat page', () => {
+  const WS = new Date('2026-09-25T12:00:00Z');
+  const PS = new Date('2026-09-24T12:00:00Z');
+  const ROW = {
+    cur_failed: '46858', prev_failed: '51701',
+    cur_sources: '2588', prev_sources: '2389',
+    cur_devices: '8', cur_truncated: false,
+  };
+  const USERS = { cur_usernames: '7023', prev_usernames: '8526' };
+  const covering = { firstBucketAt: new Date('2026-09-09T00:00:00Z') };
+  const get = (h, key) => h.figures.find((f) => f.key === key);
+
+  it('carries all four figures with their previous window', () => {
+    const h = buildHeadline(ROW, USERS, covering, WS, PS);
+    assert.equal(get(h, 'failed_events').current, 46858);
+    assert.equal(get(h, 'failed_events').previous, 51701);
+    assert.equal(get(h, 'usernames_targeted').current, 7023);
+    assert.equal(get(h, 'source_addresses').current, 2588);
+    assert.equal(get(h, 'firewalls_reporting').current, 8);
+    assert.equal(h.previousWindowCovered, true);
+  });
+
+  it('⛔ a previous window we do not hold is null, NEVER zero', () => {
+    // The retained history starts INSIDE the previous window, so we did not
+    // observe a quieter period -- we observed nothing. A 0 here renders as
+    // "up 46,858 since yesterday" on the day a customer installs the product.
+    const young = { firstBucketAt: new Date('2026-09-25T06:00:00Z') };
+    const h = buildHeadline(ROW, USERS, young, WS, PS);
+    assert.equal(h.previousWindowCovered, false);
+    for (const key of ['failed_events', 'source_addresses', 'usernames_targeted']) {
+      assert.equal(get(h, key).previous, null, `${key} invented a previous value`);
+      assert.notEqual(get(h, key).previous, 0);
+    }
+    // ...while the CURRENT figures are still perfectly good.
+    assert.equal(get(h, 'failed_events').current, 46858);
+  });
+
+  it('⛔ no baseline at all is also null, not zero', () => {
+    for (const bad of [null, undefined, {}, { firstBucketAt: null }]) {
+      const h = buildHeadline(ROW, USERS, bad, WS, PS);
+      assert.equal(h.previousWindowCovered, false);
+      assert.equal(get(h, 'failed_events').previous, null);
+    }
+  });
+
+  it('⛔ firewalls_reporting never claims a previous value', () => {
+    // "8 firewalls, up 1 from yesterday" would read as an attack spreading
+    // when it is actually a device starting or stopping log forwarding.
+    const h = buildHeadline(ROW, USERS, covering, WS, PS);
+    assert.equal(get(h, 'firewalls_reporting').previous, null);
+  });
+
+  it('⛔ the username count is flagged as a FLOOR when a bucket was capped', () => {
+    // usernames_truncated means the rollup stopped recording names for that
+    // hour, so the distinct count is "at least this many".
+    assert.equal(buildHeadline(ROW, USERS, covering, WS, PS).usernamesIsFloor, false);
+    const capped = { ...ROW, cur_truncated: true };
+    assert.equal(buildHeadline(capped, USERS, covering, WS, PS).usernamesIsFloor, true);
+  });
+
+  it('⛔ labels do not overclaim', () => {
+    const h = buildHeadline(ROW, USERS, covering, WS, PS);
+    // Not "attempts" -- one failed authentication event is what the firewall
+    // logged; an attempt may produce several.
+    assert.doesNotMatch(get(h, 'failed_events').label, /attempts/i);
+    // Not "attacking addresses" -- and not "sources seen", which counts
+    // successful staff logins too.
+    assert.match(get(h, 'source_addresses').label, /failures/i);
+    // Not "affected" -- the rollup says which firewalls SENT logs, not which
+    // were attacked. A firewall under attack and silent is missing entirely.
+    assert.doesNotMatch(get(h, 'firewalls_reporting').label, /affected|attacked|compromised/i);
+  });
+
+  it('never throws on junk rows', () => {
+    for (const bad of [null, undefined, {}, { cur_failed: 'nope' }]) {
+      assert.doesNotThrow(() => buildHeadline(bad, bad, covering, WS, PS));
+      const h = buildHeadline(bad, bad, covering, WS, PS);
+      assert.equal(h.figures.length, 4);
+    }
   });
 });

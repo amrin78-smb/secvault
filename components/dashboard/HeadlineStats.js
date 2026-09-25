@@ -3,6 +3,10 @@ import StatCard from '../ui/StatCard';
 import { getFleetHeadline, getPreviousHeadline } from '../../lib/engines/fleetHeadline';
 import { securityScoreBand } from '../../lib/engines/securityScore';
 import AnswerHeader from '../ui/AnswerHeader';
+// ⛔ GOOD travels WITH the badge: it is the vocabulary of DeltaBadge's
+// `goodDirection` prop, and a second copy here is how two pages end up
+// disagreeing about whether a rising count is good news.
+import DeltaBadge, { GOOD } from '../ui/DeltaBadge';
 import { buildFleetAnswer } from '../../lib/answers';
 import {
   deviceCountEvidence,
@@ -22,42 +26,6 @@ import {
 } from '../icons';
 
 export const dynamic = 'force-dynamic';
-
-// ⛔ Direction of GOOD is per-metric, not universal. A compliance score rising
-// is good; a critical-alert count rising is not. The mockup this layout came
-// from coloured every arrow the same way, which would have shown "more urgent
-// CVEs than yesterday" as a reassuring green tick.
-const GOOD = { up: 'up', down: 'down' };
-
-function DeltaBadge({ current, previous, goodDirection }) {
-  // ⛔ No prior row, or a prior row from before these columns existed, means
-  // the change is UNKNOWN — render nothing. A "0" here would read as
-  // "unchanged", which is a different and unearned claim.
-  if (previous === null || previous === undefined) return null;
-  if (current === null || current === undefined) return null;
-  const diff = Number(current) - Number(previous);
-  if (!Number.isFinite(diff)) return null;
-  if (diff === 0) {
-    return <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>No change since yesterday</span>;
-  }
-  const rising = diff > 0;
-  const isGood = (rising && goodDirection === GOOD.up) || (!rising && goodDirection === GOOD.down);
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: isGood ? 'var(--green)' : 'var(--red)',
-      }}
-    >
-      {rising ? '↑' : '↓'} {Math.abs(diff)}
-      <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>from yesterday</span>
-    </span>
-  );
-}
 
 const BAND_COLOR = {
   excellent: 'var(--green)',

@@ -1562,3 +1562,40 @@ so the aggregate sees zero rows and returns NULL.
 Fourth: **`sum(...) FILTER (...)` returns NULL when no row matches the filter**,
 which is NOT the same as "the column was never populated". Distinguishing them
 needs a second aggregate counting rows that carry the column at all.
+
+## ⛔ CSV EXPORTS: EIGHT FILES HAND-ROLLED THE ESCAPING, SEVEN STILL DO (found 2026-09-25)
+
+`lib/csv.js` is the shared, correct implementation. It ALWAYS quotes (conditional quoting means
+deciding per value whether it contains a separator, and one wrong call shifts every column after
+it), folds newlines/CRs/tabs to a space, doubles internal quotes, and **neutralises a leading
+formula character** with `/^\s*[=+\-@]/` -> prefix `'`. The `^\s*` is deliberate: an earlier version
+folded whitespace to a space BEFORE testing `^[=+\-@]`, so the guard could never fire.
+
+**Why it matters:** a cell beginning `=`, `+`, `-` or `@` is executed as a formula when the file is
+opened in Excel or LibreOffice. These exports carry values that originate OUTSIDE SecVault — device
+names, rule names, firewall rule COMMENTS an administrator typed, compliance finding reasons.
+
+Only two callers use the shared module (`lib/engines/ruleChangeRequestReport.js`,
+`lib/syslog/logExport.js`). `app/api/compliance/fleet/route.js` was migrated in v2.185.0.
+⛔ **SEVEN ROUTES STILL CARRY THE IDENTICAL DEFECTIVE COPY** — conditional quoting on
+`/[",\n\r]/`, no formula neutralisation:
+
+| file | cells at risk |
+|---|---|
+| `app/api/devices/[id]/rules/route.js` | **the worst** — rule names, **operator-typed comments**, zones, addresses, services; the biggest export in the product |
+| `app/api/compliance/[deviceId]/route.js` | check name, **detail**, **remediation guidance**, matched rule names |
+| `app/api/devices/[id]/analysis/route.js` | rule names, finding detail, remediation |
+| `app/api/devices/[id]/reorder-recommendation/route.js` | rule names, vendor rule ids |
+| `app/api/vpn/fleet/route.js` | device names, vendors |
+| `app/api/devices/[id]/snmp/route.js` | numeric today, same defective escape |
+| `app/api/devices/[id]/vpn/route.js` | numeric today, same defective escape |
+
+Two of them (`reorder-recommendation`, `snmp`) also dropped the `typeof value === 'object'` branch,
+so an unexpected object serialises as `[object Object]`.
+
+⛔ `tests/csvInjection.test.js` carries a RATCHET (`KNOWN_UNMIGRATED`, one reason per entry): it
+fails on an EIGHTH hand-roller, fails on a regression in the migrated route, **and fails if a listed
+file has since been migrated** — so the list cannot go stale by being quietly fixed.
+
+⛔ Not defects: `lib/syslog/actions.js`'s `sqlList` `.join(',')` builds a SQL fragment from module
+constants, and the other `join(',')` hits are query-string or SQL builders, not CSV.

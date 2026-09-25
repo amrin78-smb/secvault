@@ -251,6 +251,7 @@ const API_ROUTES = [
   // ⛔ `manage_users`, not `manage_devices`. Whoever can widen an account's
   // device scope decides who sees which customer's firewalls.
   { path: '/api/users/{id}/device-scope', methods: ['GET', 'PUT'], capability: 'manage_users' },
+  { path: '/api/vpn/detections/export', methods: ['GET'], capability: 'view_identity' },
   { path: '/api/vpn/fleet', methods: ['GET'], capability: null },
 ];
 

@@ -275,9 +275,25 @@ export default async function VpnFleetPage({ searchParams }) {
            never render as a green all-clear. Computed at read time (~1.0s),
            no table and no cron job: a stored severity would stop matching its
            own evidence the moment a threshold moved. */
+        /* ⛔ The window is a URL PARAM now, not a hardcoded 24. The engine has
+           always accepted up to MAX_WINDOW_HOURS (192); only this call site
+           pinned it. Default stays 24 so every existing bookmark resolves to
+           exactly what it used to show.
+           ⛔ Filters are applied INSIDE the component, over the findings the
+           engine already computed — never by re-querying. A narrowed view must
+           not change what was measured, only what is listed, and the counts
+           beside each panel say how many of how many are shown. */
         <VpnDetections
-          data={await getVpnDetections(pool, { hours: 24 })}
+          data={await getVpnDetections(pool, {
+            hours: clampInt(firstParam(sp.dHours), 24, 1, 192),
+          })}
           canSearchLogs={canSearchLogs}
+          hours={clampInt(firstParam(sp.dHours), 24, 1, 192)}
+          filters={{
+            q: (firstParam(sp.dq) || '').trim(),
+            country: firstParam(sp.dCountry) || '',
+            severity: firstParam(sp.dSeverity) || '',
+          }}
         />
       )}
 

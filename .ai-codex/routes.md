@@ -249,9 +249,25 @@ POST /api/users [admin] [db] — create user (bcrypt hash, role defaults to view
 PUT /api/users/[id] [admin] [db] — update role and/or password; blocks a role change that would remove the last admin.
 DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own logged-in account and blocks removing the last admin.
 
+## /api/vpn/detections/export
+
+GET /api/vpn/detections/export [auth: `view_identity`] [db] — one VPN threat detection as CSV
+(v2.185.0). `?detection=<id>&hours=<n>`; an unknown id is refused **400 before any query runs**.
+⛔ **Gated on `view_identity`, not `view_log_search` and not `isAdmin`** — these rows carry usernames
+and source addresses, and the whole detections tab is `identity: true` in `lib/vpnTabs.js`.
+⛔ **AUDITED** (`activity_log`, `action: 'export-vpn-detection'`) recording the detection, window and
+counts, never the rows — the same call `/api/logs/export` makes, and for the same reason: it is a
+gated read that produces an artefact somebody can forward.
+⛔ **EXPORTS `unverifiable` AS WELL AS `findings`**, separated by a `record_class` column, with a
+trailing `note` row when `unverifiableTotal` exceeds the listed sample (live: 393 vs 25) and another
+when `status !== 'measured'` — a zero-finding export of a baseline-gated detection must not read as
+an all-clear. Columns are PER DETECTION, not a union: a field a detection does not emit is absent,
+so an empty cell means exactly one thing. Rendered by `lib/engines/vpnDetectionsExport.js` (pure);
+escaping is `lib/csv.js`.
+
 ## /api/vpn/fleet
 
-GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`.
+GET /api/vpn/fleet [auth] [db] — fleet-wide VPN config/session summary (one row per active device via `summarizeVpnConfig` + latest `vpn_session_snapshots`); `?format=csv`. ⚠️ Hand-rolls its CSV escaping with no formula neutralisation — see the `lib/csv.js` migration note in `gotchas.md`.
 
 ## /api/system/session-policy
 

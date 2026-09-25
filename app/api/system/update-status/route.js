@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.185.0': [
+    "VPN & identity → Detections has been rebuilt as a threat page: four headline figures with their change against the previous window, a search and country/severity filters across all six detections, a selectable time window, and a CSV export per detection.",
+    "All six detections are now shown. Two of them needed more authentication history than existed before and could not previously run; there are now 16 days of history and both are active.",
+    "The time window is selectable up to 8 days. It was fixed at 24 hours even though the underlying analysis always supported more.",
+    "Each export includes the observations that could not be verified, not only the confirmed findings, and says so in the file.",
+    "Separately: fixed a fault in the fleet compliance CSV export where a value beginning with = or + could be treated as a formula when the file was opened in Excel.",
+  ],
   '2.184.2': [
     "Sign-in page: traffic in the background now passes through the sign-in box and continues out the other side, instead of stopping at it. Only a small share is shown being blocked.",
     "The previous version absorbed all of it, which showed a firewall blocking everything and left the right-hand quarter of the screen empty.",

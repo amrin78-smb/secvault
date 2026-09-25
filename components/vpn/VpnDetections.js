@@ -5,6 +5,14 @@ import NotMeasured from '../ui/NotMeasured';
 import { SEVERITY_FILL, SEVERITY_TEXT_COLOR, SEVERITY_LABEL } from '../analysis/severityRamp';
 import { timeAgo, absoluteUtc } from '../../lib/formatDisplay';
 import { buildDetectionLogHref } from '../../lib/vpnDetectionLinks';
+import StatCard from '../ui/StatCard';
+import DeltaBadge, { GOOD } from '../ui/DeltaBadge';
+import DownloadButton from '../ui/DownloadButton';
+import VpnThreatFilters from './VpnThreatFilters';
+// ⛔ The narrowing itself is PURE and lives in lib/, so it can be tested
+// directly rather than by scanning this file for the right words — the same
+// split segmentation.js and applicationView.js use.
+import { matchesFilters, filtersActive, countriesIn } from '../../lib/vpnDetectionFilters';
 
 // Named VPN threat detections — the render half of lib/engines/vpnDetections.js.
 //
@@ -408,7 +416,10 @@ function caveatList(caveats) {
 
 function detectionCard(detection, ctx) {
   const badge = STATUS_BADGE[detection.status] || STATUS_BADGE.no_data;
-  const findings = detection.findings || [];
+  const allFindings = detection.findings || [];
+  const findings = ctx.filtersActive
+    ? allFindings.filter((f) => matchesFilters(f, ctx.filters))
+    : allFindings;
   const measured = detection.status === 'measured';
   return (
     <Card key={detection.id}>
@@ -421,9 +432,31 @@ function detectionCard(detection, ctx) {
           {measured && findings.length > 0 ? (
             <Badge color="danger">{n(findings.length)} finding{findings.length === 1 ? '' : 's'}</Badge>
           ) : null}
+          {/* ⛔ SAY WHEN THE FILTER BIT. A narrowed list that prints only its
+              own length reads as the whole answer, which is the truncation
+              failure wearing a filter's clothes. */}
+          {ctx.filtersActive && allFindings.length !== findings.length ? (
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
+              showing {n(findings.length)} of {n(allFindings.length)}
+            </span>
+          ) : null}
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
             {detection.question}
           </span>
+          {/* Export is the UNFILTERED detection — the route re-reads the engine
+              and carries `unverifiable` too, which no filter may hide from a
+              file somebody will treat as the record. */}
+          {measured && allFindings.length > 0 ? (
+            <DownloadButton
+              href={`/api/vpn/detections/export?detection=${encodeURIComponent(detection.id)}&hours=${ctx.windowHours}`}
+              className="btn btn-secondary"
+              wrapperStyle={{ marginLeft: 'auto' }}
+              fallbackName={`secvault-${detection.id}.csv`}
+              title="Download every finding for this detection as CSV, including the observations that could not be verified."
+            >
+              Export
+            </DownloadButton>
+          ) : null}
         </div>
 
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
@@ -589,7 +622,62 @@ function reportingGapBanner(data) {
  *                               page that will refuse the reader is worse than
  *                               no link.
  */
-export default function VpnDetections({ data, canSearchLogs = false }) {
+// The four-figure strip at the top of the page.
+//
+// ⛔ EVERY LABEL IS THE ENGINE'S, NOT A SHORTER ONE INVENTED HERE. "Failed VPN
+// authentications" is not "Total failed attempts"; "Addresses with failures" is
+// not "Unique source IPs"; "Firewalls reporting" is not "Firewalls affected".
+// Each of those shorter labels claims something the number does not support,
+// and the engine's comments record which. A tile is a headline — it is read by
+// people who will not open the drawer.
+function headlineStrip(headline) {
+  if (!headline || !Array.isArray(headline.figures)) return null;
+  return (
+    // Same grid HeadlineStats uses for the dashboard's tile row — auto-fit so
+    // four tiles reflow to two and then one without a breakpoint.
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+        gap: 'var(--s3)',
+      }}
+    >
+      {headline.figures.map((f) => (
+        <StatCard
+          key={f.key}
+          compact
+          label={f.label}
+          value={n(f.current)}
+          sub={
+            f.key === 'usernames_targeted' && headline.usernamesIsFloor
+              ? 'at least — some hours capped their username list'
+              : undefined
+          }
+          delta={
+            // ⛔ DeltaBadge renders NOTHING for a null previous, which is
+            // exactly right: if the retained history began inside the previous
+            // window we did not observe a quieter period, we observed nothing.
+            f.previous === null || f.previous === undefined ? null : (
+              <DeltaBadge
+                current={f.current}
+                previous={f.previous}
+                goodDirection={f.goodDirection === 'up' ? GOOD.up : GOOD.down}
+                comparisonLabel="from the previous window"
+              />
+            )
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+export default function VpnDetections({
+  data,
+  canSearchLogs = false,
+  hours = 24,
+  filters = null,
+}) {
   if (!data || !Array.isArray(data.detections)) {
     return (
       // EmptyState takes `message` only — passing a `title` it does not accept
@@ -605,15 +693,28 @@ export default function VpnDetections({ data, canSearchLogs = false }) {
   // independently would eventually disagree by a tick, and the disagreement
   // would show up as a finding whose raw events are one event short of the
   // count printed beside them.
+  const active = filtersActive(filters);
   const ctx = {
     canSearchLogs: Boolean(canSearchLogs),
     windowStart: data.windowStart,
     windowEnd: data.generatedAt,
+    windowHours: data.windowHours || hours,
+    filters,
+    filtersActive: active,
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
+      {headlineStrip(data.headline)}
+      <VpnThreatFilters
+        countries={countriesIn(data.detections)}
+        hours={data.windowHours || hours}
+      />
       {historyStrip(data)}
+      {/* ⛔ THE REPORTING GAP STAYS ABOVE THE PANELS. It bounds every claim
+          below it — three of this fleet's firewalls log failures and no
+          successes, and every detection here rests on "no observed success". A
+          filter must never move it, shorten it, or push it under a fold. */}
       {reportingGapBanner(data)}
       {data.detections.map((d) => detectionCard({ ...d, windowLabel }, ctx))}
     </div>

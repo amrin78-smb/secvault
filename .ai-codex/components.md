@@ -32,6 +32,16 @@ tests/tunnelAnswer.test.js.
 
 ## ui/
 
+DeltaBadge  current, previous, goodDirection, comparisonLabel — "↑ 12 from yesterday".
+Lifted out of dashboard/HeadlineStats.js in v2.185.0 so a second page could use it; `GOOD`
+travels with it, because it is the vocabulary of `goodDirection` and a second copy is how two
+pages end up disagreeing about whether a rising count is good news. ⛔ An ABSENT
+`previous` renders NOTHING — a 0 would read as "unchanged", a different and unearned claim, and
+on a fresh install every tile would announce a rise from nothing. ⛔ `goodDirection` is
+PER METRIC: up is good for a compliance score and bad for a critical count; an unrecognised value
+colours RED, never green. ⛔ **NO PERCENTAGE MODE** — refused deliberately (these tiles
+carry counts of 0/1/2, where a percentage is noise). Pinned by tests/deltaBadge.test.js (26).
+
 Badge  color, children, className, title — colored status pill. `title` (v2.86.2) is forwarded because a badge is where this app puts a LABEL over a raw vendor value ("Login failed" for `ssl-login-fail`); without it the attribute was silently dropped and the raw evidence became unreachable.
 snmp/chartGrammar.js  (module) — the SNMP/VPN chart vocabulary. Re-exports the shared primitives from ui/chartGrammar.js and adds what is specific to POLLED TIME SERIES: withPollingGaps/countPollingGaps/PollingGapNote (a failed poll stores NO ROW, so connectNulls alone cannot protect a chart — the gaps must be inserted), the tooltip composition, and the SAMPLE-PROVENANCE vocabulary: sampleConfidence, CONFIDENCE_WORDS, countConfidence, ConfidenceDot, ConfidenceKey, ConfidenceTooltipMeta. ⛔ Provenance is TRI-STATE: low_confidence false = a real vendor-MIB measurement, true = generic MIB (real but coarse), NULL = provenance never recorded (pre-v2.55.0 rows). NULL is never folded into either boolean, in SQL or JS. Both the full SNMP page and the Overview sparkline import these, so the same sample cannot be drawn or worded two ways.
 chartGrammar.js  (module, not a component) — THE one chart grammar: AXIS_TICK, AXIS_LINE, GRID_PROPS, TOOLTIP_SURFACE, TOOLTIP_CURSOR_BAR/LINE, LEGEND_PROPS, LINE_PROPS, CHART_TITLE_STYLE. ⛔ Phase 5 was carried out by two people in parallel and produced TWO near-identical grammars (components/analysis/ and components/snmp/) disagreeing in three places — exactly the drift the phase existed to remove. The shared primitives now live here and both domain modules re-export from this one. ⛔ Do not add a third; a second copy of AXIS_TICK is never the answer. Three resolved conflicts, all explained in the file header: the tick font size goes through `style` (recharts measures label widths off an off-screen element and only honours `style` there, so a prop-passed token can lay out from the wrong width); legend iconSize 10; CHART_TITLE_STYLE is canonical over CHART_HEADING_STYLE (aliased). ⛔ LINE_PROPS bakes in `connectNulls: false` — necessary but NOT sufficient, since a failed poll usually stores NO ROW rather than a null one (see withPollingGaps in the snmp module).
@@ -211,6 +221,16 @@ LogResults  result, deviceNames, searchParams, exportError — the results table
 (c) SnmpTrendMini  points — compact sparkline pair for the Overview-tab summary card
 
 ## vpn/
+
+VpnThreatFilters (c)  countries, hours — the filter bar on `/vpn?vtab=detections` (v2.185.0):
+search, country, severity, and the detection WINDOW. Holds no state; reads the current values from
+the URL and writes back with router.push, so a filtered view is linkable and SavedViews-compatible.
+⛔ **ONE BAR FOR THE WHOLE PAGE, not one per panel** — the mockup it came from put three
+filters on each of six panels, which is eighteen URL params and six places to forget a reset.
+⛔ It re-sets `vtab=detections` on every push, or narrowing by country bounces the reader
+back to Fleet Status. ⛔ Window options stop at 192h because that is the engine's own
+MAX_WINDOW_HOURS; offering a value it silently clamps would show "30 days" and hand back eight.
+The narrowing itself is PURE in `lib/vpnDetectionFilters.js`, not in the component.
 
 ActiveVpnUsersTable  sessions, basePath, searchParams, page, query — ⛔ NO LONGER a client component (2026-09-08). Its search box and page number were useState, which AutoRefresh's router.refresh() silently reset mid-read; both now live in the URL (?vpnq= via a plain GET form, ?page=). Filtering runs over the FULL set before the window and the header states "filtered to N of M", so a filtered count is never mistaken for the connected count.
 IpsecTunnelsTable  rows, basePath, searchParams, page — paginated on ?tunnelPage=. The up / down / status-not-reported tally is computed over the full set, not the visible page. ⛔ "status not reported" is its own bucket: a tunnel whose state the device did not send is not a tunnel that is down.
