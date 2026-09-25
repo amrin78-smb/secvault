@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.186.0': [
+    "The three most urgent vulnerability findings on the fleet now say which version to upgrade to. They are known-exploited and critical, and until now every one of them showed no target version at all — the information was being discarded on the way in.",
+    "Fixed a fault that could stop vulnerability assessment for the entire fleet: a single malformed advisory record aborted the run for every remaining advisory and every remaining firewall.",
+    "A compliance check that matched firewall rules which have since been re-collected no longer looks identical to a check that matched nothing. The count is kept and the reason is stated.",
+    "Buttons now meet the contrast standard in dark mode. The Sign in and other primary buttons were white on bright cyan, which was hard to read; two further states had the same fault.",
+  ],
   '2.185.1': [
     "Fixed the same spreadsheet-formula fault in the remaining seven CSV exports: firewall rules, per-device compliance, rule analysis, rule reordering, fleet VPN, and the SNMP and VPN sample exports.",
     "The firewall rules export was the most exposed, because it includes the comments an administrator types onto a rule, and it is the largest export in the product.",

@@ -272,6 +272,57 @@
   --tint-purple:  rgba(109,69,201,0.10);  --tint-purple-fg:  #563AA0;
   --tint-teal:    rgba(10,143,163,0.10);  --tint-teal-fg:    #06707F;
   --tint-orange:  rgba(224,94,18,0.10);   --tint-orange-fg:  #B54810;
+
+  /* ── SOLID-FILL BUTTON INK. Same contract as the --tint-* and --tint-*-fg
+        pairs above: the FILL is the hue, and the INK beside it is re-picked per
+        theme so the pair clears 4.5:1 on BOTH grounds. ──
+
+     ⛔ WHY A TOKEN AND NOT A DARKER --primary. .btn-primary was
+     `background: var(--primary); color: #fff`, and in dark theme --primary is
+     #22C1D6 — white on it measures 2.17:1 at rest and 1.70:1 on hover (where
+     --primary-dark goes LIGHTER, #4FD8E8, because that is correct on a dark
+     ground). Both are far under WCAG 1.4.3's 4.5:1, on roughly a hundred
+     buttons. But --primary also drives every link, focus ring, active nav chip
+     and accent in the product: darkening it to rescue the button would repaint
+     all of those, and would flatten the dark theme's deliberate bright accent
+     into the muddy value the v2.87.0 rewrite specifically moved off. So the
+     FILL is left exactly as it was and only the INK flips.
+
+     ⛔ THE DARK INK IS A DEEP TEAL, NOT BLACK — hue-matched to its fill, which
+     is what every --tint-*-fg above already does. A solid bright teal fill is
+     still the loudest fill in the UI, so the button reads as primary at a
+     glance; only the glyph colour changed. Measured, white vs #06222B:
+
+                      dark fill    white ink   teal ink #06222B
+       rest  #22C1D6                2.17:1  ->   7.60:1
+       hover #4FD8E8                1.70:1  ->   9.69:1
+
+     ⛔ LIGHT THEME KEEPS WHITE, AND IT IS A PASS — BUT ONLY JUST. White on
+     #098294 measures 4.53:1: compliant, with 0.03 of headroom. It is NOT
+     changed here (that would repaint every primary button for a state that
+     already conforms), and what keeps it safe is arithmetic rather than this
+     comment — tests/buttonContrast.test.js recomputes it from these tokens and
+     fails the build the moment --primary moves. Do not nudge --primary without
+     reading that failure.
+
+     ⛔ .btn-danger:hover NEEDS THE SAME TREATMENT and was failing too, which
+     nothing had noticed: its hover fill is the raw --red, and in dark theme
+     --red is #FF6B70, a light salmon. White on it is 2.77:1. Its RESTING state
+     was always fine (--tint-danger/--tint-danger-fg, 5.88:1 light / 6.64:1
+     dark) — only the solid hover fill is affected.
+
+     ⛔ .btn-navy DELIBERATELY DOES NOT GET ONE and must not. --navy is dark in
+     BOTH themes — it is the shell colour — so its ink does not flip, exactly
+     like --shell-fg. A flipping token there would hand it a dark ink on a dark
+     fill in light theme, i.e. an invisible label. It measures 17.79:1 /
+     15.39:1 light and 18.16:1 / 16.01:1 dark; it is correct as it stands.
+
+     (Disabled buttons drop to opacity 0.5 and therefore fall below these
+     figures. That is deliberate and permitted: WCAG 1.4.3 exempts inactive
+     controls, and a disabled button that still reads at full strength is a
+     worse lie than a faint one.) */
+  --btn-primary-fg: #FFFFFF;
+  --btn-danger-fg:  #FFFFFF;
 }
 
 /* ── Square corners (opt-in) ────────────────────────────
@@ -393,6 +444,22 @@
   --tint-purple:  rgba(167,139,250,0.16); --tint-purple-fg:  #C4B5FD;
   --tint-teal:    rgba(34,193,214,0.16);  --tint-teal-fg:    #6FE0EE;
   --tint-orange:  rgba(255,146,71,0.15);  --tint-orange-fg:  #FFB07A;
+
+  /* ⛔ THE INK FLIPS; THE FILL DOES NOT. See the long note beside these two in
+     :root. Both dark hues here are LIGHT — --primary #22C1D6 and --red #FF6B70
+     are chosen to read on a near-black ground — so a solid fill of either needs
+     a DARK glyph, which is the whole reason these tokens exist. Each is
+     hue-matched to its own fill rather than a neutral black, the same way every
+     --tint-*-fg above is.
+
+       --btn-primary-fg  #06222B  on #22C1D6 = 7.60:1, on #4FD8E8 = 9.69:1
+       --btn-danger-fg   #2B0A0C  on #FF6B70 = 6.59:1
+
+     White on those same fills is 2.17:1, 1.70:1 and 2.77:1 respectively.
+     Re-picked for this ground, never lightened or inverted from the light
+     value — and recomputed, not trusted, by tests/buttonContrast.test.js. */
+  --btn-primary-fg: #06222B;
+  --btn-danger-fg:  #2B0A0C;
 }
 
 [data-theme="dark"] th { background: rgba(255,255,255,0.03); }
@@ -925,11 +992,23 @@ tbody tr:hover td { background: var(--bg-primary); }
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-/* ⛔ NOT .btn-primary. That is `background: var(--primary); color: #fff`, and
-   in dark theme --primary is #22C1D6 — white on it measures about 2:1, well
-   under the 4.5:1 floor. The login ground never flips, so this pins the deeper
-   teal and keeps white legible on it. The app-wide .btn-primary contrast is a
-   separate, larger decision and is deliberately NOT changed here. */
+/* ⛔ NOT .btn-primary, AND THE REASON HAS CHANGED — do not collapse the two.
+   This used to read "the app-wide .btn-primary contrast is a separate, larger
+   decision and is deliberately NOT changed here". That decision has since been
+   taken: .btn-primary now carries --btn-primary-fg, an ink that flips per
+   theme, and both its states clear 4.5:1 in both themes. So the ORIGINAL
+   justification for this exception (white on #22C1D6 measuring ~2:1) no longer
+   applies, and a session reading the old sentence would reasonably delete this
+   rule as redundant.
+
+   It survives for a different reason. The login page is a dark surface in BOTH
+   themes — like the shell, it uses --shell-fg and rgba(255,255,255,…) — so
+   nothing on it may resolve through a token that flips. .btn-primary is exactly
+   such a token now: on the theme toggle its fill would swing from #098294 to
+   #22C1D6 and its ink from white to near-black, on a card that did not move.
+   Pinning #0A7C8D here keeps one fixed appearance on a fixed ground (white on
+   it measures 4.91:1), the same call --shell-fg makes for the header and
+   sidebar. Leave it pinned. */
 .login-submit {
   width: 100%;
   height: 46px;
@@ -1026,7 +1105,11 @@ tbody tr:hover td { background: var(--bg-primary); }
 }
 .btn:hover { background: var(--bg-primary); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+/* ⛔ color is --btn-primary-fg, NOT #fff. The fill is unchanged; the ink flips
+   per theme, because in dark theme --primary is a light cyan and white on it
+   measures 2.17:1. Full reasoning and the measured table are beside the token
+   in :root. Do not "simplify" this back to a literal. */
+.btn-primary { background: var(--primary); color: var(--btn-primary-fg); border-color: var(--primary); }
 .btn-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-secondary { background: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border); }
@@ -1035,7 +1118,10 @@ tbody tr:hover td { background: var(--bg-primary); }
 .btn-navy { background: var(--navy); color: #fff; border-color: var(--navy); }
 .btn-navy:hover { background: var(--navy-light); }
 .btn-danger { background: var(--tint-danger); color: var(--tint-danger-fg); border: 1px solid var(--red); }
-.btn-danger:hover { background: var(--red); color: #fff; }
+/* The RESTING state is a tint pair and was always fine. Only this solid --red
+   hover fill needed the ink token: dark theme's --red is #FF6B70 and white on
+   it is 2.77:1. */
+.btn-danger:hover { background: var(--red); color: var(--btn-danger-fg); }
 .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Inputs / selects ──────────────────────────────────────── */
