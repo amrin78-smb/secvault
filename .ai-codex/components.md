@@ -55,9 +55,13 @@ AnswerHeader  answer (from lib/answers.js), evidence, context, actions — the a
 
 ## auth/
 
-(c) LoginBackdrop  no props — the animated ground on `/login` (v2.184.0, revised v2.184.1): traffic
-drifting in from the left and dissolving into an inspection boundary, ~1 in 6 flaring as it is
-stopped. Canvas + RAF, 44 gradient rects/frame. ⛔ **The boundary IS the sign-in card**, measured
+(c) LoginBackdrop  no props — the animated ground on `/login` (v2.184.0, revised v2.184.1 and
+v2.184.2): traffic drifting in from the left, fading INTO the sign-in card, and fading back out
+BRIGHTER on its far side — inspected, then allowed. ~1 in 6 flares at the boundary and never
+re-emerges. ⛔ **v2.184.1 absorbed ALL of it**, which showed a firewall that drops everything, on
+the login screen of a firewall security platform — and left the quarter-viewport right of the card
+dead. The composition fault and the metaphor fault had the SAME fix, which is usually the sign the
+metaphor was the problem rather than the layout. Canvas + RAF, 44 gradient rects/frame. ⛔ **The boundary IS the sign-in card**, measured
 from `.login-card`'s rect — v2.184.0 drew a standalone vertical plane at a fixed 46% width and on a
 real screen it read as a PANEL DIVIDER, the same hard seam the redesign existed to remove, with no
 visible relationship to the packets. ⛔ **Density is a LEGIBILITY setting, not a taste one**: 20x6 =
