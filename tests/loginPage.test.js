@@ -180,4 +180,41 @@ describe('⛔ the animated backdrop is decoration and must behave like it', () =
   it('is hidden from assistive technology', () => {
     assert.match(backdrop, /aria-hidden/);
   });
+
+  it('⛔ derives its boundary from the CARD, and draws no standalone plane', () => {
+    // v2.184.0 drew a vertical inspection plane at a fixed 46% of the width.
+    // On a real screen it read as a PANEL DIVIDER — a hard full-height seam
+    // between the pitch and the form, which is exactly the navy/white split
+    // the redesign existed to remove — and it had no visible relationship to
+    // the packets, so it looked accidental rather than designed.
+    //
+    // The boundary is now the sign-in card's own left edge, measured from the
+    // DOM. That removes the line and makes the motion explain the card's
+    // position instead of competing with it.
+    assert.match(backdropCode, /querySelector\('\.login-card'\)/,
+      'the boundary must be measured from the card, not assumed');
+    assert.match(backdropCode, /getBoundingClientRect/);
+    assert.doesNotMatch(backdropCode, /PLANE_X|PLANE_LINE|planePx/,
+      'a standalone drawn inspection plane came back — it reads as a panel divider');
+  });
+
+  it('⛔ keeps the density low enough to read as motion rather than static', () => {
+    // 20 lanes x 6 packets at near-identical length and alpha resolved as
+    // STATIC, and put noise behind a 30px headline. Fewer and more varied is
+    // what reads as flow; this is a legibility setting, not a taste one.
+    const lanes = Number((/LANE_COUNT\s*=\s*(\d+)/.exec(backdropCode) || [])[1]);
+    const perLane = Number((/PER_LANE\s*=\s*(\d+)/.exec(backdropCode) || [])[1]);
+    assert.ok(Number.isFinite(lanes) && Number.isFinite(perLane), 'density constants are gone');
+    assert.ok(lanes * perLane <= 60,
+      `${lanes * perLane} packets — past about 60 this reads as static, not traffic`);
+  });
+});
+
+describe('⛔ the headline is not asked to compete with the backdrop', () => {
+  it('a scrim sits under the centred content', () => {
+    // Moving marks under 30px type cost legibility, and the first screen of a
+    // security console is the wrong place to trade that for atmosphere.
+    const css = fs.readFileSync(path.join(ROOT, 'app', 'globals.css'), 'utf8');
+    assert.match(css, /\.login-center::before/, 'the content scrim is gone');
+  });
 });

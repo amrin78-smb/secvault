@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.184.1': [
+    "Sign-in page: removed the vertical line that ran down the middle of the background. It read as a divider between two panels, which is the very thing the redesign set out to remove.",
+    "The background animation now flows into the sign-in box itself and fades out there, so the movement has a visible destination instead of drifting across the whole screen.",
+    "Reduced the amount of movement by about two thirds and added a soft shading behind the heading, so the text is easier to read.",
+    "The sign-in box stands out more clearly from the background.",
+  ],
   '2.184.0': [
     "The sign-in page has been redesigned: one continuous background instead of a split panel, an animated motif of traffic being inspected and filtered, and a raised sign-in card.",
     "It previously changed appearance with the light and dark setting, which left a hard seam down the middle of the page in light mode. It is now one consistent screen in both.",

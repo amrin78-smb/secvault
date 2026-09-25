@@ -55,9 +55,14 @@ AnswerHeader  answer (from lib/answers.js), evidence, context, actions — the a
 
 ## auth/
 
-(c) LoginBackdrop  no props — the animated ground on `/login` (v2.184.0): lanes of packets drifting
-into an inspection plane, most passing and brightening, ~1 in 7 stopping and dissolving. Canvas +
-RAF, ~120 rects/frame. ⛔ **The motif is SecVault's own, not NetVault's** — the sibling's login draws
+(c) LoginBackdrop  no props — the animated ground on `/login` (v2.184.0, revised v2.184.1): traffic
+drifting in from the left and dissolving into an inspection boundary, ~1 in 6 flaring as it is
+stopped. Canvas + RAF, 44 gradient rects/frame. ⛔ **The boundary IS the sign-in card**, measured
+from `.login-card`'s rect — v2.184.0 drew a standalone vertical plane at a fixed 46% width and on a
+real screen it read as a PANEL DIVIDER, the same hard seam the redesign existed to remove, with no
+visible relationship to the packets. ⛔ **Density is a LEGIBILITY setting, not a taste one**: 20x6 =
+120 near-identical dashes resolved as STATIC and put noise behind a 30px headline. A test caps it at
+60, and `.login-center::before` scrims the text. ⛔ **The motif is SecVault's own, not NetVault's** — the sibling's login draws
 a drifting node graph, which is a topology metaphor on a product that filters against a rulebase.
 What was taken from it is the LEVEL of finish, never its content. ⛔ Honours
 `prefers-reduced-motion` by painting ONE static frame (not an empty ground), pauses on
