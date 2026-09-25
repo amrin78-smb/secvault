@@ -796,7 +796,9 @@ tbody tr:hover td { background: var(--bg-primary); }
   bottom: var(--s5);
   left: var(--s6);
   font-size: var(--text-xs);
-  color: rgba(255,255,255,0.32);
+  /* Lifted from 0.32, which was not legible on this ground. It is a quiet
+     element, not an invisible one. */
+  color: rgba(255,255,255,0.44);
   letter-spacing: 0.04em;
 }
 .login-eyebrow {

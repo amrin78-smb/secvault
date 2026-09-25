@@ -198,6 +198,23 @@ describe('⛔ the animated backdrop is decoration and must behave like it', () =
       'a standalone drawn inspection plane came back — it reads as a panel divider');
   });
 
+  it('⛔ most traffic PASSES — the firewall does not drop everything', () => {
+    // v2.184.1 absorbed every packet at the card's leading edge. Wrong twice
+    // over: a firewall that dropped everything would be a broken one, so the
+    // picture told a false story about the product — and with nothing emerging
+    // on the far side, the whole region right of the card (a quarter of a wide
+    // viewport) was dead space. Only the flaring minority is stopped now.
+    assert.match(backdropCode, /cardRight/,
+      'the card’s FAR edge is gone — traffic can no longer emerge, so nothing passes');
+    assert.match(backdropCode, /PASSED_GAIN/,
+      'allowed traffic must read brighter on the far side than on the way in');
+    // And the stopped minority must stay a minority.
+    const rate = Number((/FLARE_RATE\s*=\s*([\d.]+)/.exec(backdropCode) || [])[1]);
+    assert.ok(Number.isFinite(rate), 'FLARE_RATE is gone');
+    assert.ok(rate > 0 && rate < 0.35,
+      `${rate} of traffic stopped — above about a third this reads as a broken firewall, not a working one`);
+  });
+
   it('⛔ keeps the density low enough to read as motion rather than static', () => {
     // 20 lanes x 6 packets at near-identical length and alpha resolved as
     // STATIC, and put noise behind a 30px headline. Fewer and more varied is

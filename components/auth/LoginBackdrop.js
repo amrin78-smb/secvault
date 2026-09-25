@@ -14,6 +14,16 @@
 // motion now explains the card's position instead of competing with it, and
 // there is no line to misread.
 //
+// ⛔ AND MOST TRAFFIC PASSES. v2.184.1 absorbed EVERY packet at the card's
+// leading edge, which was wrong twice over: a firewall that dropped everything
+// would be a broken one, so the picture told a false story about the product —
+// and with nothing emerging on the far side, the whole region right of the card
+// (a quarter of a wide viewport) was dead space. Packets now fade INTO the
+// card's left edge, are invisible while inside it, and fade back out brighter
+// on the right — inspected, then allowed. Only the ~1 in 6 that flare are
+// stopped, and those never re-emerge. The composition and the metaphor are the
+// same fix here; that is usually the sign the metaphor was the problem.
+//
 // ⛔ THE MOTIF IS SECVAULT'S OWN, NOT NETVAULT'S. The sibling's login draws a
 // drifting node graph, which is right for an asset and topology product and
 // wrong for one that filters traffic against a rulebase. What was taken from it
@@ -32,12 +42,17 @@ import { useEffect, useRef } from 'react';
 // arranged in depth reads as movement; more does not.
 const LANE_COUNT = 11;
 const PER_LANE = 4;
-// How far in front of the card packets begin to dissolve.
-const ABSORB_PX = 230;
-// Roughly one in six flares as it is stopped.
+// How far either side of the card a packet fades out of / back into view.
+const ENTER_PX = 150;
+const EXIT_PX = 130;
+// Roughly one in six is stopped at the boundary and never re-emerges.
 const FLARE_RATE = 0.17;
+// Allowed traffic reads brighter on the far side than on the way in: it has
+// been inspected, and the difference is what makes the crossing legible.
+const PASSED_GAIN = 1.5;
 const DPR_CAP = 2;
-const FALLBACK_BOUNDARY = 0.62;
+const FALLBACK_LEFT = 0.62;
+const FALLBACK_RIGHT = 0.82;
 
 const TEAL = '34,193,214';
 
@@ -69,7 +84,8 @@ export default function LoginBackdrop() {
 
     let width = 0;
     let height = 0;
-    let boundary = 0;
+    let cardLeft = 0;
+    let cardRight = 0;
     let packets = [];
 
     const spawn = (lane) => ({
@@ -92,15 +108,17 @@ export default function LoginBackdrop() {
 
       // ⛔ READ THE CARD, DO NOT ASSUME IT. Its position depends on the
       // viewport, the breakpoint and the pitch column's presence; a hardcoded
-      // fraction is wrong on most of those. Falls back to a fraction only when
+      // fraction is wrong on most of those. Falls back to fractions only when
       // the card is not in the DOM at all.
       const card = document.querySelector('.login-card');
       if (card) {
         const cardRect = card.getBoundingClientRect();
         const canvasRect = canvas.getBoundingClientRect();
-        boundary = cardRect.left - canvasRect.left;
+        cardLeft = cardRect.left - canvasRect.left;
+        cardRight = cardRect.right - canvasRect.left;
       }
-      if (!boundary || boundary < 80) boundary = width * FALLBACK_BOUNDARY;
+      if (!cardLeft || cardLeft < 80) cardLeft = width * FALLBACK_LEFT;
+      if (cardRight <= cardLeft) cardRight = width * FALLBACK_RIGHT;
     };
 
     const build = () => {
@@ -118,44 +136,63 @@ export default function LoginBackdrop() {
 
       for (const p of packets) {
         const y = laneGap * (p.lane + 1);
-        const px = p.x * boundary;
+        const px = p.x * width;
         const len = 14 + p.depth * 44;
+        const base = 0.1 + p.depth * 0.26;
+        let alpha;
+        let drawX = px;
 
-        // Fade to nothing over the last stretch before the card: the traffic is
-        // absorbed at the boundary rather than sliding under the form.
-        const ramp = Math.min(1, Math.max(0, (boundary - px) / ABSORB_PX));
-        let alpha = (0.1 + p.depth * 0.28) * ramp;
-
-        // A flaring packet brightens sharply right at the boundary — the one
-        // that was stopped — then vanishes.
         if (p.flare && p.flared > 0) {
-          alpha = Math.max(alpha, 0.55 * p.flared);
+          // Stopped at the boundary: a brief bright flare, then nothing. This
+          // one never reaches the far side.
+          alpha = 0.55 * p.flared;
+          drawX = cardLeft - 14;
+        } else if (px >= cardLeft && px <= cardRight) {
+          // Inside the card — under inspection, and not drawn. The card's own
+          // backdrop-filter would otherwise smear these across the form fields.
+          continue;
+        } else if (px < cardLeft) {
+          // Inbound: fades out as it enters.
+          alpha = base * Math.min(1, Math.max(0, (cardLeft - px) / ENTER_PX));
+        } else {
+          // ⛔ PASSED INSPECTION. Fades back in on the far side and runs to the
+          // edge, brighter than it arrived.
+          alpha = base * PASSED_GAIN * Math.min(1, Math.max(0, (px - cardRight) / EXIT_PX));
         }
+
         if (alpha <= 0.004) continue;
 
         // A leading-edge gradient, so direction reads even in a still frame.
-        const grad = ctx.createLinearGradient(px - len, 0, px, 0);
+        const grad = ctx.createLinearGradient(drawX - len, 0, drawX, 0);
         grad.addColorStop(0, `rgba(${TEAL},0)`);
         grad.addColorStop(1, `rgba(${TEAL},${alpha.toFixed(3)})`);
         ctx.fillStyle = grad;
-        ctx.fillRect(px - len, y - 1, len, 1.6);
+        ctx.fillRect(drawX - len, y - 1, len, 1.6);
       }
+    };
+
+    const respawn = (p) => {
+      p.x = -0.05 - rand() * 0.2;
+      p.depth = rand();
+      p.flare = rand() < FLARE_RATE;
+      p.flared = 0;
     };
 
     const step = () => {
       for (const p of packets) {
-        const px = p.x * boundary;
-        if (p.flare && px > boundary - 26 && p.flared === 0) p.flared = 1;
-        if (p.flared > 0) p.flared -= 0.055;
+        const px = p.x * width;
 
-        p.x += (0.0006 + p.depth * 0.0016) * (boundary ? 640 / boundary : 1);
-
-        if (p.x > 1.02 || (p.flare && p.flared < 0)) {
-          p.x = -0.06 - rand() * 0.22;
-          p.depth = rand();
-          p.flare = rand() < FLARE_RATE;
-          p.flared = 0;
+        // A blocked packet holds at the boundary while it flares out, and is
+        // then recycled at the left — it never crosses.
+        if (p.flare && px >= cardLeft - 14) {
+          if (p.flared === 0) p.flared = 1;
+          p.flared -= 0.06;
+          if (p.flared <= 0) respawn(p);
+          continue;
         }
+
+        p.x += (0.0007 + p.depth * 0.0016) * (width ? 1200 / width : 1);
+        if (p.x > 1.05) respawn(p);
       }
     };
 
