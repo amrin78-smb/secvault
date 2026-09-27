@@ -25,6 +25,8 @@ const assert = require('node:assert/strict');
 const {
   findConsolidationGroups, canonicalKey, checkInterference, summariseConsolidation,
   MERGE_CLAIM, VERDICTS,
+  RAW_KEY_SIGNIFICANT, RAW_KEY_IGNORED, ATTRIBUTE_KEY_PREFIX, NEUTRAL_TOKEN,
+  canonicalRawValue, classifyRawRuleKeys, hasNegationMarker,
 } = require('../lib/engines/ruleConsolidation');
 
 const DEV = 'dev-1';
@@ -704,5 +706,445 @@ describe('summariseConsolidation', () => {
       assert.ok(!MERGE_CLAIM.toLowerCase().includes(word), `claim must not say "${word}"`);
     }
     assert.ok(/proposal/i.test(MERGE_CLAIM));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⛔ `raw_rule` — THE FIELDS `firewall_rules` HAS NO COLUMN FOR
+//
+// The canonical key used to span only the columns. Measured on the live fleet
+// 2026-09-26, that made 7 of 41 `safe_to_merge` groups NOT the same rule at all
+// — each one an actionable, plausible proposal to merge two rules the firewall
+// treats differently. Every fixture below is a live shape.
+describe('⛔ canonicalKey — raw_rule keys that decide matching or enforcement', () => {
+  /** Two adjacent rules differing only in destination, plus per-rule raw_rule. */
+  function pair(rawA, rawB) {
+    return findConsolidationGroups([
+      rule({ id: 'a', sequence_number: 10, dst_addresses: ['10.1.0.0/24'], raw_rule: rawA }),
+      rule({ id: 'b', sequence_number: 11, dst_addresses: ['10.2.0.0/24'], raw_rule: rawB }),
+    ], NO_OBJECTS);
+  }
+
+  it('⛔ PAN-OS source-user: a named user and "any" are NOT the same rule (TUM(TUTH1) #126/#127)', () => {
+    // Live: merging these grants #126's destination to EVERY user, or strips
+    // #127's access from everyone but one. It was reported `safe_to_merge`.
+    assert.deepEqual(
+      pair({ 'source-user': { member: 'dlt_tum_suppakronc' } }, { 'source-user': 'any' }),
+      []
+    );
+  });
+
+  it('⛔ FortiOS UTM inspection present on one rule and absent on the other (OKF(F2) #26/#28)', () => {
+    for (const key of ['utm-status', 'av-profile', 'ips-sensor', 'webfilter-profile',
+      'ssl-ssh-profile', 'application-list', 'dnsfilter-profile', 'profile-protocol-options']) {
+      assert.deepEqual(pair({ [key]: 'default' }, {}), [], `${key} must block the group`);
+    }
+  });
+
+  it('⛔ PAN-OS profile-setting differing by a whole spyware profile (TUG #5/#6)', () => {
+    const withSpyware = {
+      'profile-setting': {
+        profiles: {
+          virus: { member: 'default' }, spyware: { member: 'default' },
+          vulnerability: { member: 'default' },
+        },
+      },
+    };
+    const without = {
+      'profile-setting': {
+        profiles: { virus: { member: 'default' }, vulnerability: { member: 'default' } },
+      },
+    };
+    assert.deepEqual(pair(withSpyware, without), []);
+  });
+
+  it('⛔ the logging keys no column carries: log-start, log-setting, logtraffic', () => {
+    // The stated intent was ALREADY defeated: `log_enabled` is in the key so a
+    // logged rule never merges with an unlogged one, yet live `safe_to_merge`
+    // groups differed in PAN-OS log-start (IDC FW #414/#415) and FortiOS
+    // logtraffic (TSR_EKM #33/#57).
+    assert.deepEqual(pair({ 'log-start': 'yes' }, {}), []);
+    assert.deepEqual(pair({ 'log-setting': 'tu_syslog' }, {}), []);
+    assert.deepEqual(pair({ logtraffic: 'all' }, {}), []);
+  });
+
+  it('⛔ and `all` is NOT in the neutral family — that exclusion is load-bearing', () => {
+    // FortiOS logtraffic `all` logs every session; the absent default logs only
+    // UTM events. Folding them would merge a fully-logged rule with a partly
+    // logged one, which is the whole class of mistake this section prevents.
+    assert.equal(canonicalRawValue('all'), 'all');
+    assert.notEqual(canonicalRawValue('all'), NEUTRAL_TOKEN);
+    assert.equal(canonicalRawValue('any'), NEUTRAL_TOKEN);
+  });
+
+  it('⛔ matching keys with no column at all: category, HIP, rule-type, groups, NAT pool', () => {
+    assert.deepEqual(pair({ category: { member: 'gambling' } }, {}), []);
+    assert.deepEqual(pair({ 'source-hip': { member: 'corp-managed' } }, {}), []);
+    assert.deepEqual(pair({ 'destination-hip': { member: 'corp-managed' } }, {}), []);
+    assert.deepEqual(pair({ 'rule-type': 'intrazone' }, {}), []);
+    assert.deepEqual(pair({ groups: [{ name: 'vpn-users' }] }, {}), []);
+    assert.deepEqual(pair({ poolname: 'wan1-pool' }, {}), []);
+    assert.deepEqual(pair({ option: { 'disable-server-response-inspection': 'yes' } }, {}), []);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  it('⛔ A BLANKET HASH WOULD COLLAPSE THE FEATURE — identity keys must NOT split', () => {
+    // Every one of these differs on every rule of a real PAN-OS or FortiOS
+    // pull. Keying them would produce ZERO groups on the whole fleet, silently.
+    const groups = pair(
+      {
+        '@_name': 'rule-a', '@_uuid': 'aaaa', '@_loc': 'PA-220-x', '@_panorama': 'yes',
+        uuid: 'u-1', policyid: 1, name: 'policy 1', comments: 'first',
+        description: 'first', tag: { member: 'red' }, 'group-tag': 'grp',
+      },
+      {
+        '@_name': 'rule-b', '@_uuid': 'bbbb', '@_loc': 'PA-220-y', '@_panorama': 'no',
+        uuid: 'u-2', policyid: 2, name: 'policy 2', comments: 'second',
+        description: 'second', tag: { member: 'blue' }, 'group-tag': 'other',
+      }
+    );
+    assert.equal(groups.length, 1, 'identity and label keys must never split a real group');
+    assert.equal(groups[0].size, 2);
+  });
+
+  it('⛔ a field a COLUMN already models does not split the group twice', () => {
+    // `from`/`to`/`source`/`destination`/`service`/`action`/`disabled`/`schedule`
+    // and FortiOS's `srcintf`/`dstintf`/`srcaddr`/`dstaddr`/`status`/`nat` are
+    // the SOURCE of columns that are already in the key. Keying the raw copy as
+    // well would be the same fact twice — and `nat` was missed on the first
+    // pass, which put every FortiOS rule carrying it into review until a live
+    // probe named it.
+    const groups = pair(
+      { destination: { member: 'net-a' }, dstaddr: [{ name: 'net-a' }], nat: 'enable' },
+      { destination: { member: 'net-b' }, dstaddr: [{ name: 'net-b' }], nat: 'enable' }
+    );
+    assert.equal(groups.length, 1);
+  });
+
+  it('⛔ an explicit vendor DEFAULT keys the same as an absent key', () => {
+    // Live: PAN-OS writes `negate-source: no` on 131 of 1,601 rules and omits it
+    // on the rest; `destination-hip: any` on 1,197 while 404 carry nothing. Key
+    // those apart and a real group splits for a spelling difference.
+    assert.equal(pair({ 'negate-source': 'no' }, {}).length, 1);
+    assert.equal(pair({ 'destination-hip': { member: 'any' } }, {}).length, 1);
+    assert.equal(pair({ 'log-start': 'no' }, {}).length, 1);
+    assert.equal(pair({ 'utm-status': 'disable' }, {}).length, 1);
+    for (const v of [null, undefined, '', 'no', 'none', 'false', '0', 'disable', 'disabled',
+      'off', 'unset', 'any', 'ANY', ' No ']) {
+      assert.equal(canonicalRawValue(v), NEUTRAL_TOKEN, `${JSON.stringify(v)} is neutral`);
+    }
+  });
+
+  it('⛔ Panorama uncommitted-change attributes and #text wrapping do not split (IDC FW #54..#72)', () => {
+    // Live shape: the SAME value, one copy wrapped in @_time/@_admin/@_dirtyId
+    // and its text pushed into #text. Without stripping them, five identical
+    // rules split into two groups for pure metadata.
+    const plain = {
+      'source-user': { member: 'any' },
+      'profile-setting': { profiles: { virus: { member: 'default' } } },
+      'log-start': 'yes',
+    };
+    const attributed = {
+      'source-user': {
+        '@_time': '2026/08/07 14:43:44',
+        member: { '#text': 'any', '@_time': '2026/08/07 14:43:44', '@_admin': 'Naron' },
+        '@_admin': 'Naron', '@_dirtyId': '78',
+      },
+      'profile-setting': {
+        '@_time': '2026/08/07 14:43:44',
+        profiles: {
+          virus: { member: { '#text': 'default', '@_dirtyId': '78' }, '@_dirtyId': '78' },
+        },
+        '@_dirtyId': '78',
+      },
+      'log-start': { '#text': 'yes', '@_admin': 'Naron' },
+    };
+    assert.equal(pair(plain, attributed).length, 1);
+    assert.equal(canonicalRawValue(plain['log-start']), canonicalRawValue(attributed['log-start']));
+  });
+
+  it('member ORDER inside a raw value does not matter — these are sets', () => {
+    assert.equal(
+      canonicalRawValue({ member: ['b', 'a'] }),
+      canonicalRawValue({ member: ['a', 'b'] })
+    );
+    assert.equal(
+      pair({ category: { member: ['x', 'y'] } }, { category: { member: ['y', 'x'] } }).length,
+      1
+    );
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  it('⛔ AN UNCLASSIFIED KEY FORCES needs_review AND IS NAMED — it never splits silently', () => {
+    const groups = pair({ 'brand-new-vendor-field': 'quarantine' }, {});
+    assert.equal(groups.length, 1, 'an unknown key must not make the candidate disappear');
+    assert.equal(groups[0].verdict, VERDICTS.REVIEW);
+    assert.equal(groups[0].adjacent, false);
+    const u = groups[0].undetermined.filter((x) => x.reason === 'unclassified_raw_rule_key');
+    assert.equal(u.length, 1);
+    // ⛔ The KEY is reported. The fix is to classify it, not to widen anything,
+    // and an operator who cannot see which key it was cannot ask for that.
+    assert.equal(u[0].field, 'brand-new-vendor-field');
+  });
+
+  it('⛔ ...and it cannot be reached by hiding behind a classified sibling', () => {
+    const groups = pair(
+      { 'log-start': 'yes', 'brand-new-vendor-field': 'x' },
+      { 'log-start': 'yes', 'brand-new-vendor-field': 'x' }
+    );
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].verdict, VERDICTS.REVIEW);
+  });
+
+  it('classifyRawRuleKeys drops neutral significant keys and tolerates junk', () => {
+    assert.deepEqual(classifyRawRuleKeys({ raw_rule: { 'log-start': 'no' } }).significant, []);
+    assert.deepEqual(
+      classifyRawRuleKeys({ raw_rule: { 'log-start': 'yes' } }).significant,
+      [['log-start', 'yes']]
+    );
+    for (const raw of [null, undefined, 'a string', 42, ['an array'], true]) {
+      assert.deepEqual(
+        classifyRawRuleKeys({ raw_rule: raw }),
+        { significant: [], unclassified: [] }
+      );
+    }
+    assert.deepEqual(classifyRawRuleKeys(null), { significant: [], unclassified: [] });
+  });
+
+  it('⛔ the three buckets are DISJOINT and every entry carries a reason', () => {
+    for (const k of Object.keys(RAW_KEY_SIGNIFICANT)) {
+      assert.equal(k, k.toLowerCase(), `${k} must be lower-cased to be found`);
+      assert.ok(!Object.prototype.hasOwnProperty.call(RAW_KEY_IGNORED, k),
+        `${k} is in BOTH buckets — which one wins would then be source order`);
+      assert.ok(String(RAW_KEY_SIGNIFICANT[k]).length > 8, `${k} needs a stated reason`);
+      assert.ok(!k.startsWith(ATTRIBUTE_KEY_PREFIX), `${k} would be dropped by the attribute rule`);
+    }
+    for (const k of Object.keys(RAW_KEY_IGNORED)) {
+      assert.equal(k, k.toLowerCase(), `${k} must be lower-cased to be found`);
+      assert.ok(String(RAW_KEY_IGNORED[k]).length > 3, `${k} needs a stated reason`);
+    }
+    // ⛔ The negate family must be SIGNIFICANT, not ignored: it inverts an
+    // extent, which is the one thing that makes a disjointness proof backwards.
+    for (const k of ['negate-source', 'negate-destination', 'srcaddr-negate',
+      'dstaddr-negate', 'service-negate']) {
+      assert.ok(Object.prototype.hasOwnProperty.call(RAW_KEY_SIGNIFICANT, k),
+        `${k} must be significant`);
+    }
+  });
+
+  it('keys are matched case-insensitively, so a vendor changing case cannot re-open the gap', () => {
+    assert.deepEqual(classifyRawRuleKeys({ raw_rule: { 'LOG-START': 'yes' } }).unclassified, []);
+    assert.deepEqual(classifyRawRuleKeys({ raw_rule: { Uuid: 'x' } }).unclassified, []);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⛔ NEGATION IS A PROPERTY OF THE RULE, NOT OF ITS NEIGHBOURS
+//
+// hasNegationMarker was reachable only through mightMatchSameTraffic, which runs
+// only for an INTERVENING rule — so a negated MEMBER with nothing between it and
+// its partner produced `examined === 0` and a clean `safe_to_merge`. 20 of the
+// live fleet's 92 groups took that path.
+describe('⛔ a negated MEMBER is never cleared, whatever sits between', () => {
+  it('two ADJACENT members, one negated, are not even the same rule', () => {
+    // The canonical key is the FIRST of the two guards: `negate-source` is
+    // significant, so "source NOT in X" and "source IN X" no longer group.
+    assert.deepEqual(findConsolidationGroups([
+      rule({
+        id: 'neg', sequence_number: 10, dst_addresses: ['10.1.0.0/24'],
+        raw_rule: { 'negate-source': 'yes' },
+      }),
+      rule({ id: 'plain', sequence_number: 11, dst_addresses: ['10.2.0.0/24'] }),
+    ], NO_OBJECTS), []);
+  });
+
+  it('⛔ and when BOTH are negated identically they group — and are STILL needs_review', () => {
+    // This is the half the canonical key cannot do. `examined` is 0: there is
+    // nothing between them, so the position check has nothing to say, and the
+    // old code called that safe. A merge writes NOT(A ∪ B), which is not what
+    // the two rules match (NOT A ∪ NOT B).
+    const groups = findConsolidationGroups([
+      rule({
+        id: 'n1', sequence_number: 10, dst_addresses: ['10.1.0.0/24'],
+        raw_rule: { 'negate-source': 'yes' },
+      }),
+      rule({
+        id: 'n2', sequence_number: 11, dst_addresses: ['10.2.0.0/24'],
+        raw_rule: { 'negate-source': 'yes' },
+      }),
+    ], NO_OBJECTS);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].examined, 0);
+    assert.equal(groups[0].verdict, VERDICTS.REVIEW);
+    assert.equal(groups[0].adjacent, false, 'adjacent must not survive an undetermined check');
+    assert.deepEqual(
+      groups[0].undetermined.map((u) => u.reason),
+      ['member_field_is_negated', 'member_field_is_negated']
+    );
+  });
+
+  it('⛔ checkInterference refuses a negated member with an EMPTY pool', () => {
+    // The pool is where every other guard lives. With nothing in it the only
+    // thing that can fall closed is a property of the members themselves.
+    const a = rule({
+      id: 'a', sequence_number: 10, dst_addresses: ['10.1.0.0/24'],
+      raw_rule: { 'dstaddr-negate': 'enable' },
+    });
+    const b = rule({ id: 'b', sequence_number: 11, dst_addresses: ['10.2.0.0/24'] });
+    const out = checkInterference([a, b], [], { objects: [] });
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.equal(out.examined, 0);
+    assert.equal(out.undetermined[0].reason, 'member_field_is_negated');
+    assert.equal(out.undetermined[0].rule.id, 'a');
+  });
+
+  it('a negate flag that is OFF still does not poison a member', () => {
+    const a = rule({
+      id: 'a', sequence_number: 10, dst_addresses: ['10.1.0.0/24'],
+      raw_rule: { 'dstaddr-negate': 'disable' },
+    });
+    const b = rule({
+      id: 'b', sequence_number: 11, dst_addresses: ['10.2.0.0/24'],
+      raw_rule: { 'dstaddr-negate': 'disable' },
+    });
+    assert.equal(checkInterference([a, b], [], { objects: [] }).verdict, VERDICTS.SAFE);
+  });
+
+  it('⛔ an XML TEXT NODE is read as its text, not as an object (TFM-RN #12)', () => {
+    // Live: `{"#text":"no","@_loc":"PA-220-Ranode"}`. Stringified, it is not the
+    // literal "no", so the old code read it as NEGATED. That over-reports — it
+    // falls closed — but a count nobody can trust is still not a count.
+    assert.equal(hasNegationMarker({
+      raw_rule: { 'negate-destination': { '#text': 'no', '@_loc': 'PA-220-Ranode' } },
+    }), false);
+    // ...and the same shape carrying `yes` IS still negated.
+    assert.equal(hasNegationMarker({
+      raw_rule: { 'negate-destination': { '#text': 'yes', '@_loc': 'PA-220-Ranode' } },
+    }), true);
+    assert.equal(hasNegationMarker({ raw_rule: { 'negate-source': 'yes' } }), true);
+    assert.equal(hasNegationMarker({ raw_rule: {} }), false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⛔ A DUPLICATE SEQUENCE NUMBER IS NOT "OUTSIDE THE SPAN"
+//
+// `cs <= mergePosition || cs >= maxSeq` is sound only if sequence numbers are
+// unique per device+vdom, and nothing in this codebase checks that. Measured
+// 2026-09-26: zero duplicates on the live fleet — so this is a guard for the
+// collection that goes wrong later, which is exactly when a cleanup proposal
+// must not be trusted.
+describe('⛔ duplicate sequence numbers inside the span', () => {
+  const a = () => rule({ id: 'a', sequence_number: 10, dst_addresses: ['10.1.0.0/24'] });
+  const b = () => rule({ id: 'b', sequence_number: 12, dst_addresses: ['10.2.0.0/24'] });
+  /** A deny whose destination is the SECOND member's — it would interfere. */
+  const deny = (seq) => rule({
+    id: `deny${seq}`, sequence_number: seq, action: 'deny',
+    src_addresses: ['10.0.0.0/24'], dst_addresses: ['10.2.0.0/24'], services: ['tcp/443'],
+  });
+
+  it('a non-member sharing the FIRST member position is undetermined, not absent', () => {
+    const [m1, m2, d] = [a(), b(), deny(10)];
+    const out = checkInterference([m1, m2], [m1, m2, d], { objects: [] });
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.equal(out.adjacent, false,
+      'the UI would otherwise print "Nothing enabled sits between these rules."');
+    assert.deepEqual(out.undetermined.map((u) => u.reason), ['duplicate_sequence_number_in_span']);
+  });
+
+  it('...and one sharing the LAST member position too', () => {
+    const [m1, m2, d] = [a(), b(), deny(12)];
+    const out = checkInterference([m1, m2], [m1, m2, d], { objects: [] });
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.deepEqual(out.undetermined.map((u) => u.reason), ['duplicate_sequence_number_in_span']);
+  });
+
+  it('a rule genuinely ABOVE or BELOW the span is still skipped, not reviewed', () => {
+    for (const seq of [9, 13]) {
+      const [m1, m2, d] = [a(), b(), deny(seq)];
+      const out = checkInterference([m1, m2], [m1, m2, d], { objects: [] });
+      assert.equal(out.verdict, VERDICTS.SAFE, `a rule at ${seq} is outside [10,12]`);
+      assert.equal(out.examined, 0);
+    }
+  });
+
+  it('a rule strictly INSIDE the span is still examined normally', () => {
+    const [m1, m2, d] = [a(), b(), deny(11)];
+    const out = checkInterference([m1, m2], [m1, m2, d], { objects: [] });
+    assert.equal(out.examined, 1);
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.equal(out.interfering[0].reason, 'matches_moved_traffic');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// ⛔ AN EMPTY EXTENT IS NOT A DISJOINT ONE
+//
+// dimensionOverlap's own doc says 'no' "requires BOTH sides fully resolved and
+// provably disjoint". An address GROUP whose `members` is [] satisfies that to
+// the letter: the group itself resolved, so nothing lands in unresolvedNames —
+// and it contributes no range either. `storeObjects` writes [] for a group the
+// adapter did not return, and two such groups exist live (Vietnam-YCC, OKF(F2)),
+// so a PARTIAL object read produced a confident "provably disjoint".
+describe('⛔ an object group whose members could not be enumerated', () => {
+  const members = () => [
+    rule({ id: 'a', sequence_number: 10, dst_addresses: ['10.1.0.0/24'] }),
+    rule({ id: 'b', sequence_number: 40, dst_addresses: ['10.2.0.0/24'] }),
+  ];
+
+  it('an EMPTY address group on an intervening rule is undeterminable, never disjoint', () => {
+    const m = members();
+    const mid = rule({
+      id: 'mid', sequence_number: 20, action: 'deny',
+      src_addresses: ['EMPTY-GRP'], dst_addresses: ['10.2.0.0/24'], services: ['tcp/443'],
+    });
+    const out = checkInterference(m, [...m, mid], {
+      objects: [{
+        id: 'o1', object_type: 'address_group', name: 'EMPTY-GRP', value: null, members: [],
+      }],
+    });
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.equal(out.examined, 1);
+    assert.equal(out.interfering.length, 0);
+    assert.equal(out.undetermined[0].reason, 'overlap_could_not_be_determined');
+  });
+
+  it('an EMPTY service group is undeterminable too', () => {
+    const m = members();
+    const mid = rule({
+      id: 'mid', sequence_number: 20, action: 'deny',
+      src_addresses: ['10.0.0.0/24'], dst_addresses: ['10.2.0.0/24'], services: ['EMPTY-SVC'],
+    });
+    const out = checkInterference(m, [...m, mid], {
+      objects: [{
+        id: 'o1', object_type: 'service_group', name: 'EMPTY-SVC', value: null, members: [],
+      }],
+    });
+    assert.equal(out.verdict, VERDICTS.REVIEW);
+    assert.equal(out.undetermined[0].reason, 'overlap_could_not_be_determined');
+  });
+
+  it('⛔ ...and a POPULATED group still resolves and can still clear the group', () => {
+    // The fix must not blanket-unknown every object reference — that would make
+    // the engine silent rather than conservative, and nothing would ever clear.
+    const m = members();
+    const mid = rule({
+      id: 'mid', sequence_number: 20, action: 'deny',
+      src_addresses: ['FULL-GRP'], dst_addresses: ['10.2.0.0/24'], services: ['tcp/443'],
+    });
+    const out = checkInterference(m, [...m, mid], {
+      objects: [
+        {
+          id: 'o1', object_type: 'address_group', name: 'FULL-GRP', value: null,
+          members: ['HOST-1'],
+        },
+        {
+          id: 'o2', object_type: 'address', name: 'HOST-1', value: '192.168.77.5/32',
+          members: null,
+        },
+      ],
+    });
+    assert.equal(out.verdict, VERDICTS.SAFE);
+    assert.equal(out.examined, 1);
   });
 });

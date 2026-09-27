@@ -36,6 +36,9 @@ const {
   combineCapped,
   runSource,
   tunnelStatusOf,
+  gatherWorkQueue,
+  gatherCoverageGaps,
+  NEVER_ACT_NOW_SOURCES,
   gatherPatchNow,
   gatherConfigDiffs,
   gatherLicences,
@@ -1064,5 +1067,260 @@ describe('⛔ the application source — a decision per application, not a row p
     // would switch a whole source off in silence.
     const pool = stubPool([[{ n: null }], new Error('the evaluation was reached')]);
     await assert.rejects(() => gatherApplications(pool), /the evaluation was reached/);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ THE COVERAGE SOURCE — the one that deleted an item and reported success
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Measured on the live fleet 2026-09-27, with the pool throwing ONLY on the
+// log-evidence read and every other query healthy:
+//
+//   healthy                14 items, ok: true, no failed sources
+//   log-evidence failing   13 items, ok: true, NO failed sources  <- OKF(F2) gone
+//
+// OKF(F2) reports 38 of 38 rules with no hit count, read straight off
+// `firewall_rules.hit_count` and wholly independent of the enrichment that
+// failed. That is "a short queue reading as a clean one", which this file's own
+// header says two mechanisms prevent.
+
+const RULE_USAGE_GATES = [
+  'unused-rule findings', 'rule cleanup requests', 'segmentation "did it happen"',
+];
+
+const regCell = (over = {}) => ({
+  key: 'ruleUsage',
+  label: 'Rule usage (hit counts)',
+  state: 'absent',
+  detail: 'No hit counts at all (38 of 38 rules).',
+  gates: RULE_USAGE_GATES,
+  weight: 3,
+  share: null,
+  certain: true,
+  mitigationUnknown: false,
+  ageDays: null,
+  ...over,
+});
+
+const regEntry = (over = {}) => {
+  const gaps = over.gaps || [regCell()];
+  return {
+    deviceId: 'd-okf',
+    deviceName: 'OKF(F2)',
+    vendor: 'fortinet',
+    cells: gaps,
+    gapCount: gaps.length,
+    answersWithheld: gaps.reduce((n, g) => n + (g.weight || 0), 0),
+    blockedEngines: [...new Set(gaps.flatMap((g) => g.gates || []))],
+    staleFindings: null,
+    uncertainCount: gaps.filter((g) => g.certain === false).length,
+    mitigationUnknownCount: gaps.filter((g) => g.mitigationUnknown === true).length,
+    fullyCovered: false,
+    ...over,
+    gaps,
+  };
+};
+
+const register = (entries, failures = []) => ({
+  entries, summary: {}, failures, generatedAt: '2026-09-27T00:00:00.000Z',
+});
+
+// The `owned` query — the devices `collection_gap` already reports.
+const ownedPool = (ids = []) => stubPool([ids.map((id) => ({ id }))]);
+
+describe('⛔ the coverage source never shortens the queue in silence', () => {
+  it('⛔ a rule_log_evidence failure still produces the item', async () => {
+    // The enrichment that could have SHRUNK the gap failed; the gap itself came
+    // off `firewall_rules.hit_count` and is a fact. The old model marked the
+    // whole cell `certain: false`, the gather dropped unconfirmed gaps, and the
+    // firewall left the queue with `ok: true` and no banner.
+    const reg = register(
+      [regEntry({ gaps: [regCell({ mitigationUnknown: true })] })],
+      [{ source: 'rule_log_evidence', error: 'canceling statement due to statement timeout' }]
+    );
+    const out = await gatherCoverageGaps(ownedPool(), reg);
+    assert.equal(out.length, 1, 'the firewall was deleted from the queue by an enrichment failure');
+    assert.match(out[0].title, /OKF\(F2\)/);
+    // ⛔ And the caveat is stated rather than swallowed: the gap is a FLOOR.
+    assert.match(out[0].why, /floor/i);
+  });
+
+  it('a healthy register produces the same item without the floor caveat', async () => {
+    const out = await gatherCoverageGaps(ownedPool(), register([regEntry()]));
+    assert.equal(out.length, 1);
+    assert.doesNotMatch(out[0].why, /floor/i);
+  });
+
+  it('⛔ a device whose every gap is UNCHECKED gets an item, never silence', async () => {
+    // It claims no gap — the title and the action are both about the failed
+    // CHECK — but a firewall vanishing from the queue is indistinguishable from
+    // a firewall with nothing wrong.
+    const out = await gatherCoverageGaps(ownedPool(), register([
+      regEntry({ gaps: [regCell({ certain: false, detail: 'Syslog coverage could not be read.' })] }),
+    ]));
+    assert.equal(out.length, 1);
+    assert.match(out[0].title, /could not be read/i);
+    assert.match(out[0].why, /not a confirmed blind spot/i);
+    assert.notEqual(out[0].key, 'coverage:d-okf', 'it must not share the gap item key');
+  });
+
+  it('a REGISTER failure is still fatal — an empty register is not a clean fleet', async () => {
+    await assert.rejects(
+      () => gatherCoverageGaps(ownedPool(), register([], [{ source: 'coverage_counts', error: 'boom' }])),
+      /coverage_counts: boom/
+    );
+  });
+
+  it('a fully-covered firewall contributes nothing', async () => {
+    const out = await gatherCoverageGaps(ownedPool(), register([
+      regEntry({ gaps: [], fullyCovered: true }),
+    ]));
+    assert.deepEqual(out, []);
+  });
+});
+
+describe('⛔ stale findings reach the queue even when collection is also failing', () => {
+  // ⛔ LIVE, THE EXCLUSION COVERED EXACTLY THE TWO DEVICES WITH STALE FINDINGS.
+  // `collection_gap` owns {TSR-TL, TSR_EKC}, which are precisely the two
+  // carrying 51-day and 15-day-old findings — so the register's self-declared
+  // loudest state and its distinct action were dead on this fleet, and
+  // `collection_gap`'s item says nothing at all about stale findings.
+  const staleEntry = (over = {}) => regEntry({
+    deviceId: 'd-ekc',
+    deviceName: 'TSR_EKC',
+    staleFindings: {
+      ageDays: 51,
+      findingCount: 38,
+      neverCollected: true,
+      detail: 'Rule analysis last ran 51 days ago, and rule collection has never succeeded. '
+        + 'Its 38 findings are shown elsewhere with nothing marking them as that old.',
+    },
+    ...over,
+  });
+
+  it('⛔ an uncollectable firewall STILL reports its stale findings', async () => {
+    const out = await gatherCoverageGaps(ownedPool(['d-ekc']), register([staleEntry()]));
+    assert.equal(out.length, 1, 'the stale branch was dead on the live fleet');
+    assert.match(out[0].title, /51 days old and shown as current/);
+    assert.equal(out[0].severity, 'high');
+    assert.equal(out[0].key, 'coverage-stale:d-ekc');
+  });
+
+  it('and says which of the two problems it is, so it does not duplicate collection_gap', async () => {
+    const owned = await gatherCoverageGaps(ownedPool(['d-ekc']), register([staleEntry()]));
+    assert.match(owned[0].why, /reported separately/i);
+    assert.match(owned[0].action, /historical rather than current/i);
+
+    const reachable = await gatherCoverageGaps(ownedPool([]), register([staleEntry()]));
+    const stale = reachable.find((i) => i.key === 'coverage-stale:d-ekc');
+    assert.match(stale.action, /Re-run collection and rule analysis/i);
+    assert.doesNotMatch(stale.why, /reported separately/i);
+  });
+
+  it('a reachable firewall gets TWO items — the stale answer and the missing evidence', async () => {
+    const out = await gatherCoverageGaps(ownedPool([]), register([staleEntry()]));
+    assert.deepEqual(out.map((i) => i.key).sort(), ['coverage-stale:d-ekc', 'coverage:d-ekc']);
+  });
+
+  it('an uncollectable firewall gets NO gap item — collection_gap owns that step', async () => {
+    const out = await gatherCoverageGaps(ownedPool(['d-ekc']), register([staleEntry()]));
+    assert.equal(out.filter((i) => i.key === 'coverage:d-ekc').length, 0);
+  });
+
+  it('an uncollectable firewall with no stale findings contributes nothing at all', async () => {
+    const out = await gatherCoverageGaps(ownedPool(['d-okf']), register([regEntry()]));
+    assert.deepEqual(out, []);
+  });
+});
+
+describe('⛔ the item is described and ranked by the gaps it CONFIRMED', () => {
+  // `blockedEngines` and `answersWithheld` are computed over EVERY gap, uncertain
+  // ones included — so two lines after refusing to confirm a gap, the item was
+  // using it for its own text and its own severity.
+  const mixed = () => register([regEntry({
+    gaps: [
+      regCell({ weight: 3 }),
+      regCell({
+        key: 'syslog',
+        label: 'Syslog',
+        detail: 'Syslog coverage could not be read.',
+        gates: ['log_hit (CVE priority rule 2)', 'traffic evidence', 'rule-hit correlation', 'VPN detections'],
+        weight: 4,
+        certain: false,
+      }),
+    ],
+  })]);
+
+  it('the severity comes from the confirmed weight, not from answersWithheld', async () => {
+    const [gap] = await gatherCoverageGaps(ownedPool(), mixed());
+    // Confirmed weight is 3; answersWithheld is 7 and would have read medium.
+    assert.equal(gap.severity, 'low');
+  });
+
+  it('the unconfirmed gap contributes neither its text nor its gated answers', async () => {
+    const [gap] = await gatherCoverageGaps(ownedPool(), mixed());
+    assert.doesNotMatch(gap.why, /Syslog coverage could not be read/);
+    assert.doesNotMatch(gap.why, /VPN detections/);
+    assert.match(gap.why, /38 of 38 rules/);
+    assert.equal(gap.count, 1, 'the count is confirmed gaps only');
+  });
+
+  it('a heavy CONFIRMED gap set does still read medium', async () => {
+    const [gap] = await gatherCoverageGaps(ownedPool(), register([regEntry({
+      gaps: [
+        regCell({ weight: 3 }),
+        regCell({
+          key: 'objects', label: 'Object resolution', weight: 3, gates: ['application impact'],
+        }),
+      ],
+    })]));
+    assert.equal(gap.severity, 'medium');
+  });
+});
+
+describe('⛔ the coverage source can never contribute an act_now alert', () => {
+  it('every item it produces is unmeasured, so the declaration is earned', async () => {
+    // ⛔ NEVER_ACT_NOW_SOURCES is what lets the outbound dispatcher omit this
+    // source entirely. A declaration is not evidence, so it is asserted here
+    // against every shape the gather can emit.
+    const shapes = [
+      register([regEntry()]),
+      register([regEntry({ gaps: [regCell({ certain: false })] })]),
+      register([regEntry({
+        staleFindings: {
+          ageDays: 51, findingCount: 38, neverCollected: true, detail: 'old.',
+        },
+      })]),
+    ];
+    for (const reg of shapes) {
+      const out = await gatherCoverageGaps(ownedPool(), reg);
+      assert.ok(out.length > 0);
+      for (const entry of out) {
+        assert.equal(entry.evidence, 'unmeasured', `${entry.key} claimed more than unmeasured`);
+        assert.notEqual(bandFor(entry), 'act_now', `${entry.key} reached act_now`);
+      }
+    }
+    assert.ok(NEVER_ACT_NOW_SOURCES.includes('coverage'));
+  });
+
+  it('⛔ an omitted source is REPORTED as omitted, never simply absent', async () => {
+    // A source that stops appearing is indistinguishable from one that silently
+    // broke. Every other source here fails (the stub throws), which is what
+    // makes the omitted one reporting ok: true meaningful.
+    const angry = { async query() { throw new Error('nope'); } };
+    const { sources } = await gatherWorkQueue(angry, { omitSources: ['coverage'] });
+    const coverage = sources.find((s) => s.key === 'coverage');
+    assert.equal(coverage.omitted, true);
+    assert.equal(coverage.ok, true, 'an omission is not a failure');
+    assert.equal(coverage.count, 0);
+    assert.equal(coverage.truncatedFrom, undefined, 'an omitted source cannot truncate');
+    assert.ok(sources.some((s) => s.key === 'cve' && s.ok === false), 'the others still ran');
+  });
+
+  it('nothing is omitted unless a caller asks', async () => {
+    const angry = { async query() { throw new Error('nope'); } };
+    const { sources } = await gatherWorkQueue(angry);
+    assert.ok(sources.every((s) => !s.omitted), 'the default gathers everything');
   });
 });

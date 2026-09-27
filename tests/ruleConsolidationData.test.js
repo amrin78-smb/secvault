@@ -249,14 +249,52 @@ describe('⛔ a firewall with no collected ruleset is not a firewall with nothin
     assert.equal(r.coverage.ruleCount, 0);
   });
 
-  it('rows present with no timestamp still counts as collected', async () => {
+  it('⛔ ROWS WITH NO TIMESTAMP ARE NOT COLLECTED — and this test used to pin the opposite', async () => {
+    // The code read `Boolean(last_rules_collected_at) || counts.ruleCount > 0`
+    // while the comment above it said the timestamp decides. This very test
+    // asserted the `||` — so the discrepancy was pinned as intended behaviour
+    // rather than caught by it, which is why it survived.
+    //
+    // Rows without the stamp are rows nothing can prove came from a SUCCESSFUL
+    // getRules(). Treating them as collected made the page render "No two
+    // enabled rules on this firewall are identical except in one field" — a
+    // measurement — over a ruleset of unknown provenance. Live 2026-09-26:
+    // exactly one active device is in that state (TSR_EKC, 30 rows, no stamp).
     const pool = stubPool({
       device: [{ ...DEVICE_ROW, last_rules_collected_at: null }],
       rules: threeRules(),
       objects: [],
     });
     const r = await getDeviceConsolidation(pool, DEV);
-    assert.equal(r.coverage.rulesCollected, true);
+    assert.equal(r.coverage.rulesCollected, false);
+    // ⛔ The rows are still COUNTED and the groups still computed — the fix
+    // withholds the claim of a successful collection, not the analysis.
+    assert.equal(r.coverage.ruleCount, 3);
+    assert.equal(r.coverage.lastRulesCollectedAt, null);
+    assert.ok(Array.isArray(r.groups));
+  });
+
+  it('⛔ the fleet row uses the SAME definition as the device page', async () => {
+    // Two spellings of "has this firewall been collected" in one file is how the
+    // device page and the fleet row come to disagree about the same firewall.
+    const pool = stubPool({
+      devices: [
+        { id: DEV, name: 'FW-1', vendor: 'paloalto', last_rules_collected_at: null },
+        {
+          id: 'dev-2', name: 'FW-2', vendor: 'paloalto',
+          last_rules_collected_at: new Date('2026-09-20T00:00:00Z'),
+        },
+      ],
+      rules: threeRules(),
+      objects: [],
+    });
+    const r = await getFleetConsolidation(pool);
+    assert.equal(r.ok, true);
+    const rows = new Map(r.byDevice.map((d) => [d.deviceId, d]));
+    assert.equal(rows.get(DEV).ruleCount, 3);
+    assert.equal(rows.get(DEV).rulesCollected, false, 'rows without a stamp are not a collection');
+    assert.equal(rows.get('dev-2').ruleCount, 0);
+    assert.equal(rows.get('dev-2').rulesCollected, true, 'a stamp with no rows IS a collection');
   });
 });
 

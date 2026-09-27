@@ -22,10 +22,13 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/central-cve-feed-proposal.md` — ⛔ **BUILT in v2.137.0-v2.139.0**, this line said
   "PROPOSAL ONLY (not built)" for thirty-odd versions after it shipped. Kept as the design record
   for `lib/feeds/cveHub.js`; read the "Central CVE feed" section of this file for what actually runs
-- `.ai-codex/analytics-proposal.md` — PROPOSAL ONLY (not built, one item is a pointer to existing
-  roadmap work): analytics with no LLM and no local AI — upgrade planner, blind-spot register,
-  log-derived rule usage, object/rule consolidation, fleet conformance. Carries a tracking table,
-  measured 2026-09-25, and the SQL to re-measure
+- `.ai-codex/analytics-proposal.md` — ⛔ **MOSTLY BUILT in v2.187.0-v2.191.0**, and this line said
+  "PROPOSAL ONLY (not built)" for five versions after the first of them shipped — the same drift the
+  central-CVE-feed entry above records, in the same list, two lines apart. Analytics with no LLM and
+  no local AI: **A1** upgrade planner (v2.187.0), **A2** blind-spot register (v2.188.0), **A3**
+  log-derived rule usage (v2.189.0), **A4** rule/object consolidation + **A5** fleet conformance
+  (v2.190.0), **A7** change outcome (v2.191.0). **A6/A8/A9 remain unbuilt.** Its tracking table
+  carries each item's state and the SQL to re-measure; `.ai-codex/roadmap.md` is the living plan
 
 ### Maintaining the index — MANDATORY
 

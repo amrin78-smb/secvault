@@ -155,3 +155,183 @@ describe('⛔ the nav-label guard covers DISCOVERED routes, not just the static 
     assert.throws(() => assertUsableMarkers([{ path: '/x', markers: ['Settings'] }]));
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ A DATA-DEPENDENT MARKER FAILS THE DEPLOY GATE ON A HEALTHY FLEET
+// (found 2026-09-27)
+//
+// `/coverage` and `/conformance` shipped with markers that only some DATA
+// produces:
+//
+//   'Gaps by evidence source'  — a heading inside `rows.length > 0` in
+//                                CoverageRegister.js
+//   'In the smaller group'     — a <th> ConformanceBoard renders only when a
+//                                `measured` cohort holds at least one VALUE
+//                                deviation (and its RANKING_HEADING's lowercase
+//                                "…in the smaller group" does not satisfy a
+//                                case-sensitive includes() either)
+//
+// A customer with two FortiGates and two Palo Altos has every cohort below
+// MIN_COHORT and may have no recorded gaps: nothing renders, both pages are
+// CORRECT, and Update-SecVault.ps1 then sets `hadFailure` so the closing banner
+// refuses to say the deploy completed. The second marker on each route is the
+// scope-refusal branch, which only fires on a FAILED scope read.
+//
+// So a marker has to be something the page prints whatever the data says. The
+// model is the /vulnerability?tab=upgrade marker: an unconditional StatCard label.
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { stripComments } = require('./stripComments');
+
+const REPO = path.join(__dirname, '..');
+const readSrc = (...p) => fs.readFileSync(path.join(REPO, ...p), 'utf8');
+const markersFor = (p) => (STATIC_ROUTES.find((r) => r.path === p) || {}).markers;
+
+describe('⛔ no marker may depend on the fleet having interesting data', () => {
+  // Named, with the file and the guard each sat behind, so a future edit that
+  // reintroduces one is refused with the reason rather than just the string.
+  const DATA_DEPENDENT = [
+    ['Gaps by evidence source', 'CoverageRegister.js renders it inside `rows.length > 0`'],
+    ['In the smaller group', 'ConformanceBoard.js renders it only for a cohort with a value deviation'],
+  ];
+
+  it('the route table uses none of them', () => {
+    const offenders = [];
+    for (const r of STATIC_ROUTES) {
+      for (const m of r.markers) {
+        const hit = DATA_DEPENDENT.find(([s]) => s === m);
+        if (hit) offenders.push(`${r.path} -> ${JSON.stringify(m)} (${hit[1]})`);
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'a marker only some data produces turns a correct page into a failed deploy gate');
+  });
+
+  it('/coverage leads with an unconditional StatCard label', () => {
+    const m = markersFor('/coverage');
+    assert.deepEqual(m, ['Firewalls with a blind spot', 'Coverage could not be shown']);
+    // ⛔ ASSERTED AGAINST THE SOURCE, so a rename breaks the build and not the
+    // deploy. Comments stripped LINE-first via the shared helper: the prose in
+    // both files quotes the strings it renders.
+    const reg = stripComments(readSrc('components', 'devices', 'CoverageRegister.js'));
+    assert.ok(reg.includes('Firewalls with a blind spot'),
+      'the marker must still be a string CoverageRegister.js renders');
+    assert.ok(!/rows\.length > 0[\s\S]{0,400}Firewalls with a blind spot/.test(reg),
+      'and it must not have moved behind the row guard');
+    const page = stripComments(readSrc('app', '(dashboard)', 'coverage', 'page.js'));
+    assert.ok(page.includes('Coverage could not be shown'),
+      'the refusal branch keeps its own marker');
+  });
+
+  it('/conformance leads with the unconditional board purpose', () => {
+    const m = markersFor('/conformance');
+    assert.deepEqual(m, [
+      'A cohort is one vendor collected one way', 'Conformance could not be shown',
+    ]);
+    const board = stripComments(readSrc('components', 'analysis', 'ConformanceBoard.js'));
+    assert.ok(board.includes('A cohort is one vendor collected one way'),
+      'BOARD_PURPOSE must still open with this');
+    assert.ok(board.includes('{BOARD_PURPOSE}'),
+      'and it must still be rendered unconditionally above the tiles');
+    const page = stripComments(readSrc('app', '(dashboard)', 'conformance', 'page.js'));
+    assert.ok(page.includes('Conformance could not be shown'));
+  });
+
+  it('every marker on every route is present in some source file', () => {
+    // The cheapest guard against the whole class: a marker nothing renders can
+    // never pass, and would be discovered by a failed deploy rather than here.
+    // Pages and components only — a marker must come from a page body.
+    const roots = [
+      path.join(REPO, 'app'), path.join(REPO, 'components'), path.join(REPO, 'lib'),
+    ];
+    const files = [];
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.js')) files.push(full);
+      }
+    };
+    roots.forEach(walk);
+    const haystack = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+    const missing = [];
+    for (const r of STATIC_ROUTES) {
+      for (const m of r.markers) {
+        // Markers may be HTML-escaped forms of a source string; those carry an
+        // `&#x` and are checked by their sibling marker instead.
+        if (m.includes('&#x')) continue;
+        if (!haystack.includes(m)) missing.push(`${r.path} -> ${JSON.stringify(m)}`);
+      }
+    }
+    assert.deepEqual(missing, [], 'no source file renders these, so they can never pass');
+  });
+});
+
+describe('⛔ alsoMarkers is an AND, which is the point of it', () => {
+  // ⛔ WHY THIS EXISTS AT ALL. `markers` is an OR, so a page that grows a SECOND
+  // independent section cannot be covered by adding to it — the original marker
+  // satisfies the OR while the new section renders nothing. That is the blank
+  // body this whole sweep was written for, one section down. The live case is
+  // the A7 change-outcome board on /devices/[id]/changes, which sits below the
+  // change list and is a server component handing a whole computed object to a
+  // client one: the exact shape that shipped a blank /reports in v2.120.0.
+
+  const twoSection = {
+    path: '/devices/x/changes',
+    markers: ['Configuration Changes'],
+    alsoMarkers: ['compared with how much that firewall normally varies'],
+  };
+
+  it('the FIRST section alone is NOT a pass', () => {
+    const v = pageVerdict(twoSection, { status: 200, body: SHELL + 'Configuration Changes' });
+    assert.equal(v.ok, false, 'this is the case an OR marker would have passed');
+    assert.match(v.reason, /REQUIRED second section did not/);
+    assert.match(v.reason, /one section of this page is blank/);
+  });
+
+  it('it names the section that did not render, not just that something failed', () => {
+    const v = pageVerdict(twoSection, { status: 200, body: SHELL + 'Configuration Changes' });
+    // An operator reading the deploy log has to know WHICH half is dead.
+    assert.match(v.reason, /normally varies/);
+  });
+
+  it('both sections present is a pass', () => {
+    const body = SHELL + 'Configuration Changes'
+      + ' ... compared with how much that firewall normally varies from one day to the next.';
+    const v = pageVerdict(twoSection, { status: 200, body });
+    assert.equal(v.ok, true);
+    assert.equal(v.marker, 'Configuration Changes');
+  });
+
+  it('⛔ the SECOND section alone is still a failure', () => {
+    // Order independence: alsoMarkers must not be able to stand in for markers.
+    const v = pageVerdict(twoSection, {
+      status: 200,
+      body: SHELL + 'compared with how much that firewall normally varies',
+    });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /none of its content markers rendered/);
+  });
+
+  it('a route with no alsoMarkers is completely unaffected', () => {
+    // The field is optional, and every existing route omits it. A `for` over
+    // undefined would throw and fail all 28 pages at once.
+    for (const also of [undefined, null, []]) {
+      const r = { path: '/reports', markers: route.markers, alsoMarkers: also };
+      const v = pageVerdict(r, { status: 200, body: SHELL + route.markers[0] });
+      assert.equal(v.ok, true, `alsoMarkers=${JSON.stringify(also)} must not change the verdict`);
+    }
+  });
+
+  it('every alsoMarkers string in the real table is also checked for usability', () => {
+    // ⛔ THE SAME RULE AS `markers`: a nav label here would be satisfied by the
+    // shared layout. assertUsableMarkers owns that rule; this asserts the new
+    // field is not exempt from it.
+    const all = STATIC_ROUTES.flatMap((r) => r.alsoMarkers || []);
+    for (const m of all) {
+      assert.ok(!NAV_LABELS.includes(m), `${m} is a nav label and would pass on a blank page`);
+      assert.ok(m.length > 12, `${m} is too short to be distinctive`);
+    }
+  });
+});

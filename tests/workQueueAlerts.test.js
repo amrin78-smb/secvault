@@ -191,3 +191,66 @@ describe('the dispatcher shape', () => {
     );
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ THE COVERAGE SOURCE COULD PERMANENTLY SILENCE THIS ALERT TYPE
+// ────────────────────────────────────────────────────────────────────────────
+//
+// It emits one item per non-fully-covered firewall, and the register's premise is
+// that essentially every firewall has a gap (live: 16 of 16). Past PER_SOURCE_CAP
+// (50) it sets `truncatedFrom`, and the guard above then throws on EVERY poll —
+// so a fleet above ~50 firewalls would have silenced ALL `work_act_now` alerting,
+// structurally, with no recovery, because of a source whose every item is
+// `unmeasured` and therefore could never have produced an alert. It also paid the
+// register's 2+N queries and a 720-hour aggregate every 15 minutes for items
+// guaranteed to be discarded.
+
+describe('⛔ a source that can never reach act_now is omitted, not merely discarded', () => {
+  const { NEVER_ACT_NOW_SOURCES } = require('../lib/engines/workQueueData');
+
+  it('the fetcher omits exactly the never-act_now sources', async () => {
+    let seen = null;
+    const stub = async (pool, opts) => {
+      seen = opts;
+      return { items: [item({ evidence: 'measured' })], sources: [{ key: 'cve', ok: true, count: 1 }] };
+    };
+    await withGather(stub, async (mod) => {
+      await mod.OPEN_ITEM_FETCHERS.work_act_now({});
+    });
+    assert.ok(seen, 'the fetcher passed no opts at all');
+    assert.deepEqual(seen.omitSources, NEVER_ACT_NOW_SOURCES);
+  });
+
+  it('⛔ it omits NOTHING that could produce an act_now item', async () => {
+    // The reconcile step clears any natural_key absent from this list, so
+    // omitting a source that CAN reach act_now would clear real, still-open work
+    // as resolved — the exact failure the two guards above refuse to allow.
+    let seen = null;
+    const stub = async (pool, opts) => {
+      seen = opts;
+      return { items: [], sources: [] };
+    };
+    await withGather(stub, async (mod) => {
+      await mod.OPEN_ITEM_FETCHERS.work_act_now({});
+    });
+    for (const key of seen.omitSources) {
+      assert.ok(NEVER_ACT_NOW_SOURCES.includes(key),
+        `${key} is omitted but is not declared incapable of act_now`);
+    }
+  });
+
+  it('an OMITTED source is not read as a failure or as a truncation', async () => {
+    // It reports {ok: true, omitted: true, count: 0} — stated, never silent —
+    // and neither guard may fire on it.
+    await withGather(
+      ok([item({ evidence: 'measured' })], [
+        { key: 'cve', ok: true, count: 1 },
+        { key: 'coverage', ok: true, omitted: true, count: 0 },
+      ]),
+      async (mod) => {
+        const out = await mod.OPEN_ITEM_FETCHERS.work_act_now({});
+        assert.equal(out.length, 1, 'an omitted source must not throw the whole fetch away');
+      }
+    );
+  });
+});

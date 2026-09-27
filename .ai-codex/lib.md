@@ -90,6 +90,23 @@ COVER CHIP, which shows a hueless dash rather than `0` (caught by rendering the 
 where the chip said 0 under a note explaining it could not look). `headlineSentence` leads with the
 coverage failure and the words "nothing here may be read as a cleanup list".
 
+⛔ **A SLUG IS NOT AN EXPLANATION (v2.190.0+).** `UNMEASURED_REASON` gained `insufficient-history`
+and `no-rule-identity` (joining `no-coverage` / `window-too-short` / `rule-logging-disabled`), and the
+PDF's `unmeasuredReasonText[k] || k` fallback is REPLACED by the exported `unmeasuredReasonPhrase()`.
+At `days: 30` the dominant line read literally **`970 — insufficient-history`**, which an operator
+reads as a fault on their firewalls; it now says this is a limit of SecVault's OWN log history. ⛔ An
+UNMAPPED code renders *"SecVault holds no explanation for this state (<code>), so why these rules
+could not be measured is itself unknown"* — the code appears only parenthesised inside a sentence,
+never alone. A test asserts the `|| k` form is GONE from the renderer, not merely unreachable.
+
+⛔ **THREE MORE CONDITIONS ON A CLEANUP CANDIDATE, because its next step is deleting a rule.** Beyond
+`windowHits === 0 && evidence === 'measured-zero'` the filter now requires `deletionEvidence === true`
+(so an A3 NAME-grade zero can never authorise a removal), `!(lifetimeHits > 0)` (the device's own
+counter disagreeing with the window outranks the window) and a non-null `worstFinding` (a RISK
+finding, not merely any finding). Live: **410 -> 106 candidates, and 299 rules carrying real lifetime
+hits left the list entirely** — every one of them a rule this report was offering for deletion while
+the firewall itself said it had matched traffic.
+
 ⛔ **`RISK_FINDINGS` EXCLUDES THREE TYPES DELIBERATELY**, each wrong in its own way on a table of
 the busiest rules: `unused` is the opposite claim, `correlation` is a merge suggestion about ruleset
 complexity, `reorder_candidate` is a performance hint whose whole argument IS being busy. ⛔ And
@@ -280,6 +297,29 @@ UNCHANGED — an early draft used a regex written in the report file, which woul
 deny list and wrong on this fleet today (`close`/`client-rst`/`server-rst` are teardown verbs of
 permitted traffic; `reset-both` looks like that family and is a block). Its word is `'blocked'`,
 not `'denied'`.
+
+⛔ **`pdfSafe()` IS A `GLYPH_MAP` NOW, AND IT WAS MEASURED, NOT GUESSED.** Alongside the existing
+dash/bullet/quote/NBSP folds it maps U+26A0 and U+26A1 (+ a trailing U+FE0F) to `!`, U+2713/U+2714 to
+`y`, U+2717/U+2718 to `x`, U+2192/U+21D2 to `->`, and strips a bare U+FE0F. U+26A0 was reaching the
+page as **`&`** — a warning marker rendered as an ampersand in an audit PDF. ⛔ **U+2026 IS
+DELIBERATELY NOT MAPPED**: probed the same way, the bundled pdfkit's WinAnsi encodes the ellipsis as
+the single byte `0x85` at width 10, so it draws correctly, and mapping it would have changed the bytes
+of TWO ALREADY-SHIPPED audit reports for no defect — this chassis exists precisely so extraction does
+not change output. ⛔ The test (`tests/reportUnmeasuredText.test.js`) MEASURES unrenderability against
+the real Helvetica (`widthOfString` === 0) rather than asserting a hardcoded list, and pins U+2026 as
+the counter-case — a list would go stale against the font the way a second parser goes stale against
+the first.
+
+⛔ **A FIX VERSION AND A GUESS AT ONE MAY NOT SHARE A TINT.** New `FIX_PROVENANCE`
+(`published`/`derived`/`none`/`unknown`), the pure `fixProvenance(fixedIn, fixedInVersions,
+affectedRanges)` and `fixVersionCell(...)`. **Only a VENDOR-PUBLISHED version gets the green tint.** A
+bound DERIVED from the affected range still PRINTS the version — withholding it would leave the
+fleet's urgent CVEs with no upgrade target at all, which is worse than a hedged one — but hueless and
+labelled *"(from the affected range, not published as a fix)"*. ⛔ **A caller that did not select the
+advisory columns gets `unknown`, never `published`**: with both `fixedInVersions` and `affectedRanges`
+absent the function cannot tell a published fix from a derived one, and defaulting to `published`
+would paint a green, authoritative-looking version on the strength of a query that never asked.
+`none` prints "None published" in `UNMEASURED`.
 
 ⛔ `drawCover` NOW SETS `doc.y` UNCONDITIONALLY. Every caller passing `footerStamp` already did;
 the ones that did not got back whatever y pdfkit was at, which on a cover drawing summary CHIPS was
@@ -714,239 +754,34 @@ fabricate history.
 `storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
 `runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
 
+Also exports `namespaceForType` / `unevaluatableObjects` / `KNOWN_OBJECT_TYPES`
+(`address`/`address_group`/`service`/`service_group`; `namespaceForType` returns `address`, `service`
+or **`other`**), plus `NAT_ADDRESS_FIELDS` / `NAT_SERVICE_FIELDS`.
+
+⛔ **AN OBJECT TYPE THIS ENGINE CANNOT EVALUATE IS EXCLUDED FROM THE USAGE TEST, NOT REPORTED
+`unused`** — `if (ns === 'other') continue;` sits BEFORE the usage lookup, not after it. Previously
+an unrecognised `object_type` had no namespace to search, matched nothing, and was therefore reported
+unused UNCONDITIONALLY: a vendor type SecVault does not parse presented as a deletable object, on the
+strength of a lookup that never ran. The reverse of the failed-read rule — our own gap asserted as a
+fact about the customer's firewall. ⛔ **Live: 0 of 10,092 `network_objects` rows are `other` today
+and all 4,286 stored `unused` findings are unchanged — a LATENT guard**, which is why it is pinned by
+a test and not by a screenshot. `unevaluatableObjects()` exists so a caller can COUNT what was
+excluded rather than have it vanish.
+
+⛔ **THE ANALYSIS RUNS AFTER THE TOPOLOGY BLOCK IN `collectAndStore`, AND IS GATED ON NAT.** NAT rows
+are an object REFERENCE surface, so running the usage test before they are stored reports objects
+referenced only by a NAT rule as unused. The gate is
+`natCapable = typeof adapter.getNatRules === 'function'` and then
+`result.natRulesCollected === true` — so a NAT-capable adapter whose NAT pull FAILED skips the
+analysis entirely (with its own message, distinct from the objects-failed one) rather than running it
+against a half-populated reference set. Not NAT-capable ⇒ nothing to wait for, analysis runs.
+
 ## lib/syslog/eventStore.js
 
 `buildPartitionSql(date)` / `partitionNameFor(date)` — daily partition DDL, **UTC** so a boundary is the same instant everywhere and does not move under DST. Range is `[day, day+1)`; an off-by-one here leaves a whole day of events with nowhere to land.
 `buildInsertSql(rowCount)` / `flattenRow(event)` / `chunk(arr, size)` — multi-row parameterized INSERT. ⛔ 35 columns x `MAX_ROWS_PER_INSERT` (500) = 17,500 binds, kept well under PostgreSQL's 65535-parameter cap; a test asserts this, because exceeding it fails under load rather than in review. `COLUMNS.length` and `flattenRow()`'s array length must stay equal — they are positional, and a mismatch shifts every value one column left.
 `ensurePartitions(pool, now)` — creates yesterday/today/tomorrow. Yesterday matters: an event can arrive just after a UTC midnight rollover and without the partition the INSERT fails outright.
-`dropOldPartitions(pool, retentionDays, now)` — ⛔ DROPs partitions, never DELETEs rows, and only ever names matching `^syslog_events_\d{8}# lib/ — Library Export Index
-
-Every export from `lib/`, grouped by file. `[SENSITIVE]` = touches credentials, encryption,
-device auth, or config/secret storage — treat any change to these with extra care.
-
-Part 1: `lib/*.js` (root) + `lib/engines/**`. Part 2: `lib/adapters/**` + `lib/feeds/**`.
-
----
-
-## lib/db.js
-
-`pool` -> `pg.Pool` — singleton PostgreSQL connection pool (`connectionString: DATABASE_URL`); has an `error` listener registered to prevent unhandled-rejection crashes on idle-client errors.
-
-## lib/activityLog.js
-
-`logActivity(pool, {actor, action, deviceId, detail})` -> `Promise<void>` — inserts one `activity_log` audit row; NEVER throws (catches and console.warns on failure).
-
-## lib/apiUtils.js
-
-`isValidUuid(value)` -> `boolean` — regex-checks a string looks like a UUID (8-4-4-4-12 hex), used to guard path params before hitting a UUID-typed SQL column.
-
-## lib/theme.js
-(ES module, `'use client'` — exports via `export`, not `module.exports`; only top-level `lib/*.js` file that isn't CommonJS)
-
-`THEME_KEY` -> `string` — `'secvault-theme'`, the localStorage key.
-`getTheme()` -> `'light'|'dark'` — reads current `data-theme` attribute off `<html>`.
-`applyTheme(theme)` -> `void` — sets/removes `data-theme="dark"` on `<html>`, persists to localStorage, dispatches `secvault:theme` CustomEvent.
-`toggleTheme()` -> `'light'|'dark'` — flips current theme via `applyTheme`, returns the new value.
-`THEME_INIT_SCRIPT` -> `string` — inline `<script>` body (no-flash theme pre-paint init), injected into `app/layout.js`'s `<head>`.
-
-## lib/credStore.js
-[SENSITIVE] — entire file (AES-256-GCM credential encryption)
-
-`encrypt(plaintext)` -> `{encrypted: string, iv: string}` — AES-256-GCM encrypt; `encrypted` = `hex(ciphertext):hex(authTag)`, `iv` = hex. Key from `CREDENTIAL_KEY` env (32-byte hex). [SENSITIVE]
-`decrypt(encrypted, iv)` -> `string` (plaintext) — inverse of `encrypt`. [SENSITIVE]
-`getCredential(deviceId, credentialType, pool)` -> `Promise<string|null>` — fetches+decrypts latest `device_credentials` row for `(deviceId, credentialType)`. Requires `pool`. [SENSITIVE]
-`setCredential(deviceId, credentialType, plaintext, pool)` -> `Promise<void>` — encrypts + `INSERT ... ON CONFLICT (device_id, credential_type) DO UPDATE` (atomic upsert, relies on `UNIQUE(device_id, credential_type)`). Requires `pool`. [SENSITIVE]
-
-## lib/feedStatus.js
-
-`getLastSyncs(pool)` -> `Promise<object[]>` — up to 10 most recent `feed_sync_log` rows (`feed_name, status, started_at, finished_at`).
-`getSyncPillStatus(pool, {now})` -> `Promise<{state, ok, label, title, feeds[], lastSyncs[]}>` — condensed header-pill status across `KNOWN_FEEDS` (cve_hub, nvd, paloalto_psirt, fortinet_psirt, kev, cveorg, epss). `state` is `ok|degraded|error|running|skipped|none`.
-`severityOf(state)` -> `number` — rank used by the worst-state reduction. ⛔ An UNLISTED state ranks **-1, worse than `error`**, never `undefined`: `undefined < n` is false, so a state that fell through the `rated` filter used to leave the accumulator on `ok`. The filter and the severity table were coupled by nothing but happening to agree.
-⛔ **`skipped` is its own pill state, and all-skipped is NOT "no sync yet" (v2.148.0).** The never-run branch accepted skipped feeds, then told the operator no feed had EVER completed a sync and that every CVE count was empty for want of data — both false, since a skip is written BY a cycle that ran and made a decision. `PILL_TONE.skipped` is hueless (not amber, not red, not green).
-⛔ **The `ok` title names the skipped feeds too.** It listed only `rated`, so on this deployment — where the direct NVD sync is skipped every cycle because the central feed delivered — the evidence behind a green pill had NVD missing from it with no explanation.
-⛔ **A skip's recorded reason is not an error count.** `logSkipped()` writes the reason into `errors` (no detail column exists), so `jsonb_array_length` reported `errorCount: 1` for a feed working as designed; `getLatestPerFeed` now zeroes it for `status='skipped'`. Tests: `tests/feedStatusPill.test.js`.
-
-## lib/density.js
-
-Client module. Table density, stamped as `data-density` on `<html>`. Structural mirror of lib/corners.js and lib/theme.js — same storage/attribute/event/no-flash-script shape, so there is one pattern for all three.
-
-`DENSITIES` -> `string[]` — `['comfortable','compact','dense']`; the default is first, and a value not in this list is ignored rather than guessed at.
-`DENSITY_LABELS` -> `object` — display names.
-`getDensity()` / `applyDensity(d)` / `DENSITY_INIT_SCRIPT` — read, set (+persist +`secvault:density` event), and the pre-paint inline script.
-⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
-⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
-
-## lib/savedViews.js
-
-Named filter/column/sort states per user per table (`saved_views`). All functions take `pool`.
-
-`listSavedViews(pool, userId, scope)` -> own views plus anyone’s shared ones; own sort first.
-`saveView(pool, userId, {scope,name,query,shared,isDefault})` -> upsert on (user_id, scope, name). ⛔ Clears the previous default INSIDE the transaction BEFORE inserting — `uq_saved_views_one_default` is a real partial unique index, so the other order fails the insert instead of moving the default (same rule as `device_configs.is_baseline`).
-`deleteSavedView(pool, userId, id)` -> ⛔ owner scoping lives in the SQL WHERE clause, not the route, so no future caller can forget it.
-`getDefaultView(pool, userId, scope)`.
-`normalizeScope/Name/Query` — ⛔ the stored query string is REPLAYED into the address bar, so it is untrusted input: leading `?` stripped, length capped, anything with whitespace, quotes, a scheme or a path separator rejected.
-
-## lib/rbac.js
-[SENSITIVE] — entire file (auth/authorization guard)
-
-`ADMIN_ROLE` -> `string` — `'admin'`. [SENSITIVE]
-`VIEWER_ROLE` -> `string` — `'viewer'`. [SENSITIVE]
-`isAdmin(session)` -> `boolean` — true iff `session.user.role === 'admin'`. [SENSITIVE]
-`forbiddenResponse()` -> `Response` — standard 403 JSON `{error: 'Forbidden — admin role required'}`. [SENSITIVE]
-
-## lib/updateCheck.js
-
-`findGitRoot(start)` -> `string` — walks up from `start` looking for `.git` (max 6 levels).
-`localCommitHash(repoRoot)` -> `string|null` — `git rev-parse HEAD` short SHA (7 chars) for the local checkout; null on failure.
-`remoteCommitHash(repoRoot)` -> `Promise<string|null>` — `git ls-remote origin main` short SHA via git transport (not GitHub REST API); uses SSH deploy-key override. [SENSITIVE] (touches deploy SSH key path resolution)
-`remoteVersion(repoRoot)` -> `Promise<string>` — reads `package.json` version from `FETCH_HEAD` after `git fetch`; falls back to local `pkg.version` on failure.
-`pkg` -> `object` — the loaded root `package.json`.
-(internal, not exported: SSH command string is built with forward slashes only — git's bundled MSYS2 shell mangles backslashes in `core.sshCommand`. Resolves the deploy key path: `C:\ProgramData\SecVault\ssh\secvault_deploy` then repo-relative fallback.) [SENSITIVE]
-
-## lib/auditChecksSeed.js
-
-`CHECKS` -> `object[]` — curated array of compliance check definitions (`checkId, name, description, standards, vendor, severity, predicateConfig, remediationGuidance`); predicate types include `config_key_exists`/`config_value_equals`/`config_value_matches`/`feature_enabled`/`admin_access_from_zone`/`not_evaluable_from_config`/`rule_scan`/`ruleset_property`. ⛔ `not_evaluable_from_config` resolves `na` (excluded from the score denominator), NOT `warning`, since 2026-08-25 — `configAuditor.evaluateCheck()` short-circuits it before the `pass_when` guard. Current count (45) matches CLAUDE.md's Compliance Engine section — recount via `grep -c "checkId:"` if this file changes. Full mechanics: `.ai-codex/compliance-pipeline.md`.
-`seedAuditChecks(pool)` -> `Promise<{count: number}>` — idempotent `INSERT ... ON CONFLICT (check_id) DO UPDATE` seed/refresh of `audit_checks` from `CHECKS`.
-
-## lib/credentialProfiles.js
-[SENSITIVE] — entire file (reusable credential bundles: device auth, SSH, API keys, SNMP creds)
-
-`deriveDisplayUsername(plaintext)` -> `string|null` — best-effort extracts a non-secret `username` field from a JSON-shaped credential plaintext, for display only; never throws. [SENSITIVE]
-`buildProfilePlaintext(credentialType, {authMode, secret, username, password, enablePassword, snmpVersion, authProtocol, authPassword, privProtocol, privPassword})` -> `string|null` — builds the stored plaintext JSON/raw-string shape per `credentialType` (`smc_api|rest_api|ssh|snmp`); returns null if fields insufficient. [SENSITIVE]
-`listProfiles(pool)` -> `Promise<object[]>` — metadata-only rows (`id, name, credential_type, username, created_at, updated_at`) — safe for HTTP response.
-`getProfileMeta(id, pool)` -> `Promise<object|null>` — metadata-only single profile row.
-`getProfilePlaintext(id, pool)` -> `Promise<{credentialType: string, plaintext: string}|null>` — decrypts profile secret; SERVER-SIDE USE ONLY, must never leave the process. [SENSITIVE]
-`createProfile({name, credentialType, plaintext}, pool)` -> `Promise<object>` — encrypts + inserts a new profile, returns metadata row. [SENSITIVE]
-`updateProfile(id, {name, plaintext}, pool)` -> `Promise<object|null>` — rename and/or rotate-secret (either omittable); `credential_type` immutable. [SENSITIVE]
-`deleteProfile(id, pool)` -> `Promise<void>` — deletes a credential profile row.
-
-## lib/notificationChannels.js
-[SENSITIVE] — entire file (outbound notification channels: webhook URLs, SMTP passwords). Added 2026-08-01, mirrors lib/credentialProfiles.js's shape exactly.
-
-`NOTIFICATION_CHANNEL_TYPES` -> `string[]` — `['slack_webhook','teams_webhook','email','generic_webhook']`.
-`ALERT_TYPES` -> `string[]` — `['patch_now_cve','compliance_critical','config_diff','compliance_report']` (4th value added 2026-08-02, email-only — see `components/settings/NotificationsPanel.js`'s `EMAIL_ONLY_ALERT_TYPES` gate and `lib/engines/complianceReport.js`).
-`buildChannelPlaintext(channelType, {webhookUrl, smtpPassword})` -> `string|null` — the three webhook types store the raw URL as the whole secret; `email` stores the SMTP password only (host/port/from/to live in the non-secret `config` JSONB). [SENSITIVE]
-`listChannels(pool)` -> `Promise<object[]>` — metadata-only rows, safe for HTTP response.
-`getChannelMeta(id, pool)` -> `Promise<object|null>` — metadata-only single channel row.
-`getChannelPlaintext(id, pool)` -> `Promise<{id, name, channelType, alertTypes, config, plaintext}|null>` — decrypts one channel; SERVER-SIDE USE ONLY (the test-send route). [SENSITIVE]
-`listEnabledChannelsWithSecrets(pool)` -> `Promise<object[]>` — decrypts every ENABLED channel in one query; used by lib/engines/notificationDispatch.js's poll job. SERVER-SIDE USE ONLY. [SENSITIVE]
-`createChannel({name, channelType, alertTypes, config, plaintext}, pool)` -> `Promise<object>` — encrypts + inserts, returns metadata row. [SENSITIVE]
-`updateChannel(id, {name, enabled, alertTypes, config, plaintext}, pool)` -> `Promise<object|null>` — partial update (each field omittable); `channel_type` immutable. [SENSITIVE]
-`deleteChannel(id, pool)` -> `Promise<void>`.
-`recordChannelSuccess(id, pool)` / `recordChannelError(id, message, pool)` -> `Promise<void>` — updates `last_success_at`/`last_error`/`last_error_at`, called by lib/notify.js's callers after every dispatch attempt.
-
-## lib/notify.js
-Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an already-decrypted channel object.
-
-`dispatchNotification(channel, message)` -> `Promise<void>` — single entry point, routes to the per-`channel_type` sender ({alertType, title, summary, url, deviceName, attachments?} message shape); throws on failure. `NOTIFY_TIMEOUT_MS = 8000` (shorter than every other outbound timeout in this codebase — fire-and-forget inside a poll loop over N channels x M items). Teams payload (Adaptive Card via a `message` envelope, the current Power Automate Workflows webhook shape) logs its raw response once on first live send (`loggedFirstTeamsResponse`) — live-verification risk, not a settled spec, same `loggedFirst*` convention as the vendor adapters. `email` uses `nodemailer` (new dependency, 2026-08-01 — none existed in this codebase before); `message.attachments` (added 2026-08-02, nodemailer-native `[{filename, content: Buffer, contentType}]`) passes straight through to `sendMail()` — used by `lib/engines/complianceReport.js` for the PDF report, ignored by every webhook sender.
-
-## lib/snmpClient.js
-[SENSITIVE] — entire file (SNMP session/credential handling)
-
-`createSession(credential, host, port, timeoutMs)` -> `net-snmp.Session` — builds a v1/v2c or v3 SNMP session from a parsed credential (see `lib/adapters/snmpCredential.js`). Throws if no credential/host. [SENSITIVE]
-`getMetrics(session, oidMap, timeoutMs, host)` -> `Promise<Object<string,string|null>>` — GETs a flat map of named scalar OIDs; per-OID error resolves to `null`, not a thrown error; wrapped in an outer hard-timeout race.
-`walkSubtree(session, baseOid, timeoutMs, host)` -> `Promise<Array<{oid:string,value:*}>>` — SNMP WALK a subtree (table-indexed metrics); per-row errors skipped.
-`closeSession(session)` -> `void` — best-effort session close.
-`DEFAULT_TIMEOUT_MS` -> `number` — `8000`.
-
-## lib/migrate.js
-
-`runSchema(pool)` -> `Promise<void>` — executes `lib/schema.sql` verbatim against the DB.
-`seedUsers(pool)` -> `Promise<{migrated: boolean, seeded: boolean, username?: string}>` — guarded on `users` table being empty: migrates legacy `settings.admin_username/admin_password_hash` into `users`, or seeds default `admin/changeme`. [SENSITIVE] (touches password hash migration)
-`main()` -> `Promise<void>` (not exported, run via `require.main === module`) — orchestrates: runSchema → seedUsers → seedAuditChecks (NOT best-effort, throws loud) → backfillVulnerabilityCategories (best-effort) → cleanupVolatileConfigDiffs (best-effort) → regenerateOversizedChangeSummaries (best-effort) → migrateZoneClassificationsToPerDevice (best-effort) → backfillPaloAltoVersionRanges (best-effort) → backfillNvdNativeVersionRanges (best-effort, added 2026-07-31, the other five vendors).
-(internal, not exported: `loadEnvLocal()`; `migrateZoneClassificationsToPerDevice(pool)` -> `Promise<{discardedGlobalRows: number}>` — migrates `zone_classifications` from global to per-device schema shape, adds `device_id` column/constraint/index — the index creation lives HERE not in schema.sql, see schema.md's "Known schema debt".)
-
----
-
-## lib/engines/prioritization.js
-
-`computePriority(assessment, device, cvssScore)` -> `'patch_now'|'scheduled'|'monitor'` — pure priority-band decision tree (KEV → log_hit → CVSS≥9 → CVSS≥7 → unknown-applicability → default), then asset-criticality bump-one-band modifier. Order is fixed per CLAUDE.md, do not reorder.
-`updatePrioritiesForDevice(deviceId, pool)` -> `Promise<void>` — recomputes+persists `priority_band` for every `device_cve_assessments` row of a device.
-
-## lib/engines/versionMatcher.js
-
-`matchDeviceToAdvisories(device, deviceVersionTuple, advisories, recommendedReleases, applicability=null)` -> `object[]` (pure) — matches one device against pre-filtered advisories, computing `version_affected`, `config_applies` (tri-state via applicability engine), `kev_listed`, `fixed_in`, `is_fixed_recommended`. Only emits rows where `version_affected===true`.
-`runMatchForAllDevices(pool)` -> `Promise<{assessed: number, matched_cves: number, errors: object[]}>` — full engine run over all active devices; per-device `pg_advisory_xact_lock` guards concurrent DELETE+UPSERT+prioritization against 3 independent call sites. **This is where `device_cve_assessments` gets cleared/rewritten** — see cve-pipeline.md stage on assessment clearing.
-
-## lib/engines/adminAccountSummary.js
-
-`summarizeAdminAccounts(vendor, configParsed)` -> `{supported: boolean, accounts: {username, privilege, twoFactorEnabled, sourceRestricted}[], totalCount: number, superuserCount: number, error?: boolean}` — vendor-dispatched (fortinet/paloalto/cisco_asa) interpretation of already-collected config for "who can log in"; never throws, degrades to `error:true` on parse failure. [SENSITIVE] (reads admin account identity/privilege from device config, though not passwords)
-
-## lib/engines/applicability.js
-
-`evaluatePredicate(predicateType, predicateConfig, configParsed)` -> `'yes'|'no'|'unknown'` (pure, never throws) — evaluates one CVE-applicability predicate (`config_key_exists|config_value_equals|config_value_matches|feature_enabled|port_exposed|admin_access_from_zone`) against parsed config.
-`computeConfigApplies(conditions, configParsed)` -> `'yes'|'no'|'unknown'` — AND-combines a list of predicate conditions; empty/no-usable-config always → `'unknown'`, never `'no'`.
-`evaluateConditionsDetailed(conditions, configParsed)` -> `{config_applies, per_condition: {id, condition_description, predicate_type, result}[]}` — per-condition breakdown for the admin "test predicate" UI.
-`getLatestConfigParsed(deviceId, pool)` -> `Promise<object|null>` — latest `device_configs.config_parsed`, normalized via `normalizeConfigParsedRoot` (fixes Palo Alto SSH `.tree` wrapper / XML `devices.entry.deviceconfig` nesting).
-`loadConditionsByAdvisory(pool, vendor)` -> `Promise<Map<string, object[]>>` — all `advisory_conditions` for a vendor, grouped by `advisory_id`.
-`getConfigAppliesForDevice(deviceId, advisoryId, pool)` -> `Promise<'yes'|'no'|'unknown'>` — single device×advisory applicability lookup.
-`hasUsableConfig(configParsed)` -> `boolean` — true only for a non-empty interrogatable object (guards `{}`/null/array).
-`normalizeConfigParsedRoot(configParsed)` -> `object` — hoists Palo Alto SSH `.tree` / XML `deviceconfig` to top level; no-op for other vendors.
-
-## lib/engines/cidrUtils.js
-
-`parseCidrOrIp(str)` -> `{network: number, prefixLen: number}|null` — parses IPv4 literal/CIDR into masked network + prefix; `null` for anything non-IPv4-shaped (IPv6, object names, "any").
-`cidrContains(outerStr, innerStr)` -> `boolean|null` — true if outer CIDR range contains inner; `null` if either isn't parseable (never coerced to `false`).
-`cidrEquals(aStr, bStr)` -> `boolean|null` — true if both denote the same masked range; `null` if either isn't parseable.
-`parseIpRange(str)` -> `{start,end}|null` (added 2026-08-02, for `objectResolver.js`) — parses a literal `"start-end"` IPv4 range (both sides bare `/32`s); `null` for anything else.
-`rangeContains(outer, inner)` / `rangeOverlaps(a, b)` -> `boolean` — numeric `{start,end}` containment/overlap, uniform across CIDR and range shapes.
-`cidrToRange(cidr)` -> `{start,end}` — widens a parsed CIDR to a `{start,end}` range. ⛔ `/32` needs a special case (`0xffffffff >>> 32` is a no-op in JS, same mod-32 footgun `maskForPrefixLen()` already guards for `/0` — get this backwards and every single-host CIDR silently widens to the whole address space).
-
-## lib/engines/configDiff.js
-
-`diffConfigs(oldParsed, newParsed, vendor?)` -> `{added, removed, modified}` (pure) — deep recursive diff of two parsed config trees; applies vendor-specific volatile-path filtering + defense-in-depth secret redaction; caps at 500 entries. Arrays are aligned by VALUE not position: all-primitive arrays via LCS (`diffPrimitiveArrayLCS`), all-object arrays sharing a unique `@_name`/`name` key via identity alignment (`diffObjectArrayByIdentity`, added 2026-07-31 — kills the Palo Alto XML/API rulebase shift cascade); everything else falls back to positional. Forward-only, no backfill for existing rows.
-`summarizeDiff(diff)` -> `string` — human one-liner (`"N added, M removed — e.g. path1, path2"`), with sanitized/truncated example paths.
-`isEmptyDiff(diff)` -> `boolean` — true if added/removed/modified are all empty.
-`detectAndStoreDiff(deviceId, pool, vendor?)` -> `Promise<{changed: boolean, diffId: string|null, summary: string|null}>` — diffs the 2 latest `device_configs` snapshots and inserts a `config_diffs` row if changed.
-`createBackup(deviceId, label, pool)` -> `Promise<{backupId: string|null}>` — copies latest `config_raw` into `config_backups` (`label` ∈ auto/manual/pre-change).
-`filterDiffForCurrentRules(diff, vendor)` -> `object` — re-applies current volatile-path filter + secret redaction to an already-computed diff object; also DECOMPOSES a whole registered-volatile-subtree-root entry (`content-preview`/`system_info` captured as one object) back through `diffValue` so the current per-leaf allowlist applies (drops content-preview entirely, keeps only system_info's allowlisted fields) — added 2026-07-31 to clean historical whole-block noise rows the leaf-only filter missed. [SENSITIVE] (secret-redaction pass over stored config diffs)
-`cleanupVolatileConfigDiffs(pool)` -> `Promise<{checked, deleted, updated}>` — retroactive migration: deletes/updates existing `config_diffs` rows per current noise/secret rules. [SENSITIVE]
-`classifyDiff(diff)` -> `{ruleChanges: object[], sections: object[]}` — presentation-layer grouping of a diff into a rule-change table + labeled sections; pure, read-time only. Section entries also carry `friendlyDescription` and (added 2026-07-31) `ruleIndex`/`ruleField` — the positional index + in-rule field of a Palo Alto XML/API `...rulebase.<sec|nat|pbf>.rules.entry[N].<field>` path (both `null` for any other shape), so `DiffViewer.js` can regroup the flat per-field rows of the (renamed) "Security Rules" section into one table per rule. `extractIndexedRuleEntry(path)` is the pure `{index, field}` extractor. The label `Security Rules` (was `Rules (detail unavailable for this device)` pre-2.29.0) is a stable classification key — `components/devices/OverviewConfigChangesCard.js`'s `HIGH_IMPACT_LABELS` keys off it, change both together.
-`regenerateOversizedChangeSummaries(pool)` -> `Promise<{checked, updated}>` — backfill: re-derives `change_summary` for any oversized (>500 char) stored row.
-`collapsePrimitiveArrayShifts(diff)` -> `diff` (pure) — collapses a primitive-array positional-shift cascade (a set-like membership list where the OLD positional diff reported a 1-element insert/remove as N "modified" + a mis-named tail add/remove) back to the true added/removed via LCS reconstruction of the changed region. Gated: ≥3 primitive modified entries at one array path + contiguous indices. Uses `lcsPrimitiveDiff`.
-`collapseHistoricalArrayShiftCascades(pool)` -> `Promise<{checked, updated}>` — migration applying the above to every stored `config_diffs` row + re-deriving `change_summary`; idempotent, best-effort. Wired into migrate.js. Fixes the historical "246 modified" membership-list rows (new diffs never produce them — their array branch already uses LCS).
-
-## lib/engines/vpnSessions.js
-
-`storeVpnSessions(deviceId, sessions, pool)` -> `Promise<{count}>` — DELETE+reinsert (one transaction) the LIVE per-user active-session set into `vpn_active_sessions`. Engine-worker calls it only after a SUCCESSFUL poll (a failed pull never wipes; an empty array clears — nobody connected). Session objects: `{username, tunnel_type, source_ip, assigned_ip, login_time, duration_seconds, bytes_in, bytes_out, client, gateway, raw}` (any field nullable). Added 2026-07-31.
-`getVpnSessions(deviceId, pool)` -> `Promise<object[]>` — current active-session rows for the per-device VPN page.
-
-## lib/engines/vpnTunnels.js
-
-`storeVpnTunnels(deviceId, tunnels, pool)` / `getVpnTunnels(deviceId, pool)` — same live-snapshot DELETE+reinsert + read pattern as vpnSessions.js, for `vpn_ipsec_tunnels`. Tunnel shape: `{name, peer, status, ike_version, bytes_in, bytes_out, raw}`. Fed by the adapters' optional `getVpnTunnels()` (PAN-OS `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco `show vpn-sessiondb l2l`), stored by the engine-worker VPN poll in its own try/catch (a tunnel-pull failure never fails the session poll). Added 2026-07-31.
-
-## lib/engines/dashboardSnapshot.js
-
-`computeAndStoreDashboardSnapshot(pool, { ifAbsent })` — `ifAbsent:true` switches the upsert from
-`ON CONFLICT DO UPDATE` to `DO NOTHING` and returns `{stored}` reporting honestly whether a row was
-written. ⛔ Used by the STARTUP catch-up; the 00:10 cron still uses the default DO UPDATE.
-
-⛔ There used to be TWO startup paths that cancelled each other: an unconditional run in `main()`
-and a guarded `runDashboardSnapshotIfMissing()` in `scheduleJobs()`, which is called AFTER it. The
-guard always found the row the unconditional run had just written, so it was a permanent no-op —
-and because the write was DO UPDATE, every deploy restart REPLACED that day’s snapshot with
-mid-day numbers. A day’s trend point was whatever the last restart happened to see.
-
-⛔ The catch-up leans on the existing `UNIQUE (snapshot_date)` constraint, not on a read-then-write
-check, so two racing startups cannot both conclude the row is missing.
-
-⛔ It writes `CURRENT_DATE` as a SQL literal and never as a parameter, so the engine has no way to
-express any other date. Past gaps are permanent by design: those days’ CVE bands, compliance
-findings and rule analysis no longer exist, and writing today’s numbers under an old date would
-fabricate history.
-
-
-`computeFleetCveSeverity(pool)` -> `Promise<{critical, high, medium, low}>` — fleet-wide (active devices) CVE counts by CVSS bucket; unscored CVEs excluded from all buckets.
-`computeFleetComplianceScores(pool)` -> `Promise<{overall: number|null, byStandard: Record<string, number|null>, byStandardCounts: Record<string, {pass,fail,warning}>}>` — fleet-wide pass/(pass+fail+warning) scores per standard + overall; `null` when unmeasurable. `byStandardCounts` (added 2026-08-02, additive — `computeAndStoreDashboardSnapshot` below ignores it) is the raw counts behind each percentage, for `lib/engines/complianceReport.js`'s fleet summary section.
-`computeAndStoreDashboardSnapshot(pool)` -> `Promise<{cve, compliance}>` — computes + `UPSERT`s today's `fleet_dashboard_snapshots` row (idempotent per calendar day).
-
-## lib/engines/objectUsage.js
-
-`analyzeObjectUsage(objects, rules)` -> `{object_id, finding_type: 'unused'|'duplicate', detail, related_object_ids}[]` (pure) — namespace-partitioned (address vs service) unused/duplicate object detection with transitive group-membership closure.
-`storeObjects(deviceId, objects, pool)` -> `Promise<{count: number}>` — DELETE+reinsert `network_objects` from an adapter's `getObjects()` result.
-`runObjectUsageAnalysisForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads objects+rules, analyzes, DELETE+reinsert `object_analysis_results` in one transaction.
-
-. A partition name is an identifier and cannot be a bind parameter, so it is generated then re-validated before interpolation.
+`dropOldPartitions(pool, retentionDays, now)` — ⛔ DROPs partitions, never DELETEs rows, and only ever names matching `^syslog_events_\d{8}$`. A partition name is an identifier and cannot be a bind parameter, so it is generated then re-validated before interpolation.
 `insertEvents(pool, events)` -> `{stored, failedChunks}` — one bad chunk does not sink the flush, and the caller keeps the spool file whenever `failedChunks > 0` so nothing is silently discarded.
 `toInetOrNull` / `toPortOrNull` / `toIntOrNull` / `toTextOrNull` — ⛔ all return NULL rather than a substitute. An INET column rejects malformed input and would abort the WHOLE batch, so a firewall logging a hostname where an IP belongs must yield NULL, never `0.0.0.0`.
 
@@ -1021,6 +856,23 @@ a rule" (live: PAKFood). Getting this wrong makes a quiet ruleset permanently un
 stub pool feeding `getDeviceLogCoverage` must supply `first_bucket`, or history reads as unknown
 and nothing certifies — deliberately.
 
+⛔ **`logCoverageRatio` COULD EXCEED 1.0 — A COVERAGE FIGURE CANNOT (fixed 2026-09-27).** The window
+query bounded on `- ($2 * interval '1 hour')` from a truncated hour, which spans `windowHours + 1`
+BUCKETS, so a firewall logging continuously returned `hoursWithEvents 169 / windowHours 168` and the
+UI printed **"101% of that window"** — a number that discredits every honest coverage figure beside
+it. It now subtracts `(($2::int - 1) * interval '1 hour')`, matching `historyHours`' inclusive `+ 1`:
+**ONE convention, bucket-count against bucket-count**, and the two were out of step until they were
+moved together. ⛔ The `Math.min(1, …)` clamp is the SECOND expression of the same guard, for the one
+thing the query cannot control — a `bucket_hour` in the FUTURE, i.e. a firewall whose clock disagrees
+with this server's. Live at `days=7`: **14 of 15 firewalls went from 169/168 (1.006) to 168/168
+(1.000); 0 of 15 now exceed 1.**
+
+⛔ **`getLoggedRuleHits` WAS DELIBERATELY LEFT GENEROUS** and still spans `d * 24 + 1` buckets. The
+two halves ask opposite questions: the coverage query is a DENOMINATOR and had to be exact, while
+this one SEARCHES FOR EVIDENCE OF USE — and narrowing it by one hour could flip a rule whose only
+logged hit landed in the boundary hour from `hits` to `measured-zero`, which is what turns it into a
+deletion candidate. Erring towards finding something is the safe side here; symmetry would not be.
+
 ## lib/engines/fleetConformance.js + fleetConformanceData.js (A5, v2.190.0)
 
 *Which firewall is configured unlike its peers?* The ONLY analytic here that DISCOVERS checks
@@ -1071,14 +923,18 @@ O(n^2) block that `PAIRWISE_FINDING_TYPES` marks as SKIPPED above 1000 rules. Th
 canonical-key grouping: 272 ms over 1,782 rules including IDC FW 721. ⛔ **Needs NO hit counts**,
 so it is the one cleanup analytic conclusive on Fortinet.
 
-Live: **92 groups / 156 removable rows — 41 `safe_to_merge` (55 rows), 51 `needs_review` (101)**.
+Live (after the `raw_rule` fix below): **68 candidate groups / 103 removable rows — 41
+`safe_to_merge` (67 rows), 27 `needs_review` (36)**. Before it: 92 / 156 — 41 (55) / 51 (101).
+⛔ **THE SAFE GROUP COUNT DID NOT MOVE AND THE SAFE ROW COUNT WENT UP (55 -> 67)**, which looks
+backwards for a tightening. It is not: the polluted groups were also the WIDER ones, so their spans
+pulled in intervening rules, and a tightened group clears interference more often.
 
 ⛔ **MERGING NON-ADJACENT RULES CHANGES SEMANTICS** if anything between them matches the same
 traffic, so interference is TESTED against every intervening rule, and an UNDETERMINABLE check
-falls to `needs_review`, NEVER `safe_to_merge`. 24 groups carry `undetermined` (unresolved object
-names). Resolution is `objectResolver`'s, unchanged. ⛔ `safe_to_merge` renders as **"Ordering
-checked"**, never "safe": it means no interfering rule was FOUND, not that the change is safe to
-make. `MERGE_CLAIM` is exported, rendered verbatim, and there is no write path.
+falls to `needs_review`, NEVER `safe_to_merge`. 8 groups carry `undetermined` (was 24, mostly
+unresolved object names). Resolution is `objectResolver`'s, unchanged. ⛔ `safe_to_merge` renders as
+**"Ordering checked"**, never "safe": it means no interfering rule was FOUND, not that the change is
+safe to make. `MERGE_CLAIM` is exported, rendered verbatim, and there is no write path.
 
 ⛔ **THE CANONICAL KEY INCLUDES `applications`** — the vendor L7 app-ID is a MATCHING CONSTRAINT,
 not metadata, and two rules differing in service AND app-ID are not one rule written twice. Also
@@ -1091,6 +947,56 @@ rule LIST never is, because its order is the entire subject of the interference 
 one, so the engine scans `raw_rule` for a truthy `/negate/i`. Verified live — PAN-OS emits it on
 133 rules (0 enabled) and Fortinet passthrough preserves 24 distinct keys — but see
 `connectors.md`: normalising `raw_rule` into a fixed shape would blind the guard.
+
+### ⛔ 7 of 41 `safe_to_merge` GROUPS WERE NOT THE SAME RULE (fixed 2026-09-27)
+
+The canonical key ignored `raw_rule` entirely — and `raw_rule` is where the matching and
+enforcement fields no COLUMN holds still live. So rules differing in a real constraint keyed
+identically and were offered as one rule written twice, under a verdict the UI prints as "Ordering
+checked". Independently re-derived live against a hand-written diff rather than the engine's own
+key: all 7 named sets no longer group.
+
+`RAW_KEY_SIGNIFICANT` (**46** keys) goes into the key; `RAW_KEY_IGNORED` (24) is named and
+deliberately excluded — each with the column that already carries the fact (e.g. Fortinet `nat` ->
+`nat_enabled`). ⛔ **AN UNLISTED KEY FORCES `needs_review` AND IS NAMED** (`unclassified_raw_rule_key`,
+one entry per key per member) — never silently split (which would fragment real groups) and never
+silently ignored (which is the bug above). It is deliberately NOT in the key, so an unknown field
+can only ever COST a merge, never authorise one. The mechanism proved itself immediately: it flagged
+`fortinet:nat` on 54 live rules, which was then classified. **Live unclassified keys are now 0 —
+1,782 rows scanned, 0 unclassified.**
+
+⛔ **`canonicalRawValue` MAKES AN EXPLICIT VENDOR DEFAULT KEY IDENTICALLY TO AN ABSENT KEY.** It
+strips `@_`-prefixed XML attributes (`ATTRIBUTE_KEY_PREFIX`), unwraps `#text`, SORTS member sets
+(they are matched as unions), and folds a NEUTRAL family (`NEUTRAL_VALUES`, 10 entries) to
+`NEUTRAL_TOKEN` (`~`), which is then dropped from the key. Load-bearing, with live counts:
+`negate-source: no` on 131 of 1,601 rules and `destination-hip: any` on 1,197 of 1,601 — keying
+those apart from their absence would have SPLIT real groups, i.e. a false negative that quietly
+shrinks the list. ⛔ **`all` IS DELIBERATELY NOT NEUTRAL**: FortiOS `logtraffic: all` logs every
+session while the absent default logs only UTM events.
+
+⛔ **THE NEGATION GUARD IS NOW PER-MEMBER IN `checkInterference`** (`member_field_is_negated`),
+BEFORE and INDEPENDENT OF the `examined` loop — it could not fire on an ADJACENT group at all, and
+20 of 92 groups were adjacent. ⛔ Expressed TWICE: the negate keys are also SIGNIFICANT, so they
+flow into the key as well.
+
+⛔ **A DUPLICATE `sequence_number` IS INSIDE THE SPAN, NOT OUTSIDE IT.** The bounds were
+`cs <= mergePosition || cs >= maxSeq`, so a non-member sharing a member's position was skipped as
+out of range; they are now strict (`cs < mergePosition || cs > maxSeq`) and a shared position sets
+`duplicate_sequence_number_in_span`, which makes `clear` false and therefore `adjacent` false.
+Without it the UI could print "Nothing enabled sits between these rules" over a deny sitting in the
+span. ⛔ **Live duplicates today: 0 — this is a LATENT guard**, which is exactly why it needed a
+test rather than a screenshot.
+
+⛔ **`dimensionOverlap` RETURNS `'unknown'` WHEN A NON-WILDCARD SIDE RESOLVED TO ZERO** ranges or
+protocols. It used to fall through to a confident `'no'` — an UNENUMERABLE group read as "these do
+not overlap", which is the direction that manufactures a merge. Live trigger: 2 empty address groups.
+
+⛔ **`rulesCollected` IS THE TIMESTAMP ALONE** in BOTH `getDeviceConsolidation` and the fleet
+`byDevice` row — `Boolean(last_rules_collected_at)`, one definition. It previously ORed in
+`ruleCount > 0`, contradicting its own comment, so a device holding stale rows from a collection
+that has since stopped succeeding read as collected. Live: TSR_EKC (30 rules, no stamp) now reads
+NOT_COLLECTED. `canonicalScalar` (unwraps `#text` once) is shared by the key and the negation guard,
+so the two cannot read the same field differently.
 
 ## A3 consumers — where the grade travels (v2.189.0)
 
@@ -1133,14 +1039,66 @@ Seven evidence sources per device, each naming the product engines it gates: `ru
 
 ⛔ **RANK BY CONSEQUENCE, NOT GAP COUNT.** All 16 devices on the reference fleet have at least one
 gap, so a list of devices-with-gaps is a list of the fleet. `answersWithheld` = sum over gaps of
-(state weight × number of engines that source gates). A device missing ONE source that gates five
+(weight factor × number of engines that source gates). A device missing ONE source that gates five
 engines outranks one missing three that gate nothing.
+
+⛔ **A `partial` GAP IS WEIGHTED BY THE SHARE IT AFFECTS, NOT BY A FLAT 0.5.** With a flat weight
+"rank by consequence" COLLAPSED: ten devices sat on exactly 1.5 with the same blocked-engine count
+and the order fell through to `localeCompare` on the device NAME — putting **HRIS (74 of 90 object
+references unresolvable, 82%) level with TUM (6 of 263, 2%)**. Worse, ONE log-answered rule in a
+hundred HALVED the score. The cell now carries a `share`, clamped by `PARTIAL_MIN_SHARE` 0.01 (a tiny
+gap still costs something) and `PARTIAL_MAX_SHARE` 0.95 (**a partial may never weigh as much as an
+absence** — "some of this is answered" and "none of it is" are different claims), with log-answered
+rules discounted by GRADE rather than zeroed: `LOG_ID_RESIDUAL` 0.5, `LOG_NAME_RESIDUAL` 0.75. ⛔ **An
+unreadable share falls back to the flat 0.5, never to 0** — an unreadable proportion is not a small
+one. The residuals encode the grade ORDER this file documents at length and a test pins the ORDER, not
+the numbers.
+
+⛔ **RANKING USES `answersWithheldExact`, NOT THE DISPLAYED `answersWithheld`.** The displayed figure
+is rounded to one decimal, which RE-CREATED the exact tie the proportional weight existed to break.
+Re-derived live after the fix: no pair in the ranking is decided by `localeCompare` any more.
+
+⛔ **`sharePct()` NEVER PRINTS `0%` FOR A NON-ZERO GAP** (`<1%`) **AND NEVER `100%` FOR A NON-TOTAL
+ONE** (`>99%`). `Math.round` printed 1 of 878 as "(0%)" on the one page in this product whose subject
+is that a zero can mean nothing; and "100%" and "all of them" are read as the same statement, so
+rounding up makes one of them false.
 
 ⛔ **STALE IS WORSE THAN ABSENT AND IS ITS OWN STATE**, ranked above a heavier pure gap. Absent
 evidence reads as a gap; stale evidence reads as an ANSWER. Live: **TSR_EKC's rule analysis last
 ran 2026-08-07, `last_rules_collected_at` is NULL, and its 22 `unused` findings PREDATE the
 `hit_count` tri-state fix** — artefacts of a bug corrected a month earlier, still rendering beside
 today's findings with nothing distinguishing them.
+
+⛔ **EVERY ONE OF THE SEVEN SOURCES ALWAYS EMITS A CELL** — `assessDevice` pushes exactly seven, with
+no `return`, `continue` or conditional skip, and a test pins one cell per source. It did not. On an
+unreadable count `ruleUsage`, `interfaces` and BOTH halves of `objects` dropped the cell ENTIRELY,
+while `versionRows`/`configAgeDays` asserted a *certain* ABSENCE. Both failures land in the same
+place: one field nulled on an otherwise healthy device produced `fullyCovered: true` with
+`uncertainCount: 0` — **"Fully visible", on the one page whose subject is unreadable measurements.**
+All seven now emit `absent` + `certain: false` in that case.
+
+⛔ **`config_rows` WAS ADDED TO `REGISTER_SQL` BECAUSE A NULL AGE MEANT TWO OPPOSITE THINGS.**
+`configAgeDays` comes back SQL NULL both when a firewall has NO configuration snapshot (a certain
+absence) and when the value could not be read (unknown). The count disambiguates into three branches:
+`rows === 0` ⇒ `absent` CERTAIN; `rows === null` ⇒ unreadable; `rows > 0` with a null age ⇒
+unreadable age. Without it, "never collected" and "we could not tell" shared a cell.
+
+⛔ **NO RULESET ⇒ `ruleUsage` AND `objects` ARE GAPS TOO**, each with its own cost sentence ("`unused`
+cannot fire here and rule cleanup has nothing to work from"; "there are no object references to
+resolve"). Otherwise a NEVER-COLLECTED firewall carried fewer gaps than a collected-but-blind one and
+ranked BELOW it. ⛔ But `rules > 0` with `refs === 0` stays **MEASURED** — "no rule on this firewall
+references a named object, so there is nothing to resolve" is an ANSWER, and filing it as a gap would
+punish a ruleset written entirely in literals.
+
+⛔ **THE GAP AND ITS MITIGATION ARE SEPARATE CERTAINTIES.** `certain: false` means WE COULD NOT
+ESTABLISH THIS GAP. `ruleUsageCell` was using it for something else: `hit_count IS NULL` for 38 of 38
+rules is read straight off `firewall_rules` and is a FACT, while the log-evidence enrichment that may
+SHRINK it is a second, independent read. Marking the whole cell uncertain when only the ENRICHMENT
+failed reported an established blind spot as an unanswered question — and downstream
+`gatherCoverageGaps` then DELETED a real work-queue item and reported `ok: true` with no banner. So
+the gap keeps `certain: true` and the unread mitigation travels separately as `mitigationUnknown: true`
+(`mitigationUnknownCount` on the entry, `devicesWithUnreadMitigations` on the summary). A state reached
+that way is reported as a **FLOOR**: the gap is at least this large.
 
 ⛔ **`fullyCovered` IS NAMED FOR VISIBILITY AND IS NOT AN ALL-CLEAR.** It means SecVault can see
 the firewall, nothing more. A test rejects any field here that reads as a security verdict.
@@ -1160,9 +1118,9 @@ while `failures` is non-empty.
 ⛔ **`rulesLogAnswered` / `rulesLogAnsweredDeletionGrade` (v2.189.0)** shrink the `ruleUsage` gap
 where a device's LOGS answer what its counters cannot — 84 of 235 rules fleet-wide, so the cell
 used to overstate the gap on six firewalls. ⛔ It shrinks to `partial`, **NEVER to `measured`**:
-a bounded-window observation is not the device's own lifetime counter. ⛔ An unreadable
-log-evidence count leaves the cell exactly where it was with `certain: false` — it may never
-improve the picture. ⛔ Costs a BOUNDED N+1 (165ms -> ~420ms live): only devices with at least
+a bounded-window observation is not the device's own lifetime counter. ⛔ An unreadable log-evidence
+count leaves the cell where it was but keeps `certain: true`, flagging `mitigationUnknown` instead —
+see the separate-certainties rule above. ⛔ Costs a BOUNDED N+1 (165ms -> ~420ms live): only devices with at least
 one unmeasured rule are visited, and a fleet whose devices all report counters issues zero extra
 queries, pinned by a test. Collapsing them would mean reimplementing `getLoggedRuleHits`.
 
@@ -1173,12 +1131,39 @@ source scan with comments STRIPPED FIRST.
 `schema.sql:681`. The probe SQL this was designed from used `created_at`, which would have thrown
 and returned an empty register that looked like a clean fleet.
 
-**Work queue source #11** (`coverage_gap`, `gatherCoverageGaps`): always `evidence: 'unmeasured'`,
-so it can never reach `act_now`. ⛔ **It EXCLUDES devices `collection_gap` already reports**, reusing
-that source's own `COLLECTION_STALE_DAYS` rather than a second copy — an unreachable firewall has
-one problem, not two, and its coverage gaps are a symptom of the collection failure. ⛔ An
-incomplete register THROWS so `runSource` banners it, rather than contributing zero items silently.
-⛔ Cells with `certain:false` do not become work: an unchecked cell is not an established gap.
+**Work queue source #11** (`coverage_gap`, `gatherCoverageGaps` — which lives in
+`workQueueData.js`, not in the engine): always `evidence: 'unmeasured'`, so it can never reach
+`act_now`. ⛔ **It EXCLUDES devices `collection_gap` already reports**, reusing that source's own
+`COLLECTION_STALE_DAYS` rather than a second copy — an unreachable firewall has one problem, not
+two, and its coverage gaps are a symptom of the collection failure. ⛔ An incomplete register THROWS
+so `runSource` banners it, rather than contributing zero items silently.
+
+⛔ **TWO EXCEPTIONS TO THAT EXCLUSION, BOTH FOUND BY MEASURING IT.**
+1. **STALE FINDINGS ARE THEIR OWN ITEM** (`coverage-stale:<deviceId>`, `severity: 'high'`) and are
+   pushed BEFORE the exclusion, which they only read in order to REWORD themselves
+   (`alsoUncollectable`). Live, the `collection_gap` exclusion was exactly `{TSR-TL, TSR_EKC}` — i.e.
+   **precisely the two devices that had stale findings**, so the exclusion was suppressing the entire
+   point of the register. Stale evidence reads as an ANSWER; that is worse than the collection gap it
+   sits behind, not a duplicate of it.
+2. **AN UNCHECKED CELL STILL PRODUCES ITS OWN ITEM** (`coverage-unchecked:<deviceId>`,
+   `severity: 'low'`). An unchecked cell is not an established gap, so it may not be counted as one —
+   but "we could not tell whether we can see this" is itself work, and dropping it silently is the
+   failed-read rule one level up.
+
+⛔ **`why` / `severity` / `count` ARE BUILT FROM CONFIRMED GAPS ONLY** (`certain !== false`). They
+were computed over uncertain gaps too, so an unchecked cell inflated a severity and a count that the
+item's own text then could not account for. An unread mitigation is stated SEPARATELY in `why`, never
+folded into the number.
+
+⛔ **THE COVERAGE SOURCE IS OMITTED FROM THE OUTBOUND DISPATCHER** — `NEVER_ACT_NOW_SOURCES`
+(exactly `['coverage']`) passed as `opts.omitSources` from `notificationDispatch.fetchOpenWorkQueue`.
+⛔ **Omitted is not absent**: an omitted source still reports `{key, ok: true, omitted: true,
+items: [], count: 0}` and `omitted` survives the projection, because a source that simply stopped
+appearing is indistinguishable from one that silently broke. Two reasons, both measured: the source
+can never produce an `act_now` item (it is structurally `unmeasured`), yet it was filling
+`PER_SOURCE_CAP` (50) and so **permanently silencing `work_act_now` on any fleet above ~50 devices**;
+and it was paying 2+N queries plus a 720-hour aggregate every 15 minutes for items that were then
+discarded.
 
 ## lib/engines/upgradePlan.js + upgradePlanData.js (added 2026-09-25, v2.187.0)
 
@@ -1207,10 +1192,42 @@ file's own header. Now `blockedReason`: `no_running_version` vs `unreadable_runn
 for the fix, while nothing asserted what was RECOMMENDED.
 
 ⛔ `upgradePlanData` is DEVICES-DRIVEN, not assessments-driven, so no firewall can vanish from
-the plan, and it carries FOUR coverage states — `never_assessed` / `assessed_no_version` /
-`assessed_clear` / `assessed` — because `openCount: 0` means the same thing for "clear" and "never
-asked" on the one page whose job is to say what still needs doing. It reuses
-`fleetHeadline.isAssessed()` unchanged rather than writing a second definition.
+the plan, and it carries **FIVE** coverage states — `never_assessed` / `assessed_no_version` /
+**`assessed_unreadable_version`** / `assessed_clear` / `assessed` — because `openCount: 0` means the
+same thing for "clear" and "never asked" on the one page whose job is to say what still needs doing.
+It reuses `fleetHeadline.isAssessed()` unchanged rather than writing a second definition.
+
+⛔ **THE FIFTH STATE: ASSESSED, VERSIONED, AND THE VERSION IS NOT READABLE.** Reached via the newly
+exported `hasReadableFix`, counted as `assessedUnreadableVersion`, and it makes `coverageComplete`
+FALSE. Without it a device whose running version cannot be parsed sat in a state that claimed the plan
+had looked — a fabricated all-clear on the page that decides which firewalls get upgraded.
+
+⛔ **`blockedReason` IS NOW CONSUMED, NOT RE-DERIVED.** `noPlanReason()` (in
+`components/vulnerability/UpgradePlan.js`) reads the engine's field; the `!blocked && !plan.X`
+fallbacks survive only for a plan arriving without it, and are labelled as such. Two places deciding
+"why is there no plan" would eventually disagree, and the view's copy is the one with no tests over
+the version grammar.
+
+⛔ **`unplannable` NAMES ITS SECOND REASON.** `fix_version_unreadable` (a `fixed_in` exists and cannot
+be parsed) beside `no_known_fix` (there is none) — it was falling through to a generic fallback, so
+"the vendor published nothing" and "we could not read what they published" printed the same sentence,
+and only one of those is a fact about the vendor.
+
+⛔ **`clears()` GAINED THE DIGIT GUARD `branchOf` ALREADY HAD** (`if (!/\d/.test(fixedIn)) return
+false;` plus a finiteness check on every component). Same root cause as bug (a) above: `parseVersion`
+returns FABRICATED ZEROS for an unparseable string, so a `fixed_in` of `"see advisory"` compared as
+`0.0.0` and CLEARED every target — an advisory silently marked as fixed by an upgrade nobody made. One
+guard, two call sites, and the second had been missed.
+
+⛔ **`numericOrNull` is gone from the upgrade-plan layer and `adv.cvss_score` is gone from
+`ASSESSMENTS_SQL`** (a test asserts the export is `undefined` — "an exported, tested helper with no
+caller is dead code with a test defending it"). The identifier still exists as unrelated LOCAL helpers
+in `forcepoint/index.js`, `vpnTunnels.js` and `vpnSessions.js`; do not read the removal as repo-wide.
+
+**Open follow-up, not built**: a THIRD unplannable reason `fix_version_derived`. A fix boundary
+DERIVED from the affected range (see `lib/feeds/fixBoundary.js`) is a PLANNABLE target but not a
+vendor commitment, and today it is indistinguishable from a published one here. `chassis.js`'s
+`fixProvenance` already draws that line for the PDF; nothing in `upgradePlan.js` does.
 
 ## lib/vpnDetectionFilters.js (added 2026-09-25, v2.185.0)
 
@@ -3081,7 +3098,42 @@ The three things most likely to be broken by a well-meaning edit:
 Wired in `lib/feeds/index.js` as `runCveHubSync`, running **FIRST in
 `runFullSync`** — `advisories.cve_id` is UNIQUE with one vendor, so feed order is
 the attribution rule. Logged to `feed_sync_log` as `cve_hub`; `skipped` when not
-configured. Tests: `tests/cveHub.test.js` (18 cases, 6 mutations verified).
+configured. Tests: `tests/cveHub.test.js` (35 cases).
+
+### ⛔ The repair that reported success and wrote nothing (2026-09-27)
+
+Rule 3 is doubled — a JS predicate and a `WHERE` on the `UPDATE` — and for twelve
+consecutive runs the two DISAGREED: `hubIsBetter()` permitted a repair, the
+statement refused it, `rowCount` was 0, and the counters still read `updated: 20`.
+Live proof: no advisory's `updated_at` fell inside a `cve_hub` window across seven
+days while the feed reported twenty repairs per run. The doubling held (nothing bad
+was written); the REPORTING did not.
+
+New counters: `statementRefused` / `statementRefusedCves` (permitted then refused),
+`repairedCves` (the ids actually written), `insertSkipped` (an INSERT whose
+`ON CONFLICT DO NOTHING` wrote nothing — a stale snapshot), plus `considered` and
+`unaccounted`.
+
+⛔ **A REFUSED STATEMENT IS AN ERROR, NOT A STATISTIC.** It is pushed into `errors`
+(sampled, `REFUSAL_SAMPLE` 8), which is what turns the sync `partial` and puts it on
+the status banner. **A counter alone is read by nobody** — that is exactly how this
+survived twelve runs.
+
+⛔ **AN ACCOUNTING IDENTITY, CHECKED IN BOTH DIRECTIONS.** `considered` (=
+`byCve.size`) is compared against the sum of every branch, and any difference at all
+(`!== 0`, not merely a shortfall) pushes its own error. Per-CVE errors are counted
+BEFORE the roll-up so a report about the identity cannot satisfy it;
+`skippedUnusable` rows never enter `byCve` and are correctly outside the sum.
+
+⛔ **A FEED THAT REPAIRS FOREVER IS NOT REPAIRING.** Pure `repairTrend()` +
+`loadRecentRepairCounts()`: `REPAIR_CONVERGENCE_RUNS` (3) consecutive NONZERO repair
+runs reports `not_converging` with its own `errors` entry — the same rows are being
+rewritten every cycle, which is what a broken guard looks like from outside.
+⛔ **An unreadable or too-short history is `unknown`, NEVER `converging`, and
+deliberately NOT an error** — a narrow, named exception: this is a DIAGNOSTIC over
+our own `feed_sync_log`, and letting a blip reading it turn the sync `partial` would
+raise an alarm about CVE DISCOVERY on the strength of a query that has nothing to do
+with it.
 
 `fillHourlyGaps(rows, hours, nowMs)` -> densified series, one slot per hour, each `{hour, events, denied, bytesSent, bytesReceived, measured}` (v2.148.0). PURE — no pool, clock is a parameter. ⛔ **A MISSING HOUR IS A GAP, NOT A NARROWER CHART**: the rollup writes no row for an hour in which nothing was stored, so a bar strip mapping only the returned rows spread 14 bars evenly across a 24-hour axis and a ten-hour ingestion outage rendered as an unbroken, healthy-looking series — the one thing a traffic timeline exists to show. ⛔ A filled hour carries `measured:false` and is drawn with `--hatch`, NEVER as a zero bar: no row means nothing was STORED, and a silent firewall is not distinguished from a stopped collector. ⛔ `denied`/bytes stay NULL in a filled hour, so it can move no total — only reveal a hole in the axis. Used by `DeviceTrafficTab` and `SyslogWidgets`; tests `tests/trafficTimelineGaps.test.js`.
 
@@ -3192,3 +3244,43 @@ Consumers: `app/api/compliance/[deviceId]/route.js` (CSV), `compliance/[deviceId
 
 Tests: `tests/matchedRuleEvidence.test.js` (22 cases, 3 mutations verified — including a mutation
 that restores the original `.filter(Boolean)` behaviour and is caught by 4 assertions).
+
+## lib/feeds/fixBoundary.js (added 2026-09-27)
+
+`hasUsableFixBoundary(ranges)` / `isUnrecognisedRanges(ranges)` / `hasUsableFixBoundarySql(expr)` —
+**ONE shared definition of "this advisory states a usable fix boundary"**, and the whole point is that
+it is expressed as BOTH a JS predicate and a SQL fragment **in the same file**, so the doubled guard
+this codebase relies on cannot drift into two different answers.
+
+⛔ **THE DEFINITION IS `exclude_fixed === true` (strictly, not truthy) AND A NON-EMPTY TRIMMED `max`.**
+A boundary with no `max` NAMES NO VERSION and therefore fixes nothing.
+
+⛔ **THE BUG IT EXISTS TO KILL: `jsonb` CONTAINMENT IS BLIND TO `max`.** The guard was
+`@> '[{"exclude_fixed": true}]'`, which cannot express "has a key whose sibling is non-empty", so a
+`max`-less boundary SATISFIED it and counted as a stated fix. ⛔ And the same blind test fails the
+OTHER WAY in the vendor upserts — refusing a legitimate vendor update — so one wrong predicate
+produced opposite errors in two places. `tests/fixBoundary.test.js` runs both halves over one shared
+case table and FORBIDS a consumer hand-writing the predicate.
+
+Wired into `lib/feeds/cveHub.js` (all three, including the `UPDATE`'s own `WHERE`), `lib/feeds/fortinet.js`
+and `lib/feeds/paloalto.js` (both in `ON CONFLICT`). ⛔ **`paloalto.js` was the file MISSING the guard
+entirely** — its `ON CONFLICT` overwrote ranges on a bare `vendor` match — which is what let `cve_hub`
+log `updated: 20` on twelve consecutive runs while no advisory's `updated_at` moved in seven days.
+
+## lib/engines/ruleChangeRequestReport.js — `byNameCaveat` (fixed 2026-09-27)
+
+⛔ **THE CAVEAT WAS KEYED ON THE ONE FIELD THAT CAN NEVER CARRY THE VALUE IT TESTED FOR.** It asked
+`usageGrade === 'log-name'`, but `usageGrade` is `deviceHits !== null ? 'device' : logGrade` — and
+`getCleanupCandidates` only admits a rule with a DEVICE-reported hit count, so on a change request
+`usageGrade` is ALWAYS `'device'`. The caveat could not appear on a single row of a single change
+request, ever. It now keys on **`logGrade`**, which is how the LOG answer was reached and is
+independent of the device counter.
+
+⛔ **A GUARD THAT CANNOT FIRE IS WORSE THAN NO GUARD** — the code reads as handled. Live: **0 of the
+202 rules across 9 firewalls carrying `logGrade: 'log-name'` + `usageGrade: 'device'` got the caveat;
+it now fires on 232 rules fleet-wide**, in the document somebody uses to delete rules from a firewall.
+
+⛔ **`usageGrade === 'log-name'` IS KEPT AS AN ALIAS, not as the test.** It can only ARISE from
+`logGrade === 'log-name'`, so it adds no case — but a caveat only ever REFUSES a deletion, so erring
+towards PRINTING it is the safe direction, and an older enriched object missing `logGrade` still
+carries its warning.

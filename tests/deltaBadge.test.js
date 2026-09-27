@@ -246,3 +246,133 @@ describe('the six dashboard call sites still get the shipped wording', () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE VPN THREAT STRIP — THE CALL SITE WHERE A NULL BECAME A GREEN ARROW
+// ─────────────────────────────────────────────────────────────────────────
+//
+// This badge already refuses a delta against a null `current` (above). The bug
+// was one layer up: lib/engines/vpnDetections.js coerced a NULL
+// `sum(event_count) FILTER (...)` to 0 with `num()`, and components/vpn/
+// VpnDetections.js had no not-measured branch in its headline strip. So when the
+// syslog collector stopped, the page rendered
+//
+//     Failed VPN authentications   0
+//     ↓ 47881 from the previous window          <- var(--green)
+//
+// i.e. a TOTAL INGEST OUTAGE as the largest security improvement the page is
+// capable of showing, with a reassuring hue on it. Nothing threw, nothing looked
+// broken, and the arrow pointed the way an operator wants it to point.
+//
+// ⛔ RENDERED, because the wrong answer is a colour and a sentence. The engine
+// half is pinned in tests/vpnDetections.test.js; this is the half a reader sees.
+describe('⛔ the VPN threat headline strip — an outage is never a green arrow', () => {
+  let VpnDetections = null;
+  let vpnLoadError = null;
+  try {
+    // The filter bar inside this component is a client component calling
+    // useRouter/useSearchParams; there is no app router in a test process, so
+    // next/navigation is stubbed to let the REAL tree render.
+    const origLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (request === 'next/navigation') {
+        return {
+          useRouter: () => ({ push() {}, replace() {} }),
+          usePathname: () => '/vpn',
+          useSearchParams: () => new URLSearchParams('vtab=detections'),
+        };
+      }
+      return origLoad(request, parent, isMain);
+    };
+    VpnDetections = require('../components/vpn/VpnDetections').default;
+  } catch (err) {
+    vpnLoadError = err;
+  }
+
+  const DATA = (figures) => ({
+    windowHours: 24,
+    windowStart: new Date('2026-09-26T16:00:00Z'),
+    generatedAt: new Date('2026-09-27T16:00:00Z'),
+    baseline: { hasHistory: true, spanDays: 18.2, firstBucketAt: new Date('2026-09-09T01:00:00Z') },
+    headline: { figures },
+    coverage: {
+      devices: [], reportingGapDevices: [], unattributedCoverage: [],
+      totalFailures: 0, totalSuccesses: 0, sourcesSeen: 0,
+    },
+    detections: [],
+  });
+
+  const strip = (figures) => {
+    assert.ok(VpnDetections, 'could not load VpnDetections: '
+      + (vpnLoadError ? vpnLoadError.stack : 'unknown'));
+    return renderToStaticMarkup(React.createElement(VpnDetections, {
+      data: DATA(figures), canSearchLogs: false, hours: 24, filters: null,
+    }));
+  };
+
+  // What the engine now returns for the outage: no rows in the window, so the
+  // figure is unmeasured and carries its reason.
+  const OUTAGE = {
+    key: 'failed_events',
+    label: 'Failed VPN authentications',
+    current: null,
+    currentReason: 'No VPN authentication logs were received in this window at all, so this is '
+      + 'not a measured zero.',
+    previous: 47881,
+    previousReason: null,
+    isFloor: false,
+    goodDirection: 'down',
+  };
+
+  it('⛔ prints NO delta at all against an unmeasured current figure', () => {
+    const out = strip([OUTAGE]);
+    assert.ok(!out.includes('47881'), 'computed a change against a figure nobody measured');
+    assert.doesNotMatch(out, /↓/);
+    assert.doesNotMatch(out, /from the previous window/);
+  });
+
+  it('⛔ and NEVER in var(--green) — this is not good news', () => {
+    const out = strip([OUTAGE]);
+    assert.ok(!out.includes('var(--green)'),
+      'an ingest outage was painted as an improvement');
+    assert.ok(!out.includes('var(--red)'),
+      'and it is not bad news either: absence of news has no hue');
+  });
+
+  it('⛔ renders the hueless not-measured marker, with the reason on it', () => {
+    const out = strip([OUTAGE]);
+    assert.ok(out.includes('var(--unmeasured)'), 'no not-measured treatment at all');
+    assert.match(out, /not a measured zero/);
+    // ⛔ And not a 0 sitting where the number goes. Scoped to the tile's own
+    // value element: the coverage strip legitimately prints zeros of its own, and
+    // a whole-page text scan would go green on the wrong one.
+    const value = out.match(/class="stat-value-compact"[^>]*>(.*?)<\/div>/);
+    assert.ok(value, 'the tile rendered no value element at all');
+    assert.match(value[1], /—/, 'the value is not the em-dash NotMeasured renders');
+    assert.ok(!/>0</.test(value[1]) && value[1].trim() !== '0',
+      'rendered a zero for a window with no evidence');
+  });
+
+  it('⛔ a MEASURED zero keeps its number and its arrow — the distinction survives', () => {
+    // Rows arrived and none was a failure. That is a real, earned zero and it
+    // must still compare: an em-dash here would hide a genuinely clean window.
+    const out = strip([{ ...OUTAGE, current: 0, currentReason: null }]);
+    const text = out.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    assert.match(text, /↓ 47,?881|↓ 47881/);
+    assert.ok(out.includes('var(--green)'), 'a real fall in failures is good news');
+  });
+
+  it('a measured figure whose COMPARISON is missing says why, hueless', () => {
+    const out = strip([{
+      ...OUTAGE,
+      current: 46090,
+      currentReason: null,
+      previous: null,
+      previousReason: 'SecVault does not hold VPN authentication history reaching back to the '
+        + 'start of the previous window.',
+    }]);
+    assert.match(out, /No comparison/);
+    assert.match(out, /does not hold/);
+    assert.ok(!out.includes('var(--green)') && !out.includes('var(--red)'));
+  });
+});

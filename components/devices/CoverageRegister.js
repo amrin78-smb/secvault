@@ -90,6 +90,15 @@ export const NOT_CHECKED_NOTE =
   'SecVault could not read this measurement, so this is not a confirmed gap — it is an '
   + 'unanswered question about one. Do not read it as either.';
 
+// ⛔ A THIRD STATE AGAIN, AND IT IS NOT "NOT CHECKED". This gap WAS established —
+// it came off the firewall's own data — but a second read that could have made it
+// SMALLER failed. So the state on screen is a FLOOR: at least this bad, possibly
+// no worse. Drawing it as "not checked" would hide a confirmed blind spot behind
+// an unanswered question, which is how the work queue lost a real item.
+export const MITIGATION_UNKNOWN_NOTE =
+  'This gap is confirmed, but a second check that could have made it smaller could not be '
+  + 'read. Treat the figure as a floor: the gap is at least this large.';
+
 export const STALE_NOTE =
   'Stale evidence renders as an ANSWER everywhere else in this product. Findings this '
   + 'old sit beside today’s with nothing marking them as old, so a reader cannot '
@@ -278,6 +287,38 @@ export function chipLabel(cell) {
 export function chipWeight(cell) {
   if (isUnchecked(cell)) return CELL_WEIGHT.unknown;
   return cellWeight(cell.state);
+}
+
+/** ⛔ An established gap whose MITIGATION could not be read. Not `isUnchecked`. */
+export function hasUnreadMitigation(cell) {
+  return Boolean(cell) && typeof cell === 'object'
+    && cell.mitigationUnknown === true && cell.certain !== false;
+}
+
+/**
+ * Cells in the order the eye should take them: loudest first.
+ *
+ * ⛔ THIS IS WHAT `CELL_WEIGHT[*].rank` IS FOR, AND UNTIL 2026-09-27 NOTHING READ
+ * IT. Five test assertions pinned the ranking, the comment above it invoked the
+ * SegmentationBoard.js failure by name, and `CellTable` rendered whatever order
+ * the engine happened to construct — live, TSR_EKC drew its one tinted cell
+ * (`stale`, rank 0, documented as louder than `absent`) LAST. A ranking that is
+ * declared, tested and never consumed is the guard-that-cannot-fire pattern.
+ *
+ * ⛔ IT ORDERS CELLS WITHIN ONE FIREWALL, NEVER FIREWALLS. The engine ranks
+ * entries by consequence and this file must not re-sort those; see the note on
+ * the default export.
+ *
+ * ⛔ A COPY, and ties keep their original order — two cells at the same loudness
+ * are not ranked against each other, and inventing an order for them would make
+ * the table shuffle on unrelated data changes.
+ */
+export function orderCells(cells) {
+  const list = (Array.isArray(cells) ? cells : []).filter(Boolean);
+  return list
+    .map((cell, i) => ({ cell, i, rank: chipWeight(cell).rank }))
+    .sort((a, b) => (a.rank - b.rank) || (a.i - b.i))
+    .map((x) => x.cell);
 }
 
 /** What a gap withholds, as one sentence. ⛔ Never rendered as a bare list. */
@@ -481,6 +522,7 @@ function CellRow({ cell }) {
         <Line>{cell.detail || 'No detail was recorded for this source.'}</Line>
         {gates ? <Line muted>{gates}</Line> : null}
         {isUnchecked(cell) ? <Line muted>{NOT_CHECKED_NOTE}</Line> : null}
+        {hasUnreadMitigation(cell) ? <Line muted>{MITIGATION_UNKNOWN_NOTE}</Line> : null}
       </td>
     </tr>
   );
@@ -502,7 +544,10 @@ function CellTable({ cells }) {
         </tr>
       </thead>
       <tbody>
-        {cells.map((cell) => (
+        {/* ⛔ LOUDEST FIRST — see orderCells. The engine ranks FIREWALLS; nothing
+            ranked the cells within one, so the only tinted cell on the fleet's
+            worst firewall was drawn last. */}
+        {orderCells(cells).map((cell) => (
           <CellRow key={cell.key} cell={cell} />
         ))}
       </tbody>
@@ -581,6 +626,10 @@ function EntryCard({ entry }) {
   const gapKeys = new Set(gaps.map((c) => c && c.key));
   const measured = cells.filter((c) => c && !gapKeys.has(c.key));
   const uncertain = intOrNull(entry.uncertainCount);
+  // ⛔ COUNTED APART FROM `uncertain`. "We could not establish this gap" and
+  // "this gap is established and may be larger than we could confirm" are
+  // different statements, and only the first may be discounted.
+  const unreadMitigations = intOrNull(entry.mitigationUnknownCount);
   const withheld = intOrNull(entry.answersWithheld);
   const blocked = Array.isArray(entry.blockedEngines) ? entry.blockedEngines : [];
 
@@ -625,6 +674,7 @@ function EntryCard({ entry }) {
                 `${withheld} answers withheld`
               )}
               {uncertain ? ` · ${uncertain} not checked` : null}
+              {unreadMitigations ? ` · ${unreadMitigations} at least this large` : null}
             </span>
           )}
         </div>

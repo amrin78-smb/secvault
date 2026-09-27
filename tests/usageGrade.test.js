@@ -43,11 +43,13 @@ const SRC = read(...VIEW_REL);
 // thing it was hunting — a file that says in prose "never use --evidence here"
 // would pass a raw grep for `--evidence` as though it used it, or fail one, in
 // whichever direction happens to be wrong. Only code is evidence about code.
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^[ \t]*\/\/[^\n]*$/gm, '');
-}
+// ⛔ THE SHARED HELPER, NOT A LOCAL COPY (2026-09-27). This file carried its
+// own, and it stripped BLOCK comments FIRST — the order tests/stripOrder.test.js
+// forbids, because a `/*` inside a `//` comment then eats everything to the next
+// `*/`. It escaped that guard only because its line-strip regex used a negated
+// character class where the guard looks for `.*$`, i.e. by accident rather than
+// by design. One stripper, line comments first.
+const { stripComments } = require('./stripComments');
 
 const CODE = stripComments(SRC);
 
@@ -73,7 +75,9 @@ function loadView() {
     'LOG_EVIDENCE_UNKNOWN',
     'usageGradeDescriptor',
     'logEvidenceSentence',
+    'usageReason',
     'usageTitle',
+    'usageBadgeTitle',
   ];
   // eslint-disable-next-line no-new-func
   return new Function(`${pure}\nreturn { ${names.join(', ')} };`)();
@@ -428,5 +432,94 @@ describe('call sites', () => {
     const tab = stripComments(read('components', 'analysis', 'CleanupTab.js'));
     assert.match(tab, /UsageGradeBadge/, 'the removal candidate column must name its grade');
     assert.match(tab, /grade="device"/, 'getCleanupCandidates accepts only the device counter');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ A "NOT MEASURED" SENTENCE WAS ATTACHED TO A MEASURED DEVICE FIGURE
+// (found 2026-09-27)
+//
+// `usageTitle()` deliberately suppressed the log sentence for the `device`
+// grade — the figure came from the firewall's own counter, and the log sentence
+// describes a different measurement over a different window. Then
+// `RuleUsageCell` passed `reason={sentence}` into `UsageGradeBadge`
+// UNCONDITIONALLY, and the badge's title became `${d.title} ${reason}`:
+//
+//   "The firewall reported this count from its own hit counter… Not measured:
+//    SecVault has not been collecting logs long enough to say."
+//
+// Live: 1,444 rules fleet-wide render a device counter, and every one carried
+// that. components/ui/NotMeasured.js's own header forbids exactly this.
+//
+// ⛔ THE DEFECT WAS IN THE JOIN, NOT IN EITHER HALF. usageTitle was right and the
+// descriptor was right; the badge said the opposite of both because the caller
+// handed it a reason the grade had already rejected. So the composition is
+// pinned, not just the two pieces.
+
+describe('⛔ the log sentence may not caption a device-counter figure', () => {
+  const CODES = Object.keys(V.LOG_EVIDENCE_REASONS);
+
+  it('usageReason is null for the device grade, for EVERY evidence code', () => {
+    for (const code of [...CODES, undefined, null, 'something-new']) {
+      assert.equal(V.usageReason('device', code, 30), null,
+        `device + ${String(code)} must carry no log sentence`);
+    }
+  });
+
+  it('and is the sentence for every grade that IS log-derived', () => {
+    for (const grade of ['log-id', 'log-name']) {
+      for (const code of CODES) {
+        assert.equal(
+          V.usageReason(grade, code, 30),
+          V.logEvidenceSentence(code, 30),
+          `${grade} + ${code} must keep its sentence`
+        );
+      }
+    }
+  });
+
+  it('⛔ so the BADGE hover never says "Not measured" over a measured count', () => {
+    // The composition, exactly as UsageGradeBadge builds it. Before the fix this
+    // read "…from its own hit counter. Not measured: SecVault has not been
+    // collecting logs long enough to say."
+    for (const code of [...CODES, undefined]) {
+      const title = V.usageBadgeTitle('device', V.usageReason('device', code, 30));
+      assert.ok(!/not measured/i.test(title),
+        `device + ${String(code)} produced: ${title}`);
+      assert.equal(title, V.USAGE_GRADES.device.title, 'and it is exactly the grade title');
+    }
+  });
+
+  it('the badge hover and the figure hover AGREE, which is what drifted', () => {
+    for (const grade of [...GRADES]) {
+      for (const code of [...CODES, undefined]) {
+        assert.equal(
+          V.usageBadgeTitle(grade, V.usageReason(grade, code, 30)),
+          V.usageTitle(grade, code, 30),
+          `${String(grade)} + ${String(code)} must give one answer, not two`
+        );
+      }
+    }
+  });
+
+  it('a log-derived grade DOES still carry its not-measured reason', () => {
+    // The fix must not silence the sentence where it is the whole point: a
+    // log-graded figure over a window we have no history for is unmeasured, and
+    // the badge has to say so.
+    const t = V.usageBadgeTitle('log-name', V.usageReason('log-name', 'insufficient-history', 30));
+    assert.match(t, /not measured/i);
+    assert.match(t, /SecVault has not been collecting/i);
+  });
+
+  it('⛔ RuleUsageCell passes usageReason, never the raw sentence', () => {
+    // Source-level, because the behavioural test above cannot see which value
+    // the component chooses to hand over. Comments stripped LINE-first via the
+    // shared helper.
+    const cell = CODE.slice(CODE.indexOf('function RuleUsageCell('));
+    assert.ok(cell.length > 100, 'expected to find RuleUsageCell');
+    assert.ok(!/<UsageGradeBadge[^>]*reason=\{sentence\}/.test(cell),
+      'the raw sentence must not reach the badge');
+    assert.match(cell, /<UsageGradeBadge[^>]*reason=\{reason\}/);
+    assert.match(cell, /usageReason\(/);
   });
 });

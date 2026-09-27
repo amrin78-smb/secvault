@@ -607,3 +607,124 @@ describe('⛔ A3 — a NAME-matched answer carries its caveat into the document'
     assert.equal(byNameCaveat(null), '');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE CAVEAT KEYED ON THE WRONG FIELD AND COULD NEVER FIRE (2026-09-27)
+//
+// `byNameCaveat` tested `usageGrade !== 'log-name'`. `usageGrade` grades
+// `effectiveHitCount` — the DEVICE's counter wherever one exists — while the
+// sentence it decorates describes `loggedHits`, whose grade is `logGrade`. So on
+// every rule whose firewall reports a counter, `usageGrade` is 'device' and the
+// caveat was unreachable however the log answer was reached.
+//
+// In THIS document it was structurally unreachable: buildRequestReportData sets
+// pseudoRules.hit_count from `hit_count_at_request`, which getCleanupCandidates
+// guarantees is finite, so `usageGrade` is ALWAYS 'device' here.
+//
+// Live shape, SMT/SSL-TO-SAPRise 2026-09-27: hit_count 2,083,930,
+// loggedHits 13,697, logGrade 'log-name', usageGrade 'device'. 202 rules across
+// 9 firewalls are in that state (SMT alone 45 of 190).
+
+describe('⛔ the by-NAME caveat fires for the LIVE shape, not just a synthetic one', () => {
+  const { logEvidenceDisplay, byNameCaveat } = require('../lib/engines/ruleChangeRequestReport');
+
+  // Exactly what enrichRulesWithLogEvidence returns for SMT/SSL-TO-SAPRise.
+  const LIVE = {
+    logEvidence: 'hits',
+    loggedHits: 13697,
+    loggedLastHit: null,
+    hit_count: 2083930,
+    logGrade: 'log-name',
+    usageGrade: 'device',
+    deletionEvidence: true,
+  };
+
+  it('a finite device counter plus logGrade log-name STILL carries the caveat', () => {
+    assert.notEqual(byNameCaveat(LIVE), '', 'this is the shape that shipped uncaveated');
+    const r = logEvidenceDisplay(LIVE, 30);
+    assert.match(r.text, /13697 matching log events/);
+    assert.match(r.text, /rule NAME/, 'the reader must be told the match was by name');
+    assert.match(r.text, /not sufficient evidence to remove the rule/i);
+  });
+
+  it('⛔ and on a MEASURED-ZERO, which is the sentence that removes a rule', () => {
+    const r = logEvidenceDisplay(
+      { ...LIVE, logEvidence: 'measured-zero', loggedHits: 0, logCoverageRatio: 0.98 }, 30);
+    assert.match(r.text, /rule NAME/);
+    assert.match(r.text, /name being unchanged/i);
+  });
+
+  it('logGrade is what decides it — usageGrade device alone is silent', () => {
+    // Proves the new test is the log grade and not merely "either field set".
+    assert.equal(byNameCaveat({ usageGrade: 'device', logGrade: 'log-id' }), '');
+    assert.equal(byNameCaveat({ usageGrade: 'device', logGrade: null }), '');
+    assert.notEqual(byNameCaveat({ usageGrade: 'device', logGrade: 'log-name' }), '');
+  });
+
+  it('usageGrade log-name is still accepted, as an alias in the SAFE direction', () => {
+    // It can only arise FROM logGrade 'log-name', so this adds no case — but a
+    // caveat only ever REFUSES a deletion, so an older enriched object missing
+    // `logGrade` must keep its warning rather than lose it.
+    assert.notEqual(byNameCaveat({ usageGrade: 'log-name' }), '');
+  });
+
+  it('⛔ the caveat is ASCII — pdfkit Helvetica has no glyph for U+26A0', () => {
+    // Verified at byte level against the bundled pdfkit: doc.text('⚠')
+    // emits 0x26 ('&') + 0xA0, and widthOfString is 0 so the wrap measurement is
+    // two glyphs short as well. The document said "& " where it meant a warning.
+    const c = byNameCaveat({ logGrade: 'log-name' });
+    assert.ok(!/[⚠⚡️✓✗→]/.test(c),
+      'no zero-width WinAnsi-absent glyph may reach a PDF');
+    assert.match(c, /CAUTION/, 'it says the word instead');
+  });
+});
+
+describe('⛔ the caveat reaches an assembled change-request document', () => {
+  it('a request row with a FINITE snapshot count and name-only logs is caveated', async () => {
+    // The production path end to end: hit_count_at_request is a real number (the
+    // engine refuses anything else), the device's rollup rows carry NO rule id,
+    // and the rule matches by name. Before the fix this produced
+    // "13697 matching log events in the last 30 days." and nothing else.
+    const pool = stubPool({
+      items: [{
+        rule_id_vendor: '47',
+        rule_name: 'SSL-TO-SAPRise',
+        finding_type: 'redundant',
+        hit_count_at_request: '2083930',
+        evidence: { detail: 'covered by rule 12', logEnabled: true },
+        outcome: 'pending',
+        verified_at: null,
+      }],
+      liveRules: [{ rule_id_vendor: '47', log_enabled: true }],
+      // Palo-Alto-shaped: rule_id NULL on every row, names only.
+      ruleHits: [{
+        rule_id: null, rule_name: 'SSL-TO-SAPRise', hits: '13697',
+        first_hit: null, last_hit: null,
+      }],
+    });
+    const d = await buildRequestReportData(pool, 'r1');
+    assert.equal(d.items[0].hit.state, 'measured', 'the device counter is real');
+    assert.match(d.items[0].log.text, /rule NAME/,
+      'the caveat must appear in the document, not only in a field nobody sees');
+
+    // And it must survive into the CSV column the reviewer filters on.
+    const csv = renderRequestCsv(d);
+    assert.match(csv, /rule NAME/);
+  });
+
+  it('an id-matched row on the same document is NOT caveated', async () => {
+    // Fortinet-shaped: rule_id on every row. Keeps the caveat meaningful by
+    // proving it is absent where the evidence is strong.
+    const pool = stubPool({
+      items: [{
+        rule_id_vendor: '47', rule_name: 'SSL-TO-SAPRise', finding_type: 'redundant',
+        hit_count_at_request: '2083930', evidence: { logEnabled: true },
+        outcome: 'pending', verified_at: null,
+      }],
+      liveRules: [{ rule_id_vendor: '47', log_enabled: true }],
+      ruleHits: [{ rule_id: '47', rule_name: 'SSL-TO-SAPRise', hits: '13697', first_hit: null, last_hit: null }],
+    });
+    const d = await buildRequestReportData(pool, 'r1');
+    assert.ok(!/rule NAME/.test(d.items[0].log.text));
+  });
+});

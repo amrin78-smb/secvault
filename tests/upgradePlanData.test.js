@@ -26,15 +26,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const dataModule = require('../lib/engines/upgradePlanData');
 const {
   getFleetUpgradePlan,
   coverageOf,
   normaliseDeviceIds,
-  numericOrNull,
   COVERAGE,
   DEVICES_SQL,
   ASSESSMENTS_SQL,
-} = require('../lib/engines/upgradePlanData');
+} = dataModule;
 
 // --------------------------------------------------------------------------
 // Stub pool
@@ -76,7 +76,6 @@ const assessment = (over = {}) => ({
   kev_listed: false,
   priority_band: 'scheduled',
   cve_id: 'CVE-2026-1000',
-  cvss_score: '7.5',
   ...over,
 });
 
@@ -158,7 +157,7 @@ describe('a firewall with no open assessments is still in the plan', () => {
     assert.equal(summary.assessedNoVersion, 1);
   });
 
-  it('coverageOf: all four states, driven directly', () => {
+  it('coverageOf: four of the five states, driven directly (the fifth has its own block)', () => {
     assert.equal(
       coverageOf({ id: 'x', last_cve_assessed_at: null, has_assessment_rows: false, running: '7.4.9' }, 0),
       COVERAGE.NEVER_ASSESSED
@@ -283,30 +282,31 @@ describe('grouping', () => {
   });
 });
 
-describe('cvss_score coercion', () => {
-  // NUMERIC comes back from `pg` as a STRING, and `Number(null)` is 0 — which
-  // this product reads as a real, vendor-published "not impacted" score.
-  it('a NUMERIC string becomes a number', () => {
-    assert.equal(numericOrNull('7.5'), 7.5);
+describe('⛔ a column nobody reads is not selected', () => {
+  // `adv.cvss_score` was fetched, coerced through a carefully null-guarded helper
+  // with a six-line comment about a vendor-published 0.0 — and read by NOTHING.
+  // upgradePlan.js documents the field in its row shape and never looks at it,
+  // and neither does the view. A defence whose comment explains why it matters is
+  // worse than no column: the next session reads the comment as evidence that
+  // something depends on it.
+  it('the assessment statement does not select a score', () => {
+    assert.ok(!/cvss_score/i.test(ASSESSMENTS_SQL),
+      'select it again only when something reads it — and bring the NULL guard back with it');
   });
-  it('a published 0.0 STAYS 0, because a vendor-published zero is a score', () => {
-    assert.equal(numericOrNull('0.0'), 0);
+
+  it('the helper that guarded it is gone with it', () => {
+    assert.equal(dataModule.numericOrNull, undefined,
+      'an exported, tested helper with no caller is dead code with a test defending it');
   });
-  it('an ABSENT score stays null and never becomes 0', () => {
-    assert.equal(numericOrNull(null), null);
-    assert.equal(numericOrNull(undefined), null);
-    assert.equal(numericOrNull(''), null);
-    assert.equal(numericOrNull('not-a-number'), null);
-  });
-  it('carries through to the assessment rows the pure engine is handed', async () => {
+
+  it('the plan is still built from the columns that ARE read', async () => {
     const pool = stubPool(
       [device({ id: 'a', name: 'alpha' })],
-      [assessment({ device_id: 'a', cvss_score: null })]
+      [assessment({ device_id: 'a' })]
     );
     const { plans } = await getFleetUpgradePlan(pool);
-    // The plan does not re-expose raw rows, but the unplannable list does when
-    // the fix is absent; assert the engine ran without coercing to 0 instead.
     assert.equal(plans[0].openCount, 1);
+    assert.equal(plans[0].inBranch.target, 'v7.4.11');
   });
 });
 
@@ -467,5 +467,97 @@ describe('an empty fleet', () => {
     // coverageComplete is vacuously true — a renderer must not turn "no
     // firewalls" into an all-clear, and `devices: 0` is the signal that says so.
     assert.equal(summary.neverAssessed, 0);
+  });
+});
+
+// --------------------------------------------------------------------------
+// ⛔ A COLLECTED VERSION SECVAULT CANNOT READ IS NOT A VERSION
+// --------------------------------------------------------------------------
+//
+// `coverageOf` tested `device.running` for TRUTHINESS, so a `sangfor` reporting
+// `'unknown'` counted as `assessed`: `devicesWithNoVersion` was 0 (it is computed
+// as `!p.runningVersion`), the firewall was in NEITHER the actionable nor the
+// uncovered population, and `coverageComplete` stayed TRUE — over a firewall
+// `buildUpgradePlan` had independently refused to plan
+// (`blockedReason: 'unreadable_running_version'`). The one flag that exists to
+// forbid a green headline over incomplete coverage authorised exactly that.
+
+describe('⛔ an unreadable running version is its own coverage state', () => {
+  it('coverageOf reports it, rather than calling the firewall assessed', () => {
+    assert.equal(
+      coverageOf({
+        id: 'x', vendor: 'sangfor', last_cve_assessed_at: '2026-09-25T00:00:00Z',
+        has_assessment_rows: true, running: 'unknown',
+      }, 0),
+      COVERAGE.ASSESSED_UNREADABLE_VERSION
+    );
+  });
+
+  it('a readable version is unaffected, for every vendor scheme in the product', () => {
+    for (const [vendor, running] of [
+      ['fortinet', 'v7.4.9,build2573'],
+      ['paloalto', '11.1.2-h3'],
+      ['cisco_asa', '9.18(4)15'],
+      ['checkpoint', 'R81.20 Take 41'],
+      ['sangfor', '8.0.85'],
+      ['forcepoint', '6.10.21'],
+    ]) {
+      assert.equal(
+        coverageOf({
+          id: 'x', vendor, last_cve_assessed_at: '2026-09-25T00:00:00Z',
+          has_assessment_rows: true, running,
+        }, 0),
+        COVERAGE.ASSESSED_CLEAR,
+        `${vendor} ${running} was read as unreadable`
+      );
+    }
+  });
+
+  it('it is NOT confused with a missing version row — they send an operator elsewhere', () => {
+    const missing = coverageOf({
+      id: 'x', vendor: 'sangfor', last_cve_assessed_at: '2026-09-25T00:00:00Z',
+      has_assessment_rows: true, running: null,
+    }, 0);
+    assert.equal(missing, COVERAGE.ASSESSED_NO_VERSION);
+    assert.notEqual(missing, COVERAGE.ASSESSED_UNREADABLE_VERSION);
+  });
+
+  it('and never assessed still outranks both — nothing was asked at all', () => {
+    assert.equal(
+      coverageOf({
+        id: 'x', vendor: 'sangfor', last_cve_assessed_at: null,
+        has_assessment_rows: false, running: 'unknown',
+      }, 0),
+      COVERAGE.NEVER_ASSESSED
+    );
+  });
+
+  it('⛔ coverageComplete is FALSE while any firewall carries one', async () => {
+    const pool = stubPool(
+      [
+        device({ id: 'a', name: 'readable' }),
+        device({ id: 'b', name: 'unreadable', vendor: 'sangfor', running: 'unknown' }),
+      ],
+      [assessment({ device_id: 'a' })]
+    );
+    const { plans, summary } = await getFleetUpgradePlan(pool);
+    assert.equal(summary.assessedUnreadableVersion, 1);
+    assert.equal(summary.coverageComplete, false,
+      'an all-clear is forbidden while a firewall cannot be planned at all');
+    // ⛔ And it is counted SEPARATELY: `devicesWithNoVersion` is computed as
+    // `!p.runningVersion` in the pure engine and cannot see this case.
+    assert.equal(summary.devicesWithNoVersion, 0);
+    assert.equal(byName(plans, 'unreadable').coverage, COVERAGE.ASSESSED_UNREADABLE_VERSION);
+  });
+
+  it('the plan for it carries the engine\'s own blocking reason', async () => {
+    const pool = stubPool(
+      [device({ id: 'b', name: 'unreadable', vendor: 'sangfor', running: 'unknown' })],
+      []
+    );
+    const { plans } = await getFleetUpgradePlan(pool);
+    assert.equal(plans[0].blockedReason, 'unreadable_running_version');
+    assert.equal(plans[0].recommendation, 'none');
+    assert.equal(plans[0].runningVersion, 'unknown', 'the collected string is reported verbatim');
   });
 });

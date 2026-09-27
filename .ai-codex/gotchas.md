@@ -1795,3 +1795,194 @@ itself as the work completed, which is this file's own "a scan over nothing pass
 
 ⛔ Not defects: `lib/syslog/actions.js`'s `sqlList` `.join(',')` builds a SQL fragment from module
 constants, and the other `join(',')` hits are query-string or SQL builders, not CSV.
+
+## ⛔ `raw_rule` CARRIES MATCHING AND ENFORCEMENT FIELDS NO COLUMN HOLDS (found 2026-09-26)
+
+`lib/engines/ruleConsolidation.js`'s canonical key spanned only the `firewall_rules` COLUMNS. So
+**7 of 41 `safe_to_merge` groups were not the same rule** and SecVault would have proposed merging
+them. Live, on the reference fleet:
+
+| firewall | field | what a merge would have done |
+|---|---|---|
+| TUM(TUTH1) #126/#127 | PAN-OS `source-user` | grants #126's destination to EVERY user, or strips #127's access from everyone but one |
+| OKF(F2) #26/#28 | FortiOS `utm-status`/`av-profile`/`ips-sensor`/`webfilter-profile` | merges an INSPECTED rule with an uninspected one |
+| TUG #5/#6 | PAN-OS `profile-setting` | differs by a whole spyware profile |
+| IDC FW #414/#415 | PAN-OS `log-start` | changes what the firewall records |
+| TSR_EKM #33/#57 | FortiOS `logtraffic` | same fact, one layer down |
+
+⛔ **THE STATED INTENT WAS ALREADY DEFEATED.** `log_enabled` is in the key precisely so a logged rule
+never merges with an unlogged one — and the last two rows differ in exactly that fact, expressed in a
+place no column was looking. **Anything reading `firewall_rules` to decide two rules are EQUIVALENT
+must account for `raw_rule`**, not just the columns.
+
+⛔ **A BLANKET HASH OF `raw_rule` IS NOT THE FIX** and would be worse: it folds in `@_uuid`, `uuid`,
+`policyid`, `@_name` and Panorama provenance, all distinct per rule, and collapses the feature to
+**zero groups on the whole fleet** — silently, no error, just a cleanup screen with nothing to say.
+So keys are classified BY NAME in three buckets (`RAW_KEY_SIGNIFICANT` in the key /
+`RAW_KEY_IGNORED` not in it, each entry naming the column that already carries the fact / `@_*`
+attributes as metadata by pattern), and ⛔ **AN UNLISTED KEY IS NEITHER SPLIT NOR IGNORED — IT FORCES
+`needs_review`** and is NAMED in the group's `undetermined` list, so the fix is to classify it rather
+than to widen a wildcard. ⛔ The asymmetry is deliberate: adding a key to SIGNIFICANT can only
+over-report (safe), adding one to IGNORED can CLEAR a group that should not be (unsafe) — so
+SIGNIFICANT is liberal and lists fields not yet seen live, and IGNORED is strict.
+
+⛔ **fast-xml-parser gives an element carrying BOTH text and attributes as `{'#text':'no','@_loc':…}`**,
+and reading the OBJECT instead of its text made one live rule's `negate-destination` look NEGATED.
+Unwrapped once (`unwrapXmlText`) so the key, the negation guard and the scalar canonicaliser agree.
+
+## ⛔ AN EXPLICIT VENDOR DEFAULT AND AN ABSENT KEY ARE THE SAME RULE (2026-09-26)
+
+PAN-OS writes `negate-source: no` on **131 of 1,601** live rules and omits it on the rest, and
+`destination-hip: any` on **1,197** while 404 carry nothing. Keying those apart splits a real group
+over a SPELLING — so every "this key constrains nothing" value folds onto one `NEUTRAL_TOKEN`
+(`''`/`no`/`none`/`false`/`0`/`disable`/`disabled`/`off`/`unset`/`any`).
+
+⛔ **THIS IS THE OPPOSITE DIRECTION FROM THIS FILE'S USUAL FAILED-READ BUG, AND IT IS STILL WRONG.**
+Over-precision here produces a FALSE NEGATIVE: a consolidation group that should have been offered
+never appears at all, which looks exactly like a clean ruleset. That is the same silent under-report a
+blanket hash produces, arrived at one field at a time.
+
+⛔ **`all` IS DELIBERATELY NOT IN THAT FAMILY.** FortiOS `logtraffic: all` logs every session while
+the absent default logs only UTM events, so folding them would merge a fully-logged rule with a
+partly-logged one — the exact class of mistake the whole classification exists to stop. A value that
+LOOKS permissive is not automatically neutral; check what the vendor default actually is.
+
+## ⛔ A DUPLICATE `sequence_number` IS NOT "OUTSIDE THE SPAN" (2026-09-26)
+
+The interference check skipped any rule with `cs <= mergePosition || cs >= maxSeq`, which is sound
+only if sequence numbers are UNIQUE per device+vdom — and **nothing in this codebase checks that.** A
+non-member `deny` sharing a member's position may sit either side of it in evaluation order, and if it
+sits below, the later members move past it. Both bounds are now exclusive only OUTSIDE the span, and a
+shared position inside it pushes `duplicate_sequence_number_in_span` into `undetermined`.
+
+⛔ **WHAT THE OLD FORM PRODUCED WAS A SENTENCE, NOT A SILENCE**: the Consolidation tab printed
+*"Nothing enabled sits between these rules."* over a `deny` sitting inside the span, and offered the
+group as `safe_to_merge`.
+
+⛔ **MEASURED 2026-09-26: ZERO duplicates on the live fleet, so this guard has never fired — do not
+delete it on the strength of re-measuring that zero.** It exists for the collection that goes wrong
+LATER, which is precisely when a cleanup proposal must not be trusted. (Check Point already renumbers
+`rule-number` per layer — see the Check Point note above — so non-unique positions are not
+hypothetical in this schema.)
+
+## ⛔ `storeObjects` WRITES `[]` FOR A GROUP THE ADAPTER DID NOT RETURN (2026-09-26)
+
+`lib/engines/objectUsage.js`'s `storeObjects` stores `members: (g && g.members) || []`, so a group the
+adapter enumerated without members is indistinguishable in `network_objects` from a genuinely empty
+one. **Two such groups exist live (Vietnam-YCC, OKF(F2)).**
+
+⛔ **AND AN EMPTY EXTENT USED TO RESOLVE TO A CONFIDENT "THESE DO NOT OVERLAP".** An address group
+whose `members` is `[]` resolves FINE through `objectResolver` — the group itself was found — so it
+contributes no range AND no `unresolvedNames` entry. `ruleConsolidation`'s `dimensionOverlap` was
+documented as yielding `unknown` on "a single unresolved object name", and that was satisfied to the
+letter while it returned `no` for a side that had been enumerated as empty: a PARTIAL object read
+produced "provably disjoint" and cleared a consolidation group with a `deny` sitting inside its span.
+⛔ **A ZERO-RANGE NON-WILDCARD EXTENT IS `unknown`, NOT `no`** — now asserted on both the address and
+the service branch. A cycle-stopped recursion in that same resolver arrives here the same way.
+
+## ⛔ AN UNKNOWN `object_type` MUST BE EXCLUDED FROM THE USAGE TEST, NOT REPORTED `unused` (2026-09-26)
+
+`network_objects.object_type` has **no CHECK constraint**, so `KNOWN_OBJECT_TYPES` in
+`lib/engines/objectUsage.js` is the only thing that says which types exist. An object outside it got
+`namespaceForType() === 'other'`, never entered `byNamespace`, and the skip test read
+`if (ns !== 'other' && used[ns].has(name)) continue;` — **false for `other` whatever referenced it.**
+So the first FQDN, region or URL-category object any adapter ever collects would have arrived on the
+Objects tab as safe to delete, on every device, with nothing anywhere reporting a problem. No live row
+carries an unknown type today, so this is LATENT — and against **4,286 stored `unused` findings** it
+would not have stood out when it stopped being.
+
+⛔ **THE FIX IS TO EMIT NOTHING, NOT A SOFTER FINDING.** `object_analysis_results` carries only
+`finding_type` (`unused`|`duplicate`) plus free text, so there is nowhere honest to put "we could not
+evaluate this", and an "unverifiable unused" row would render, count and export identically to a
+measured one. `unevaluatableObjects()` exposes the excluded set so a caller COUNTS it rather than
+discovering it missing — a silent exclusion is how a partial answer looks complete.
+
+## ⛔ U+26A0 (⚠) RENDERS AS `&` IN THIS REPO'S PDFs (verified at byte level 2026-09-27)
+
+pdfkit's built-in Helvetica is WinAnsi. `doc.text('X1⚠X2')` emits **0x26 (`&`) followed by 0xA0**, and
+`widthOfString('⚠')` returns **0** — so the wrap measurement is two glyphs short for the rest of the
+line as well. No error, no warning, nothing a passing suite sees; the only symptom is a stray
+ampersand in an audit artefact a customer keeps.
+
+`lib/reports/chassis.js`'s `pdfSafe()` / `GLYPH_MAP` is **the one place to fix a glyph** —
+`installPdfSafeText(doc)` wraps `doc.text` so every string drawn anywhere goes through it. Mapped:
+`⚠ ⚡`→`!` (plus U+FE0F, which follows them whenever the text was pasted from an emoji-presenting
+source and is invisible garbage on its own), `✓✔`→`y`, `✗✘`→`x`, `→⇒`→`->`, dashes, bullets, curly
+quotes, NBSP.
+
+⛔ **U+2026 (…) IS DELIBERATELY NOT MAPPED.** Probed the same way: WinAnsi encodes it as the single
+byte 0x85 at width 10, so it DRAWS. Mapping it would have changed the bytes of two already-shipped
+audit reports for no defect, and this chassis exists precisely because extraction must not change
+output. ⛔ **TEST UNRENDERABILITY AGAINST THE REAL FONT, NEVER AGAINST A LIST** —
+`tests/reportUnmeasuredText.test.js` asserts `widthOfString(c) === 0` for every mapped glyph and `> 0`
+for the ellipsis counter-case, so the list cannot drift with pdfkit and nothing is added on the
+strength of looking unusual.
+
+## ⛔ A SMOKE MARKER MUST NOT BE DATA-DEPENDENT (found 2026-09-27)
+
+`scripts/smoke.js` shipped two markers that only some DATA produces: `'Gaps by evidence source'` is a
+heading inside `rows.length > 0` in `CoverageRegister.js`, and `'In the smaller group'` is a `<th>`
+`ConformanceBoard` renders only when a `measured` cohort holds at least one VALUE deviation (its
+`RANKING_HEADING`'s lowercase *"…in the smaller group"* does not satisfy a case-sensitive
+`includes()` either, so the marker was narrower still).
+
+⛔ **BOTH DIRECTIONS ARE WRONG AND THE FLEET DECIDES WHICH.** A customer with two FortiGates and two
+Palo Altos has every cohort below `MIN_COHORT` and may have no recorded gaps: nothing renders, both
+pages are CORRECT, **the sweep goes red, `Update-SecVault.ps1` sets `hadFailure`, and the closing
+banner refuses to say the deploy completed.** Conversely a fleet that happens to have findings makes
+the sweep go green over a page that could be dead. A marker has to be something the page prints
+whatever the data says — an unconditional `StatCard` label (`'Firewalls with a blind spot'`) or the
+board's own purpose sentence. ⛔ Alongside the existing rule: **never a NAV LABEL**, which the shared
+layout renders into every page.
+
+⛔ **AND THE SAME CHECK FOUND A PRE-EXISTING DEAD MARKER.** `/logs` asserted
+`'Log search is not available'` and **nothing in the product renders that string** — the
+capability-refusal branch draws `components/ui/NoAccess.js`, whose wording is *"… is not part of the
+`<role>` role"*. A marker no page can produce can only ever fail; it was harmless purely because its
+two OR-siblings do render, which is exactly how it survived. `tests/smokeHarness.test.js` now names
+both data-dependent strings with the guard each sat behind.
+
+## ⛔ A GUARD WRITTEN AS AN ASSERTION ABOUT SOURCE TEXT PINS THE SHAPE, NOT THE BEHAVIOUR
+
+`tests/fixedVersionFromRanges.test.js` asserts the repair counter as EXACT SOURCE TEXT:
+
+```js
+assert.match(src, /stats\.repaired \+= Number\(res && res\.rowCount\) \|\| 0/);
+```
+
+The thing it protects is real — `stats.repaired++` used to fire whether or not the `WHERE` matched, so
+a statement the database REFUSED was reported as a repair. But reading the rowCount into a local
+variable first, or reordering the expression, **DISARMS the assertion while preserving the defect it
+was written to catch.** ⛔ **OUTSTANDING: convert this to a behavioural test** — drive the function
+with a stub pool returning `rowCount: 0` and assert `stats.repaired` stays 0. It is recorded here so
+the next session finds it rather than re-deriving it.
+
+⛔ **PRECEDENT, ALREADY FIXED THIS WAY:** a `cveHub` freshness test asserted an `errors.push` LINE
+EXISTED rather than that it RAN, a mutation escaped it, and the logic was extracted into
+`freshnessErrors()` so it could be tested by behaviour. Same family as the six-agent-sweep pattern
+above (`assert.match(src, /startsWith\('\/\/'\)/)` over the login redirect guard). **A test that reads
+source text can prove a line exists and nothing else.**
+
+## ⛔ THE COMMENT STRIPPER'S ORDER IS LOAD-BEARING, AND ITS OWN GUARD CANNOT FIRE FOR EVERY SPELLING
+
+44 test files in this repo scan SOURCE TEXT, because several of its rules can only be checked that
+way. Every one must strip comments first, and **BLOCK-BEFORE-LINE is wrong**: a `//` comment
+containing the characters `/*` opens a phantom block running to the next real `*/`.
+`lib/feeds/paloalto.js:407` says `feeds/*.js`, and its phantom block **ate 216 lines**. Measured
+repo-wide 2026-09-27: **17 source files carry the trigger and the wrong order discards 52,339
+characters of REAL CODE** — a quarter of `scripts/dbcheck.js`, 40% of `lib/deviceScopePaths.js`.
+Eleven test files had it. ⛔ **No security verdict flipped, which is why it survived**: the one
+block-first test reading a damaged file returned the same answer either way for all 17.
+
+Use the shared `tests/stripComments.js` (line first, then block; `{sql:true}` for embedded `--`).
+`tests/stripOrder.test.js` forbids the order, pinned against the REAL `paloalto.js` rather than a
+fixture so it cannot pass while the repo drifts, with NAMED exemptions carrying a reason each.
+
+⛔ **AND `stripOrder.test.js`'s OWN DETECTION IS FRAGILE — A GUARD THAT CANNOT FIRE, INSIDE THE GUARD
+WRITTEN TO CATCH GUARDS THAT CANNOT FIRE.** It identifies a line-stripper only by the literal
+`LINE_SIG = '.*$'`, so a file spelling the same thing `//[^\n]*` or `[^\n]*$` yields `li === -1`, hits
+the `=== -1` "not both, nothing to order" guard, and is **SKIPPED rather than caught** — files that
+escaped it that way were found by hand. (Its FIRST draft failed the same way for a different reason:
+it searched for `/\*[\s\S]*?\*/` while the files contain `\/\*[\s\S]*?\*\/`, both indices were -1, and
+it PASSED over all eleven known offenders.) If you add a source-scanning test, REQUIRE THE SHARED
+HELPER — matching a signature is not how this gets enforced reliably.

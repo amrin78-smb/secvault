@@ -46,7 +46,7 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 ## Rule Analysis
 
 [server] /analysis — FleetAnalysisPage — fleet-wide "Rule Health" table: one row per active device with per-severity (`rule_analysis_results`) finding counts + `computeRiskScoreFromCounts()` risk band/score badge, links into each device's `/devices/[id]/analysis`.
-[server] /devices/[id]/analysis — DeviceAnalysisPage — 13-tab rule-analysis workspace for one device via `?tab=summary|rules|findings|cleanup|optimization|reorder|risk|risky-rules|objects|tracking|reachability|access-path|relationships` (default `summary`). `summary` = clickable StatCard grid (Total/Allowed/Denied/Inactive/NAT/Any-to-Any/Logging-Disabled, most linking into filtered `/rules` or `?tab=findings`) + severity StatCards + `RuleStatsBarChart`/`FindingsBarChart`. `findings` = filterable (severity/finding_type, 12 types) findings table. Other tabs render one dedicated component each (`CleanupTab`, `OptimizationTab`, `ReorderTab`, `RiskTab`, `RiskyRulesTab`, `ObjectsTab`, `TrackingTab`, `ReachabilityTab`, `AccessPathTab` — added 2026-08-02, object/IP/port-resolved query tool, see `lib.md`'s `objectResolver.js` entry — `RuleRelationshipTab`). "Run Analysis" button admin-gated; CSV export always available.
+[server] /devices/[id]/analysis — DeviceAnalysisPage — 14-tab rule-analysis workspace for one device via `?tab=summary|rules|findings|cleanup|optimization|reorder|consolidation|risk|risky-rules|objects|tracking|reachability|access-path|relationships` (default `summary`). ⛔ `consolidation` (A4, v2.190.0) was INSERTED after `reorder` in the tab BAR — the visual order is free, the tab KEY is a URL contract and nothing was renamed. `summary` = clickable StatCard grid (Total/Allowed/Denied/Inactive/NAT/Any-to-Any/Logging-Disabled, most linking into filtered `/rules` or `?tab=findings`) + severity StatCards + `RuleStatsBarChart`/`FindingsBarChart`. `findings` = filterable (severity/finding_type, 12 types) findings table. Other tabs render one dedicated component each (`CleanupTab`, `OptimizationTab`, `ReorderTab`, `ConsolidationTab` — A4, v2.190.0, async server component doing its own `getDeviceConsolidation()` read — `RiskTab`, `RiskyRulesTab`, `ObjectsTab`, `TrackingTab`, `ReachabilityTab`, `AccessPathTab` — added 2026-08-02, object/IP/port-resolved query tool, see `lib.md`'s `objectResolver.js` entry — `RuleRelationshipTab`). "Run Analysis" button admin-gated; CSV export always available.
 
 ## Compliance
 
@@ -235,6 +235,53 @@ covered**, which is why the engine ranks by CONSEQUENCE rather than gap count.
 
 Smoke markers: `Gaps by evidence source` / `Coverage could not be shown` — deliberately NOT the nav
 label, which the shared shell renders into every page.
+
+## app/(dashboard)/devices/[id]/changes/page.js — "What Followed These Changes" (A7)
+
+⛔ **BUILT, NOT YET RELEASED — `package.json` still reads 2.190.0 at the time of writing.** The
+engine, the plumbing, the view and four test files are in the tree; the version bump and the
+`releaseNotes` entry are not. Do not read a version number into this entry until one exists.
+
+A7, change → traffic outcome. Not a new page and **not a new tab**: a section rendered by
+`components/analysis/ChangeOutcomeBoard.js` on the EXISTING config-change timeline, from
+`getDeviceChangeOutcome(pool, deviceId, ...)` (`lib/engines/changeOutcomeData.js`) over the pure
+`lib/engines/changeOutcome.js`. No API route, no stored verdict, no cron job — read-time, the rule
+`/segmentation` and `/applications` already follow.
+
+⛔ **ABOVE THE CHANGE LIST, DELIBERATELY.** It is the same set of changes the list underneath
+enumerates, seen from the other side. A reader who scrolls the diffs first has already decided
+which changes mattered, and the board's most common answer is that it cannot tell them apart from
+an ordinary day.
+
+⛔ **THE CONTROL IS THE FEATURE, AND IT IS WHY THIS IS A BOARD AND NOT A PERCENTAGE.** Measured
+2026-09-27: 24h either side of a real config change averaged **+13.6%** (61 changes), while 24h
+either side of an ORDINARY day averaged **+17.6%** (284 pairs) — *the change-adjacent delta is
+smaller than the noise*. A naive version of this feature would have printed 61 plausible
+percentages and an operator would have read causation into every one. So every verdict is stated
+against that firewall's own measured variability, and the page prints no bare delta.
+
+⛔ **ONE FIREWALL, PASSED AS A ONE-ELEMENT LIST.** The board is fleet-shaped so it can be dropped
+on a fleet page later, and `getChangeOutcomes()` (the fleet entry point) exists — but **nothing
+calls it outside the tests today**. There is no fleet A7 surface; do not document one.
+
+⛔ **SIX VERDICTS, EACH ITS OWN VISIBLE STATE** (`VERDICTS` in the engine):
+`indistinguishable` (the common answer, and NOT "no effect") · `exceeded_normal_variation` ·
+`no_traffic_window` · `insufficient_baseline` · `baseline_degenerate` · **`window_incomplete`**.
+The last one exists because of the first live run: four changes dated 2026-09-08 — the rollup's own
+first day — reported **+814%**, +691% and +239% and cleared every band, because their "before"
+window lay in the hours the collector had only just started. It was tested before there was traffic
+to test it against.
+
+⛔ **`exceeded` IS NOT "significant" AND NOTHING HERE SAYS "caused".** `OUTCOME_CLAIM` is exported
+from the engine and `tests/changeOutcomeBoard.test.js` rejects the causal vocabulary from every
+string in the view.
+
+⛔ **A FAILED READ IS NOT AN EMPTY BOARD.** `failures` non-empty suppresses every verdict and count
+rather than printing a quiet fleet — zero changes assessed otherwise reads exactly like a fleet
+whose changes were all uneventful.
+
+Smoke marker unchanged: the page's marker is still `Configuration Changes` (`scripts/smoke.js`), i.e.
+**the sweep does not yet assert that this board rendered.** Worth adding when it gets its version.
 
 ## app/(dashboard)/reports/page.js  -> `/reports`  (v2.120.0, rebuilt v2.121.0)
 

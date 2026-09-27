@@ -62,6 +62,11 @@ if (BASE.startsWith('https://') && (isLocal || process.env.SMOKE_INSECURE === '1
 // legitimate branch (an empty-state and a populated one) and both are a
 // successful render.
 //
+// `alsoMarkers` is an AND: every one must be present. Use it when a page renders
+// two INDEPENDENT sections, because adding to `markers` can only ever make a
+// page easier to pass — the old marker satisfies the OR while the new section is
+// blank.
+//
 // ⛔ NAV_LABELS IS NOT DECORATION -- tests/smokeHarness.test.js asserts that no
 // marker in the table below equals one of these. The first draft of this file
 // declared the list, wrote the warning above it, and then never used it, which
@@ -78,15 +83,31 @@ const STATIC_ROUTES = [
   { path: '/', markers: ['Security Score', 'Overview sections'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
   { path: '/alerts', markers: ['Fleet-wide items needing attention'] },
-  // ⛔ NOT a nav label: the sidebar renders 'Coverage' into every page from
-  // the shared layout, so such a marker is satisfied by a working shell
-  // around a dead page -- the exact failure this sweep exists to catch.
-  { path: '/coverage', markers: ['Gaps by evidence source', 'Coverage could not be shown'] },
-  // ⛔ Column headers from ConformanceBoard, not the nav label: the shell
-  // renders 'Conformance' into every page, so such a marker is satisfied by a
-  // working shell around a dead page.
-  { path: '/conformance', markers: ['In the smaller group', 'Conformance could not be shown'] },
-  { path: '/logs', markers: ['Search raw firewall logs', 'Log search is not available', 'received_at'] },
+  // ⛔ NOT a nav label ('Coverage' is one, rendered into every page by the
+  // shared layout) AND NOT DATA-DEPENDENT. The first draft used
+  // 'Gaps by evidence source', which CoverageRegister.js renders inside
+  // `rows.length > 0` -- so a fleet with no recorded gaps fails a sweep of two
+  // pages that rendered perfectly, and Update-SecVault.ps1 then sets
+  // `hadFailure` and refuses to say the deploy completed. 'Firewalls with a
+  // blind spot' is an unconditional StatCard label, the same shape as the
+  // /vulnerability?tab=upgrade marker below. The second marker is the
+  // scope-refusal branch, which renders no register at all.
+  { path: '/coverage', markers: ['Firewalls with a blind spot', 'Coverage could not be shown'] },
+  // ⛔ SAME DEFECT, SAME FIX. 'In the smaller group' is a <th> ConformanceBoard
+  // renders only when a `measured` cohort holds at least one VALUE deviation --
+  // and on a fleet of, say, two FortiGates and two Palo Altos every cohort is
+  // below MIN_COHORT, nothing renders, and both pages are CORRECT. (Its
+  // RANKING_HEADING's lowercase "...in the smaller group" does not satisfy a
+  // case-sensitive includes() either, so the marker was narrower still.)
+  // BOARD_PURPOSE is printed unconditionally above the tiles.
+  { path: '/conformance', markers: ['A cohort is one vendor collected one way', 'Conformance could not be shown'] },
+  // ⛔ 'Log search is not available' USED TO SIT HERE AND NOTHING RENDERED IT
+  // (found 2026-09-27 by tests/smokeHarness.test.js's new source check). The
+  // capability-refusal branch draws `components/ui/NoAccess.js`, whose wording is
+  // "Log search is not part of the ... role". A marker no page can produce is a
+  // marker that can only ever fail — harmless here only because the two beside it
+  // are OR'd and do render, which is exactly how it went unnoticed.
+  { path: '/logs', markers: ['Search raw firewall logs', 'is not part of the', 'received_at'] },
   { path: '/reports', markers: ['Point-in-time PDFs you can hand to an auditor'] },
   { path: '/devices', markers: ['Firewalls sending syslog from an address that is not in the inventory', 'Add firewall'] },
   { path: '/devices/discovered', markers: ['Discovered Senders'] },
@@ -238,6 +259,21 @@ function pageVerdict(route, { status, location, body }) {
       + 'this is the blank-page shape'
     );
   }
+  // ⛔ `alsoMarkers` IS AN AND, AND THAT IS THE WHOLE REASON IT EXISTS. `markers`
+  // is an OR, so adding a second entry to it can only ever make a page EASIER to
+  // pass. A page that renders two independent sections — an existing one and a
+  // newly added board below it — therefore cannot be covered by `markers` at all:
+  // the old marker satisfies the OR while the new section renders nothing, which
+  // is exactly the blank-body failure this sweep was written for.
+  for (const m of route.alsoMarkers || []) {
+    if (!body.includes(m)) {
+      return fail(
+        `200 and ${body.length} bytes, and ${JSON.stringify(hit.slice(0, 40))} rendered, `
+        + `but a REQUIRED second section did not (${JSON.stringify(m.slice(0, 60))}) — `
+        + 'one section of this page is blank'
+      );
+    }
+  }
   return { path: route.path, ok: true, status: 200, bytes: body.length, marker: hit };
 }
 
@@ -268,6 +304,16 @@ async function discoverRoutes() {
             markers: suffix === '' ? ['← Back to firewalls', '&#x2190; Back to firewalls', dev.name]
               : suffix === '/changes' ? ['Configuration Changes']
                 : [dev.name],
+            // ⛔ THE A7 BOARD IS A SECOND SECTION ON THIS PAGE, so it needs an AND
+            // rather than another OR branch. It is a server component handing a
+            // whole computed object to a client one — the shape that shipped a
+            // blank /reports in v2.120.0 with 2,399 tests passing and a clean
+            // build. This sentence comes from ChangeOutcomeBoard's BOARD_PURPOSE
+            // and renders before any list, so it is present on every branch
+            // including "nothing detected".
+            alsoMarkers: suffix === '/changes'
+              ? ['compared with how much that firewall normally varies']
+              : undefined,
           });
         }
         // ⛔ NOT the bare word 'Compliance' — that is the SIDEBAR's label, which

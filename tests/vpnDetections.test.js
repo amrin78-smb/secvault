@@ -47,7 +47,17 @@ const {
   COUNTRY_CHANGE_MAX_GAP_HOURS,
   OFF_HOURS_MIN_BASELINE_DAYS,
   buildHeadline,
+  normalisedCountryList,
 } = require('../lib/engines/vpnDetections');
+
+// ⛔ THE CONSUMER, REQUIRED ON PURPOSE. Three of these detections are read by
+// lib/vpnDetectionFilters.js, and the bug that made `account_targeted`
+// unfilterable was an AGREEMENT bug between the two files, not a bug inside
+// either: the engine emitted `countries: 8` and the filter read `countries[]`.
+// Both files were internally consistent and individually tested, and 28 live
+// findings silently vanished from every country filter. So the contract is
+// pinned by calling the real reader against the real builder's output.
+const { countriesOf, matchesFilters, countriesIn } = require('../lib/vpnDetectionFilters');
 
 // --------------------------------------------------------------------------
 // Fixtures
@@ -329,8 +339,8 @@ describe('account targeted from many addresses', () => {
   it('ranks by distinct source count and always marks the attempt count a floor', () => {
     const d = buildTargetedAccountDetection({
       rows: [
-        { username: 'quiet.user', sources: 11, countries: 2, attempts_floor: 12, hours: 4, last_seen_at: null },
-        { username: 'pongake.lekrat', sources: 71, countries: 8, attempts_floor: 84, hours: 22, last_seen_at: null },
+        { username: 'quiet.user', sources: 11, countries: ['PL', 'TH'], attempts_floor: 12, hours: 4, last_seen_at: null },
+        { username: 'pongake.lekrat', sources: 71, countries: ['BG', 'CH', 'DE', 'ES', 'GB', 'PL', 'RU', 'US'], attempts_floor: 84, hours: 22, last_seen_at: null },
       ],
       windowHours: 24,
     });
@@ -339,6 +349,53 @@ describe('account targeted from many addresses', () => {
     // ⛔ ALWAYS a floor here: this aggregation is per-username across buckets
     // that each carry an undivided event count.
     assert.ok(d.findings.every((f) => f.attemptsIsFloor === true));
+  });
+
+  // ⛔ THE FIELD NAME IS PART OF THE CONTRACT, NOT DECORATION. This detection
+  // emitted `countries: <integer>` — count(DISTINCT src_country) — under the name
+  // every other detection uses for an ARRAY of country names.
+  // lib/vpnDetectionFilters.js's countriesOf() does `Array.isArray(finding.countries)`,
+  // which is false for a number, so it returned [] and the country filter
+  // REJECTED every account_targeted finding for every country. Measured live: 54
+  // findings, 0 survivors, all 19 offered countries — and the panel then printed
+  // "Nothing matched this detection in the last 24 hours" over them.
+  it('⛔ `countries` is the LIST and `countryCount` is the NUMBER — a filter cannot read a count', () => {
+    const d = buildTargetedAccountDetection({
+      rows: [{
+        username: 'admin', sources: 26, attempts_floor: 40, hours: 12,
+        // Exactly the live shape: the rollup holds BOTH vendors' spellings.
+        countries: ['CA', 'CH', 'DE', 'Germany', 'Netherlands', 'PL', 'United States', 'US'],
+      }],
+      windowHours: 24,
+    });
+    const f = d.findings[0];
+    assert.ok(Array.isArray(f.countries), 'countries must be the list the filter reads');
+    // ⛔ ONE VOCABULARY, so CH/Switzerland and DE/Germany fold. The raw
+    // count(DISTINCT src_country) said 8; six countries is the honest figure.
+    assert.deepEqual(f.countries,
+      ['Canada', 'Germany', 'Netherlands', 'Poland', 'Switzerland', 'United States']);
+    assert.equal(f.countryCount, 6);
+    assert.notEqual(f.countryCount, 8);
+    // The evidence sentence quotes the same number the column shows.
+    assert.match(f.evidence, /in 6 countries/);
+
+    // ⛔ THE CROSS-FILE CONTRACT. This is the assertion that was missing.
+    assert.deepEqual(countriesOf(f), f.countries);
+    assert.ok(matchesFilters(f, { country: 'Switzerland' }),
+      'a country filter must be able to find an account_targeted finding');
+    assert.ok(!matchesFilters(f, { country: 'Thailand' }));
+  });
+
+  it('a row that named no country is an empty list, not a zero pretending to be one', () => {
+    const d = buildTargetedAccountDetection({
+      rows: [{ username: 'x', sources: 12, countries: null, attempts_floor: 12, hours: 2 }],
+      windowHours: 24,
+    });
+    assert.deepEqual(d.findings[0].countries, []);
+    assert.equal(d.findings[0].countryCount, 0);
+    // ⛔ And it is then EXCLUDED by a country filter rather than passed through:
+    // "we do not know where this came from" is not a match for Switzerland.
+    assert.ok(!matchesFilters(d.findings[0], { country: 'Switzerland' }));
   });
 
   it('never claims the targeted usernames are or are not real accounts', () => {
@@ -672,6 +729,60 @@ describe('getVpnDetections orchestration', () => {
     }
   });
 
+  // ⛔ THE HEADLINE WINDOWS MUST BE THE SAME LENGTH, AND THE BOUND IS WHERE IT
+  // WAS LOST. Asserted against the statements actually HANDED TO THE DATABASE,
+  // because that is the artefact that was wrong: `bucket_hour > $1` for current
+  // and `<= $1` for previous, while every other query in the engine windows on
+  // `>= $1`. The bucket at exactly windowStart was removed from the current
+  // window AND added to the comparison, so the error is doubled and always
+  // points the same way — measured live, 23 buckets against 24, understating a
+  // rise 3.2x in the direction goodDirection 'down' paints GREEN.
+  it('⛔ the headline windows share a boundary — no `> $1` and no `<= $1`', async () => {
+    const pool = stubPool();
+    await getVpnDetections(pool, { hours: 24, now: NOW });
+    const headline = pool.statements.filter((s) => /cur_failed|cur_usernames/.test(s.sql));
+    assert.equal(headline.length, 2, 'the event totals and the username count, two statements');
+    for (const s of headline) {
+      assert.doesNotMatch(s.sql, /bucket_hour > \$1/,
+        'the current window drops the bucket at its own start');
+      assert.doesNotMatch(s.sql, /bucket_hour <= \$1/,
+        'the previous window claims a bucket that belongs to the current one');
+      assert.match(s.sql, /bucket_hour >= \$1::timestamptz/);
+      assert.match(s.sql, /bucket_hour < +\$1::timestamptz/);
+      // The outer bound too: it decides where the PREVIOUS window starts.
+      assert.doesNotMatch(s.sql, /bucket_hour > \$2/);
+      assert.match(s.sql, /bucket_hour >= \$2::timestamptz/);
+    }
+  });
+
+  it('⛔ the username floor flag describes the FAILURE buckets, in BOTH windows', async () => {
+    const pool = stubPool();
+    await getVpnDetections(pool, { hours: 24, now: NOW });
+    const [headline] = pool.statements.filter((s) => /cur_truncated/.test(s.sql));
+    assert.ok(headline, 'the headline query must declare the floor flag');
+    // It was computed over EVERY outcome while the username count it qualifies
+    // counts failure buckets only — so a capped SUCCESS bucket declared a floor
+    // on a number it had not contributed to.
+    assert.match(headline.sql,
+      /bool_or\(usernames_truncated\) FILTER \(WHERE auth_outcome = 'failure' AND bucket_hour >= \$1/);
+    // And there was no previous-window equivalent at all, so a declared floor
+    // could be compared against an undeclared one.
+    assert.match(headline.sql,
+      /bool_or\(usernames_truncated\) FILTER \(WHERE auth_outcome = 'failure' AND bucket_hour < +\$1/);
+    assert.match(headline.sql, /AS prev_truncated/);
+  });
+
+  it('⛔ the whole strip is unmeasured when the window holds no rollup rows', async () => {
+    // The stub returns no headline row at all, which is the shape a window with
+    // no VPN authentication evidence produces. Every current figure must be null.
+    const pool = stubPool();
+    const r = await getVpnDetections(pool, { hours: 24, now: NOW });
+    assert.equal(r.headline.currentWindowCovered, false);
+    for (const f of r.headline.figures) {
+      assert.equal(f.current, null, `${f.key} invented a value from an absent row`);
+    }
+  });
+
   it('⛔ the per-user attempt floor is expressed in SQL, not patched up afterwards', async () => {
     const pool = stubPool();
     await getVpnDetections(pool, { hours: 24, now: NOW });
@@ -765,13 +876,105 @@ describe('country spellings are folded before grouping', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// ONE COUNTRY VOCABULARY
+// ─────────────────────────────────────────────────────────────────────────
+//
+// ⛔ Palo Alto emits `CH`, FortiOS emits `Switzerland`, and the country filter's
+// dropdown is DERIVED from whatever the findings carry. Two detections read the
+// raw column while two came through getVpnLoginLocations() (which normalises), so
+// the one dropdown offered both spellings — measured live, 16 options for ~11
+// countries, including CH *and* Switzerland, DE *and* Germany, CA *and* Canada.
+// Picking either then filtered two detections and zeroed the other two, which
+// printed an all-clear about the window over findings they still held.
+describe('⛔ one country vocabulary across all six detections', () => {
+  it('normalisedCountryList folds both spellings and keeps an unmapped code verbatim', () => {
+    assert.deepEqual(normalisedCountryList(['CH', 'Switzerland', 'DE']),
+      ['Germany', 'Switzerland']);
+    // ⛔ An unrecognised code is kept, never dropped and never guessed at — the
+    // rule lib/syslog/vpnAuthStats.js's own map documents. KZ is live today.
+    assert.deepEqual(normalisedCountryList(['KZ']), ['KZ']);
+    for (const bad of [null, undefined, 5, 'CH', {}]) {
+      assert.deepEqual(normalisedCountryList(bad), []);
+    }
+  });
+
+  it('brute force reports the country by NAME, not by ISO code', () => {
+    const d = buildBruteForceDetection({
+      rows: [{
+        username: 'admin', src_ip: '1.2.3.4', src_country: 'CH',
+        attempts_floor: 12, hours: 3,
+        device_ids: ['dev-palo'], device_names: ['IDC FW'],
+      }],
+      baselineByDevice: baselineMap(PALO),
+      windowHours: 24,
+    });
+    assert.equal(d.findings[0].country, 'Switzerland');
+    assert.ok(matchesFilters(d.findings[0], { country: 'Switzerland' }));
+  });
+
+  it('off-hours reports the country by NAME too, and sorts the list', () => {
+    const d = buildOffHoursDetection({
+      hourRows: [],
+      successRows: [
+        successRow('sistema', '2026-09-09T17:00:00.000Z', 'CH'),
+        successRow('sistema', '2026-09-09T17:00:00.000Z', 'Germany', { src_ip: '5.6.7.8' }),
+      ],
+      baseline: THIN_BASELINE,
+      windowStart: WINDOW_START,
+    });
+    // Thin baseline, so this is an unverifiable observation — which still carries
+    // countries and still populates the dropdown.
+    assert.deepEqual(d.unverifiable[0].countries, ['Germany', 'Switzerland']);
+  });
+
+  it('⛔ the derived dropdown therefore offers each country ONCE', () => {
+    const detections = [
+      // Spray already speaks names (it comes through getVpnLoginLocations).
+      buildSprayDetection({
+        sources: [source({ srcIp: '9.9.9.9', country: 'Switzerland' })],
+        attributionBySource: attribution({ '9.9.9.9': { deviceIds: ['dev-palo'], deviceNames: ['IDC FW'], vendors: ['paloalto'], unattributed: false, hours: 4 } }),
+        baselineByDevice: baselineMap(PALO),
+        windowHours: 24,
+      }),
+      buildBruteForceDetection({
+        rows: [{ username: 'admin', src_ip: '1.2.3.4', src_country: 'CH', attempts_floor: 12, hours: 3, device_ids: ['dev-palo'], device_names: ['IDC FW'] }],
+        baselineByDevice: baselineMap(PALO),
+        windowHours: 24,
+      }),
+      buildTargetedAccountDetection({
+        rows: [{ username: 'admin', sources: 12, countries: ['CH', 'Switzerland'], attempts_floor: 12, hours: 2 }],
+        windowHours: 24,
+      }),
+      buildOffHoursDetection({
+        hourRows: [],
+        successRows: [successRow('sistema', '2026-09-09T17:00:00.000Z', 'CH')],
+        baseline: THIN_BASELINE,
+        windowStart: WINDOW_START,
+      }),
+    ];
+    const offered = countriesIn(detections);
+    assert.deepEqual(offered, ['Switzerland'],
+      'the dropdown offered both CH and Switzerland for one country');
+    for (const code of ['CH', 'DE', 'US']) {
+      assert.ok(!offered.includes(code), `${code} leaked a raw ISO code into the filter`);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 describe('⛔ buildHeadline — the strip at the top of the threat page', () => {
   const WS = new Date('2026-09-25T12:00:00Z');
   const PS = new Date('2026-09-24T12:00:00Z');
+  // ⛔ `cur_rows`/`prev_rows` ARE PART OF THE SHAPE, and their absence is now the
+  // unmeasured state rather than a zero — which is the safe direction: a future
+  // refactor that drops them renders a hueless "not measured", never a green
+  // improvement. `cur_buckets`/`prev_buckets` are equal because the windows are.
   const ROW = {
+    cur_rows: '9854', prev_rows: '11585',
+    cur_buckets: '24', prev_buckets: '24',
     cur_failed: '46858', prev_failed: '51701',
     cur_sources: '2588', prev_sources: '2389',
-    cur_devices: '8', cur_truncated: false,
+    cur_devices: '8', cur_truncated: false, prev_truncated: false,
   };
   const USERS = { cur_usernames: '7023', prev_usernames: '8526' };
   const covering = { firstBucketAt: new Date('2026-09-09T00:00:00Z') };
@@ -823,6 +1026,107 @@ describe('⛔ buildHeadline — the strip at the top of the threat page', () => 
     assert.equal(buildHeadline(ROW, USERS, covering, WS, PS).usernamesIsFloor, false);
     const capped = { ...ROW, cur_truncated: true };
     assert.equal(buildHeadline(capped, USERS, covering, WS, PS).usernamesIsFloor, true);
+    // ⛔ ON THE FIGURE ITSELF, not only on the strip. The renderer matched the
+    // strip-wide boolean against a hardcoded figure key, so the caveat was
+    // attached by name rather than by which number is actually a floor.
+    assert.equal(get(buildHeadline(capped, USERS, covering, WS, PS), 'usernames_targeted').isFloor, true);
+    assert.equal(get(buildHeadline(capped, USERS, covering, WS, PS), 'failed_events').isFloor, false);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ⛔ FINDING 1: AN INGEST OUTAGE IS NOT A SECURITY IMPROVEMENT
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it('⛔ an empty CURRENT window is null with a reason, NEVER a measured zero', () => {
+    // The scenario, exactly: the collector stops. `sum(event_count) FILTER (...)`
+    // returns NULL, `num()` turned that into 0, and the strip had no
+    // not-measured branch — so the page rendered
+    //     Failed VPN authentications   0
+    //     ↓ 47881 from the previous window        <- in var(--green)
+    // i.e. a total ingest failure presented as the largest security improvement
+    // this page is capable of showing. `previous` was guarded from the day it was
+    // written; `current` never was.
+    const outage = {
+      cur_rows: '0', prev_rows: '11585',
+      cur_buckets: '0', prev_buckets: '24',
+      cur_failed: null, prev_failed: '47881',
+      // ⛔ count(DISTINCT ...) returns 0 rather than NULL over an empty set, so a
+      // NULL-check alone would still have printed a confident "0 addresses" and
+      // "0 firewalls reporting". The gate is ROW PRESENCE.
+      cur_sources: '0', prev_sources: '2330',
+      cur_devices: '0', cur_truncated: null, prev_truncated: false,
+    };
+    const h = buildHeadline(outage, { cur_usernames: '0', prev_usernames: '9182' }, covering, WS, PS);
+    assert.equal(h.currentWindowCovered, false);
+    for (const key of ['failed_events', 'source_addresses', 'usernames_targeted', 'firewalls_reporting']) {
+      const f = get(h, key);
+      assert.equal(f.current, null, `${key} reported an ingest outage as a measured value`);
+      assert.notEqual(f.current, 0);
+      assert.ok(f.currentReason && /not a measured zero/i.test(f.currentReason),
+        `${key} carries no reason, so the UI can only render a bare em-dash`);
+    }
+  });
+
+  it('⛔ a zero with EVIDENCE BEHIND IT is still a real zero', () => {
+    // The other half, and the reason the gate is row presence rather than a
+    // NULL check: rows arrived and none of them was a failure. People logged in
+    // and nobody failed. That is a measurement and must print 0 — an em-dash
+    // there would hide a genuinely clean window.
+    const quiet = {
+      cur_rows: '412', prev_rows: '500',
+      cur_buckets: '24', prev_buckets: '24',
+      cur_failed: null, prev_failed: '12',
+      cur_sources: '0', prev_sources: '3',
+      cur_devices: '8', cur_truncated: false, prev_truncated: false,
+    };
+    const h = buildHeadline(quiet, {}, covering, WS, PS);
+    assert.equal(h.currentWindowCovered, true);
+    assert.equal(get(h, 'failed_events').current, 0);
+    assert.equal(get(h, 'failed_events').currentReason, null);
+    assert.equal(get(h, 'source_addresses').current, 0);
+  });
+
+  it('⛔ an empty PREVIOUS window is null too, and says WHY — the two whys differ', () => {
+    // Retention: history does not reach back that far.
+    const young = { firstBucketAt: new Date('2026-09-25T06:00:00Z') };
+    const retention = get(buildHeadline(ROW, USERS, young, WS, PS), 'failed_events');
+    assert.equal(retention.previous, null);
+    assert.match(retention.previousReason, /does not hold/i);
+
+    // No evidence: history covers it, but nothing arrived. A different problem
+    // with a different next step, so it must not share the retention sentence.
+    const empty = { ...ROW, prev_rows: '0', prev_failed: null, prev_sources: '0' };
+    const gap = get(buildHeadline(empty, USERS, covering, WS, PS), 'failed_events');
+    assert.equal(gap.previous, null, 'an empty previous window read as a quieter one');
+    assert.match(gap.previousReason, /previous window/i);
+    assert.notEqual(gap.previousReason, retention.previousReason);
+  });
+
+  it('⛔ FLOOR vs FLOOR is not a change — a capped window blocks the username delta', () => {
+    // A capped bucket means the rollup stopped recording names for that hour, so
+    // the count is "at least this many". Subtracting one floor from another and
+    // drawing an arrow is a measurement nobody made. Live both flags are false,
+    // which is exactly when this is cheapest to carry and easiest to forget.
+    for (const capped of [{ cur_truncated: true }, { prev_truncated: true }]) {
+      const h = buildHeadline({ ...ROW, ...capped }, USERS, covering, WS, PS);
+      const f = get(h, 'usernames_targeted');
+      assert.equal(f.previous, null, 'compared a floor against an exact count');
+      assert.match(f.previousReason, /floor/i);
+      // ⛔ and only that figure: the event and address counts are unaffected by a
+      // username cap and must keep their comparison.
+      assert.equal(get(h, 'failed_events').previous, 51701);
+    }
+    // Uncapped, the comparison is real.
+    assert.equal(get(buildHeadline(ROW, USERS, covering, WS, PS), 'usernames_targeted').previous, 8526);
+  });
+
+  it('⛔ the two windows are the same length, and the counts are carried to prove it', () => {
+    const h = buildHeadline(ROW, USERS, covering, WS, PS);
+    assert.equal(h.currentBuckets, 24);
+    assert.equal(h.previousBuckets, 24);
+    assert.equal(h.currentBuckets, h.previousBuckets);
+    // Verified on the live fleet after the bound fix: 24/24 at hours=24 and
+    // 48/48 at hours=48. Before it, 23 against 24.
   });
 
   it('⛔ labels do not overclaim', () => {

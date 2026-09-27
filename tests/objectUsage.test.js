@@ -33,6 +33,9 @@ const {
   runObjectUsageAnalysisForDevice,
   NAT_ADDRESS_FIELDS,
   NAT_SERVICE_FIELDS,
+  namespaceForType,
+  unevaluatableObjects,
+  KNOWN_OBJECT_TYPES,
 } = require('../lib/engines/objectUsage');
 
 // --------------------------------------------------------------------------
@@ -550,5 +553,211 @@ describe('objectUsage: the NAT field lists cover every name-bearing nat_rules co
     // And each is on the side its NAME says it is on.
     assert.deepEqual(NAT_ADDRESS_FIELDS.filter((f) => !/_addresses$/.test(f)), []);
     assert.deepEqual(NAT_SERVICE_FIELDS.filter((f) => !/_services$/.test(f)), []);
+  });
+});
+
+// --------------------------------------------------------------------------
+// H. ⛔ AN OBJECT TYPE THE ENGINE CANNOT EVALUATE IS NOT "UNUSED"
+//
+// `network_objects.object_type` has no CHECK constraint. Any type outside the
+// four known values got `namespaceForType() === 'other'`, never entered
+// `byNamespace`, and then hit `if (ns !== 'other' && used[ns].has(name)) continue;`
+// — false for 'other' whatever referenced it. So the first FQDN, region or
+// URL-category object any adapter collects would arrive on the Objects tab as
+// safe to delete, on every device, with nothing reporting a problem.
+// --------------------------------------------------------------------------
+
+describe('objectUsage: an unknown object_type produces NO finding, not an `unused` one', () => {
+  const fqdn = {
+    id: 'o-fqdn', object_type: 'fqdn', name: 'updates.example.com', value: null, members: null,
+  };
+
+  it('⛔ a type outside the four known values is never reported unused', () => {
+    const findings = analyzeObjectUsage([fqdn], [], []);
+    assert.deepEqual(findings, [],
+      'an object this engine has no reference surface for must not be recommended for deletion');
+  });
+
+  it('⛔ ...not even when a rule DOES reference it — the test could never see that', () => {
+    const findings = analyzeObjectUsage(
+      [fqdn],
+      [{ src_addresses: ['updates.example.com'], dst_addresses: [], services: [] }],
+      []
+    );
+    assert.deepEqual(findings, []);
+  });
+
+  it('⛔ ...and not when a NAT rule references it either', () => {
+    const findings = analyzeObjectUsage([fqdn], [], [
+      { original_dst_addresses: ['updates.example.com'] },
+    ]);
+    assert.deepEqual(findings, []);
+  });
+
+  it('every unknown-type value behaves the same, including null and junk', () => {
+    for (const t of ['fqdn', 'region', 'url_category', 'edl', '', null, undefined, 42, 'ADDRESS']) {
+      const findings = analyzeObjectUsage(
+        [{ id: 'x', object_type: t, name: 'thing', value: '10.0.0.1/32', members: null }], [], []
+      );
+      assert.deepEqual(findings, [], `object_type ${JSON.stringify(t)} must produce nothing`);
+    }
+  });
+
+  it('⛔ the KNOWN types are still analysed — the skip must not swallow the feature', () => {
+    const findings = analyzeObjectUsage(
+      [addr('a1', 'ORPHAN-HOST', '10.9.9.9/32'), fqdn], [], []
+    );
+    assert.deepEqual(findings.map((f) => [f.object_id, f.finding_type]), [['a1', 'unused']]);
+  });
+
+  it('the boundary is stated, exported, and countable rather than discovered', () => {
+    assert.deepEqual(KNOWN_OBJECT_TYPES.slice().sort(),
+      ['address', 'address_group', 'service', 'service_group']);
+    for (const t of KNOWN_OBJECT_TYPES) {
+      assert.notEqual(namespaceForType(t), 'other', `${t} must be evaluable`);
+    }
+    assert.equal(namespaceForType('fqdn'), 'other');
+    // ⛔ A silent exclusion is how a partial answer looks complete.
+    assert.deepEqual(unevaluatableObjects([addr('a1', 'X'), fqdn]).map((o) => o.id), ['o-fqdn']);
+    assert.deepEqual(unevaluatableObjects(null), []);
+  });
+
+  it('a `duplicate` finding is not reachable for an unknown type either', () => {
+    // Duplicate detection is restricted to leaf address/service types, so two
+    // unknown-type objects sharing a value must produce nothing at all.
+    const findings = analyzeObjectUsage([
+      { id: 'd1', object_type: 'fqdn', name: 'a', value: 'x.example.com', members: null },
+      { id: 'd2', object_type: 'fqdn', name: 'b', value: 'x.example.com', members: null },
+    ], [], []);
+    assert.deepEqual(findings, []);
+  });
+});
+
+// --------------------------------------------------------------------------
+// I. ⛔ THE FRESHNESS NOTE MUST NOT OUTLIVE THE FIX
+//
+// The header above runObjectUsageAnalysisForDevice() used to say the analysis
+// ran BEFORE NAT collection and prescribed "move the NAT collection block above
+// this call in lib/adapters/index.js". The ANALYSIS moved down instead, and is
+// gated on `natRulesCollected === true`. A stale "still broken" note sends the
+// next session to redo a completed move, in the file this engine's gate lives in.
+// --------------------------------------------------------------------------
+
+describe('objectUsage: the freshness note describes what the code actually does', () => {
+  const { stripComments } = require('./stripComments');
+  const engineSrc = () => fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'engines', 'objectUsage.js'), 'utf8'
+  );
+  const adapterCode = () => stripComments(
+    fs.readFileSync(path.join(__dirname, '..', 'lib', 'adapters', 'index.js'), 'utf8')
+  );
+
+  it('⛔ the prescription that was already carried out is gone', () => {
+    const src = engineSrc();
+    // ⛔ Both wordings. The first draft of this test matched only "move …" and a
+    // mutation saying "moving …" walked straight past it — a guard that cannot
+    // fire, in the test written to stop a stale note.
+    assert.ok(!/mov(e|ing) the NAT collection block above/i.test(src),
+      'objectUsage.js still prescribes a move that lib/adapters/index.js already made');
+    assert.ok(!/analysis BEFORE it collects/i.test(src),
+      'objectUsage.js still claims the analysis runs before NAT collection');
+    // ...and it must still SAY something about freshness: deleting the whole
+    // paragraph would satisfy both assertions above while telling the next
+    // session nothing at all.
+    assert.ok(/FRESHNESS/.test(src), 'the freshness position must still be stated');
+  });
+
+  it('⛔ and the claim it makes INSTEAD is true of the real source', () => {
+    // Read from lib/adapters/index.js, comments stripped (LINE first, via the
+    // shared helper) so the prose naming the gate cannot satisfy the scan.
+    const c = adapterCode();
+    const nat = c.indexOf('await storeNatRules(');
+    const usage = c.indexOf('runObjectUsageAnalysisForDevice(');
+    assert.ok(nat > -1 && usage > -1, 'both call sites must exist');
+    assert.ok(nat < usage, 'NAT rows are stored BEFORE the usage analysis runs');
+    assert.ok(/natRulesCollected\s*===\s*true/.test(c),
+      'the analysis is gated on a SUCCESSFUL NAT collection, not merely on ordering');
+  });
+});
+
+// --------------------------------------------------------------------------
+// J. ⛔ `catch (_err) { ... throw err }` — THE REAL ERROR WAS BEING LOST
+//
+// Nine sites across the three adapters that collect NAT bound the caught error
+// as `_err` and then rethrew `err`, which is not in scope. So a PARSE failure
+// threw `ReferenceError: err is not defined` instead of the vendor error, and
+// the message that reached the collection result named neither the device nor
+// the command. It matters to THIS engine specifically: a NAT read failure is
+// what suppresses the object-usage analysis (section I), so the diagnostic for
+// "why did this device stop being analysed" was the one being destroyed.
+// --------------------------------------------------------------------------
+
+describe('adapters: a catch block that rethrows binds the error it throws', () => {
+  const { stripComments } = require('./stripComments');
+  const FILES = [
+    ['fortinet', 'ssh.js'], ['paloalto', 'index.js'], ['paloalto', 'ssh.js'],
+  ].map((p) => path.join(__dirname, '..', 'lib', 'adapters', ...p));
+
+  /** Every `catch (<id>) { <body> }` in `src`, by brace matching. */
+  function catchBlocks(src) {
+    const out = [];
+    const re = /catch\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{/g;
+    let m = re.exec(src);
+    while (m) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      while (i < src.length && depth > 0) {
+        if (src[i] === '{') depth += 1;
+        else if (src[i] === '}') depth -= 1;
+        i += 1;
+      }
+      out.push({ binding: m[1], body: src.slice(m.index + m[0].length, i - 1) });
+      m = re.exec(src);
+    }
+    return out;
+  }
+
+  it('⛔ no catch block throws an identifier it did not bind', () => {
+    const offenders = [];
+    for (const file of FILES) {
+      // ⛔ Comments stripped through the shared helper — LINE comments first.
+      // Every one of these nine sites carries a long ⛔ comment that itself
+      // contains the words `throw` and `err`, so an unstripped scan reports the
+      // prose and proves nothing.
+      const src = stripComments(fs.readFileSync(file, 'utf8'));
+      for (const b of catchBlocks(src)) {
+        for (const thrown of [...b.body.matchAll(/\bthrow\s+([A-Za-z_$][\w$]*)\b/g)].map((x) => x[1])) {
+          // `throw new Error(...)` constructs a fresh error and binds nothing.
+          if (thrown === 'new') continue;
+          // Rethrowing the name that WAS bound is the point of the fix.
+          if (thrown === b.binding) continue;
+          // A local declared inside the body, or an inner catch's own binding —
+          // brace matching hands the OUTER body every nested block too.
+          if (new RegExp(`\\b(const|let|var)\\s+${thrown}\\b`).test(b.body)) continue;
+          if (new RegExp(`\\bcatch\\s*\\(\\s*${thrown}\\s*\\)`).test(b.body)) continue;
+          offenders.push(`${path.basename(path.dirname(file))}/${path.basename(file)}: `
+            + `catch (${b.binding}) { … throw ${thrown} }`);
+        }
+      }
+    }
+    assert.deepEqual(offenders, [], 'these throw an identifier that is not in scope, so the '
+      + 'vendor error is replaced by "ReferenceError: <name> is not defined":\n  '
+      + offenders.join('\n  '));
+  });
+
+  it('...and the rethrowing sites are still THERE — the guard must be able to fire', () => {
+    // If the nine blocks were ever replaced by a `return []`, the test above
+    // would pass over nothing at all. This is the count it is protecting.
+    let rethrows = 0;
+    for (const file of FILES) {
+      const src = stripComments(fs.readFileSync(file, 'utf8'));
+      for (const b of catchBlocks(src)) {
+        if (/\bthrow\s+[A-Za-z_$][\w$]*\b/.test(b.body)) rethrows += 1;
+      }
+    }
+    assert.ok(rethrows >= 9,
+      `expected at least the 9 documented RETHROW sites, found ${rethrows} — `
+      + 'if a getInterfaces/getRoutingTable/getNatRules failure now returns [] instead of '
+      + 'throwing, collectAndStore wipes that device\'s rows and reports success');
   });
 });

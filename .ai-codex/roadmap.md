@@ -79,12 +79,34 @@ Found by the 2026-09-21 sweep, triaged as not worth a release of their own. All 
 | 19 | `backfillPaloAltoVersionRanges` still reports `cleaned up 302` every deploy, rewriting 351 advisory rows to identical values. Gated but flagged; first place to look if advisory matching regresses. | [ ] |
 | 20 | Stale `E:\SecVault_Backups` (~4.7 GB) left beside the current backup set. | [ ] |
 
+### P4b — open after the analytics build (A1-A5 + A7), raised 2026-09-27
+
+Same triage as P4: real, each one a sitting, none worth a release of its own.
+⛔ **None of these is done — do not read the ✅ rows in the analytics table below as
+covering them.** Every one was verified against the source on the date raised.
+
+| # | Item | Done |
+|---|---|:--:|
+| 21 | **`upgradePlan` presents a DERIVED fix boundary as a vendor commitment.** `lib/reports/chassis.js` now exports `FIX_PROVENANCE` / `fixProvenance()` / `fixVersionCell()` — four states, `PUBLISHED` / `DERIVED` / `UNKNOWN` / `NONE` — and green is reserved for `PUBLISHED`. ⛔ **`lib/reports/vulnerabilityPosture.js` IS ALREADY WIRED** (both the per-firewall table and the fleet-grouped row, which goes green only when EVERY firewall's target is vendor-published) — this item was raised as covering it and does not. What is genuinely unwired is **`lib/engines/upgradePlan.js` / `upgradePlanData.js`**: neither reads `fixed_in_versions` or `affected_version_ranges` at all, so an upgrade target derived from a `versionEndExcluding` boundary is recommended in the same voice as one the vendor published. ⛔ `unplannable` wants a THIRD reason, `fix_version_derived`, beside today's `no_known_fix` and `fix_version_unreadable` — a derived bound is a plannable target but **not a vendor commitment**, which is a different fact from having no target at all. No schema change. | [ ] |
+| 22 | **The CVE hub should populate `fixed_in_versions` AT SOURCE** (the `nocvault-eol` project), rather than SecVault deriving the boundary out of `exclude_fixed: true` on ingest and then defending that repair against the vendor feed. Measured: only **10 of 955** hub advisories populate the field, while many carry the boundary in a range — so the derivation is load-bearing today and is the wrong place for it. ⛔ Cross-repo: nothing in THIS repo fixes it, and the local derivation must stay until the hub actually ships the field. | [ ] |
+| 23 | **A failed feed waits a full cycle — there is no retry.** `feed-sync-and-match` self-catches, logs, and the next `node-cron` tick is `FEED_POLL_INTERVAL_HOURS` away (**6h** by default). A transient DNS or 503 therefore costs six hours of discovery, and nothing distinguishes "failed once, will retry at 18:00" from "failing every cycle" on the feed pill. A bounded in-job retry with backoff, or a short-interval re-arm for a feed whose last run failed. | [ ] |
+| 24 | **`versionComparator.parseVersion` returns FABRICATED ZEROS for a version it cannot read**, and says nothing. `parseVersion('fortinet', 'nope')` is `[0,0,…]`, which every conceivable target compares "at or above" — this codebase's most-repeated bug living in a version parser. ⛔ **`upgradePlan.branchOf` and its sibling ARE guarded** (a no-digit test plus an every-component-is-finite test, added 2026-09-27 after a KEV row with `fixed_in: 'Not applicable'` was reported as CLEARED and excluded from `unplannable`). ⛔ **THE REMAINING CALL SITES HAVE NOT BEEN AUDITED**: `lib/engines/versionMatcher.js` (3 sites), `lib/feeds/nvd.js`, `lib/feeds/paloalto.js`, and every adapter's `version_tuple` (`checkpoint/parser.js`, `cisco_asa/index.js`, `fortinet/parser.js`, `fortinet/ssh.js`, `paloalto/parser.js`, `paloalto/ssh.js`, `sangfor/index.js`). The right fix is probably at the source — return `null` for unreadable input and make every caller say what it does about that — but that is a breaking change across a matcher on the CVE path, so measure before moving it. | [ ] |
+| 25 | **`tests/fixedVersionFromRanges.test.js` still pins EXACT SOURCE TEXT rather than behaviour.** Its section 3 slices `lib/feeds/fortinet.js` around `affected_version_ranges = CASE` and regex-matches the wording of the downgrade guard, so a harmless rename or reformat disarms it silently — a guard that cannot fire, which is the defect this repo names most often. ⛔ Its section 4 (the `cveHub` half) was ALREADY converted after the old four-regex version was demonstrated inert against a real disagreement, and `tests/fixBoundary.test.js` owns that behaviour — so the pattern to follow already exists in the same file. Convert section 3 the same way. | [ ] |
+
+⛔ **A6, A8 and A9 remain UNBUILT** and are tracked in the table below — A6 is not a new item at all
+(it is Tier 1 #2, and cannot arm until the hour-of-week baseline reaches 3 weeks). Do not read the
+five ✅ rows there as progress on them.
+
 ### New analytics, measured 2026-09-25 — tracked in `analytics-proposal.md`
 
 Nine analytics buildable with **no LLM and no local AI**, each grounded in a live measurement.
 ⛔ **The tracking table lives in `analytics-proposal.md`, not here** — one Done column, not two, or
-they drift. Three items were nearly written as new proposals and are NOT: seasonal baselines are
-Tier 1 #2 below, bandwidth forecasting is Tier 2, and a general flow rollup was already refused.
+they drift. `⧖` below means BUILT AND IN THE TREE BUT NOT RELEASED: no version bump, no `releaseNotes`
+entry. It is neither `[ ]` (which would send a session to rebuild it) nor `✅` (which would have it
+looked for in a release that does not carry it).
+
+Three items were nearly written as new proposals and are NOT: seasonal baselines are Tier 1 #2
+below, bandwidth forecasting is Tier 2, and a general flow rollup was already refused.
 
 The headline, because it reorders the usual instinct: **the analytics are bounded by EVIDENCE
 COVERAGE, not by algorithms.** So decisions-from-existing-findings come first, coverage second,
@@ -97,7 +119,8 @@ detection third.
 | A3 | **Log-derived rule usage** | ~84 of 235 unmeasured rules gain evidence (54 Fortinet by rule-id, 30 Palo Alto by name). ⛔ Never written into `hit_count`; name-matching is a weaker grade and may not authorise a deletion | **[x]** v2.189.0 |
 | A4 | **Object & rule consolidation** | 3,298 of 10,092 objects (33%) referenced by nothing; 771 duplicates; up to 405 rule rows removable. ⛔ Needs **no hit counts**, so it is the one cleanup analytic that is conclusive on Fortinet | **[x]** v2.190.0 |
 | A5 | **Fleet conformance / odd-one-out** | 11 Palo Altos, 5 Fortinets. The only one that DISCOVERS checks the 45-check library lacks. ⛔ Majority ≠ correctness — reports "1 of 11 differs", never "misconfigured" | **[x]** v2.190.0 |
-| A7-A9 | change→outcome correlation, remediation survival, VPN behavioural profiles | Tier 3. ⛔ A8's honest output today is an indictment: **0 version changes across 16 devices in 70 days** | [ ] |
+| A7 | **Change → outcome correlation** | Tier 3, and the most differentiating item in the file — SecVault is the only product here holding the change record and the traffic outcome in one database. ⛔ **THE CONTROL IS THE FEATURE:** measured 2026-09-27, 24h either side of a real config change averaged **+13.6%** (61 changes) against **+17.6%** for an ORDINARY day (284 pairs) — *the change-adjacent delta is smaller than the noise*, so a bare before/after percentage would have manufactured 61 effects. Verdict is `exceeded_normal_variation` vs `indistinguishable`, never "significant", and never causal | **⧖ BUILT, NOT RELEASED** |
+| A8-A9 | remediation survival, VPN behavioural profiles | Tier 3. ⛔ A8's honest output today is an indictment: **0 version changes across 16 devices in 70 days** | [ ] |
 
 ⛔ **`eol_catalogue` IS NOT IN THIS DATABASE.** The nocvault-eol hub holds 2,770 rows; here the
 table is absent entirely. Probably the largest missing DATASET available to this product — it would
@@ -155,6 +178,12 @@ moved the monthly compliance PDF). Re-measure before committing to 4-9.
 | **Log search bounded by EXECUTION TIME** | v2.144.0; the third bound. Cost tracks how RARE the value is, not which column is indexed — the indexed column was the 11-second one |
 | **Server health tab** | v2.145.0; disk per volume, database size, retention, ingest, service liveness inferred from what each service WRITES (NSSM reports a crash-looping process as Running) |
 | **Two bug sweeps + the open-items pass** | v2.146.0-v2.148.0; 25 fixes, all one family. See those commits before assuming a "missing" honesty guard is missing |
+| **A1 — Upgrade planner** | v2.187.0; `/vulnerability?tab=upgrade`, `lib/engines/upgradePlan.js` + `upgradePlanData.js`. Live: **246 open assessments across 16 firewalls → 16 upgrade decisions**, 27 unplannable. ⛔ `inBranch` is recommended EVEN WHEN a branch move clears more — the literal Pareto frontier told three FortiGates on 7.4.9 to go to 7.6.7, a platform migration, and both numbers were right while the advice was wrong |
+| **A2 — Blind-spot register** | v2.188.0; `/coverage` (Monitor → Coverage), `lib/engines/coverageRegister.js` + `coverageRegisterData.js`, and **work-queue source #11** (`coverage`, in `NEVER_ACT_NOW_SOURCES` — every item is `unmeasured` by construction). Live: **0 of 16 devices fully covered**. Ranks by CONSEQUENCE, not gap count. SCOPE-AWARE — one of only a handful classified `aware` |
+| **A3 — Log-derived rule usage, graded** | v2.189.0; `lib/engines/ruleHitCorrelation.js` gained an ADDITIVE grade (`logEvidence` values unchanged), `components/analysis/UsageGrade.js`, the `Hits` column on `/devices/[id]/rules` became **`Usage`**, and the grade travels into the change-request document. ⛔ Never written into `hit_count`; **ID-grade and NAME-grade are different grades** and only ID satisfies the `ruleChangeRequests` deletion bar; absence from logs stays `unmeasured`, never a measured zero |
+| **A4 — Rule & object consolidation** | v2.190.0; `lib/engines/ruleConsolidation.js` + `ruleConsolidationData.js`, **Consolidation tab** on `/devices/[id]/analysis` (14 tabs now, inserted after `reorder`), plus `nat_rules` counted as an object reference surface in `objectUsage.js`. Live: **92 groups / 156 removable rows — 41 `safe_to_merge`, 51 `needs_review`** in 272 ms over 1,782 rules. ⛔ Needs NO hit counts, so it is the one cleanup analytic that is conclusive on the FortiGates. ⛔ Object consolidation was ALREADY BUILT (`objectUsage.js`, 2026-08-03) — the proposal said otherwise and would have had it rebuilt |
+| **A5 — Fleet conformance / odd-one-out** | v2.190.0; `/conformance` (Risk → Conformance), `lib/engines/fleetConformance.js` + `fleetConformanceData.js`. ⛔ The cohort is `(vendor, mgmt_method)`, NOT vendor — TUG is the only Palo Alto collected over SSH and its parser emits a different structure, so a vendor-only grouping would have made this a false-finding machine on its first run. ⛔ MAJORITY IS NOT CORRECTNESS: `admin-ssh-port` is 4× `22` against OKF(F2)'s `5022`, i.e. the minority firewall is the HARDENED one |
+| **A7 — Change → outcome** | ⛔ **BUILT, NOT YET RELEASED** — `lib/engines/changeOutcome.js` + `changeOutcomeData.js` + `components/analysis/ChangeOutcomeBoard.js`, rendered on `/devices/[id]/changes` above the change list. No version bump and no `releaseNotes` entry yet, so it is in the tree and not in any release. Recorded here so it is not rebuilt; see `pages.md` for the surface and the six verdicts |
 
 ---
 

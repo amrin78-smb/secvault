@@ -237,8 +237,45 @@ rank; an unrecognised verdict falls to it, and `orderGroups()` sorts on the same
 comes from, so colour and reading order cannot disagree — the v2.122.0 SegmentationBoard failure.
 ⛔ `safe_to_merge` is labelled **"Ordering checked"**, never "safe". ⛔ No form, button, onClick or
 POST — asserted by test; this proposes and never applies.
+**v2.191.0.** `UNDETERMINED_REASON` (exported) gained wording for the engine's three new slugs —
+`member_field_is_negated`, `duplicate_sequence_number_in_span`, `unclassified_raw_rule_key` — taking
+it to six. ⛔ **THE TEST NOW DERIVES THE SLUG LIST FROM THE ENGINE'S OWN `undetermined.push` SITES**
+(`lib/engines/ruleConsolidation.js`, comment-stripped) and asserts the table BOTH WAYS: no engine slug
+missing, no orphan entry here. The old test hardcoded three, so it would have stayed green while
+three new reasons reached the operator as QUOTED INTERNAL TOKENS — which reads as a defect in
+SecVault rather than a fact about the firewall, and the operator stops reading the column.
+⛔ Plus a NEGATIVE assertion that no `interfering.push` slug (`matches_moved_traffic`) ever appears in
+this table — those are separate lists with separate rendering, and wording one here invites the two
+to merge. ⛔ The unclassified-key caveat now prints the **vendor field name** the engine passes as
+`u.field`, monospaced: it is the one reason an operator can actually get closed (by telling us what
+that field means), and withholding the name turns an actionable gap into an unexplained refusal.
 
-UsageGrade (server)UsageGrade (server)  `components/analysis/UsageGrade.js` (v2.189.0). The ONLY place a rule-usage
+ChangeOutcomeBoard (server)  `{devices, summary, failures, windowHours, generatedAt}` —
+`components/analysis/ChangeOutcomeBoard.js`, the A7 surface on `/devices/[id]/changes` (v2.190.0+).
+Props only, no fetching: the judgement is `lib/engines/changeOutcome.js` (pure) and the plumbing is
+`changeOutcomeData.js`. It reports whether the traffic delta around a configuration change is
+**distinguishable from that firewall's own ordinary day-to-day variation**. Six verdicts —
+`indistinguishable` · `exceeded_normal_variation` · `no_traffic_window` · `insufficient_baseline` ·
+`baseline_degenerate` · `window_incomplete` — with the last four exported as `UNJUDGEABLE`, and an
+unrecognised verdict falls to the hueless `unknown` weight, NEVER to `indistinguishable`.
+⛔ **CO-OCCURRENCE, NEVER CAUSATION**: every phrase is "was followed by", and a test rejects the
+causal vocabulary from the comment-STRIPPED source, JSX prose included. ⛔ The engine's claim
+sentence is rendered VERBATIM — no copy lives here, the position `ConformanceBoard` takes.
+⛔ **NOTHING IN THE FILE CARRIES A SEVERITY HUE**: `exceeded_normal_variation` is one observation
+about volume and may be the change working as intended, so it uses the INFO pair; the incompleteness
+banner uses WARN so it is not read as belonging to the rows beneath it. ⛔ **`window_incomplete` gets
+a named, counted panel ABOVE the per-firewall lists, never a footer** — it is the MAJORITY state
+(live: 203 changes, **137** window-incomplete, 66 judged, **0** exceeding their band) and it is a
+limit of OURS; it must also read differently from `no_traffic_window` (window outside the collection
+period vs. inside it and empty). ⛔ **Every judged change prints its basis** — how many of that
+firewall's ordinary daily swings the movement exceeds, out of how many were observed, and the band.
+⛔ **NO ARITHMETIC AT ALL** in the file: no rounding, no share, no single figure — only the numbers
+the engine published. ⛔ `headline()` splits "none exceeded, over 66 judged" from "none judged at
+all"; the second is an absence of evidence wearing the first's clothes. ⛔ While `failures` is
+non-empty NO verdict and NO count is printed, because a reader cannot tell a truncated list from a
+quiet firewall.
+
+UsageGrade (server)  `components/analysis/UsageGrade.js` (v2.189.0). The ONLY place a rule-usage
 grade is drawn. Exports `USAGE_GRADES` / `LOG_EVIDENCE_REASONS` as DATA so tests compare them
 rather than grep CSS. `device` teal · `log-id` info · `log-name` **warning + rename caveat** ·
 `null` **hueless** (`NotMeasured`, never a muted Badge — a flat grey chip reads as a real but quiet
@@ -248,10 +285,27 @@ category). ⛔ Red and violet are both refused by a test: red is danger only, vi
 `logEvidence` vocabulary is HARVESTED FROM `ruleHitCorrelation.js`'s own source, so a new engine
 state cannot silently render as "no evidence available". Exports `UsageGradeBadge` and a default
 `RuleUsageCell`.
+**v2.191.0 — `usageReason()` / `usageBadgeTitle()`, both pure and exported.** ⛔ `usageReason`
+returns **null for the `device` grade**: that figure came from the firewall's own hit counter, while
+the log sentence describes a DIFFERENT measurement over a DIFFERENT window. **"Not measured: SecVault
+has not been collecting logs long enough to say" was printed on a MEASURED device figure** —
+measured live 2026-09-27, **1,444 rules fleet-wide render a device counter and every one carried that
+sentence in its badge tooltip**, because `usageTitle()` suppressed it and `RuleUsageCell` then handed
+it to the badge anyway. ⛔ **THE DEFECT WAS IN THE JOIN, NOT IN EITHER HALF** — descriptor and
+`usageTitle()` were both correct — so `usageBadgeTitle` exists to make the composition testable, and
+the test asserts **the badge hover and the figure hover AGREE for every grade × every evidence
+code**. Two halves tested separately pass straight over this. ⛔ This is
+`components/ui/NotMeasured.js`'s own rule violated in the one place that undoes it.
 
 CoverageRegister (server)  `{entries, summary, failures, generatedAt}` — the whole of `/coverage`
-(v2.188.0). ⛔ **RENDERS `entries` IN THE ORDER GIVEN**; there is deliberately no `.sort(` in the
-file and a test asserts it, because the engine's consequence ranking is the feature.
+(v2.188.0). ⛔ **RENDERS `entries` IN THE ORDER GIVEN**, because the engine's consequence ranking of
+FIREWALLS is the feature. There is exactly ONE `.sort(` in the file and a test pins both that count
+and its position: it must live inside `orderCells` (v2.191.0), which orders the CELLS WITHIN one
+firewall loudest-first off `chipWeight().rank`, copies rather than mutates, and keeps ties in their
+original order. ⛔ It exists because `CELL_WEIGHT[*].rank` was declared, pinned by five assertions
+and **read by nothing** — `CellTable` drew whatever order the engine happened to construct, so live
+TSR_EKC printed its one tinted `stale` cell (rank 0, documented as louder than `absent`) LAST. A
+ranking that is declared, tested and never consumed is the guard-that-cannot-fire pattern.
 ⛔ `CELL_WEIGHT` declares the five visual weights AS DATA so a test can compare them rather than
 grep CSS strings — `stale`(0) > `absent`/`unknown`(1) > `partial`(2) > `measured`(3). **`stale` is
 the only hued state in the file** (`--tint-warn`), louder than `absent`, because a stale answer is
@@ -259,6 +313,14 @@ ACTED ON where a missing one is not; `absent` is hueless (`--unmeasured` + `--ha
 border). An unrecognised state falls to `unknown`, never `measured` — the asymmetry is the safety
 property. ⛔ `certain:false` OVERRIDES the claimed state: the chip reads **"Not checked"**, so a
 count we could not read can never be reported as a confirmed gap.
+⛔ **A THIRD CERTAINTY, AND IT IS NOT `certain:false`** (v2.191.0): `hasUnreadMitigation(cell)` is
+true when the gap itself was established off the firewall's own data but a SECOND read that could
+have made it SMALLER failed (`mitigationUnknown:true` with `certain !== false`). It renders
+`MITIGATION_UNKNOWN_NOTE`, which states the figure is a FLOOR — at least this large. Drawing it as
+"Not checked" hides a confirmed blind spot behind an unanswered question, which is how
+`workQueueData.gatherCoverageGaps` silently dropped a real item while reporting `ok:true`. **The gap
+and its mitigation are separate certainties.** Exports `orderCells` / `hasUnreadMitigation` /
+`MITIGATION_UNKNOWN_NOTE` alongside the existing pure helpers.
 ⛔ **While `failures` is non-empty EVERY headline count is withheld** (rendered hueless, not `0`)
 — a failed register and a clean fleet produce identical summary totals, so the caller must not
 print either. ⛔ A test rejects all-clear vocabulary (`healthy`/`clean`/`secure`/`✓`) reaching the
@@ -277,6 +339,23 @@ than the raw total, which would promote it into the slot the recommendation vaca
 ⛔ `unplannable` appears TWICE — a hatched fleet table ABOVE the cards (ordering pinned) and a
 per-device hueless block; the count falls back to the named list's length, never to 0.
 50 cases in `tests/upgradePlanView.test.js`, 9 mutations verified.
+**v2.191.0.** ⛔ `assessed_unreadable_version` is a FIFTH `COVERAGE_STATE` and a THIRD
+`UNCOVERED_REASON` — "a version was collected and SecVault cannot read it" is a PARSING gap here,
+not the missing collection `assessed_no_version` names, and the two send an operator to different
+places. ⛔ `noPlanReason()` now CONSUMES the engine's own `blockedReason`
+(`no_running_version` / `unreadable_running_version`) instead of re-deriving the same verdict from
+`runningVersion`/`currentBranch`: `lib/engines/upgradePlan.js` computed and exported it, three test
+assertions pinned it, and the only consumer in the product ignored it — two implementations of one
+judgement with the authoritative one dead, and the screen would have shown the copy. It falls
+through to the old derivation when the field is absent, so an older plan shape still reads correctly.
+⛔ `reasonText` is now EXPORTED and `UNPLANNABLE_REASON` carries BOTH engine reasons
+(`no_known_fix` + `fix_version_unreadable`) — only one was named, so the second fell to the generic
+fallback and the two were indistinguishable on screen; one is chased with the vendor, the other with
+the feed. ⛔ `normalise()` TOLERATES A NULL PLAN and lands it in `uncovered`: `plan.openCount` was
+dereferenced before `partitionPlans`'s own `if (!p) continue` could run, so one null in the array
+threw and BLANKED THE WHOLE TAB while the defensive guard sat two screens below, never reached.
+Dropping it instead would shorten the fleet list silently, which on this page reads as a firewall
+with nothing to do.
 
 ## vpn/
 

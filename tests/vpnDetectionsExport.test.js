@@ -127,7 +127,13 @@ const targetedFinding = {
   kind: 'account_targeted',
   username: 'admin',
   sources: 31,
-  countries: 12,
+  // ⛔ `countries` IS THE LIST, `countryCount` IS THE NUMBER. This fixture
+  // carried `countries: 12` — the integer the engine used to emit under the array
+  // field's name, which made every country filter drop every one of this
+  // detection's findings. The export was the only consumer that agreed with the
+  // bug, because numOrBlank() happily printed it.
+  countries: ['Canada', 'Germany', 'Netherlands', 'Poland', 'Switzerland', 'United States'],
+  countryCount: 6,
   attemptsFloor: 44,
   attemptsIsFloor: true,
   hours: 18,
@@ -248,6 +254,12 @@ describe('⛔ columns match what that detection actually emits', () => {
       assert.equal(cols.includes(absent), false, `account_targeted must not carry ${absent}`);
     }
     assert.ok(cols.includes('sources') && cols.includes('countries'));
+    // ⛔ THE NAMES GET THEIR OWN COLUMN. `countries` is the COUNT here, taken
+    // from `countryCount`; reading it out of `countries` would print
+    // "Germany; Poland" in a column a reader treats as a number, and before the
+    // engine split the two it made this file the one place the shape bug looked
+    // correct.
+    assert.ok(cols.includes('country_names'), 'the country names are what the page filters on');
   });
 
   it('off_hours_success carries NO timestamp column', () => {
@@ -271,7 +283,13 @@ describe('⛔ columns match what that detection actually emits', () => {
     const cases = [
       ['credential_spray', sprayFinding, { src_ip: '203.0.113.9', usernames: '908', usernames_is_floor: 'yes', vendors: 'paloalto' }],
       ['brute_force', bruteFinding, { username: 'jsmith', attempts_floor: '57', first_seen_at_utc: '2026-09-24T22:00:00.000Z' }],
-      ['account_targeted', targetedFinding, { username: 'admin', sources: '31', countries: '12' }],
+      ['account_targeted', targetedFinding, {
+        username: 'admin', sources: '31',
+        // The normalised count, not the raw count(DISTINCT src_country) of 8...
+        countries: '6',
+        // ...and the names beside it, in the one vocabulary the page filters by.
+        country_names: 'Canada; Germany; Netherlands; Poland; Switzerland; United States',
+      }],
       ['new_country_for_user', newCountryFinding, { country: 'India', known_countries: 'Thailand', baseline_days: '9', sources: '10.20.1.5; 10.20.1.6' }],
       ['country_change', countryChangeFinding, { gap_hours: '0', from_country: 'Thailand', to_country: 'Germany' }],
       ['off_hours_success', offHoursFinding, { hour_utc: '19', auth_hours: '1', countries: 'Thailand' }],

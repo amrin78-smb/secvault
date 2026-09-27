@@ -73,6 +73,11 @@ function loadView() {
     'partitionPlans',
     'coverageIsComplete',
     'assessedAsOf',
+    // Not exported — evaluated here because a null element in the plans array
+    // reached it BEFORE partitionPlans' own null guard and blanked the tab.
+    'plansFrom',
+    'normalise',
+    'reasonText',
   ];
   // eslint-disable-next-line no-new-func
   return new Function(`${pure}\nreturn { ${names.join(', ')} };`)();
@@ -594,5 +599,151 @@ describe('the view stays a server component built from shared primitives', () =>
     for (const g of gaps) {
       assert.match(g, /^var\(--s\d\)$/, `gap "${g}" is outside the spacing scale`);
     }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ THE ENGINE'S OWN `blockedReason` IS WHAT DECIDES, NOT A SECOND DERIVATION
+// ────────────────────────────────────────────────────────────────────────────
+//
+// `lib/engines/upgradePlan.js` computes `blockedReason`, exports it and has it
+// pinned by three test assertions — and its only consumer in the product
+// re-derived the same verdict from `runningVersion`/`currentBranch`. Two
+// implementations of one judgement, the authoritative one dead: if they ever
+// disagreed, the screen would show the copy.
+
+describe('⛔ noPlanReason reads the engine\'s blockedReason', () => {
+  it('no running version is named as a collection gap', () => {
+    const r = V.noPlanReason(plan({
+      blockedReason: 'no_running_version', runningVersion: null, currentBranch: null, inBranch: null,
+    }));
+    assert.match(r, /No firmware version has been collected/i);
+  });
+
+  it('an unreadable running version is named as a parsing gap, and quotes the string', () => {
+    const r = V.noPlanReason(plan({
+      blockedReason: 'unreadable_running_version',
+      runningVersion: 'build-xyz',
+      currentBranch: null,
+      inBranch: null,
+    }));
+    assert.match(r, /could not be read as a version number/i);
+    assert.match(r, /build-xyz/);
+  });
+
+  it('⛔ the engine wins when the two disagree', () => {
+    // A plan carrying a currentBranch AND a blockedReason is a shape the engine
+    // does not currently emit — but if it ever did, the derivation would report
+    // a target that does not exist while the engine had already refused to plan.
+    const r = V.noPlanReason(plan({
+      blockedReason: 'no_running_version',
+      runningVersion: '7.4.9',
+      currentBranch: '7.4',
+      inBranch: null,
+      unplannableCount: 27,
+    }));
+    assert.match(r, /No firmware version has been collected/i,
+      'the view re-derived its own verdict and ignored the engine');
+  });
+
+  it('a plan with no blockedReason still falls back to the derivation', () => {
+    // An older plan shape, or a hand-built one, must not stop reading correctly.
+    assert.match(
+      V.noPlanReason(plan({ runningVersion: null, currentBranch: null, inBranch: null })),
+      /No firmware version has been collected/i
+    );
+    assert.match(
+      V.noPlanReason(plan({ runningVersion: 'build-xyz', currentBranch: null, inBranch: null })),
+      /could not be read as a version number/i
+    );
+  });
+
+  it('an unplannable-only firewall and a no-target one still read differently', () => {
+    assert.match(
+      V.noPlanReason(plan({ blockedReason: null, inBranch: null, unplannableCount: 27 })),
+      /missing a recorded fix version/i
+    );
+    assert.match(
+      V.noPlanReason(plan({ blockedReason: null, inBranch: null, unplannableCount: 0, unplannable: [] })),
+      /no upgrade target to propose/i
+    );
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ AN UNREADABLE RUNNING VERSION IS ITS OWN COVERAGE STATE
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('⛔ a collected version SecVault cannot read is not "assessed"', () => {
+  it('it falls to `uncovered`, never to the plan list or the clear list', () => {
+    const { actionable, clear, uncovered } = V.partitionPlans([
+      plan({ coverage: V.COVERAGE_STATE.ASSESSED_UNREADABLE_VERSION }),
+    ]);
+    assert.equal(actionable.length, 0);
+    assert.equal(clear.length, 0);
+    assert.equal(uncovered.length, 1);
+  });
+
+  it('and it is DESCRIBED, not left to the unrecognised-state fallback', () => {
+    const r = V.uncoveredReason(V.COVERAGE_STATE.ASSESSED_UNREADABLE_VERSION);
+    assert.match(r, /cannot read it as a version number/i);
+    assert.match(r, /parsing gap here, not a missing collection/i);
+    assert.doesNotMatch(r, /not one this page recognises/i);
+  });
+
+  it('it reads differently from a firewall with no version at all', () => {
+    assert.notEqual(
+      V.uncoveredReason(V.COVERAGE_STATE.ASSESSED_UNREADABLE_VERSION),
+      V.uncoveredReason(V.COVERAGE_STATE.ASSESSED_NO_VERSION),
+    );
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ A NULL PLAN MUST NOT BLANK THE TAB
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('⛔ normalise survives what partitionPlans was written to survive', () => {
+  it('a null element does not throw', () => {
+    // It used to: `plan.openCount` dereferenced a null two screens above the
+    // `if (!p) continue` written to skip it, so the whole tab rendered nothing.
+    for (const junk of [null, undefined, 'x', 42]) {
+      const out = V.normalise(junk);
+      assert.equal(typeof out, 'object');
+      assert.deepEqual(out.unplannable, []);
+      assert.deepEqual(out.crossBranch, []);
+      assert.equal(out.openCount, 0);
+    }
+  });
+
+  it('⛔ a null plan is NOT dropped — it lands in uncovered and says so', () => {
+    // Dropping it would shorten the fleet list silently, which on this page reads
+    // as a firewall with nothing to do.
+    const plans = V.plansFrom({ plans: [plan(), null, plan({ deviceId: 'd2' })] }).map(V.normalise);
+    assert.equal(plans.length, 3);
+    const { actionable, uncovered } = V.partitionPlans(plans);
+    assert.equal(actionable.length, 2);
+    assert.equal(uncovered.length, 1);
+    assert.match(V.uncoveredReason(uncovered[0].coverage), /not one this page recognises/i);
+  });
+
+  it('the shared summariser can reduce over the result without throwing', () => {
+    const { summarisePlans } = require('../lib/engines/upgradePlan');
+    const plans = [plan(), null, plan({ deviceId: 'd2' })].map(V.normalise);
+    assert.equal(summarisePlans(plans).devices, 3);
+  });
+});
+
+describe('⛔ both unplannable reasons are named', () => {
+  it('an unreadable fix version reads differently from an absent one', () => {
+    const absent = V.reasonText('no_known_fix');
+    const unreadable = V.reasonText('fix_version_unreadable');
+    assert.match(absent, /records no fixed version/i);
+    assert.match(unreadable, /cannot read as a version number/i);
+    assert.notEqual(absent, unreadable, 'the operator chases the vendor in one case, the feed in the other');
+  });
+
+  it('an unrecognised reason still says something true', () => {
+    assert.match(V.reasonText('brand-new'), /no usable fix version/i);
   });
 });

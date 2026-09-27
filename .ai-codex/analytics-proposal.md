@@ -1,4 +1,12 @@
-# Analytics without an LLM — PROPOSAL, mostly NOT BUILT
+# Analytics without an LLM — **A1-A5 BUILT, A7 BUILT AND UNRELEASED**, A6/A8/A9 proposal only
+
+⛔ **THIS TITLE READ "PROPOSAL, mostly NOT BUILT" AFTER FIVE OF THE NINE HAD SHIPPED.** That is
+the error this repo pays for most: a stale "not built" sends a session off to rebuild working
+code, and this very file records the same mistake being made about `objectUsage.js` in its own A4
+section. The tracking table below is the answer to "what is built"; the per-item sections that
+follow are the ORIGINAL PROPOSAL TEXT, kept as the design record, and a built item says so in its
+heading. For what actually shipped read `roadmap.md`'s `## Already built`, then `pages.md` and
+`lib.md`.
 
 **Raised 2026-09-25.** Every figure here was measured against the live fleet on that date with the
 read-only role; none is estimated. Re-measure before acting on any of them — the SQL is in the
@@ -15,17 +23,21 @@ PROPOSED SHAPE IS REFUSED"). What this file adds to those is measurement, not a 
 ## Tracking table — start here
 
 Tick `Done` in the SAME commit as the work, per `roadmap.md`'s own rule. `[ ]` not started ·
-`◨` partial · `✅` done.
+`◨` partial · `✅` done (shipped in a released version) · `⧖` **built and in the tree but NOT
+RELEASED** — no version bump, no `releaseNotes` entry.
+
+⛔ `⧖` is not a courtesy state. `[ ]` would send a session to rebuild it; `✅` would have someone
+look for it in a release that does not carry it. Both are wrong in a way that costs work.
 
 | # | Item | Tier | Effort | New table? | Done |
 |---|---|---|---|---|:--:|
 | A1 | **Upgrade planner** — collapse 246 assessments into ~16 upgrade decisions | 1 | S | no | ✅ v2.187.0 |
-| A2 | **Blind-spot register** — which devices look healthy because we cannot see them | 1 | S–M | no | [ ] |
-| A3 | **Log-derived rule usage** — a second evidence source for `hit_count` | 1 | M | no | [ ] |
-| A4 | **Object & rule consolidation** — exact set algebra, needs no hit counts | 2 | M | no | [ ] |
-| A5 | **Fleet conformance / odd-one-out** — discovers checks the 45-check library lacks | 2 | M | no | [ ] |
+| A2 | **Blind-spot register** — which devices look healthy because we cannot see them | 1 | S–M | no | ✅ v2.188.0 |
+| A3 | **Log-derived rule usage** — a second evidence source for `hit_count` | 1 | M | no | ✅ v2.189.0 |
+| A4 | **Object & rule consolidation** — exact set algebra, needs no hit counts | 2 | M | no | ✅ v2.190.0 |
+| A5 | **Fleet conformance / odd-one-out** — discovers checks the 45-check library lacks | 2 | M | no | ✅ v2.190.0 |
 | A6 | Seasonal baselines — **NOT a new item**, it is `roadmap.md` Tier 1 #2. See §A6 for why it cannot arm yet | — | — | — | [ ] |
-| A7 | **Change → outcome correlation** — the most differentiating, depends on A6 | 3 | M–L | no | [ ] |
+| A7 | **Change → outcome correlation** — the most differentiating; it built its OWN control rather than waiting on A6 | 3 | M–L | no | ⧖ built, unreleased |
 | A8 | **Remediation velocity (survival)** — today its honest output is an indictment | 3 | S | no | [ ] |
 | A9 | **VPN behavioural profiles** — 557 users, 35 days, gate PER USER | 3 | M | no | [ ] |
 
@@ -94,7 +106,11 @@ cannot be defended to a customer, and defensibility is the entire product thesis
 
 ---
 
-## A1 — Upgrade planner *(Tier 1, small, highest value-to-effort here)*
+## ✅ BUILT v2.187.0 — A1 — Upgrade planner *(Tier 1, small, highest value-to-effort here)*
+
+*Original proposal text. Shipped as `/vulnerability?tab=upgrade`, `lib/engines/upgradePlan.js` +
+`upgradePlanData.js`. Read the ✅ A1 note above first — it records the one rule the proposal below
+got wrong.*
 
 **The question: what single action clears the most risk on this firewall?**
 
@@ -122,7 +138,11 @@ the customer will not run. The output is evidence for a decision, not the decisi
 
 ---
 
-## A2 — Blind-spot register *(Tier 1, small–medium)*
+## ✅ BUILT v2.188.0 — A2 — Blind-spot register *(Tier 1, small–medium)*
+
+*Original proposal text. Shipped as `/coverage`, `lib/engines/coverageRegister.js` +
+`coverageRegisterData.js`, and work-queue source #11 (`coverage`, which can never reach
+`act_now` — every item is `unmeasured` by construction). Live: 0 of 16 devices fully covered.*
 
 **The question: which devices look healthy because SecVault cannot see them?**
 
@@ -148,7 +168,11 @@ completeness checklist nobody works.
 
 ---
 
-## A3 — Log-derived rule usage *(Tier 1, medium)*
+## ✅ BUILT v2.189.0 — A3 — Log-derived rule usage *(Tier 1, medium)*
+
+*Original proposal text, and all three honesty rules below were kept. Shipped as an ADDITIVE
+grade on `ruleHitCorrelation.js`, `components/analysis/UsageGrade.js`, the `Hits` column on
+`/devices/[id]/rules` becoming `Usage`, and the grade carried into the change-request document.*
 
 **The question: can the syslog already stored close the hit-count gap?**
 
@@ -220,7 +244,12 @@ the honest outcome, not a bug.
 
 ---
 
-## A4 — Object & rule consolidation *(Tier 2, medium)*
+## ✅ BUILT v2.190.0 — A4 — Object & rule consolidation *(Tier 2, medium)*
+
+*Original proposal text — read the A4 CORRECTION immediately above it first: the OBJECT half was
+already built. Shipped as `lib/engines/ruleConsolidation.js` + `ruleConsolidationData.js`, the
+Consolidation tab on `/devices/[id]/analysis`, and `nat_rules` counted as a reference surface in
+`objectUsage.js`.*
 
 Exact set algebra. ⛔ **Needs NO hit counts**, which makes it the one cleanup analytic that is
 CONCLUSIVE on Fortinet, where every other one is blocked.
@@ -283,7 +312,12 @@ address.
 
 ---
 
-## A5 — Fleet conformance / odd-one-out *(Tier 2, medium)*
+## ✅ BUILT v2.190.0 — A5 — Fleet conformance / odd-one-out *(Tier 2, medium)*
+
+*Original proposal text — read the A5 MEASUREMENT immediately above it first: the cohort is
+`(vendor, mgmt_method)`, NOT vendor, and grouping by vendor alone would have made this a
+false-finding machine on its first run. Shipped as `/conformance`,
+`lib/engines/fleetConformance.js` + `fleetConformanceData.js`.*
 
 **The question: which device is configured unlike its peers?**
 
@@ -324,7 +358,77 @@ made continuous, and is why A2 should land first.
 
 ---
 
-## A7 — Change → outcome correlation *(Tier 3, medium–large)*
+## ⧖ BUILT, NOT RELEASED — A7 — Change → outcome correlation *(Tier 3, medium–large)*
+
+⛔ **IN THE TREE, IN NO RELEASE.** `lib/engines/changeOutcome.js` + `changeOutcomeData.js` +
+`components/analysis/ChangeOutcomeBoard.js`, rendered on `/devices/[id]/changes` above the change
+list. No version bump and no `releaseNotes` entry yet, so it is built and shipped to nobody.
+
+⛔ **AND IT DID NOT WAIT FOR A6.** The proposal below says this "requires A6's variance estimate,
+which is why this is Tier 3". It does require a variance estimate — and it BUILDS ITS OWN, per
+device, from the same daily series, rather than depending on a seasonal model that still cannot
+arm. The dependency stated below did not hold; A6 remains unbuilt and was never a blocker.
+
+⛔ **THE CONTROL IS THE FEATURE.** "Did this change actually change anything?" is only answerable
+after ORDINARY day-to-day variation on the same device has been measured — without a control every
+post-change delta looks meaningful. Measured 2026-09-27, same fleet, same window:
+
+| | avg delta |
+|---|---|
+| 24h either side of a CONFIG CHANGE (61 changes) | **+13.6%** |
+| 24h either side of an ORDINARY DAY (284 pairs) | **+17.6%** |
+
+⛔ **THE CHANGE-ADJACENT DELTA IS SMALLER THAN THE NOISE.** Per-change deltas ran −92.1% to
++126.0% against a fleet p90 of absolute daily variation of 113.8% — every one of those 61
+"effects" sits inside ordinary fluctuation. A naive build of this feature — compute the
+before/after delta and print it — would have produced 61 plausible percentages and an operator
+would have read causation into every one. So the engine reports no bare delta at all: it reports
+a delta against that device's own measured variability, and its common answer is
+`indistinguishable`.
+
+⛔ **THE BAND IS PER DEVICE.** Measured p90 of absolute daily variation spans **23.2% (HRIS) to
+284.3% (Vietnam-YCC)**, a 12x spread. One fleet-wide band would flag routine Vietnam-YCC
+fluctuation as an effect AND miss a genuine change on HRIS.
+
+⛔ **MEDIAN + MAD WAS TRIED, MEASURED WRONG, AND REJECTED — AND ONLY THE CONTROL REVEALED IT.**
+The first version used Iglewicz–Hoaglin's modified Z-score at its own standard 3.5 threshold:
+robust, published, and the correct answer to the mean+σ trap the A6 section below warns about.
+Against the control it flagged **49 of 284 ordinary, change-free day-pairs — 17.3%** (worst
+device 42.1%). A detector that fires on one ordinary day in six manufactures effects from noise,
+which is precisely the failure this engine exists to prevent, reached by a correct-looking robust
+statistic. ⛔ The cause: 3.5 assumes approximately normal data while these deltas are
+heavy-tailed (medians 2.4%–30% against p90s of 23%–284%), so MAD measures a tight core the tail
+routinely clears — **a ROBUST estimator is not a DISTRIBUTION-FREE one.** Replaced with the
+device's own EMPIRICAL QUANTILE (`BAND_QUANTILE = 0.95`), whose false-positive rate is
+`1 - quantile` BY CONSTRUCTION rather than by hope; measured 5.3%. Median and MAD are still
+computed and reported, as DESCRIPTION only, and must never decide anything.
+
+Other constants: `MIN_BASELINE_PAIRS = 10`; `DEFAULT_WINDOW_HOURS = 24`, ⛔ **not a tuning knob**
+— 61 changes have a complete 24h window either side and only 18 have 7 days, so widening it buys
+precision by discarding most of the subject.
+
+⛔ **SIX VERDICTS, AND `window_incomplete` EARNED ITS PLACE ON THE FIRST LIVE RUN.** Four changes
+dated 2026-09-08 — the rollup's OWN FIRST DAY — reported **+814%**, +691% and +239% and cleared
+every band, because their 24h "before" window lay in the hours when the collector had only just
+started. Nothing to do with any firewall: a confident, plausible, completely wrong number, this
+codebase's signature bug arriving through the front door of a feature built to prevent it. ⛔ It
+was tested before the traffic existed to test it against, which is the only reason the state was
+there when the artefact appeared. The full set: `indistinguishable` ·
+`exceeded_normal_variation` · `no_traffic_window` · `insufficient_baseline` ·
+`baseline_degenerate` · `window_incomplete`.
+
+⛔ **THE VERDICT IS `exceeded` vs `indistinguishable`, DELIBERATELY NOT "significant", AND IT
+MAKES NO CAUSAL CLAIM.** `OUTCOME_CLAIM` is exported and `tests/changeOutcomeBoard.test.js`
+rejects the causal vocabulary from every string the view emits. ⛔ `indistinguishable` is NOT "no
+effect" — it is a statement about what can be RESOLVED. ⛔ A thin baseline reports its own
+insufficiency rather than a clean result, and a failed read suppresses every verdict AND every
+count rather than rendering a quiet fleet — zero changes assessed otherwise reads exactly like a
+fleet whose changes were all uneventful.
+
+⛔ `getChangeOutcomes()` (the fleet entry point) exists but **nothing calls it outside the
+tests**. There is no fleet A7 surface today.
+
+*Original proposal text follows.*
 
 203 `config_diffs` (99 in the last 30 days, 9 unreviewed) against `syslog_rollup_hourly`. For each
 change, compare a window either side: deny rate, volume, threat counts.

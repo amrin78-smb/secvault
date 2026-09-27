@@ -25,10 +25,38 @@ const healthy = () => ({
   // fixture derived from this one therefore asserts the DEVICE-ONLY state; the
   // unreadable case is a null, and has its own tests below.
   rulesLogAnswered: 0, rulesLogAnsweredDeletionGrade: 0,
-  objectRefs: 878, objectUnresolvable: 0, configAgeDays: 0,
+  objectRefs: 878, objectUnresolvable: 0, configRows: 12, configAgeDays: 0,
   versionRows: 3, analysisAgeDays: 1, ruleFindings: 377,
   rulesCollectedAt: '2026-09-25T00:00:00Z',
 });
+
+// ⛔ EVERY SOURCE, AND THE MEASUREMENT IT RESTS ON. Used by the unreadable-count
+// tests below so the property is asserted for the CLASS rather than for one
+// instance — the old test exercised `logBuckets` alone while claiming to hold for
+// every count, and four of the seven sources were meanwhile DROPPING their cell
+// when their own count could not be read.
+//
+// `config` takes both fields because the AGE is its measurement and the row count
+// only disambiguates a NULL one; nulling the count alone leaves a real age, which
+// is still a measurement.
+const SOURCE_MEASUREMENTS = [
+  ['ruleset', ['rules']],
+  ['ruleUsage', ['rulesUnmeasured']],
+  ['syslog', ['logBuckets']],
+  ['interfaces', ['interfaces']],
+  ['objects', ['objectRefs']],
+  ['objects', ['objectUnresolvable']],
+  ['config', ['configAgeDays', 'configRows']],
+  ['version', ['versionRows']],
+];
+
+const UNREADABLE = [null, undefined, '', '   ', [], false, {}, NaN, 'n/a'];
+
+const nulled = (fields, bad) => {
+  const d = healthy();
+  for (const f of fields) d[f] = bad;
+  return d;
+};
 
 const cellFor = (entry, key) => entry.cells.find((c) => c.key === key);
 
@@ -109,7 +137,7 @@ test('an UNREADABLE count is absent-but-UNCERTAIN, never a measured gap', () => 
 // `Number.isFinite(Number(v))` guard records every one of them as a measured
 // zero. That was live in this engine until the test above caught it.
 test('no falsy input is ever recorded as a measured zero', () => {
-  for (const bad of [null, undefined, '', '   ', [], false, {}, NaN, 'n/a']) {
+  for (const bad of UNREADABLE) {
     const e = assessDevice({ ...healthy(), logBuckets: bad });
     const c = cellFor(e, 'syslog');
     assert.equal(c.certain, false, `${JSON.stringify(bad)} was read as a measurement`);
@@ -120,6 +148,47 @@ test('no falsy input is ever recorded as a measured zero', () => {
     const c = cellFor(assessDevice({ ...healthy(), logBuckets: real }), 'syslog');
     assert.equal(c.certain, true, `${JSON.stringify(real)} is a real measured zero`);
     assert.match(c.detail, /sends no syslog/i);
+  }
+});
+
+// ── ⛔ THE CLASS, NOT ONE INSTANCE ───────────────────────────────────────
+//
+// The test above holds for `logBuckets`. It was the ONLY count it held for:
+// `ruleUsage`, `interfaces` and both halves of `objects` DROPPED their cell when
+// their count could not be read, which took the gap out of `gaps`, the weight out
+// of `answersWithheld` and the uncertainty out of `uncertainCount` — so an
+// unreadable count produced `fullyCovered: true`, "Fully visible", on the one page
+// whose subject is unreadable measurements.
+
+test('⛔ EVERY source still produces a cell when its own measurement is unreadable', () => {
+  for (const [key, fields] of SOURCE_MEASUREMENTS) {
+    for (const bad of UNREADABLE) {
+      const e = assessDevice(nulled(fields, bad));
+      const c = cellFor(e, key);
+      assert.ok(c, `${key} dropped its cell for ${fields.join('+')} = ${JSON.stringify(bad)}`);
+      assert.equal(c.certain, false,
+        `${key} read ${fields.join('+')} = ${JSON.stringify(bad)} as a measurement`);
+      assert.match(c.detail, /could not be read/i);
+    }
+  }
+});
+
+test('⛔ an unreadable measurement can NEVER produce fullyCovered', () => {
+  for (const [key, fields] of SOURCE_MEASUREMENTS) {
+    const e = assessDevice(nulled(fields, null));
+    assert.equal(e.fullyCovered, false, `${key}: an unread count rendered as fully visible`);
+    assert.ok(e.gapCount > 0, `${key}: the unread count contributed no gap`);
+    assert.ok(e.uncertainCount > 0, `${key}: the unread count was not counted as unchecked`);
+    assert.ok(e.answersWithheld > 0, `${key}: the unread count withheld nothing`);
+  }
+});
+
+test('assessDevice always emits exactly one cell per evidence source', () => {
+  // ⛔ A source that can vanish is a source that can be silently written off.
+  const keys = Object.keys(SOURCES);
+  for (const d of [healthy(), {}, nulled(['rules', 'rulesUnmeasured'], null)]) {
+    const e = assessDevice(d);
+    assert.deepEqual(e.cells.map((c) => c.key).sort(), [...keys].sort());
   }
 });
 
@@ -349,27 +418,46 @@ test('a PARTIAL device with no log answers keeps its original wording', () => {
 // ⛔ THE ONE THAT REGRESSES SILENTLY. A failed read must never improve the
 // picture: "we could not check whether the logs answer these" is not "the logs
 // answer these".
-test('an UNREADABLE log-evidence count leaves the cell at its WORSE state, uncertain', () => {
+//
+// ⛔ AND IT IS THE GAP'S MITIGATION THAT IS UNREAD, NOT THE GAP. `hit_count IS
+// NULL` for 78 of 78 rules came off `firewall_rules` and is certain; only the
+// enrichment that could have shrunk it failed. Marking the whole cell
+// `certain: false` reported an established blind spot as an unanswered question
+// — and because `gatherCoverageGaps` drops unconfirmed gaps, it DELETED
+// OKF(F2)'s work-queue item on the live fleet while the queue reported ok.
+test('an UNREADABLE log-evidence count leaves the cell at its WORSE state', () => {
   const e = unmeasuredDevice(null, null);
   const c = cellFor(e, 'ruleUsage');
   assert.equal(c.state, STATE.ABSENT, 'it must stay where the device evidence left it');
-  assert.equal(c.certain, false);
+  assert.equal(c.certain, true, 'the GAP was measured on the device — only its mitigation was not');
+  assert.equal(c.mitigationUnknown, true);
   assert.match(c.detail, /78 of 78/);
   assert.match(c.detail, /could not be read/i);
   assert.match(c.detail, /overstate/i);
-  assert.equal(e.uncertainCount, 1);
+  assert.equal(e.uncertainCount, 0, 'an unread mitigation is not an unread gap');
+  assert.equal(e.mitigationUnknownCount, 1);
   // ⛔ And it must not claim a NUMBER of log answers. The sentence names the
   // logs to say they could not be read, which is the opposite of a claim.
   assert.doesNotMatch(c.detail, /logs answer (all )?\d/i);
 });
 
-test('an unreadable count on a PARTIAL device also stays partial and uncertain', () => {
+test('⛔ an unread mitigation is COUNTED, separately from an unread gap', () => {
+  const s = summariseRegister([
+    assessDevice({ ...healthy(), deviceId: 'a', logBuckets: null }),
+    unmeasuredDevice(null, null, { deviceId: 'b' }),
+  ]);
+  assert.equal(s.devicesWithUnreadableChecks, 1, 'only the unreadable syslog count');
+  assert.equal(s.devicesWithUnreadMitigations, 1, 'only the unread log-evidence enrichment');
+});
+
+test('an unreadable count on a PARTIAL device also stays partial', () => {
   const c = cellFor(assessDevice({
     ...healthy(), rules: 100, rulesUnmeasured: 40,
     rulesLogAnswered: null, rulesLogAnsweredDeletionGrade: null,
   }), 'ruleUsage');
   assert.equal(c.state, STATE.PARTIAL);
-  assert.equal(c.certain, false);
+  assert.equal(c.certain, true);
+  assert.equal(c.mitigationUnknown, true);
 });
 
 // ⛔ `Number(null)` is 0 and 0 is finite. The whole coercion family has to stay
@@ -377,30 +465,30 @@ test('an unreadable count on a PARTIAL device also stays partial and uncertain',
 // this is the field where a coercion would IMPROVE the register, which is the
 // direction that never gets noticed.
 test('no falsy log-evidence input is ever read as "the logs answer none"', () => {
-  for (const bad of [null, undefined, '', '   ', [], false, {}, NaN, 'n/a']) {
+  for (const bad of UNREADABLE) {
     const c = cellFor(unmeasuredDevice(bad, bad), 'ruleUsage');
-    assert.equal(c.certain, false, `${JSON.stringify(bad)} was read as a measurement`);
+    assert.equal(c.mitigationUnknown, true, `${JSON.stringify(bad)} was read as a measurement`);
     assert.equal(c.state, STATE.ABSENT, `${JSON.stringify(bad)} moved the cell`);
   }
   for (const real of [0, '0']) {
     const c = cellFor(unmeasuredDevice(real, real), 'ruleUsage');
-    assert.equal(c.certain, true, `${JSON.stringify(real)} is a real measured zero`);
+    assert.equal(c.mitigationUnknown, false, `${JSON.stringify(real)} is a real measured zero`);
   }
 });
 
 // ⛔ KNOWING HOW MANY are answered without knowing how many are ID-GRADE cannot
 // be rendered: the detail would imply a deletion authority it has not
 // established. Either count unreadable holds the whole cell back.
-test('a readable total with an unreadable grade split is still uncertain', () => {
+test('a readable total with an unreadable grade split claims neither', () => {
   const c = cellFor(unmeasuredDevice(54, null), 'ruleUsage');
-  assert.equal(c.certain, false);
+  assert.equal(c.mitigationUnknown, true);
   assert.equal(c.state, STATE.ABSENT);
   assert.doesNotMatch(c.detail, /54/);
 });
 
-test('an unreadable grade split with a zero total is also uncertain', () => {
+test('an unreadable grade split with a zero total also claims no mitigation', () => {
   const c = cellFor(unmeasuredDevice(0, null), 'ruleUsage');
-  assert.equal(c.certain, false);
+  assert.equal(c.mitigationUnknown, true);
 });
 
 // ── ID grade vs NAME grade ───────────────────────────────────────────────
@@ -485,7 +573,148 @@ test('a negative log-evidence count is not a measurement', () => {
   // smaller gap, and it must not silently behave like zero.
   const c = cellFor(unmeasuredDevice(-3, 0), 'ruleUsage');
   assert.equal(c.state, STATE.ABSENT);
-  assert.equal(c.certain, false, 'a negative must not render as "we checked; none"');
+  assert.equal(c.mitigationUnknown, true, 'a negative must not render as "we checked; none"');
   assert.match(c.detail, /could not be read/i);
-  assert.equal(cellFor(unmeasuredDevice(30, -1), 'ruleUsage').certain, false);
+  assert.equal(cellFor(unmeasuredDevice(30, -1), 'ruleUsage').mitigationUnknown, true);
+});
+
+// ── ⛔ FINDING 3: a firewall with NO ruleset must not outrank nothing ─────
+//
+// `ruleUsage` and `objects` were pushed only `if (rules)`, so a firewall nothing
+// had ever been collected from produced FEWER gaps and a LOWER `answersWithheld`
+// than one collected and blind — the exact inversion this engine exists to
+// correct, reproduced inside its own ranking.
+
+const neverCollected = () => assessDevice({
+  ...healthy(),
+  deviceId: 'never', deviceName: 'NEVER-COLLECTED',
+  rules: 0, rulesUnmeasured: 0,
+  objectRefs: 0, objectUnresolvable: 0,
+  rulesCollectedAt: null, analysisAgeDays: null, ruleFindings: 0,
+});
+
+const collectedButBlind = () => assessDevice({
+  ...healthy(),
+  deviceId: 'blind', deviceName: 'COLLECTED-BUT-BLIND',
+  rules: 100, rulesUnmeasured: 100,
+  objectRefs: 90, objectUnresolvable: 90,
+});
+
+test('⛔ a firewall with NO ruleset withholds MORE than one collected but blind', () => {
+  const never = neverCollected();
+  const blind = collectedButBlind();
+  assert.ok(never.answersWithheld > blind.answersWithheld,
+    `never-collected withheld ${never.answersWithheld}, blind withheld ${blind.answersWithheld}`);
+  assert.deepEqual(
+    rankRegister([blind, never]).map((e) => e.deviceName),
+    ['NEVER-COLLECTED', 'COLLECTED-BUT-BLIND'],
+    'a firewall SecVault has never read must never rank below one it has',
+  );
+});
+
+test('no ruleset makes rule usage and object resolution gaps, and says why', () => {
+  const e = neverCollected();
+  for (const key of ['ruleset', 'ruleUsage', 'objects']) {
+    const c = cellFor(e, key);
+    assert.equal(c.state, STATE.ABSENT, `${key} should be absent with no ruleset`);
+    assert.equal(c.certain, true, `${key}: a measured zero rule count IS a measurement`);
+  }
+  assert.match(cellFor(e, 'ruleUsage').detail, /No rules have been collected/);
+  assert.match(cellFor(e, 'objects').detail, /No rules have been collected/);
+});
+
+test('rules collected but referencing no object is MEASURED, not a gap', () => {
+  // ⛔ The other half of the same branch: with a ruleset present, zero object
+  // references is a real measured zero — there is nothing to resolve.
+  const c = cellFor(assessDevice({ ...healthy(), objectRefs: 0, objectUnresolvable: 0 }), 'objects');
+  assert.equal(c.state, STATE.MEASURED);
+  assert.match(c.detail, /nothing to resolve/i);
+});
+
+// ── ⛔ FINDING 4: a partial gap is weighted by the SHARE it affects ───────
+//
+// `STATE_WEIGHT.partial` was a flat 0.5, so nine of sixteen live firewalls sat on
+// exactly 1.5 with the same blocked-engine count and the order fell through to
+// the device NAME — HRIS (74 of 90 object references unresolvable) level with TUM
+// (6 of 263). And one log-answered rule in a hundred HALVED the score.
+
+const objectsPartial = (unres, refs) => cellFor(
+  assessDevice({ ...healthy(), objectRefs: refs, objectUnresolvable: unres }), 'objects',
+);
+
+test('⛔ a partial gap affecting 82% of a source outweighs one affecting 2%', () => {
+  const hris = objectsPartial(74, 90);
+  const tum = objectsPartial(6, 263);
+  assert.equal(hris.state, STATE.PARTIAL);
+  assert.equal(tum.state, STATE.PARTIAL);
+  assert.ok(hris.weight > tum.weight * 5,
+    `82% weighed ${hris.weight} against 2% at ${tum.weight} — the ranking has collapsed`);
+});
+
+test('⛔ the ranking uses the UNROUNDED weight, so display rounding cannot re-tie it', () => {
+  // Live: TSR_EKM (3.05) and TUG (3.07) both display as 3.1, and ranking on the
+  // displayed figure hands the order back to localeCompare(deviceName) — the
+  // collapse the share was introduced to fix, re-created by a rounding.
+  const a = assessDevice({
+    ...healthy(), deviceId: 'a', deviceName: 'Zulu', objectRefs: 500, objectUnresolvable: 101,
+  });
+  const b = assessDevice({
+    ...healthy(), deviceId: 'b', deviceName: 'Alpha', objectRefs: 500, objectUnresolvable: 100,
+  });
+  assert.equal(a.answersWithheld, b.answersWithheld, 'the displayed figures must tie for this test');
+  assert.ok(a.answersWithheldExact > b.answersWithheldExact);
+  assert.deepEqual(rankRegister([b, a]).map((e) => e.deviceName), ['Zulu', 'Alpha'],
+    'the larger real gap must lead, whatever the two display as');
+});
+
+test('a partial weight rises monotonically with the share affected', () => {
+  const weights = [1, 10, 50, 100, 200, 400].map((u) => objectsPartial(u, 500).weight);
+  for (let i = 1; i < weights.length; i += 1) {
+    assert.ok(weights[i] > weights[i - 1], `weights did not rise: ${weights.join(', ')}`);
+  }
+});
+
+test('⛔ a partial can never weigh as much as an absence, however large the share', () => {
+  const nearlyAll = objectsPartial(499, 500);
+  const all = objectsPartial(500, 500);
+  assert.equal(all.state, STATE.ABSENT);
+  assert.ok(nearlyAll.weight < all.weight,
+    'a gap with something answered must not rank level with one with nothing answered');
+});
+
+test('⛔ a tiny partial still carries weight — a gap that costs nothing reads as an answer', () => {
+  const one = objectsPartial(1, 878);
+  assert.ok(one.weight > 0, 'one unresolvable reference in 878 weighed nothing');
+  assert.ok(one.weight < objectsPartial(400, 878).weight);
+});
+
+test('⛔ ONE log-answered rule in a hundred does not halve the gap', () => {
+  const none = cellFor(unmeasuredDevice(0, 0, { rules: 100, rulesUnmeasured: 100 }), 'ruleUsage');
+  const one = cellFor(unmeasuredDevice(1, 1, { rules: 100, rulesUnmeasured: 100 }), 'ruleUsage');
+  const all = cellFor(unmeasuredDevice(100, 100, { rules: 100, rulesUnmeasured: 100 }), 'ruleUsage');
+  assert.ok(one.weight > all.weight * 1.5,
+    `one answered rule weighed ${one.weight} against ${all.weight} for all hundred`);
+  assert.ok(one.weight < none.weight, 'one answered rule is still an improvement');
+});
+
+test('NAME-grade answers withhold more than ID-grade ones, at the same count', () => {
+  // ⛔ The grade ORDER is what is pinned, never the residual numbers.
+  const byId = cellFor(unmeasuredDevice(40, 40, { rules: 100, rulesUnmeasured: 40 }), 'ruleUsage');
+  const byName = cellFor(unmeasuredDevice(40, 0, { rules: 100, rulesUnmeasured: 40 }), 'ruleUsage');
+  assert.ok(byName.weight > byId.weight,
+    'a name answer cannot authorise a removal, so it withholds more than an ID answer');
+});
+
+// ── ⛔ FINDING 11: a real gap may never print as 0% ──────────────────────
+
+test('⛔ a non-zero object gap never renders as "(0%)"', () => {
+  const c = objectsPartial(1, 878);
+  assert.match(c.detail, /1 of 878/);
+  assert.match(c.detail, /\(<1%\)/, 'on the page that exists to stop zeros meaning nothing');
+  assert.doesNotMatch(c.detail, /\(0%\)/);
+});
+
+test('a gap that is not total never renders as "(100%)" either', () => {
+  assert.match(objectsPartial(999, 1000).detail, /\(>99%\)/);
+  assert.match(objectsPartial(77, 77).detail, /\(100%\)/, 'a total gap really is all of them');
 });

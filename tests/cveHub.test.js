@@ -348,3 +348,168 @@ test('freshnessErrors: a missing verdict is treated as a problem, not as fresh',
   assert.equal(freshnessErrors(undefined).length, 1);
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ A STATEMENT REFUSAL WAS COUNTED NOWHERE (found 2026-09-27)
+//
+// When hubIsBetter() says yes and the UPDATE's own WHERE clause writes nothing,
+// the old code incremented NOTHING: not `repaired` (rowCount 0 now, correctly),
+// not `degradeRefused`, not `unchanged`. So the stats stopped summing to
+// byCve.size and the ONE outcome the doubled guard exists to make impossible was
+// the only one it did not report.
+//
+// That is the signal that would have caught v2.186.0's doubled-guard drift in ONE
+// deploy instead of three: the JS half permitted 80 repairs, the SQL half refused
+// all 80, and every number in feed_sync_log looked fine.
+
+function refusingPool(existingRows) {
+  // A pool whose UPDATE matches no row — exactly the v2.186.0 shape.
+  const calls = [];
+  return {
+    calls,
+    async query(sql, params) {
+      calls.push({ sql, params });
+      if (/SELECT cve_id, vendor/.test(sql)) return { rows: existingRows };
+      if (/UPDATE advisories/.test(sql)) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+}
+
+const BLANK_LOCAL = (cve) => ({
+  cve_id: cve, vendor: 'cisco_asa', affected_version_ranges: [], matchability: 'unmatchable',
+});
+const GOOD_REMOTE = (cve) => ({
+  cve_id: cve, vendor: 'cisco_asa', matchability: 'matched', affected_version_ranges: RANGE,
+});
+
+test('⛔ applyFeed: a permitted-then-refused repair is COUNTED and ERRORED', async () => {
+  const pool = refusingPool([BLANK_LOCAL('CVE-2024-9'), BLANK_LOCAL('CVE-2024-10')]);
+  const stats = await applyFeed(pool, feedOf([GOOD_REMOTE('CVE-2024-9'), GOOD_REMOTE('CVE-2024-10')]));
+
+  assert.equal(stats.repaired, 0, 'nothing was written, so nothing may be reported repaired');
+  assert.equal(stats.statementRefused, 2, 'and the refusal itself must be counted');
+  assert.deepEqual(stats.statementRefusedCves, ['CVE-2024-9', 'CVE-2024-10']);
+  assert.equal(stats.unchanged, 0, 'a refusal is NOT "nothing to do"');
+  assert.equal(stats.degradeRefused, 0, 'nor a degrade');
+
+  // ⛔ AN ERROR, NOT JUST A COUNTER. Pushing it into `errors` is what turns the
+  // sync `partial` and puts it on the status banner; a counter buried in a jsonb
+  // summary is read by nobody until somebody already suspects a problem.
+  const err = stats.errors.find((e) => /guard disagreement/.test(e.message));
+  assert.ok(err, 'expected a guard-disagreement error, got ' + JSON.stringify(stats.errors));
+  assert.match(err.message, /2 advisories were permitted/);
+  assert.match(err.message, /CVE-2024-9/);
+  assert.match(err.message, /fixBoundary/, 'it must name where the two halves live');
+});
+
+test('⛔ applyFeed: a SUCCESSFUL repair records no refusal and names the CVE', async () => {
+  // Keeps the counter meaningful: it must be absent on the healthy path, or the
+  // banner it feeds becomes permanent amber and gets ignored.
+  const pool = stubPool([BLANK_LOCAL('CVE-2024-11')]);
+  const stats = await applyFeed(pool, feedOf([GOOD_REMOTE('CVE-2024-11')]));
+  assert.equal(stats.repaired, 1);
+  assert.equal(stats.statementRefused, 0);
+  assert.deepEqual(stats.repairedCves, ['CVE-2024-11']);
+  assert.equal(stats.errors.length, 0);
+});
+
+test('⛔ applyFeed: the counters SUM to the advisories considered', async () => {
+  // The identity that made the missing counter visible in review at all. Every
+  // branch is exercised at once: insert, repair-refused, degrade, vendor
+  // conflict, unchanged.
+  const pool = {
+    calls: [],
+    async query(sql, params) {
+      this.calls.push({ sql, params });
+      if (/SELECT cve_id, vendor/.test(sql)) {
+        return {
+          rows: [
+            BLANK_LOCAL('CVE-R'),
+            { cve_id: 'CVE-X', vendor: 'paloalto', affected_version_ranges: RANGE, matchability: 'matched' },
+            { cve_id: 'CVE-D', vendor: 'cisco_asa', affected_version_ranges: RANGE, matchability: 'matched' },
+            { cve_id: 'CVE-U', vendor: 'cisco_asa', affected_version_ranges: RANGE, matchability: 'matched' },
+          ],
+        };
+      }
+      // The repair of CVE-R is permitted by the predicate and refused by the
+      // statement — the drift this counter exists to expose.
+      if (/UPDATE advisories/.test(sql)) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    },
+  };
+  const stats = await applyFeed(pool, feedOf([
+    GOOD_REMOTE('CVE-R'),
+    { cve_id: 'CVE-N', vendor: 'fortinet', matchability: 'matched', affected_version_ranges: RANGE },
+    { cve_id: 'CVE-X', vendor: 'cisco_asa', matchability: 'matched', affected_version_ranges: RANGE },
+    { cve_id: 'CVE-D', vendor: 'cisco_asa', matchability: 'matched', affected_version_ranges: [] },
+    { cve_id: 'CVE-U', vendor: 'cisco_asa', matchability: 'matched', affected_version_ranges: RANGE },
+  ]));
+
+  assert.equal(stats.considered, 5);
+  assert.equal(stats.inserted, 1);
+  assert.equal(stats.statementRefused, 1);
+  assert.equal(stats.vendorConflict, 1);
+  assert.equal(stats.degradeRefused, 1);
+  assert.equal(stats.unchanged, 1);
+  assert.equal(stats.unaccounted, 0, 'an uncounted outcome is an outcome nobody can see');
+  assert.ok(!stats.errors.some((e) => /accounting/.test(e.message)));
+});
+
+test('⛔ applyFeed: an INSERT that writes nothing is counted, not silently dropped', async () => {
+  // `ON CONFLICT DO NOTHING` writing nothing means the snapshot read at the top
+  // was stale against a concurrent sync. Not an error — but not invisible either,
+  // or the accounting identity above would have a hole in it.
+  const pool = {
+    async query(sql) {
+      if (/SELECT cve_id, vendor/.test(sql)) return { rows: [] };
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const stats = await applyFeed(pool, feedOf([
+    { cve_id: 'CVE-2024-12', vendor: 'fortinet', matchability: 'matched', affected_version_ranges: RANGE },
+  ]));
+  assert.equal(stats.inserted, 0);
+  assert.equal(stats.insertSkipped, 1);
+  assert.equal(stats.unaccounted, 0);
+});
+
+// ── repairTrend — "repaired 20" every six hours is not progress ──────────────
+
+const { repairTrend, REPAIR_CONVERGENCE_RUNS } = require('../lib/feeds/cveHub');
+
+test('⛔ repairTrend: a steady nonzero repair count is NOT converging', () => {
+  // The symptom that read as progress for three days: a repair is a backfill and
+  // should converge to zero, so a steady count every cycle means something is
+  // undoing the writes between cycles.
+  const t = repairTrend([20, 20, 20], 20);
+  assert.equal(t.state, 'not_converging');
+  assert.match(t.reason, /consecutive runs/);
+  assert.match(t.reason, /not sticking|overwriting/);
+});
+
+test('repairTrend: a repair after a quiet run is ordinary convergence', () => {
+  assert.equal(repairTrend([0, 20, 20], 5).state, 'converging');
+  assert.equal(repairTrend([20, 0], 5).state, 'converging');
+});
+
+test('repairTrend: no repairs this run is idle, never an alarm', () => {
+  assert.equal(repairTrend([20, 20, 20], 0).state, 'idle');
+  assert.equal(repairTrend([], 0).state, 'idle');
+});
+
+test('⛔ repairTrend: an UNREADABLE history is unknown, never converging', () => {
+  // A failed read is not a measurement. It is also deliberately NOT an error —
+  // see the function's own note: this is a diagnostic over our own log table, and
+  // a blip reading it must not raise an alarm about CVE discovery.
+  const t = repairTrend(null, 20);
+  assert.equal(t.state, 'unknown');
+  assert.match(t.reason, /could not be read/);
+  assert.notEqual(t.state, 'converging');
+});
+
+test('repairTrend: too little history to judge is unknown, not a clean bill', () => {
+  assert.equal(repairTrend([20], 20).state, 'unknown');
+  assert.equal(repairTrend([], 20).state, 'unknown');
+  assert.ok(REPAIR_CONVERGENCE_RUNS >= 3, 'fewer than three runs cannot show a trend');
+});

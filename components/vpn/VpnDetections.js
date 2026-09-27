@@ -12,7 +12,7 @@ import VpnThreatFilters from './VpnThreatFilters';
 // ⛔ The narrowing itself is PURE and lives in lib/, so it can be tested
 // directly rather than by scanning this file for the right words — the same
 // split segmentation.js and applicationView.js use.
-import { matchesFilters, filtersActive, countriesIn } from '../../lib/vpnDetectionFilters';
+import { filtersActive, countriesIn, panelView } from '../../lib/vpnDetectionFilters';
 
 // Named VPN threat detections — the render half of lib/engines/vpnDetections.js.
 //
@@ -367,9 +367,14 @@ function baselinePanel(detection) {
   );
 }
 
-function unverifiableBlock(detection, ctx) {
-  const rows = detection.unverifiable || [];
-  const total = detection.unverifiableTotal || 0;
+// ⛔ TAKES THE VIEW, NOT THE DETECTION. The rows shown here are narrowed by the
+// same filters as the findings above them — without that, one card could print
+// "Nothing matched…", "showing 0 of 130" and 25 rows from three other countries
+// at the same time. ⛔ But the TOTAL is the engine's and no filter shrinks it: it
+// is the claim, the list is illustration, and the summary says which is which.
+function unverifiableBlock(detection, view, ctx) {
+  const rows = view.unverifiable || [];
+  const total = view.unverifiableTotal || 0;
   if (total === 0) return null;
   const reasons = [...new Set(rows.map((r) => r.reason))];
   return (
@@ -380,11 +385,21 @@ function unverifiableBlock(detection, ctx) {
           padding: 'var(--s2) 0',
         }}
       >
-        {n(total)} could not be verified{rows.length < total ? ` (${rows.length} shown)` : ''} —{' '}
-        {reasons.map((r) => REASON_TEXT[r] || r).join('; ')}
+        {n(total)} could not be verified
+        {view.unverifiableHiddenByFilters > 0
+          ? ` (${n(rows.length)} shown, narrowed by the current filters)`
+          : rows.length < total ? ` (${n(rows.length)} shown)` : ''} —{' '}
+        {reasons.length > 0
+          ? reasons.map((r) => REASON_TEXT[r] || r).join('; ')
+          : 'no example survives the current filters'}
       </summary>
       <div style={{ marginTop: 'var(--s2)' }}>
-        {findingsTable(detection.id, rows, {
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
+            None of these {n(total)} observation(s) matches the current filters. They are still
+            counted above — narrowing the list never reduces the total.
+          </div>
+        ) : findingsTable(detection.id, rows, {
           label: 'Why not verified',
           cell: (f) => (
             <span style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-xs)' }}>
@@ -416,11 +431,14 @@ function caveatList(caveats) {
 
 function detectionCard(detection, ctx) {
   const badge = STATUS_BADGE[detection.status] || STATUS_BADGE.no_data;
-  const allFindings = detection.findings || [];
-  const findings = ctx.filtersActive
-    ? allFindings.filter((f) => matchesFilters(f, ctx.filters))
-    : allFindings;
-  const measured = detection.status === 'measured';
+  // ⛔ THE DECISION IS PURE AND LIVES IN lib/, so the four outcomes (rows / an
+  // EARNED all-clear / narrowed to nothing / not measured) are pinned by
+  // behaviour rather than by a scan of this file for the right words. The
+  // all-clear in particular must key on the UNFILTERED set — see panelView.
+  const view = panelView(detection, ctx.filtersActive ? ctx.filters : null);
+  const allFindings = view.findingsTotal;
+  const findings = view.findings;
+  const measured = view.measured;
   return (
     <Card key={detection.id}>
       <CardBody style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
@@ -435,9 +453,9 @@ function detectionCard(detection, ctx) {
           {/* ⛔ SAY WHEN THE FILTER BIT. A narrowed list that prints only its
               own length reads as the whole answer, which is the truncation
               failure wearing a filter's clothes. */}
-          {ctx.filtersActive && allFindings.length !== findings.length ? (
+          {view.hiddenByFilters > 0 ? (
             <span style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
-              showing {n(findings.length)} of {n(allFindings.length)}
+              showing {n(findings.length)} of {n(allFindings)}
             </span>
           ) : null}
           <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
@@ -446,7 +464,7 @@ function detectionCard(detection, ctx) {
           {/* Export is the UNFILTERED detection — the route re-reads the engine
               and carries `unverifiable` too, which no filter may hide from a
               file somebody will treat as the record. */}
-          {measured && allFindings.length > 0 ? (
+          {measured && allFindings > 0 ? (
             <DownloadButton
               href={`/api/vpn/detections/export?detection=${encodeURIComponent(detection.id)}&hours=${ctx.windowHours}`}
               className="btn btn-secondary"
@@ -495,17 +513,30 @@ function detectionCard(detection, ctx) {
             </div>
           ) : null}
 
-        {measured && findings.length === 0 ? (
-          // ⛔ An EARNED all-clear, in ordinary text. Reachable only when the
-          // detection genuinely evaluated its question.
+        {/* ⛔ An EARNED all-clear, in ordinary text — and it is keyed on the
+            UNFILTERED set. This sentence is a claim about the WINDOW, so a
+            filter must never be able to produce it: ?dCountry=CH made
+            credential_spray print it over 130 findings, and a bogus
+            ?dSeverity=xyz made all six panels print it at once. */}
+        {view.earnedAllClear ? (
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
             Nothing matched this detection in the last {detection.windowLabel || 'window'}.
           </div>
         ) : null}
 
+        {/* The filtered-to-empty case says what it actually is, and how much it
+            is hiding. Hueless: it is neither an all-clear nor a finding. */}
+        {view.narrowedToNothing ? (
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
+            No finding here matches the current filters. This detection found{' '}
+            <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{n(allFindings)}</strong>{' '}
+            in the last {detection.windowLabel || 'window'} — clear the filters to see them.
+          </div>
+        ) : null}
+
         {!measured ? baselinePanel(detection) : null}
 
-        {unverifiableBlock(detection, ctx)}
+        {unverifiableBlock(detection, view, ctx)}
         {caveatList(detection.caveats)}
       </CardBody>
     </Card>
@@ -630,6 +661,47 @@ function reportingGapBanner(data) {
 // Each of those shorter labels claims something the number does not support,
 // and the engine's comments record which. A tile is a headline — it is read by
 // people who will not open the drawer.
+// ⛔ AN UNMEASURED FIGURE IS A HUELESS NotMeasured, NEVER A 0. The engine used to
+// coerce a NULL `sum(event_count)` to 0 and this strip had no branch for the
+// difference, so a stopped collector rendered "Failed VPN authentications 0" with
+// a GREEN "↓ 47,881 from the previous window" under it — a total ingest outage
+// presented as the biggest security win the page can display. The engine now
+// returns null with a reason; this renders it.
+function headlineValue(f) {
+  if (f.current === null || f.current === undefined) {
+    return <NotMeasured reason={f.currentReason || 'This figure was not measured in this window.'} />;
+  }
+  return n(f.current);
+}
+
+// ⛔ NO DELTA AGAINST AN UNMEASURED CURRENT VALUE. DeltaBadge already refuses one
+// (it returns null for a null `current`), and this refuses to construct it — two
+// guards, because the arithmetic that produced −47,881 was the dangerous half and
+// neither file should be the only thing standing between it and the screen.
+//
+// When the CURRENT figure is real but the comparison is not, the reason is
+// printed hueless rather than left blank: "no arrow" and "no prior window" look
+// identical otherwise.
+function headlineDelta(f) {
+  if (f.current === null || f.current === undefined) return null;
+  if (f.previous === null || f.previous === undefined) {
+    if (!f.previousReason) return null;
+    return (
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--unmeasured)' }}>
+        No comparison — {f.previousReason}
+      </span>
+    );
+  }
+  return (
+    <DeltaBadge
+      current={f.current}
+      previous={f.previous}
+      goodDirection={f.goodDirection === 'up' ? GOOD.up : GOOD.down}
+      comparisonLabel="from the previous window"
+    />
+  );
+}
+
 function headlineStrip(headline) {
   if (!headline || !Array.isArray(headline.figures)) return null;
   return (
@@ -647,25 +719,16 @@ function headlineStrip(headline) {
           key={f.key}
           compact
           label={f.label}
-          value={n(f.current)}
+          value={headlineValue(f)}
           sub={
-            f.key === 'usernames_targeted' && headline.usernamesIsFloor
+            // ⛔ PER FIGURE, from the engine's own flag — not `usernames_targeted`
+            // matched by key against a strip-wide boolean, which put the caveat
+            // on a hardcoded tile rather than on whichever figure is a floor.
+            f.isFloor && f.current !== null && f.current !== undefined
               ? 'at least — some hours capped their username list'
               : undefined
           }
-          delta={
-            // ⛔ DeltaBadge renders NOTHING for a null previous, which is
-            // exactly right: if the retained history began inside the previous
-            // window we did not observe a quieter period, we observed nothing.
-            f.previous === null || f.previous === undefined ? null : (
-              <DeltaBadge
-                current={f.current}
-                previous={f.previous}
-                goodDirection={f.goodDirection === 'up' ? GOOD.up : GOOD.down}
-                comparisonLabel="from the previous window"
-              />
-            )
-          }
+          delta={headlineDelta(f)}
         />
       ))}
     </div>

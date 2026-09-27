@@ -199,6 +199,12 @@ function orderGroups(groups) {
 }
 
 // The engine's own `undetermined[].reason` slugs, in the operator's words.
+//
+// ⛔ EVERY SLUG THE ENGINE CAN EMIT MUST BE HERE, and tests/consolidationTab.test.js
+// reads the engine's source to assert exactly that. A slug missing from this table
+// still renders — through undeterminedReason's fallback — but as a quoted internal
+// token, which reads as a defect in SecVault rather than as a fact about the
+// firewall, and the operator stops reading the column.
 const UNDETERMINED_REASON = Object.freeze({
   member_has_no_sequence_number:
     'a rule in this group has no position in the rulebase, so nothing can be said about what a '
@@ -208,6 +214,15 @@ const UNDETERMINED_REASON = Object.freeze({
   overlap_could_not_be_determined:
     'an address or service could not be resolved, so whether an intervening rule matches the '
     + 'same traffic is unknown',
+  member_field_is_negated:
+    'a rule in this group matches everything EXCEPT what it lists, so the merged rule would not '
+    + 'match what the separate rules match today',
+  duplicate_sequence_number_in_span:
+    'another rule shares a position with one of these, so whether it sits between them cannot '
+    + 'be established from the order the firewall reported',
+  unclassified_raw_rule_key:
+    'these rules carry a vendor field SecVault does not yet know the meaning of, so whether it '
+    + 'changes what the firewall matches or does is unknown',
 });
 
 /** ⛔ An unrecognised reason is NAMED, never dropped and never silently generic. */
@@ -233,11 +248,18 @@ function groupCaveats(group) {
   for (const u of undetermined) {
     const slug = u && u.reason ? String(u.reason) : '';
     if (!index.has(slug)) {
-      const entry = { reason: slug, count: 0, text: undeterminedReason(slug) };
+      const entry = { reason: slug, count: 0, text: undeterminedReason(slug), fields: [] };
       index.set(slug, entry);
       reasons.push(entry);
     }
-    index.get(slug).count += 1;
+    const entry = index.get(slug);
+    entry.count += 1;
+    // ⛔ THE FIELD IS NAMED WHEN THE ENGINE NAMES IT. `unclassified_raw_rule_key`
+    // is the one reason an operator can actually get closed — by telling us which
+    // vendor field it is — and a message that withholds the field name turns an
+    // actionable gap into an unexplained refusal.
+    const field = u && u.field ? String(u.field) : '';
+    if (field && !entry.fields.includes(field)) entry.fields.push(field);
   }
   return {
     interferingCount: interfering.length,
@@ -419,6 +441,13 @@ function GroupChecks({ group }) {
               style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}
             >
               {r.count}× — {r.text}
+              {r.fields.length > 0 ? (
+                <>
+                  {' ('}
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{r.fields.join(', ')}</span>
+                  {')'}
+                </>
+              ) : null}
             </span>
           ))}
         </span>
@@ -607,6 +636,15 @@ function MethodNote() {
         firewall does with it — action, zones, schedule, logging, NAT and expiry — leaving exactly
         one of source, destination or service free to differ. A rule whose varying field is already
         a wildcard is left out: its extent cannot be widened by a merge.
+      </p>
+      <p>
+        That comparison is not limited to the fields SecVault stores in its own columns. The vendor
+        fields a firewall returns alongside a rule — which users or URL categories it matches, which
+        inspection profiles it applies, what it writes to the log — are read too, each one named and
+        classified: a field that changes what the firewall matches or does separates two rules, while
+        an identifier, a comment or a management-system timestamp does not. A field SecVault does not
+        yet recognise never separates a group quietly; it puts the group under &ldquo;Needs
+        review&rdquo; and is named there.
       </p>
       <p>
         A firewall evaluates rules in order, so merging a group at its lowest position moves every

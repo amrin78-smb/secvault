@@ -34,6 +34,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { stripComments } = require('./stripComments');
+
 const REPO = path.join(__dirname, '..');
 const VIEW_PATH = path.join(REPO, 'components', 'devices', 'CoverageRegister.js');
 const SRC = fs.readFileSync(VIEW_PATH, 'utf8');
@@ -43,9 +45,11 @@ const SRC = fs.readFileSync(VIEW_PATH, 'utf8');
 // it was hunting — and this file's own header says "HEALTHIEST DEVICE ON THE
 // FLEET" and "No green, no tick, no healthy, no clean" in order to forbid
 // them. A scan that read those would fail on its own documentation.
-const CODE = SRC
-  .replace(/\/\*[\s\S]*?\*\//g, ' ')
-  .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+//
+// ⛔ THE SHARED HELPER, which strips LINE comments FIRST. This file rolled its
+// own in the other order, where a `/*` inside a `//` comment opens a phantom
+// block that runs to the next real `*/` and silently eats real code.
+const CODE = stripComments(SRC);
 
 function loadView() {
   const declarations = SRC
@@ -79,6 +83,9 @@ function loadView() {
     'isUnchecked',
     'chipLabel',
     'chipWeight',
+    'hasUnreadMitigation',
+    'MITIGATION_UNKNOWN_NOTE',
+    'orderCells',
     'gatesSentence',
     'ageLabel',
     'staleSentence',
@@ -103,7 +110,9 @@ const cell = (over) => ({
   detail: 'This firewall sends no syslog to SecVault.',
   gates: ['log_hit (CVE priority rule 2)', 'traffic evidence'],
   weight: 4,
+  share: null,
   certain: true,
+  mitigationUnknown: false,
   ageDays: null,
   ...over,
 });
@@ -492,17 +501,128 @@ describe('⛔ full coverage is never rendered as a security verdict', () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('⛔ entries render in the order the engine ranked them', () => {
-  it('nothing in the file sorts anything', () => {
-    // The engine ranks by CONSEQUENCE — answers withheld, stale ahead of a
-    // heavier pure gap. Every firewall on the reference fleet has at least one
-    // gap, so a register re-sorted by name or by gap COUNT is a list of the
+  it('nothing in the file re-orders the ENTRIES', () => {
+    // The engine ranks FIREWALLS by CONSEQUENCE — answers withheld, stale ahead
+    // of a heavier pure gap. Every firewall on the reference fleet has at least
+    // one gap, so a register re-sorted by name or by gap COUNT is a list of the
     // fleet rather than a to-do list.
-    assert.equal(/\.sort\(/.test(CODE), false, 'the view sorts, and the engine already ranked');
+    //
+    // ⛔ THE ORIGINAL FORM OF THIS ASSERTION WAS `no .sort( anywhere`, and its
+    // stated reason — "the engine already ranked" — was only ever true of
+    // entries. The engine ranks firewalls and never the CELLS within one, so a
+    // blanket ban left `CELL_WEIGHT[*].rank` declared, pinned by five
+    // assertions above, and consumed by nothing: live, TSR_EKC drew its one
+    // tinted `stale` cell LAST. Cells are now ordered, entries still are not.
+    for (const forbidden of [
+      /\bentries\s*\.sort\(/,
+      /\blist\s*\.sort\(/,
+      /\.sort\([^)]*deviceName/,
+      /\.sort\([^)]*answersWithheld/,
+    ]) {
+      assert.equal(forbidden.test(CODE), false, `the view re-ranks entries: ${forbidden}`);
+    }
+    const sorts = CODE.match(/\.sort\(/g) || [];
+    assert.equal(sorts.length, 1, 'the only sort here is orderCells');
+    const declared = CODE.indexOf('function orderCells(');
+    assert.notEqual(declared, -1, 'orderCells is gone');
+    assert.ok(CODE.indexOf('.sort(') > declared, 'the only sort must live in orderCells');
   });
 
   it('the entries prop is mapped straight through', () => {
     assert.match(CODE, /entries\.filter\(Boolean\)/, 'entries must survive as given');
     assert.match(CODE, /list\.map\(\(entry\) =>/, 'entries are not rendered in order');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 8b. ⛔ THE CELL RANKING IS CONSUMED, NOT MERELY DECLARED.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('⛔ cells are drawn loudest first', () => {
+  const stale = cell({ key: 'config', label: 'Configuration', state: 'stale', ageDays: 49 });
+  const absent = cell({ key: 'syslog', state: 'absent' });
+  const partial = cell({ key: 'objects', label: 'Object resolution', state: 'partial' });
+  const measured = cell({ key: 'ruleset', label: 'Firewall rules', state: 'measured', gates: [], weight: 0 });
+
+  it('⛔ stale leads, then absent, then partial, then measured', () => {
+    // Live: TSR_EKC's cells arrive as ruleUsage(partial), interfaces(absent),
+    // objects(absent), config(STALE) — the one tinted cell, rank 0, documented
+    // as louder than absent, drawn LAST.
+    const out = V.orderCells([partial, absent, measured, stale]);
+    assert.deepEqual(out.map((c) => c.state), ['stale', 'absent', 'partial', 'measured']);
+  });
+
+  it('it agrees with CELL_WEIGHT rather than carrying its own order', () => {
+    const ranks = V.orderCells([measured, partial, absent, stale]).map((c) => V.chipWeight(c).rank);
+    assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b));
+  });
+
+  it('⛔ an UNCHECKED cell is ordered at the hueless weight it is DRAWN at', () => {
+    // Its claimed state came from a read that failed, so ordering it by that
+    // state would put a `stale` label it has not earned at the top.
+    const unchecked = cell({ key: 'version', state: 'stale', certain: false });
+    const out = V.orderCells([measured, unchecked]);
+    assert.equal(out[0].key, 'version', 'an unread check still outranks a measured source');
+    assert.equal(V.chipWeight(unchecked).kind, 'unknown');
+  });
+
+  it('ties keep their original order, and the input is not mutated', () => {
+    const a = cell({ key: 'syslog', state: 'absent' });
+    const b = cell({ key: 'interfaces', state: 'absent' });
+    const input = [a, b];
+    assert.deepEqual(V.orderCells(input).map((c) => c.key), ['syslog', 'interfaces']);
+    assert.deepEqual(input.map((c) => c.key), ['syslog', 'interfaces'], 'the prop was mutated');
+  });
+
+  it('tolerates junk without dropping a real cell', () => {
+    assert.deepEqual(V.orderCells(null), []);
+    assert.deepEqual(V.orderCells('x'), []);
+    assert.equal(V.orderCells([null, absent, undefined]).length, 1);
+  });
+
+  it('⛔ the table actually uses it', () => {
+    assert.match(CODE, /orderCells\(cells\)\.map\(/, 'the ranking is declared and never consumed');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 8c. ⛔ AN UNREAD MITIGATION IS A FLOOR, NOT AN UNANSWERED QUESTION.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('⛔ a confirmed gap whose mitigation could not be read says so', () => {
+  const floored = cell({
+    key: 'ruleUsage',
+    label: 'Rule usage (hit counts)',
+    state: 'absent',
+    detail: 'No hit counts at all (38 of 38 rules).',
+    certain: true,
+    mitigationUnknown: true,
+  });
+
+  it('it is NOT "not checked" — the gap was established', () => {
+    assert.equal(V.isUnchecked(floored), false);
+    assert.equal(V.hasUnreadMitigation(floored), true);
+    assert.equal(V.chipLabel(floored), V.CELL_WEIGHT.absent.label,
+      'a confirmed gap keeps its own state label');
+  });
+
+  it('an unchecked cell is never ALSO reported as a floor — they are different states', () => {
+    const unchecked = cell({ certain: false, mitigationUnknown: true });
+    assert.equal(V.hasUnreadMitigation(unchecked), false);
+    assert.equal(V.isUnchecked(unchecked), true);
+  });
+
+  it('an ordinary gap reports neither', () => {
+    assert.equal(V.hasUnreadMitigation(cell()), false);
+    assert.equal(V.hasUnreadMitigation(null), false);
+    assert.equal(V.hasUnreadMitigation('x'), false);
+  });
+
+  it('the note says the figure is a floor, and is RENDERED', () => {
+    assert.match(V.MITIGATION_UNKNOWN_NOTE, /floor/i);
+    assert.match(V.MITIGATION_UNKNOWN_NOTE, /confirmed/i);
+    assert.match(CODE, /\{MITIGATION_UNKNOWN_NOTE\}/, 'the qualifier is declared and never shown');
+    assert.match(CODE, /hasUnreadMitigation\(cell\)/);
   });
 });
 

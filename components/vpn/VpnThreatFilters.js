@@ -32,6 +32,29 @@ const WINDOWS = [
   { value: '192', label: 'Last 8 days' },
 ];
 
+// ⛔ THE LIST MUST CONTAIN THE WINDOW ACTUALLY IN FORCE. The page clamps `dHours`
+// to 1..192, so `?dHours=48` runs a 48-hour window while this fixed list left the
+// control reading "Last 24 hours" — a filter reporting a value that is not the one
+// the figures beside it were computed from, and the reader has no way to tell.
+// Whatever the engine resolved is added as its own option rather than silently
+// snapped to a neighbour, because snapping would change the query on the next
+// interaction without being asked to.
+function windowLabel(h) {
+  if (h % 24 === 0) {
+    const days = h / 24;
+    return `Last ${days} day${days === 1 ? '' : 's'}`;
+  }
+  return `Last ${h} hour${h === 1 ? '' : 's'}`;
+}
+
+function windowOptions(hours) {
+  const h = Math.trunc(Number(hours));
+  if (!Number.isFinite(h) || h <= 0) return WINDOWS;
+  if (WINDOWS.some((w) => w.value === String(h))) return WINDOWS;
+  return [...WINDOWS, { value: String(h), label: windowLabel(h) }]
+    .sort((a, b) => Number(a.value) - Number(b.value));
+}
+
 const SEVERITIES = [
   { value: '', label: 'All severities' },
   { value: 'critical', label: 'Critical' },
@@ -117,7 +140,7 @@ export default function VpnThreatFilters({ countries = [], hours = 24 }) {
         aria-label="Detection window"
         style={FIELD}
       >
-        {WINDOWS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+        {windowOptions(hours).map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
       </select>
 
       {active && (

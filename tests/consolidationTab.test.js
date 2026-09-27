@@ -48,9 +48,15 @@ const DATA = require('../lib/engines/ruleConsolidationData');
 // ("safe to merge", "Safe"), and a scan that read them would fail on the very
 // documentation that prevents the bug. This repo has had a source scan
 // satisfied by the comment explaining the thing it hunts more than once.
-function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-}
+//
+// ⛔ AND IT IS THE SHARED HELPER NOW, NOT A LOCAL COPY. The local one stripped
+// BLOCK comments first — the order `tests/stripOrder.test.js` exists to forbid,
+// because a `//` comment containing `/*` then opens a phantom block that eats
+// every line to the next `*/`. It escaped that guard on a technicality: the
+// guard looks for the literal fragment `.*$`, and this copy was written
+// `//[^\n]*`, so it was skipped rather than caught. A guard that cannot fire,
+// inside the file that tests guards that cannot fire.
+const { stripComments } = require('./stripComments');
 
 const CODE = stripComments(SRC);
 
@@ -409,15 +415,75 @@ describe('⛔ a group says WHY it needs review', () => {
     assert.match(V.undeterminedReason(undefined), /no reason/i);
   });
 
+  // ⛔ DERIVED FROM THE ENGINE'S SOURCE, NOT A LIST TYPED HERE. This used to name
+  // three slugs literally, so the three the engine gained afterwards
+  // (`member_field_is_negated`, `duplicate_sequence_number_in_span`,
+  // `unclassified_raw_rule_key`) would each have rendered as a quoted internal
+  // token — "a check reported …, which this view does not recognise" — and the
+  // test would have stayed green while saying so. A hardcoded list cannot fail
+  // on something it does not mention.
+  //
+  // ⛔ It reads the `undetermined.push` sites SPECIFICALLY, not every `reason:`
+  // in the file — `interfering.push` has its own slugs and its own rendering, and
+  // a derivation that swept both would demand wording here for
+  // `matches_moved_traffic`, which this table must NOT carry. Caught on the first
+  // run, which is the only reason the distinction is written down.
+  const ENGINE_SRC = stripComments(read('lib', 'engines', 'ruleConsolidation.js'));
+  const slugsPushedTo = (listName) => [...new Set(
+    [...ENGINE_SRC.matchAll(new RegExp(`${listName}\\.push\\(\\{[\\s\\S]*?\\}\\)`, 'g'))]
+      .flatMap((m) => [...m[0].matchAll(/reason:\s*'([a-z0-9_]+)'/g)].map((x) => x[1]))
+  )].sort();
+  const ENGINE_REASON_SLUGS = slugsPushedTo('undetermined');
+
   it('every engine reason slug has wording of its own', () => {
-    for (const slug of [
-      'member_has_no_sequence_number',
-      'intervening_rule_has_no_sequence_number',
-      'overlap_could_not_be_determined',
-    ]) {
-      assert.ok(V.UNDETERMINED_REASON[slug], `${slug} has no wording`);
+    assert.ok(ENGINE_REASON_SLUGS.length >= 6,
+      `expected the engine's reason slugs to be found, got ${ENGINE_REASON_SLUGS.join(', ')}`);
+    for (const slug of ENGINE_REASON_SLUGS) {
+      assert.ok(V.UNDETERMINED_REASON[slug],
+        `${slug} is emitted by the engine and has no wording in this view — it would render as a `
+        + 'quoted internal token, which reads as a SecVault defect rather than a fact about the '
+        + 'firewall');
       assert.equal(V.undeterminedReason(slug), V.UNDETERMINED_REASON[slug]);
     }
+    // ...and nothing in the table is wording for a slug the engine cannot emit:
+    // a stale entry is a sentence nobody will ever see, which is how a table
+    // stops describing the engine it fronts.
+    assert.deepEqual(
+      Object.keys(V.UNDETERMINED_REASON).filter((k) => !ENGINE_REASON_SLUGS.includes(k)),
+      []
+    );
+    // ⛔ ...and an INTERFERING reason has no place in this table. "A rule between
+    // them matches" and "we could not tell whether one does" are the distinction
+    // the whole engine is built on, and GroupChecks renders them in two separate
+    // branches; wording an interfering slug here would invite the two to merge.
+    const interfering = slugsPushedTo('interfering');
+    assert.ok(interfering.includes('matches_moved_traffic'), 'the derivation found no interfering slugs');
+    for (const slug of interfering) {
+      assert.ok(!V.UNDETERMINED_REASON[slug], `${slug} is an INTERFERING reason, not an undetermined one`);
+    }
+  });
+
+  it('⛔ the reason NAMES the vendor field when the engine names it', () => {
+    // `unclassified_raw_rule_key` is the one reason an operator can get closed —
+    // by telling us which vendor field it is. A message that withholds the field
+    // name turns an actionable gap into an unexplained refusal.
+    const c = V.groupCaveats(group({
+      verdict: ENGINE.VERDICTS.REVIEW,
+      undetermined: [
+        { rule: { label: 'rule-a' }, field: 'brand-new-field', reason: 'unclassified_raw_rule_key' },
+        { rule: { label: 'rule-b' }, field: 'brand-new-field', reason: 'unclassified_raw_rule_key' },
+        { rule: { label: 'rule-b' }, field: 'another-field', reason: 'unclassified_raw_rule_key' },
+      ],
+    }));
+    assert.equal(c.undeterminedCount, 3);
+    assert.equal(c.reasons.length, 1);
+    assert.deepEqual(c.reasons[0].fields, ['brand-new-field', 'another-field']);
+    // A reason the engine reports without a field carries an empty list, never
+    // an undefined one a renderer would have to guard.
+    const plain = V.groupCaveats(group({
+      undetermined: [{ rule: { label: 'x' }, reason: 'member_field_is_negated' }],
+    }));
+    assert.deepEqual(plain.reasons[0].fields, []);
   });
 
   it('⛔ the count reaches the screen through NotMeasured, not a tooltip', () => {

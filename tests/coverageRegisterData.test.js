@@ -169,6 +169,7 @@ const row = (over = {}) => ({
   log_buckets: '2009',
   obj_refs: '878',
   obj_unresolvable: '0',
+  config_rows: '12',
   config_age_days: 0,
   analysis_age_days: 1,
   rule_findings: '377',
@@ -293,11 +294,52 @@ describe('a NULL count stays unreadable', () => {
     assert.equal(cellFor(entries[0], 'syslog').certain, false);
   });
 
-  it('a NULL config age is "no configuration collected", and a real 0 is not', async () => {
-    const pool = stubPool([row({ config_age_days: null }), row({ id: 'd2', name: 'fresh', config_age_days: 0 })]);
+  it('a NULL config age with NO snapshots is "no configuration collected", and a real 0 is not', async () => {
+    const pool = stubPool([
+      row({ config_rows: '0', config_age_days: null }),
+      row({ id: 'd2', name: 'fresh', config_age_days: 0 }),
+    ]);
     const { entries } = await getCoverageRegister(pool);
-    assert.equal(cellFor(byName(entries, 'IDC FW'), 'config').state, STATE.ABSENT);
+    const none = cellFor(byName(entries, 'IDC FW'), 'config');
+    assert.equal(none.state, STATE.ABSENT);
+    assert.equal(none.certain, true, 'zero snapshots is a measured absence');
+    assert.match(none.detail, /No configuration has been collected/);
     assert.equal(cellFor(byName(entries, 'fresh'), 'config').state, STATE.MEASURED);
+  });
+
+  it('⛔ a NULL config age WITH snapshots is an unreadable age, not "no configuration"', async () => {
+    // ⛔ `EXTRACT(day FROM now() - max(collected_at))` is SQL NULL both when a
+    // firewall has no snapshot AND when the value could not be read, and the
+    // engine asserted the first of those as a certain fact either way. The row
+    // count is the only thing that separates them.
+    const pool = stubPool([row({ config_rows: '12', config_age_days: null })]);
+    const { entries } = await getCoverageRegister(pool);
+    const c = cellFor(entries[0], 'config');
+    assert.equal(c.state, STATE.ABSENT);
+    assert.equal(c.certain, false, 'we could not check — that is not "there is no config"');
+    assert.match(c.detail, /could not be read/i);
+    assert.doesNotMatch(c.detail, /No configuration has been collected/);
+  });
+
+  it('⛔ an unreadable count on ANY source leaves a cell, never "fully visible"', async () => {
+    // Four of the seven sources used to DROP their cell instead, which took the
+    // gap out of `gaps`, the weight out of `answersWithheld` and the uncertainty
+    // out of `uncertainCount` — so a single unreadable count rendered a firewall
+    // as fully visible on the page whose subject is unreadable measurements.
+    for (const field of [
+      'rules', 'rules_unmeasured', 'log_buckets', 'interfaces',
+      'obj_refs', 'obj_unresolvable', 'version_rows',
+    ]) {
+      const pool = stubPool([row({ [field]: null })]);
+      const { entries, summary } = await getCoverageRegister(pool, { now: AT });
+      assert.equal(entries[0].fullyCovered, false, `${field}: rendered as fully visible`);
+      assert.ok(entries[0].uncertainCount > 0, `${field}: not counted as unchecked`);
+      assert.equal(summary.devicesFullyCovered, 0, `${field}: counted as fully covered`);
+      assert.equal(summary.devicesWithUnreadableChecks, 1, `${field}: not reported as unreadable`);
+    }
+    const pool = stubPool([row({ config_rows: null, config_age_days: null })]);
+    const { entries } = await getCoverageRegister(pool, { now: AT });
+    assert.equal(entries[0].fullyCovered, false, 'config: rendered as fully visible');
   });
 
   it('a NULL last_rules_collected_at is passed through as null, never invented', async () => {
@@ -465,7 +507,7 @@ describe('log-derived rule usage', () => {
     assert.match(c.detail, /cleanup will refuse/i);
   });
 
-  it('⛔ AN UNREADABLE LOG-EVIDENCE COUNT LEAVES THE CELL WORSE AND UNCERTAIN', async () => {
+  it('⛔ AN UNREADABLE LOG-EVIDENCE COUNT LEAVES THE CELL WORSE, AND ITS GAP CERTAIN', async () => {
     // The one that regresses silently: a failed read that quietly improved the
     // picture would report a blind spot as covered, on the page whose entire
     // job is to name blind spots.
@@ -478,17 +520,22 @@ describe('log-derived rule usage', () => {
     const c = cellFor(entries[0], 'ruleUsage');
 
     assert.equal(c.state, STATE.ABSENT, 'it must stay at its WORSE state');
-    assert.equal(c.certain, false, 'and say we could not even check');
+    // ⛔ THE GAP IS CERTAIN AND THE MITIGATION IS NOT. `hit_count IS NULL` for 78
+    // of 78 rules came off `firewall_rules`; only the enrichment failed. Calling
+    // the whole cell uncertain deleted this firewall's work-queue item.
+    assert.equal(c.certain, true, 'the gap was measured on the device');
+    assert.equal(c.mitigationUnknown, true, 'what could have shrunk it was not read');
     assert.match(c.detail, /could not be read/i);
     assert.match(c.detail, /overstate/i);
-    assert.equal(summary.devicesWithUnreadableChecks, 1);
+    assert.equal(summary.devicesWithUnreadableChecks, 0, 'this is not an unread CHECK');
+    assert.equal(summary.devicesWithUnreadMitigations, 1);
     // ⛔ And it lands in failures, never silently reducing the register.
     assert.equal(failures.length, 1);
     assert.match(failures[0].source, /rule_log_evidence/);
     assert.match(failures[0].error, /statement timeout/);
   });
 
-  it('a failed SHARED read leaves every affected firewall uncertain, and the counts stand', async () => {
+  it('a failed SHARED read leaves every affected mitigation unread, and the counts stand', async () => {
     const pool = stubPool(
       [row(), TSR_EKM()],
       { coverage: new Error('relation "syslog_rollup_hourly" does not exist') },
@@ -496,7 +543,8 @@ describe('log-derived rule usage', () => {
     const { entries, failures } = await getCoverageRegister(pool, { now: AT });
 
     assert.equal(entries.length, 2, 'the register itself is still built');
-    assert.equal(cellFor(byName(entries, 'TSR_EKM'), 'ruleUsage').certain, false);
+    assert.equal(cellFor(byName(entries, 'TSR_EKM'), 'ruleUsage').mitigationUnknown, true);
+    assert.equal(cellFor(byName(entries, 'TSR_EKM'), 'ruleUsage').certain, true);
     // The firewall that reports its own hit counts is untouched by this failure.
     assert.equal(cellFor(byName(entries, 'IDC FW'), 'ruleUsage').state, STATE.MEASURED);
     assert.equal(cellFor(byName(entries, 'IDC FW'), 'ruleUsage').certain, true);
@@ -528,7 +576,7 @@ describe('log-derived rule usage', () => {
     // Bravo stays at its worse state and says it could not be checked — it is
     // never handed Alpha's answer, and never a zero it did not earn.
     assert.equal(cellFor(byName(entries, 'Bravo'), 'ruleUsage').state, STATE.ABSENT);
-    assert.equal(cellFor(byName(entries, 'Bravo'), 'ruleUsage').certain, false);
+    assert.equal(cellFor(byName(entries, 'Bravo'), 'ruleUsage').mitigationUnknown, true);
     assert.equal(failures.length, 1);
     assert.match(failures[0].source, /rule_log_evidence:Bravo/);
   });
@@ -641,7 +689,12 @@ describe('log-derived rule usage', () => {
     const pool = stubPool([row({ rules: null, rules_unmeasured: null })]);
     const { entries } = await getCoverageRegister(pool, { now: AT });
     assert.equal(cellFor(entries[0], 'ruleset').certain, false);
-    assert.equal(cellFor(entries[0], 'ruleUsage'), undefined, 'no cell without a rule count');
+    // ⛔ A CELL, NOT NO CELL. It used to be dropped, which took the whole
+    // question out of the register: no gap, no weight, no "not checked".
+    const c = cellFor(entries[0], 'ruleUsage');
+    assert.equal(c.state, STATE.ABSENT);
+    assert.equal(c.certain, false, 'we could not establish this gap at all');
+    assert.equal(c.mitigationUnknown, false, 'and no mitigation was claimed either way');
     assert.equal(pool.calls.length, 1);
   });
 
@@ -824,6 +877,13 @@ describe('the SQL', () => {
   it('counts unmeasured rules as hit_count IS NULL, the tri-state\'s third state', async () => {
     const call = await sqlOf();
     assert.match(call.sql, /hit_count\s+IS\s+NULL/i);
+  });
+
+  it('⛔ counts config SNAPSHOTS as well as their age, because a NULL age is two facts', async () => {
+    const call = await sqlOf();
+    assert.match(call.sql, /count\(\*\)\s+FROM\s+device_configs/i,
+      'without the row count, "no configuration" and "unreadable age" are the same NULL');
+    assert.match(call.sql, /max\(c\.collected_at\)/i);
   });
 
   it('stores nothing — no INSERT, UPDATE or DELETE anywhere in this engine', () => {

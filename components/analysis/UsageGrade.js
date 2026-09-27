@@ -208,14 +208,50 @@ export function logEvidenceSentence(code, windowDays) {
 }
 
 /**
+ * Does the log sentence belong beside THIS figure at all?
+ *
+ * ⛔ IT DOES NOT FOR THE `device` GRADE, AND THAT IS NOT COSMETIC. The figure a
+ * `device` grade describes came from the firewall's own hit counter; the log
+ * sentence describes a DIFFERENT measurement over a DIFFERENT window. On a fleet
+ * whose log history is shorter than the window asked about, that sentence is
+ * "Not measured: SecVault has not been collecting logs long enough to say" — so
+ * a real, measured number arrived on screen wearing a "Not measured" caption.
+ *
+ * ⛔ THIS IS `components/ui/NotMeasured.js`'s OWN RULE, VIOLATED. Measured live
+ * 2026-09-27: 1,444 rules fleet-wide render with a device counter, and every one
+ * of them carried a not-measured sentence in its badge tooltip, because
+ * `usageTitle()` suppressed it and `RuleUsageCell` then passed it into the badge
+ * anyway. Returning null is what keeps the two in step.
+ *
+ * @returns {string|null} null = no log sentence applies to this figure.
+ */
+export function usageReason(grade, logEvidence, windowDays) {
+  if (usageGradeDescriptor(grade).grade === 'device') return null;
+  return logEvidenceSentence(logEvidence, windowDays);
+}
+
+/**
  * The hover text for a figure: what the grade means, then the window it was
  * measured over.
  */
 export function usageTitle(grade, logEvidence, windowDays) {
   const d = usageGradeDescriptor(grade);
-  const sentence = logEvidenceSentence(logEvidence, windowDays);
-  if (d.grade === 'device') return d.title;
-  return `${d.title} ${sentence}`;
+  const reason = usageReason(grade, logEvidence, windowDays);
+  return reason ? `${d.title} ${reason}` : d.title;
+}
+
+/**
+ * The badge's own hover text, composed exactly as `UsageGradeBadge` composes it.
+ *
+ * ⛔ EXPORTED SO THE COMPOSITION IS TESTABLE. The defect this replaces lived in
+ * the JOIN, not in either half: `usageTitle()` was correct and the descriptor
+ * was correct, and the badge still said the opposite of both because the caller
+ * handed it a reason the grade had already rejected. A test of the two halves
+ * separately passes over that.
+ */
+export function usageBadgeTitle(grade, reason) {
+  const d = usageGradeDescriptor(grade);
+  return reason ? `${d.title} ${reason}` : d.title;
 }
 
 // ── view ──────────────────────────────────────────────────────────────────
@@ -234,7 +270,7 @@ export function UsageGradeBadge({ grade, reason }) {
     return <NotMeasured text={d.short} reason={reason || d.title} />;
   }
   return (
-    <Badge color={d.badgeColor} title={reason ? `${d.title} ${reason}` : d.title}>
+    <Badge color={d.badgeColor} title={usageBadgeTitle(grade, reason)}>
       {d.short}
     </Badge>
   );
@@ -265,6 +301,12 @@ export default function RuleUsageCell({ rule }) {
   }
 
   const d = usageGradeDescriptor(r.usageGrade);
+  // ⛔ `usageReason`, NEVER the raw sentence. Passing `sentence` unconditionally
+  // is what attached "Not measured: SecVault has not been collecting logs long
+  // enough to say" to a figure the FIREWALL measured and reported — the exact
+  // reading NotMeasured.js exists to prevent. `usageTitle` had the rule; the
+  // badge did not get it.
+  const reason = usageReason(r.usageGrade, r.logEvidence, days);
   return (
     <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 'var(--s1)' }}>
       <span
@@ -273,7 +315,7 @@ export default function RuleUsageCell({ rule }) {
       >
         {Number(count).toLocaleString()}
       </span>
-      <UsageGradeBadge grade={r.usageGrade} reason={sentence} />
+      <UsageGradeBadge grade={r.usageGrade} reason={reason} />
       {d.caveatShort ? (
         <span
           style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', lineHeight: 1.35 }}

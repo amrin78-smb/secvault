@@ -19,7 +19,11 @@ import VpnLoginLocations from '../../../components/vpn/VpnLoginLocations';
 import VpnUserHeatmap from '../../../components/vpn/VpnUserHeatmap';
 import { DEFAULT_WINDOW_DAYS, DEFAULT_TOP_USERS, clampInt } from '../../../lib/syslog/vpnPresence';
 import VpnDetections from '../../../components/vpn/VpnDetections';
-import { getVpnDetections } from '../../../lib/engines/vpnDetections';
+import {
+  getVpnDetections,
+  DEFAULT_WINDOW_HOURS as DETECTION_DEFAULT_HOURS,
+  MAX_WINDOW_HOURS as DETECTION_MAX_HOURS,
+} from '../../../lib/engines/vpnDetections';
 import VpnUserTraffic from '../../../components/vpn/VpnUserTraffic';
 import VpnTunnelHealth from '../../../components/vpn/VpnTunnelHealth';
 import {
@@ -189,6 +193,16 @@ export default async function VpnFleetPage({ searchParams }) {
   // table. Same reasoning as the dashboard rendering only its active tab.
   const showStatus = tab === 'status';
 
+  // ⛔ CLAMPED ONCE, AND AGAINST THE ENGINE'S OWN BOUNDS. This was computed twice
+  // from the same expression with 24 and 192 written out by hand — so the value
+  // handed to the engine and the value handed to the filter bar could drift, and
+  // the bounds could drift from MAX_WINDOW_HOURS. The filter bar builds its option
+  // list from what it is given, so this number is also what the control displays;
+  // a second copy of it is a control that can disagree with its own query.
+  const detectionHours = clampInt(
+    firstParam(sp.dHours), DETECTION_DEFAULT_HOURS, 1, DETECTION_MAX_HOURS
+  );
+
   const total = showStatus ? await countActiveDevices(pool) : 0;
   // pageWindow clamps a past-the-end `?page=` to the LAST page rather than
   // rendering an empty table, which would read as "there are no devices".
@@ -284,11 +298,9 @@ export default async function VpnFleetPage({ searchParams }) {
            not change what was measured, only what is listed, and the counts
            beside each panel say how many of how many are shown. */
         <VpnDetections
-          data={await getVpnDetections(pool, {
-            hours: clampInt(firstParam(sp.dHours), 24, 1, 192),
-          })}
+          data={await getVpnDetections(pool, { hours: detectionHours })}
           canSearchLogs={canSearchLogs}
-          hours={clampInt(firstParam(sp.dHours), 24, 1, 192)}
+          hours={detectionHours}
           filters={{
             q: (firstParam(sp.dq) || '').trim(),
             country: firstParam(sp.dCountry) || '',

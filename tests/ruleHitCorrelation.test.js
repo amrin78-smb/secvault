@@ -423,3 +423,105 @@ describe('⛔ A3 — the deletion bar cannot drift open', () => {
       + 'let a renamed rule be deleted. Use deletionEvidence.');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE COVERAGE RATIO COULD EXCEED 1.0, AND IT WAS PRINTED AS A PERCENTAGE
+// (found 2026-09-27)
+//
+// `bucket_hour >= date_trunc('hour', $1) - ($2 hours)` is inclusive at BOTH
+// ends, so it spans `windowHours + 1` distinct hour buckets while `windowHours`
+// stays the denominator. Measured live at days=7: `hoursWithEvents 169 /
+// windowHours 168 -> 1.006` on 14 of 15 firewalls, and the consumers render it:
+// the `unused` finding said "with 101% log coverage of the window" and the
+// change-request PDF "Device logged continuously for 101% of that window."
+//
+// ⛔ AND `historyHours` USES THE SAME INCLUSIVE `+1` CONVENTION, which is why
+// both had to move together: `sufficientHistory` compares `historyHours >=
+// windowHours`, i.e. one bucket count against another. Fixing one alone leaves
+// the two counting different things again.
+//
+// The stub below MODELS PostgreSQL's inclusive `>=` rather than hardcoding a
+// row count: it reads the offset the query actually asks for and returns the
+// number of buckets that range really contains. That is what makes this a test
+// of the boundary and not of a fixture.
+
+describe("⛔ the coverage window is exactly windowHours buckets", () => {
+  // A firewall that logged in EVERY hour the query asks about — the shape 14 of
+  // 15 live devices have, and the only shape that can expose the off-by-one.
+  function perfectLogger(captured) {
+    return {
+      async query(sql, params) {
+        const windowHours = Number(params[1]);
+        // The offset the SQL actually subtracts, in hours.
+        const offsetHours = /\$2::int\s*-\s*1/.test(sql) ? windowHours - 1 : windowHours;
+        const at = params[0];
+        const truncated = new Date(at);
+        truncated.setMinutes(0, 0, 0);
+        const lower = new Date(truncated.getTime() - offsetHours * 3600000);
+        // PostgreSQL's `>=` is inclusive at both ends: lower..truncated.
+        const buckets = offsetHours + 1;
+        if (captured) Object.assign(captured, { sql, windowHours, offsetHours, buckets });
+        return {
+          rows: [{
+            device_id: 'dev-1',
+            hours_with_events: buckets,
+            first_bucket: lower,
+            first_seen: lower,
+            last_seen: truncated,
+            events: '1000000',
+          }],
+        };
+      },
+    };
+  }
+
+  for (const days of [7, 30, 90]) {
+    it(`days=${days}: a perfect logger scores exactly 1.0, never above it`, async () => {
+      const cap = {};
+      const at = new Date('2026-09-27T13:42:19Z');
+      const c = (await getDeviceLogCoverage(perfectLogger(cap), days, at)).get('dev-1');
+      assert.equal(cap.windowHours, days * 24);
+      assert.equal(cap.buckets, days * 24,
+        'the range must contain exactly windowHours buckets, not windowHours + 1');
+      assert.equal(c.hoursWithEvents, c.windowHours);
+      assert.equal(c.ratio, 1, `ratio was ${c.ratio} — a percentage over 100 reaches a PDF`);
+      assert.equal(c.covered, true, 'and a perfect logger must still certify');
+    });
+  }
+
+  it('⛔ historyHours counts the SAME inclusive buckets, so the two agree', async () => {
+    // `sufficientHistory` is `historyHours >= windowHours`. If one side counts
+    // inclusive buckets and the other does not, a fleet with exactly the window's
+    // worth of history lands on the wrong side of the gate.
+    const at = new Date('2026-09-27T13:42:19Z');
+    const c = (await getDeviceLogCoverage(perfectLogger(), 7, at)).get('dev-1');
+    assert.equal(c.historyHours, c.windowHours,
+      'a rollup starting exactly at the window boundary is exactly one window old');
+    assert.equal(c.sufficientHistory, true);
+  });
+
+  it('⛔ and a FUTURE bucket_hour is clamped, not printed as 101%', async () => {
+    // The second expression of the same guard. The window query cannot control a
+    // firewall whose clock disagrees with this server's, and "101%" in a document
+    // that justifies deleting rules reads as a broken product rather than as the
+    // skew it is.
+    const skewed = {
+      async query(sql, params) {
+        return {
+          rows: [{
+            device_id: 'dev-1',
+            hours_with_events: Number(params[1]) + 12,
+            first_bucket: new Date(Date.now() - 90 * 24 * 3600 * 1000),
+            first_seen: null, last_seen: null, events: '1',
+          }],
+        };
+      },
+    };
+    const c = (await getDeviceLogCoverage(skewed, 7, new Date())).get('dev-1');
+    assert.equal(c.ratio, 1);
+    assert.ok(c.ratio <= 1);
+    // ⛔ The RAW count is still reported honestly — the clamp is on the ratio the
+    // UI renders, not on the measurement.
+    assert.equal(c.hoursWithEvents, 168 + 12);
+  });
+});
