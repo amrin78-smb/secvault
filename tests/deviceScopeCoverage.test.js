@@ -123,8 +123,8 @@ describe('⛔ a surface that reads device data is never silently unclassified', 
   // through. The [^:] guard keeps an https:// inside a string from eating
   // the rest of its line.
   const stripComments = (src) => src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 
   it('nothing classified no-device-data actually queries devices', () => {
     const offenders = [];

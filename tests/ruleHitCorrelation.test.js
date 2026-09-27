@@ -412,7 +412,7 @@ describe('⛔ A3 — the deletion bar cannot drift open', () => {
       path.join(__dirname, '..', 'lib', 'engines', 'ruleChangeRequests.js'), 'utf8');
     // ⛔ Comments stripped FIRST. This repo has repeatedly had a source scan
     // satisfied by the comment explaining the very thing it was hunting.
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const code = src.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 
     assert.match(code, /r\.hit_count === null \|\| r\.hit_count === undefined/,
       'the withheld test must still be the device-reported counter');

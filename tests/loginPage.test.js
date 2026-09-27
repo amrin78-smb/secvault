@@ -39,8 +39,8 @@ const backdrop = fs.readFileSync(BACKDROP, 'utf8');
 // prose saying a module held no device data was read as evidence that it did.
 function stripComments(src) {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/^\s*\/\/.*$/gm, ' ');
+    .replace(/^\s*\/\/.*$/gm, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ');
 }
 const code = stripComments(page);
 const backdropCode = stripComments(backdrop);

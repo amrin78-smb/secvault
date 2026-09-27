@@ -276,8 +276,8 @@ describe('⛔ CO-OCCURRENCE, NEVER CAUSATION', () => {
   // comment explaining the thing it was hunting.
   function code() {
     return fs.readFileSync(SRC, 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
   }
 
   it('the stripper works (proven, not assumed)', () => {

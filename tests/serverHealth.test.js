@@ -207,13 +207,19 @@ test('getServiceLiveness converts a timestamp into an age', async () => {
  * already records: "." does not match a carriage return, so on a CRLF checkout
  * the stripper silently does nothing and the guard passes for the wrong reason.
  */
+// ⛔ LINE COMMENTS FIRST, BLOCK COMMENTS SECOND. Reversed (as this was until
+// 2026-09-27) a `/*` living inside a `//` comment opens a phantom block that
+// runs to the next real `*/`. Measured across the repo: 17 source files carry
+// that trigger and the wrong order discards 52,339 characters of REAL CODE from
+// them. See tests/stripComments.js for the whole measurement, and
+// tests/stripOrder.test.js for the guard that now forbids the wrong order.
 function codeOnly(src) {
   return src
     .replace(/\r\n/g, '\n')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n')
     .map((line) => line.replace(/\/\/.*$/, ''))
-    .join('\n');
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 function healthSource() {

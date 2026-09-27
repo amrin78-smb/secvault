@@ -284,7 +284,7 @@ test('full coverage is named for VISIBILITY and never claims safety', () => {
   );
   // ⛔ Strip comments first — three separate source scans in this repo have
   // been satisfied by the comment explaining the thing they were hunting.
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const code = src.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(/fullyCovered/.test(code));
   assert.ok(!/\b(secure|allClear|all_clear|healthy|clean)\s*[:=]/i.test(code),
     'no field here may read as a security verdict — coverage is visibility, not safety');

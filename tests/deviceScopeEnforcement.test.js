@@ -48,7 +48,7 @@ const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf8');
 // reads raw source is satisfied by a COMMENT containing the same words, which
 // is how three deleted authorization gates once passed a green suite.
 function code(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  return src.replace(/(^|[^:])\/\/.*$/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 // A blocked page and an aware one, taken from the live register rather than

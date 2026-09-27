@@ -36,8 +36,8 @@ const SRC = path.join(__dirname, '..', 'lib', 'adapters', 'index.js');
 // a sentence rather than in code.
 function code() {
   return fs.readFileSync(SRC, 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    .replace(/(^|[^:])\/\/.*$/gm, '$1')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 describe('⛔ object usage analysis runs AFTER NAT collection', () => {

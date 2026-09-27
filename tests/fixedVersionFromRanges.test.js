@@ -191,26 +191,22 @@ describe('⛔ the Fortinet upsert never trades a fix boundary for none', () => {
 
   it('refuses a strict downgrade of affected_version_ranges', () => {
     // ⛔ THIS FEED RUNS NINE SECONDS AFTER cve_hub. Measured 2026-09-25: the
-    // hub repaired 80 advisory rows at 12:56:27 and not one survived the
-    // cycle, because a resolved CSAF takes the ELSE branch and overwrites.
-    // The vendor is normally the better source; FortiGuard's CSAF is PROSE,
-    // and "7.4.0 through 7.4.10" parses to an inclusive bound with no fix
-    // version where NVD's versionEndExcluding gives 7.4.11.
-    const clause = src.slice(
-      src.indexOf('affected_version_ranges = CASE'),
-      src.indexOf('fixed_in_versions = CASE')
-    );
-    assert.ok(clause.length > 0, 'the affected_version_ranges CASE is gone');
-    assert.match(
-      clause,
-      /advisories\.affected_version_ranges\s*@>\s*'\[\{"exclude_fixed":\s*true\}\]'/,
-      'the downgrade guard is gone — the vendor feed can overwrite a fix boundary again'
-    );
-    assert.match(
-      clause,
-      /NOT\s*\(\s*EXCLUDED\.affected_version_ranges\s*@>/,
-      'the guard must test the INCOMING row too, or it becomes an unconditional refusal'
-    );
+    // hub repaired 80 advisory rows at 12:56:27 and not one survived the cycle.
+    //
+    // ⛔ THE ASSERTION CHANGED SHAPE 2026-09-27 AND THAT IS THE POINT. It used
+    // to grep this file for the literal jsonb-containment text -- which was
+    // itself the bug, because containment is BLIND TO `max` and so disagreed
+    // with the JS predicate. The guard is now GENERATED from
+    // lib/feeds/fixBoundary.js, so the two halves cannot drift; what is worth
+    // asserting here is that this feed uses the shared definition at all.
+    // tests/fixBoundary.test.js owns the behaviour.
+    const clause = src.slice(src.indexOf('affected_version_ranges = CASE'));
+    assert.ok(clause.length > 0, 'the ON CONFLICT clause is gone');
+    assert.match(clause, /hasUsableFixBoundarySql\('advisories\.affected_version_ranges'\)/,
+      'the downgrade guard must be built from the shared definition');
+    assert.match(clause, /NOT \$\{hasUsableFixBoundarySql\('EXCLUDED\.affected_version_ranges'\)\}/,
+      'and it must refuse only the strict downgrade, so a vendor row carrying a '
+      + 'usable boundary still wins');
   });
 
   it('⛔ stays ONE-DIRECTIONAL — an incoming row WITH a boundary still wins', () => {
@@ -234,27 +230,38 @@ describe('⛔ hubIsBetter and the UPDATE’s WHERE clause express the SAME rule'
   const path = require('node:path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'feeds', 'cveHub.js'), 'utf8');
 
-  it('the WHERE clause admits the widened case, not just a blank row', () => {
-    // ⛔ THIS COST THREE DEPLOYS. Rule 3 is deliberately expressed TWICE -- in
-    // the JS predicate AND in the statement -- so that an unsafe repair is
-    // IMPOSSIBLE rather than merely unreached. v2.186.0 widened the predicate
-    // and left the statement on the old rule, so every widened repair passed
-    // the predicate and was then refused by the database. Measured live:
-    // `repaired: 80` reported on three consecutive cycles, zero rows written.
+  it('the WHERE clause is GENERATED from the same definition as the predicate', () => {
+    // ⛔ THIS COST THREE DEPLOYS, AND THE TEST THAT WAS SUPPOSED TO STOP IT
+    // RECURRING COULD NOT FIRE. Rule 3 is expressed twice -- a JS predicate and
+    // a statement WHERE -- so an unsafe repair is impossible rather than merely
+    // unreached. v2.186.0 widened the predicate and left the statement behind;
+    // v2.186.2 fixed that pair; and on 2026-09-27 review found the halves STILL
+    // disagreed, because the SQL used jsonb containment, which is blind to
+    // `max`:  local {exclude_fixed:true, max:null}  ->  JS repair, SQL refuse.
     //
-    // The doubling worked exactly as designed. It made the unsafe outcome
-    // impossible including the one I had decided was safe -- which is the point
-    // of a doubled guard, and the reason both halves must move together.
-    const where = src.slice(src.indexOf('WHERE cve_id = $1'), src.indexOf('[\n            cveId'));
+    // ⛔ THE OLD TEST HERE WAS FOUR REGEXES OVER THE SQL STRING'S TEXT,
+    // asserting each half's WORDING separately. It never built an input where
+    // the halves disagreed, which is why the disagreement above passed a green
+    // suite -- and it was demonstrated inert: wrapping the widened disjunct in
+    // a block comment left all four assertions passing.
+    //
+    // The halves are now one definition, so this asserts that property and
+    // tests/fixBoundary.test.js asserts the behaviour.
+    // ⛔ Slice from the WHERE to the end of the template literal rather than to
+    // a hand-written marker containing a newline — the previous form embedded a
+    // literal line break in a single-quoted JS string, which does not parse.
+    const whereStart = src.indexOf('WHERE cve_id = $1');
+    // 3000 chars comfortably spans the WHERE through its last disjunct; the
+    // first attempt used 1200 and fell ~100 chars short of the blank-row case,
+    // which failed as "the blank-row case must survive" — a false alarm about
+    // the code caused by the window, exactly the kind of misdirection a
+    // hand-tuned slice invites.
+    const where = whereStart === -1 ? '' : src.slice(whereStart, whereStart + 3000);
     assert.ok(where.length > 0, 'the UPDATE WHERE clause is gone');
     assert.match(where, /jsonb_array_length\(affected_version_ranges\) = 0/,
       'the blank-row case must survive');
-    assert.match(where, /NOT \(affected_version_ranges @> '\[\{"exclude_fixed": true\}\]'/,
-      'the WHERE clause no longer admits the widened case — repairs will be silently refused');
-    assert.match(where, /\$2::jsonb @> '\[\{"exclude_fixed": true\}\]'/,
-      'the WHERE clause must require the INCOMING row to carry the boundary');
-    assert.match(where, /jsonb_array_length\(\$2::jsonb\)\s*>=\s*jsonb_array_length\(affected_version_ranges\)/,
-      'the WHERE clause must keep the "at least as many ranges" condition');
+    assert.ok(!/@> '\[\{"exclude_fixed": true\}\]'/.test(where),
+      'the hand-written containment test must be gone -- it is the blind-to-max form');
   });
 
   it('⛔ the repair counts what the DATABASE did, not what we asked', () => {
@@ -270,7 +277,7 @@ describe('⛔ hubIsBetter and the UPDATE’s WHERE clause express the SAME rule'
     // in one day: deviceScopeCoverage's transitive check read prose as
     // evidence, and the button-contrast extractor read a token name out of a
     // comment and produced NaN:1.
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+    const code = src.replace(/^\s*\/\/.*$/gm, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
     assert.doesNotMatch(code, /stats\.repaired\+\+/,
       'a blind increment came back');
     // And the INSERT half, which was always right, must stay right.

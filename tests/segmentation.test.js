@@ -664,7 +664,7 @@ describe('⛔ "DID" may not be described as windowed — most counts are lifetim
     // length beside the code, and a comment quoting the banned phrase in order
     // to ban it must not fail the check that enforces it.
     const src = readSrc('components', 'segmentation', 'SegmentationBoard.js');
-    const prose = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const prose = src.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
     assert.ok(!/in the window/i.test(prose), 'SegmentationBoard.js must not claim a windowed count');
     assert.match(prose, /cumulative since/, 'the caveat must be stated to the operator');
   });

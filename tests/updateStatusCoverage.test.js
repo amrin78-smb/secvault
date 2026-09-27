@@ -17,7 +17,7 @@ const ROOT = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 // Comments in this repo quote the anti-patterns they forbid, so every
 // assertion runs against comment-stripped source.
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const stripComments = (s) => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
 describe('update-status: an unreadable local commit is not "up to date"', () => {
   const src = stripComments(read('app/api/system/update-status/route.js'));
