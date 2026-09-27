@@ -5,6 +5,8 @@ import { isAdmin } from '../../../../../lib/rbac';
 import { isValidUuid } from '../../../../../lib/apiUtils';
 import { pool } from '../../../../../lib/db';
 import { diffConfigs, classifyDiff } from '../../../../../lib/engines/configDiff';
+import { getDeviceChangeOutcome } from '../../../../../lib/engines/changeOutcomeData';
+import ChangeOutcomeBoard from '../../../../../components/analysis/ChangeOutcomeBoard';
 import Badge from '../../../../../components/ui/Badge';
 import Card, { CardBody, CardHeader, CardTitle } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
@@ -250,11 +252,21 @@ export default async function DeviceChangesPage({ params, searchParams }) {
     );
   }
 
-  const [diffTotal, backupTotal, versions, baselineRow] = await Promise.all([
+  const [diffTotal, backupTotal, versions, baselineRow, outcome] = await Promise.all([
     countDiffs(pool, device.id),
     countBackups(pool, device.id),
     getConfigVersions(pool, device.id),
     getBaselineConfig(pool, device.id),
+    // What FOLLOWED each of those changes, in this firewall's own traffic.
+    //
+    // ⛔ IN THE SAME Promise.all, NOT AWAITED AFTER IT. It is three independent
+    // statements against the hourly rollup, and serialising them behind the four
+    // reads above would add their latency to a page that already fetches a lot.
+    //
+    // ⛔ IT RETURNS `failures` AND THAT IS PART OF THE ANSWER, so it is passed
+    // straight through to the board rather than being unwrapped here: a read that
+    // failed must not be able to render as a firewall nothing has happened to.
+    getDeviceChangeOutcome(pool, device.id),
   ]);
 
   // ---- Pagination for the two long lists ----------------------------------
@@ -445,6 +457,26 @@ export default async function DeviceChangesPage({ params, searchParams }) {
           )}
         </CardBody>
       </Card>
+
+      {/* ⛔ ABOVE THE CHANGE LIST, NOT BELOW IT. This is the same set of changes
+          the list underneath enumerates, seen from the other side — what the
+          firewall's own traffic did in the hours either side of each one. A
+          reader who scrolls the list first has already formed a view of which
+          changes mattered, from the diffs alone.
+          ⛔ A SINGLE FIREWALL, PASSED AS A ONE-ELEMENT LIST. The board is
+          fleet-shaped so it can be dropped on a fleet page later; `summary` is
+          scoped to this firewall by getDeviceChangeOutcome, so every count here
+          is this firewall's. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h2 style={SECTION_HEADING_STYLE}>What Followed These Changes</h2>
+        <ChangeOutcomeBoard
+          devices={outcome.device ? [outcome.device] : []}
+          summary={outcome.summary}
+          failures={outcome.failures}
+          windowHours={outcome.windowHours}
+          generatedAt={outcome.generatedAt}
+        />
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2 style={SECTION_HEADING_STYLE}>Configuration Changes</h2>

@@ -1027,6 +1027,11 @@ const REGISTRY = [
   { mod: 'lib/engines/coverageRegisterData.js', fn: 'getCoverageRegister', args: () => [{}], spec: { object: ['entries', 'summary', 'failures'] } },
   { mod: 'lib/engines/ruleConsolidationData.js', fn: 'getFleetConsolidation', args: () => [], spec: { object: [] } },
   { mod: 'lib/engines/fleetConformanceData.js', fn: 'getFleetConformance', args: () => [{}], spec: { object: ['cohorts', 'summary', 'failures'] } },
+  // A7 — what followed a configuration change. ⛔ BOTH ENTRY POINTS, since the
+  // per-firewall one is what the Changes page calls and it passes a different
+  // parameter down the same three statements.
+  { mod: 'lib/engines/changeOutcomeData.js', fn: 'getChangeOutcomes', args: () => [{}], spec: { object: ['devices', 'summary', 'failures'] } },
+  { mod: 'lib/engines/changeOutcomeData.js', fn: 'getDeviceChangeOutcome', args: (c) => [c.deviceId, {}], needsDevice: true, spec: { object: ['device', 'summary', 'failures'] } },
 
   { mod: 'lib/engines/segmentationData.js', fn: 'listFleetZones', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'listIntents', args: () => [], spec: RAW },

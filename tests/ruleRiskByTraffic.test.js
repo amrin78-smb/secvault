@@ -174,14 +174,80 @@ describe('⛔ a cleanup candidate needs a MEASURED zero', () => {
   });
 
   it('and reports it as NOT agreeing when the firewall supplied no counter', async () => {
+    // ⛔ `hits` MUST carry another rule's ID-identified row. Without one, this
+    // device's logs have never named a rule at all, and the absence of THIS
+    // rule proves nothing -- see the `rowsSeen === 0` test below. The candidate
+    // is legitimate only because rule '9' establishes that these logs DO carry
+    // rule ids, which makes rule 'a' provably absent from them.
     const pool = stubPool({
       rules: [rule({ id: 'a', rule_name: 'A', rule_id_vendor: '1', hit_count: null })],
-      hits: [],
+      hits: [hit({ rule_id: '9', rule_name: 'Other' })],
       findings: [finding({ rule_id: 'a' })],
     });
     const d = await buildRuleRiskData(pool, { days: 7 });
+    assert.equal(d.cleanupCandidates.length, 1);
     assert.equal(d.cleanupCandidates[0].deviceAgreesZero, false,
       'absence of a counter is not agreement');
+    assert.equal(d.cleanupCandidates[0].logGrade, 'log-id',
+      'and the absence was established by rule ID, which is what admits it here');
+  });
+
+  // ⛔ THE TWO GUARDS ADDED 2026-09-27, AFTER REVIEW FOUND THIS LIST HOLDING
+  // 410 CANDIDATES OF WHICH 299 CARRIED REAL DEVICE-REPORTED HITS -- the worst
+  // at 4,031,387,493 on IDC FW, nominated for removal because a 7-day log
+  // window saw nothing. The row shape did not even carry the grade.
+
+  it('⛔ a NAME-grade absence may not reach the list', async () => {
+    // Every Palo Alto identifies rules in its logs by NAME only. A rule RENAMED
+    // inside the window is absent under its new name while passing traffic
+    // under its old one. 363 of those 410 candidates were name-grade.
+    const pool = stubPool({
+      rules: [rule({ id: 'a', rule_name: 'A', rule_id_vendor: null, hit_count: null })],
+      hits: [hit({ rule_id: null, rule_name: 'Other' })],
+      findings: [finding({ rule_id: 'a', finding_type: 'any_any', severity: 'critical' })],
+    });
+    const d = await buildRuleRiskData(pool, { days: 7 });
+    assert.equal(d.cleanupCandidates.length, 0,
+      'a name-matched absence is not evidence enough to remove a rule');
+  });
+
+  it('⛔ a device counter reporting real hits CONTRADICTS the logged zero', async () => {
+    // The counter is weaker in TIME (cumulative since an unknown reset) than a
+    // windowed zero, which is exactly why it may not be silently outranked.
+    const pool = stubPool({
+      rules: [rule({ id: 'a', rule_name: 'A', rule_id_vendor: '1', hit_count: 13275022 })],
+      hits: [hit({ rule_id: '9', rule_name: 'Other' })],
+      findings: [finding({ rule_id: 'a', finding_type: 'any_any', severity: 'critical' })],
+    });
+    const d = await buildRuleRiskData(pool, { days: 7 });
+    assert.equal(d.cleanupCandidates.length, 0,
+      'a rule the firewall says has 13.3M hits is not a removal candidate');
+  });
+
+  it('⛔ a device whose logs never named ANY rule yields no candidates', async () => {
+    // `rowsSeen === 0`: the logs are silent about every rule, so the absence of
+    // this one proves nothing. Reachable for any vendor whose syslog SecVault
+    // parses but whose rule field it does not -- Cisco ASA and Sangfor both
+    // report no hit counts by transport, so every rule would certify at once.
+    const pool = stubPool({
+      rules: [rule({ id: 'a', rule_name: 'A', rule_id_vendor: '1', hit_count: null })],
+      hits: [],
+      findings: [finding({ rule_id: 'a', finding_type: 'any_any', severity: 'critical' })],
+    });
+    const d = await buildRuleRiskData(pool, { days: 7 });
+    assert.equal(d.cleanupCandidates.length, 0);
+  });
+
+  it('a DEVICE-reported zero still qualifies on its own', async () => {
+    // The strongest evidence available, and independent of any log grade.
+    const pool = stubPool({
+      rules: [rule({ id: 'a', rule_name: 'A', rule_id_vendor: null, hit_count: 0 })],
+      hits: [hit({ rule_id: null, rule_name: 'Other' })],
+      findings: [finding({ rule_id: 'a', finding_type: 'any_any', severity: 'critical' })],
+    });
+    const d = await buildRuleRiskData(pool, { days: 7 });
+    assert.equal(d.cleanupCandidates.length, 1);
+    assert.equal(d.cleanupCandidates[0].deviceAgreesZero, true);
   });
 
   it('a rule with no finding is not a candidate, however idle', async () => {

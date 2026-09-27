@@ -24,8 +24,9 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  buildUpgradePlan, rankPlans, summarisePlans, branchOf,
+  buildUpgradePlan, rankPlans, summarisePlans, branchOf, clears, hasReadableFix,
 } = require('../lib/engines/upgradePlan');
+const { parseVersion } = require('../lib/engines/versionComparator');
 
 const FORTI = { id: 'd1', name: 'TSR-TL', vendor: 'fortinet', asset_criticality: 'medium' };
 const PALO = { id: 'd2', name: 'IDC FW', vendor: 'paloalto', asset_criticality: 'high' };
@@ -257,5 +258,86 @@ describe('⛔ no running version means NO RECOMMENDATION, not a branch move', ()
     assert.equal(p.blockedReason, null);
     assert.equal(p.recommendation, 'in_branch');
     assert.equal(p.inBranch.target, '7.4.12');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ SWEEP 2026-09-27 — an UNREADABLE fix version must never read as cleared
+//
+// `branchOf` carried a 7-line comment about `parseVersion` returning a tuple of
+// ZEROS for input it cannot read. `clears()`, twelve lines below, had no such
+// guard — so an unreadable `fixed_in` compared as version 0.0.0.0, which every
+// target is "at or above". A doubled guard where only one half moved.
+//
+// The cost was the worst available: a KEV-listed CVE reported as CLEARED by an
+// upgrade that does nothing about it, AND excluded from `unplannable`, whose
+// whole job is catching it.
+
+describe('⛔ an unreadable fixed_in is never cleared, and never silently dropped', () => {
+  const dev = { id: 'd', name: 'FG', vendor: 'fortinet' };
+
+  const unreadable = ['Not applicable', 'contact support', 'N/A', 'see advisory', '', '   '];
+
+  it('a target does not clear an assessment whose fix version cannot be read', () => {
+    for (const bad of unreadable) {
+      assert.equal(clears('fortinet', bad, parseVersion('fortinet', '9.9.9')), false,
+        `"${bad}" must not be cleared by 9.9.9`);
+    }
+  });
+
+  it('⛔ and a KEV with an unreadable fix is NOT counted as cleared', () => {
+    const plan = buildUpgradePlan(dev, 'v7.4.9,build2829', [
+      { cve_id: 'CVE-A', fixed_in: '7.4.10', kev_listed: false, priority_band: 'scheduled' },
+      { cve_id: 'CVE-KEV', fixed_in: 'Not applicable', kev_listed: true, priority_band: 'patch_now' },
+      { cve_id: 'CVE-C', fixed_in: 'contact support', kev_listed: false, priority_band: 'monitor' },
+    ]);
+    assert.ok(plan.inBranch, 'there is still a real in-branch target');
+    assert.equal(plan.inBranch.clears, 1, 'only the readable one is cleared');
+    assert.equal(plan.inBranch.kevCleared, 0,
+      'the KEV is NOT cleared — an upgrade to 7.4.10 does nothing about it');
+  });
+
+  it('⛔ and it is COUNTED in unplannable, with its own reason', () => {
+    const plan = buildUpgradePlan(dev, 'v7.4.9,build2829', [
+      { cve_id: 'CVE-KEV', fixed_in: 'Not applicable', kev_listed: true, priority_band: 'patch_now' },
+      { cve_id: 'CVE-NONE', fixed_in: null, kev_listed: false, priority_band: 'monitor' },
+    ]);
+    assert.equal(plan.unplannable.length, 2, 'neither may vanish from both populations');
+    const byCve = new Map(plan.unplannable.map((u) => [u.cve_id, u]));
+    // ⛔ TWO REASONS, because the operator's next step differs: chase the vendor
+    // for a fix version, versus chase the feed for a readable one.
+    assert.equal(byCve.get('CVE-KEV').reason, 'fix_version_unreadable');
+    assert.equal(byCve.get('CVE-KEV').fixed_in_raw, 'Not applicable',
+      'the unreadable value is shown, so a person can see what arrived');
+    assert.equal(byCve.get('CVE-NONE').reason, 'no_known_fix');
+    assert.equal(byCve.get('CVE-KEV').kev_listed, true);
+  });
+
+  it('⛔ an unreadable fix leaves nothing to plan, rather than a false all-clear', () => {
+    const plan = buildUpgradePlan(dev, 'v7.4.9,build2829', [
+      { cve_id: 'CVE-KEV', fixed_in: 'Not applicable', kev_listed: true, priority_band: 'patch_now' },
+    ]);
+    assert.equal(plan.inBranch, null, 'no target can clear it');
+    assert.equal(plan.recommendation, 'none');
+    assert.equal(plan.unplannable.length, 1);
+  });
+
+  it('a readable fix still works exactly as before', () => {
+    // The whole point of the feature must survive the guard.
+    const plan = buildUpgradePlan(dev, 'v7.4.9,build2829', [
+      { cve_id: 'CVE-2026-24858', fixed_in: '7.4.11', kev_listed: true, priority_band: 'patch_now' },
+    ]);
+    assert.equal(plan.inBranch.target, '7.4.11');
+    assert.equal(plan.inBranch.kevCleared, 1);
+    assert.equal(plan.unplannable.length, 0);
+  });
+
+  it('hasReadableFix agrees with clears on every shape', () => {
+    for (const bad of unreadable.concat([null, undefined, 42, {}, []])) {
+      assert.equal(hasReadableFix('fortinet', bad), false, String(bad));
+    }
+    for (const good of ['7.4.11', 'v7.4.11,build2829', '11.1.2-h3']) {
+      assert.equal(hasReadableFix('fortinet', good), true, good);
+    }
   });
 });
