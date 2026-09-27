@@ -403,6 +403,23 @@ device's own EMPIRICAL QUANTILE (`BAND_QUANTILE = 0.95`), whose false-positive r
 `1 - quantile` BY CONSTRUCTION rather than by hope; measured 5.3%. Median and MAD are still
 computed and reported, as DESCRIPTION only, and must never decide anything.
 
+⛔ **AND THE RESOLVED BANDS ARE WHY A SINGLE FLEET-WIDE NUMBER CANNOT WORK.** Measured on the
+live fleet after the v2.191.0 deploy, each device's own band: HRIS **±29.2%**, ITC-SLY ±144.8%,
+SMT ±151.6%, OKF(F2) ±159.0%, ITC-SK ±185.4%, IDC FW **±344.9%** — a **12x spread**. A constant
+picked anywhere in that range is simultaneously far too tight for IDC FW, where a doubling of
+traffic is an ordinary Tuesday, and far too loose for HRIS, where it would hide everything short
+of a 3x move. ⛔ So the per-device band is not a refinement of a global threshold that could be
+simplified back into one later; there is no single value it is approximating.
+
+First full run after that deploy: 16 devices, 0 failures, **203 changes judged — 66
+`indistinguishable`, 137 `window_incomplete`, and 0 `exceeded_normal_variation`.** The zero is
+the intended shape of an honest answer, not a broken detector: nothing on this fleet currently
+moves outside its own ordinary variation, and `window_incomplete` dominating simply says the
+rollup history is still shorter than most changes need. ⛔ **PAKFood reports
+`insufficient_baseline`** — it is the fleet's zero-syslog firewall, the same device the A2
+blind-spot register exists to name, so the two features agree about it instead of one of them
+quietly scoring it as calm.
+
 Other constants: `MIN_BASELINE_PAIRS = 10`; `DEFAULT_WINDOW_HOURS = 24`, ⛔ **not a tuning knob**
 — 61 changes have a complete 24h window either side and only 18 have 7 days, so widening it buys
 precision by discarding most of the subject.
