@@ -530,9 +530,15 @@ describe('⛔ /vulnerability tab registry', () => {
     assert.equal(keys[1], 'advisories');
   });
 
-  it('appends the new key at the END', () => {
+  it('appends each new key at the END, leaving earlier ones where they were', () => {
+    // ⛔ THE INVARIANT IS THE PREFIX, NOT THE LAST ELEMENT. This originally
+    // pinned `upgrade` as the final key, which made it fail the moment a
+    // FOURTH tab was appended correctly — the guard firing on the thing it was
+    // meant to permit. What actually matters is that no existing key moves,
+    // because a bookmark carrying ?tab=upgrade must still resolve.
     const keys = tabList();
-    assert.equal(keys[keys.length - 1], 'upgrade');
+    assert.deepEqual(keys.slice(0, 3), ['posture', 'advisories', 'upgrade'],
+      'an existing key changed position, which breaks every link already sent');
     assert.equal(keys.indexOf('upgrade'), 2, 'upgrade was inserted rather than appended');
   });
 
@@ -551,10 +557,27 @@ describe('⛔ /vulnerability tab registry', () => {
     assert.match(PAGE, /VULN_TABS\.includes\(searchParams\?\.tab\)/);
   });
 
-  it('the new tab is actually reachable — a link AND a render branch', () => {
-    assert.match(PAGE, /tabLink\(tab, 'upgrade', '[^']+'\)/, 'no link in the tab strip');
-    assert.match(PAGE, /tab === 'upgrade' && <UpgradePlan/, 'nothing renders for the new key');
-    assert.match(PAGE, /import UpgradePlan from/, 'the component is referenced but not imported');
+  it('EVERY tab is actually reachable — a link AND a render branch', () => {
+    // ⛔ DERIVED FROM THE REGISTRY, not a hardcoded list. The original checked
+    // `upgrade` alone, so a fourth tab could be registered, linked and never
+    // rendered — a key that resolves to a blank body — without failing here.
+    //
+    // ⛔ PLAIN STRING CONTAINMENT, NOT A BUILT REGEX. The first draft built one
+    // with `new RegExp(`tabLink\(tab, ...`)`, and inside a TEMPLATE LITERAL a
+    // single backslash before `(` is consumed by the string, so the regex saw a
+    // capturing group rather than a literal paren and matched NOTHING — for all
+    // four keys, including the three that were already correct. A guard that
+    // cannot fire. There is no escaping to get wrong here.
+    for (const key of tabList()) {
+      assert.ok(PAGE.includes(`tabLink(tab, '${key}', '`),
+        `${key} has no link in the tab strip`);
+      assert.ok(PAGE.includes(`tab === '${key}' &&`),
+        `nothing renders for ?tab=${key}`);
+    }
+    assert.ok(PAGE.includes('import UpgradePlan from'),
+      'the component is referenced but not imported');
+    assert.ok(PAGE.includes('import RemediationVelocity from'),
+      'the velocity tab is not imported');
   });
 });
 

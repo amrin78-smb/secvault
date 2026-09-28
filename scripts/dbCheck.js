@@ -1025,6 +1025,10 @@ const REGISTRY = [
   // catching fleetConformanceData the moment it landed.
   { mod: 'lib/engines/upgradePlanData.js', fn: 'getFleetUpgradePlan', args: () => [{}], spec: { object: [] } },
   { mod: 'lib/engines/coverageRegisterData.js', fn: 'getCoverageRegister', args: () => [{}], spec: { object: ['entries', 'summary', 'failures'] } },
+  // A8. Three reads, all isolated: a failure leaves ok:false with the source
+  // named, so dbcheck's swallowed-error harvest sees a broken query even
+  // though the call itself resolves.
+  { mod: 'lib/engines/remediationVelocityData.js', fn: 'getRemediationVelocity', args: () => [{}], spec: { object: ['ok', 'summary', 'failures'] } },
   { mod: 'lib/engines/ruleConsolidationData.js', fn: 'getFleetConsolidation', args: () => [], spec: { object: [] } },
   { mod: 'lib/engines/fleetConformanceData.js', fn: 'getFleetConformance', args: () => [{}], spec: { object: ['cohorts', 'summary', 'failures'] } },
   // A7 — what followed a configuration change. ⛔ BOTH ENTRY POINTS, since the

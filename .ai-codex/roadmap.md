@@ -93,17 +93,19 @@ covering them.** Every one was verified against the source on the date raised.
 | 24 | **`versionComparator.parseVersion` returns FABRICATED ZEROS for a version it cannot read**, and says nothing. `parseVersion('fortinet', 'nope')` is `[0,0,…]`, which every conceivable target compares "at or above" — this codebase's most-repeated bug living in a version parser. ⛔ **`upgradePlan.branchOf` and its sibling ARE guarded** (a no-digit test plus an every-component-is-finite test, added 2026-09-27 after a KEV row with `fixed_in: 'Not applicable'` was reported as CLEARED and excluded from `unplannable`). ⛔ **THE REMAINING CALL SITES HAVE NOT BEEN AUDITED**: `lib/engines/versionMatcher.js` (3 sites), `lib/feeds/nvd.js`, `lib/feeds/paloalto.js`, and every adapter's `version_tuple` (`checkpoint/parser.js`, `cisco_asa/index.js`, `fortinet/parser.js`, `fortinet/ssh.js`, `paloalto/parser.js`, `paloalto/ssh.js`, `sangfor/index.js`). The right fix is probably at the source — return `null` for unreadable input and make every caller say what it does about that — but that is a breaking change across a matcher on the CVE path, so measure before moving it. | [ ] |
 | 25 | **`tests/fixedVersionFromRanges.test.js` still pins EXACT SOURCE TEXT rather than behaviour.** Its section 3 slices `lib/feeds/fortinet.js` around `affected_version_ranges = CASE` and regex-matches the wording of the downgrade guard, so a harmless rename or reformat disarms it silently — a guard that cannot fire, which is the defect this repo names most often. ⛔ Its section 4 (the `cveHub` half) was ALREADY converted after the old four-regex version was demonstrated inert against a real disagreement, and `tests/fixBoundary.test.js` owns that behaviour — so the pattern to follow already exists in the same file. Convert section 3 the same way. | [ ] |
 
-⛔ **A6, A8 and A9 remain UNBUILT** and are tracked in the table below — A6 is not a new item at all
-(it is Tier 1 #2, and cannot arm until the hour-of-week baseline reaches 3 weeks). Do not read the
-five ✅ rows there as progress on them.
+⛔ **A6 and A9 remain UNBUILT** and are tracked in the table below — A6 is not a new item at all
+(it is Tier 1 #2; re-measured 2026-09-28 it crosses the 3-week hour-of-week gate on **2026-09-29**
+and arms with no code change). **A8 SHIPPED in v2.192.0** and A7 in v2.191.0. Do not read the ✅
+rows there as progress on A6 or A9.
 
 ### New analytics, measured 2026-09-25 — tracked in `analytics-proposal.md`
 
 Nine analytics buildable with **no LLM and no local AI**, each grounded in a live measurement.
 ⛔ **The tracking table lives in `analytics-proposal.md`, not here** — one Done column, not two, or
-they drift. `⧖` below means BUILT AND IN THE TREE BUT NOT RELEASED: no version bump, no `releaseNotes`
+they drift. `⧖` means BUILT AND IN THE TREE BUT NOT RELEASED: no version bump, no `releaseNotes`
 entry. It is neither `[ ]` (which would send a session to rebuild it) nor `✅` (which would have it
-looked for in a release that does not carry it).
+looked for in a release that does not carry it). ⛔ **Nothing carries `⧖` today** — A7 held it and
+shipped in v2.191.0; the state stays defined because the next unreleased item will need it.
 
 Three items were nearly written as new proposals and are NOT: seasonal baselines are Tier 1 #2
 below, bandwidth forecasting is Tier 2, and a general flow rollup was already refused.
@@ -119,8 +121,9 @@ detection third.
 | A3 | **Log-derived rule usage** | ~84 of 235 unmeasured rules gain evidence (54 Fortinet by rule-id, 30 Palo Alto by name). ⛔ Never written into `hit_count`; name-matching is a weaker grade and may not authorise a deletion | **[x]** v2.189.0 |
 | A4 | **Object & rule consolidation** | 3,298 of 10,092 objects (33%) referenced by nothing; 771 duplicates; up to 405 rule rows removable. ⛔ Needs **no hit counts**, so it is the one cleanup analytic that is conclusive on Fortinet | **[x]** v2.190.0 |
 | A5 | **Fleet conformance / odd-one-out** | 11 Palo Altos, 5 Fortinets. The only one that DISCOVERS checks the 45-check library lacks. ⛔ Majority ≠ correctness — reports "1 of 11 differs", never "misconfigured" | **[x]** v2.190.0 |
-| A7 | **Change → outcome correlation** | Tier 3, and the most differentiating item in the file — SecVault is the only product here holding the change record and the traffic outcome in one database. ⛔ **THE CONTROL IS THE FEATURE:** measured 2026-09-27, 24h either side of a real config change averaged **+13.6%** (61 changes) against **+17.6%** for an ORDINARY day (284 pairs) — *the change-adjacent delta is smaller than the noise*, so a bare before/after percentage would have manufactured 61 effects. Verdict is `exceeded_normal_variation` vs `indistinguishable`, never "significant", and never causal | **⧖ BUILT, NOT RELEASED** |
-| A8-A9 | remediation survival, VPN behavioural profiles | Tier 3. ⛔ A8's honest output today is an indictment: **0 version changes across 16 devices in 70 days** | [ ] |
+| A7 | **Change → outcome correlation** | Tier 3, and the most differentiating item in the file — SecVault is the only product here holding the change record and the traffic outcome in one database. ⛔ **THE CONTROL IS THE FEATURE:** measured 2026-09-27, 24h either side of a real config change averaged **+13.6%** (61 changes) against **+17.6%** for an ORDINARY day (284 pairs) — *the change-adjacent delta is smaller than the noise*, so a bare before/after percentage would have manufactured 61 effects. Verdict is `exceeded_normal_variation` vs `indistinguishable`, never "significant", and never causal. ⛔ This row read **⧖ BUILT, NOT RELEASED** for a full release after the one that carried it | **[x]** v2.191.0 |
+| A8 | **Remediation velocity (survival)** | Tier 3. ⛔ Its honest first output IS the finding, and it is sharper than the proposal predicted: measured 2026-09-28, **246 open exposures, 0 remediated, median time-to-remediate NOT REACHED in 74 observed days**. **0 of 16 firewalls have ever changed version** (3,954 version rows, 16 distinct (device, version) pairs), and **3 KEV-listed exposures have been open at least 69 days**. 794 advisories testable, 0 reconstructed remediation events, 638 ms | **[x]** v2.192.0 |
+| A9 | **VPN behavioural profiles** | Tier 3. Re-measured 2026-09-28: **7,145 sessions, 608 users, 38 days of history, 11.8 sessions/user — but only 209 of 608 users (34%) have ≥10 sessions.** ⛔ That is the hard number behind the proposal's "gate PER USER, not fleet-wide" rule: a fleet-level gate would arm the detector for the two-thirds of users who have no usable baseline. Stale-account detection stays unanswerable until December | [ ] |
 
 ⛔ **`eol_catalogue` IS NOT IN THIS DATABASE.** The nocvault-eol hub holds 2,770 rows; here the
 table is absent entirely. Probably the largest missing DATASET available to this product — it would
@@ -183,7 +186,8 @@ moved the monthly compliance PDF). Re-measure before committing to 4-9.
 | **A3 — Log-derived rule usage, graded** | v2.189.0; `lib/engines/ruleHitCorrelation.js` gained an ADDITIVE grade (`logEvidence` values unchanged), `components/analysis/UsageGrade.js`, the `Hits` column on `/devices/[id]/rules` became **`Usage`**, and the grade travels into the change-request document. ⛔ Never written into `hit_count`; **ID-grade and NAME-grade are different grades** and only ID satisfies the `ruleChangeRequests` deletion bar; absence from logs stays `unmeasured`, never a measured zero |
 | **A4 — Rule & object consolidation** | v2.190.0; `lib/engines/ruleConsolidation.js` + `ruleConsolidationData.js`, **Consolidation tab** on `/devices/[id]/analysis` (14 tabs now, inserted after `reorder`), plus `nat_rules` counted as an object reference surface in `objectUsage.js`. Live: **92 groups / 156 removable rows — 41 `safe_to_merge`, 51 `needs_review`** in 272 ms over 1,782 rules. ⛔ Needs NO hit counts, so it is the one cleanup analytic that is conclusive on the FortiGates. ⛔ Object consolidation was ALREADY BUILT (`objectUsage.js`, 2026-08-03) — the proposal said otherwise and would have had it rebuilt |
 | **A5 — Fleet conformance / odd-one-out** | v2.190.0; `/conformance` (Risk → Conformance), `lib/engines/fleetConformance.js` + `fleetConformanceData.js`. ⛔ The cohort is `(vendor, mgmt_method)`, NOT vendor — TUG is the only Palo Alto collected over SSH and its parser emits a different structure, so a vendor-only grouping would have made this a false-finding machine on its first run. ⛔ MAJORITY IS NOT CORRECTNESS: `admin-ssh-port` is 4× `22` against OKF(F2)'s `5022`, i.e. the minority firewall is the HARDENED one |
-| **A7 — Change → outcome** | ⛔ **BUILT, NOT YET RELEASED** — `lib/engines/changeOutcome.js` + `changeOutcomeData.js` + `components/analysis/ChangeOutcomeBoard.js`, rendered on `/devices/[id]/changes` above the change list. No version bump and no `releaseNotes` entry yet, so it is in the tree and not in any release. Recorded here so it is not rebuilt; see `pages.md` for the surface and the six verdicts |
+| **A7 — Change → outcome** | v2.191.0; `lib/engines/changeOutcome.js` + `changeOutcomeData.js` + `components/analysis/ChangeOutcomeBoard.js`, rendered on `/devices/[id]/changes` above the change list. ⛔ This row said **"BUILT, NOT YET RELEASED"** for a full release after the one that shipped it — corrected 2026-09-28. See `pages.md` for the surface and the six verdicts. ⛔ **MEDIAN + MAD WAS TRIED HERE AND MEASURED WRONG** (17.3% of ordinary change-free days flagged); replaced by a per-device empirical quantile at a measured 5.3% |
+| **A8 — Remediation velocity** | v2.192.0; `/vulnerability?tab=velocity` (the FOURTH tab), `lib/engines/remediationVelocity.js` + `remediationVelocityData.js` + `components/vulnerability/RemediationVelocity.js`. Live 2026-09-28: **246 open exposures, 0 remediated, median NOT REACHED in 74 observed days**, 0 of 16 firewalls have ever changed version, 3 KEV-listed exposures open ≥69 days, 794 advisories testable, 0 reconstructed events, 638 ms. ⛔ **`device_cve_assessments.assessed_at` COULD NOT BE USED** — all 246 live rows carry the same (today's) timestamp because the row is rewritten on every match run; it records when SecVault last LOOKED, not when the exposure began. ⛔ **A remediated exposure leaves NO ROW**, so events are reconstructed from append-only `device_versions` using `versionComparator.isInRange` UNCHANGED — without that path the 0% would be unfalsifiable, indistinguishable from an engine that never looked. ⛔ **TWO CLOCKS** (`daysSinceKnown` / `daysSincePublished`), both reported, never blended: 59 of 246 exposures were published >30 days before SecVault held them (mean 27, max 276). ⛔ Kaplan–Meier "survival" means STILL VULNERABLE, so S(t)=100% is the worst result wearing the number a dashboard tints green — the view never renders it |
 
 ---
 
@@ -237,13 +241,25 @@ credential spraying found on 2026-09-08 would have fired this), collector ingest
 ⛔ Thresholds must be explicit and per-rule, never a magic "anomaly score" — see CLAUDE.md's
 rejection of a composite `log_hit` definition for the same reason.
 
-⛔ **IT CANNOT ARM YET, MEASURED 2026-09-25.** `syslog_rollup_hourly` spans **2.4 weeks / 405
-distinct hours**, and a 168-bucket hour-of-week model needs ≥3 weeks to hold more than ~2
-observations per bucket. Build it GATED, reporting `insufficient_baseline` with the baseline it
-needed beside the one that exists — the pattern the six VPN detections already use, hatched and
-hueless, never a green all-clear. It then arms itself with no code change. ⛔ And use **median +
-MAD, not mean + σ**: firewall traffic is heavy-tailed, one spike poisons a mean, and the detector
-under-reports for a week afterwards. The baseline is an input to a NAMED threshold, not a score.
+⛔ **IT CANNOT ARM YET — BUT IT IS DAYS AWAY. RE-MEASURED 2026-09-28**, `syslog_rollup_hourly`
+spans **481 distinct hours = 2.86 weeks, 2.9 observations per hour-of-week bucket** (was 405 hours
+/ 2.4 weeks on 2026-09-25). Collection started 2026-09-08, so a 168-bucket hour-of-week model
+crosses the ≥3-week gate on **2026-09-29**. Build it GATED, reporting `insufficient_baseline` with
+the baseline it needed beside the one that exists — the pattern the six VPN detections already use,
+hatched and hueless, never a green all-clear. It then arms itself with no code change.
+
+⛔ **"MEDIAN + MAD, NEVER MEAN + σ" IS NO LONGER TAKEN ON TRUST — A7 FALSIFIED IT ON THIS DATA.**
+A7 ran exactly that method (Iglewicz–Hoaglin's modified Z-score at its own standard 3.5) over the
+same rollups, against a CONTROL of ordinary change-free days, and it flagged **17.3% of them**
+(worst device 42.1%) — firewall traffic is heavy-tailed, and **a ROBUST estimator is not a
+DISTRIBUTION-FREE one**. It was replaced by the device's own EMPIRICAL QUANTILE, whose
+false-positive rate is `1 - quantile` BY CONSTRUCTION rather than by hope: measured **5.3%**. A6's
+grain differs — hour-of-week LEVELS, not day-over-day DELTAS — so this does not prove median + MAD
+wrong here. ⛔ **THE DECISION TAKEN: run A7's control harness against A6's grain and pick on the
+MEASURED false-positive rate, rather than inherit a constraint already falsified once on this
+data.** `lib/engines/changeOutcome.js` already exports `buildBaseline`, `median`, `quantile` and
+`BAND_QUANTILE` for exactly that reuse. Either way the baseline is an input to a NAMED threshold,
+never a composite anomaly score.
 
 ### 3. Report library and scheduling
 **Why.** FWA's real stickiness is not any single report; it is that a manager receives one every

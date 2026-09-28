@@ -3284,3 +3284,96 @@ it now fires on 232 rules fleet-wide**, in the document somebody uses to delete 
 `logGrade === 'log-name'`, so it adds no case — but a caveat only ever REFUSES a deletion, so erring
 towards PRINTING it is the safe direction, and an older enriched object missing `logGrade` still
 carries its warning.
+
+## lib/engines/remediationVelocity.js + remediationVelocityData.js (A8, v2.192.0)
+
+"How long does a known vulnerability stay open on this fleet" — Kaplan-Meier with right-censoring.
+`remediationVelocity.js` is PURE (`buildExposure` / `kaplanMeier` / `summariseVelocity` /
+`velocityHeadline` / `daysBetween`, plus `OUTCOMES` / `VELOCITY_CLAIM` / `MEDIAN_NOT_REACHED`);
+`remediationVelocityData.js` is the plumbing (`getRemediationVelocity`, `findRemediationEvents`,
+`advisoryCovers`, and `OPEN_EXPOSURES_SQL` / `VERSION_HISTORY_SQL` / `ADVISORY_RANGES_SQL`).
+Read-time, no table, no cron job. Registered in `scripts/dbCheck.js`'s REGISTRY; surface is
+`/vulnerability?tab=velocity`.
+
+Live 2026-09-28 (638 ms; re-verified against the production database while writing this entry):
+**246 exposures, 0 remediated, median NOT REACHED in 74 observed days, 3 KEV-listed open ≥69 days,
+0 of 16 firewalls have ever changed version** (3,954 version rows, 16 distinct `(device, version)`
+pairs), **794 advisories testable, 0 reconstructed events.**
+
+⛔ **`device_cve_assessments.assessed_at` IS NOT AN EXPOSURE CLOCK, AND THE ENGINE IS FORBIDDEN FROM
+READING IT** — a test scans the engine source AND `OPEN_EXPOSURES_SQL`, comments stripped. All 246
+live rows carry the SAME timestamp, today's, because the row is rewritten on every match run. A
+duration measured from it reports every exposure as hours old, forever, resetting every six hours.
+The start is instead the LATER of `advisories.created_at` and the device's first
+`device_versions.collected_at` — the advisory date alone charges a firewall for weeks before
+SecVault had ever collected from it, the device date alone charges it for an advisory that did not
+exist yet, and neither is a real exposure.
+
+⛔ **A REMEDIATED EXPOSURE LEAVES NO ROW, SO EVENTS ARE RECONSTRUCTED.** `device_cve_assessments` is
+DELETE+reinserted, so a device that moves onto a fixed version simply STOPS HAVING A ROW and the
+obvious query ("assessments that disappeared") cannot be written at all. Fed only from that table
+the engine reports 0% remediated forever — an ARTEFACT OF THE SCHEMA, indistinguishable from the
+true 0% this fleet has. `findRemediationEvents` reconstructs transitions from `device_versions`
+(append-only) and reuses `versionComparator.isInRange` UNCHANGED. ⛔ **That path is what makes the
+live 0% FALSIFIABLE**: it would have found an event had there been one. Events are dated at the
+FIRST OBSERVATION OF THE FIXED VERSION — the late end of
+`(before.last_seen_at, after.first_seen_at]` — so a reconstructed time-to-remediate OVER-estimates
+while open ages UNDER-estimate, both erring away from flattering us. An exposure that closed while
+its advisory also left the corpus is invisible, and that is stated in `caveats`, never folded into
+the denominator.
+
+⛔ **TWO CLOCKS, REPORTED SEPARATELY, NEITHER BLENDED.** `daysSinceKnown` (from when SecVault first
+held the advisory — what an operator is accountable for) and `daysSincePublished` (from vendor
+disclosure — how long the firewall was actually exposed). ⛔ **A MISSING PUBLISH DATE DOES NOT FALL
+BACK TO THE OTHER CLOCK**; it stays `null`, or one measurement ships under the other's name.
+Measured live: 59 of 246 exposures were published more than 30 days before SecVault ingested them,
+mean 27 days, MAX 276 — and **CVE-2025-31514 reads 69 days by our clock and 350 by the vendor's, on
+three firewalls**. A single blended figure is wrong in both directions at once. The gap itself is
+`unawareDays` (published -> known), summarised as `meanUnawareDays`/`maxUnawareDays`.
+
+⛔ **EVERY DURATION IS A LOWER BOUND** — `isLowerBound: true` on every exposure, left-censored on
+both sides: an advisory ingested on the day the feed was switched on was real long before, and 2 of
+16 devices sit exactly on the collection-start date (2026-07-16), so for those two the clock is the
+install date, not a fact about the firewall. Same contract as
+`vpn_sessions.duration_is_lower_bound`, for the same reason.
+
+⛔ **A MEDIAN THAT WAS NEVER REACHED IS `null`** — exported as `MEDIAN_NOT_REACHED`, never the
+largest observation. With every subject censored the survival function never crosses 0.5;
+substituting the longest observed age would report 74 days as this fleet's median time-to-patch.
+
+⛔ **AN UNREADABLE VERSION PRODUCES NO EVENT, NOT A REMEDIATION.** `advisoryCovers` returns `null`
+(never `false`) when it cannot tell, and a `null` on either side of a transition is SKIPPED.
+`versionComparator.parseVersion` returns FABRICATED ZEROS for junk, so a naive call tests `0.0.0`
+against the range, reads as "not affected" and manufactures a remediation — the same root cause as
+`upgradePlan`'s `branchOf` and `clears()` bugs, guarded here by requiring a digit. ⛔ On this page
+the fabricated direction is the FLATTERING one and therefore the dangerous one.
+
+⛔ **A NEGATIVE AGE IS `null`**, not 0 and not an absolute value: two clocks disagreeing is not a
+measurement. The same call `vpn_sessions` makes on a negative duration.
+
+⛔ **`UNKNOWN_START` IS COUNTED BUT EXCLUDED FROM THE CURVE** — it has no time axis to sit on. It
+stays in `summary.unknownStart` and in the `exposures` denominator; dropping it would shrink the
+denominator and inflate the remediation rate. At equal times the estimator orders EVENTS BEFORE
+CENSORINGS — the standard convention, and it matters: a subject censored at the same instant is
+still at risk for that event.
+
+⛔ **A FAILED READ IS NOT AN EMPTY FLEET.** Any of the three queries failing leaves `ok: false`,
+`summary: null` and the failing source NAMED in `failures[]`, and no consumer may render a figure
+while it is non-empty. A shorter exposure list on this page reads as a fleet that patches better
+than it does.
+
+⛔ `OPEN_EXPOSURES_SQL` takes only `version_affected = true` on `active` devices — an advisory that
+never applied to the running version was never an exposure, and counting it dilutes the denominator
+with work that did not exist. `ADVISORY_RANGES_SQL` takes only `matchability = 'matched'` with a
+non-empty range array. `coverage` reports `devicesWithVersionHistory` / `devicesWithAVersionChange`
+/ `advisoriesTestable` / `reconstructedEvents` beside three `caveats`, the third of which fires only
+when no firewall has been observed changing version at all — without it the 0% is unfalsifiable.
+
+⛔ **`VELOCITY_CLAIM` IS THE ONE SENTENCE THIS ENGINE MAY MAKE**, exported so the UI cannot
+paraphrase it into something stronger — the same device as `applicationView`'s `IMPACT_CLAIM` and
+A7's `OUTCOME_CLAIM`. `velocityHeadline` refuses `tone: 'ok'` while `allCensored` (nothing was
+remediated) and returns `unknown` — never `ok` — both when there are no exposures and when a median
+does not exist yet.
+
+Pinned by `tests/remediationVelocity.test.js` (29), `tests/remediationVelocityData.test.js` (16)
+and `tests/remediationVelocityView.test.js` (12).

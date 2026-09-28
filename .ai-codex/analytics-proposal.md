@@ -1,4 +1,4 @@
-# Analytics without an LLM — **A1-A5 BUILT, A7 BUILT AND UNRELEASED**, A6/A8/A9 proposal only
+# Analytics without an LLM — **A1-A5, A7 AND A8 BUILT**, A6/A9 proposal only
 
 ⛔ **THIS TITLE READ "PROPOSAL, mostly NOT BUILT" AFTER FIVE OF THE NINE HAD SHIPPED.** That is
 the error this repo pays for most: a stale "not built" sends a session off to rebuild working
@@ -28,6 +28,8 @@ RELEASED** — no version bump, no `releaseNotes` entry.
 
 ⛔ `⧖` is not a courtesy state. `[ ]` would send a session to rebuild it; `✅` would have someone
 look for it in a release that does not carry it. Both are wrong in a way that costs work.
+⛔ **Nothing carries `⧖` today** — A7 held it and shipped in v2.191.0. The state stays defined
+because the next unreleased item will need it.
 
 | # | Item | Tier | Effort | New table? | Done |
 |---|---|---|---|---|:--:|
@@ -37,9 +39,9 @@ look for it in a release that does not carry it. Both are wrong in a way that co
 | A4 | **Object & rule consolidation** — exact set algebra, needs no hit counts | 2 | M | no | ✅ v2.190.0 |
 | A5 | **Fleet conformance / odd-one-out** — discovers checks the 45-check library lacks | 2 | M | no | ✅ v2.190.0 |
 | A6 | Seasonal baselines — **NOT a new item**, it is `roadmap.md` Tier 1 #2. See §A6 for why it cannot arm yet | — | — | — | [ ] |
-| A7 | **Change → outcome correlation** — the most differentiating; it built its OWN control rather than waiting on A6 | 3 | M–L | no | ⧖ built, unreleased |
-| A8 | **Remediation velocity (survival)** — today its honest output is an indictment | 3 | S | no | [ ] |
-| A9 | **VPN behavioural profiles** — 557 users, 35 days, gate PER USER | 3 | M | no | [ ] |
+| A7 | **Change → outcome correlation** — the most differentiating; it built its OWN control rather than waiting on A6 | 3 | M–L | no | ✅ v2.191.0 |
+| A8 | **Remediation velocity (survival)** — its honest output is an indictment, and that is the point | 3 | S | no | ✅ v2.192.0 |
+| A9 | **VPN behavioural profiles** — 608 users, 38 days; gate PER USER, and only 34% of users have a usable baseline | 3 | M | no | [ ] |
 
 ⛔ **No new table is required for anything in this file.** Every item is read-time over data already
 collected, which is also why none of them may store a verdict — the same rule `/segmentation` and
@@ -76,9 +78,9 @@ Measured 2026-09-25, 16 devices:
 | of those 235 | **181 are Fortinet**; all five Fortinets are 100% unmeasured. **TUG** is the only Palo Alto like it (54 of 54) |
 | `network_objects` | 10,092 defined, **3,298 (33%) referenced by no rule and no group**, and **2,989 rule references resolve to no object** |
 | syslog coverage | **15 of 16 devices.** PAKFood is fully collected (33 rules, 17 CVE assessments, 24 audit findings, 17 interfaces, collected same day) and sends **zero** log events |
-| `device_versions` | 3,727 rows, 16 devices, **0 version changes in 70 days** |
+| `device_versions` | 3,727 rows, 16 devices, **0 version changes in 70 days**. Re-measured 2026-09-28: 3,954 rows, still **0 changes in 74 days** — see §A8, now built |
 | `fleet_dashboard_snapshots` | 55 rows over 69 calendar days — **14 missing days** |
-| hour-of-week baseline | **2.4 weeks**, 405 distinct hours — below the 3 weeks a seasonal model needs |
+| hour-of-week baseline | **2.4 weeks**, 405 distinct hours — below the 3 weeks a seasonal model needs. Re-measured 2026-09-28: **2.86 weeks / 481 hours**, crossing the gate 2026-09-29 — see §A6 |
 | `audit_findings` | 181 pass / 165 fail / 39 `na` / 19 warning → scorePct **49.6%** |
 | `rule_analysis_results` | 1,164 across 11 types |
 
@@ -337,32 +339,50 @@ evidence.
 
 ---
 
-## A6 — Seasonal baselines: NOT a new item
+## ⛔ NOT BUILT — A6 — Seasonal baselines: NOT a new item
 
 This is `roadmap.md` **Tier 1 #2, "Threshold and anomaly alerting"**, already raised and unbuilt.
 What this file contributes is the measurement that says when it can work, and one method constraint.
 
-⛔ **IT CANNOT ARM TODAY.** `syslog_rollup_hourly` spans **2.4 weeks / 405 distinct hours**; a
-168-bucket hour-of-week model needs ≥3 weeks to have more than ~2 observations per bucket. Build it
-**gated**, reporting `insufficient_baseline` with the baseline it needed and the baseline that
-exists — exactly as the six VPN detections do, rendering hatched and hueless, never a green
-all-clear. It arms itself in one to two weeks with no code change.
+⛔ **IT CANNOT ARM TODAY — BUT IT IS ONE DAY AWAY. RE-MEASURED 2026-09-28**,
+`syslog_rollup_hourly` spans **481 distinct hours = 2.86 weeks, 2.9 observations per hour-of-week
+bucket** (it was 405 hours / 2.4 weeks when this file was raised on 2026-09-25). Collection started
+2026-09-08, so the ≥3-week gate for a 168-bucket hour-of-week model is crossed on **2026-09-29**.
+Build it **gated**, reporting `insufficient_baseline` with the baseline it needed and the baseline
+that exists — exactly as the six VPN detections do, rendering hatched and hueless, never a green
+all-clear. It then arms itself with no code change.
 
-⛔ **Median + MAD, never mean + σ.** Firewall traffic is heavy-tailed; a single spike poisons a mean
-and the detector then under-reports for a week. This is compatible with the roadmap's own rule that
-thresholds be "explicit and per-rule, never a magic anomaly score" — the baseline is an input to a
-NAMED threshold, not a composite score.
+⛔ **THE "MEDIAN + MAD, NEVER MEAN + σ" CONSTRAINT BELOW HAS SINCE BEEN CONTRADICTED BY
+MEASUREMENT, ON THIS DATA, BY A7.** A7 tested exactly that method — Iglewicz–Hoaglin's modified
+Z-score at its own standard 3.5 — over the same rollups and against a CONTROL of ordinary,
+change-free days. It flagged **17.3% of them** (worst device 42.1%), because firewall traffic is
+heavy-tailed and **a ROBUST estimator is not a DISTRIBUTION-FREE one**; it was replaced by the
+device's own empirical quantile, whose false-positive rate is `1 - quantile` by construction, and
+measured **5.3%**. A6's grain is not A7's — hour-of-week LEVELS, not day-over-day DELTAS — so this
+does NOT prove median + MAD wrong here.
+
+⛔ **THE DECISION TAKEN: run A7's control harness against A6's grain and pick on the MEASURED
+false-positive rate, rather than inherit a constraint already falsified once on this data.**
+`lib/engines/changeOutcome.js` already exports `buildBaseline`, `median`, `quantile` and
+`BAND_QUANTILE` for exactly that reuse — a second implementation of "what is normal for this
+device" would eventually disagree with the first. Whichever wins, the baseline stays an input to a
+NAMED threshold, never a magic anomaly score, which is the roadmap's own rule and is unaffected.
+
+*Original method constraint, kept as the design record:* median + MAD, never mean + σ — firewall
+traffic is heavy-tailed, a single spike poisons a mean, and the detector then under-reports for a
+week.
 
 ⛔ **Highest-value detector when it does arm: a device that STOPS logging** — which is A2's finding
 made continuous, and is why A2 should land first.
 
 ---
 
-## ⧖ BUILT, NOT RELEASED — A7 — Change → outcome correlation *(Tier 3, medium–large)*
+## ✅ BUILT v2.191.0 — A7 — Change → outcome correlation *(Tier 3, medium–large)*
 
-⛔ **IN THE TREE, IN NO RELEASE.** `lib/engines/changeOutcome.js` + `changeOutcomeData.js` +
+⛔ **RELEASED IN v2.191.0.** `lib/engines/changeOutcome.js` + `changeOutcomeData.js` +
 `components/analysis/ChangeOutcomeBoard.js`, rendered on `/devices/[id]/changes` above the change
-list. No version bump and no `releaseNotes` entry yet, so it is built and shipped to nobody.
+list. This paragraph read "IN THE TREE, IN NO RELEASE" for a full release after the one that
+carried it — corrected 2026-09-28. A stale "unreleased" costs the same as a stale "not built".
 
 ⛔ **AND IT DID NOT WAIT FOR A6.** The proposal below says this "requires A6's variance estimate,
 which is why this is Tier 3". It does require a variance estimate — and it BUILDS ITS OWN, per
@@ -460,7 +480,49 @@ variance estimate, which is why this is Tier 3 and not Tier 1.
 
 ---
 
-## A8 — Remediation velocity / survival *(Tier 3, small)*
+## ✅ BUILT v2.192.0 — A8 — Remediation velocity / survival *(Tier 3, small)*
+
+`lib/engines/remediationVelocity.js` (pure) + `remediationVelocityData.js` +
+`components/vulnerability/RemediationVelocity.js`, on the new FOURTH tab of `/vulnerability`
+(`?tab=velocity`, "Remediation velocity"; the list is now `posture`, `advisories`, `upgrade`,
+`velocity`). Read-time, no API route, no stored verdict, no cron job. Runs in **638 ms**.
+
+⛔ **THE PREDICTION BELOW IS SUPERSEDED, AND THE REAL FIGURE IS SHARPER.** It said "0 version
+changes across 16 devices in 70 days". Measured on the live fleet 2026-09-28:
+
+- **246 open exposures, 0 remediated, median time-to-remediate NOT REACHED in 74 observed days.**
+- **0 of 16 firewalls have ever changed version** — 3,954 version rows, 16 distinct
+  (device, version) pairs.
+- **3 KEV-listed exposures open at least 69 days.**
+- 794 advisories testable; 0 reconstructed remediation events.
+
+Four design points the proposal did not anticipate, each of which a later session needs:
+
+⛔ **1. `device_cve_assessments.assessed_at` COULD NOT BE USED AS AN EXPOSURE START.** All 246
+live rows carry the SAME timestamp, today's, because the row is rewritten on every match run. It
+records when SecVault last LOOKED, not when the exposure began; a duration measured from it would
+report every exposure as hours old, for ever, resetting every six hours — a confident, plausible,
+wrong number. A test scans for it.
+
+⛔ **2. A REMEDIATED EXPOSURE LEAVES NO ROW**, so the obvious query cannot be written at all.
+Events are RECONSTRUCTED from `device_versions`, which is append-only, using
+`versionComparator.isInRange` UNCHANGED. Without that path the 0% would be unfalsifiable —
+indistinguishable from an engine that never looked — and the 0% is only KNOWN to be real because
+the reconstruction would have found an event had there been one.
+
+⛔ **3. TWO CLOCKS, BOTH REPORTED, NEITHER BLENDED.** 59 of 246 exposures were published by the
+vendor more than 30 days before SecVault held them (mean 27, **max 276**). CVE-2025-31514 reads 69
+days by our clock and **350 by the vendor's**. `daysSinceKnown` is what an operator is accountable for;
+`daysSincePublished` is how long the firewall was actually exposed. A single blended figure would be
+wrong in both directions at once. Both are LOWER BOUNDS — left-censored at collection start.
+
+⛔ **4. KAPLAN–MEIER "SURVIVAL" MEANS STILL VULNERABLE.** S(t)=100% is the worst available
+result wearing the number a dashboard tints green and puts a tick beside. The view NEVER renders
+`survivingPct`; it renders `remediatedPct`, inverted ONCE in the engine (the call
+`securityScore.js` makes about `riskScore`'s polarity), and a 0% is tinted DANGER, never the
+hueless "not measured" treatment — it was measured, and the answer is bad.
+
+*Original proposal text follows.*
 
 Kaplan–Meier with right-censoring is ~30 lines and needs no library.
 
@@ -474,17 +536,24 @@ devices that did remediate — which here is none of them.
 
 ---
 
-## A9 — VPN behavioural profiles *(Tier 3, medium)*
+## ⛔ NOT BUILT — A9 — VPN behavioural profiles *(Tier 3, medium)*
 
-557 distinct users, 5,954 sessions, **35 days** of history, 468 users active in the last 7 days.
-Per-user baselines of hour-of-day, session duration and client.
+**RE-MEASURED 2026-09-28: 7,145 sessions, 608 distinct users, 38 days of history, 11.8 sessions
+per user** (was 5,954 / 557 / 35 days on 2026-09-25). Per-user baselines of hour-of-day, session
+duration and client.
+
+⛔ **AND THE FLEET AVERAGE HIDES THE ONLY NUMBER THAT MATTERS: just 209 of 608 users (34%) have
+≥10 sessions.** That is the hard evidence for the rule below, which was raised on reasoning alone
+— a fleet-level gate would arm the detector for the TWO-THIRDS of users who have no usable
+baseline, on the strength of the busy accounts, and every one of those would be judged against a
+profile built from a handful of logins.
 
 ⛔ **Gate PER USER, not fleet-wide.** At ~10 sessions per user many individuals have no usable
 baseline while the fleet aggregate looks healthy — a fleet-level gate would arm the detector for
 everyone on the strength of the busy accounts.
 
 ⛔ **Stale-account detection needs history this fleet does not have.** Every user has been seen
-within 30 days because there are only 35 days of data; "quiet for 90 days" is unanswerable until
+within 30 days because there are only 38 days of data; "quiet for 90 days" is unanswerable until
 December and must report `insufficient_history`, not zero.
 
 ---

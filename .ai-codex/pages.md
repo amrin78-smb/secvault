@@ -37,7 +37,7 @@ uses that pattern extensively (mostly server-driven `?tab=`, one client-driven e
 
 ## Vulnerability / CVE
 
-[server] /vulnerability — VulnerabilityPage — tabbed shell (`?tab=posture|advisories|upgrade`, default `posture`, list in `VULN_TABS`); renders `CvePostureTab`, `AdvisoriesTab` or `UpgradePlan`; "Assess Now" button (admin-gated, `AssessNowButton`) shown only on `posture` tab.
+[server] /vulnerability — VulnerabilityPage — tabbed shell, FOUR tabs (`?tab=posture|advisories|upgrade|velocity`, default `posture`, list in `VULN_TABS`); renders `CvePostureTab`, `AdvisoriesTab`, `UpgradePlan` or `RemediationVelocity`; "Assess Now" button (admin-gated, `AssessNowButton`) shown only on `posture` tab.
 [server] /vulnerability/cve/[cveId] — CveDetailPage — one advisory's fleet view: CVSS/published/vendor + description + table of affected devices (current version/fixed-in/priority band/is-fixed-recommended) sourced from `device_cve_assessments`.
 [server] /vulnerability/advisories — AdvisoryCurationPage — the applicability CURATION WORKLIST (added 2026-09-08): every advisory with >=1 assessment, sorted KEV-first then LEAST-curated then CVSS, with a per-row "not curated" vs "N conditions" badge, CISA SSVC exploitation badge, and the affected-product list read out of the stored CVE record. Exists because `advisory_conditions` was empty fleet-wide, which parks every advisory at `config_applies=unknown` -> rule 5 -> `scheduled`. Backed by `lib/engines/advisoryCuration.js`; states published facts only, never a recommendation.
 [server] /vulnerability/advisories/[cveId] — AdvisoryDetailPage — advisory record detail: KEV badge+date, CVSS score/vector, description, affected-version-ranges table, fixed-in-versions badges, applicability-condition count + link to conditions page, affected-devices list, external NVD link.
@@ -156,6 +156,47 @@ upgrade decisions. ⛔ Tab key APPENDED, never inserted — it is a URL contract
 `lib/engines/upgradePlan.js`; see lib.md for the branch-jump rule, which is the whole point of the
 feature.
 
+**`/vulnerability?tab=velocity` — Remediation velocity (v2.192.0).** A8, the FOURTH tab. Fully
+server-rendered inside `components/vulnerability/RemediationVelocity.js`, which calls
+`getRemediationVelocity(pool, {})` itself — no API route, no stored verdict, no cron job. Judgement
+in the pure `lib/engines/remediationVelocity.js` (Kaplan–Meier with right-censoring, ~30 lines of
+estimator), plumbing in `remediationVelocityData.js`; see lib.md. Live 2026-09-28: **246 open
+exposures, 0 remediated, median time-to-remediate NOT REACHED in 74 observed days**; 0 of 16
+firewalls have ever changed version (3,954 version rows, 16 distinct (device, version) pairs);
+3 KEV-listed exposures open at least 69 days; 794 advisories testable, 0 reconstructed remediation
+events; 638 ms.
+
+⛔ **`survivingPct` IS NEVER RENDERED, AND THAT IS THE WHOLE RISK OF THIS VIEW.** Kaplan–Meier
+"survival" is the probability the event has NOT happened — here the event is being patched, so
+S(t)=100% means EVERY EXPOSURE IS STILL OPEN: the worst available result wearing the number a
+dashboard tints green and puts a tick beside. The view renders `remediatedPct`, which the engine
+supplies ALREADY INVERTED so no component does the inversion itself (the call `securityScore.js`
+makes about `riskScore`'s polarity, for the same reason). ⛔ A 0% is tinted DANGER, never the
+hueless `--unmeasured` treatment — it was measured, so it is a finding, not a gap.
+
+⛔ **TWO CLOCKS, BOTH ALWAYS SHOWN, NEITHER BLENDED.** `daysSinceKnown` (from when SecVault could
+first have told you — what an operator is accountable for) beside `daysSincePublished` (from vendor
+disclosure — how long the firewall was actually exposed). Live they disagree by months: 59 of 246
+exposures were published more than 30 days before SecVault held them, mean 27, **max 276**;
+CVE-2025-31514 reads 69 days by our clock and 350 by the vendor's. A single blended figure would be
+wrong in both directions at once. ⛔ Every age is a LOWER BOUND — both clocks are left-censored,
+the same contract as `vpn_sessions.duration_is_lower_bound`.
+
+⛔ **A FAILED READ RENDERS A REFUSAL, NOT AN EMPTY FLEET.** Nothing numeric appears while a source
+failed: a shorter exposure list on this page reads as a fleet that patches better than it does. The
+`getRemediationVelocity` throw is caught IN the component rather than left to the page — an
+uncaught error in a server component blanks the whole tab, which is the v2.120.0 shape.
+
+⛔ Tab key APPENDED, never inserted — URL contract, `VULN_TABS` is append-only and its FIRST entry
+is also the fallback for an unrecognised `?tab=`. ⛔ Inherits `/vulnerability`'s `blocked`
+classification in `lib/deviceScopeCoverage.js`: a SCOPED account is refused the whole page, tab
+included.
+
+Smoke markers: `How long a vulnerability SecVault knows about stays open` / `Remediation velocity
+could not be measured` — an OR because BOTH are successful renders. The purpose line sits AFTER the
+failed-read early return, so a refusal can never satisfy the first marker, and neither marker is a
+nav label.
+
 ## app/(dashboard)/applications/page.js  -> `/applications`  (v2.124.0)
 
 `server` — `ApplicationsPage` — declared business applications, each flow re-checked against the
@@ -238,9 +279,10 @@ label, which the shared shell renders into every page.
 
 ## app/(dashboard)/devices/[id]/changes/page.js — "What Followed These Changes" (A7)
 
-⛔ **BUILT, NOT YET RELEASED — `package.json` still reads 2.190.0 at the time of writing.** The
-engine, the plumbing, the view and four test files are in the tree; the version bump and the
-`releaseNotes` entry are not. Do not read a version number into this entry until one exists.
+⛔ **RELEASED IN v2.191.0.** This entry read "BUILT, NOT YET RELEASED — `package.json` still
+reads 2.190.0" for a whole release AFTER the one that carried it; `releaseNotes['2.191.0']` has
+always described it. Corrected 2026-09-28 — a stale "not released" is the same defect as a stale
+"not built", and this file records the rule it broke.
 
 A7, change → traffic outcome. Not a new page and **not a new tab**: a section rendered by
 `components/analysis/ChangeOutcomeBoard.js` on the EXISTING config-change timeline, from

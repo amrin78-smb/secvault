@@ -357,6 +357,32 @@ threw and BLANKED THE WHOLE TAB while the defensive guard sat two screens below,
 Dropping it instead would shorten the fleet list silently, which on this page reads as a firewall
 with nothing to do.
 
+RemediationVelocity (server)  no props — the Remediation velocity tab on `/vulnerability`
+(v2.192.0). The default export fetches `getRemediationVelocity(pool, {})` inside its own try/catch
+(an uncaught throw in a server component blanks the whole tab — the v2.120.0 shape) and renders
+`RemediationVelocityView`, which is SPLIT OUT AND EXPORTED so the rendering is testable without a
+database — the same split segmentation and applicationView use. Also exports `VELOCITY_PURPOSE`.
+⛔ **THE ONE RULE THIS VIEW MUST GET RIGHT: Kaplan-Meier "survival" means STILL VULNERABLE**, so
+S(t) = 100% is the WORST possible result wearing the number a dashboard tints green — and live it
+is flat at 1.0 for all 74 observed days, 0 of 246 exposures remediated. The component therefore
+**NEVER READS `survivingPct`**, pinned by a comment-stripped source scan; it reads `remediatedPct`,
+which the engine supplies ALREADY INVERTED, so the polarity is defined in exactly one place — the
+call `securityScore.js` makes about `riskScore`, and for the same reason: an inversion done twice
+eventually disagrees and the wrong copy looks plausible.
+⛔ **0% REMEDIATED IS TINTED DANGER, NEVER NEUTRAL.** Hueless `--unmeasured` belongs to things
+SecVault COULD NOT measure; this was measured and the answer is bad. `TONE_TINT` has no mapping that
+turns a zero rate into a neutral or positive tint, and ⛔ an unrecognised tone falls to `unknown`,
+never `ok`. A `null` figure renders the em-dash, never a 0, and a median that was not reached prints
+`not reached in N days` rather than 0 days.
+⛔ **THE SECOND CLOCK GETS ITS OWN PANEL** — "Before SecVault could have told you" — rather than a
+column beside the ages: it is a fact about SecVault, not about the firewall, and mixed in it reads
+as operator delay.
+⛔ A failed read renders an `EmptyState` NAMING the failed sources and nothing numeric; a shorter
+list on this page reads as a fleet that patches better than it does. The `caveats` and the coverage
+badges (`0 have changed version` carries the `danger` variant) are part of the answer, not
+decoration — without the third caveat the 0% is unfalsifiable.
+12 cases in `tests/remediationVelocityView.test.js`.
+
 ## vpn/
 
 VpnThreatFilters (c)  countries, hours — the filter bar on `/vpn?vtab=detections` (v2.185.0):
@@ -411,6 +437,12 @@ AppearancePanel  no props — Settings -> General. Per-browser presentation pref
 
 AdvisoriesTab  searchParams — advisory browser tab with filters + sync status
 CvePostureTab  searchParams — fleet CVE posture stat grid + filterable table
+
+`/vulnerability` now has FOUR tabs (`VULN_TABS` in `app/(dashboard)/vulnerability/page.js`, order
+load-bearing — `[0]` is the fallback for an unrecognised `?tab=`): `posture` (CvePostureTab,
+default) · `advisories` (AdvisoriesTab) · `upgrade` (UpgradePlan) · `velocity`
+(RemediationVelocity). Applicability is a separate ROUTE (`/vulnerability/advisories`), not a
+`?tab=` view.
 
 ## topology/
 

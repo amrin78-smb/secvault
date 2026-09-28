@@ -127,6 +127,10 @@ const STATIC_ROUTES = [
   // gate. The marker is the recommendation heading, which only this tab
   // produces; a tab LABEL would be satisfied by the tab bar around a dead body.
   { path: '/vulnerability?tab=upgrade', markers: ['Recommended — patch within this branch', 'Firewalls with an upgrade to make'] },
+  // Both render paths are successful renders, so both are markers (an OR).
+  // The purpose line sits AFTER the failed-read early return, so it alone
+  // would report a merely-unavailable source as a broken page.
+  { path: '/vulnerability?tab=velocity', markers: ['How long a vulnerability SecVault knows about stays open', 'Remediation velocity could not be measured'] },
   { path: '/vpn', markers: ['Fleet-wide VPN/remote-access exposure'] },
   // ⛔ THE DETECTIONS TAB IS SWEPT SEPARATELY, because `/vpn` alone only ever
   // loads the DEFAULT tab (`status`) — so the other six were never rendered by
