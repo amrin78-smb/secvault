@@ -82,6 +82,34 @@ Found by the 2026-09-21 sweep, triaged as not worth a release of their own. All 
 ### P4b — open after the analytics build (A1-A5 + A7), raised 2026-09-27
 
 Same triage as P4: real, each one a sitting, none worth a release of its own.
+
+⛔ **EVERY DEPLOY LOSES SYSLOG, AND `dropped` REPORTS 0 WHILE IT HAPPENS** (measured
+2026-09-28, deferred deliberately — raised with the user, answer was "nothing for now").
+`Update-SecVault.ps1` stops `SecVault-Collector` unconditionally, so the gap is a whole
+`npm ci` + `next build` wide, not a service restart. Measured against a steady ~83,000
+events/minute across three deploys in one 45-minute window:
+
+| deploy | minutes absent | shortfall |
+|---|---|---|
+| v2.193.0 | 15:57-15:59 | ~200,600 |
+| v2.193.1 | 16:15-16:18 | ~278,400 |
+| v2.193.2 | 16:25-16:28 | ~195,365 |
+
+~674,000 events for three deploys; five went out that day, so **over a million events**
+lost from a 30-day forensic window.
+
+⛔ **`syslog_ingest_stats.dropped` IS 0 FOR EVERY ONE OF THOSE MINUTES**, and that is not
+a bug in the counter — while the service is stopped the datagrams hit a closed UDP socket
+and the OS discards them, so nothing is ever received to count. The rows are simply
+ABSENT. A forensic search over that window returns clean empty minutes rather than a gap.
+This is the file's own failed-read-as-a-fact rule aimed at the deploy process.
+
+**The fix when it is wanted**: the collector only needs stopping when `npm ci` will
+actually touch `node_modules` (Windows file locks are the reason) or when `services/**`
+changed. Neither was true for v2.193.1 or v2.193.2 — `package-lock.json` was unchanged and
+the collector's code was identical — and both conditions are detectable before anything is
+stopped. Worth pairing with a written marker for the window it WAS down, so the gap is
+visible rather than silent.
 ⛔ **None of these is done — do not read the ✅ rows in the analytics table below as
 covering them.** Every one was verified against the source on the date raised.
 
