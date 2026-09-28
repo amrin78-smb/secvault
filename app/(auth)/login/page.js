@@ -85,6 +85,13 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
+  // ⛔ THREE STATES, NOT TWO. `null` = we have not asked yet; `true` = the
+  // precheck said this account uses a code; `false` = it said it does not.
+  // Only an explicit `false` hides the field — "not asked" and "could not tell"
+  // both SHOW it, which is the behaviour this product shipped with and the
+  // reason a precheck failure can never stop anyone signing in.
+  const [codeNeeded, setCodeNeeded] = useState(null);
+  const totpRef = useRef(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // ⛔ READ FROM window.location IN AN EFFECT, NOT useSearchParams(). This page
@@ -101,10 +108,54 @@ export default function LoginPage() {
     returnTo.current = safeReturnPath(q.get('callbackUrl'));
   }, []);
 
+  /**
+   * Ask whether this account uses a code, so the field can stay hidden for the
+   * majority who do not have one.
+   *
+   * ⛔ IT CAN ONLY EVER HIDE THE FIELD. Any failure — offline, rate limited,
+   * malformed, 500 — returns `null` and the caller shows it. There is
+   * deliberately no error path that blocks the sign-in.
+   */
+  async function askWhetherCodeNeeded() {
+    try {
+      const res = await fetch('/api/auth/mfa/precheck', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || data.ok !== true) return null;
+      return data.mfaRequired === true;
+    } catch {
+      return null;
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setSubmitting(true);
+
+    // ⛔ ASKED ONCE, AND ONLY WHILE THE FIELD IS HIDDEN. Once the field is on
+    // screen the answer cannot change anything, and re-asking on every attempt
+    // would spend a rate-limit budget on submissions that already carry a code.
+    if (codeNeeded === null) {
+      const needed = await askWhetherCodeNeeded();
+      if (needed === true) {
+        // Reveal and stop. The user has not typed a code yet, so submitting now
+        // would fail and show them a generic error for a field they were never
+        // offered.
+        setCodeNeeded(true);
+        setSubmitting(false);
+        // Focus after paint, so the field exists to receive it.
+        setTimeout(() => { if (totpRef.current) totpRef.current.focus(); }, 0);
+        return;
+      }
+      // `false` (no code) or `null` (could not tell) both continue to sign-in.
+      // On `null` the field is shown as well, so a second attempt has one.
+      setCodeNeeded(needed);
+    }
 
     try {
       const result = await signIn('local', {
@@ -209,25 +260,37 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* ⛔ ALWAYS VISIBLE, never revealed conditionally. Showing this field
-                only for accounts that have MFA would turn the login form into an
-                oracle: type a username, watch whether the box appears, and you
-                know which accounts are protected and which are worth attacking.
-                It is optional for everyone and ignored for accounts without MFA.
-                ⛔ NetVault's login does the opposite — it POSTs the credentials
-                to /api/auth/mfa/precheck and shows the field only when the
-                answer is yes. Do not port that here: it is the oracle this
-                comment exists to prevent, and CLAUDE.md's single-form rule
-                ("NextAuth v4's authorize() is ONE call") is the other half of
-                the same decision. */}
-            <div className="login-field">
+            {/* ⛔ HIDDEN ONLY ON AN EXPLICIT `false`. Three states: not asked
+                yet, "this account uses a code", and "it does not". Only the
+                last hides the field, so every failure of the precheck — rate
+                limited, offline, 500, LDAP account, database down — falls back
+                to showing it, which is exactly how this product behaved before
+                the precheck existed. The endpoint can REMOVE a field; it can
+                never demand one, and it can never stop a sign-in.
+
+                ⛔ THIS COMMENT PREVIOUSLY FORBADE THIS, AND ITS REASON WAS
+                WRONG. It said a conditionally-revealed field is an oracle —
+                "type a username, watch whether the box appears". That is true
+                of a precheck that answers on the USERNAME alone, and it is not
+                what NetVault does or what we do: the password is verified
+                first, so without valid credentials every caller gets the same
+                `{ ok: false }`. What IS given up is narrower and is documented
+                at the route: a correct password now confirms itself before the
+                code is supplied. See app/api/auth/mfa/precheck/route.js. */}
+            <div className="login-field" hidden={codeNeeded === false}>
               <label htmlFor="totp">
                 Authenticator code
-                <span className="login-hint"> — if enabled</span>
+                {/* Once the precheck has answered `true` the code is not
+                    optional, and saying "if enabled" would invite the user to
+                    leave it blank and collect a generic failure. */}
+                {codeNeeded === true
+                  ? null
+                  : <span className="login-hint"> — if enabled</span>}
               </label>
               <input
                 id="totp"
                 name="totp"
+                ref={totpRef}
                 type="text"
                 /* one-time-code lets a phone offer the SMS/authenticator code.
                    ⛔ Not type="number": it strips a leading zero, and a TOTP

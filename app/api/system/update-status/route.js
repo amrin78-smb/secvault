@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.193.0': [
+    "The authenticator code box on the sign-in page is now hidden for accounts that do not use one. Enter your username and password as usual; if the account has MFA the code field appears and the cursor moves to it. Accounts without MFA never see a field they cannot fill in.",
+    "⛔ This does not reveal which accounts are protected. The check verifies your password before it answers anything, so without valid credentials every attempt gets the same response and the field is shown regardless — there is no way to probe for MFA-enabled accounts by typing usernames.",
+    "⛔ Nothing about it can stop you signing in. If the check is unavailable for any reason — rate limited, database busy, an LDAP account, a network problem — the code field simply appears, exactly as it always did. It can only ever remove a field, never demand one.",
+    "SecVault now rate-limits repeated password attempts against a single account, which it did not do at all before. Being limited only means the code field is shown; sign-in itself is never blocked.",
+    "One accepted trade-off, stated plainly: someone who already has a correct password now learns it is correct before supplying the code, where previously one generic message left both in doubt. The sign-in failure message itself is unchanged and still never says which factor was wrong.",
+  ],
   '2.192.0': [
     "New Remediation velocity tab under Vulnerabilities: how long a vulnerability SecVault knows about actually stays open on a firewall, and how often one gets closed at all. Its first answer on this fleet is blunt — not one of 246 open exposures has been remediated in 74 days of observation, so there is no median time-to-patch yet. Three of them are on CISA's known-exploited list and have been open at least 69 days.",
     "⛔ The 0% is a measurement, not a gap. A remediated finding leaves no record behind it, so SecVault reconstructs patching from the version history it has collected — and confirms no firewall has changed version at all. Without that check, \"nothing was patched\" and \"nothing was looked for\" would be the same number.",

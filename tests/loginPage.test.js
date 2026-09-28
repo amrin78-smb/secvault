@@ -73,27 +73,58 @@ describe('⛔ the sign-in page is PRE-AUTH — what it must never disclose', () 
 });
 
 describe('⛔ the sign-in form is not an ORACLE', () => {
-  it('renders the authenticator field unconditionally', () => {
+  // ⛔ THIS BLOCK CHANGED IN v2.193.0, AND WHAT IT GUARDS CHANGED WITH IT.
+  //
+  // It used to require the authenticator field to render UNCONDITIONALLY, on
+  // the grounds that revealing it per-account discloses which accounts are
+  // protected. The field is now revealed only when the account needs it — but
+  // the disclosure that worried this test never happens, because
+  // /api/auth/mfa/precheck VERIFIES THE PASSWORD BEFORE ANSWERING. Without
+  // valid credentials every caller gets the same `{ ok: false }` and the field
+  // is shown regardless.
+  //
+  // So the oracle property is still pinned; it has simply moved. What must hold
+  // now is that the FORM cannot reveal anything on its own — it asks a server
+  // that is itself password-gated (tests/mfaPrecheck.test.js pins that end) and
+  // treats every unclear answer as "show it".
+
+  it('still renders the authenticator field, and hides it only on an explicit false', () => {
     assert.match(code, /id="totp"/, 'the authenticator input is gone');
-    // The input must not sit behind a conditional. Revealing it per-account
-    // discloses which accounts are protected and therefore which are worth
-    // attacking.
-    const totpAt = code.indexOf('id="totp"');
-    const fieldStart = code.lastIndexOf('login-field', totpAt);
-    const before = code.slice(fieldStart, totpAt);
-    assert.doesNotMatch(before, /&&|\?\s|mfaStage|mfaRequired|showTotp/,
-      'the authenticator field became conditional — that turns the form into an oracle');
+    // ⛔ `hidden={!codeNeeded}` would hide the field whenever the precheck
+    // failed — an outage, a rate limit or an LDAP account would silently
+    // remove the one input that account needs.
+    assert.match(code, /hidden=\{codeNeeded === false\}/,
+      'the field must compare against false explicitly, never coerce');
+    assert.doesNotMatch(code, /hidden=\{!codeNeeded\}/);
   });
 
-  it('does not precheck whether an account has MFA', () => {
-    // NetVault POSTs the credentials to /api/auth/mfa/precheck to decide whether
-    // to show the field. That is the oracle above, plus a second credential
-    // round-trip. CLAUDE.md's single-form rule is the other half of the same
-    // decision: NextAuth v4's authorize() is ONE call.
-    assert.doesNotMatch(code, /precheck|mfaRequired|mfaStage/i);
+  it('⛔ the form never decides on the username alone', () => {
+    // The precheck is sent BOTH credentials. A request carrying only the
+    // username would be answerable without a password, which is the oracle
+    // this block has always existed to prevent.
+    const at = code.indexOf('/api/auth/mfa/precheck');
+    assert.ok(at > -1, 'the precheck call is gone — if that is deliberate, rewrite this test');
+    const call = code.slice(at, at + 400);
+    assert.match(call, /JSON\.stringify\(\{ username, password \}\)/,
+      'the precheck must be sent the password, or it cannot gate its answer on one');
+  });
+
+  it('⛔ every unclear answer shows the field', () => {
+    const fn = code.slice(code.indexOf('async function askWhetherCodeNeeded'));
+    // Split on the closing brace at indent 2 rather than searching for a
+    // newline escape sequence: there is then nothing for a code generator to
+    // mangle. Writing that escape through one turned it into a REAL newline
+    // and broke this file, twice in one session.
+    const body = fn.split(/^  \}/m)[0];
+    assert.match(body, /if \(!res\.ok\) return null;/);
+    assert.match(body, /data\.ok !== true/);
+    assert.match(body, /catch \{\s*return null;/);
   });
 
   it('gives ONE failure message, which never names the code as the cause', () => {
+    // ⛔ UNCHANGED, and it still matters. The precheck confirms a password to
+    // whoever already HAS it; the failure message must still confirm nothing
+    // to whoever does not.
     const messages = [...code.matchAll(/setError\(\s*'([^']+)'/g)].map((m) => m[1]);
     assert.ok(messages.length > 0, 'no failure message found at all');
     for (const m of messages) {

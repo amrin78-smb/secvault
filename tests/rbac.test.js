@@ -263,6 +263,15 @@ describe('every mutating API route is guarded', () => {
     // least able to secure themselves. The ADMIN path over another account
     // (app/api/users/[id]/mfa) is separately gated on MANAGE_USERS.
     ['api','mfa','route.js'].join(path.sep),
+    // ⛔ THE MFA PRECHECK IS PART OF SIGNING IN, so it cannot require a
+    // session — there is none yet. It is exempt for the same reason
+    // [...nextauth] is: it AUTHENTICATES rather than authorises. It
+    // persists nothing, issues no session, token or cookie, and decides
+    // exactly one thing — whether the sign-in form shows the code field.
+    // Its own guards (password verified before answering, one refusal
+    // shape, username-keyed rate limit) are pinned by
+    // tests/mfaPrecheck.test.js, which is where a reviewer should look.
+    ['api','auth','mfa','precheck','route.js'].join(path.sep),
   ];
 
   it('scans a meaningful number of routes', () => {

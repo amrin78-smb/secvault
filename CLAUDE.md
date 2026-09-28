@@ -478,9 +478,11 @@ emits six plausible digits no authenticator agrees with.
 authenticator implements. TOTP's security rests on the secret, not on collision resistance;
 changing it silently breaks every enrolled device.
 
-⛔ **Single-form login** (username + password + code together). NextAuth v4's `authorize()` is
-ONE call, so a two-step flow needs a pre-auth token table and custom session wiring — more
-machinery on the login path of a security product, for no security gain.
+⛔ **Single-form login** (username + password + code together) — STILL TRUE, and unchanged by
+v2.193.0. NextAuth v4's `authorize()` is ONE call, so a two-step flow needs a pre-auth token table
+and custom session wiring — more machinery on the login path of a security product, for no security
+gain. The code field is on the same form and the sign-in is still one submission; what changed is
+only whether that field is DISPLAYED.
 
 ⛔ **A code is SINGLE USE.** `user_mfa.last_counter` records the accepted step and is compared
 with `<=`, not `!==` — rejecting only an exact repeat would still allow replaying the previous
@@ -498,9 +500,43 @@ the user proves a code; otherwise closing the tab mid-enrolment locks them out.
 ⛔ **Fails closed at login**: if the MFA lookup throws (DB down, `CREDENTIAL_KEY` missing) the
 login is REFUSED. An MFA check that degrades to 'skip it' is not a second factor.
 
-⛔ **The login form is not an oracle**: the code field is always visible (revealing it per-account
-would disclose which accounts are protected), and every failure returns one message. The specific
-reason goes to the server log.
+⛔ **The login form is not an oracle**, and every failure returns one message with the specific
+reason going only to the server log.
+
+⛔ **The code field is HIDDEN for accounts that do not need one (v2.193.0), and the old reason for
+keeping it always-visible was wrong.** This file and the login page both said revealing it
+per-account "would disclose which accounts are protected". That is true of a check answering on the
+USERNAME alone; it is not what `POST /api/auth/mfa/precheck` does. **The password is verified
+BEFORE any answer is given** (`lib/localPassword.js`, shared with `authorize()` so the two cannot
+disagree), so without valid credentials every caller gets the same `{ok:false}` and the field is
+shown regardless.
+
+⛔ **What IS given up is narrower, real, and was accepted deliberately**: a correct password for an
+MFA-protected account now returns `mfaRequired:true`, which CONFIRMS THE PASSWORD before the second
+factor is supplied. Previously one generic failure left an attacker holding a stolen password
+unable to tell whether the password or the code was wrong. This turns a credential-stuffing miss
+into a confirmed hit worth pursuing by other means. The disclosure is inherent — any answer useful
+enough to drive the form confirms the password — so do not attempt to "fix" it by answering before
+the password check, which reinstates the enumeration oracle instead.
+
+⛔ **THE ENDPOINT CAN ONLY REMOVE A FIELD, NEVER DEMAND ONE.** Rate limited, database down,
+malformed body, unknown user, LDAP account, MFA lookup threw: every path returns `{ok:false}` and
+the form shows the field exactly as this product behaved before. No failure of it can stop anyone
+signing in, and that property is what makes it safe to rate-limit by username. The form hides the
+field only on an EXPLICIT `false` — a truthiness test there would hide it on every failure.
+
+⛔ **`lib/rateLimit.js` KEYS ON THE USERNAME, NOT THE CLIENT IP**, deliberately diverging from
+NetVault's port. `server.js` serves TLS directly with no reverse proxy, so `x-forwarded-for` is
+usually absent and NetVault's shared `'unknown'` bucket would throttle the login for the whole
+organisation; where the header IS present it is trusted on shape alone and can be spoofed for a
+fresh bucket per request. A username key is confined to the account being guessed — safe ONLY
+because being limited shows the field rather than blocking anything. **A future caller that uses
+this limiter to refuse an action must revisit that choice in the same commit**, or the username key
+becomes an account-lockout weapon. It fails open, including on a nonsense configuration.
+
+⛔ SecVault does not implement NetVault's `enrolmentRequired`: `authorize()` here does not refuse a
+login for an account whose `user_mfa.required` is set but which never enrolled, so there is no such
+state to report. Do not add the response field without adding the enforcement it describes.
 
 ⛔ `user_mfa` holds the encrypted secret and the recovery hashes, so it is **excluded from the
 readonly grants** — same rule as `device_credentials`. `POST/PUT/DELETE /api/mfa` is the THIRD

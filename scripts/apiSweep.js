@@ -179,6 +179,26 @@ const API_ROUTES = [
     anonPath: '/api/auth/csrf',
     anonExpect: [200],
   },
+  // ⛔ PUBLIC BY NECESSITY — it runs BEFORE a session exists, as part of signing
+  // in. It is not an authorisation surface: it issues nothing and decides only
+  // whether the login form reveals the authenticator field.
+  //
+  // ⛔ NOT SWEPT WITH A REAL POST. This harness runs against the PRODUCTION
+  // fleet and refuses verbs outside its allow-list; posting credentials here
+  // would put a password on the wire from a test, and an empty body would spend
+  // a rate-limit budget against whatever username it invented. The anon probe
+  // therefore asserts the route EXISTS and does not 401 — the security
+  // properties are pinned by tests/mfaPrecheck.test.js, which needs no server.
+  {
+    path: '/api/auth/mfa/precheck',
+    methods: ['POST'],
+    capability: null,
+    public: true,
+    anonPath: '/api/auth/mfa/precheck',
+    // A GET reaches a POST-only route handler: Next answers 405, never 401.
+    // That is enough to prove it is routed and unguarded.
+    anonExpect: [405],
+  },
   { path: '/api/compliance/fleet', methods: ['GET'], capability: null },
   { path: '/api/compliance/report/generate', methods: ['POST'], capability: 'operate' },
   { path: '/api/compliance/report/pdf', methods: ['GET'], capability: null },

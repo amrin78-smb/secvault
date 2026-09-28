@@ -26,6 +26,7 @@ only call a pure engine module (`lib/engines/*`) even if that engine reads adapt
 ## /api/auth
 
 GET/POST /api/auth/[...nextauth] [public] [db] — NextAuth handler: local (bcrypt vs `users` table) + LDAP credential providers; JWT session re-validates role against `users` on every request for local accounts (fail-closed on DB error or deleted user).
+POST /api/auth/mfa/precheck [public] [db] — login step 1 (v2.193.0). `{username, password}` -> `{ok:false}` or `{ok:true, mfaRequired}`; decides ONLY whether the sign-in form reveals the authenticator field. Issues no session, token or cookie, and `authorize()` re-checks password AND code independently. ⛔ The password is VERIFIED BEFORE ANY ANSWER, so it is not a username-enumeration oracle: without valid credentials every caller gets the same `{ok:false}`. ⛔ What it does disclose is that a correct password IS correct, before the second factor — accepted deliberately, documented at the route. ⛔ Every failure path (rate limited, DB down, malformed, unknown user, LDAP account, MFA lookup threw) returns `{ok:false}` and the form SHOWS the field, so it can only remove a field, never demand one or block a sign-in. Rate limited per USERNAME (20 / 5 min, `lib/rateLimit.js`) — not per IP, because `server.js` serves directly with no proxy and every caller would share one bucket. Shares `lib/localPassword.js` with `authorize()` so the two cannot disagree.
 
 ## /api/devices
 

@@ -1,17 +1,12 @@
 import NextAuth from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import * as mfa from '../../../../lib/mfa';
-import bcrypt from 'bcryptjs';
+import { verifyLocalPassword } from '../../../../lib/localPassword';
 import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
 import { sessionOptions } from '../../../../lib/sessionPolicy';
 import * as ldapRoles from '../../../../lib/ldapRoles';
 
-// A real bcrypt hash (of a random string) used so a login attempt for an
-// UNKNOWN username still pays the bcrypt cost and cannot be distinguished by
-// timing from a known one. It can never validate against any input — verified.
-// See the constant-time note in the local provider's authorize() below.
-const DUMMY_BCRYPT_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 // ⛔ SEARCH-THEN-BIND, BECAUSE A USER'S DN CANNOT BE BUILT FROM THEIR USERNAME.
 //
@@ -167,28 +162,23 @@ export const authOptions = {
         // `settings` (admin_username/admin_password_hash); lib/migrate.js's
         // seedUsers() migrates any such legacy identity into `users` on
         // first run after upgrade, so existing installs keep working.
-        const result = await pool.query(
-          'SELECT id, username, password_hash, role FROM users WHERE username = $1',
-          [credentials.username]
-        );
-        const storedUser = result.rows[0];
-
-        // ⛔ CONSTANT-TIME-ISH: always run bcrypt, even for an unknown user.
-        //
-        // Returning early on a missing user skipped the bcrypt compare entirely,
-        // and bcrypt is the expensive part. Measured live against this server:
-        // a REAL username with a wrong password took 0.119-0.176s, an unknown
-        // username took 0.035-0.039s — a consistent ~4x gap with no overlap
-        // across 8 attempts. Identical status and body, so timing alone was a
-        // reliable oracle for "does this account exist", which is exactly the
-        // reconnaissance step before credential spraying (and /api/auth/providers
-        // already advertises that LDAP is wired up).
-        //
-        // Comparing against a fixed dummy hash makes both paths do the same
-        // work. The dummy is a real bcrypt hash of a random string, so it can
-        // never validate.
-        const hashToCheck = storedUser ? storedUser.password_hash : DUMMY_BCRYPT_HASH;
-        const valid = await bcrypt.compare(credentials.password, hashToCheck);
+        // ⛔ ONE DEFINITION, SHARED WITH THE MFA PRECHECK. lib/localPassword.js
+        // owns the lookup, the constant-time-ish dummy compare and the measured
+        // reason for it. Two copies of this predicate would let
+        // `/api/auth/mfa/precheck` and this function disagree about whether a
+        // password is valid — the precheck would then tell the form to show or
+        // hide the code field for a credential this call rejects.
+        let storedUser = null;
+        let valid = false;
+        try {
+          ({ user: storedUser, valid } =
+            await verifyLocalPassword(pool, credentials.username, credentials.password));
+        } catch (err) {
+          // ⛔ A FAILED READ IS NOT A WRONG PASSWORD, and it is not a pass
+          // either. Refuse, and say why in the log.
+          console.error('[auth] password verification failed, refusing login:', err.message);
+          return null;
+        }
         if (!storedUser || !valid) {
           return null;
         }
