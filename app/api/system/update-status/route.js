@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.193.2': [
+    "The authenticator box really is hidden now. The previous fix set the HTML `hidden` attribute, which the page's own stylesheet silently overrode — the attribute was in the page and the box stayed on screen.",
+    "The field is no longer rendered at all until it is needed, which no stylesheet can undo. It still appears whenever the account uses MFA, the check could not be completed, or a sign-in fails.",
+    "`hidden` now also works everywhere else in the console, so the same trap cannot catch a future screen.",
+  ],
   '2.193.1': [
     "Fixes the previous release: the authenticator code box was still showing on the sign-in page for everyone. It now starts hidden and appears only when the account actually needs it.",
     "The check that decides this only answers after you submit, and a user without MFA is signed in by that same submit — so starting the box visible meant it was never hidden in practice. It now starts hidden.",

@@ -965,6 +965,21 @@ tbody tr:hover td { background: var(--bg-primary); }
 /* ⛔ The card's own form controls, because .input/.form-field are themed for
    the app's flipping surfaces and would render white-on-white here in light
    theme. */
+/* the HTML `hidden` attribute, made to actually work.
+
+   The UA stylesheet implements `hidden` as `[hidden] { display: none }`, and
+   ANY author rule that sets `display` on the same element beats it — author
+   styles outrank the UA sheet regardless of specificity. `.login-field` below
+   sets `display: flex`, so the authenticator field rendered with `hidden=""`
+   in the served HTML and was fully visible on screen. Shipped in v2.193.1 and
+   found from a screenshot; the attribute was present and inert, which is why a
+   test asserting the attribute passed over it.
+
+   The login field now conditionally RENDERS instead, which is the stronger fix.
+   This rule exists so the next use of `hidden` anywhere in the app is not
+   silently defeated the same way. */
+[hidden] { display: none !important; }
+
 .login-field { display: flex; flex-direction: column; gap: 7px; }
 .login-field label {
   font-size: var(--text-sm);

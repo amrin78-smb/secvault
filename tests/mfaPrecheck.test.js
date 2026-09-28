@@ -234,6 +234,30 @@ describe('⛔ the precheck answers only AFTER the password is verified', () => {
 describe('⛔ the field is hidden by default and every uncertain path reveals it', () => {
   const src = stripComments(fs.readFileSync(LOGIN, 'utf8'));
 
+  test('⛔ the field is NOT RENDERED when not needed, not merely marked hidden', () => {
+    // ⛔ THE `hidden` ATTRIBUTE DID NOTHING HERE, AND A TEST ASSERTING THE
+    // ATTRIBUTE PASSED OVER IT. The UA stylesheet implements `hidden` as
+    // `[hidden] { display: none }`, and `.login-field` sets `display: flex` —
+    // author styles beat the UA sheet, so the field shipped with `hidden=""`
+    // in the served HTML and fully visible on screen. I verified the attribute
+    // was present and called that done; the screenshot was the real test.
+    //
+    // Conditional RENDER cannot be defeated by a stylesheet, so that is what
+    // is pinned. The element is absent from the DOM entirely.
+    assert.match(src, /\{showCode && \(/,
+      'the field must be conditionally rendered, not styled away');
+    assert.doesNotMatch(src, /className="login-field" hidden=/,
+      'the hidden attribute is inert against .login-field display:flex');
+  });
+
+  test('⛔ and globals.css makes `hidden` work for everything else', () => {
+    // Defence in depth for the NEXT use of the attribute, which will not have
+    // this file's history attached to it.
+    const css = fs.readFileSync(path.join(ROOT, 'app', 'globals.css'), 'utf8');
+    assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important/,
+      'without this rule any author display: rule silently defeats hidden');
+  });
+
   test('⛔ it starts HIDDEN — the first version had this backwards', () => {
     // The original shipped `hidden={codeNeeded === false}` with an initial
     // `null`, so the field showed until an answer said otherwise. But the
@@ -243,7 +267,6 @@ describe('⛔ the field is hidden by default and every uncertain path reveals it
     // because they pinned the mechanism and never the default.
     assert.match(src, /const \[showCode, setShowCode\] = useState\(false\)/,
       'the field must start hidden, or the feature does nothing');
-    assert.match(src, /hidden=\{!showCode\}/);
     assert.doesNotMatch(src, /hidden=\{codeNeeded/, 'the inverted default is back');
   });
 

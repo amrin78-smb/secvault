@@ -96,9 +96,11 @@ describe('⛔ the sign-in form is not an ORACLE', () => {
     // signed in BY that submit, the box showed on every page load and was never
     // hidden in practice — the feature shipped doing nothing.
     assert.match(code, /useState\(false\)/, 'showCode must start hidden');
-    assert.match(code, /hidden=\{!showCode\}/);
-    assert.doesNotMatch(code, /hidden=\{codeNeeded === false\}/,
-      'the old inverted default is back');
+    // ⛔ CONDITIONALLY RENDERED, not merely marked `hidden`: `.login-field`
+    // sets display:flex, which beats the UA `[hidden]` rule, so the attribute
+    // was inert and the box stayed on screen.
+    assert.match(code, /\{showCode && \(/);
+    assert.doesNotMatch(code, /className="login-field" hidden=/);
   });
 
   it('⛔ THREE independent paths reveal it, so it can never be missing when needed', () => {

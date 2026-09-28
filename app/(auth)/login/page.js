@@ -313,7 +313,8 @@ export default function LoginPage() {
                 `{ ok: false }`. What IS given up is narrower and is documented
                 at the route: a correct password now confirms itself before the
                 code is supplied. See app/api/auth/mfa/precheck/route.js. */}
-            <div className="login-field" hidden={!showCode}>
+            {showCode && (
+            <div className="login-field">
               <label htmlFor="totp">
                 Authenticator code
                 {/* Once the precheck has answered `true` the code is not
@@ -341,6 +342,7 @@ export default function LoginPage() {
                 style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.14em' }}
               />
             </div>
+            )}
 
             {/* ⛔ A TIMEOUT IS NOT A FAILURE, and it is tinted as information
                 rather than danger. Someone returning to a signed-out console

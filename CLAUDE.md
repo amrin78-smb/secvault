@@ -535,6 +535,16 @@ precheck is unavailable, which is the one thing this must never do.
 ⛔ Starting hidden is NOT an oracle: the initial state is identical for every visitor because
 nothing has been asked yet, and the reveal only follows a password-verified answer.
 
+⛔ **THE FIELD IS CONDITIONALLY RENDERED, NEVER JUST `hidden` (v2.193.2).** v2.193.1 marked it with
+the HTML `hidden` attribute, which the UA sheet implements as `[hidden] { display: none }` — and
+`.login-field` sets `display: flex`, so the AUTHOR rule beat it. The box shipped with `hidden=""`
+in the served HTML and fully visible on screen. ⛔ The live check I ran asserted the ATTRIBUTE was
+present, not that the box was gone, so it passed: testing the mechanism instead of the outcome,
+which is the same defect as the default it was verifying. `app/globals.css` now carries
+`[hidden] { display: none !important; }` so the next use of the attribute is not defeated the same
+way, but the login field does not rely on it — an element that is not rendered cannot be un-hidden
+by a stylesheet.
+
 ⛔ **`lib/rateLimit.js` KEYS ON THE USERNAME, NOT THE CLIENT IP**, deliberately diverging from
 NetVault's port. `server.js` serves TLS directly with no reverse proxy, so `x-forwarded-for` is
 usually absent and NetVault's shared `'unknown'` bucket would throttle the login for the whole
