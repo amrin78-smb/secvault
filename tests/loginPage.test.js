@@ -88,14 +88,42 @@ describe('⛔ the sign-in form is not an ORACLE', () => {
   // that is itself password-gated (tests/mfaPrecheck.test.js pins that end) and
   // treats every unclear answer as "show it".
 
-  it('still renders the authenticator field, and hides it only on an explicit false', () => {
+  it('still renders the authenticator field, hidden until something reveals it', () => {
     assert.match(code, /id="totp"/, 'the authenticator input is gone');
-    // ⛔ `hidden={!codeNeeded}` would hide the field whenever the precheck
-    // failed — an outage, a rate limit or an LDAP account would silently
-    // remove the one input that account needs.
-    assert.match(code, /hidden=\{codeNeeded === false\}/,
-      'the field must compare against false explicitly, never coerce');
-    assert.doesNotMatch(code, /hidden=\{!codeNeeded\}/);
+    // ⛔ HIDDEN BY DEFAULT IS THE WHOLE POINT, and the first implementation got
+    // it backwards: it started VISIBLE and hid the field on an explicit "no".
+    // Since the answer only arrives after a submit, and a user without MFA is
+    // signed in BY that submit, the box showed on every page load and was never
+    // hidden in practice — the feature shipped doing nothing.
+    assert.match(code, /useState\(false\)/, 'showCode must start hidden');
+    assert.match(code, /hidden=\{!showCode\}/);
+    assert.doesNotMatch(code, /hidden=\{codeNeeded === false\}/,
+      'the old inverted default is back');
+  });
+
+  it('⛔ THREE independent paths reveal it, so it can never be missing when needed', () => {
+    // precheck says yes; precheck could not tell; a sign-in failed.
+    assert.match(code, /revealCode\(\);/, 'the affirmative answer must reveal it');
+    const nullBranch = code.slice(code.indexOf('if (needed === null)'));
+    assert.match(nullBranch.slice(0, 600), /setShowCode\(true\)/,
+      'an unclear answer must reveal it');
+    const failBranch = code.slice(code.indexOf('Sign-in failed.'));
+    assert.match(failBranch.slice(0, 600), /setShowCode\(true\)/,
+      'a failed sign-in must reveal it, whatever the precheck claimed');
+  });
+
+  it('⛔ an unclear answer still SUBMITS rather than blocking the sign-in', () => {
+    const at = code.indexOf('if (needed === null)');
+    assert.ok(at > -1);
+    // Bounded to the block's OWN closing brace, located with indexOf so there
+    // is no newline escape in the expression. A fixed-width window ran past
+    // the block into the try below and matched THAT code's return.
+    const end = code.indexOf('      }', at);
+    const block = code.slice(at, end > at ? end : at + 400);
+    assert.ok(block.length > 0 && block.length < 700, 'the block bound looks wrong');
+    assert.doesNotMatch(block, /return;/,
+      'refusing to submit here would block every sign-in while the precheck is down');
+    assert.match(block, /setShowCode\(true\)/);
   });
 
   it('⛔ the form never decides on the username alone', () => {

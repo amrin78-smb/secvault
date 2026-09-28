@@ -231,43 +231,63 @@ describe('⛔ the precheck answers only AFTER the password is verified', () => {
 
 // ── the login form ─────────────────────────────────────────────────────────
 
-describe('⛔ every failure of the precheck SHOWS the field', () => {
+describe('⛔ the field is hidden by default and every uncertain path reveals it', () => {
   const src = stripComments(fs.readFileSync(LOGIN, 'utf8'));
 
-  test('the field is hidden only on an explicit false', () => {
-    // ⛔ THREE STATES. `null` (not asked / could not tell) and `true` both
-    // show it. A truthiness test here — `hidden={!codeNeeded}` — would hide the
-    // field whenever the precheck failed, which is the dangerous inversion.
-    assert.match(src, /hidden=\{codeNeeded === false\}/,
-      'must compare against false explicitly, never coerce');
-    assert.ok(!/hidden=\{!codeNeeded\}/.test(src));
+  test('⛔ it starts HIDDEN — the first version had this backwards', () => {
+    // The original shipped `hidden={codeNeeded === false}` with an initial
+    // `null`, so the field showed until an answer said otherwise. But the
+    // answer only arrives after a submit, and a user WITHOUT MFA is signed in
+    // by that submit — so the box appeared on every page load and was never
+    // hidden in practice. All 24 tests passed over a feature doing nothing,
+    // because they pinned the mechanism and never the default.
+    assert.match(src, /const \[showCode, setShowCode\] = useState\(false\)/,
+      'the field must start hidden, or the feature does nothing');
+    assert.match(src, /hidden=\{!showCode\}/);
+    assert.doesNotMatch(src, /hidden=\{codeNeeded/, 'the inverted default is back');
+  });
+
+  test('a positive answer reveals and STOPS, rather than submitting blind', () => {
+    const at = src.indexOf('if (needed === true)');
+    assert.ok(at > -1);
+    const end = src.indexOf('      }', at);
+    const block = src.slice(at, end > at ? end : at + 400);
+    assert.match(block, /revealCode\(\)/);
+    assert.match(block, /return;/,
+      'submitting with an empty code shows a generic error for a field never offered');
+  });
+
+  test('⛔ an UNCLEAR answer reveals it AND still submits', () => {
+    // Blocking here would stop every sign-in whenever the precheck is
+    // unavailable — the one thing this must never do.
+    const at = src.indexOf('if (needed === null)');
+    assert.ok(at > -1);
+    const end = src.indexOf('      }', at);
+    const block = src.slice(at, end > at ? end : at + 400);
+    assert.match(block, /setShowCode\(true\)/);
+    assert.doesNotMatch(block, /return;/);
+  });
+
+  test('⛔ a FAILED sign-in reveals it, whatever the precheck claimed', () => {
+    // Belt and braces: covers an answer that was wrong, or became wrong
+    // between the two calls (MFA enrolled mid-session). Without it the user
+    // would have to reload the page to get a field they now need.
+    const at = src.indexOf('Sign-in failed.');
+    assert.ok(at > -1);
+    assert.match(src.slice(at, at + 500), /setShowCode\(true\)/);
   });
 
   test('askWhetherCodeNeeded returns null on every failure', () => {
     const fn = src.slice(src.indexOf('async function askWhetherCodeNeeded'));
-    const body = fn.slice(0, fn.indexOf('\n  }'));
-    assert.match(body, /if \(!res\.ok\) return null;/, 'a non-200 must not hide the field');
-    assert.match(body, /data\.ok !== true/, 'an ok:false must not hide the field');
-    assert.match(body, /catch \{\s*return null;/, 'a network failure must not hide the field');
+    const body = fn.split(/^  \}/m)[0];
+    assert.match(body, /if \(!res\.ok\) return null;/, 'a non-200 is not an answer');
+    assert.match(body, /data\.ok !== true/, 'an ok:false is not an answer');
+    assert.match(body, /catch \{\s*return null;/, 'a network failure is not an answer');
   });
 
-  test('⛔ it is asked once, and only while the field is hidden', () => {
-    assert.match(src, /if \(codeNeeded === null\)/,
-      're-asking would spend the rate-limit budget on submissions that already carry a code');
-  });
-
-  test('revealing the field stops that submission rather than failing it', () => {
-    const at = src.indexOf('if (needed === true)');
-    assert.ok(at > -1);
-    const block = src.slice(at, at + 400);
-    assert.match(block, /setCodeNeeded\(true\)/);
-    assert.match(block, /return;/, 'must not fall through to signIn with an empty code');
-  });
-
-  test('a null answer still proceeds to sign in', () => {
-    // "Could not tell" must not block the login — it shows the field AND
-    // attempts the sign-in, so an account without MFA is unaffected.
-    assert.match(src, /setCodeNeeded\(needed\);/);
+  test('⛔ it is asked once, and only while unasked', () => {
+    assert.match(src, /if \(!asked\)/,
+      're-asking would spend the rate-limit budget on submissions already carrying a code');
   });
 
   test('the one generic failure message is unchanged', () => {

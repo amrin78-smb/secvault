@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.193.1': [
+    "Fixes the previous release: the authenticator code box was still showing on the sign-in page for everyone. It now starts hidden and appears only when the account actually needs it.",
+    "The check that decides this only answers after you submit, and a user without MFA is signed in by that same submit — so starting the box visible meant it was never hidden in practice. It now starts hidden.",
+    "It still appears whenever there is any doubt: if the account uses MFA, if the check could not be completed, or if a sign-in fails for any reason. You can never be left without somewhere to type a code.",
+  ],
   '2.193.0': [
     "The authenticator code box on the sign-in page is now hidden for accounts that do not use one. Enter your username and password as usual; if the account has MFA the code field appears and the cursor moves to it. Accounts without MFA never see a field they cannot fill in.",
     "⛔ This does not reveal which accounts are protected. The check verifies your password before it answers anything, so without valid credentials every attempt gets the same response and the field is shown regardless — there is no way to probe for MFA-enabled accounts by typing usernames.",

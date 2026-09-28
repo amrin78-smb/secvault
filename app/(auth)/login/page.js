@@ -85,13 +85,31 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
-  // ⛔ THREE STATES, NOT TWO. `null` = we have not asked yet; `true` = the
-  // precheck said this account uses a code; `false` = it said it does not.
-  // Only an explicit `false` hides the field — "not asked" and "could not tell"
-  // both SHOW it, which is the behaviour this product shipped with and the
-  // reason a precheck failure can never stop anyone signing in.
-  const [codeNeeded, setCodeNeeded] = useState(null);
+  // ⛔ HIDDEN UNTIL THERE IS A REASON TO SHOW IT, and `asked` is separate from
+  // `showCode` on purpose.
+  //
+  // The first version of this had it backwards: it started VISIBLE and hid the
+  // field only on an explicit "no". But the answer only arrives after a submit,
+  // and a user without MFA is signed in BY that submit — so the box was visible
+  // on every page load and never hidden in practice. The feature did nothing.
+  //
+  // ⛔ STARTING HIDDEN IS NOT AN ORACLE: the initial state is identical for
+  // every visitor because nothing has been asked yet. The reveal happens only
+  // after a password-verified answer.
+  //
+  // ⛔ AND EVERY UNCERTAIN PATH REVEALS IT: precheck says yes, precheck could
+  // not tell, or a sign-in failed. The field can therefore never be missing
+  // when someone needs it — it can only be absent for the case we positively
+  // established does not need one.
+  const [showCode, setShowCode] = useState(false);
+  const [asked, setAsked] = useState(false);
   const totpRef = useRef(null);
+
+  function revealCode() {
+    setShowCode(true);
+    // Focus after paint, so the field exists to receive it.
+    setTimeout(() => { if (totpRef.current) totpRef.current.focus(); }, 0);
+  }
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // ⛔ READ FROM window.location IN AN EFFECT, NOT useSearchParams(). This page
@@ -140,21 +158,30 @@ export default function LoginPage() {
     // ⛔ ASKED ONCE, AND ONLY WHILE THE FIELD IS HIDDEN. Once the field is on
     // screen the answer cannot change anything, and re-asking on every attempt
     // would spend a rate-limit budget on submissions that already carry a code.
-    if (codeNeeded === null) {
+    // ⛔ ASKED ONCE. Once the field is on screen the answer cannot change
+    // anything, and re-asking would spend the rate-limit budget on submissions
+    // that already carry a code.
+    if (!asked) {
       const needed = await askWhetherCodeNeeded();
+      setAsked(true);
       if (needed === true) {
-        // Reveal and stop. The user has not typed a code yet, so submitting now
+        // Reveal and STOP. The user has not typed a code yet, so submitting now
         // would fail and show them a generic error for a field they were never
         // offered.
-        setCodeNeeded(true);
+        revealCode();
         setSubmitting(false);
-        // Focus after paint, so the field exists to receive it.
-        setTimeout(() => { if (totpRef.current) totpRef.current.focus(); }, 0);
         return;
       }
-      // `false` (no code) or `null` (could not tell) both continue to sign-in.
-      // On `null` the field is shown as well, so a second attempt has one.
-      setCodeNeeded(needed);
+      if (needed === null) {
+        // ⛔ COULD NOT TELL — reveal the field AND still submit. An account
+        // without MFA signs in normally and never notices; one with MFA gets a
+        // single generic failure and then has the box already waiting. Refusing
+        // to submit here would block every sign-in whenever the precheck is
+        // unavailable, which is the one thing this must never do.
+        setShowCode(true);
+      }
+      // `false` proceeds with the field still hidden — the only case where we
+      // positively established no code is needed.
     }
 
     try {
@@ -174,6 +201,11 @@ export default function LoginPage() {
         // the thing the second factor exists to keep uncertain. The specific
         // reason is written to the server log, where the operator can see it.
         setError('Sign-in failed. Check your username, password and authenticator code.');
+        // ⛔ BELT AND BRACES. Whatever the precheck said, a FAILED sign-in
+        // reveals the field: if the answer was wrong, or became wrong between
+        // the two calls (MFA enrolled mid-session), the user must still be able
+        // to supply a code without reloading the page.
+        setShowCode(true);
         setSubmitting(false);
         return;
       }
@@ -260,13 +292,17 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* ⛔ HIDDEN ONLY ON AN EXPLICIT `false`. Three states: not asked
-                yet, "this account uses a code", and "it does not". Only the
-                last hides the field, so every failure of the precheck — rate
-                limited, offline, 500, LDAP account, database down — falls back
-                to showing it, which is exactly how this product behaved before
-                the precheck existed. The endpoint can REMOVE a field; it can
-                never demand one, and it can never stop a sign-in.
+            {/* ⛔ HIDDEN UNTIL SOMETHING REVEALS IT. Three ways in: the
+                precheck said this account uses a code, the precheck could not
+                tell, or a sign-in failed. So the field is absent ONLY for the
+                case we positively established does not need one; every
+                uncertain path shows it, and no failure of the precheck can
+                leave someone unable to enter a code.
+
+                ⛔ THE FIRST VERSION HAD THIS BACKWARDS — it started visible and
+                hid on an explicit "no". The answer only arrives after a submit,
+                and a user without MFA is signed in BY that submit, so the box
+                showed on every page load and was never hidden in practice.
 
                 ⛔ THIS COMMENT PREVIOUSLY FORBADE THIS, AND ITS REASON WAS
                 WRONG. It said a conditionally-revealed field is an oracle —
@@ -277,15 +313,16 @@ export default function LoginPage() {
                 `{ ok: false }`. What IS given up is narrower and is documented
                 at the route: a correct password now confirms itself before the
                 code is supplied. See app/api/auth/mfa/precheck/route.js. */}
-            <div className="login-field" hidden={codeNeeded === false}>
+            <div className="login-field" hidden={!showCode}>
               <label htmlFor="totp">
                 Authenticator code
                 {/* Once the precheck has answered `true` the code is not
                     optional, and saying "if enabled" would invite the user to
                     leave it blank and collect a generic failure. */}
-                {codeNeeded === true
-                  ? null
-                  : <span className="login-hint"> — if enabled</span>}
+                {/* Once the field is on screen it is because this account
+                    needs one (or we could not tell); "if enabled" would invite
+                    the user to leave it blank and collect a generic failure. */}
+                {null}
               </label>
               <input
                 id="totp"

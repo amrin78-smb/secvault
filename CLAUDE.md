@@ -519,11 +519,21 @@ into a confirmed hit worth pursuing by other means. The disclosure is inherent �
 enough to drive the form confirms the password — so do not attempt to "fix" it by answering before
 the password check, which reinstates the enumeration oracle instead.
 
-⛔ **THE ENDPOINT CAN ONLY REMOVE A FIELD, NEVER DEMAND ONE.** Rate limited, database down,
-malformed body, unknown user, LDAP account, MFA lookup threw: every path returns `{ok:false}` and
-the form shows the field exactly as this product behaved before. No failure of it can stop anyone
-signing in, and that property is what makes it safe to rate-limit by username. The form hides the
-field only on an EXPLICIT `false` — a truthiness test there would hide it on every failure.
+⛔ **THE FIELD IS HIDDEN BY DEFAULT, AND v2.193.0 SHIPPED THAT BACKWARDS.** The first
+implementation started VISIBLE and hid the field only on an explicit "no". But the answer arrives
+only after a submit, and a user without MFA is signed in BY that submit — so the box appeared on
+every page load and was never hidden in practice. The feature shipped doing nothing, past 24
+passing tests, because every one of them pinned the MECHANISM and none pinned the DEFAULT. Fixed in
+v2.193.1; a test now asserts `useState(false)` and mutation-fails on `useState(true)`.
+
+⛔ **THREE PATHS REVEAL IT, so it can never be missing when someone needs it**: the precheck said
+yes, the precheck could not tell, or a sign-in FAILED. The last is belt-and-braces for an answer
+that was wrong or became wrong between the two calls (MFA enrolled mid-session). An unclear answer
+reveals the field AND still submits — refusing there would block every sign-in whenever the
+precheck is unavailable, which is the one thing this must never do.
+
+⛔ Starting hidden is NOT an oracle: the initial state is identical for every visitor because
+nothing has been asked yet, and the reveal only follows a password-verified answer.
 
 ⛔ **`lib/rateLimit.js` KEYS ON THE USERNAME, NOT THE CLIENT IP**, deliberately diverging from
 NetVault's port. `server.js` serves TLS directly with no reverse proxy, so `x-forwarded-for` is
