@@ -101,6 +101,41 @@ is the per-item wayfinding cue; the active chip is always the brand accent. `/ap
 collected rulebase, and Inventory holds what SecVault COLLECTED rather than what an operator
 DECLARED.
 
+⛔ **ONE RENDERED ENTRY FOR TWO ROUTES (2026-09-29).** The sidebar reached 16 destinations and
+scrolled. Segmentation and Applications now share a single entry labelled **Intent**; both pages
+carry `components/layout/IntentTabs.js`. This pair is the only merge taken, because it is the one
+where tabbing is a LEGIBILITY win rather than hiding a destination — the same mechanic at two
+grains, zone-to-zone then application-to-flow. Coverage+Conformance and Vulnerabilities+Exposure
+were considered and REFUSED: they answer different questions, and `/vulnerability` already carries
+four tabs.
+
+⛔ **NOTHING MOVED AT THE ROUTING LAYER.** `/segmentation` and `/applications` both still exist and
+still resolve — CLAUDE.md's rule is that hrefs never change, because both are already in sent
+notifications and pasted tickets. No redirect, no route deletion. Only what Sidebar RENDERS changed.
+
+⛔ **`navHidden` IS NOT `requires`, AND THE DISTINCTION IS LOAD-BEARING.** `requires` is an
+AUTHORISATION gate (the page refuses too; hiding only stops discovery). `navHidden` is a LAYOUT
+choice for a page anyone entitled may still open. Collapsing them into one flag would eventually
+hide a page from someone entitled to it, or advertise one they are not.
+
+⛔ **A `navHidden` ENTRY STAYS IN `NAV`, AND THAT IS THE WHOLE TRAP.** `HeaderSearch`'s
+`matchPages()` filters over the flat `NAV` export, so DELETING the Applications item — the obvious
+implementation — would have made Ctrl+K answer "no results" to `applications`, `apps`, `flows`,
+`cloud`, `office 365` and `saas`, with no visible symptom: the page still renders and the URL still
+works. `tests/navigation.test.js` now fails the build on any registry href with no PAGE_KEYWORDS,
+and it immediately found **two pre-existing gaps** — `/coverage` and `/conformance` shipped with
+none, reachable only by typing their exact label.
+
+⛔ **`alsoActiveFor` KEEPS THE SHARED ENTRY LIT ON BOTH ROUTES.** Without it Intent goes dark on
+`/applications` and the sidebar claims you are nowhere — worse than an unmerged list, because the
+operator cannot tell which section they are in.
+
+(c) IntentTabs  `{active}` — the two-tab strip shared by `/segmentation` and `/applications`, same
+visual contract as the `/vulnerability` strip (two tab strips that look different read as two
+mechanisms). ⛔ It links to ROUTES, never a `?tab=`, so no URL changes. ⛔ Tab labels keep the OLD
+words (Segmentation, Applications) because the nav entry above them no longer says either, and
+those are what an operator types.
+
 ## devices/
 
 DeviceInventoryTiles  tiles — six fleet tiles above the Devices table (added 2026-08-06, v2.56.0). Figures count the rows actually rendered below, so tiles and table can never disagree. ⛔ Deliberately NO "Unsupported OS / EOL" tile: SecVault collects no vendor OS end-of-life dates and no feed supplies them. Support-CONTRACT expiry replaces it, and expired vs expiring are never merged (different actions).

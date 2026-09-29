@@ -103,7 +103,17 @@ const NAV_GROUPS = [
   { group: 'Risk', items: [
     { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
     { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
-    { href: '/segmentation', label: 'Segmentation', Icon: IconGrid },
+    // ⛔ ONE RENDERED ENTRY FOR TWO ROUTES (2026-09-29). The sidebar had grown
+    // to 16 destinations and scrolled; this pair is the only one where merging
+    // is a LEGIBILITY win rather than hiding a destination behind a click, for
+    // the reason the Applications comment below already gave — same mechanic,
+    // one grain finer. `components/layout/IntentTabs.js` carries the strip.
+    //
+    // ⛔ NOTHING MOVED AT THE ROUTING LAYER. /segmentation and /applications
+    // both still exist and still resolve; CLAUDE.md's rule is that hrefs never
+    // change, because both are already in sent notifications and pasted tickets.
+    // Only what this file RENDERS changed.
+    { href: '/segmentation', label: 'Intent', Icon: IconGrid, alsoActiveFor: ['/applications'] },
     // Which firewall is unlike its peers. In Risk rather than Inventory
     // because a deviation is a triage lead -- though never, on its own, a
     // fault: the odd one out may be the only one configured deliberately.
@@ -119,7 +129,13 @@ const NAV_GROUPS = [
     // application-to-flow. Inventory holds what SecVault COLLECTED
     // (firewalls, links, licences); everything here is something the
     // operator DECLARED and SecVault then judged.
-    { href: '/applications', label: 'Applications', Icon: IconApplications },
+    // ⛔ `navHidden` REMOVES IT FROM THE SIDEBAR, NOT FROM THE PRODUCT. It must
+    // stay in NAV_GROUPS because `NAV` is what HeaderSearch's matchPages()
+    // filters over — dropping the entry outright would make Ctrl+K answer "no
+    // results" to 'applications', 'apps', 'flows', 'cloud', 'office 365' and
+    // 'saas', which is precisely the failure PAGE_KEYWORDS exists to prevent.
+    // Reachable by URL, by the palette, and by the Intent tab strip.
+    { href: '/applications', label: 'Applications', Icon: IconApplications, navHidden: true },
     { href: '/analysis', label: 'Rule hygiene', Icon: IconChart },
     { href: '/compliance', label: 'Compliance', Icon: IconSearch },
   ] },
@@ -140,9 +156,15 @@ export const NAV = [...NAV_GROUPS.flatMap((g) => g.items), SETTINGS_ITEM];
 
 const COLLAPSE_KEY = 'secvault-sidebar-collapsed';
 
-function isActive(pathname, href, exact) {
+function isActive(pathname, href, exact, alsoActiveFor) {
   if (exact) return pathname === href;
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const under = (base) => pathname === base || pathname.startsWith(`${base}/`);
+  if (under(href)) return true;
+  // ⛔ A SIBLING ROUTE SHARING THIS ENTRY MUST LIGHT IT UP. Without this the
+  // Intent entry goes dark on /applications and the sidebar claims you are
+  // nowhere — worse than an unmerged list, because the operator cannot tell
+  // which section they are in.
+  return Array.isArray(alsoActiveFor) && alsoActiveFor.some(under);
 }
 
 export default function Sidebar({ version, capabilities }) {
@@ -174,8 +196,16 @@ export default function Sidebar({ version, capabilities }) {
       <nav className="sv-nav">
         {NAV_GROUPS.map(({ group, items: allItems }) => {
           // A group whose every entry is hidden must not leave its label behind.
+          // ⛔ TWO SEPARATE REASONS AN ENTRY IS NOT RENDERED, and they are not
+          // the same thing. `requires` is an AUTHORISATION gate — the page
+          // itself refuses too, this only stops discovery. `navHidden` is a
+          // LAYOUT choice for a destination that is still fully available by
+          // URL, by Ctrl+K and from another page's tab strip. Collapsing them
+          // into one flag would eventually hide a page from someone entitled
+          // to it, or advertise one they are not.
           const items = allItems.filter(
-            (it) => !it.requires || !capabilities || capabilities[it.requires]
+            (it) => !it.navHidden
+              && (!it.requires || !capabilities || capabilities[it.requires])
           );
           if (items.length === 0) return null;
           return (
@@ -183,8 +213,8 @@ export default function Sidebar({ version, capabilities }) {
             {/* Hidden when collapsed: at 64px there is no room for a heading,
                 and the grouping still reads from the gap between clusters. */}
             {!collapsed && <div className="sv-nav-group-label">{group}</div>}
-            {items.map(({ href, label, Icon, exact }) => {
-              const active = isActive(pathname, href, exact);
+            {items.map(({ href, label, Icon, exact, alsoActiveFor }) => {
+              const active = isActive(pathname, href, exact, alsoActiveFor);
               return (
                 <Link
                   key={href}

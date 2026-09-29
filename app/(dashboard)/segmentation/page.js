@@ -1,4 +1,5 @@
 import PageHeader from '../../../components/ui/PageHeader';
+import IntentTabs from '../../../components/layout/IntentTabs';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
 import SegmentationBoard from '../../../components/segmentation/SegmentationBoard';
 import { pool } from '../../../lib/db';
@@ -59,6 +60,8 @@ export default async function SegmentationPage() {
         title="Segmentation"
         subtitle="What you say must not connect, checked against what the rules permit and what the traffic actually did."
       />
+
+      <IntentTabs active="/segmentation" />
 
       <AnswerHeader answer={answer} evidence={evidence} />
 

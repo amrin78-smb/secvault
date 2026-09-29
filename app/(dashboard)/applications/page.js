@@ -1,4 +1,5 @@
 import PageHeader from '../../../components/ui/PageHeader';
+import IntentTabs from '../../../components/layout/IntentTabs';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
 import ApplicationBoard from '../../../components/applications/ApplicationBoard';
 import CloudServices from '../../../components/applications/CloudServices';
@@ -67,6 +68,8 @@ export default async function ApplicationsPage() {
         title="Applications"
         subtitle="What each application needs from the network, checked against what the rules permit — and, separately, against what the permitting rules have actually carried."
       />
+
+      <IntentTabs active="/applications" />
 
       <AnswerHeader answer={answer} evidence={evidence} />
 

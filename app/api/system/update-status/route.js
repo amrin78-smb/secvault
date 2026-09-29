@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.194.0': [
+    "The side menu had grown to sixteen destinations and needed scrolling. Segmentation and Applications now share one entry, called Intent, with a tab across the top of each page — they answer the same question at two levels, zone-to-zone policy and then application-to-flow, so they read better together than apart.",
+    "⛔ No link has changed. Both pages keep their own web address, so anything already sent in a notification, pasted into a ticket or saved as a bookmark still opens the same page. Nothing was redirected or removed.",
+    "Both pages are still found by search. Typing \"applications\", \"apps\", \"flows\", \"cloud\" or \"office 365\" in Ctrl+K reaches Applications exactly as before, even though the menu no longer lists it by that name.",
+    "Two pages that were only ever findable by typing their exact name now answer to ordinary words as well: Coverage responds to \"blind spot\" and \"gaps\", Conformance to \"drift\", \"outlier\" and \"odd one out\".",
+  ],
   '2.193.2': [
     "The authenticator box really is hidden now. The previous fix set the HTML `hidden` attribute, which the page's own stylesheet silently overrode — the attribute was in the page and the box stayed on screen.",
     "The field is no longer rendered at all until it is needed, which no stylesheet can undo. It still appears whenever the account uses MFA, the check could not be completed, or a sign-in fails.",

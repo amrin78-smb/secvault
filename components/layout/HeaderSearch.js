@@ -40,10 +40,25 @@ const PAGE_KEYWORDS = {
   // "no results" to the product's own former words is worse than none. So
   // "cloud"/"office 365" find Applications, and "queue"/"todo" find Work.
   '/work': ['work queue', 'queue', 'todo', 'to do', 'outstanding', 'backlog'],
+  // ⛔ TWO MORE PAGES SHIPPED WITHOUT KEYWORDS (found 2026-09-29 by
+  // tests/navigation.test.js, which now fails the build on any registry entry
+  // that has none). Same defect the four above had: reachable only by typing
+  // the exact label, which is the one word an operator is least likely to
+  // guess for a page they have never opened.
+  '/coverage': ['coverage', 'blind spot', 'blind spots', 'gaps', 'not measured',
+    'unmeasured', 'visibility'],
+  '/conformance': ['conformance', 'odd one out', 'drift', 'deviation', 'outlier',
+    'consistency', 'peers'],
   '/reports': ['report', 'reports', 'pdf', 'export', 'download', 'audit report'],
+  // ⛔ BOTH ENTRIES SURVIVE THE SIDEBAR MERGE (2026-09-29). These two now share
+  // ONE rendered nav entry, labelled "Intent" — but matchPages() filters over
+  // NAV, so if the Applications item had been deleted rather than marked
+  // `navHidden`, every keyword below it would have started answering "no
+  // results". The label is no longer the word anyone types for either page,
+  // which makes these keywords load-bearing rather than a convenience.
   '/segmentation': ['segmentation', 'zones', 'intent', 'east-west', 'boundary'],
   '/applications': ['applications', 'apps', 'flows', 'declared', 'cloud',
-    'office 365', 'microsoft 365', 'saas'],
+    'office 365', 'microsoft 365', 'saas', 'intent'],
 };
 
 function matchPages(q) {
