@@ -48,6 +48,52 @@ can be run unattended.
 
 ---
 
+## ✅ BUILT AND VERIFIED ON STAGING, 2026-10-01
+
+This ran end to end. What is actually there now:
+
+| | |
+|---|---|
+| path | `C:\Apps\SecVaultTest` (v2.196.0, commit `610db97`) |
+| database | `secvault_mock`, owner `secvault_mock_user` |
+| services | `SecVaultTest-App` + `SecVaultTest-Collector`, **both `SERVICE_DEMAND_START`** so nothing comes back on reboot |
+| app | `http://192.168.31.10:3010` — `/api/health` answers **401** (working app, unauthenticated call) |
+| syslog | udp/tcp **1514**; sender aliases `10.99.0.11` / `10.99.0.21` on the loopback pseudo-interface |
+| CertVault | **untouched** — both its services still Running on 3014, its database not opened |
+
+Measured on that install: **5,950 events received / parsed / stored, 0 DROPPED, 0 unattributed**;
+rule-hit correlation populated on both grades (Fortinet by rule id 1-6, Palo Alto by rule name); the
+tri-state intact at 9 unmeasured / 1 measured-zero / 4 with hits across 14 rules.
+
+⛔ **`npm test` on staging: 5,669 tests, 5,667 pass, 0 fail, 2 skipped — AND THE INSTALLER
+POWERSHELL GATE RAN.** This is the authoritative machine for it (PowerShell **5.1**), and it had not
+been run anywhere since development moved to Linux. The 2 skips are the two deliberately
+Linux-only cases; `⛔ on Windows it must NOT skip` RUNS and passes, which is the symmetry
+`tests/psScripts.test.js` exists to enforce.
+
+⛔ **IT WAS DEPLOYED BY ARCHIVE, NOT CLONED, AND THEREFORE CANNOT UPDATE ITSELF.** Staging holds no
+GitHub credential (its only key is the one for logging *into* staging, and CertVault there has no
+`.git` either — it was also copied). So `git archive HEAD` was copied across and extracted. The cost
+is visible and real: the build log already shows
+`[updateCheck] remoteCommitHash failed: git ls-remote origin main`. This is the exact property
+CLAUDE.md records as the reason the source-bundled installer was withdrawn, and it is acceptable
+**only** because this is a throwaway mock environment at a distinct path. The tree carries a
+`NOT-A-REAL-INSTALL.txt` saying so. ⛔ A real install must be cloned.
+
+⛔ **A deploy key was generated ON staging** (`~/.ssh/secvault_staging_deploy`, private half never
+leaves that machine) so a proper clone is possible once its public half is authorised on the repo.
+
+⛔ **Three Node versions are now in play** — production **20**, dev **22**, staging **24**. That is
+precisely why `scripts/runTests.js` had to replace `node --test tests/`, which is Node-20-only;
+staging confirms the replacement works on 24.
+
+⛔ **The test runner prints a different format on each.** Under a non-TTY on Linux it emits TAP
+(`# pass`); through PowerShell on staging it emits the SPEC reporter, so a grep for `# pass` there
+returns NOTHING and reads as a suite that produced no result. Parse whichever the machine actually
+emits — do not hardcode one.
+
+---
+
 ## Steps
 
 ### 1. Clone
