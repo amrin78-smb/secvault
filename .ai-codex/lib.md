@@ -3399,3 +3399,61 @@ does not exist yet.
 
 Pinned by `tests/remediationVelocity.test.js` (29), `tests/remediationVelocityData.test.js` (16)
 and `tests/remediationVelocityView.test.js` (12).
+
+## scripts/seedMockFleet.js + scripts/mockSyslog.js — the staging mock fleet (added 2026-10-01)
+
+Two generators so SecVault can be exercised end to end on a machine with no firewalls attached.
+Neither is reachable from the app; both are operator tools run by hand. Pinned by
+`tests/mockFixtures.test.js` (19 cases, 17 mutations verified).
+
+**`seedMockFleet.js`** writes four devices, their rules, configs and versions straight into a
+database. ⛔ **THREE INDEPENDENT REFUSALS, each separately tested**, because this inserts fabricated
+firewalls and a fabricated firewall in the production fleet is indistinguishable from a real one
+nobody can find: the host may not be in `PRODUCTION_HOSTS`; the database name must match
+`/mock|test|staging|scratch/i`; and `--i-know` must be passed. ⛔ A missing or unparseable
+`DATABASE_URL` is REFUSED, never defaulted to localhost — a default would make an unset variable
+mean "seed whatever is nearest". Every device name carries the `MOCK-` prefix so it is identifiable
+on sight and so the wipe can target it precisely.
+
+⛔ **THE FLEET IS DELIBERATELY UNEVEN, AND THAT IS THE POINT.** A uniformly healthy mock fleet
+exercises only the green path, which is the one path this product has never had a bug on. So:
+`MOCK-FGT-Branch-01` has `hit_count` NULL throughout (the Fortinet-over-SSH shape — `unused` must
+not be claimed from it); `MOCK-PAN-DC-01` has real counts **including a measured zero** (the other
+half of the tri-state); `MOCK-FGT-Edge-02` reports version `'unknown'` with a NULL tuple (exercises
+`unreadable_running_version`); `MOCK-UNREACHABLE-03` has no rules, no config, no version and a NULL
+`last_collected_at` (the coverage-gap path, and never `now()`, which would assert a collection that
+never happened). Each of those four properties is pinned by its own test.
+
+**`mockSyslog.js`** emits synthetic FortiOS key=value and PAN-OS positional CSV over UDP, so the
+collector → parser → spool → `syslog_events` → rollups → rule-hit-correlation chain runs for real.
+Defaults to `127.0.0.1:1514` (no inbound firewall rule needed, no privileged port) and is FINITE
+and rate-limited by default — the reference fleet produces ~93M events/day, so an unbounded
+generator pointed at a laptop fills its disk. ⛔ Every numeric option is VALIDATED, not coerced:
+`Number('fast')` is NaN and every NaN comparison is false, so a typo would silently remove the bound
+the flag exists to set.
+
+⛔ **THE GENERATED LINES ARE CHECKED AGAINST THE REAL PARSERS, NOT EYEBALLED — AND THE FIRST DRAFT
+FAILED.** `paloAltoLine()` produced output `detectVendor()` returned null for, on two counts that
+are invisible when reading the line: the receive-time field is `YYYY/MM/DD` with **SLASHES** (an ISO
+`YYYY-MM-DD` fails `PALOALTO_RE` outright), and `PALOALTO_RE` is **ANCHORED**, so the CSV must begin
+the syslog MESSAGE — which requires a valid RFC 3164 header for `syslogParser` to strip, or the
+frame stays `pri-only` and the message still carries the timestamp and hostname. ⛔ **The failure
+would have been silent:** the collector still STORES an unattributed event (correctly — an unmatched
+sender is still evidence), so nothing errors; the mock fleet would simply have appeared to produce
+no Palo Alto traffic at all, and the obvious conclusion would have been that the collector or the
+rollups were broken. Both details are now pinned, and both mutations were verified to fail.
+
+⛔ **THE IDENTIFIERS MUST MATCH THE SEED, NOT MERELY EXIST.** Fortinet correlates on the vendor's
+own rule id (`policyid` ↔ `firewall_rules.rule_id_vendor`, which the seed writes as `String(seq)`)
+and Palo Alto correlates on the rule NAME. A policyid or name corresponding to no seeded rule parses
+perfectly and correlates to nothing, so every rule would read as having no traffic — an `unused`
+finding manufactured out of a mismatch between two of our own files. A test asserts the generated
+identifiers are a subset of the seeded ones, in both directions of the vendor split.
+
+⛔ **The two vendors exercise DIFFERENT correlation grades on purpose** — an id match authorises a
+deletion, a name match deliberately does not — so the mock fleet lights up both halves of the
+log-derived usage work, including the name-grade caveat. ⛔ `SENDERS` must match `devices.mgmt_ip`
+in the seed or every event stores `device_id NULL` and nothing correlates; that too is pinned.
+⛔ The action vocabularies are the REAL ones: FortiGate's `close`/`client-rst` (an established
+session that ended, never logged `allow`) and PAN-OS's `reset-both` (which looks like Fortinet's
+close family and is a BLOCK).

@@ -66,18 +66,35 @@ Not a module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependenc
 |---|---|---|
 | **dev** | `192.168.31.230` · `amrin-Latitude-5400` | **Linux.** Zorin OS 18.1 (Ubuntu 24.04 noble). Repos under `/home/amrin/development/Nocvault/`. Node 22 via nvm, PostgreSQL 16.15 local, `pwsh` 7.6, Playwright 1.63 + browsers, openssh-server, sshpass. |
 | **staging** | `192.168.31.10` · `LAPTOP-6PETB251` | Windows 11 Home, PostgreSQL 16.15, NSSM at `C:\Windows\System32\nssm.exe`. **Hosts CertVault only** (`C:\Apps\CertVault`, port 3014). DHCP, reservation pending. |
-| **production** | `192.168.7.69` | The SecVault reference fleet server. ⛔ **NOT reachable from the dev box** — measured 2026-10-01, 3010 and 5432 both no-answer. Different network. |
+| **production** | `192.168.7.69` | The SecVault reference fleet server. **Reachable from dev ONLY over the VPN** (`tun0`, dev becomes `10.10.10.22`). With the VPN up: 3010 and 5432 both answer, `/api/health` returns 401. With it down: both are no-answer. |
 
 ⛔ **`192.168.31.230` WAS THE OLD WINDOWS STAGING MACHINE AND IS NOW THE LINUX DEV BOX.** That
 Windows install was WIPED. Anything a note or script assumes is installed there — services,
 databases, an app install — is gone. Do not try to deploy to it or SSH into it as a Windows server.
 
-⛔ **PRODUCTION IS UNREACHABLE FROM DEV, so the live-DB verification loop this file keeps calling
-for does not work from here.** The `claude_readonly` workflow (and every "query the live fleet
-before guessing a field name" instruction below) needs a machine on that network. From the dev box,
-reach for the LOCAL PostgreSQL 16.15 instead and say plainly when a claim could not be checked
-against production — an unverifiable claim stated as measured is this file's own
-failed-read-as-a-fact rule aimed at its own process.
+⛔ **PRODUCTION IS REACHABLE FROM DEV, BUT ONLY WITH THE VPN UP — AND THIS FILE SAID THE
+OPPOSITE.** It read "NOT reachable — 3010 and 5432 both no-answer — different network", which was
+measured with the VPN DOWN and then written as a property of the network. ASK WHETHER THE VPN IS UP
+BEFORE CONCLUDING ANYTHING FROM A FAILED PROBE. Measured 2026-10-01 with `tun0` up (dev is
+`10.10.10.22`): 3010 OPEN, 5432 OPEN, `/api/health` → **401** in 117ms — a working app refusing an
+unauthenticated call. 22 and 443 do not answer either way.
+
+⛔ **AND THE MECHANISM IT BLAMED WAS ALSO WRONG.** A follow-up note said the database was blocked
+by `pg_hba.conf` having no entry for the VPN address. It is not: `psql` from the dev box reaches
+**`FATAL: password authentication failed`**, which is returned only AFTER the host has been
+admitted — a `pg_hba` rejection answers `no pg_hba.conf entry for host` without ever checking a
+credential. So the host IS permitted and the only blocker is the credential, which Amrin rotated.
+⛔ Note this contradicts the `DATABASE_URL` comment in the env-var list below, which says a default
+`pg_hba.conf` admits loopback ONLY "and nothing in this repo ever widens it" — that is still true
+OF THE REPO, so the reference deployment was widened by hand, outside it. Do not "fix" either
+statement by assuming the other is stale; they are describing different things.
+
+⛔ **The lesson, which is this file's own rule turned on its own process:** both claims were a
+FAILED READ RECORDED AS A FACT. One probe with the VPN down became "different network", and one
+inference became a named mechanism. A negative measurement needs its preconditions stated beside it
+or it reads as a permanent property — and a confident wrong mechanism is worse than none, because
+it sends the next session to fix the wrong thing. When a live check genuinely cannot run, say which
+precondition was missing, not that the thing is impossible.
 
 ⛔ **SecVault IS NOT INSTALLED ON THE STAGING SERVER.** It hosts CertVault today. **Ask before
 installing anything there.**

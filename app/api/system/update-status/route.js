@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.196.0': [
+    "Internal only \u2014 nothing in the console changes. Adds two tools for exercising SecVault on a machine with no firewalls attached: one seeds a small mock fleet into a database, the other emits synthetic firewall logs so the collector, the hourly rollups and the rule-usage correlation all run for real.",
+    "\u26d4 The mock fleet is deliberately uneven, because a uniformly healthy one only ever exercises the path that has never had a bug. It includes a firewall that reports no rule usage at all, one that reports a genuine zero, one whose version string cannot be read, and one nothing could be collected from \u2014 the four states the product has to tell apart.",
+    "\u26d4 The seeder refuses three separate ways before it writes anything: it will not touch the production server, it will not touch a database whose name does not say it is a test, and it will not run without an explicit confirmation flag. A fabricated firewall in a real fleet would be indistinguishable from one nobody can find.",
+    "\u26d4 The synthetic log lines are checked against the product's own parsers rather than being eyeballed, and the first draft of the Palo Alto format failed that check on two details invisible to a reader. It would have failed silently \u2014 the events are still stored, just unattributed, so the mock fleet would have looked like it produced no Palo Alto traffic and the collector would have taken the blame.",
+    "Corrected two wrong notes about the production server being unreachable from the development machine. It is reachable over the VPN; one measurement had simply been taken with the VPN down, and a follow-up note then blamed the wrong mechanism.",
+  ],
   '2.195.0': [
     "Internal only — no change to anything you see in the console. Development moved from Windows to a Linux machine, and this release makes the project's own checks work there.",
     "⛔ The test suite could not start at all on the new machine: the command used to run it only works on one version of Node, and on the newer one it reported a single ordinary-looking failure having run nothing. It now enumerates the test files directly, and refuses to report success if it finds suspiciously few of them.",
