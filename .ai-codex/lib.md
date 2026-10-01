@@ -3507,3 +3507,36 @@ name builds clean, passes every static check and fails only when the query runs;
 time on this project (`rule_action` where the column is `action`) and it is the v2.86.1 outage shape.
 The check also asserts THAT IT FOUND SOMETHING, since a regex matching nothing passes every
 assertion it never runs.
+
+### Two defects the FIRST REAL RUN found (2026-10-01, local PostgreSQL)
+
+Both were invisible to 24 passing tests and to a UDP round-trip harness, and both are the same
+shape: the harness substituted the value the real path derives from its environment.
+
+⛔ **1. NOTHING ATTRIBUTED, AND NOTHING ERRORED.** The collector resolves a device from the
+datagram's SOURCE address against `devices.mgmt_ip`. Running on the same box, the generator sent
+from loopback — matching no seeded device — so all **1,960 of 2,000** stored events had
+`device_id NULL` and rule-hit correlation produced zero rows. The collector was right (an unmatched
+sender is still evidence and is still stored); the generator was wrong. ⛔ **The earlier round-trip
+harness hid it by FAKING `sourceIp`** — it set the one field the real path reads off the socket, so
+it proved the parse chain and nothing about attribution. `mockSyslog.js` now binds one socket per
+vendor to that vendor's address and **REFUSES (exit 1) with the exact `ip addr add` / `netsh`
+command if it cannot bind**, rather than falling back to loopback and producing a dataset that looks
+real and attributes to nothing. `--any-source` overrides it and prints what that costs. After the
+fix: 3,950 events, **0 unattributed**, both correlation paths populated.
+
+⛔ **2. THE GENERATOR EMITTED SELF-CONTRADICTORY EVIDENCE.** It picked rule and action
+INDEPENDENTLY, so `Deny-All` logged `accept` and `default-deny` logged `allow` — measured, 149 hits
+of it. That is not merely unrealistic: **`/segmentation` reads exactly this evidence** to decide
+whether a deny-intent zone pair is actually carrying traffic, so the mock data would have
+manufactured a violation that exists only because of the generator. Actions are now drawn from the
+rule's own intent, and `tests/mockFixtures.test.js` CROSS-CHECKS the generator's intent tables
+against the SEEDER's rules rather than restating them, so the two cannot drift. ⛔ `reset-both` is
+still permitted on an ALLOW rule and a test requires it to occur — PAN-OS's IPS really does reset an
+allowed session, and trimming that would be the opposite error.
+
+**What the first real run proved**, beyond the two fixes: `lib/schema.sql` migrates cleanly into a
+**never-migrated** database in 1.4s — the fresh-install case CLAUDE.md records as invisible on every
+deployed server — and the seeded tri-state lands exactly as designed (6 unmeasured / 1 measured-zero
+/ 4 positive hit counts, one unreadable version with a NULL tuple, one device with nothing collected
+and a NULL `last_collected_at`).

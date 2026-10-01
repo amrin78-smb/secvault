@@ -154,6 +154,24 @@ sc.exe start SecVaultTest-App          # ⛔ sc.exe, never Start-Service
 
 The collector is started by hand, only while generating:
 
+⛔ **FIRST, ADD THE SENDER ADDRESSES — WITHOUT THEM NOTHING ATTRIBUTES.** The collector resolves a
+device from the datagram's SOURCE address against `devices.mgmt_ip`. A generator running on the same
+box sends from loopback, which matches no seeded device, so every event is stored with
+`device_id NULL` — CORRECTLY, since an unmatched sender is still evidence — and **nothing errors**.
+Measured on the dev box before this was fixed: 2,000 events arrived, every one parsed with the right
+vendor, and **all 1,960 stored rows were unattributed**, so rule-hit correlation produced nothing.
+That reads exactly like a broken collector or a broken rollup.
+
+```powershell
+# Windows: add each mock firewall's address to the loopback pseudo-interface.
+netsh interface ipv4 add address "Loopback Pseudo-Interface 1" 10.99.0.11 255.255.255.255
+netsh interface ipv4 add address "Loopback Pseudo-Interface 1" 10.99.0.21 255.255.255.255
+```
+
+`mockSyslog.js` binds one socket per vendor to those addresses and **REFUSES with the exact command
+above if it cannot** (exit 1), rather than falling back to loopback and producing a dataset that
+looks real and attributes to nothing. `--any-source` overrides it and states the cost.
+
 ```powershell
 # terminal 1
 node services\collector.js
@@ -161,6 +179,8 @@ node services\collector.js
 # terminal 2 — finite and rate-limited by default
 node scripts\mockSyslog.js --port 1514 --count 20000 --rate 500
 ```
+
+Remove the addresses afterwards with `netsh interface ipv4 delete address "Loopback Pseudo-Interface 1" 10.99.0.11`.
 
 ⛔ **`sent` is not `received`.** UDP drops under burst even on loopback — measured 360 of 400 at
 400/sec with an 8 MB receive buffer. Read `syslog_ingest_stats` (received / parsed / stored /

@@ -37,6 +37,28 @@ const dgram = require('node:dgram');
 
 const DEFAULTS = { host: '127.0.0.1', port: 1514, count: 1000, rate: 200 };
 
+// ⛔ THE SOURCE ADDRESS IS THE WHOLE ATTRIBUTION MECHANISM, AND SENDING FROM
+// THE WRONG ONE FAILS SILENTLY. The collector resolves a device from
+// `rinfo.address` against `devices.mgmt_ip`. A datagram sent from loopback
+// matches no seeded device, so the collector stores it with `device_id NULL` —
+// CORRECTLY, because an unmatched sender is still evidence — and nothing errors.
+//
+// Measured before this was added: 2,000 events arrived, every one parsed with the
+// right vendor, and **all 1,960 stored rows were unattributed**. Rule-hit
+// correlation therefore produced nothing, which reads exactly like a broken
+// collector or a broken rollup rather than a generator sending from 127.0.0.1.
+//
+// So each vendor's datagrams are sent FROM that vendor's own address, which has
+// to exist locally. If it cannot be bound this REFUSES and prints the command to
+// add it, rather than falling back to loopback and producing a dataset that looks
+// like real data and attributes to nothing.
+function sourceHelp(ip) {
+  if (process.platform === 'win32') {
+    return `netsh interface ipv4 add address "Loopback Pseudo-Interface 1" ${ip} 255.255.255.255`;
+  }
+  return `sudo ip addr add ${ip}/32 dev lo`;
+}
+
 // Mock devices' source addresses. ⛔ These must match `devices.mgmt_ip` in
 // scripts/seedMockFleet.js, or the collector stores every event with
 // `device_id NULL` — which it is RIGHT to do (an unmatched sender is still
@@ -45,6 +67,18 @@ const SENDERS = {
   fortinet: '10.99.0.11',
   paloalto: '10.99.0.21',
 };
+
+// \u26d4 These mirror scripts/seedMockFleet.js's own rule definitions, and
+// tests/mockFixtures.test.js CROSS-CHECKS them against it so the two cannot
+// drift. A generator logging an action its seeded rule would never produce is
+// fabricated evidence, not merely unrealistic traffic.
+const DENY_POLICY_ID = 6;                 // MOCK-FGT-Branch-01's `Deny-All`
+const PAN_RULES = [
+  { name: 'app-to-db', allow: true },
+  { name: 'users-to-app', allow: true },
+  { name: 'outbound-web', allow: true },
+  { name: 'default-deny', allow: false },
+];
 
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function ip(prefix) { return `${prefix}.${1 + Math.floor(Math.random() * 253)}`; }
@@ -83,8 +117,17 @@ function fortinetLine(now) {
   // that FortiGate logs a session that was established and then ended as
   // close/client-rst, NEVER as `allow`, and that matching only `allow` misses
   // the most exposed service on the fleet.
-  const action = pick(['accept', 'close', 'client-rst', 'deny', 'accept', 'close']);
+  // \u26d4 THE ACTION MUST AGREE WITH THE RULE THAT PRODUCED IT. The first version
+  // picked rule and action INDEPENDENTLY, so `Deny-All` logged `accept` and the
+  // rollups recorded a deny rule carrying permitted traffic. That is not merely
+  // unrealistic: /segmentation reads exactly this evidence to decide whether a
+  // deny-intent zone pair is actually in use, so contradictory mock data would
+  // manufacture a violation that only exists because of the generator. Seeded
+  // Fortinet rules 1-5 are `allow`, rule 6 (`Deny-All`) is `deny`.
   const policyid = 1 + Math.floor(Math.random() * 6);
+  const action = policyid === DENY_POLICY_ID
+    ? pick(['deny', 'deny', 'close'])          // a denied session can still log close
+    : pick(['accept', 'close', 'client-rst', 'accept', 'close']);
   const dstport = pick([443, 53, 22, 10443, 80, 3389]);
   return `<189>date=${date} time=${time} ${eventtime}${tz}devname="MOCK-FGT-Branch-01" devid="FGMOCK0000000001" `
     + `logid="0000000013" type="traffic" subtype="forward" level="notice" vd="root" `
@@ -136,11 +179,16 @@ function paloAltoLine(now) {
   const ts = pan;
   // ⛔ `reset-both` is included and is a BLOCK (PAN-OS's IPS resetting both
   // ends) — it looks like Fortinet's `close` family and is the opposite.
-  const action = pick(['allow', 'allow', 'deny', 'drop', 'reset-both']);
-  const rule = pick(['app-to-db', 'users-to-app', 'outbound-web', 'default-deny']);
+  // Same rule as the Fortinet side. PAN-OS's `reset-both` is a BLOCK (its IPS
+  // resetting both ends), so it is legitimate on an ALLOW rule whose security
+  // profile fired -- but `allow` on `default-deny` never is.
+  const rule = pick(PAN_RULES);
+  const action = rule.allow
+    ? pick(['allow', 'allow', 'allow', 'reset-both'])
+    : pick(['deny', 'deny', 'drop', 'reset-both']);
   const dport = pick([1521, 8443, 443, 445]);
   return `<14>${rfc3164Stamp(now)} MOCK-PAN-DC-01 1,${ts},001801000000,TRAFFIC,end,2561,${ts},`
-    + `${ip('10.20.5')},${ip('10.20.9')},0.0.0.0,0.0.0.0,${rule},,,`
+    + `${ip('10.20.5')},${ip('10.20.9')},0.0.0.0,0.0.0.0,${rule.name},,,`
     + `${dport === 443 ? 'ssl' : 'oracle'},vsys1,users,db,ethernet1/1,ethernet1/2,`
     + `MOCK-LOG,${ts},${Math.floor(Math.random() * 9e5)},1,`
     + `${1024 + Math.floor(Math.random() * 60000)},${dport},0,0,0x0,tcp,${action},`
@@ -149,11 +197,12 @@ function paloAltoLine(now) {
 }
 
 function parseArgs(argv) {
-  const o = Object.assign({}, DEFAULTS, { dryRun: false });
+  const o = Object.assign({}, DEFAULTS, { dryRun: false, anySource: false });
   const raw = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') { o.dryRun = true; continue; }
+    if (a === '--any-source') { o.anySource = true; continue; }
     const v = argv[i + 1];
     if (a === '--host') { o.host = v; i++; }
     else if (a === '--port') { raw.port = v; o.port = Number(v); i++; }
@@ -173,41 +222,81 @@ function parseArgs(argv) {
   return o;
 }
 
+/**
+ * One bound socket per vendor, so each vendor's traffic carries its own source
+ * address. ⛔ Rejects rather than falling back — see sourceHelp() above.
+ */
+function bindSender(ip) {
+  return new Promise((resolve, reject) => {
+    const sock = dgram.createSocket('udp4');
+    sock.once('error', (err) => {
+      sock.close();
+      reject(new Error(
+        `could not send from ${ip} (${err.code || err.message}).\n`
+        + `  That address must exist on this machine, or every event is stored with no device\n`
+        + `  and nothing correlates. Add it with:\n    ${sourceHelp(ip)}\n`
+        + `  Or pass --any-source to send from the default address and accept unattributed events.`
+      ));
+    });
+    sock.bind({ address: ip, port: 0, exclusive: true }, () => resolve(sock));
+  });
+}
+
 async function run(opts) {
-  const sock = opts.dryRun ? null : dgram.createSocket('udp4');
+  // One socket per vendor, each bound to that vendor's own source address, so
+  // the collector can resolve a device from it. --any-source falls back to a
+  // single unbound socket and says what that costs.
+  const socks = {};
+  if (!opts.dryRun) {
+    if (opts.anySource) {
+      const shared = dgram.createSocket('udp4');
+      socks.fortinet = shared;
+      socks.paloalto = shared;
+      console.log('[mockSyslog] --any-source: sending from the default address. Events will NOT '
+        + 'match a seeded device and will be stored with device_id NULL (correctly). '
+        + 'Rule-hit correlation will produce nothing.');
+    } else {
+      for (const [vendor, ip] of Object.entries(SENDERS)) {
+        socks[vendor] = await bindSender(ip);
+      }
+      console.log(`[mockSyslog] sending as ${Object.entries(SENDERS)
+        .map(([v, ip]) => `${v}=${ip}`).join(', ')}`);
+    }
+  }
+  const allSocks = [...new Set(Object.values(socks))];
+
   let sent = 0;
   const started = Date.now();
   const perTick = Math.max(1, Math.round(opts.rate / 10));
   const tickMs = 100;
 
   return new Promise((resolve, reject) => {
+    const finish = () => { for (const s of allSocks) { try { s.close(); } catch {} } };
     const timer = setInterval(() => {
       try {
         for (let i = 0; i < perTick && sent < opts.count; i++) {
           const now = new Date();
-          const fortinet = Math.random() < 0.6;
-          const line = fortinet ? fortinetLine(now) : paloAltoLine(now);
+          const vendor = Math.random() < 0.6 ? 'fortinet' : 'paloalto';
+          const line = vendor === 'fortinet' ? fortinetLine(now) : paloAltoLine(now);
           if (opts.dryRun) {
-            console.log(`[${fortinet ? 'fortinet' : 'paloalto'} from ${fortinet ? SENDERS.fortinet : SENDERS.paloalto}] ${line}`);
+            console.log(`[${vendor} from ${SENDERS[vendor]}] ${line}`);
           } else {
-            sock.send(Buffer.from(line), opts.port, opts.host);
+            socks[vendor].send(Buffer.from(line), opts.port, opts.host);
           }
           sent++;
         }
         if (sent >= opts.count) {
           clearInterval(timer);
-          if (sock) sock.close();
+          finish();
           const secs = (Date.now() - started) / 1000;
           console.log(`[mockSyslog] sent ${sent} events to ${opts.host}:${opts.port} in `
             + `${secs.toFixed(1)}s (~${Math.round(sent / Math.max(secs, 0.001))}/sec)`);
-          // \u26d4 SENT IS NOT RECEIVED, AND THIS LINE EXISTS SO NOBODY READS IT
-          // AS ONE. UDP drops under burst even on loopback: measured here,
-          // 360 of 400 arrived at 400/sec with an 8 MB receive buffer. So a
-          // shortfall in `syslog_ingest_stats` after a run is EXPECTED and is
-          // not by itself a collector defect \u2014 and matching numbers are not
-          // proof there was no loss either. Read the collector's own `dropped`
-          // counter, which is the only thing that distinguishes "the buffer
-          // overflowed" from "the network lost it".
+          // \u26d4 SENT IS NOT RECEIVED. UDP drops under burst even on loopback:
+          // measured, 360 of 400 arrived at 400/sec with an 8 MB receive buffer.
+          // A shortfall in syslog_ingest_stats is EXPECTED and is not by itself a
+          // collector defect -- and matching numbers are not proof of no loss.
+          // The collector's own `dropped` counter is the only thing that separates
+          // "the buffer overflowed" from "the network lost it".
           if (!opts.dryRun) {
             console.log('[mockSyslog] note: UDP is lossy under burst \u2014 `sent` is what this '
               + 'process emitted, NOT what arrived. Compare against syslog_ingest_stats '
@@ -217,7 +306,7 @@ async function run(opts) {
         }
       } catch (err) {
         clearInterval(timer);
-        if (sock) sock.close();
+        finish();
         reject(err);
       }
     }, tickMs);
@@ -235,4 +324,5 @@ if (require.main === module) {
   run(opts).catch((e) => { console.error('[mockSyslog]', e.message); process.exit(1); });
 }
 
-module.exports = { fortinetLine, paloAltoLine, parseArgs, SENDERS };
+module.exports = { fortinetLine, paloAltoLine, parseArgs, SENDERS, sourceHelp,
+  DENY_POLICY_ID, PAN_RULES };

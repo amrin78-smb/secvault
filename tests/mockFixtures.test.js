@@ -22,7 +22,8 @@ const assert = require('node:assert/strict');
 
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const vendorParsers = require('../lib/syslog/vendorParsers');
-const { fortinetLine, paloAltoLine, parseArgs, SENDERS } = require('../scripts/mockSyslog');
+const { fortinetLine, paloAltoLine, parseArgs, SENDERS, DENY_POLICY_ID, PAN_RULES } =
+  require('../scripts/mockSyslog');
 const { assertSafeTarget, DEVICES, NAME_PREFIX } = require('../scripts/seedMockFleet');
 
 const NOW = new Date('2026-10-01T16:30:00+07:00');
@@ -111,6 +112,98 @@ describe('⛔ mock syslog is parsed by the REAL parsers, not merely plausible', 
     }
     assert.ok(actions.has('close') || actions.has('client-rst'),
       `expected a session-close action among ${[...actions].join(',')}`);
+  });
+});
+
+describe('⛔ a logged action must agree with the rule that produced it', () => {
+  // The first version picked rule and action INDEPENDENTLY, so `Deny-All` logged
+  // `accept` and `default-deny` logged `allow` -- measured live, 149 hits of it.
+  // That is not merely unrealistic: /segmentation reads exactly this evidence to
+  // decide whether a deny-intent zone pair is actually carrying traffic, so the
+  // generator would have manufactured a violation that exists only because of the
+  // generator. Fabricated evidence is worse than no evidence.
+  const DENIED = new Set(['deny', 'drop', 'reset-both']);
+
+  function seededRules(ip) {
+    return DEVICES.find((d) => d.mgmt_ip === ip).rules;
+  }
+
+  it('\u26d4 the generator\'s intent tables match the SEEDER\'s rules', () => {
+    // Cross-checked against the seeder rather than restated, so the two cannot
+    // drift into disagreeing about which rules deny.
+    const fgt = seededRules(SENDERS.fortinet);
+    const denyIds = fgt.filter((r) => r.action === 'deny').map((r) => r.seq);
+    assert.deepEqual(denyIds, [DENY_POLICY_ID],
+      `the seeder's deny rule(s) are ${denyIds.join(',')} but the generator thinks it is ${DENY_POLICY_ID}`);
+
+    const pan = seededRules(SENDERS.paloalto);
+    for (const r of PAN_RULES) {
+      const seeded = pan.find((x) => x.name === r.name);
+      assert.ok(seeded, `generator logs PAN rule "${r.name}" which the seeder does not define`);
+      assert.equal(r.allow, seeded.action === 'allow',
+        `"${r.name}": generator says allow=${r.allow}, seeder says action=${seeded.action}`);
+    }
+  });
+
+  it('a Fortinet deny rule never logs an accepting action', () => {
+    let seen = 0;
+    for (let i = 0; i < 2000; i++) {
+      const line = fortinetLine(NOW);
+      const ev = vendorParsers.parseFortinet(parseSyslogLine(line, NOW).message);
+      if (String(ev.ruleId) !== String(DENY_POLICY_ID)) continue;
+      seen++;
+      assert.ok(ev.action !== 'accept',
+        `rule ${DENY_POLICY_ID} is Deny-All and must never log accept`);
+    }
+    assert.ok(seen > 0, 'the deny rule never appeared, so nothing was checked');
+  });
+
+  it('a Fortinet allow rule never logs deny', () => {
+    let seen = 0;
+    for (let i = 0; i < 2000; i++) {
+      const line = fortinetLine(NOW);
+      const ev = vendorParsers.parseFortinet(parseSyslogLine(line, NOW).message);
+      if (String(ev.ruleId) === String(DENY_POLICY_ID)) continue;
+      seen++;
+      assert.ok(ev.action !== 'deny',
+        `rule ${ev.ruleId} is an allow rule and must never log deny`);
+    }
+    assert.ok(seen > 0, 'no allow rule appeared, so nothing was checked');
+  });
+
+  it('\u26d4 default-deny never logs allow, and an allow rule never logs a bare deny', () => {
+    const byRule = new Map();
+    for (let i = 0; i < 3000; i++) {
+      const ev = vendorParsers.parsePaloAlto(parseSyslogLine(paloAltoLine(NOW), NOW).message);
+      if (!byRule.has(ev.ruleName)) byRule.set(ev.ruleName, new Set());
+      byRule.get(ev.ruleName).add(ev.action);
+    }
+    for (const r of PAN_RULES) {
+      const actions = byRule.get(r.name);
+      assert.ok(actions && actions.size, `rule ${r.name} never appeared`);
+      if (r.allow) {
+        assert.ok(!actions.has('deny') && !actions.has('drop'),
+          `allow rule ${r.name} logged ${[...actions].join(',')}`);
+      } else {
+        assert.ok(!actions.has('allow'),
+          `DENY rule ${r.name} logged allow -- /segmentation would read that as a live violation`);
+        for (const a of actions) {
+          assert.ok(DENIED.has(a), `deny rule ${r.name} logged non-denying action ${a}`);
+        }
+      }
+    }
+  });
+
+  it('reset-both is permitted on an ALLOW rule, because PAN-OS really does that', () => {
+    // Its IPS resetting both ends. Excluding it would be the opposite error:
+    // trimming real vendor behaviour out of the fixtures.
+    let found = false;
+    for (let i = 0; i < 3000 && !found; i++) {
+      const ev = vendorParsers.parsePaloAlto(parseSyslogLine(paloAltoLine(NOW), NOW).message);
+      const r = PAN_RULES.find((x) => x.name === ev.ruleName);
+      if (r && r.allow && ev.action === 'reset-both') found = true;
+    }
+    assert.ok(found, 'no allow rule ever logged reset-both, so that real case is untested');
   });
 });
 
