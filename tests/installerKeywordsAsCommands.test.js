@@ -38,7 +38,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { powershellHost, runPsProbe } = require('./psScripts');
 
 const INSTALLER_DIR = path.join(__dirname, '..', 'installer');
 
@@ -70,35 +70,37 @@ const PROBE = [
 ].join('\n');
 
 function inspectInstallerScripts() {
-  const probePath = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'sv-astprobe-')),
-    'probe.ps1'
-  );
-  fs.writeFileSync(probePath, PROBE, 'utf8');
-  try {
-    const stdout = execFileSync(
-      'powershell',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', probePath, INSTALLER_DIR],
-      { encoding: 'utf8', timeout: 120000 }
-    );
-    return stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((l) => {
-        const [file, line, rest] = l.split('|');
-        return { file, line: Number(line), rest };
-      });
-  } finally {
-    fs.rmSync(path.dirname(probePath), { recursive: true, force: true });
-  }
+  // ⛔ null, NOT a throw, when no authoritative PowerShell exists here — see
+  // tests/psScripts.js. The caller skips with the reason; it must never ENOENT.
+  const stdout = runPsProbe(PROBE, [INSTALLER_DIR]);
+  if (stdout === null) return null;
+  return stdout
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [file, line, rest] = l.split('|');
+      return { file, line: Number(line), rest };
+    });
 }
 
-describe('installer scripts are structurally sound, not merely parseable', () => {
-  // ⛔ NO SKIP BRANCH. If PowerShell cannot be reached this test FAILS — a gate
-  // that quietly passes when it could not run is the guard-that-cannot-fire
-  // pattern, which is the defect this whole file exists to close. These scripts
-  // only ever run on Windows; so does their gate.
+// ⛔ THE RULE HERE CHANGED ON 2026-10-01, AND THE OLD ONE IS QUOTED SO THE
+// REVERSAL IS VISIBLE RATHER THAN SILENT. It read: "NO SKIP BRANCH. If
+// PowerShell cannot be reached this test FAILS ... These scripts only ever run
+// on Windows; so does their gate." That was right while development happened on
+// Windows. Development moved to Linux, where the gate does not fail on a
+// finding — it dies with `spawnSync powershell ENOENT` and takes the whole
+// suite with it, for a reason that has nothing to do with the scripts.
+//
+// ⛔ THE REPLACEMENT IS A SKIP, NOT A PASS. The skip is printed with its reason
+// in the TAP output, so "we could not measure this here" is visible rather than
+// being a green tick over an unrun check — the distinction this codebase draws
+// everywhere between an absent measurement and a clean one. The authoritative
+// 5.1 run happens on the Windows staging server (CLAUDE.md, "Machines").
+const psHost = powershellHost();
+
+describe('installer scripts are structurally sound, not merely parseable', { skip: psHost.exe ? false : psHost.reason }, () => {
   const findings = inspectInstallerScripts();
 
   it('reached PowerShell and actually inspected something', () => {

@@ -39,6 +39,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { readPs } = require('./psScripts');
+
 const INSTALLER_DIR = path.join(__dirname, '..', 'installer');
 
 // Anything that names an env file: the variables the scripts hold one in, plus
@@ -74,7 +76,7 @@ const isComment = (line) => /^\s*#/.test(line);
 function scriptLines() {
   return fs.readdirSync(INSTALLER_DIR)
     .filter((f) => f.endsWith('.ps1'))
-    .flatMap((file) => fs.readFileSync(path.join(INSTALLER_DIR, file), 'utf8')
+    .flatMap((file) => readPs(file)
       .split('\n')
       .map((text, i) => ({ file, line: i + 1, text }))
       .filter((l) => !isComment(l.text)));
@@ -190,7 +192,7 @@ describe('⛔ every env-file read states its encoding', () => {
     // opaque OutOfMemoryException instead of the recovery instructions.
     for (const file of ['SecVault-Tls.ps1', 'Install-SecVault.ps1']) {
       assert.match(
-        fs.readFileSync(path.join(INSTALLER_DIR, file), 'utf8'),
+        readPs(file),
         /-gt\s*1MB/,
         `the oversized-.env.local guard is gone from ${file}`
       );

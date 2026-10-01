@@ -204,6 +204,28 @@ score-shaped field (pinned); the slug/UUID join always routes through `audit_che
 NEGATIVELY — the wrong forms are asserted absent); and `expires_at` is mandatory with expiry
 resolved at read time. `tests/complianceExceptions.test.js`, 64 cases, 30/30 mutations killed.
 
+## scripts/runTests.js (v2.195.0) — what `npm test` runs
+
+Enumerates `tests/**/*.test.js` in JS and spawns `node --test <files…>`. ⛔ Replaces
+`node --test tests/`, which is **Node-20-only**: on Node 22 and 24 the DIRECTORY form resolves as a
+MODULE and the run dies with `Cannot find module '<repo>/tests'`, reporting `# fail 1` over ZERO
+executed tests — a suite that never started, wearing the summary of one ordinary failure. The dev
+box runs Node 22 and the server Node 20, so a command working on only one is not a gate. ⛔ The
+shell-glob alternative is not portable either (npm uses `cmd.exe` on Windows, which does not glob).
+⛔ **Fewer than `MIN_EXPECTED_FILES` test files is a FAILURE**: `node --test` with no files exits 0,
+so a wrong directory would turn the main gate into a green tick over nothing. Forwards extra argv.
+
+## tests/psScripts.js (v2.195.0) — the one PowerShell-authority decision
+
+`readPs` / `readAllPs` / `powershellHost` / `runPsProbe`. ⛔ **Windows PowerShell 5.1 is the only
+authority**: `pwsh` accepts `&&`, `||`, `??`, `?:` and `?.`, which 5.1 REJECTS, so a green pwsh run
+would certify a script that cannot execute on the server. ⛔ Off Windows `powershellHost()` returns
+`exe: null` and the caller SKIPS with the reason printed — never a pass, never `spawnSync powershell
+ENOENT` (which is what killed the whole suite on the Linux dev box). `SECVAULT_ALLOW_PWSH=1` is an
+opt-in spot-check whose reason still says NOT authoritative. ⛔ `readPs` normalises CRLF→LF: a
+Windows checkout stores `.ps1` with CRLF, and `split('\n')[n]` then yields a line with a trailing
+`\r` against which every anchored regex silently stops matching.
+
 ## scripts/apiSweep.js + scripts/dbCheck.js (v2.163.0)
 
 The two gates added beside `npm run smoke`; see CLAUDE.md's "three gates OUTSIDE npm test" table

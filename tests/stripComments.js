@@ -27,7 +27,7 @@
 //   raw 46,914 chars  ->  block-first 35,219  ->  8,261 chars of REAL CODE gone
 //
 // Across the repo, 17 source files carry that trigger and block-first discards
-// **52,339 characters of real code** from them — a quarter of `scripts/dbcheck.js`,
+// **52,339 characters of real code** from them — a quarter of `scripts/dbCheck.js`,
 // 40% of `lib/deviceScopePaths.js`.
 //
 // ⛔ NO SECURITY VERDICT CURRENTLY FLIPS. Measured: `deviceScopeCoverage.test.js`

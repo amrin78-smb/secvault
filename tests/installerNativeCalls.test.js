@@ -33,6 +33,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { readPs } = require('./psScripts');
+
 const INSTALLER_DIR = path.join(__dirname, '..', 'installer');
 
 // A line is a comment if the first non-space character is `#`. PowerShell has
@@ -42,7 +44,7 @@ const isComment = (line) => /^\s*#/.test(line);
 function scriptsWithNativeRedirects() {
   return fs.readdirSync(INSTALLER_DIR)
     .filter((f) => f.endsWith('.ps1'))
-    .map((f) => ({ file: f, text: fs.readFileSync(path.join(INSTALLER_DIR, f), 'utf8') }))
+    .map((f) => ({ file: f, text: readPs(f) }))
     .filter((s) => s.text.includes('2>&1'));
 }
 
@@ -208,7 +210,10 @@ describe('⛔ the allow-list is honest about itself', () => {
       const [file, lineNo] = entry.split(':');
       const full = path.join(INSTALLER_DIR, file);
       assert.ok(fs.existsSync(full), `${file} no longer exists — drop ${entry}`);
-      const line = fs.readFileSync(full, 'utf8').split('\n')[Number(lineNo) - 1];
+      // ⛔ readPs, not readFileSync: a CRLF checkout leaves a trailing \r on every
+      // line, and an anchored regex against it stops matching while the check
+      // reports clean — comparing against a string nobody writes.
+      const line = readPs(full).split('\n')[Number(lineNo) - 1];
       assert.ok(line !== undefined, `${entry} is past the end of the file — the list has drifted`);
       assert.ok(line.includes('2>&1'),
         `${entry} no longer redirects stderr — either it was fixed (remove it from `

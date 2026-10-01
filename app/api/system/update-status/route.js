@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.195.0': [
+    "Internal only — no change to anything you see in the console. Development moved from Windows to a Linux machine, and this release makes the project's own checks work there.",
+    "⛔ The test suite could not start at all on the new machine: the command used to run it only works on one version of Node, and on the newer one it reported a single ordinary-looking failure having run nothing. It now enumerates the test files directly, and refuses to report success if it finds suspiciously few of them.",
+    "⛔ The checks that inspect the Windows installer scripts now say \"could not measure here\" when run off Windows, instead of failing for an unrelated reason. They are still run for real on Windows, which is the only version that matters — PowerShell 7 on Linux accepts syntax the servers reject, so a pass there would certify a script that cannot run.",
+    "Fixed a filename that differed only by capitalisation, which worked on Windows and broke immediately on Linux — the check involved had never actually read the file it claimed to inspect.",
+  ],
   '2.194.0': [
     "The side menu had grown to sixteen destinations and needed scrolling. Segmentation and Applications now share one entry, called Intent, with a tab across the top of each page — they answer the same question at two levels, zone-to-zone policy and then application-to-flow, so they read better together than apart.",
     "⛔ No link has changed. Both pages keep their own web address, so anything already sent in a notification, pasted into a ticket or saved as a bookmark still opens the same page. Nothing was redirected or removed.",

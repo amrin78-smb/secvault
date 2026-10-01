@@ -34,7 +34,12 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const ENGINES = path.join(ROOT, 'lib', 'engines');
-const DBCHECK = path.join(ROOT, 'scripts', 'dbcheck.js');
+// ⛔ `dbCheck.js`, CAPITAL C. Spelled `dbcheck.js` until 2026-10-01, which
+// resolved fine on Windows' case-insensitive filesystem and threw ENOENT the
+// moment development moved to Linux. The test had never actually read the
+// file it claims to pin on any case-sensitive machine, and nothing said so
+// because ENOENT only arrives once the path is genuinely wrong.
+const DBCHECK = path.join(ROOT, 'scripts', 'dbCheck.js');
 
 // ⛔ `*Data.js` is the repo's own naming convention for "the pool-taking half of
 // a pure engine" — segmentationData, applicationViewData, coverageRegisterData.

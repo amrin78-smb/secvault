@@ -1,13 +1,13 @@
 {
   "name": "secvault",
-  "version": "2.194.0",
+  "version": "2.195.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3010",
     "build": "next build",
     "start": "next start -p 3010",
     "migrate": "node lib/migrate.js",
-    "test": "node --test tests/",
+    "test": "node scripts/runTests.js",
     "smoke": "node scripts/smoke.js",
     "apisweep": "node scripts/apiSweep.js",
     "dbcheck": "node scripts/dbCheck.js"

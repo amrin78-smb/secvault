@@ -59,8 +59,61 @@ Not a module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependenc
 - **Install path:** `C:\Apps\SecVault\`
 - **Repo:** `amrin78-smb/secvault` (private)
 - **DB:** `secvault` (PostgreSQL 16, user: `secvault_user`)
-- **Dev path (office):** `D:\Users\rahamr00\Documents\NocVault\SecVault\`
+
+### Machines (changed 2026-10-01 — read this before assuming where anything runs)
+
+| role | host | what it is |
+|---|---|---|
+| **dev** | `192.168.31.230` · `amrin-Latitude-5400` | **Linux.** Zorin OS 18.1 (Ubuntu 24.04 noble). Repos under `/home/amrin/development/Nocvault/`. Node 22 via nvm, PostgreSQL 16.15 local, `pwsh` 7.6, Playwright 1.63 + browsers, openssh-server, sshpass. |
+| **staging** | `192.168.31.10` · `LAPTOP-6PETB251` | Windows 11 Home, PostgreSQL 16.15, NSSM at `C:\Windows\System32\nssm.exe`. **Hosts CertVault only** (`C:\Apps\CertVault`, port 3014). DHCP, reservation pending. |
+| **production** | `192.168.7.69` | The SecVault reference fleet server. ⛔ **NOT reachable from the dev box** — measured 2026-10-01, 3010 and 5432 both no-answer. Different network. |
+
+⛔ **`192.168.31.230` WAS THE OLD WINDOWS STAGING MACHINE AND IS NOW THE LINUX DEV BOX.** That
+Windows install was WIPED. Anything a note or script assumes is installed there — services,
+databases, an app install — is gone. Do not try to deploy to it or SSH into it as a Windows server.
+
+⛔ **PRODUCTION IS UNREACHABLE FROM DEV, so the live-DB verification loop this file keeps calling
+for does not work from here.** The `claude_readonly` workflow (and every "query the live fleet
+before guessing a field name" instruction below) needs a machine on that network. From the dev box,
+reach for the LOCAL PostgreSQL 16.15 instead and say plainly when a claim could not be checked
+against production — an unverifiable claim stated as measured is this file's own
+failed-read-as-a-fact rule aimed at its own process.
+
+⛔ **SecVault IS NOT INSTALLED ON THE STAGING SERVER.** It hosts CertVault today. **Ask before
+installing anything there.**
+
+⛔ **STAGING SSH IS KEY-ONLY** (password login refused):
+`ssh -i ~/.ssh/certvault_staging_ed25519 -o IdentitiesOnly=yes amrin78@192.168.31.10`. `amrin78` is
+a local administrator and the session is an elevated **cmd** shell — for PowerShell, `scp` a `.ps1`
+across and run `powershell -NoProfile -ExecutionPolicy Bypass -File <path>`; avoid multi-line
+`-Command`. ⛔ **The private key lives on the dev box ONLY. Never copy a private key between
+machines** — generate your own and ask for it to be authorised.
+
+⛔ **NEVER RESTART, RECONFIGURE OR STOP `sshd` ON STAGING.** The last attempt took SSH down and only
+physical console access recovered it. Its OpenSSH is the GitHub build (`winget
+Microsoft.OpenSSH.Preview`); the Windows built-in capability install hangs, and its leftover
+`InstallPending` state once unregistered sshd outright. Port 22 needed an explicit inbound rule
+(`CertVault-SSH-In`).
+
+⛔ **`sudo` on the dev box needs Amrin's password — ASK, and never write it to a file or a memory.**
+Gotcha: `echo pw | sudo -S` consumes stdin, so hand SQL to `sudo -u postgres psql` with `-f <file>`,
+never a heredoc.
+
 - **Deploy:** `git push` → `& "C:\Apps\SecVault\installer\Update-SecVault.ps1"`
+
+> **Machines (2026-10-01).** Claude now develops on a **Linux** box (Zorin 18.1,
+> `192.168.31.230` — the IP of the old Windows staging laptop, which was WIPED;
+> never treat `.230` as a Windows server). The Windows staging machine is
+> **192.168.31.10** (`LAPTOP-6PETB251`), and it currently hosts **CertVault only** —
+> SecVault is NOT installed there. **Ask Amrin before installing it.** Staging SSH is
+> key-only and ⛔ sshd must never be restarted remotely. Full detail lives in
+> project memory (`dev-and-staging-machines`) and in `certvault/CLAUDE.md`.
+>
+> ⚠️ `pwsh` 7 on the Linux dev box is **not** a valid PS 5.1 gate — it accepts
+> `&&`, `||`, `??`, `?:`, `?.` which 5.1 rejects. Tests that parse or run installer
+> `.ps1` files must use `powershell` (5.1) on Windows and SKIP elsewhere with
+> "could not measure here"; normalise CRLF→LF when reading `.ps1`.
+
 
 ---
 
@@ -137,6 +190,14 @@ query, a renderer, or an engine; sort with `NULLS LAST`.
   reintroduce a global shape.
 
 ### PowerShell (PS5 compatibility — Windows Server uses PS5 not PS7)
+
+⛔ **`pwsh` ON LINUX IS NOT AUTHORITATIVE AND MAY NEVER STAND IN FOR 5.1 (decided 2026-10-01).**
+The dev box carries PowerShell 7.6; the servers run Windows PowerShell 5.1. **pwsh ACCEPTS SYNTAX
+5.1 REJECTS** — `&&`, `||`, `??`, `?:` and `?.` all parse cleanly in 7 and are hard errors in 5.1.
+So a green pwsh run certifies a script that cannot execute on the machine it ships to, which is
+worse than no check at all: it is this file's own "a second parser disagreeing with the
+authoritative one" trap, with a different binary. The authoritative run happens on the **Windows
+staging server**.
 - `try/catch` cannot pipe directly in PS5 — assign to a variable first, then pipe: `$out = git pull; $out | Write-Host` (not `try { git pull | Write-Host } catch {}`)
 - No `-Parallel` on `ForEach-Object`, no `-TimeoutSeconds` on `Test-Connection` (both PS7-only)
 - `$PID` is a reserved variable — use `$procPid` instead
@@ -193,8 +254,27 @@ at all. It cleared a parse check, a package build, and a read of the diff around
 in this repo, and now it is not evidence for the installer scripts either.
 `tests/installerKeywordsAsCommands.test.js` asks the REAL AST (never a brace-counting regex, which
 would be a second parser disagreeing with the authoritative one) and fails the build when any
-block keyword — `else`/`elseif`/`catch`/`finally`/`until` — is parsed as a command name. It has
-NO skip branch: these scripts only ever run on Windows, and so does their gate.
+block keyword — `else`/`elseif`/`catch`/`finally`/`until` — is parsed as a command name.
+
+⛔ **IT NOW SKIPS OFF WINDOWS, REVERSING THIS FILE'S OWN EARLIER RULE (2026-10-01).** It used to
+say "NO skip branch: these scripts only ever run on Windows, and so does their gate." That was
+right while development happened on Windows. Development moved to Linux, where the gate no longer
+fails on a FINDING — it dies with `spawnSync powershell ENOENT` and takes the entire suite with it,
+for a reason that has nothing to do with the scripts. A gate that fails for an unrelated reason
+gets deleted or ignored, which loses the check altogether.
+
+⛔ **A SKIP, NEVER A PASS, AND NEVER AN ENOENT.** `tests/psScripts.js` owns the decision in one
+place: on Windows it uses `powershell` (5.1); off Windows it returns `null` and the suite SKIPS
+with the reason printed in the TAP output — "could not measure here" is visible, where a silent
+green tick over an unrun check is the guard-that-cannot-fire pattern. `SECVAULT_ALLOW_PWSH=1`
+enables a deliberate local spot-check whose reason string still says **NOT authoritative**.
+⛔ The rule is asserted from the OTHER SIDE too (`tests/psScripts.test.js`): **on win32 it must NOT
+skip**, or the check would have quietly stopped happening on the one machine that can do it.
+
+⛔ **AND EVERY TEST THAT READS A `.ps1` NORMALISES CRLF→LF** via `psScripts.js`'s `readPs()`. A
+Windows checkout stores them with CRLF, so `text.split('\n')[n]` hands back a line with a trailing
+`\r` and every anchored regex against it quietly stops matching — the check reports clean because
+it compared against a string nobody writes.
 
 ### External API Integrations
 - **Verify all field names against live responses before writing any parser — documentation lies.**
@@ -314,7 +394,7 @@ node reads the certificate once, at startup.
 | Frontend + API | Next.js 14.2.35, React 18.3, App Router (`app/` directory — NOT `pages/`) |
 | Auth | next-auth 4.24.7, standalone (no suite SSO dependency) |
 | Database | PostgreSQL 16, `pg` module (pool pattern) |
-| Runtime | Node.js v20 |
+| Runtime | Node.js v20 **on the server**; the Linux dev box runs **Node 22** via nvm (`. "$NVM_DIR/nvm.sh"; nvm use 22`). ⛔ They are not interchangeable — see Testing. |
 | CSS | Plain CSS custom properties + suite utility classes (`app/globals.css`) — NO framework. See "Design System" below. |
 | Icons | Hand-rolled inline SVG (`components/icons.js`) — no icon library |
 | Charts | `recharts` |
@@ -3029,8 +3109,24 @@ not even fix the slow case.
 
 ## Testing (`tests/`, added 2026-08-25)
 
-`npm test` — Node 20's **built-in** test runner (`node --test tests/`). Read `tests/README.md`
-before adding any.
+`npm test` — Node's **built-in** test runner, driven by `scripts/runTests.js`. Read
+`tests/README.md` before adding any.
+
+⛔ **`node --test tests/` WAS NODE-20-ONLY AND BROKE THE WHOLE SUITE ON THE DEV BOX.** Measured
+2026-10-01: on Node 22 **and** Node 24 the DIRECTORY form is resolved as a MODULE, so the run dies
+with `Error: Cannot find module '<repo>/tests'` and reports `# fail 1` — zero tests executed, and a
+summary that reads like one ordinary failure rather than a suite that never started. The dev box
+runs Node 22 and the server runs Node 20, so a command that only works on one of them is not a gate.
+⛔ The shell-glob fix is not portable either: `tests/*.test.js` relies on the SHELL expanding it,
+and npm runs scripts through `cmd.exe` on Windows, which does not glob. `scripts/runTests.js`
+enumerates the files in JS — no shell, no Node-version dependence.
+⛔ **It EXITS NON-ZERO on finding fewer than `MIN_EXPECTED_FILES` test files.** `node --test` with
+no files exits 0, so a wrong directory or a renamed suffix would turn this repo's main gate into a
+green tick over nothing.
+
+⛔ **UNDER A NON-TTY THE RUNNER PRINTS TAP** — read the `# pass` / `# fail` / `# skipped` lines, not
+the `ℹ` spec summary, which is not emitted in that mode. A grep for the wrong one reports nothing
+and reads as success.
 
 ⛔ **`package.json` has NO `devDependencies`, and that is deliberate — keep it that way.** The
 production server installs with `npm ci` in `Update-SecVault.ps1`, so every devDependency would
@@ -3147,8 +3243,14 @@ shipping.
 # CommonJS half of the repo and worth nothing for app/** -- which is how a syntax
 # error in an API route reached main. `npm test` is what actually catches this.
 node --check lib/**/*.js services/**/*.js                 # CommonJS only -- see above
+# On the Linux dev box, load nvm first -- a non-interactive shell does NOT have it,
+# and bare `node` there resolves to a DIFFERENT version than the one Amrin set up:
+#   export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 npm test                                                  # must be zero failures; the REAL syntax gate
 npm run build                                             # must be zero errors
+# ⛔ `# skipped` is NOT `# pass`. Off Windows the installer PowerShell gate SKIPS with
+# "could not measure here" -- run it for real on the Windows staging server before
+# shipping any installer/*.ps1 change. See the PowerShell section above.
 # If a PAGE or a server->client prop changed, also sweep a running instance:
 #   SMOKE_URL=https://<server>:3010 SMOKE_USER=… SMOKE_PASS=… SMOKE_INSECURE=1 npm run smoke
 # Nothing in `npm test` renders a page -- see the smoke-sweep note under Testing.
@@ -3162,3 +3264,6 @@ npm run build                                             # must be zero errors
 # On production server:
 & "C:\Apps\SecVault\installer\Update-SecVault.ps1"
 ```
+⛔ **This cannot be driven from the Linux dev box** — production (`192.168.7.69`) is on a different
+network and does not answer (measured 2026-10-01). Deployment runs on the server itself, via that
+script or Settings → Update. Push the commit and have it pulled; see "Machines" above.
