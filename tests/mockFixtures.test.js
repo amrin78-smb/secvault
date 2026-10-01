@@ -196,3 +196,70 @@ describe('the seeded fleet is deliberately uneven', () => {
     assert.ok(bad, 'nothing exercises unreadable_running_version in the upgrade planner');
   });
 });
+
+describe('⛔ the seeder\'s SQL matches the real schema, not a remembered one', () => {
+  // Nothing in `npm test` can run the seeder — it needs a database, and the dev
+  // box has no role to connect as. So the one failure that would waste the first
+  // real attempt is pinned statically instead: a column name that does not
+  // exist. Already hit once this project (`rule_action` where the column is
+  // `action`), and it is the v2.86.1 outage shape — a wrong column name builds
+  // clean, passes every static check, and fails only when the query runs.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ROOT = path.join(__dirname, '..');
+  const schema = fs.readFileSync(path.join(ROOT, 'lib/schema.sql'), 'utf8');
+  const seed = fs.readFileSync(path.join(ROOT, 'scripts/seedMockFleet.js'), 'utf8');
+
+  function columnsOf(table) {
+    const cols = new Set();
+    const m = schema.match(new RegExp(`CREATE TABLE IF NOT EXISTS\\s+${table}\\s*\\(([\\s\\S]*?)\\n\\);`, 'i'));
+    if (m) {
+      for (const line of m[1].split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('--')) continue;
+        if (/^(PRIMARY|FOREIGN|UNIQUE|CHECK|CONSTRAINT|EXCLUDE)\b/i.test(t)) continue;
+        const c = t.match(/^"?([a-z_][a-z0-9_]*)"?\s/i);
+        if (c) cols.add(c[1].toLowerCase());
+      }
+    }
+    // ADD COLUMN matters as much as the CREATE body — CLAUDE.md's own trap is a
+    // column added to an existing table, where the CREATE still looks right.
+    const alter = new RegExp(`ALTER TABLE\\s+${table}\\s+ADD COLUMN IF NOT EXISTS\\s+"?([a-z_][a-z0-9_]*)"?`, 'gi');
+    let a;
+    while ((a = alter.exec(schema))) cols.add(a[1].toLowerCase());
+    return cols;
+  }
+
+  const inserts = [];
+  const re = /INSERT INTO\s+([a-z_]+)\s*\(([^)]*)\)/gi;
+  let m;
+  while ((m = re.exec(seed))) {
+    inserts.push({
+      table: m[1].toLowerCase(),
+      cols: m[2].split(',')
+        .map((c) => c.trim().replace(/\s+/g, ' ').split(' ')[0].toLowerCase())
+        .filter(Boolean),
+    });
+  }
+
+  it('the scan actually found the seeder\'s INSERTs', () => {
+    // Without this the loop below is a guard that cannot fire: a regex that
+    // matches nothing passes every assertion it never runs.
+    assert.ok(inserts.length >= 4,
+      `expected at least 4 INSERT statements, found ${inserts.length} — the scan is broken, not the seeder`);
+    const tables = inserts.map((i) => i.table);
+    for (const t of ['devices', 'device_versions', 'device_configs', 'firewall_rules']) {
+      assert.ok(tables.includes(t), `the seeder no longer inserts into ${t}`);
+    }
+  });
+
+  for (const { table, cols } of inserts) {
+    it(`every column the seeder writes to ${table} exists in schema.sql`, () => {
+      const declared = columnsOf(table);
+      assert.ok(declared.size > 0, `${table} is not declared in schema.sql at all`);
+      const missing = cols.filter((c) => !declared.has(c));
+      assert.deepEqual(missing, [],
+        `${table}: these columns do not exist in schema.sql -> ${missing.join(', ')}`);
+    });
+  }
+});
