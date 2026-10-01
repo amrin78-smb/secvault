@@ -40,6 +40,8 @@
 //   DATABASE_URL=postgres://…/secvault_mock node scripts/seedMockFleet.js --i-know
 //   …add --wipe to clear previously-seeded MOCK- devices first.
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { Pool } = require('pg');
 
 const PRODUCTION_HOSTS = ['192.168.7.69'];
@@ -226,7 +228,50 @@ async function seed(pool, { wipe }) {
   return out;
 }
 
+// ⛔ `.env.local` IS LOADED HERE, THE SAME WAY lib/migrate.js DOES IT, AND THE
+// SAFETY OF THAT RESTS ENTIRELY ON THE THREE REFUSALS BELOW.
+//
+// Found on the first staging run: `migrate.js` loads `.env.local` and this did
+// not, so `node scripts/seedMockFleet.js --i-know` failed with "DATABASE_URL is
+// not set" on a machine whose database was configured and migrated seconds
+// earlier. Two scripts in the same directory disagreeing about where
+// configuration comes from is a footgun, and the runbook step that worked for
+// one silently did not for the other.
+//
+// ⛔ It does mean that running this on a PRODUCTION box would now pick up the
+// production DATABASE_URL rather than erroring out. That is fine ONLY because
+// the database-NAME refusal is the load-bearing one and catches it: production's
+// database is `secvault`, which does not match /mock|test|staging|scratch/i.
+// The host check cannot be relied on there — production's own DATABASE_URL
+// carries NO host at all (it is loopback), so it would never match
+// PRODUCTION_HOSTS. Do not weaken the name check on the assumption that the
+// host check backs it up.
+function loadEnvLocal() {
+  const envPath = path.join(__dirname, '..', '.env.local');
+  try {
+    const content = fs.readFileSync(envPath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"'))
+        || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      // An explicit environment variable WINS, so a one-off run can point
+      // somewhere else without editing the file.
+      if (process.env[key] === undefined) process.env[key] = value;
+    }
+  } catch {
+    // Absent or unreadable is not an error: process.env may already carry it.
+  }
+}
+
 async function main() {
+  loadEnvLocal();
   const { confirmed, wipe } = parseArgs(process.argv.slice(2));
   const url = process.env.DATABASE_URL;
   let target;
