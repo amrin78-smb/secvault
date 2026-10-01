@@ -114,6 +114,61 @@ describe('⛔ mock syslog is parsed by the REAL parsers, not merely plausible', 
   });
 });
 
+describe('⛔ all three Fortinet timestamp paths are exercised', () => {
+  // The first draft exercised NONE of them: it emitted date= and time= with no
+  // tz= and no eventtime=, so `parseFortinet` correctly refused to invent a zone
+  // and EVERY mock Fortinet event carried a null eventAt. Right behaviour by the
+  // parser, and it meant the mock fleet never tested the timestamp logic at all.
+  function sample(n) {
+    const out = { ns: 0, fallback: 0, nul: 0 };
+    for (let i = 0; i < n; i++) {
+      const line = fortinetLine(new Date());
+      const ev = vendorParsers.parseFortinet(parseSyslogLine(line, NOW).message);
+      if (!ev.eventAt) out.nul++;
+      else if (/eventtime=/.test(line)) out.ns++;
+      else out.fallback++;
+    }
+    return out;
+  }
+
+  it('the preferred eventtime path, the date+tz fallback, and a NULL all occur', () => {
+    const r = sample(1500);
+    assert.ok(r.ns > 0, 'no line carried a usable eventtime \u2014 the preferred path is untested');
+    assert.ok(r.fallback > 0, 'no line fell back to date+time+tz \u2014 that path is untested');
+    assert.ok(r.nul > 0,
+      '\u26d4 no line produced a NULL eventAt \u2014 the refusal to invent a timezone is untested, '
+      + 'and that is the case this codebase gets wrong');
+  });
+
+  it('\u26d4 eventtime is 19 digits, so it scales as NANOseconds', () => {
+    // parseFortinet scales by DIGIT LENGTH. A 16-digit value is read as
+    // microseconds and resolves to 1970-01-21 \u2014 present in the table and
+    // outside every time window and rollup bucket. A wrong-length epoch is
+    // worse than no epoch.
+    let checked = 0;
+    for (let i = 0; i < 400 && checked < 5; i++) {
+      const line = fortinetLine(new Date());
+      const m = line.match(/eventtime=(\d+)/);
+      if (!m) continue;
+      checked++;
+      assert.equal(m[1].length, 19, `eventtime must be 19 digits, got ${m[1].length}`);
+      const ev = vendorParsers.parseFortinet(parseSyslogLine(line, NOW).message);
+      assert.ok(ev.eventAt, 'a 19-digit eventtime must resolve');
+      assert.ok(ev.eventAt.getUTCFullYear() >= 2026,
+        `resolved to ${ev.eventAt.toISOString()} \u2014 the divisor is wrong`);
+    }
+    assert.ok(checked > 0, 'no eventtime was ever emitted, so nothing was checked');
+  });
+
+  it('a NULL eventAt is never backfilled with a guess', () => {
+    // Belt and braces on the parser's own contract: when the generator omits
+    // both, nothing downstream may invent a time.
+    const line = fortinetLine(NOW).replace(/eventtime=\d+ /, '').replace(/tz="[^"]*" /, '');
+    const ev = vendorParsers.parseFortinet(parseSyslogLine(line, NOW).message);
+    assert.equal(ev.eventAt, null, 'an unanchored local time must stay null, never become now()');
+  });
+});
+
 describe('⛔ mockSyslog cannot be told to run unbounded by a typo', () => {
   test('a non-numeric option is refused, and the message echoes what was typed', () => {
     // `Number('fast')` is NaN, and every comparison against NaN is false — so a

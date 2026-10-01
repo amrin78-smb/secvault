@@ -3457,3 +3457,53 @@ in the seed or every event stores `device_id NULL` and nothing correlates; that 
 ⛔ The action vocabularies are the REAL ones: FortiGate's `close`/`client-rst` (an established
 session that ended, never logged `allow`) and PAN-OS's `reset-both` (which looks like Fortinet's
 close family and is a BLOCK).
+
+### Verified end to end over a real UDP socket (2026-10-01)
+
+The generators were run through the collector's OWN chain — socket → `parseSyslogLine` →
+`parseVendorPayload` → `buildEvent`, with a device map standing in for the one the collector
+refreshes from the database. Everything the collector does except the insert. Result: **360 of 400
+datagrams arrived, 0 unattributed** (every one resolved to a vendor AND a device), both correlation
+paths populated, all seven real action verbs present.
+
+⛔ **THAT RUN FOUND A REAL FIDELITY GAP, AND IT WAS IN THE DIRECTION THAT LOOKS FINE.** The first
+Fortinet generator emitted `date=` and `time=` with no `tz=` and no `eventtime=`. `parseFortinet`
+then correctly refused to invent a zone, so **every mock Fortinet event carried a NULL `eventAt`** —
+the parser behaving exactly as documented, and the mock fleet testing the timestamp logic not at
+all. The live fleet sends both fields. Now ~70% carry a 19-digit nanosecond `eventtime` (the
+preferred path), ~20% fall back to `date`+`time`+`tz`, and ~10% carry neither so the refusal itself
+is exercised. ⛔ The digit length is pinned, because `parseFortinet` scales by it: a 16-digit value
+is read as MICROseconds and resolves to 1970-01-21 — present in the table and outside every time
+window and rollup bucket, which is worse than no timestamp at all. All four mutations verified.
+
+⛔ **TWO MEASURED NUMBERS FROM THAT RUN ARE DOCUMENTED RATHER THAN FIXED, because both would
+otherwise be misread on the staging box:**
+
+1. **`sent` IS NOT `received`.** 40 of 400 datagrams were lost on LOOPBACK at 400/sec with an 8 MB
+   receive buffer — ordinary UDP behaviour under burst. So a shortfall in `syslog_ingest_stats`
+   after a mock run is EXPECTED and is not by itself a collector defect; equally, matching numbers
+   are not proof there was no loss. The collector's own `dropped` counter is the only thing that
+   separates "the buffer overflowed" from "the network lost it". The script prints this caveat on
+   every live send, at the point where the confusion happens. (Relevant to the open roadmap item
+   that every deploy loses ~200k events while `dropped` reads 0.)
+2. **The storage profile is NOT production's.** The action mix is deliberately denial-heavy so both
+   branches of `SYSLOG_RAW_MESSAGE=security` are exercised, which keeps the raw line on ~31% of
+   rows against the live fleet's ~8.3%. Bytes/row measured against mock traffic over-states
+   production by roughly 3x. ⛔ Never size storage from the mock fleet — size from events/sec on the
+   real one, per `docs/SIZING-AND-BACKUP.md`.
+
+⛔ **The first version of the verification harness was itself wrong, in two ways worth recording.**
+It asserted snake_case field names (`device_id`, `event_time`, `rule_id`) where `buildEvent` returns
+camelCase (`deviceId`, `eventAt`, `ruleId`), so it reported every event as unattributed when nothing
+was — the "verify field names against the real thing" rule applied to our own internal shape, not
+just to vendor APIs. And it parsed inline on the receive path, which lost 54% of the datagrams and
+looked exactly like generator loss; the collector buffers first for this reason.
+
+⛔ **The seeder's SQL is pinned against `lib/schema.sql` statically** (31 column references, 0
+problems), counting both the `CREATE TABLE` body and every `ALTER TABLE ... ADD COLUMN`. Nothing in
+`npm test` can run the seeder — it needs a database, and the Linux dev box has no role to connect as
+— so the one failure that would waste the first real attempt is caught without one. A wrong column
+name builds clean, passes every static check and fails only when the query runs; it has already cost
+time on this project (`rule_action` where the column is `action`) and it is the v2.86.1 outage shape.
+The check also asserts THAT IT FOUND SOMETHING, since a regex matching nothing passes every
+assertion it never runs.

@@ -22,6 +22,12 @@
 // laptop would fill its disk. `--count` bounds the run and `--rate` bounds the
 // pressure, so a mistake costs seconds rather than a volume.
 //
+// \u26d4 DO NOT SIZE STORAGE FROM THIS. The action mix here is deliberately
+// denial-heavy so both branches of SYSLOG_RAW_MESSAGE=security get exercised,
+// which keeps the raw line on ~31% of rows. The live fleet's figure is ~8.3%,
+// so bytes/row measured against mock traffic over-states production by ~3x.
+// Size from events/sec on the real fleet, per docs/SIZING-AND-BACKUP.md.
+//
 // Usage:
 //   node scripts/mockSyslog.js --count 5000 --rate 200
 //   node scripts/mockSyslog.js --host 127.0.0.1 --port 1514 --count 100000 --rate 1000
@@ -43,11 +49,36 @@ const SENDERS = {
 function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function ip(prefix) { return `${prefix}.${1 + Math.floor(Math.random() * 253)}`; }
 
-/** FortiOS key=value, the shape `vendorParsers.js` parses. */
+/**
+ * FortiOS key=value, the shape `vendorParsers.js` parses.
+ *
+ * ⛔ THREE TIMESTAMP PATHS ARE EXERCISED ON PURPOSE, and the first draft of
+ * this function exercised NONE of them. It emitted `date=` and `time=` with no
+ * `tz=` and no `eventtime=`, so `parseFortinet` correctly refused to invent a
+ * zone and every mock Fortinet event carried a NULL `eventAt` — right
+ * behaviour, and it meant the mock fleet never tested the timestamp logic at
+ * all. The live fleet sends both fields. So:
+ *
+ *   ~70%  `eventtime` (19-digit NANOSECOND epoch) + `tz`  -> the preferred path
+ *   ~20%  no `eventtime`, but `date`+`time`+`tz`          -> the fallback path
+ *   ~10%  no `eventtime` and no `tz`                      -> eventAt stays NULL
+ *
+ * ⛔ That last 10% is the one that matters most here. An unanchored local time
+ * is exactly the ambiguity this codebase refuses to guess at, and a generator
+ * that never produces it would leave the refusal untested — the same reason the
+ * seeded fleet carries a device nothing could be collected from.
+ */
 function fortinetLine(now) {
   const ts = now.toISOString();
   const date = ts.slice(0, 10);
   const time = ts.slice(11, 19);
+  // ⛔ NANOSECONDS, 19 digits. `parseFortinet` scales by DIGIT LENGTH, so a
+  // 16-digit value is read as microseconds and silently backdates the row to
+  // 1970 — a wrong-length epoch is worse than none, because the row is present
+  // and simply outside every time window.
+  const roll = Math.random();
+  const eventtime = roll < 0.7 ? `eventtime=${now.getTime()}000000 ` : '';
+  const tz = roll < 0.9 ? 'tz="+0700" ' : '';
   // ⛔ `close` and `client-rst` are deliberately represented: CLAUDE.md records
   // that FortiGate logs a session that was established and then ended as
   // close/client-rst, NEVER as `allow`, and that matching only `allow` misses
@@ -55,7 +86,7 @@ function fortinetLine(now) {
   const action = pick(['accept', 'close', 'client-rst', 'deny', 'accept', 'close']);
   const policyid = 1 + Math.floor(Math.random() * 6);
   const dstport = pick([443, 53, 22, 10443, 80, 3389]);
-  return `<189>date=${date} time=${time} devname="MOCK-FGT-Branch-01" devid="FGMOCK0000000001" `
+  return `<189>date=${date} time=${time} ${eventtime}${tz}devname="MOCK-FGT-Branch-01" devid="FGMOCK0000000001" `
     + `logid="0000000013" type="traffic" subtype="forward" level="notice" vd="root" `
     + `srcip=${ip('10.1.0')} srcport=${1024 + Math.floor(Math.random() * 60000)} srcintf="internal" `
     + `dstip=${ip('203.0.113')} dstport=${dstport} dstintf="wan1" `
@@ -169,6 +200,19 @@ async function run(opts) {
           const secs = (Date.now() - started) / 1000;
           console.log(`[mockSyslog] sent ${sent} events to ${opts.host}:${opts.port} in `
             + `${secs.toFixed(1)}s (~${Math.round(sent / Math.max(secs, 0.001))}/sec)`);
+          // \u26d4 SENT IS NOT RECEIVED, AND THIS LINE EXISTS SO NOBODY READS IT
+          // AS ONE. UDP drops under burst even on loopback: measured here,
+          // 360 of 400 arrived at 400/sec with an 8 MB receive buffer. So a
+          // shortfall in `syslog_ingest_stats` after a run is EXPECTED and is
+          // not by itself a collector defect \u2014 and matching numbers are not
+          // proof there was no loss either. Read the collector's own `dropped`
+          // counter, which is the only thing that distinguishes "the buffer
+          // overflowed" from "the network lost it".
+          if (!opts.dryRun) {
+            console.log('[mockSyslog] note: UDP is lossy under burst \u2014 `sent` is what this '
+              + 'process emitted, NOT what arrived. Compare against syslog_ingest_stats '
+              + '(received/parsed/stored/dropped), not against this number.');
+          }
           resolve(sent);
         }
       } catch (err) {
