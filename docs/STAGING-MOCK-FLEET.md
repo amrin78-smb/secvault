@@ -71,6 +71,36 @@ been run anywhere since development moved to Linux. The 2 skips are the two deli
 Linux-only cases; `⛔ on Windows it must NOT skip` RUNS and passes, which is the symmetry
 `tests/psScripts.test.js` exists to enforce.
 
+### ✅ The honesty test it exists for — RUN AND PASSED (2026-10-03)
+
+Standing the fleet up is not the test; this is. Measured on staging after driving
+`runAnalysisForDevice` and `runComplianceAuditForDevice` across all four devices:
+
+| assertion | result |
+|---|---|
+| `unused` findings on rules whose `hit_count` is **NULL** | **0**, out of **9** such rules |
+| `unused` on a **measured** zero | 1 — the only device with real counts, which has exactly one true zero |
+| the device nothing was collected from | **13 `na`, and nothing else** — no pass, no fail, no warning |
+| all 33 pages render with a real session | 33/33 in 3.3s |
+
+So `unused` really does require a MEASURED zero — nine chances to fabricate a finding, none taken —
+and the uncollectable firewall is entirely `na`, i.e. dropped from the score's denominator rather
+than scored 0 or rendered healthy.
+
+⛔ **THE FIRST RUN OF THIS CHECK WAS VACUOUS AND NEARLY REPORTED AS A PASS.** It returned
+`fabricated_unused = 0` while `rule_analysis_results` held **0 rows** — zero findings because no
+engine had ever run on the mock data, not because any engine behaved correctly. Rule analysis
+normally runs inside `collectAndStore`, and the seeder writes rules directly, so nothing triggers
+it; the Engine service is deliberately not registered here either. **A count of zero proves nothing
+until you have shown the thing can produce a non-zero.** The engines are now driven explicitly, and
+the assertion is only meaningful because 9 unmeasured rules and 1 measured zero were both present
+when it ran.
+
+⛔ **`.ps1` FILES COPIED TO STAGING MUST BE PLAIN ASCII.** PowerShell 5.1 parses a `.ps1` with no
+BOM using the ANSI codepage, so a `⛔` in a double-quoted STRING decodes as three cp1252
+characters and breaks the parse; in a comment it is harmless, which is why earlier scripts worked.
+This is the repo's own `Get-Content` encoding trap applied to the script file itself.
+
 ⛔ **IT WAS DEPLOYED BY ARCHIVE, NOT CLONED, AND THEREFORE CANNOT UPDATE ITSELF.** Staging holds no
 GitHub credential (its only key is the one for logging *into* staging, and CertVault there has no
 `.git` either — it was also copied). So `git archive HEAD` was copied across and extracted. The cost
