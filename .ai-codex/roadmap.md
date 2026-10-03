@@ -702,3 +702,65 @@ of a rollup that was refused.
 
 **Status: P2 #6 CLOSED as specified** (the storage decision was the deliverable, and it is "no").
 The targeted rollup is a new, better-specified item — argued, sized, and not yet built.
+
+## ⛔ Two gaps the SIX-VENDOR mock fleet exposed (measured 2026-10-03)
+
+Neither is visible on the production fleet, because it holds **5 Fortinet + 11 Palo Alto and
+nothing else** — the two vendors with by far the most checks. Both were found within minutes of
+seeding mock Check Point / Cisco ASA / Sangfor / Forcepoint devices.
+
+### 1. THE LESS WE KNOW ABOUT A VENDOR, THE HEALTHIER ITS FIREWALLS LOOK
+
+Measured on the 8-device mock fleet:
+
+| device | vendor | gradeable checks | score |
+|---|---|---:|---:|
+| MOCK-CP-Perimeter-04 | checkpoint | 9 | **78%** |
+| MOCK-FP-DC-07 | forcepoint | 9 | **78%** |
+| MOCK-SANGFOR-Branch-06 | sangfor | 9 | **78%** |
+| MOCK-ASA-Edge-05 | cisco_asa | 11 | 73% |
+| MOCK-FGT-Branch-01 | fortinet | 25 | 60% |
+| MOCK-FGT-Edge-02 | fortinet | 25 | 40% |
+| MOCK-PAN-DC-01 | paloalto | 21 | 38% |
+
+The three top scorers are the three vendors with **ZERO vendor-scoped checks** in
+`lib/auditChecksSeed.js` — which carries 18 for `fortinet`, 14 for `paloalto`, 3 for `cisco_asa`
+and **none at all** for `checkpoint`, `sangfor` or `forcepoint`. They score highest because they
+are measured against 9 generic checks instead of 21-25, not because they are better configured.
+
+⛔ **This is the codebase's signature bug at VENDOR grain.** CLAUDE.md already states it at device
+grain — "a firewall nothing can be collected from renders as the healthiest device on the fleet" —
+and v2.163.0 built `complianceCoverage.js` precisely so a thin denominator could not be read as a
+posture. But `coverageEvidence()` is keyed **per STANDARD, never per DEVICE**: the per-device
+`scorePct` is computed from bare counts with no coverage statement attached, so Check Point's
+78%-on-9-checks renders identically to a Fortinet 78%-on-25. The guard exists and does not cover
+this axis.
+
+**Two separate pieces of work, and they are not the same:**
+- **(a) Surface the denominator per device.** The cheaper half and the honest one: carry the
+  gradeable count beside the per-device score the way the per-standard card already does. Does not
+  change the arithmetic, which CLAUDE.md requires be documented before any change.
+- **(b) Write vendor-scoped checks for the three vendors that have none.** The real fix. Until
+  then those devices are thinly assessed, and (a) is what stops that reading as "clean".
+
+### 2. SYSLOG FOR FOUR VENDORS IS BLOCKED ON EVIDENCE, NOT EFFORT
+
+`detectVendor()` handles **only** `fortinet` and `paloalto`, with a deliberate no-fallback. There
+is no parser for `checkpoint`, `cisco_asa`, `sangfor` or `forcepoint`, so syslog from them would be
+stored with `vendor NULL` — correct behaviour, and it tests nothing.
+
+⛔ **The parsers may NOT be written from vendor documentation.** Every existing vendor field mapping
+was read off REAL captured logs per this repo's "documentation lies" rule, and `scripts/mockSyslog.js`
+states the sharper version: *a generator invented from documentation tests the parser against the
+same guess the parser was written from, and agrees with itself.* Both halves would be wrong together
+and the mock fleet would certify it.
+
+**No source of real lines is currently available**, confirmed 2026-10-03: the production fleet is
+5 Fortinet + 11 Palo Alto, and a 6-hour sample of `syslog_events` returned **zero** unparsed rows.
+A test asserts `SENDERS` contains only the two parseable vendors, so nobody can quietly add a
+fabricated generator for the others.
+
+**The one untried source:** the preserved **335 GB FWA archive**, which ingested from **27**
+devices against today's 16 and may hold lines from vendors since removed. If it does, the parsers
+become legitimate; if it is the same two vendors, this stays blocked. Checking it needs a grep on
+the production box.

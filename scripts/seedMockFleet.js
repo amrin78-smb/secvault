@@ -109,6 +109,35 @@ const RULES_PALOALTO = [
   { seq: 5, name: 'default-deny', action: 'deny', src: ['any'], dst: ['any'], svc: ['any'], szone: ['any'], dzone: ['any'] },
 ];
 
+// Check Point: the management API reports hit counts, so this device carries
+// MEASURED ones. Rule names follow its own convention.
+const RULES_CHECKPOINT = [
+  { seq: 1, name: 'Mgmt-Access', action: 'allow', src: ['MGMT-Net'], dst: ['CP-Gateway'], svc: ['https', 'ssh'], szone: ['mgmt'], dzone: ['internal'] },
+  { seq: 2, name: 'Web-Out', action: 'allow', src: ['Corp-LAN'], dst: ['any'], svc: ['http', 'https'], szone: ['internal'], dzone: ['external'] },
+  { seq: 3, name: 'DMZ-to-DB', action: 'allow', src: ['DMZ-Net'], dst: ['DB-Farm'], svc: ['tcp-1521'], szone: ['dmz'], dzone: ['db'] },
+  { seq: 4, name: 'Cleanup', action: 'deny', src: ['any'], dst: ['any'], svc: ['any'], szone: ['any'], dzone: ['any'] },
+];
+
+// Cisco ASA over SSH cannot report hit counts (hitCounts: null below).
+const RULES_ASA = [
+  { seq: 1, name: 'outside_access_in_1', action: 'allow', src: ['any'], dst: ['dmz-web'], svc: ['tcp-443'], szone: ['outside'], dzone: ['dmz'] },
+  { seq: 2, name: 'inside_access_out_1', action: 'allow', src: ['inside-net'], dst: ['any'], svc: ['ip'], szone: ['inside'], dzone: ['outside'] },
+  { seq: 3, name: 'outside_access_in_2', action: 'deny', src: ['any'], dst: ['any'], svc: ['ip'], szone: ['outside'], dzone: ['inside'] },
+];
+
+// Sangfor over SSH likewise reports no hit counts.
+const RULES_SANGFOR = [
+  { seq: 1, name: 'LAN_to_WAN', action: 'allow', src: ['LAN_Zone'], dst: ['any'], svc: ['any'], szone: ['lan'], dzone: ['wan'] },
+  { seq: 2, name: 'Deny_All', action: 'deny', src: ['any'], dst: ['any'], svc: ['any'], szone: ['any'], dzone: ['any'] },
+];
+
+// Forcepoint is reached through the SMC, never the engine itself.
+const RULES_FORCEPOINT = [
+  { seq: 1, name: 'Allow-Internal-Web', action: 'allow', src: ['Internal-Network'], dst: ['ANY'], svc: ['HTTP', 'HTTPS'], szone: ['Internal'], dzone: ['External'] },
+  { seq: 2, name: 'Allow-VPN-Users', action: 'allow', src: ['VPN-Pool'], dst: ['Internal-Network'], svc: ['ANY'], szone: ['VPN'], dzone: ['Internal'] },
+  { seq: 3, name: 'Default-Deny', action: 'deny', src: ['ANY'], dst: ['ANY'], svc: ['ANY'], szone: ['ANY'], dzone: ['ANY'] },
+];
+
 const DEVICES = [
   {
     name: `${NAME_PREFIX}FGT-Branch-01`,
@@ -166,6 +195,75 @@ const DEVICES = [
     version: null, tuple: null, rules: [], hitCounts: null, config: null,
     collected: false,
   },
+  // ---------------------------------------------------------------------
+  // The four vendors that had NO mock device, and therefore no coverage of
+  // their version scheme, their CPE strings or their vendor-scoped checks.
+  // ⛔ These deliberately carry NO syslog: `detectVendor` handles only
+  // fortinet and paloalto, and there are no REAL captured lines for these
+  // four to build a parser from. See .ai-codex/roadmap.md.
+  // ---------------------------------------------------------------------
+  {
+    name: `${NAME_PREFIX}CP-Perimeter-04`,
+    vendor: 'checkpoint', mgmt_method: 'api', mgmt_ip: '10.99.0.41',
+    site: 'HQ', criticality: 'critical',
+    // R stripped, Take becomes the 3rd segment -> [81, 20, 41, 0]
+    version: 'R81.20 Take 41', tuple: [81, 20, 41, 0],
+    rules: RULES_CHECKPOINT,
+    // The management API DOES report hits, so these are measured -- including
+    // a genuine zero on the DMZ rule.
+    hitCounts: [15204, 88310, 0, 4120],
+    config: {
+      'management-server': { version: 'R81.20', 'take': 41 },
+      logging: { enabled: true, 'log-forwarding': true },
+      admins: [{ name: 'cpadmin', permissions: 'read-write' }],
+    },
+  },
+  {
+    name: `${NAME_PREFIX}ASA-Edge-05`,
+    vendor: 'cisco_asa', mgmt_method: 'ssh', mgmt_ip: '10.99.0.51',
+    site: 'Branch', criticality: 'high',
+    // interim release is the 4th segment -> [9, 18, 4, 15]
+    version: '9.18(4)15', tuple: [9, 18, 4, 15],
+    rules: RULES_ASA,
+    // ASA over SSH cannot report hit counts.
+    hitCounts: null,
+    // ⛔ DELIBERATELY FAILS BOTH CISCO CHECKS. They are the only vendor-scoped
+    // checks in the library that had never executed on any device, and a mock
+    // config that passed them would leave them just as unexercised: a check
+    // that has only ever returned `pass` has not been shown to be able to fail.
+    config: {
+      telnet_sources: ['10.0.0.0 255.255.255.0 inside'],   // cisco-asa-telnet-disabled -> FAIL
+      http_server_enabled: true,                            // cisco-asa-http-server-disabled -> FAIL
+      usernames: ['admin', 'netops'],
+      logging: { enabled: true },
+    },
+  },
+  {
+    name: `${NAME_PREFIX}SANGFOR-Branch-06`,
+    vendor: 'sangfor', mgmt_method: 'ssh', mgmt_ip: '10.99.0.61',
+    site: 'Branch', criticality: 'medium',
+    version: '8.0.85', tuple: [8, 0, 85],
+    rules: RULES_SANGFOR,
+    hitCounts: null,
+    config: { system: { version: '8.0.85' }, logging: { enabled: false } },
+  },
+  {
+    name: `${NAME_PREFIX}FP-DC-07`,
+    vendor: 'forcepoint', mgmt_method: 'smc',
+    // ⛔ Forcepoint is reached through the SMC, so the connection fields are
+    // smc_host/smc_port -- NOT mgmt_ip. Getting this wrong is the kind of
+    // per-vendor detail a single-vendor mock fleet can never catch.
+    mgmt_ip: null, smc_host: '10.99.0.71', smc_port: 8082,
+    site: 'DC', criticality: 'critical',
+    version: '6.10.21', tuple: [6, 10, 21],
+    rules: RULES_FORCEPOINT,
+    hitCounts: [9312, 441, 0],
+    config: {
+      engine: { version: '6.10.21' },
+      logging: { enabled: true },
+      admins: [{ name: 'smcadmin', role: 'superuser' }],
+    },
+  },
 ];
 
 async function seed(pool, { wipe }) {
@@ -178,10 +276,16 @@ async function seed(pool, { wipe }) {
 
   for (const d of DEVICES) {
     const dev = await pool.query(
-      `INSERT INTO devices (name, vendor, mgmt_method, mgmt_ip, site, asset_criticality,
+      // smc_host/smc_port are Forcepoint's connection fields -- it is reached
+      // through the SMC, never the engine -- so they are NOT interchangeable
+      // with mgmt_ip. Both are written, each NULL where it does not apply.
+      `INSERT INTO devices (name, vendor, mgmt_method, mgmt_ip, smc_host, smc_port,
+                            site, asset_criticality,
                             active, last_connectivity_ok, last_collected_at)
-       VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8) RETURNING id`,
-      [d.name, d.vendor, d.mgmt_method, d.mgmt_ip, d.site, d.criticality,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10) RETURNING id`,
+      [d.name, d.vendor, d.mgmt_method, d.mgmt_ip || null,
+        d.smc_host || null, d.smc_port || null,
+        d.site, d.criticality,
         d.collected === false ? false : true,
         // ⛔ NULL last_collected_at for the unreachable one — never now(), which
         // would assert a collection that did not happen.

@@ -312,6 +312,102 @@ describe('⛔ the seed refuses anything that is not plainly a test database', ()
   });
 });
 
+describe('\u26d4 the four vendors that had no mock device at all', () => {
+  const { parseVersion } = require('../lib/engines/versionComparator');
+
+  it('all six supported vendors are represented', () => {
+    const vendors = new Set(DEVICES.map((d) => d.vendor));
+    for (const v of ['fortinet', 'paloalto', 'checkpoint', 'cisco_asa', 'sangfor', 'forcepoint']) {
+      assert.ok(vendors.has(v), `no mock device for ${v}, so nothing exercises its version scheme or CPEs`);
+    }
+  });
+
+  it('\u26d4 every seeded version parses to the tuple CLAUDE.md documents', () => {
+    // Checked against the REAL comparator, not restated. A version string that
+    // parses to [0] would silently make every CVE range comparison meaningless
+    // while the device still looked fully populated.
+    for (const d of DEVICES) {
+      if (!d.version || d.tuple === null) continue;
+      assert.deepEqual(parseVersion(d.vendor, d.version), d.tuple,
+        `${d.name}: "${d.version}" does not parse to ${JSON.stringify(d.tuple)}`);
+    }
+  });
+
+  it('\u26d4 the version STRINGS look like what the device really reports', () => {
+    // Pinning the tuple alone is too weak: `9.18.4.15` parses to the SAME
+    // [9,18,4,15] as the real `9.18(4)15`, so a mutation replacing the genuine
+    // ASA notation with a dot-separated one passed. The tuple was right and the
+    // mock data was unfaithful, which is the half a version test usually misses.
+    const SHAPES = {
+      cisco_asa: /^\d+\.\d+\(\d+\)\d+$/,        // interim release in parens
+      checkpoint: /^R\d+\.\d+ Take \d+$/,          // R-prefix and a Take
+      fortinet: /^v\d+\.\d+\.\d+,build\d+$/,      // leading v and ,build
+      paloalto: /^\d+\.\d+\.\d+(-h\d+)?$/,        // optional hotfix suffix
+      sangfor: /^\d+\.\d+\.\d+$/,
+      forcepoint: /^\d+\.\d+\.\d+$/,
+    };
+    let checked = 0;
+    for (const d of DEVICES) {
+      if (!d.version || d.tuple === null) continue;   // 'unknown' is its own case
+      const shape = SHAPES[d.vendor];
+      assert.ok(shape, `no expected version shape declared for ${d.vendor}`);
+      assert.match(d.version, shape,
+        `${d.name}: "${d.version}" is not the form a ${d.vendor} device reports`);
+      checked++;
+    }
+    assert.ok(checked >= 6, `only ${checked} versions checked`);
+  });
+
+  it('\u26d4 Forcepoint uses smc_host, NEVER mgmt_ip', () => {
+    // It is reached through the SMC, never the engine. A single-vendor mock
+    // fleet can never catch this kind of per-vendor connection detail.
+    const fp = DEVICES.find((d) => d.vendor === 'forcepoint');
+    assert.ok(fp, 'no forcepoint device');
+    assert.ok(fp.smc_host, 'forcepoint must carry smc_host');
+    assert.equal(fp.mgmt_ip, null, 'forcepoint must NOT carry mgmt_ip');
+    assert.equal(fp.mgmt_method, 'smc');
+    for (const d of DEVICES.filter((x) => x.vendor !== 'forcepoint')) {
+      assert.ok(!d.smc_host, `${d.name} is not forcepoint and must not use smc_host`);
+    }
+  });
+
+  it('\u26d4 the ASA config FAILS both Cisco checks, deliberately', () => {
+    // These are the only vendor-scoped checks in the library that had never
+    // executed on any device. A mock config that PASSED them would leave them
+    // just as unexercised: a check that has only ever returned `pass` has not
+    // been shown to be able to fail.
+    const asa = DEVICES.find((d) => d.vendor === 'cisco_asa' && d.config);
+    assert.ok(asa, 'no cisco_asa device with a config');
+    assert.ok(Array.isArray(asa.config.telnet_sources) && asa.config.telnet_sources.length > 0,
+      'telnet_sources.0 must exist so cisco-asa-telnet-disabled can FAIL');
+    assert.equal(asa.config.http_server_enabled, true,
+      'http_server_enabled must be true so cisco-asa-http-server-disabled can FAIL');
+  });
+
+  it('\u26d4 NO syslog is generated for a vendor with no parser', () => {
+    // detectVendor handles ONLY fortinet and paloalto, with no fallback, and
+    // there are no REAL captured lines for the other four to build a parser
+    // from. Generating plausible-looking traffic for them would store rows with
+    // vendor NULL and prove nothing, while looking like coverage.
+    assert.deepEqual(Object.keys(SENDERS).sort(), ['fortinet', 'paloalto'],
+      'a sender was added for a vendor whose syslog cannot be parsed');
+    for (const v of ['checkpoint', 'cisco_asa', 'sangfor', 'forcepoint']) {
+      assert.ok(!SENDERS[v], `${v} has no syslog parser; do not fabricate log lines for it`);
+    }
+  });
+
+  it('the new devices still carry a mix of measured and unmeasured hit counts', () => {
+    const ssh = DEVICES.filter((d) => ['cisco_asa', 'sangfor'].includes(d.vendor) && d.rules.length);
+    for (const d of ssh) {
+      assert.equal(d.hitCounts, null,
+        `${d.name}: ${d.vendor} over SSH cannot report hit counts, so they must be NULL`);
+    }
+    const cp = DEVICES.find((d) => d.vendor === 'checkpoint');
+    assert.ok(Array.isArray(cp.hitCounts) && cp.hitCounts.includes(0),
+      'Check Point\'s management API does report hits, including a genuine zero');
+  });
+});
+
 describe('the seeded fleet is deliberately uneven', () => {
   // A uniformly healthy fleet exercises only the green path, which is the one
   // place this product has never had a bug.
