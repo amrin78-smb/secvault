@@ -22,8 +22,8 @@ const assert = require('node:assert/strict');
 
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const vendorParsers = require('../lib/syslog/vendorParsers');
-const { fortinetLine, paloAltoLine, parseArgs, SENDERS, DENY_POLICY_ID, PAN_RULES } =
-  require('../scripts/mockSyslog');
+const { fortinetLine, paloAltoLine, ciscoAsaLine, parseArgs, SENDERS, DENY_POLICY_ID,
+  PAN_RULES } = require('../scripts/mockSyslog');
 const { assertSafeTarget, DEVICES, NAME_PREFIX } = require('../scripts/seedMockFleet');
 
 const NOW = new Date('2026-10-01T16:30:00+07:00');
@@ -384,16 +384,55 @@ describe('\u26d4 the four vendors that had no mock device at all', () => {
       'http_server_enabled must be true so cisco-asa-http-server-disabled can FAIL');
   });
 
-  it('\u26d4 NO syslog is generated for a vendor with no parser', () => {
-    // detectVendor handles ONLY fortinet and paloalto, with no fallback, and
-    // there are no REAL captured lines for the other four to build a parser
-    // from. Generating plausible-looking traffic for them would store rows with
-    // vendor NULL and prove nothing, while looking like coverage.
-    assert.deepEqual(Object.keys(SENDERS).sort(), ['fortinet', 'paloalto'],
-      'a sender was added for a vendor whose syslog cannot be parsed');
-    for (const v of ['checkpoint', 'cisco_asa', 'sangfor', 'forcepoint']) {
-      assert.ok(!SENDERS[v], `${v} has no syslog parser; do not fabricate log lines for it`);
+  it('\u26d4 a sender exists ONLY for a vendor whose syslog we can really parse', () => {
+    // Derived from detectVendor rather than a hardcoded list, so this stays
+    // true as parsers are added. Cisco ASA joined once a parser written from
+    // REAL captures existed (tests/fixtures/ciscoAsaSyslog.js); the remaining
+    // three have no captured evidence, and generating plausible-looking traffic
+    // for them would store rows with vendor NULL and prove nothing while
+    // looking like coverage.
+    const GENERATORS = {
+      fortinet: fortinetLine,
+      paloalto: paloAltoLine,
+      cisco_asa: ciscoAsaLine,
+    };
+    assert.deepEqual(Object.keys(SENDERS).sort(), Object.keys(GENERATORS).sort(),
+      'every sender must have a generator, and every generator a sender');
+
+    for (const [vendor, gen] of Object.entries(GENERATORS)) {
+      const line = gen(NOW);
+      const frame = parseSyslogLine(line, NOW);
+      assert.equal(vendorParsers.detectVendor(frame.message), vendor,
+        `${vendor}: the generator emits something its own parser does not claim`);
     }
+
+    for (const v of ['checkpoint', 'sangfor', 'forcepoint']) {
+      assert.ok(!SENDERS[v],
+        `${v} has no syslog parser built from captured evidence; do not fabricate lines for it`);
+    }
+  });
+
+  it('\u26d4 the ASA generator REPLAYS captures and never invents a rule name', () => {
+    // A rule name matching no seeded access-list parses perfectly and
+    // correlates to nothing, so every rule would read as unused -- the same
+    // fabricated-finding trap the Fortinet/PAN identifier check guards.
+    const asa = DEVICES.find((d) => d.name.includes('ASA-Edge'));
+    const seeded = new Set(asa.rules.map((r) => r.name));
+    let sawRule = 0;
+    for (let i = 0; i < 300; i++) {
+      const p = vendorParsers.parseCiscoAsa(parseSyslogLine(ciscoAsaLine(NOW), NOW).message);
+      if (!p || !p.ruleName) continue;
+      sawRule++;
+      assert.ok(seeded.has(p.ruleName), `ACL "${p.ruleName}" matches no seeded rule`);
+      // ⛔ And the ACTION must agree with that rule's seeded intent.
+      const rule = asa.rules.find((r) => r.name === p.ruleName);
+      if (p.action === 'permit') {
+        assert.equal(rule.action, 'allow', `"${p.ruleName}" is a ${rule.action} rule but logged permit`);
+      } else if (p.action === 'deny') {
+        assert.equal(rule.action, 'deny', `"${p.ruleName}" is a ${rule.action} rule but logged deny`);
+      }
+    }
+    assert.ok(sawRule > 0, 'no ASA line ever carried a rule name, so nothing was checked');
   });
 
   it('the new devices still carry a mix of measured and unmeasured hit counts', () => {

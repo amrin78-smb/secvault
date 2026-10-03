@@ -66,7 +66,41 @@ function sourceHelp(ip) {
 const SENDERS = {
   fortinet: '10.99.0.11',
   paloalto: '10.99.0.21',
+  // Added once a REAL-capture-derived ASA parser existed. Matches
+  // MOCK-ASA-Edge-05's mgmt_ip in seedMockFleet.js.
+  cisco_asa: '10.99.0.51',
 };
+
+// \u26d4 THE ASA GENERATOR REPLAYS CAPTURED LINES; IT DOES NOT TEMPLATE THEM.
+// This file's own header warns that a generator invented from documentation
+// "would test the parser against the same guess the parser was written from,
+// and agree with itself". Writing an ASA template by hand would reintroduce
+// exactly that, one step removed -- so it imports the SAME captured fixtures
+// the parser is tested against and substitutes only the variable VALUES
+// (addresses, ports, ACL names, connection ids). The STRUCTURE is never
+// authored here, which is what makes agreement between generator and parser
+// mean something.
+const { ASA_FIXTURES } = require('../tests/fixtures/ciscoAsaSyslog');
+
+// Only the fixtures that carry addresses are worth replaying as traffic; the
+// VPN/IPSEC ones have no endpoints to vary.
+const ASA_TRAFFIC = ASA_FIXTURES.filter((f) => f.expect && f.expect.srcIp);
+
+// The access-lists MOCK-ASA-Edge-05 actually has, so rule-hit correlation has
+// something to match. A name not in the seeded ruleset would parse perfectly
+// and correlate to nothing.
+//
+// \u26d4 AND EACH CARRIES ITS SEEDED INTENT, for the same reason the Fortinet and
+// PAN generators do: a `permitted` line attributed to a rule seeded as `deny`
+// is self-contradictory evidence, and /segmentation reads exactly this to decide
+// whether a deny-intent pair is carrying traffic. The first version of this
+// replay picked a name at random and produced `deny, permit` on all three,
+// including the deny rule.
+const ASA_ACLS = [
+  { name: 'outside_access_in_1', allow: true },
+  { name: 'inside_access_out_1', allow: true },
+  { name: 'outside_access_in_2', allow: false },
+];
 
 // \u26d4 These mirror scripts/seedMockFleet.js's own rule definitions, and
 // tests/mockFixtures.test.js CROSS-CHECKS them against it so the two cannot
@@ -196,6 +230,41 @@ function paloAltoLine(now) {
     + `${Math.floor(Math.random() * 400)},${Math.floor(Math.random() * 60)}`;
 }
 
+/**
+ * Replay a captured ASA line with fresh values.
+ *
+ * \u26d4 Substitution is textual and deliberately narrow: the four addresses and
+ * ports from the fixture's own `expect`, plus the access-list name where the
+ * fixture has one. Nothing else in the line is touched, so every structural
+ * quirk the capture carries -- the NAT parenthetical, `(some.user)`, the
+ * `[0x...]` trailer, the `hit-cnt` suffix forms -- survives verbatim.
+ */
+function ciscoAsaLine(now) {
+  const f = pick(ASA_TRAFFIC);
+  let body = f.line;
+  const e = f.expect;
+  // Addresses and ports, longest-first so a port number cannot be rewritten as
+  // part of a longer one.
+  const subs = [
+    [e.srcIp, ip('10.60.1')],
+    [e.dstIp, ip('203.0.113')],
+    [String(e.srcPort), String(1024 + Math.floor(Math.random() * 60000))],
+    [String(e.dstPort), String(pick([443, 80, 22, 3389, 1521]))],
+  ];
+  for (const [from, to] of subs) {
+    if (from) body = body.split(from).join(to);
+  }
+  if (e.ruleName) {
+    // Deny-shaped lines get a deny-intent ACL, permit-shaped lines an allow one.
+    const wantAllow = e.action !== 'deny';
+    const candidates = ASA_ACLS.filter((a) => a.allow === wantAllow);
+    body = body.split(e.ruleName).join(pick(candidates).name);
+  }
+  const sev = e.action === 'deny' ? 4 : 6;
+  return `<${164 + sev % 8}>${rfc3164Stamp(now)} MOCK-ASA-Edge-05 CiscoASA[999]: `
+    + `%ASA-${sev}-${f.msgId}: ${body}`;
+}
+
 function parseArgs(argv) {
   const o = Object.assign({}, DEFAULTS, { dryRun: false, anySource: false });
   const raw = {};
@@ -276,8 +345,10 @@ async function run(opts) {
       try {
         for (let i = 0; i < perTick && sent < opts.count; i++) {
           const now = new Date();
-          const vendor = Math.random() < 0.6 ? 'fortinet' : 'paloalto';
-          const line = vendor === 'fortinet' ? fortinetLine(now) : paloAltoLine(now);
+          const r = Math.random();
+          const vendor = r < 0.45 ? 'fortinet' : (r < 0.80 ? 'paloalto' : 'cisco_asa');
+          const line = vendor === 'fortinet' ? fortinetLine(now)
+            : vendor === 'paloalto' ? paloAltoLine(now) : ciscoAsaLine(now);
           if (opts.dryRun) {
             console.log(`[${vendor} from ${SENDERS[vendor]}] ${line}`);
           } else {
@@ -324,5 +395,5 @@ if (require.main === module) {
   run(opts).catch((e) => { console.error('[mockSyslog]', e.message); process.exit(1); });
 }
 
-module.exports = { fortinetLine, paloAltoLine, parseArgs, SENDERS, sourceHelp,
-  DENY_POLICY_ID, PAN_RULES };
+module.exports = { fortinetLine, paloAltoLine, ciscoAsaLine, parseArgs, SENDERS,
+  sourceHelp, DENY_POLICY_ID, PAN_RULES, ASA_ACLS };

@@ -849,3 +849,66 @@ and the guard would see it.
 ⛔ **IF AN ADAPTER IS EVER CHANGED TO NORMALISE `raw_rule` INTO A FIXED SHAPE, THIS GUARD GOES
 BLIND** and the engine can return `safe_to_merge` on a pair that is not. `raw_rule` being a verbatim
 vendor dump is a load-bearing property, not an implementation detail.
+
+## Cisco ASA syslog parsing (added 2026-10-03) — the first parser NOT from our own captures
+
+`lib/syslog/vendorParsers.js` gains `parseCiscoAsa()` + `classifyCiscoAsa()`, and `detectVendor()`
+now returns `cisco_asa`. It is the third vendor SecVault can parse syslog from, and the first whose
+evidence did not come off this fleet.
+
+⛔ **PROVENANCE IS THE POINT, SO IT IS RECORDED PER FIXTURE.**
+`tests/fixtures/ciscoAsaSyslog.js` carries the captured lines, their source, licence and retrieval
+date. Source: **logstash-plugins/logstash-patterns-core**, `spec/patterns/firewalls_spec.rb`,
+**Apache 2.0** (verified against that repo's LICENSE, 2026-10-03).
+
+⛔ **ELASTIC'S FIXTURES WERE DELIBERATELY NOT COPIED.** `elastic/integrations` ships `cisco_asa`
+`.log` files too, but that repo is **Elastic License 2.0**, not Apache, so nothing from it is
+vendored. It was used only to CORROBORATE — two different projects, two different licences, both
+showing `%ASA-6-302013: Built outbound TCP connection 11757 for outside:...` with identical
+structure. **Independent agreement is the substitute for a live device**, and it is why this is a
+legitimate parser rather than the "documentation lies" trap. A single source would not have been.
+
+⛔ **WHAT THE EVIDENCE DOES NOT ESTABLISH**, and no UI may imply otherwise: that a customer's ASA
+emits these message IDs (that depends on configured logging level and enabled features), or that
+the format is identical on their firmware. **The first real ASA is still a verification step**, the
+same as a new device adapter.
+
+⛔ **ONLY EIGHT MESSAGE IDS ARE PARSED** — `106001`, `106006`, `106023`, `106100`, `302013/14/15/16`
+— gated by `ASA_PARSED_IDS`. The same call `parsePaloAlto` makes about TRAFFIC/THREAT. The ASA
+emits hundreds of ids; one whose layout has never been observed yields the ENVELOPE ONLY (vendor,
+severity, msgId) with every data field null, which reads honestly as "received, not understood".
+⛔ The test for that gate initially COULD NOT FIRE: its fixture body matched no regex, so it parsed
+to nulls whether or not the gate existed. It now uses `302035` — a real id NOT in the set — with a
+body shaped exactly like the `302013` we do parse, plus a control asserting the same body under a
+verified id DOES populate.
+
+⛔ **THE RULE LINKAGE IS THE ACCESS-LIST NAME**, ASA's analogue of FortiOS `policyid`: `106023`
+carries `by access-group "<name>"` and `106100` carries `access-list <name> ... hit-cnt <n>`.
+⛔ `106001`/`106006` name no ACL, so `ruleName` stays **NULL** — a deny we cannot attribute is still
+a real deny, and attributing it to a guessed rule would be worse than leaving it unattributed.
+
+⛔ **`Teardown` IS A CLOSE, NEVER A DENY.** A session ending is not a block; reading it as one would
+invert the row's meaning and manufacture denials out of normal traffic — the trap FortiOS `close`
+and PAN-OS `reset-both` sit either side of. Actions come from the SHARED `lib/syslog/actions.js`
+sets, never a private copy.
+
+⛔ **NO TIMESTAMP IS INVENTED.** An ASA syslog line carries no year and no timezone, so `eventAt`
+stays null and `received_at` anchors the row — the same call `parseFortinet` makes when `tz` is
+absent.
+
+**The generator REPLAYS, it does not template.** `scripts/mockSyslog.js` imports the SAME fixtures
+the parser is tested against and substitutes only variable values (addresses, ports, ACL names),
+so every structural quirk survives verbatim and the generator cannot drift in step with the parser
+— which is what `mockSyslog`'s own header warns about. ⛔ ACL names carry their SEEDED INTENT: the
+first version picked one at random and produced `deny, permit` on all three including the deny
+rule. Verified live on the mock fleet: **867 ASA events, 0 unattributed**, correlation populated on
+all three access-lists, each showing only its own intent.
+
+### The other three vendors remain BLOCKED ON EVIDENCE
+
+Researched 2026-10-03. **Check Point** and **Forcepoint** are both tractable — Elastic ships
+Check Point captures (RFC 5424 + bracketed `key:"value";`, with real quirks like a double-colon
+`sys_message::`), and Forcepoint NGFW exports **CEF**, a self-describing open standard rather than
+a proprietary layout. **Sangfor is not**: the only public sample is a FortiSIEM forum thread with
+two free-text lines whose own field labels disagree (`"Log type"` vs `"Log Type"`), and Fortinet
+staff state it is "not compatible with SIEM". ⛔ Do not write a Sangfor parser from that.
