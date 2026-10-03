@@ -79,6 +79,7 @@ const { pool } = require('../lib/db');
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const { buildEvent } = require('../lib/syslog/eventShape');
+const { buildDeviceMap } = require('../lib/syslog/deviceMap');
 const archive = require('../lib/syslog/archive');
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
@@ -226,7 +227,12 @@ async function refreshDeviceMap() {
     // a slightly stale complete map, which is the failure mode this function
     // was already written to prefer.
     const [devices, aliases] = await Promise.all([
-      pool.query('SELECT id, mgmt_ip, snmp_host FROM devices WHERE active = true'),
+      // \u26d4 smc_host IS INCLUDED, AND IT IS WHY THE COLLISION GUARD BELOW
+      // EXISTS. A Forcepoint device has NO mgmt_ip -- it is reached through the
+      // SMC -- so without smc_host its syslog could never be attributed to it
+      // at all. Measured on the six-vendor mock fleet: 637 Forcepoint events,
+      // every one stored with device_id NULL.
+      pool.query('SELECT id, mgmt_ip, snmp_host, smc_host FROM devices WHERE active = true'),
       // Additional syslog source addresses for a managed device — HA passive
       // peers, mainly. See lib/engines/deviceDiscovery.js: on this fleet 5 of 8
       // unmatched senders were peers of devices SecVault already had.
@@ -236,13 +242,19 @@ async function refreshDeviceMap() {
            JOIN devices d ON d.id = s.device_id AND d.active = true`
       ),
     ]);
-    const map = new Map();
-    for (const r of devices.rows) {
-      if (r.mgmt_ip) map.set(String(r.mgmt_ip), r.id);
-      if (r.snmp_host) map.set(String(r.snmp_host), r.id);
-    }
-    for (const r of aliases.rows) {
-      if (r.ip) map.set(String(r.ip), r.id);
+    // The resolution itself lives in lib/syslog/deviceMap.js so it can be
+    // unit-tested; this file starts listeners on require and cannot be.
+    // \u26d4 An address claimed by more than one device is left OUT of the map
+    // and the events stay unattributed, rather than being filed under an
+    // arbitrary one of them. See that module's header for why.
+    const { map, ambiguous } = buildDeviceMap(devices.rows, aliases.rows);
+    if (ambiguous.length > 0) {
+      // Counted and logged, never silent: an operator needs to know WHY a
+      // device's events are unattributed, and that a device_syslog_sources row
+      // naming the real sender is the fix.
+      log(`device map: ${ambiguous.length} address(es) claimed by more than one device `
+        + `(${ambiguous.slice(0, 3).map((a) => a.ip).join(', ')}${ambiguous.length > 3 ? ', ...' : ''}) `
+        + '— left unattributed rather than guessed; add a device_syslog_sources row to resolve');
     }
     deviceByIp = map;
   } catch (err) {

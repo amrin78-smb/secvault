@@ -22,8 +22,8 @@ const assert = require('node:assert/strict');
 
 const { parseSyslogLine } = require('../lib/syslog/syslogParser');
 const vendorParsers = require('../lib/syslog/vendorParsers');
-const { fortinetLine, paloAltoLine, ciscoAsaLine, parseArgs, SENDERS, DENY_POLICY_ID,
-  PAN_RULES } = require('../scripts/mockSyslog');
+const { fortinetLine, paloAltoLine, ciscoAsaLine, cefLine, parseArgs, SENDERS,
+  DENY_POLICY_ID, PAN_RULES } = require('../scripts/mockSyslog');
 const { assertSafeTarget, DEVICES, NAME_PREFIX } = require('../scripts/seedMockFleet');
 
 const NOW = new Date('2026-10-01T16:30:00+07:00');
@@ -395,6 +395,9 @@ describe('\u26d4 the four vendors that had no mock device at all', () => {
       fortinet: fortinetLine,
       paloalto: paloAltoLine,
       cisco_asa: ciscoAsaLine,
+      // Both reached through the shared CEF grammar.
+      checkpoint: (now) => cefLine('checkpoint', now),
+      forcepoint: (now) => cefLine('forcepoint', now),
     };
     assert.deepEqual(Object.keys(SENDERS).sort(), Object.keys(GENERATORS).sort(),
       'every sender must have a generator, and every generator a sender');
@@ -406,10 +409,11 @@ describe('\u26d4 the four vendors that had no mock device at all', () => {
         `${vendor}: the generator emits something its own parser does not claim`);
     }
 
-    for (const v of ['checkpoint', 'sangfor', 'forcepoint']) {
-      assert.ok(!SENDERS[v],
-        `${v} has no syslog parser built from captured evidence; do not fabricate lines for it`);
-    }
+    // ⛔ Sangfor remains the one vendor with NO usable evidence: a single forum
+    // thread with two free-text lines whose own labels disagree ("Log type" vs
+    // "Log Type"). Do not add a generator for it without real captures.
+    assert.ok(!SENDERS.sangfor,
+      'sangfor has no syslog parser built from captured evidence; do not fabricate lines for it');
   });
 
   it('\u26d4 the ASA generator REPLAYS captures and never invents a rule name', () => {

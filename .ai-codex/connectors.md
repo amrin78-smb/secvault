@@ -912,3 +912,71 @@ Check Point captures (RFC 5424 + bracketed `key:"value";`, with real quirks like
 a proprietary layout. **Sangfor is not**: the only public sample is a FortiSIEM forum thread with
 two free-text lines whose own field labels disagree (`"Log type"` vs `"Log Type"`), and Fortinet
 staff state it is "not compatible with SIEM". ⛔ Do not write a Sangfor parser from that.
+
+## CEF: Forcepoint NGFW + Check Point Log Exporter (added 2026-10-04)
+
+`lib/syslog/cef.js` is the ArcSight CEF **grammar**, shared; `vendorParsers.parseCefEvent()` maps a
+CEF record to the event shape. Five of six vendors can now be parsed. Only **Sangfor** remains.
+
+⛔ **CEF IS THE ONE PLACE "DOCUMENTATION" IS NOT THE TRAP THIS REPO WARNS ABOUT.** Every other
+parser reverse-engineers a proprietary layout, because vendor docs lie about field names. CEF is a
+PUBLISHED, SELF-DESCRIBING format: the header names the vendor and product, the extension carries
+its own labels. There is no layout to guess. What the grammar cannot tell us is which SLOT a vendor
+puts a fact in — and that part was still read off samples.
+
+⛔ **THE FIXTURES ARE RECONSTRUCTIONS, NOT CAPTURES, AND THAT IS A WEAKER CLASS OF EVIDENCE.** No
+Apache-licensed Forcepoint or Check Point captures exist (logstash-patterns-core carries only Cisco
+and SuSE); the sources that publish samples are Elastic License 2.0 or ordinary documentation. So
+`tests/fixtures/cefSyslog.js` holds OUR reconstruction of a structure corroborated across
+independent sources, and says so. **A disagreement with a real device is resolved in the device's
+favour, without argument.** Contrast `tests/fixtures/ciscoAsaSyslog.js`, which is verbatim Apache-2.0
+captures.
+
+⛔ **`cs<N>` SLOTS ARE VENDOR-ASSIGNED, AND THAT IS WHY THE LABELS EXIST.** Forcepoint puts its rule
+id in **cs1** (`cs1Label=RuleID`); Check Point puts its rule **NAME** in **cs2**
+(`cs2Label=Rule Name`). Reading `cs1` unconditionally takes Check Point's **NAT rule id** for a rule
+name — a wrong value that looks entirely plausible. `bySlotLabel()` resolves every slot through its
+`Label` companion, which is what lets ONE parser serve both vendors. A mutation reading `cs1`
+directly nulls Check Point's rule name on every fixture.
+
+⛔ **THREE THINGS A NAIVE CEF PARSER GETS WRONG, all observed in real samples:**
+1. **Extension values contain SPACES** — `deviceExternalId=NGFW2 node 1 dvchost=...`. Splitting on
+   whitespace yields `NGFW2` plus two tokens of garbage that look like data.
+2. **`=` is escaped inside values** — `originsicname=CN\=gate2,O\=...`. Splitting on a bare `=` cuts
+   the value in half and invents a key called `O\`.
+3. **`|` is escaped inside header fields.** The header is POSITIONAL, so an unescaped split shifts
+   every later field left by one and the severity reads as a signature name.
+
+⛔ **CHECK POINT HAS THREE EXPORT FORMATS, NOT TWO** — CEF, a semicolon-delimited `key:"value";`
+native form, and a pipe-delimited `key=value|` form. Only CEF is handled. **Detection must never
+assume a Check Point device speaks CEF**; the other two remain unparsed and their events are stored
+unattributed, which is correct.
+
+⛔ **`proto` DISAGREES ACROSS VENDORS**: Forcepoint sends the IP protocol NUMBER (`6`, `17`), Check
+Point a name (`tcp`). Both normalise to a lowercase name; an unrecognised value passes through
+verbatim, because an unknown protocol is a fact, not a gap. ⛔ **`rt` is used ONLY when it is
+plainly a 13-digit millisecond epoch** — a wrong scale backdates the row to 1970, present in the
+table and outside every time window, the same lesson FortiOS `eventtime` digit-length encodes.
+
+### ⛔ Two product defects this exposed, neither visible on a two-vendor fleet
+
+**1. `Discard` was in NEITHER action set.** Forcepoint says `Discard` where others say `deny`/`drop`,
+and `lib/syslog/actions.js` knew neither. The failure is ASYMMETRIC: `log_hit` fails SAFE (an
+unrecognised verb never counts as "reached"), but retention fails UNSAFE —
+`shouldKeepRawMessage` keeps the raw line for DENIED traffic, so **every Forcepoint block would have
+silently lost its raw text** at `SYSLOG_RAW_MESSAGE=security`, precisely the events an investigation
+opens. `tests/vendorActions.test.js` now fails the build if any parser can emit an action in neither
+set.
+
+**2. A Forcepoint device could never be attributed at all.** The collector's map read `mgmt_ip` and
+`snmp_host`; a Forcepoint device has **neither** — it is reached through the SMC. Measured: 637
+Forcepoint events, every one `device_id NULL`. ⛔ **But the naive fix is wrong: ONE SMC MANAGES MANY
+ENGINES**, so `smc_host` is routinely shared, and a last-writer-wins map files every one of those
+devices' events under whichever row returned last — a fabricated attribution, indistinguishable
+from a real one once stored. `lib/syslog/deviceMap.js` (extracted so it is testable, as
+`eventShape.js` was) therefore **withholds any address claimed by more than one device**, reports
+it, and lets an explicit `device_syslog_sources` row resolve it. The same hazard already existed for
+a shared `snmp_host` and had simply never been exercised.
+
+**Verified live on the mock fleet:** 6,000 events, **all five parseable vendors attributed, zero
+unattributed**, rule-hit correlation populated for every one, each rule showing only its own intent.

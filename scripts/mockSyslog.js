@@ -69,7 +69,32 @@ const SENDERS = {
   // Added once a REAL-capture-derived ASA parser existed. Matches
   // MOCK-ASA-Edge-05's mgmt_ip in seedMockFleet.js.
   cisco_asa: '10.99.0.51',
+  // \u26d4 Added once CEF parsing existed. Forcepoint is reached on smc_host,
+  // not mgmt_ip, so this matches MOCK-FP-DC-07's SMC address.
+  checkpoint: '10.99.0.41',
+  forcepoint: '10.99.0.71',
 };
+
+// \u26d4 SAME REPLAY DISCIPLINE AS THE ASA GENERATOR: the CEF fixtures are
+// imported, not re-authored here, so the generator cannot drift from the
+// evidence the parser was written against.
+const { CEF_FIXTURES } = require('../tests/fixtures/cefSyslog');
+
+// Rule identifiers that exist on the seeded devices, so correlation has
+// something to match. A name matching no seeded rule parses perfectly and
+// correlates to nothing. Each carries its intent, for the same reason the
+// Fortinet/PAN/ASA generators do.
+const CP_RULES = [
+  { name: 'Mgmt-Access', allow: true },
+  { name: 'Web-Out', allow: true },
+  { name: 'DMZ-to-DB', allow: true },
+  { name: 'Cleanup', allow: false },
+];
+const FP_RULES = [
+  { name: 'Allow-Internal-Web', allow: true },
+  { name: 'Allow-VPN-Users', allow: true },
+  { name: 'Default-Deny', allow: false },
+];
 
 // \u26d4 THE ASA GENERATOR REPLAYS CAPTURED LINES; IT DOES NOT TEMPLATE THEM.
 // This file's own header warns that a generator invented from documentation
@@ -265,6 +290,34 @@ function ciscoAsaLine(now) {
     + `%ASA-${sev}-${f.msgId}: ${body}`;
 }
 
+/**
+ * Replay a captured CEF line for one vendor, substituting only values.
+ *
+ * \u26d4 Forcepoint's rule slot holds an ID (`2100123.2`) while Check Point's
+ * holds a NAME. The seeded rules are named, so for Forcepoint the ID is
+ * replaced with the seeded rule's NAME: correlation keys on whatever the device
+ * reports, and a mock fleet whose identifiers match nothing proves nothing.
+ */
+function cefLine(vendor, now) {
+  const pool = CEF_FIXTURES.filter((f) => f.vendor === vendor);
+  const f = pick(pool);
+  const rules = vendor === 'checkpoint' ? CP_RULES : FP_RULES;
+  const e = f.expect;
+  const wantAllow = !['deny', 'drop', 'discard'].includes(e.action);
+  const rule = pick(rules.filter((r) => r.allow === wantAllow));
+
+  let line = f.line;
+  const subs = [
+    [e.srcIp, ip(vendor === 'checkpoint' ? '10.80.1' : '10.70.1')],
+    [e.dstIp, ip('203.0.113')],
+    [String(e.srcPort), String(1024 + Math.floor(Math.random() * 60000))],
+    [String(e.dstPort), String(pick([443, 53, 80, 1521, 8443]))],
+  ];
+  for (const [from, to] of subs) if (from) line = line.split(from).join(to);
+  if (e.ruleName) line = line.split(e.ruleName).join(rule.name);
+  return `<134>${line}`;
+}
+
 function parseArgs(argv) {
   const o = Object.assign({}, DEFAULTS, { dryRun: false, anySource: false });
   const raw = {};
@@ -346,9 +399,11 @@ async function run(opts) {
         for (let i = 0; i < perTick && sent < opts.count; i++) {
           const now = new Date();
           const r = Math.random();
-          const vendor = r < 0.45 ? 'fortinet' : (r < 0.80 ? 'paloalto' : 'cisco_asa');
+          const vendor = r < 0.34 ? 'fortinet' : r < 0.60 ? 'paloalto'
+            : r < 0.78 ? 'cisco_asa' : r < 0.89 ? 'checkpoint' : 'forcepoint';
           const line = vendor === 'fortinet' ? fortinetLine(now)
-            : vendor === 'paloalto' ? paloAltoLine(now) : ciscoAsaLine(now);
+            : vendor === 'paloalto' ? paloAltoLine(now)
+              : vendor === 'cisco_asa' ? ciscoAsaLine(now) : cefLine(vendor, now);
           if (opts.dryRun) {
             console.log(`[${vendor} from ${SENDERS[vendor]}] ${line}`);
           } else {
@@ -395,5 +450,5 @@ if (require.main === module) {
   run(opts).catch((e) => { console.error('[mockSyslog]', e.message); process.exit(1); });
 }
 
-module.exports = { fortinetLine, paloAltoLine, ciscoAsaLine, parseArgs, SENDERS,
-  sourceHelp, DENY_POLICY_ID, PAN_RULES, ASA_ACLS };
+module.exports = { fortinetLine, paloAltoLine, ciscoAsaLine, cefLine, parseArgs,
+  SENDERS, sourceHelp, DENY_POLICY_ID, PAN_RULES, ASA_ACLS, CP_RULES, FP_RULES };
