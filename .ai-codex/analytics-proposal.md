@@ -339,7 +339,51 @@ evidence.
 
 ---
 
-## ⛔ NOT BUILT — A6 — Seasonal baselines: NOT a new item
+## ◨ IN PROGRESS — A6 — Seasonal baselines: NOT a new item
+
+⛔ **THE ARMING GATE IN THIS SECTION IS WRONG, AND THE HARNESS PROVED IT (2026-10-05).** It gates on
+"≥3 weeks for a 168-bucket hour-of-week model", crossed 2026-09-29. Three weeks is ~3 observations
+per bucket, and **three observations cannot support a tail threshold**: to place two observations
+above a quantile q you need `2/(1-q)` of them — 40 for q=0.95, 200 for q=0.99. The honest gate is
+OBSERVATIONS PER BUCKET measured against the chosen threshold, which is what
+`lib/engines/seasonalBaseline.js`'s `minObservationsFor()` implements.
+
+Measured on this fleet's own span (~649h, 3.9 weeks):
+
+| grain | buckets | obs/bucket | highest supportable q | FP per bucket |
+|---|---:|---:|---:|---:|
+| hour-of-week (the proposed grain) | 168 | 3.9 | — | **unusable** |
+| hour-of-day × weekday/weekend | 48 | 13.5 | 0.852 | 14.8% |
+| hour-of-day | 24 | 27.0 | 0.926 | 7.4% |
+
+⛔ **SO THE PROPOSED GRAIN NEEDS ~40 WEEKS, NOT 3**, and a gate counting weeks would have armed it
+anyway on a baseline that cannot support its own threshold. `selectGrain()` picks the finest grain
+the data actually supports and **upgrades itself** as history accumulates, with no code change —
+verified: 4 weeks → hour-of-day, 45 weeks → hour-of-week.
+
+⛔ **PERSISTENCE IS WHAT MAKES THE FEATURE SURVIVABLE, AND THE ARITHMETIC SAYS SO.** 16 devices ×
+168 hours = 2,688 device-hours/week, so a 5% per-bucket rate is ~142 false alerts a week — exactly
+how `new_finding` got pulled from the Alerts feed in July. `scripts/a6Harness.js` measures both
+false positives AND sensitivity against PLANTED anomalies (a detector that never fires has a perfect
+FP rate and is useless) and the synthetic sweep is unambiguous:
+
+| config | false alerts/day | planted events found |
+|---|---:|---:|
+| hour-of-day q=0.95 **persist=1** | 20.65 | 100% |
+| hour-of-day q=0.95 **persist=2** | 1.17 | 100% |
+| hour-of-day q=0.975 **persist=3** | **0.02** | **100%** |
+
+Single-bucket rules are unusable at any quantile; persistence collapses them without costing
+sensitivity.
+
+⛔ **THE SHIPPING THRESHOLD IS STILL UNCHOSEN.** The table above is SYNTHETIC — it proves the
+harness can tell a good configuration from a blind one, nothing more. Real firewall traffic is what
+falsified the last method, and only real rollups can pick. **Running the harness against
+`syslog_rollup_hourly` on the live fleet is the next step and needs read access to it.**
+
+---
+
+### Original section, kept as the design record
 
 This is `roadmap.md` **Tier 1 #2, "Threshold and anomaly alerting"**, already raised and unbuilt.
 What this file contributes is the measurement that says when it can work, and one method constraint.
