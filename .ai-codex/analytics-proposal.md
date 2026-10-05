@@ -376,6 +376,47 @@ FP rate and is useless) and the synthetic sweep is unambiguous:
 Single-bucket rules are unusable at any quantile; persistence collapses them without costing
 sensitivity.
 
+### ✅ MEASURED ON THE LIVE FLEET, 2026-10-05 — the method is picked
+
+Harness run against production `syslog_rollup_hourly` (read-only, rollups only), 15 devices,
+646 hours, metric = denied traffic per device-hour:
+
+| grain | q | persistence | fired/bucket | alerts/day | planted events found |
+|---|---:|---:|---:|---:|---:|
+| hour-of-day | 0.90 | 1 | 8.0% | 15.39 | 100% (15/15) |
+| hour-of-day | 0.90 | 2 | 8.0% | 5.96 | 100% (15/15) |
+| **hour-of-day** | **0.90** | **3** | 8.0% | **2.48** | **100% (15/15)** |
+
+Everything else in the sweep reports `insufficient_baseline` — including every hour-of-week row,
+as predicted.
+
+⛔ **THE MEASURED RATE IS 13x WHAT INDEPENDENCE PREDICTS.** At an 8% per-bucket rate a 3-hour
+persistence rule should give `0.08³ × 24 × 15 = 0.18` alerts/day. The real figure is **2.48** —
+because firewall traffic is AUTOCORRELATED: an anomalous hour is far more likely to be followed by
+another. This is precisely why the threshold is measured and not computed, and it is the same class
+of error that made A7 discard median+MAD.
+
+⛔ **"alerts/day" IS AN ALERT RATE, NOT A FALSE-POSITIVE RATE.** A7 could measure false positives
+because it had LABELS (days with no config change are known-change-free). A6 has none, so some of
+those 2.48 may be real. It is an UPPER BOUND, and the number that matters operationally anyway.
+
+⛔ **A HARNESS BUG PRODUCED A CONFIDENT FALSE CONCLUSION FIRST, AND THE SHAPE OF THE RESULT IS WHAT
+GAVE IT AWAY.** Planting was multiplicative on the existing value, and **30.7% of device-hours have
+ZERO denied events** (2,962 of 9,654) — so a third of planting sites were undetectable by
+construction, and with 3-hour persistence any window touching one could never fire. Sensitivity
+barely moved with magnitude (57% at 3x, 42% at 6x, 41% at 10x), which is not how a threshold
+detector behaves. Reported as-is it would have been a damning finding about the DETECTOR that was
+really a finding about the HARNESS. Planting is now additive against the device's own normal level,
+which is what a real scan looks like; sensitivity went to 100%.
+
+⛔ **q=0.95 IS NOT REACHABLE YET AND WOULD BE BETTER.** It needs 40 observations/bucket = 960h of
+TRAINING data (5.7 weeks); the fleet has 646h total. Reachable around **2026-10-25**, and
+`selectGrain()` will adopt it with no code change.
+
+⛔ **THE 0.85 TRAIN SPLIT IS A HARNESS ARTEFACT, NOT A SETTING.** A holdout is needed to measure;
+in production the baseline uses all history and judges each new hour as it arrives. At a 0.7 split
+nothing qualified at all — 18.8 observations/bucket against the 20 needed, short by 1.2.
+
 ⛔ **THE SHIPPING THRESHOLD IS STILL UNCHOSEN.** The table above is SYNTHETIC — it proves the
 harness can tell a good configuration from a blind one, nothing more. Real firewall traffic is what
 falsified the last method, and only real rollups can pick. **Running the harness against
