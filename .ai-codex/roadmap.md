@@ -598,7 +598,11 @@ Still deferred, deliberately:
   ⛔ What IS still open: it needs `SMOKE_USER`/`SMOKE_PASS` in the deployed `.env.local` or it logs
   a SKIP rather than a pass, and it cannot be run from a dev machine with no local instance.
 
-## Application-centric view — ⛔ PHASE 1 **BUILT** (v2.124.0); phases 2-4 still proposed
+## Application-centric view — ⛔ PHASES 1 **AND 2** BUILT (v2.124.0, v2.129.0); phases 3-4 proposed
+
+⛔ This heading said "phases 2-4 still proposed" while Phase 2 was live. The paragraph below
+corrects it, but a reader scanning headings would not reach that — and `application-view-plan.md`
+carried the same error in its own title until 2026-10-05.
 
 Full proposal: `.ai-codex/application-view-plan.md`. The one capability where both Tufin
 (SecureApp) and AlgoSec (AppViz/BusinessFlow) ship a real product and SecVault has nothing.

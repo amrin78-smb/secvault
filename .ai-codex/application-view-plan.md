@@ -1,7 +1,18 @@
-# Application-Centric View — Phase 1 BUILT (v2.124.0); phases 2-4 still proposed
+# Application-Centric View — Phases 1 and 2 BUILT; phases 3-4 proposed
 
-Status: **Phase 1 is BUILT and shipped** (see §7). Phases 2, 3 and 4 remain proposals and nothing in
-them exists in code. This was the plan for the one capability where the competitive table had
+Status: **Phase 1 BUILT (v2.124.0)** and **Phase 2 BUILT (v2.129.0)**. Phases 3 and 4 remain
+proposals.
+
+⛔ **THIS HEADER SAID "Phases 2, 3 and 4 remain proposals and nothing in them exists in code" FOR
+~67 VERSIONS AFTER PHASE 2 SHIPPED.** `lib/engines/applicationImpact.js` (21 KB, exporting
+`IMPACT_CLAIM`) and `lib/engines/applicationRetire.js` (26 KB) have existed since v2.129.0, with
+their own routes, tests and a whole CLAUDE.md section. §7's Phase 2 bullets below still carry no
+BUILT marker and §9's open question 2 still asks whether the reverse index should be built —
+both are answered: it was. Corrected 2026-10-05.
+
+⛔ A stale "not built" is the costliest index error this repo makes, and this is the third document
+it has happened to (after `central-cve-feed-proposal.md` and `analytics-proposal.md`). It sends a
+session off to rebuild working code. This was the plan for the one capability where the competitive table had
 SecVault at "None" and both leaders shipping: Tufin's SecureApp and AlgoSec's AppViz/BusinessFlow.
 
 ⛔ **Two things in this document turned out to be WRONG and are corrected in place below** — §3's

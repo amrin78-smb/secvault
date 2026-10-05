@@ -18,7 +18,11 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/gotchas.md`        — footguns and redaction rules
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 - `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
-- `.ai-codex/application-view-plan.md` — PROPOSAL ONLY (not built): the application-centric view
+- `.ai-codex/application-view-plan.md` — ⛔ **PHASE 1 BUILT (v2.124.0) AND PHASE 2 BUILT
+  (v2.129.0)**; phases 3-4 proposed. This line said "PROPOSAL ONLY (not built)" while BOTH were
+  live — the THIRD time that exact phrase has gone stale in THIS LIST, and it sat directly above
+  the two entries recording the other two. Read CLAUDE.md's own "Application Intent" sections for
+  what runs; the file is the design record, and its own header carried the same error
 - `.ai-codex/central-cve-feed-proposal.md` — ⛔ **BUILT in v2.137.0-v2.139.0**, this line said
   "PROPOSAL ONLY (not built)" for thirty-odd versions after it shipped. Kept as the design record
   for `lib/feeds/cveHub.js`; read the "Central CVE feed" section of this file for what actually runs
@@ -27,7 +31,9 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   central-CVE-feed entry above records, in the same list, two lines apart. Analytics with no LLM and
   no local AI: **A1** upgrade planner (v2.187.0), **A2** blind-spot register (v2.188.0), **A3**
   log-derived rule usage (v2.189.0), **A4** rule/object consolidation + **A5** fleet conformance
-  (v2.190.0), **A7** change outcome (v2.191.0). **A6/A8/A9 remain unbuilt.** Its tracking table
+  (v2.190.0), **A7** change outcome (v2.191.0), **A8** remediation velocity (v2.192.0).
+  ⛔ **A6 and A9 remain unbuilt** — this line said A8 did too, for four versions after it
+  shipped, which is the same drift twice over in one paragraph. Its tracking table
   carries each item's state and the SQL to re-measure; `.ai-codex/roadmap.md` is the living plan
 
 ### Maintaining the index — MANDATORY
