@@ -12,6 +12,8 @@ import PageHeader from '../../../components/ui/PageHeader';
 import Pagination from '../../../components/ui/Pagination';
 import AlertsFilters from '../../../components/alerts/AlertsFilters';
 import AlertAckControl from '../../../components/alerts/AlertAckControl';
+import AnomalyPanel from '../../../components/alerts/AnomalyPanel';
+import { gatherAnomalies, LOOKBACK_DAYS as ANOMALY_LOOKBACK_DAYS } from '../../../lib/engines/anomalyDetectionsData';
 import { resolvePage, pageWindow } from '../../../lib/pagination';
 import { isValidUuid } from '../../../lib/apiUtils';
 
@@ -267,6 +269,23 @@ export default async function AlertsPage({ searchParams }) {
   // resets to page 1 -- a stale page number from a larger result set would
   // otherwise land past the end.
   const linkParams = {};
+  // ── A6 ANOMALY DETECTORS ─────────────────────────────────
+  // ⛔ ISOLATED, AND THE FAILURE IS CARRIED RATHER THAN SWALLOWED. This is a
+  // read-time computation over the hourly rollups; a slow or broken query must
+  // not take down the alert feed beside it, and it must not silently contribute
+  // an empty section either — AnomalyPanel renders the error as its own panel
+  // saying nothing has been ruled out. Deliberately the OPPOSITE handling from
+  // anomalyDetectionsData's dispatch fetchers, which THROW on purpose: there a
+  // short list would mark real findings resolved, here there is no reconcile to
+  // corrupt and a blank page would be the worse outcome.
+  let anomalies = null;
+  let anomalyError = null;
+  try {
+    anomalies = await gatherAnomalies(pool);
+  } catch (err) {
+    anomalyError = err && err.message ? err.message : String(err);
+  }
+
   if (typeParam) linkParams.type = typeParam;
   if (statusParam !== 'open') linkParams.status = statusParam;
   if (deviceIdParam) linkParams.device_id = deviceIdParam;
@@ -275,7 +294,7 @@ export default async function AlertsPage({ searchParams }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
         title="Alerts"
-        subtitle="Fleet-wide items needing attention — patch-now CVEs and unacknowledged config changes. Rule findings live in Rule hygiene."
+        subtitle="Fleet-wide items needing attention — patch-now CVEs, unacknowledged config changes, and traffic or reporting anomalies. Rule findings live in Rule hygiene."
       />
 
       <AlertsFilters
@@ -291,8 +310,19 @@ export default async function AlertsPage({ searchParams }) {
         </p>
       )}
 
+      <AnomalyPanel
+        result={anomalies}
+        error={anomalyError}
+        lookbackDays={ANOMALY_LOOKBACK_DAYS}
+      />
+
+      {/* ⛔ THIS ALL-CLEAR WAS UNCONDITIONAL AND BECAME A LIE. "Nothing needs
+          attention." spoke for the whole page while the anomaly panel above it
+          could be reporting a firewall that stopped logging 15 hours ago. It now
+          speaks only for the feed it belongs to, which is what it always
+          measured. */}
       {items.length === 0 ? (
-        <EmptyState message="Nothing needs attention." />
+        <EmptyState message="No patch-now CVEs and no unacknowledged config changes." />
       ) : (
         <>
           <Table>

@@ -82,7 +82,21 @@ const STATIC_ROUTES = [
   { path: '/login', anon: true, markers: ['Firewall security posture, in one place.'] },
   { path: '/', markers: ['Security Score', 'Overview sections'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
-  { path: '/alerts', markers: ['Fleet-wide items needing attention'] },
+  // ⛔ `alsoMarkers`, NOT a second `markers` entry — this is the exact case the
+  // AND exists for, and I got it wrong first: `markers` is an OR, so adding the
+  // anomaly heading there left the page passing with the panel deleted
+  // (verified: 33,556 bytes instead of ~63,000, still reported ok). The panel is
+  // an INDEPENDENT second section below the alert feed, so the feed's own marker
+  // satisfies the OR while the panel renders nothing.
+  // The heading renders unconditionally, including on the panel's error branch,
+  // which is deliberate: it proves the panel MOUNTED. A marker from inside the
+  // findings list would be DATA-DEPENDENT and fail on a fleet with nothing
+  // anomalous, which is the mistake the note below records.
+  {
+    path: '/alerts',
+    markers: ['Fleet-wide items needing attention'],
+    alsoMarkers: ['Traffic and reporting anomalies'],
+  },
   // ⛔ NOT a nav label ('Coverage' is one, rendered into every page by the
   // shared layout) AND NOT DATA-DEPENDENT. The first draft used
   // 'Gaps by evidence source', which CoverageRegister.js renders inside

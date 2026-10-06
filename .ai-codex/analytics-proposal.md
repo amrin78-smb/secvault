@@ -426,6 +426,44 @@ becomes reachable ~2026-10-25 and `selectGrain()` adopts it with no code change.
 
 ---
 
+### ✅ ON-SCREEN SURFACE, 2026-10-06 — `components/alerts/AnomalyPanel.js`
+
+⛔ **STAGE 2 SHIPPED WIRED TO DISPATCH ONLY, AND THAT WAS A GAP, NOT A PHASE.** Detection ran every
+15 minutes and the findings went nowhere unless a channel subscribed — and the reference fleet has
+**zero notification channels configured**, so two real silences (15h, 13h) and three denied-traffic
+exceedances were computed and discarded on every cycle. A product that measures something and shows
+nobody is indistinguishable from one that never measured it.
+
+It renders on **`/alerts`**, beside the feed and deliberately NOT in it: the feed is a paginated SQL
+UNION over stored, acknowledgeable rows, while an anomaly finding is computed at read time, has no
+row and nothing to acknowledge — the same "no stored verdict" call `/segmentation` and
+`/applications` make. No new sidebar entry.
+
+⛔ **COVERAGE IS RENDERED, NOT JUST FINDINGS.** Each detector reports how many firewalls it judged
+versus could not, hatched and hueless, because "no findings" and "could not look" are the same empty
+list. ⛔ **`"Nothing needs attention."` WAS UNCONDITIONAL AND BECAME A LIE** — it spoke for the whole
+page while the panel above it could be reporting a firewall that stopped logging 15 hours ago. It
+now speaks only for the feed it belongs to.
+
+⛔ **THREE DEFECTS SURVIVED A CLEAN BUILD AND 5,778 PASSING TESTS; LOADING THE PAGE CAUGHT ALL
+THREE.**
+1. `<TimeAgo date={...}>` where the prop is `value` — every finding rendered **"started —"**, the
+   NOT-MEASURED em-dash over a timestamp measured exactly. The inversion this product exists to
+   refuse, shipped by a one-word prop name.
+2. The subtitle edit silently did nothing: a line-based script inserted above its own target and
+   then wrote to a stale index, reporting success. A no-op that announced itself as a change.
+3. The silence link pointed at `/logs`, which needs `view_log_search` — a capability `operator` does
+   NOT hold, while `/alerts` is gated on `OPERATE`. A dead link for exactly the role most likely to
+   be reading it. Now the device page.
+
+⛔ **AND THE SMOKE MARKER WAS ADDED TO THE WRONG FIELD FIRST.** `markers` is an **OR**, so the feed's
+existing marker satisfied it while the panel rendered nothing — verified by deleting the panel and
+watching the sweep still report `ok /alerts` at 33,556 bytes instead of ~63,000. `alsoMarkers` is the
+**AND** that exists for precisely this shape, and the file says so. With it the sweep fails:
+*"a REQUIRED second section did not render — one section of this page is blank"*.
+
+---
+
 ### ✅ MEASURED ON THE LIVE FLEET, 2026-10-05 — the method is picked
 
 Harness run against production `syslog_rollup_hourly` (read-only, rollups only), 15 devices,
