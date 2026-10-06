@@ -1037,6 +1037,18 @@ const REGISTRY = [
   { mod: 'lib/engines/changeOutcomeData.js', fn: 'getChangeOutcomes', args: () => [{}], spec: { object: ['devices', 'summary', 'failures'] } },
   { mod: 'lib/engines/changeOutcomeData.js', fn: 'getDeviceChangeOutcome', args: (c) => [c.deviceId, {}], needsDevice: true, spec: { object: ['device', 'summary', 'failures'] } },
 
+  // A6 anomaly detectors. ⛔ gatherAnomalies runs BOTH detectors, so one entry
+  // exercises every query in the module; its `states` object is what proves a
+  // detector that judged nothing is visible as such rather than reading clean.
+  // \u26d4 NO `spec` ON THESE TWO: they return a Map keyed by device id, which is
+  // neither an array (RAW) nor a named-key object, and declaring RAW made
+  // dbcheck report "returned object, but callers iterate it as an array" —
+  // a FAILURE caused by my wrong declaration, not by the code. An honest
+  // "shape unverified" beats a spec that asserts the wrong thing; the SQL is
+  // still executed and the grants still checked, which is the point here.
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadReportingGrid', args: () => [{ days: 2 }] },
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadDeniedSeries', args: () => [{ days: 2 }] },
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'gatherAnomalies', args: () => [{ days: 2 }], spec: { object: ['findings', 'states'] } },
   { mod: 'lib/engines/segmentationData.js', fn: 'listFleetZones', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'listIntents', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'loadFleetRulesWithEvidence', args: (c) => [1, c.now], spec: { object: ['rules', 'rulesCollected', 'deviceCount'] } },

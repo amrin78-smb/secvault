@@ -376,6 +376,56 @@ FP rate and is useless) and the synthetic sweep is unambiguous:
 Single-bucket rules are unusable at any quantile; persistence collapses them without costing
 sensitivity.
 
+### ✅ STAGE 2 BUILT, 2026-10-06 — two detectors, and two REFUSED on measurement
+
+`lib/engines/anomalyDetections.js` (pure) + `anomalyDetectionsData.js` (plumbing), dispatched as
+**one alert type per detector**.
+
+| detector | measured | shipped |
+|---|---|:--:|
+| **device stopped logging** | **0.074 alerts/day** — 16 silent device-hours in 9,720 (0.16%) over 27 days, in exactly TWO runs (3h, 13h): silence here is rare AND clustered | ✅ |
+| **denied traffic above normal** | **2.48 alerts/day, 100% sensitivity** — hour-of-day, q=0.90, 3 consecutive hours | ✅ |
+| total-events spike | 6.91 alerts/day at the best configuration the data supports | ❌ |
+| VPN auth burst | 3.32/day, **and 33% of control buckets fired against the ~10% a 0.9 quantile can produce** | ❌ |
+
+⛔ **THE VPN REFUSAL IS A DIAGNOSIS, NOT A TUNING FAILURE.** That 33%-vs-10% gap is DRIFT: VPN auth
+failures rose **~7x over the window** (mean per row 1 → 3 → 5 → 5 → 7 by week) while denied traffic
+stayed flat. A STATIC seasonal baseline is the wrong instrument for a trending metric and a looser
+threshold would not fix it. ⛔ **The trend is itself worth someone's attention** and is a live
+observation about this fleet, not a modelling note.
+
+⛔ **AN UNMEASURED DETECTOR CANNOT BE REGISTERED.** `assertRegisteredDetector()` throws at module
+load unless `EVIDENCE[key]` carries an alert rate, a sensitivity (or a stated reason it does not
+apply), a date and a method. Adding either refused candidate back needs a harness run, not a
+judgement call.
+
+⛔ **THE SILENCE DETECTOR NEEDS NO BASELINE AT ALL**, and is the one the rest of the product most
+needs: a firewall that stopped reporting contributes no CVEs, no failing checks and no rule
+findings — CLAUDE.md's own words, it "renders as the healthiest device on the fleet". ⛔ A device
+that has **never** reported is `no_data`, never "stopped" — that is an uncollected device, a
+different fact with a different owner.
+
+⛔ **THE BASELINE EXCLUDES THE JUDGED WINDOW.** An anomaly inside its own baseline raises its own
+threshold. Measured boundary: masking begins once the anomaly exceeds **(1−q)** of a bucket's
+observations — at q=0.9, 5% and 9% are still found, 11% FRAGMENTS (7 runs instead of 1), 15% and
+25% are fully MASKED. The default 24h window against 28 days is **3.6%**, so the default is safe by
+a wide margin; a caller raising `judgeWindowHours` is not, and a test pins that.
+
+⛔ **THE TOGGLE GATES DISPATCH, NEVER DETECTION**, one type per detector via
+`notification_channels.alert_types[]` — no new env var, no new page. Muting denied-traffic must not
+mute a firewall going dark. Deliberately the OPPOSITE call from `work_act_now`, which collapses
+twelve sources into one: there the sources share a vocabulary, here each detector measures a
+different fact with its own measured rate.
+
+⛔ **MARGINS ARE SMALL AND ARE STATED.** Live findings ranged from 0.4% to 1025% above the
+threshold (median 7%, p25 3.2% over 31 runs in 28 days). A 10% floor would discard 71% of runs and
+is NOT applied — it is a second knob, unmeasured against sensitivity. Instead the alert prints its
+own margin, with a decimal below 1% so a real exceedance can never render as "0% above it". The
+small margins are the expected cost of q=0.90, which is all 4 weeks of history supports; q=0.95
+becomes reachable ~2026-10-25 and `selectGrain()` adopts it with no code change.
+
+---
+
 ### ✅ MEASURED ON THE LIVE FLEET, 2026-10-05 — the method is picked
 
 Harness run against production `syslog_rollup_hourly` (read-only, rollups only), 15 devices,

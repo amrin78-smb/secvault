@@ -86,6 +86,27 @@ const METRICS = {
        GROUP BY 1, 2 ORDER BY 1, 2`,
     params: (days, denied) => [String(days), denied],
   },
+  // VPN authentication FAILURES per device-hour. The detector that would have
+  // caught the credential spraying found on 2026-09-08.
+  // \u26d4 Only hours the device actually REPORTED vpn auth are included; an hour
+  // with no row is a device that logged no VPN auth at all, which is missing,
+  // not zero failures.
+  vpn_auth_fail: {
+    table: 'syslog_vpn_auth_hourly',
+    sql: `
+      WITH reporting AS (
+        SELECT device_id, bucket_hour FROM syslog_vpn_auth_hourly
+         WHERE device_id IS NOT NULL AND bucket_hour >= now() - ($1 || ' days')::interval
+         GROUP BY 1, 2
+      )
+      SELECT r.device_id::text AS device, r.bucket_hour AS at,
+             COALESCE(SUM(v.event_count) FILTER (WHERE v.auth_outcome = 'failure'), 0)::bigint AS value
+        FROM reporting r
+        LEFT JOIN syslog_vpn_auth_hourly v
+          ON v.device_id = r.device_id AND v.bucket_hour = r.bucket_hour
+       GROUP BY 1, 2 ORDER BY 1, 2`,
+    params: (days) => [String(days)],
+  },
   // Total events per device-hour. The inverse detector -- "this device stopped
   // logging" -- is the proposal's highest-value one and reads the same series.
   events: {

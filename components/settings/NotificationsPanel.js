@@ -34,6 +34,11 @@ const CHANNEL_TYPE_LABEL = {
 const ALERT_TYPES = [
   'patch_now_cve', 'compliance_critical', 'config_diff', 'ingest_drop', 'work_act_now',
   'compliance_report',
+  // ⛔ ONE PER DETECTOR, AND SUBSCRIBING HERE IS HOW A DETECTOR IS SWITCHED ON.
+  // Detection always runs; this only decides whether a finding reaches a
+  // channel. Separate types so muting a noisy one cannot mute a firewall going
+  // dark — which is the highest-value detector of the two.
+  'anomaly_device_silent', 'anomaly_denied_spike',
 ];
 const ALERT_TYPE_LABEL = {
   patch_now_cve: 'Patch Now CVEs',
@@ -50,6 +55,16 @@ const ALERT_TYPE_LABEL = {
   // firehose that got the rule-findings alert removed in July.
   work_act_now: 'Work Queue — Act Now (covers CVEs and compliance)',
   compliance_report: 'Monthly Compliance Report',
+  // ⛔ Worded as the FACT, not as "anomaly": a firewall that stopped reporting
+  // contributes no CVEs, no failing checks and no rule findings, so it reads as
+  // the healthiest device on the fleet everywhere else in this product.
+  // Measured on the live fleet: 2 occurrences in 27 days across 15 firewalls.
+  anomaly_device_silent: 'Firewall Stopped Sending Syslog',
+  // ⛔ Measured, not guessed: hour-of-day baseline at the 90th percentile,
+  // sustained 3 hours, ~2.5 alerts/day fleet-wide at 100% sensitivity against
+  // planted events. The threshold is deliberately NOT adjustable here — a
+  // tunable one invites tuning until quiet, which defeats the detector.
+  anomaly_denied_spike: 'Denied-Traffic Spike',
 };
 // 'compliance_report' only ever means anything for an email channel (a PDF
 // attachment has no Slack/Teams/generic-webhook analog) — the checkbox
