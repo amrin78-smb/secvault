@@ -632,6 +632,33 @@ function checkShape(value, spec) {
     return { problems, unverified };
   }
 
+  // ⛔ A Map IS a legitimate return shape and the checker could not express one.
+  // Added 2026-10-06 for anomalyDetectionsData's per-device loaders. Declaring
+  // them `array` reported a FAILURE caused by the wrong declaration; omitting
+  // the spec tripped dbCheckHarness's "every entry needs a shape spec" guard,
+  // which is right — a missing spec is how a typo silently skips a check. The
+  // honest fix is for the checker to know about Maps.
+  if (s.map) {
+    if (!(value instanceof Map)) {
+      problems.push(`returned ${typeof value}, but callers iterate it as a Map`);
+      return { problems, unverified };
+    }
+    if (value.size === 0) {
+      unverified.push('returned an empty Map, so its entry shape was not verified');
+    } else if (s.valueKeys) {
+      const first = value.values().next().value;
+      if (!first || typeof first !== 'object') {
+        problems.push(`its first Map value is ${typeof first}, not an object`);
+      } else {
+        const missing = s.valueKeys.filter((k) => !(k in first));
+        if (missing.length) {
+          problems.push(`its Map values are missing ${missing.join(', ')} — present: ${Object.keys(first).join(', ')}`);
+        }
+      }
+    }
+    return { problems, unverified };
+  }
+
   if (s.array) {
     if (!Array.isArray(value)) {
       problems.push(`returned ${typeof value}, but callers iterate it as an array`);
@@ -1040,14 +1067,13 @@ const REGISTRY = [
   // A6 anomaly detectors. ⛔ gatherAnomalies runs BOTH detectors, so one entry
   // exercises every query in the module; its `states` object is what proves a
   // detector that judged nothing is visible as such rather than reading clean.
-  // \u26d4 NO `spec` ON THESE TWO: they return a Map keyed by device id, which is
-  // neither an array (RAW) nor a named-key object, and declaring RAW made
-  // dbcheck report "returned object, but callers iterate it as an array" —
-  // a FAILURE caused by my wrong declaration, not by the code. An honest
-  // "shape unverified" beats a spec that asserts the wrong thing; the SQL is
-  // still executed and the grants still checked, which is the point here.
-  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadReportingGrid', args: () => [{ days: 2 }] },
-  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadDeniedSeries', args: () => [{ days: 2 }] },
+  // \u26d4 These return a Map keyed by device id. Declaring RAW (array) reported a
+  // FAILURE caused by the wrong declaration; omitting the spec tripped
+  // dbCheckHarness's "every entry needs a shape spec" guard, which is right.
+  // `map` was added to checkShape for this rather than reshaping the code to
+  // suit the tool.
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadReportingGrid', args: () => [{ days: 2 }], spec: { map: true, valueKeys: ['name', 'hours'] } },
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadDeniedSeries', args: () => [{ days: 2 }], spec: { map: true, valueKeys: ['name', 'series'] } },
   { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'gatherAnomalies', args: () => [{ days: 2 }], spec: { object: ['findings', 'states'] } },
   { mod: 'lib/engines/segmentationData.js', fn: 'listFleetZones', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'listIntents', args: () => [], spec: RAW },
