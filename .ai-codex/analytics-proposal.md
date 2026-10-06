@@ -426,6 +426,46 @@ becomes reachable ~2026-10-25 and `selectGrain()` adopts it with no code change.
 
 ---
 
+### ✅ THE 5% MARGIN FLOOR, 2026-10-06 — found by looking at production
+
+⛔ **THE UI IS WHAT EXPOSED IT.** With the findings finally on screen, the live panel read
+**"TFM-RN: 2,897 denied events against a normal ceiling of 2,897, 0.0% above it"** — two identical
+numbers and a margin of nothing. The detector was right (it exceeded, by under one event) and the
+alert was useless. An earlier pass had declined a floor as "an unmeasured second knob"; that was the
+correct instinct and the wrong conclusion, because the floor CAN be measured.
+
+Measured on the live fleet, both directions at once:
+
+| floor | live runs kept | planted anomalies still detected |
+|---:|---:|---:|
+| 0% | 32/32 | 30/30 (100%) |
+| 2% | 27/32 | 30/30 (100%) |
+| **5%** | **20/32** | **30/30 (100%)** |
+| 10% | 10/32 | 30/30 (100%) |
+
+⛔ **PLANTED ANOMALIES CARRY A MINIMUM MARGIN OF 10.9%** (median 71.5%), so every floor to 10% keeps
+full sensitivity. **5% is the pick**: it removes the trivial tail and keeps a 2x gap to the smallest
+real anomaly. ⛔ **10% cuts more noise and was REFUSED** — it sits 0.9pp under that smallest margin,
+which is no gap at all.
+
+Re-measured after the change: **1.00 alerts/day, down from 2.48**, sensitivity unchanged.
+
+⛔ **AND THE REPORTED HOUR WAS WRONG IN THE SAME SENTENCE.** The run named its largest-VALUE hour,
+but each hour is judged against ITS OWN bucket — so the biggest number can be the one that barely
+cleared a high ceiling while another hour cleared a low one by far more. Live, the same TSR-TL event
+read **"16,276 against 15,216, 7% above"** by value and **"13,583 against 11,574, 17% above"** by
+exceedance: a smaller number that describes the event better. The run now reports the hour that
+actually drove it.
+
+⛔ **TWO MUTATIONS INITIALLY ESCAPED** because the fixture used a FLAT history, where every bucket
+shares one threshold and the largest-value hour IS the largest-exceedance hour — so reporting by
+either gave the same answer. A skewed fixture (a quiet hour beside two busy ones) separates them.
+⛔ Its first draft then produced NO run at all: `selectGrain` upgrades to `hour_of_week` once the
+history is long enough, each bucket then needs 20 observations of its own, and the trim left the
+three judged buckets on 19 — the fixture was sitting exactly on the boundary it existed to test past.
+
+---
+
 ### ✅ ON-SCREEN SURFACE, 2026-10-06 — `components/alerts/AnomalyPanel.js`
 
 ⛔ **STAGE 2 SHIPPED WIRED TO DISPATCH ONLY, AND THAT WAS A GAP, NOT A PHASE.** Detection ran every
