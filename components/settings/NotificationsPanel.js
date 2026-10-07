@@ -423,9 +423,18 @@ export default function NotificationsPanel() {
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)', margin: 0 }}>
-            Send an alert to Slack, Microsoft Teams, email, or a generic webhook when a device reaches
-            Patch Now on a CVE, fails a critical compliance check, or has an unacknowledged config change.
-            Checked every few minutes — see the About tab for the current poll interval.
+              {/* ⛔ THIS SENTENCE NAMED THREE OF SEVEN ALERT TYPES. It was written when
+                  there were three and never grew with the list, so `ingest_drop`,
+                  `work_act_now` and both anomaly detectors were dispatchable, listed in the
+                  checkboxes directly below, and absent from the only prose describing what
+                  this page does. Keep it GENERAL rather than re-enumerating, so the next
+                  type added cannot make it stale again — the checkboxes are the
+                  authoritative list and they are two inches away. */}
+              Send an alert to Slack, Microsoft Teams, email, or a generic webhook when something
+              needs attention — an urgent CVE, a failing critical compliance check, an
+              unacknowledged config change, a firewall that has stopped sending syslog, or unusual
+              denied traffic. Each channel chooses which of these it wants below. Checked every few
+              minutes — see the About tab for the current poll interval.
           </p>
 
           {channels && channels.length > 0 && (
