@@ -9,39 +9,96 @@
 -- from lib/schema.sql, and its failure must never block application startup —
 -- see the best-effort handling in lib/migrate.js.
 --
--- ⛔ FRESH INSTALL: THESE TWO ROLES SHIP WITH A PASSWORD THAT IS IN THIS FILE,
--- IN A GIT REPOSITORY, IDENTICAL ON EVERY INSTALLATION. That is a deliberate
--- development convenience (CLAUDE.md "Readonly Access for Diagnostics"), and on
--- a CUSTOMER server it is a standing login to the security database.
+-- ── Readonly password: PER INSTALL, never hardcoded (2026-10-16) ─────────
+-- This file used to carry a hardcoded `PASSWORD` literal, so every
+-- SecVault installation in the field was created with the SAME password, and
+-- that password was in this git repository. CertVault had already solved this
+-- and its own schema-grants.sql names SecVault as the app that had not; this is
+-- that mechanism ported across, deliberately unchanged in shape so the two
+-- cannot drift.
 --
--- What keeps it bounded, and what does not:
---   * They are SELECT-only and granted PER TABLE -- never GRANT ... ON ALL --
---     and device_credentials, credential_profiles, notification_channels and
---     user_mfa are excluded, as are the admin/user password hashes (via the
+--   $env:PGPASSWORD = <postgres superuser password>           # never on argv
+--   $env:SECVAULT_READONLY_PASSWORD = <generated password>    # install only
+--   psql -U postgres -d secvault -f lib\schema-grants.sql
+--
+--   Alternative: -v readonly_password=<pw> wins over the env var.
+--   ⛔ that puts the password on the process command line; prefer the env var.
+--   Needs psql >= 15 (\getenv, \if :{?var}); the bundled PostgreSQL 16 has it.
+--
+-- ⛔ IT IS USED ONLY WHEN A ROLE IS CREATED. An operator's later
+-- `ALTER ROLE ... PASSWORD` therefore survives every update, and an UPDATE need
+-- not supply it at all (the roles already exist, so nothing reads it).
+--
+-- ⛔ NO PASSWORD SUPPLIED AND THE ROLE IS ABSENT => CREATED `NOLOGIN`, WITH A
+-- WARNING. It fails CLOSED. Falling back to a default here would reinstate the
+-- exact defect this replaces, and these roles are diagnostic-only -- nothing in
+-- the application reads them, so a NOLOGIN role breaks nothing.
+--
+-- ⛔ THE ROLES ARE CLUSTER-WIDE AND SHARED WITH SIBLING SUITE APPS. If
+-- claude_readonly already exists because NetVault or CertVault created it, this
+-- file does NOT change its password -- so an installer must not claim to have
+-- set one (CertVault staging, 2026-09-29: the roles pre-existed and the printed
+-- password had never been applied).
+--
+-- What still bounds these roles, unchanged:
+--   * SELECT-only, granted PER TABLE -- never GRANT ... ON ALL -- with
+--     device_credentials, credential_profiles, notification_channels and
+--     user_mfa excluded, as are the admin/user password hashes (via the
 --     settings_readonly and users_readonly views below). The encrypted secrets
---     are genuinely not reachable through these roles. That property is real.
---   * They are NOT reachable remotely on a default PostgreSQL install, because
---     the bundled installer's pg_hba.conf admits only 127.0.0.1/32 and ::1/128.
---     ⛔ That is an accident of the DEFAULT, not a control this file asserts.
---     Anyone who widens pg_hba.conf -- to reach the database from a workstation,
---     or to make DATABASE_URL resolve against a LAN address -- exposes both
---     roles with it, and nothing in this file or in either installer says so.
---
--- On a customer deployment either ALTER ROLE both roles to a local password, or
--- DROP them; nothing the application does depends on either one. The CREATE
--- below is guarded by IF NOT EXISTS, so a changed password SURVIVES every
--- update -- re-running this file recreates a role only when it is absent.
+--     are genuinely not reachable through these roles.
+--   * A default pg_hba.conf admits only 127.0.0.1/32 and ::1/128. ⛔ That is an
+--     accident of the DEFAULT, not a control this file asserts: anyone who
+--     widens pg_hba.conf exposes both roles with it.
+
+-- Take the password into a session setting first: psql variables do NOT
+-- interpolate inside a DO $$ ... $$ body, so it is parked in a custom GUC and
+-- read back with current_setting(). Cleared again at the end of this file.
+-- ⛔ Wrapped in a comparison so psql prints t/f, NOT the password itself
+-- (set_config RETURNS the new value, and installer output is routinely logged).
+\if :{?readonly_password}
+\else
+\getenv readonly_password SECVAULT_READONLY_PASSWORD
+\endif
+
+-- ⛔ psql interpolates :'readonly_password' INTO the statement text, so with
+-- log_statement='all' or log_min_duration_statement=0 the password would land in
+-- the PostgreSQL SERVER LOG. From here through the DO block below (the only code
+-- that reads it; an ERROR there would quote its EXECUTE text -- CREATE ROLE ...
+-- PASSWORD -- as CONTEXT) logging is suppressed. All four are SUSET and this
+-- file runs as the superuser; they are RESET immediately afterwards.
+SET log_statement = 'none';
+SET log_min_duration_statement = -1;
+SET log_min_error_statement = panic;
+SET log_min_messages = panic;
+\if :{?readonly_password}
+SELECT set_config('secvault.ro_pw', :'readonly_password', false) <> '' AS readonly_password_supplied;
+\else
+SELECT set_config('secvault.ro_pw', '', false) <> '' AS readonly_password_supplied;
+\endif
 
 DO $$
+DECLARE
+  pw TEXT := current_setting('secvault.ro_pw', true);
+  r  TEXT;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'claude_readonly') THEN
-    CREATE ROLE claude_readonly LOGIN PASSWORD 'ClaudeRead@2026!';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nocvault_readonly') THEN
-    CREATE ROLE nocvault_readonly LOGIN PASSWORD 'ClaudeRead@2026!';
-  END IF;
+  FOREACH r IN ARRAY ARRAY['claude_readonly', 'nocvault_readonly'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+      IF coalesce(pw, '') <> '' THEN
+        -- %L quotes the literal safely; DDL cannot take a bind parameter.
+        EXECUTE pg_catalog.format('CREATE ROLE %I LOGIN PASSWORD %L', r, pw);
+      ELSE
+        EXECUTE pg_catalog.format('CREATE ROLE %I NOLOGIN', r);
+        RAISE WARNING 'role % created NOLOGIN: no readonly password supplied (ALTER ROLE % LOGIN PASSWORD ... to enable)', r, r;
+      END IF;
+    END IF;
+  END LOOP;
 END
 $$;
+-- End of the password span: server logging back to its configured defaults.
+RESET log_min_messages;
+RESET log_min_error_statement;
+RESET log_min_duration_statement;
+RESET log_statement;
 
 -- settings stores the local admin's bcrypt hash under key='admin_password_hash'
 -- (app/api/settings/route.js). A blanket table grant would let claude_readonly/
@@ -236,3 +293,8 @@ GRANT SELECT ON TABLE cloud_app_ranges TO nocvault_readonly;
 -- written by anything but the app.
 GRANT SELECT ON TABLE user_device_scopes TO claude_readonly;
 GRANT SELECT ON TABLE user_device_scopes TO nocvault_readonly;
+
+-- ⛔ Drop the readonly password out of the session. It was set with
+-- is_local=false so it would survive to the DO block above; without this it
+-- would stay readable via current_setting() for the rest of the connection.
+SELECT set_config('secvault.ro_pw', '', false) = '' AS readonly_password_cleared;

@@ -488,7 +488,23 @@ excluded from readonly grants same as `credential_profiles`).
 
 ### Readonly Access for Diagnostics
 
-Two readonly users exist for Claude Code to query the live DB directly: `claude_readonly` and `nocvault_readonly` (same password, `ClaudeRead@2026!`).
+Two readonly users exist for Claude Code to query the live DB directly: `claude_readonly` and
+`nocvault_readonly`.
+
+⛔ **THEIR PASSWORD IS GENERATED PER INSTALL AND IS NOT IN THIS REPOSITORY (2026-10-16).**
+`lib/schema-grants.sql` used to carry a hardcoded literal, so every installation in the field was
+created with the same password and that password was in git. `Install-SecVault.ps1` now generates
+one and passes it to psql in the ENVIRONMENT (never argv); the SQL uses it ONLY when a role must be
+CREATED, so an operator's later `ALTER ROLE` survives every update, and an update need not supply it.
+⛔ **No password supplied and the role absent => created `NOLOGIN`, with a warning.** It fails
+CLOSED; a default fallback would reinstate the defect. ⛔ The roles are CLUSTER-WIDE and shared with
+sibling suite apps, so if one already exists its password is NOT changed and the installer says so
+rather than printing a credential it never applied.
+⛔ **EXISTING DEPLOYMENTS KEEP THE OLD PASSWORD UNTIL SOMEONE CHANGES IT** — the `IF NOT EXISTS`
+guard means this fix reaches FRESH installs only. Run `ALTER ROLE claude_readonly LOGIN PASSWORD
+'...'` (and the same for `nocvault_readonly`) on every server already in the field, including the
+reference deployment. Ported from CertVault, whose own `schema-grants.sql` named SecVault as the
+app that had shipped it hardcoded.
 
 **These users must NEVER have access to `device_credentials`.** Grant per-table explicitly, in `lib/schema-grants.sql` — **NOT** in `lib/schema.sql`: `GRANT SELECT ON TABLE new_table_name TO claude_readonly;` (and identically to `nocvault_readonly`), never a blanket `ON ALL TABLES`.
 **Second exception: `settings`, granted via a `settings_readonly` VIEW, never the base table** — it stores the local admin's bcrypt hash under `key='admin_password_hash'`; a blanket table grant let readonly roles read it via raw SQL even though the app's `HIDDEN_KEYS` filter hid it from HTTP. Any future secret-bearing row added to `settings` needs the same treatment. `users` gets the identical treatment (`users_readonly` view, excludes `password_hash`).

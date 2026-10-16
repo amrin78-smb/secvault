@@ -1314,11 +1314,34 @@ Pop-Location
 # these roles are diagnostic-only and not required for the app to function.
 Write-Step 'Applying readonly diagnostic grants (lib/schema-grants.sql)...'
 
+# The readonly password is GENERATED PER INSTALL and handed to psql in the
+# ENVIRONMENT, never on argv (a command line is readable by any local process
+# and lands in transcripts). schema-grants.sql reads it with \getenv and uses it
+# ONLY when a role has to be created, so an operator's later ALTER ROLE survives.
+# Same byte pattern as $pgPassBytes in step 1d -- GetBytes fills a pre-allocated
+# array in place; passing an int silently yields $null.
+$roPassBytes = New-Object byte[] 24
+(New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($roPassBytes)
+$ReadonlyPassword = (([Convert]::ToBase64String($roPassBytes) -replace '[^a-zA-Z0-9]', '') + 'Aa1Bb2').Substring(0, 24)
+
 $env:PGPASSWORD = $PgAdminPassword
+
+# ⛔ THESE ROLES ARE CLUSTER-WIDE AND SHARED WITH SIBLING SUITE APPS. If NetVault
+# or CertVault already created claude_readonly on this PostgreSQL, schema-grants
+# .sql does NOT change its password -- so the summary below must not claim a
+# password that was never applied (CertVault staging, 2026-09-29, did exactly
+# that). Ask BEFORE applying the file, while the answer is still true.
+$roCheck = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -t -A -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('claude_readonly','nocvault_readonly')" 2>&1 }
+$script:ReadonlyRolesPreExisted = (($roCheck | Out-String).Trim() -eq '2')
+
 $grantsPath = Join-Path $repoRoot 'lib\schema-grants.sql'
+$env:SECVAULT_READONLY_PASSWORD = $ReadonlyPassword
 $out = Invoke-Native { & "$PgBin\psql.exe" -U postgres -h localhost -d secvault -f $grantsPath 2>&1 }
+Remove-Item Env:\SECVAULT_READONLY_PASSWORD -ErrorAction SilentlyContinue
 $out | Write-Host
+$script:ReadonlyGrantsOk = $true
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1) {
+    $script:ReadonlyGrantsOk = $false
     Write-Host "[WARN] Readonly grants script exited with code $LASTEXITCODE -- claude_readonly/nocvault_readonly may not be fully configured. This does not affect application function." -ForegroundColor Yellow
 }
 Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
@@ -1844,6 +1867,16 @@ if ($appRunning -and $engineRunning -and $collectorRunning) {
         Write-Host ' TLS: OFF -- the console is serving PLAIN HTTP. Set ENABLE_TLS=true in .env.local and run installer\Update-SecVault.ps1 to turn it on.'
     }
     Write-Host ' Default login: admin / changeme (change immediately via Settings)'
+    # ⛔ REPORT ONLY A PASSWORD THIS INSTALL ACTUALLY SET. The readonly roles are
+    # cluster-wide; if a sibling suite app already created them, schema-grants.sql
+    # leaves their password alone, and printing one here would hand the operator a
+    # credential that does not work. Shown once, on the console only -- it is
+    # stored nowhere, and nothing in the application uses these roles.
+    if ($script:ReadonlyGrantsOk -and -not $script:ReadonlyRolesPreExisted) {
+        Write-Host " Readonly : diagnostic roles created with password $ReadonlyPassword (shown once, stored nowhere; ALTER ROLE to change)."
+    } elseif ($script:ReadonlyRolesPreExisted) {
+        Write-Host ' Readonly : claude_readonly / nocvault_readonly already existed on this PostgreSQL (shared with other suite apps); their passwords were NOT changed.'
+    }
     # A SKIP IS STATED, NEVER SILENT -- the same rule .env.local.example states
     # for this pair. Update-SecVault.ps1 runs the page-render sweep only when
     # both are set; left blank, every future deploy logs a SKIP that nobody
@@ -1867,3 +1900,4 @@ if ($appRunning -and $engineRunning -and $collectorRunning) {
     Write-Host " Everything else (dependencies, database, build) completed successfully -- this is a runtime startup issue, not an install issue." -ForegroundColor Yellow
 }
 Write-Host '=================================================='
+$ReadonlyPassword = $null
