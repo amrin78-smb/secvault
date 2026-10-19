@@ -1638,10 +1638,56 @@ async function scheduleJobs() {
   // run after the startup passes have already settled and, historically, after
   // an unconditional snapshot run had already created today's row, which made
   // the guard a permanent no-op.
-  logger.info('Scheduling [dashboard-snapshot] with cron "10 0 * * *" (daily).');
-  const dashboardSnapshotTask = cron.schedule('10 0 * * *', () => {
+  // ⛔ MOVED OFF 00:10 ON 2026-10-19, AND THE REASON MATTERS MORE THAN THE TIME.
+  // The tick sat INSIDE rule-version-pull's run window. That job starts at
+  // 00:00 and takes 12.8-15.8 minutes on this fleet (measured 769-950s over 12
+  // consecutive days), so 00:10 fell inside it EVERY SINGLE DAY. node-cron
+  // matches on the second: if the event loop is not free during that one
+  // second, the tick is not deferred, it is LOST.
+  //
+  // Measured on the live fleet, 30 days: 4 days had no snapshot at all
+  // (2026-10-11, -12, -13 and -15 local). The engine was healthy throughout —
+  // 32 feed syncs on each of those days, and [snapshot-retention] at 00:30
+  // fired every day without a miss. Side by side:
+  //   10-13 HIT : TSR_EKC 17:09:50Z -> snapshot fires 17:10:00Z -> next device 17:11:40Z
+  //   10-14 MISS: TSR_EKC 17:09:27Z -> 108 SECONDS OF NOTHING    -> next device 17:11:15Z
+  // Same gap between the same two devices; on the miss it covered 17:10:00
+  // outright. It was a race against a collection pass, and it lost ~13% of the
+  // time.
+  //
+  // ⛔ THE STARTUP CATCH-UP BELOW WAS BUILT FOR THE WRONG CAUSE. Its comment
+  // blames "deploy restarts" for exactly this symptom. The engine was never
+  // down on any of the four days, so that catch-up could not fire and the gap
+  // continued after it shipped — a fix aimed at a misdiagnosis, which is why
+  // the root cause is written out above rather than summarised.
+  //
+  // 01:10 is clear of rule-version-pull (ends ~00:16), [snapshot-retention]
+  // (00:30) and [config-retention] (00:45). It is also STRICTLY BETTER than
+  // 00:10 on the merits: a snapshot taken mid-collection measured a fleet
+  // half-updated by that night's own pull.
+  logger.info('Scheduling [dashboard-snapshot] with cron "10 1 * * *" (daily).');
+  const dashboardSnapshotTask = cron.schedule('10 1 * * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
+  });
+
+  // ⛔ AND MOVING THE TIME IS NOT THE FIX, ONLY HALF OF IT. Any single-tick
+  // daily job is one blocked second away from losing a day permanently, and a
+  // snapshot is a point-in-time measurement that can never be reconstructed
+  // afterwards — the four lost days above are gone for good. So the day gets
+  // 23 more chances: an hourly guarded pass that writes ONLY if the day has no
+  // row yet (ON CONFLICT DO NOTHING, against the table's own UNIQUE
+  // constraint). It reuses runDashboardSnapshotIfMissing unchanged.
+  //
+  // ⛔ It can never overwrite or rewrite history: an already-recorded day is
+  // left exactly as measured, so the 01:10 reading stays the day's reading.
+  // A catch-up row is a later reading of the SAME day, which is strictly
+  // better than the gap it replaces and is honest about what it is.
+  // Minute :37 so it never shares a second with the :00/:15/:30/:45 jobs.
+  logger.info('Scheduling [dashboard-snapshot catch-up] with cron "37 * * * *" (hourly, writes only if the day is unrecorded).');
+  const dashboardSnapshotCatchupTask = cron.schedule('37 * * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runDashboardSnapshotIfMissing, 'dashboard-snapshot-catchup');
   });
 
   // Fixed daily time (00:30 UTC, offset from dashboard-snapshot above so the
@@ -1727,6 +1773,7 @@ async function scheduleJobs() {
     vpnTask,
     snmpTask,
     dashboardSnapshotTask,
+    dashboardSnapshotCatchupTask,
     snapshotRetentionTask,
     configRetentionTask,
     notificationsTask,

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.196.2': [
+    'Vulnerability Trends had four missing days (2026-10-11, -12, -13, -15). The engine was healthy throughout — the 00:10 snapshot tick sat inside rule-version-pull\u2019s 12.8\u201315.8 minute run window, and node-cron loses a tick whose second passes while the event loop is busy.',
+    'The tick moved to 01:10, clear of the nightly collection, retention and config-retention jobs — and it now measures a fleet that has finished updating rather than one mid-pull.',
+    'Added an hourly guarded catch-up: it writes only when the day has no row (ON CONFLICT DO NOTHING), so a single blocked second can no longer cost a whole day of history.',
+    'The earlier startup catch-up blamed deploy restarts for this symptom; the engine was never down on any of the four days, so it could not fire. Cause re-measured from the live engine log.',
+    'tests/engineSchedules.test.js pins the schedule relations; four mutations verified.',
+  ],
   '2.196.1': [
     'Server tab: the largest-relations list reported every ordinary table as 0 bytes. pg_partition_tree() returns no rows for a relation that is neither partitioned nor a partition, so only syslog_events measured correctly.',
     'That zero then rendered as "1 MB" because the formatter floored small values upward — so the panel showed a 717 GB database whose next four relations were each "1 MB", hiding ~6.9 GB of syslog detail rollups and device_configs at 776 MB.',

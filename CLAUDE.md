@@ -2444,13 +2444,55 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
 | VPN session poll (vendors with `getVpnSessionSummary()`) | 5-59 min | `VPN_POLL_INTERVAL_MINUTES` |
 | Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
-| Fleet dashboard snapshot | Daily, fixed 00:10 **server-local** | (not configurable) |
+| Fleet dashboard snapshot | Daily, fixed **01:10 server-local**, plus an hourly guarded catch-up at :37 | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 **server-local** | `SNMP_VPN_RETENTION_DAYS` |
 | VPN session-history retention (`vpn_sessions`) | inside the same 00:30 job, **own window** | `VPN_SESSION_RETENTION_DAYS` |
 | Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 **server-local** | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 | `log_hit` correlation (`log-hit`) | Hourly, fixed `20 * * * *` | `LOG_HIT_LOOKBACK_DAYS` |
 | Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
+
+### ⛔ A DAILY CRON TICK IS ONE BLOCKED SECOND FROM LOSING A DAY (fixed 2026-10-19)
+
+`[dashboard-snapshot]` sat at `10 0 * * *` — **inside `rule-version-pull`'s run window**, which
+starts at 00:00 and takes **12.8–15.8 minutes** on the reference fleet (measured 769–950s over 12
+consecutive days). So the tick fell inside a collection pass EVERY day, and `node-cron` matches on
+the SECOND: a tick whose second passes while the event loop is busy is **not deferred, it is lost**.
+
+Measured over 30 live days: **4 days have no snapshot at all** (2026-10-11, -12, -13, -15 local).
+The engine was healthy throughout — 32 feed syncs on each of those days and `[snapshot-retention]`
+at 00:30 never missed once. The two cases side by side, 20 minutes apart, same two devices:
+
+```
+10-13 HIT : TSR_EKC 17:09:50Z -> snapshot fires 17:10:00Z -> next device 17:11:40Z
+10-14 MISS: TSR_EKC 17:09:27Z -> 108 SECONDS OF NOTHING    -> next device 17:11:15Z
+```
+
+⛔ **A LOST SNAPSHOT IS UNRECOVERABLE.** It is a point-in-time measurement; nothing can reconstruct
+what the fleet looked like that day. Those four days are gone, and they are four missing points in
+every day-over-day delta drawn from the table.
+
+⛔ **AND IT WAS MISDIAGNOSED ONCE ALREADY, WHICH IS WHY THE CAUSE IS WRITTEN OUT ABOVE.** A startup
+catch-up was added blaming *"deploy restarts"* for exactly this symptom ("21 snapshots across the
+last 28 days, with no weekly pattern"). The engine was provably never down on any of the four days,
+so that catch-up could not fire and the gap simply continued after it shipped. A fix aimed at the
+wrong cause reads as a fix and changes nothing.
+
+Two halves, and the second is the one that matters:
+1. The tick moved to **01:10**, clear of `rule-version-pull` (ends ~00:16), `[snapshot-retention]`
+   (00:30) and `[config-retention]` (00:45). It is also better on the merits — 00:10 measured a
+   fleet half-updated by that night's own pull.
+2. ⛔ **Moving a time is not a fix, it is a better guess.** Any single-tick daily job stays one
+   blocked second from losing a day, so an **hourly guarded pass** (`37 * * * *`) now writes only
+   when the day has no row — `ON CONFLICT (snapshot_date) DO NOTHING`, against the table's own
+   UNIQUE constraint. It can never overwrite a recorded day, so the 01:10 reading stays that day's
+   reading, and a catch-up row is an honest later reading of the same day rather than a hole.
+
+`tests/engineSchedules.test.js` pins the RELATIONS, not the numbers: the daily tick may not land
+inside the collection window, the catch-up must run more often than daily, it must call the
+`ifAbsent` path and never the upserting one, no two daily jobs may share a minute, and every
+`cron.schedule` must be registered for shutdown. Four mutations verified, including restoring
+`10 0 * * *`.
 
 ⛔ **These "fixed HH:MM" cron jobs run in the SERVER’S LOCAL ZONE, not UTC.** `node-cron` is
 registered with no `timezone` option, so `10 0 * * *` fires at 00:10 **Asia/Bangkok** on the
