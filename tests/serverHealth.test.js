@@ -360,6 +360,24 @@ test('formatBytes: unreadable figures are unmeasured, not zero', () => {
   }
 });
 
+test('⛔ formatBytes: an EMPTY or wrong-typed value is unmeasured, not 0 bytes', () => {
+  // `Number('')`, `Number(false)`, `Number([])` and `Number('   ')` are all 0,
+  // which IS finite — so a bare Number.isFinite guard rendered each of these as
+  // a confident "0 bytes". This file's own getIngestHealth comment names that
+  // exact trap 150 lines above; formatBytes was using the guard it warns about.
+  for (const v of ['', '   ', false, [], {}, 'abc', '12abc', NaN, Infinity, -1]) {
+    const r = formatBytes(v);
+    assert.equal(r.unmeasured, true, `${JSON.stringify(v)} must be unmeasured, got ${r.text}`);
+    assert.equal(r.text, '—');
+  }
+  // And real readings, including numeric STRINGS (which is what pg hands back
+  // for bigint), still measure.
+  assert.deepEqual(formatBytes('0'), { text: '0 bytes', unmeasured: false });
+  assert.deepEqual(formatBytes(0), { text: '0 bytes', unmeasured: false });
+  assert.equal(formatBytes('1048576').text, '1 MB');
+  assert.equal(formatBytes(1048576).text, '1 MB');
+});
+
 test('formatBytes: unmeasured and zero never render alike', () => {
   // The whole point of the tab's header rule. If these two ever collapse, a
   // failed read becomes indistinguishable from an empty table.

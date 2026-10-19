@@ -57,6 +57,22 @@ function Panel({ icon, tint, tintBg, title, children }) {
 
 const STATE_COLOR = { ok: 'var(--green)', warning: 'var(--yellow)', critical: 'var(--red)' };
 
+// ⛔ Module top level, never inside a component — a component defined inside
+// another remounts on every render and loses input focus (see CLAUDE.md).
+// Deliberately coarse: this labels WHEN a gap was recorded, and minute
+// precision on a weeks-old event would imply a freshness it does not have.
+function agoText(ts) {
+  const then = new Date(ts).getTime();
+  if (!Number.isFinite(then)) return 'at an unknown time';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 0) return 'timestamped in the future';
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function Row({ label, value, sub }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0' }}>
@@ -257,9 +273,20 @@ export default async function ServerHealthWidgets() {
               </span>
             )
           }
+          /* ⛔ THE AGE IS PART OF THE READING. This row sits inside a panel
+             titled "Ingest (last N min)" with live counters beside it, so a
+             bare "182s" three weeks after the last restart reads as current
+             loss — and worse, a number that has sat there for weeks trains the
+             operator to dismiss a genuine gap from two minutes ago. getLastIngestGap
+             already fetches detected_at; it was being thrown away.
+             ⛔ "at most" is not hedging: the span is measured from the last
+             EVENT, not from the last proof of life, so on a quiet fleet it
+             includes idle time. See recordIngestGap() in services/collector.js. */
           sub={
             h.ingest.lastGap && h.ingest.lastGap.gapSeconds !== null
-              ? 'nothing was listening; upper bound. Events in this window were discarded by the OS and are counted nowhere'
+              ? `at most, when the collector last restarted${
+                  h.ingest.lastGap.detectedAt ? ` — ${agoText(h.ingest.lastGap.detectedAt)}` : ''
+                }. Datagrams arriving while nothing was bound are counted nowhere`
               : 'time the collector was not listening (deploys, restarts)'
           }
         />

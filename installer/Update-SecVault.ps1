@@ -711,15 +711,41 @@ Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
 # half-started system on purpose: the half that cannot catch up later is the
 # half that keeps running.
 # -----------------------------------------------------------------------
+# ⛔ A COLLECTOR THAT FAILED TO START MUST NOT READ AS SUCCESS. Only the SKIP
+# case was wired: sc.exe's exit code was never checked, Invoke-Step's return
+# value was discarded (unlike $migrateSucceeded / $buildSucceeded), and a failed
+# Wait-ServiceStatus only wrote a [WARN] without touching $script:hadFailure.
+# So a collector that could not bind -- a stale process on 514, a missing spool
+# directory, a crash on first flush -- left hadFailure $false and
+# $collectorStartSkipped $false, and the closing banner said "completed
+# successfully" while syslog was dead and datagrams were being discarded rather
+# than queued. There is no /api/health equivalent for the collector, so nothing
+# downstream catches it. That is the same guard-that-cannot-fire shape this
+# step's own comment describes fixing for SecVault-App, one branch over.
 $collectorStartSkipped = $false
+$collectorStartFailed = $false
 if ($migrateSucceeded) {
     Invoke-Step 'sc.exe start SecVault-Collector' {
         $out = sc.exe start SecVault-Collector
         $out | Write-Host
         Add-Content -Path $LogFile -Value ($out -join "`n")
         if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15)) {
-            Write-Log '  [WARN] SecVault-Collector did not reach Running state within 15s -- check logs\collector-stderr.log.'
+            throw 'SecVault-Collector did not reach Running state within 15s -- check logs\collector-stderr.log.'
         }
+    } | Out-Null
+
+    # ⛔ THE SERVICE STATE DECIDES, NOT Invoke-Step's RETURN VALUE. Invoke-Step
+    # returns `& $Action` followed by $true, so its value is an ARRAY whenever
+    # the action emits anything to the pipeline -- and `-not <array>` is not the
+    # test it looks like. Asking the service what it is actually doing is both
+    # robust against that and the right question: NSSM restarts a crashing
+    # process, so "sc.exe start returned 0" is not "the collector is listening".
+    # (Invoke-Step has already set $script:hadFailure on a throw; this is the
+    # flag the BANNER needs, which is a separate thing from the run failing.)
+    if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 1)) {
+        $collectorStartFailed = $true
+        $script:hadFailure = $true
+        Write-Log '  [FAIL] SecVault-Collector is NOT running. Syslog ingestion is stopped and datagrams are being DISCARDED by the OS, not queued.'
     }
 } else {
     $collectorStartSkipped = $true
@@ -1275,11 +1301,31 @@ if ($script:hadFailure) {
     # most important sentence this banner can carry.
     $notStarted = @()
     if ($appStartSkipped) { $notStarted += 'SecVault-App' }
-    if ($collectorStartSkipped) { $notStarted += 'SecVault-Collector (syslog ingestion is NOT running -- datagrams are being discarded, not queued)' }
+    if ($collectorStartSkipped) { $notStarted += 'SecVault-Collector (NOT started -- the schema migration failed)' }
+    if ($collectorStartFailed) { $notStarted += 'SecVault-Collector (FAILED to start -- syslog ingestion is NOT running and datagrams are being discarded, not queued)' }
+    # ⛔ AND IT MUST SAY WHEN THE COLLECTOR *IS* UP. Under the old ordering a
+    # failed build left the collector down, so a banner that listed only what
+    # was skipped was complete. Since the collector now starts BEFORE the build
+    # (step 5c) a build failure leaves it CAPTURING -- and an operator who knows
+    # the old behaviour reads "completed WITH ERRORS" and concludes syslog is
+    # down when it is the one thing still working. That is the inverse of the
+    # error the reordering fixed.
+    $collectorUp = ($migrateSucceeded -and -not $collectorStartFailed)
+    $stillUp = @()
+    if ($collectorUp) { $stillUp += 'SecVault-Collector IS running, so syslog capture continues' }
+    # ⛔ Reported here too, not only in the elseif below -- $collectorRegistered
+    # used to be read ONLY in that branch, which is shadowed by this one, so on
+    # the single run where it mattered (not registered AND something else
+    # failed) the warning was unreachable and this branch instead claimed "all
+    # services were still (re)started" about a service that does not exist.
+    if (-not $collectorRegistered) { $notStarted += 'SecVault-Collector (NOT REGISTERED as a service -- run installer\Install-SecVault.ps1)' }
+
+    $tail = ''
+    if ($stillUp.Count -gt 0) { $tail = ' ' + ($stillUp -join '; ') + '.' }
     if ($notStarted.Count -gt 0) {
-        Write-Log ('SecVault update completed WITH ERRORS  -  see steps above. NOT (re)started: ' + ($notStarted -join '; ') + '. SecVault-Engine was still started as a best-effort recovery.')
+        Write-Log ('SecVault update completed WITH ERRORS  -  see steps above. NOT (re)started: ' + ($notStarted -join '; ') + '. SecVault-Engine was still started as a best-effort recovery.' + $tail)
     } else {
-        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. All services were still (re)started as a best-effort recovery.'
+        Write-Log ('SecVault update completed WITH ERRORS  -  see steps above. All services were still (re)started as a best-effort recovery.' + $tail)
     }
 } elseif (-not $collectorRegistered) {
     # ⛔ Not "successfully". The app and engine updated fine, but syslog

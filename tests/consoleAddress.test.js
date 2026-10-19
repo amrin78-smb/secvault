@@ -220,23 +220,77 @@ describe('⛔ .env.local holds every secret the product has', () => {
     assert.equal(parseEnv(fs.readFileSync(file, 'utf8')).NEXTAUTH_URL, 'https://x.example.com');
   });
 
-  it('⛔ the backup IS kept and reported when the write itself fails', () => {
-    const file = tmpEnv(SAMPLE);
-    // Fail the write AFTER the backup has been taken. Read-only on the target
-    // is the one failure reachable without stubbing fs.
-    fs.chmodSync(file, 0o444);
-    let r;
-    try {
-      r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
-    } finally {
-      fs.chmodSync(file, 0o644);
+  // ⛔ SKIPPED AS ROOT, NOT SILENTLY PASSED. Mode 0444 does not stop root
+  // writing, so as root setEnvValue SUCCEEDS and this test fails for a reason
+  // that has nothing to do with the code — the same way the installer
+  // PowerShell gate died with ENOENT off Windows and took the suite with it.
+  // A visible skip beats a red build nobody can act on, and beats a green tick
+  // over a check that did not run.
+  const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+
+  it('⛔ the backup IS kept and reported when the write itself fails',
+    { skip: asRoot ? 'cannot measure as root: mode 0444 does not prevent writing' : false }, () => {
+      const file = tmpEnv(SAMPLE);
+      // Fail the write AFTER the backup has been taken. Read-only on the target
+      // is the one failure reachable without stubbing fs.
+      fs.chmodSync(file, 0o444);
+      let r;
+      try {
+        r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
+      } finally {
+        fs.chmodSync(file, 0o644);
+      }
+      assert.equal(r.ok, false, 'an unwritable target must not report success');
+      assert.ok(r.backupPath, 'the failure path must report where the original is');
+      assert.ok(fs.existsSync(r.backupPath), 'and that file must still exist');
+      assert.equal(fs.readFileSync(r.backupPath, 'utf8'), SAMPLE, 'the backup is the ORIGINAL');
+      // ⛔ AND THE TARGET IS INTACT. writeFileSync opens-and-truncates before it
+      // can throw, so this branch must restore rather than leave .env.local
+      // possibly missing CREDENTIAL_KEY — and must SAY which happened.
+      assert.equal(fs.readFileSync(file, 'utf8'), SAMPLE, 'the original must survive');
+      // ⛔ AND IT MUST STATE THE RESULTING STATE ACCURATELY. A read-only target
+      // fails at OPEN, so nothing was truncated — claiming the file "may be
+      // incomplete" here would send an operator to restore a backup over an
+      // intact credential store.
+      assert.equal(r.fileState, 'unchanged');
+      assert.match(r.error, /Nothing was changed/);
+      assert.doesNotMatch(r.error, /INCOMPLETE/,
+        'an untouched file must not be reported as possibly corrupt');
+    });
+
+  it('⛔ a corrupt oversized file is REFUSED and never copied into a backup', () => {
+    // The 2.2 GB production case already fails closed in readFileSync. A
+    // 50-500 MB one did not: it was read, duplicated IN FULL as a
+    // secret-bearing .bak, rewritten, and read back. Both installer env
+    // writers refuse over 1 MB; this one did not.
+    const file = tmpEnv(`${SAMPLE}# padding\n${'x'.repeat(1024 * 1024 + 10)}\n`);
+    const r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /larger than|corrupt/i);
+    const strays = fs.readdirSync(path.dirname(file)).filter((n) => n.endsWith('.bak'));
+    assert.deepEqual(strays, [], 'a file too corrupt to rewrite must not be duplicated');
+  });
+
+  it('⛔ two backups in the same millisecond cannot collide', () => {
+    // The stamp was millisecond-resolution ISO only, so two saves against the
+    // same file derived the SAME path — the first to finish deleted the file
+    // the second was reporting. Driven through the failure path because a
+    // verified success no longer keeps a backup.
+    const seen = new Set();
+    for (let i = 0; i < 25; i++) {
+      const file = tmpEnv(SAMPLE);
+      fs.chmodSync(file, 0o444);
+      let r;
+      try {
+        r = setEnvValue(file, 'NEXTAUTH_URL', `https://x${i}.example.com`);
+      } finally {
+        fs.chmodSync(file, 0o644);
+      }
+      if (r.backupPath) seen.add(path.basename(r.backupPath));
     }
-    assert.equal(r.ok, false, 'an unwritable target must not report success');
-    assert.ok(r.backupPath, 'the failure path must report where the original is');
-    assert.ok(fs.existsSync(r.backupPath), 'and that file must still exist');
-    assert.equal(fs.readFileSync(r.backupPath, 'utf8'), SAMPLE, 'the backup is the ORIGINAL');
-    // The original is intact either way.
-    assert.equal(fs.readFileSync(file, 'utf8'), SAMPLE);
+    // As root the writes succeed and no backup survives; then there is nothing
+    // to collide and the assertion below is vacuously true, which is correct.
+    if (!asRoot) assert.equal(seen.size, 25, 'every backup name must be distinct');
   });
 
   it('⛔ a refused duplicate key leaves NO orphan backup behind', () => {

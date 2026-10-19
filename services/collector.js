@@ -941,9 +941,25 @@ function startTcp(port) {
 // nothing listened is unknowable; multiplying a neighbouring rate by the gap
 // would manufacture a measurement out of an absence.
 //
-// ⛔ THE GAP IS AN UPPER BOUND. It is measured from the last successful flush,
-// and the previous process may have kept listening for up to one flush
-// interval after it. Overstating is the safe direction here.
+// ⛔ THE GAP IS AN UPPER BOUND, AND THE BOUND IS LOOSER THAN "ONE FLUSH
+// INTERVAL" -- which is what this comment used to claim. The signal is
+// `max(recorded_at) FROM syslog_ingest_stats`, and doFlush() only writes a
+// stats row when something actually happened (a batch, a drop, or a spool
+// drain). NO TRAFFIC MEANS NO ROW. So the span measured here is "time since a
+// datagram last arrived", NOT "time the collector was not running", and on a
+// quiet fleet those differ by hours: a collector that ran all night over
+// silent firewalls would report the whole silence as a gap.
+//
+// ⛔ THE REFERENCE FLEET CANNOT SHOW THIS -- it floors at 381 events/sec, so a
+// stats row lands every flush and the bound is tight to ~2s. It would be wrong
+// at the first low-volume or single-site install, which is exactly the shape of
+// fabricated measurement this product exists not to produce. So the reason is
+// named `since_last_event` rather than `measured`, and the UI says "at most".
+// ⛔ THE PROPER FIX IS A SHUTDOWN MARKER, NOT A BETTER GUESS: recording the
+// stop time on SIGTERM would make this a true downtime measurement for every
+// clean restart (which is what a deploy is), with this bound kept as the
+// fallback for a hard crash. Deliberately a follow-up rather than rushed in
+// beside the deploy it would be measuring.
 //
 // ⛔ NEVER THROWS AND NEVER BLOCKS THE BIND. A failure to record a gap must
 // not stop the collector listening -- that would turn an accounting problem
@@ -976,8 +992,15 @@ async function recordIngestGap() {
     // ⛔ A clock that moved backwards gives a negative span. That is not a
     // zero-length gap, it is a disagreement -- the same call vpn_sessions
     // makes on a negative duration.
-    const secs = Math.round((Date.now() - lastMs) / 1000);
-    if (secs < 0) {
+    // ⛔ TESTED BEFORE ROUNDING. `Math.round(-0.4)` is `-0`, and `-0 < 0` is
+    // FALSE -- so a last-flush timestamp between 1ms and 600ms in the future
+    // skipped the clock-mismatch branch and inserted `gap_seconds = -0`, stored
+    // as 0. That is precisely the value lib/schema.sql forbids ("NULL
+    // gap_seconds IS 'COULD NOT BE DETERMINED', NEVER ZERO"), and the panel
+    // renders it un-tinted as "0s", i.e. "the collector never stopped", out of
+    // a clock disagreement.
+    const deltaMs = Date.now() - lastMs;
+    if (!(deltaMs > 0)) {
       await pool.query(
         'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES ($1, NULL, $2)',
         [new Date(lastMs), 'clock_mismatch']
@@ -985,14 +1008,19 @@ async function recordIngestGap() {
       log('WARN ingest gap: last flush is in the FUTURE - clock disagreement, gap NOT measured.');
       return;
     }
+    // ⛔ FLOORED AT 1, NEVER 0. A genuine sub-second span rounds to 0, which the
+    // schema reserves for "could not be determined". Overstating by under a
+    // second is the safe direction; claiming no gap at all is not.
+    const secs = Math.max(1, Math.round(deltaMs / 1000));
     await pool.query(
       'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES ($1, $2, $3)',
-      [new Date(lastMs), secs, 'measured']
+      [new Date(lastMs), secs, 'since_last_event']
     );
     log(
-      `ingest gap: ${secs}s with nothing listening (upper bound; last flush ` +
-      `${new Date(lastMs).toISOString()}). Datagrams arriving in that window were ` +
-      'discarded by the OS and are not counted anywhere.'
+      `ingest gap: at most ${secs}s with nothing listening (measured from the last ` +
+      `event, so it includes any quiet period; last flush ` +
+      `${new Date(lastMs).toISOString()}). Datagrams arriving while nothing was ` +
+      'bound were discarded by the OS and are not counted anywhere.'
     );
   } catch (err) {
     log(`WARN ingest gap could not be recorded: ${err.message}`);

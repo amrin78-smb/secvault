@@ -177,6 +177,101 @@ SYSTEM scheduled task actually reading the file, not by reading the ACL back. Al
 run as **LocalSystem** (CLAUDE.md said "a limited service account"; it is not), so SYSTEM
 FullControl is what they need and removing Users costs nothing.
 
+## ⛔ FOUR WAYS A ZERO WAS BEING PRESENTED AS A MEASUREMENT (found in review, 2026-10-19)
+
+All four shipped, all four pass every static check, and each produces a confident wrong number.
+
+1. **`Math.round(-0.4)` is `-0`, and `-0 < 0` is FALSE.** `recordIngestGap()` guarded clock skew
+   with `if (secs < 0)` AFTER rounding, so a `last_stat_at` between 1 ms and 600 ms in the future
+   skipped the `clock_mismatch` branch and inserted `gap_seconds = -0`, stored as `0` — precisely
+   the value `schema.sql` reserves ("NULL gap_seconds IS 'COULD NOT BE DETERMINED', NEVER ZERO").
+   The panel then renders an un-tinted `0s`, i.e. "the collector never stopped", out of a clock
+   disagreement. **Test the raw delta BEFORE rounding**, and floor a real span at 1.
+2. **`formatBytes` used the exact coercion guard this file warns about 150 lines above its own
+   caller.** `!Number.isFinite(Number(bytes))` passes `''`, `'   '`, `false` and `[]`, because
+   `Number()` makes all of them `0` and `0` is finite — so each rendered as a confident
+   `"0 bytes"` in the function whose whole purpose is separating a measurement from an absence.
+3. **`Number(r.bytes)` turned a SQL NULL into a measured 0.** Harmless while a `Math.max(1, …)`
+   floor masked it as "1 MB"; the moment that floor was correctly removed, the masking moved one
+   layer up instead of closing. `GREATEST()` IGNORES NULL arguments in PostgreSQL, so a relation
+   dropped mid-query yields `GREATEST(NULL, 0) = 0`.
+4. **The ingest gap measured IDLENESS, not DOWNTIME.** It derives from
+   `max(recorded_at) FROM syslog_ingest_stats`, and `doFlush()` only writes a stats row when
+   something happened — **no traffic means no row**. So on a quiet fleet a collector that ran all
+   night reported the whole silence as a gap, logged as fact. ⛔ **The reference fleet cannot show
+   this**: it floors at 381 events/sec, so a row lands every flush and the bound is tight to ~2s.
+   It would be wrong at the first low-volume or single-site install. Now named
+   `since_last_event` with the UI saying "at most"; the real fix is a shutdown marker so a clean
+   restart is a true measurement, with this bound kept only for a hard crash.
+
+⛔ **The pattern across all four: the dangerous direction was not overclaiming, it was a
+plausible zero.** Each is the failed-read-as-a-fact rule, and three of the four were introduced
+by a change that was itself fixing an instance of it.
+
+## ⛔ A CRON COLLISION THE SCHEDULE TEST COULD NOT SEE (found in review, 2026-10-19)
+
+`[dashboard-snapshot catch-up]` was given `37 * * * *` with the stated reasoning that minute :37
+"never shares a second with the :00/:15/:30/:45 jobs". `[snmp-poll]` is
+`buildMinutelyCron(15, 7)` => **`7,22,37,52 * * * *`** on the shipped defaults. The reasoning
+checked only the `*/n` schedules and missed the one job carrying a minute OFFSET; occupied minutes
+under the defaults are 0,7,15,20,22,30,35,37,45,52.
+
+⛔ **AND THE TEST THAT EXISTS TO PREVENT THIS COULD NOT FIRE, TWO WAYS.** It read
+`if (hour === '*') continue; // hourly passes are compared below` — **and there was no comparison
+below**, so every hourly job was skipped and compared to nothing. And it collected schedules by
+scraping `cron.schedule('<literal>'`, so the five COMPUTED ones (feed, config, vpn, snmp,
+notifications) were invisible to it entirely. A guard that covers one shape and reports clean
+about the rest is worse than none.
+
+⛔ **The engine cannot be `require`d from a test** — it calls `main()` at load — so the only way
+to make that guard see a computed schedule was to move the arithmetic somewhere importable:
+`lib/cronPlan.js`. ⛔ The test must IMPORT it rather than recompute the minutes, or the second
+copy eventually disagrees and the disagreeing one is the one calling the schedule safe.
+
+⛔ **A GENERAL "no two jobs ever collide" ASSERTION IS WRONG HERE AND WOULD HAVE BEEN DELETED.**
+Minute 0 of hour 0 already carries four jobs by design (feed, config, vpn, notifications).
+Those overlaps are tolerable because every one of those jobs REPEATS — a lost VPN poll is replaced
+30 minutes later. A lost fleet snapshot is not: it is a point-in-time measurement, which is how
+four days of history were permanently lost. So the strict rule is scoped to the snapshot jobs,
+and the scope IS the finding.
+
+⛔ **SEPARATELY: an hourly catch-up PRE-EMPTED the daily tick it exists to back up.** At 00:37
+today's row did not exist (the daily tick is 01:10), so the "safety net" computed the whole fleet
+snapshot and the daily tick then recomputed it — the heaviest read-only job in the engine running
+twice nightly, with the catch-up as the de-facto primary writer. The stored value was still the
+01:10 reading only because that path upserts, i.e. the documented invariant held by accident
+rather than by the mechanism named. Now `41 2-23 * * *`.
+
+## ⛔ `psql`'s `\!` IS A LOCAL SHELL, AND `-X` DOES NOT DISABLE IT (found in review, 2026-10-19)
+
+`scripts/devdb.sh` put the password in `PGPASSWORD` with a sixteen-line comment explaining that
+`/proc/<pid>/cmdline` is world-readable while `/proc/<pid>/environ` is not. Correct, and beside
+the point: the script forwards `"$@"` to `psql`, and `\!` executes a local shell that INHERITS
+this process's environment. So `scripts/devdb.sh production -c '\! printenv PGPASSWORD'` printed
+the production password to stdout. `-X` suppresses `.psqlrc`, not backslash meta-commands, and
+`\!` also bypasses `default_transaction_read_only` entirely because it is not SQL.
+
+Fixed with a temporary `PGPASSFILE` (mode 0600, removed on every exit path including a signal) —
+a pass file is never in the environment, so the same command now prints nothing. ⛔ `exec psql`
+had to become a child process plus an explicit exit code, because `exec` replaces the shell and
+the `EXIT` trap would never run, leaving a pass file behind on every invocation. ⛔ The shell
+escape itself is NOT what was being defended against: whoever runs the script already has a shell
+as that user. What must not happen is a credential they do not otherwise hold being handed over.
+
+## ⛔ THE BACKUP'S FALLBACK DIRECTORY IS INSIDE THE GIT TREE (found in review, 2026-10-19)
+
+`Backup-SecVault.ps1` derives its destination from `SYSLOG_ARCHIVE_DIR`; when that yields no
+volume qualifier it falls back to `<install root>\backup` and writes `secvault-<stamp>.env` (a
+verbatim copy of `.env.local`: CREDENTIAL_KEY, the database password, NEXTAUTH_SECRET,
+PG_ADMIN_PASSWORD) beside `secvault-<stamp>.key.pem` (the TLS private key) and the dump. None of
+those names can be matched by `.env*.local` or by the `certs/` directory rule, so all four were
+committable — the same defect class as the `.env.local.*` backups, in a different family of names.
+The 02:30 SYSTEM backup task is re-registered on **every** update, so it arms itself without
+anyone choosing it. Now ignored, along with the `spool/` and `archive/` defaults.
+⛔ **The reference deployment was never exposed** — measured: `SYSLOG_ARCHIVE_DIR=E:\SecVaultArchive`
+is volume-qualified, so the fallback never fired and `C:\Apps\SecVault\backup` does not exist.
+Checked rather than assumed, because "probably safe" is not a finding.
+
 ## Syslog archive (lib/syslog/archive.js)
 
 ⛔ **The archive is CONCATENATED GZIP MEMBERS — one per flush — and not every reader handles that.**

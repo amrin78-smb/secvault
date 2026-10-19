@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.198.1': [
+    'Pre-deploy review pass over v2.196.1-v2.198.0. The evidence-window resolver ran once per DEVICE rather than once per pass, so nightly collection issued one fleet aggregate per firewall \u2014 and because each device resolved independently, two firewalls in one run could store different windows in their finding text.',
+    'The hourly snapshot catch-up ticked at :37, the same second as the SNMP poll on the shipped defaults (7,22,37,52), and at 00:37 it pre-empted the 01:10 daily tick every day, computing the whole fleet snapshot twice nightly. Moved to :41, hours 2-23 \u2014 and the cron builders moved to lib/cronPlan.js so the schedule tests can finally see the five COMPUTED schedules that hid this.',
+    'The ingest-gap reason is now `since_last_event`, not `measured`: it is derived from the last flush, and a flush is only written when traffic arrived, so on a quiet fleet it reported idleness as downtime. The panel says "at most" and now shows when the gap was recorded rather than printing a weeks-old number beside live counters.',
+    'Three ways a zero was being presented as a measurement: a sub-600ms clock skew wrote gap_seconds = 0 as "measured" (Math.round(-0.4) is -0, and -0 < 0 is false); formatBytes read \'\', false and [] as a measured 0 bytes; and a NULL table size became a confident "0 bytes".',
+    'The updater could report "completed successfully" over a collector that FAILED to start \u2014 only the deliberately-skipped case was wired \u2014 and it now also says when the collector IS still capturing after a failed build, which the new start ordering makes possible.',
+    'scripts/devdb.sh moved from PGPASSWORD to a temporary PGPASSFILE: psql\'s \\! runs a local shell that inherited the environment, so one -c argument could print the production password. .gitignore now also covers the backup fallback artefacts (a verbatim .env.local copy and the TLS private key) and the spool/archive defaults.',
+  ],
   '2.198.0': [
     'The log-evidence window is now RESOLVED from the history that exists instead of being four separate hardcoded 30s. On the reference fleet it widens from 30 to 39 days, so rule-usage evidence rests on 9 more days of traffic.',
     'Raising the old literal to 90 would have been destructive, not generous: the coverage gate requires the window to fit inside the history held, and running the real gate at 90 days takes the fleet from 15 of 15 devices covered to 0 of 15 \u2014 every "unused" finding would have silently disappeared.',

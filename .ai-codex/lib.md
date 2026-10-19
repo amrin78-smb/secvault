@@ -835,6 +835,21 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/cronPlan.js — the engine's cron arithmetic, made testable (added 2026-10-19, v2.198.1)
+
+`planMinutelyCron(interval, offset)` / `planHourlyCron(interval)` (both pure, both returning
+`{expr, fellBack}` so the caller logs a fallback in its own voice) plus `minutesOf(field)` /
+`hoursOf(field)`. `services/engine-worker.js`'s `buildMinutelyCron`/`buildHourlyCron` now
+delegate to them and keep only the logging.
+
+⛔ **IT EXISTS BECAUSE A LIVE COLLISION SHIPPED PAST THE TEST THAT EXISTS TO CATCH ONE.**
+`tests/engineSchedules.test.js` scraped `cron.schedule('<literal>'`, so it saw 7 of 12 schedules —
+the five COMPUTED ones were invisible — and the engine cannot be `require`d from a test because it
+calls `main()` at load. `[dashboard-snapshot catch-up]` was given `37 * * * *` while `[snmp-poll]`
+runs `7,22,37,52` on the shipped defaults. ⛔ The test must IMPORT this rather than recompute the
+minutes; a second copy of the arithmetic eventually disagrees, and the disagreeing one is the one
+reporting the schedule safe. Full detail in `gotchas.md`.
+
 ## lib/engines/evidenceWindow.js — the ONE log-evidence window (added 2026-10-19, v2.198.0)
 
 Pure policy (`resolveEvidenceWindow(availableDays)`) plus one bounded read
@@ -867,6 +882,24 @@ gate run against the live fleet (41.1 days of `syslog_rollup_hourly`), 2026-10-1
 | **39d (resolved)** | yes | **15/15** | 0.983 |
 | 41d | yes | 15/15 | 0.984 |
 | **90d (a naive bump)** | **NO** | **0/15** | 0.448 |
+
+⛔ **Resolved ONCE PER POOL, with a 60s TTL** (`resetEvidenceWindowCache(pool)` for tests). It
+first shipped resolving inside `loadOptionsFromSettings`, which `runAnalysisForDevice` calls PER
+DEVICE — so the nightly pass issued one aggregate per firewall, and four interactive pages each
+gained one per load. The correctness half matters more than the cost: each device resolving
+independently meant two firewalls in one pass could get different windows if `floor(availableDays)`
+ticked mid-run, and that number is written into the stored finding text. ⛔ Keyed on the POOL
+OBJECT, which is what makes it safe in tests (production has one singleton pool; every test builds
+a fresh stub, so the query always runs) — a time-only cache would have made query-count assertions
+depend on how fast the suite runs. ⛔ An explicit `now` BYPASSES the cache and is threaded into the
+read; it used to be ignored while the caller handed its own pinned clock to `getDeviceLogCoverage`,
+and with one day of margin a caller pinning `now` a few days back resolved a window WIDER than its
+own clock could justify, making `sufficientHistory` false fleet-wide.
+
+⛔ **An unmeasurable history WARNS.** `reason` is returned but nothing renders it, so "30 days of
+history" and "the query failed" printed the same number everywhere. If this read ever breaks the
+feature reverts to the floor for ever with no banner — the guard-that-cannot-fire pattern — so it
+logs once per cache fill.
 
 ⛔ **Floored at MIN, so it can never be narrower than the literal it replaced**; capped at MAX;
 held one day inside the available history because the gate compares exact hour-bucket counts.

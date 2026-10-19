@@ -99,3 +99,25 @@ dist/
 # Python bytecode from the dev helper scripts (scripts/devwinrm.py).
 __pycache__/
 *.pyc
+
+# ⛔ Backup-SecVault.ps1's FALLBACK DIRECTORY IS INSIDE THE TREE. When
+# SYSLOG_ARCHIVE_DIR yields no volume qualifier it uses <install root>\backup,
+# and writes a verbatim copy of .env.local (CREDENTIAL_KEY, the database
+# password, NEXTAUTH_SECRET, PG_ADMIN_PASSWORD) beside the TLS PRIVATE KEY and
+# the database dump. None of those names could be matched by `.env*.local` or
+# by the `certs/` directory rule, so all four were committable -- the same
+# defect class as the .env.local.* backups above, in a different family of
+# names. The 02:30 SYSTEM backup task is re-registered on every update, so this
+# fires on a server whose archive dir is unset without anyone choosing it.
+backup/
+secvault-*.env
+secvault-*.dump
+*.key.pem
+*.cert.pem
+
+# Collector spool and archive, which default to <install root>\... when their
+# env vars are blank. Raw syslog carries usernames, internal addresses and URLs
+# -- the reason /api/logs/search needs its own capability -- and at ~4.3 GB/day
+# an archive inside a working tree also wrecks `git status` and `git pull`.
+spool/
+archive/

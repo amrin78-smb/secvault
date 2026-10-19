@@ -98,7 +98,22 @@ export async function PUT(request) {
 
   const file = envPath();
   const result = setEnvValue(file, 'NEXTAUTH_URL', check.url);
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
+  if (!result.ok) {
+    // ⛔ THE BACKUP PATH TRAVELS WITH THE FAILURE, AND IN THE MESSAGE ITSELF.
+    // setEnvValue's own error strings end "...at the backup path below" — and
+    // this route used to send `error` alone, so the operator read a sentence
+    // promising a path with nothing beneath it, on the one file that holds
+    // CREDENTIAL_KEY. It matters more since a VERIFIED success no longer keeps
+    // a backup: a reported path now means the write really did fail. The panel
+    // renders `error` only, so the path goes in the string as well as the field
+    // rather than relying on a component change to become visible.
+    return NextResponse.json({
+      error: result.backupPath
+        ? `${result.error} The previous file is at ${result.backupPath}.`
+        : result.error,
+      backupPath: result.backupPath || null,
+    }, { status: 500 });
+  }
 
   return NextResponse.json({
     ok: true,
@@ -126,8 +141,13 @@ export async function PUT(request) {
     // and the operator needs the old URL, which is what they have to type
     // back. The path is mentioned only when a backup actually survived.
     recovery: result.unchanged ? null
+      // ⛔ `== null`, NOT `||`. A key present but BLANK (`NEXTAUTH_URL=`) has a
+      // previous value of '', which `||` reports as "it was not previously
+      // set" — telling the operator there is nothing to type back when the
+      // correct recovery is to blank the line again.
       : `If sign-in stops working, set NEXTAUTH_URL back to `
-        + `${result.previous || '(it was not previously set)'} in ${file} on the server and `
+        + `${result.previous == null ? '(it was not previously set)' : `"${result.previous}"`} `
+        + `in ${file} on the server and `
         + 'restart SecVault-App with sc.exe.'
         + (result.backupPath ? ` A copy of the previous file is at ${result.backupPath}.` : ''),
   });

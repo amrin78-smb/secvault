@@ -58,6 +58,7 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 const cron = require('node-cron');
+const { planMinutelyCron, planHourlyCron } = require('../lib/cronPlan');
 const winston = require('winston');
 
 const { pool } = require('../lib/db');
@@ -196,13 +197,13 @@ function getConfigPullIntervalHours() {
   return fallback;
 }
 
+// Delegates to lib/cronPlan.js for the same reason buildMinutelyCron does.
 function buildHourlyCron(intervalHours) {
-  let n = parseInt(intervalHours, 10);
-  if (!Number.isInteger(n) || n < 1 || n > 24) {
+  const { expr, fellBack } = planHourlyCron(intervalHours);
+  if (fellBack) {
     logger.warn(`Invalid cron interval hours "${intervalHours}" — falling back to 6.`);
-    n = 6;
   }
-  return `0 */${n} * * *`;
+  return expr;
 }
 
 // VPN session polling (added 2026-07-19) runs far more often than the other
@@ -240,20 +241,18 @@ function getVpnPollIntervalMinutes() {
 // ⛔ It does not and cannot remove every collision — a user is free to pick two
 // values that still meet — so the deferral logic stays as the backstop. This
 // only stops the SHIPPED DEFAULTS from colliding on every single tick.
+// ⛔ DELEGATES TO lib/cronPlan.js, WHICH IS WHY THAT MODULE EXISTS. The
+// arithmetic lives there so tests/engineSchedules.test.js can ask what the
+// COMPUTED schedules are — it previously scraped only single-quoted literals
+// and so could not see this function's output at all, which is how the
+// snapshot catch-up came to share minute :37 with [snmp-poll]. The logging
+// stays here because the logger does.
 function buildMinutelyCron(intervalMinutes, offsetMinutes = 0) {
-  let n = parseInt(intervalMinutes, 10);
-  if (!Number.isInteger(n) || n < 5 || n > 59) {
+  const { expr, fellBack } = planMinutelyCron(intervalMinutes, offsetMinutes);
+  if (fellBack) {
     logger.warn(`Invalid cron interval minutes "${intervalMinutes}" — falling back to 30.`);
-    n = 30;
   }
-  const offset = Number.isInteger(offsetMinutes) ? ((offsetMinutes % n) + n) % n : 0;
-  if (offset === 0) return `*/${n} * * * *`;
-  const minutes = [];
-  for (let m = offset; m < 60; m += n) minutes.push(m);
-  // A tail shorter than the interval would make the last gap of the hour
-  // shorter than `n`; that is inherent to any non-divisor of 60 and is true of
-  // `*/n` too, so it is accepted rather than papered over.
-  return `${minutes.join(',')} * * * *`;
+  return expr;
 }
 
 // SNMP metric polling (added 2026-07-21, see CLAUDE.md's "SNMP Monitoring"
@@ -1683,9 +1682,28 @@ async function scheduleJobs() {
   // left exactly as measured, so the 01:10 reading stays the day's reading.
   // A catch-up row is a later reading of the SAME day, which is strictly
   // better than the gap it replaces and is honest about what it is.
-  // Minute :37 so it never shares a second with the :00/:15/:30/:45 jobs.
-  logger.info('Scheduling [dashboard-snapshot catch-up] with cron "37 * * * *" (hourly, writes only if the day is unrecorded).');
-  const dashboardSnapshotCatchupTask = cron.schedule('37 * * * *', () => {
+  // ⛔ MINUTE 41, AND HOURS 2-23. Both halves of "37 * * * *" were wrong:
+  //
+  // 1. ⛔ IT COLLIDED WITH [snmp-poll] ON THE SHIPPED DEFAULTS. That job is
+  //    buildMinutelyCron(15, 7) => "7,22,37,52 * * * *", so the two ticked on
+  //    the same second of :37 every hour. The justification this replaces —
+  //    "minute :37 so it never shares a second with the :00/:15/:30/:45 jobs"
+  //    — checked only the `*/n` schedules and missed the one job that carries
+  //    a minute OFFSET. Occupied minutes under the defaults are
+  //    0,7,15,20,22,30,35,37,45,52. 41 is free.
+  // 2. ⛔ AT 00:37 IT PRE-EMPTED THE 01:10 DAILY TICK EVERY SINGLE DAY. Today's
+  //    row does not exist before 01:10, so the "safety net" computed the full
+  //    fleet snapshot first and the daily tick then recomputed it — the
+  //    heaviest read-only job in the engine running twice nightly, with the
+  //    catch-up as the de-facto primary writer and 01:10 as the redundant one,
+  //    the exact inverse of the design above. The stored value was still the
+  //    01:10 reading only because that path upserts, i.e. the invariant in the
+  //    comment above held by accident rather than by this mechanism.
+  //    Starting at hour 2 gives the daily tick its chance first, which is what
+  //    makes this a catch-up rather than a rival.
+  const CATCHUP_CRON = '41 2-23 * * *';
+  logger.info(`Scheduling [dashboard-snapshot catch-up] with cron "${CATCHUP_CRON}" (hourly from 02:41, writes only if the day is unrecorded).`);
+  const dashboardSnapshotCatchupTask = cron.schedule(CATCHUP_CRON, () => {
     if (shuttingDown) return;
     runTrackedJob(runDashboardSnapshotIfMissing, 'dashboard-snapshot-catchup');
   });

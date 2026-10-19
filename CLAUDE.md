@@ -1390,10 +1390,25 @@ caller cannot reintroduce the split by omitting the argument. An EXPLICIT window
 everywhere (`?days=`, a test pinning a number), and `resolveWindowDays`' pure `[7, 400]` clamp
 is unchanged — only the no-request default moved.
 
-⛔ **It costs ONE extra fleet-wide aggregate per pass** (~50 ms warm, ~330 ms cold). Flat in
-fleet size, which is why it is acceptable; `tests/coverageRegisterData.test.js` counts it rather
-than waiving it, because the property that test defends is that the PER-FIREWALL work stays
-proportional to the firewalls that need it.
+⛔ **It costs ONE extra fleet-wide aggregate per pass** (~50 ms warm, ~330 ms cold against a
+50 MB / 158,890-row table), and that claim is only true because it is **CACHED PER POOL** with a
+60-second TTL. It first shipped resolving inside `loadOptionsFromSettings`, which
+`runAnalysisForDevice` calls PER DEVICE — so the nightly pass issued one aggregate per firewall
+and four interactive pages each gained one per load. ⛔ The correctness half mattered more than
+the cost: each device resolved independently, so two firewalls in one pass could get different
+windows if `floor(availableDays)` ticked mid-run, and that number is written into the STORED
+finding text. ⛔ The cache is keyed on the POOL OBJECT, which is what keeps it safe in tests —
+production holds one singleton pool, every test builds a fresh stub and therefore always queries;
+a time-keyed cache would have made query-count assertions depend on how fast the suite runs.
+`tests/coverageRegisterData.test.js` counts the statement rather than waiving it.
+
+⛔ **AN UNMEASURABLE HISTORY WARNS.** `reason` is returned and nothing in the product renders it,
+so "we measured 30 days" and "the read failed" print the same number on every page, PDF and CSV.
+If that query ever breaks the feature silently reverts to the floor for ever — a guard that cannot
+fire — so it logs once per cache fill. ⛔ An explicit `now` BYPASSES the cache and is threaded into
+the read; it was previously ignored while the caller handed its own pinned clock to
+`getDeviceLogCoverage`, and with one day of margin a caller pinning `now` a few days back resolved
+a window WIDER than its own clock could justify, making `sufficientHistory` false fleet-wide.
 
 ## VPN Traffic Attribution (`/vpn?vtab=traffic`, added 2026-09-10, v2.101.0)
 
@@ -2514,7 +2529,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | CVE re-match on config change (Phase 6) | Only when a pull detects a config diff | (triggered by rule-version-pull job) |
 | VPN session poll (vendors with `getVpnSessionSummary()`) | 5-59 min | `VPN_POLL_INTERVAL_MINUTES` |
 | Device metric poll (job name `snmp-poll`) — `getPerformanceMetrics()` on every active device, else `getSnmpMetrics()` on `snmp_enabled` devices | 5-59 min | `SNMP_POLL_INTERVAL_MINUTES` |
-| Fleet dashboard snapshot | Daily, fixed **01:10 server-local**, plus an hourly guarded catch-up at :37 | (not configurable) |
+| Fleet dashboard snapshot | Daily, fixed **01:10 server-local**, plus a guarded catch-up at **:41, hours 2-23** | (not configurable) |
 | Snapshot retention (`vpn_session_snapshots`/`snmp_metric_snapshots`) | Daily, fixed 00:30 **server-local** | `SNMP_VPN_RETENTION_DAYS` |
 | VPN session-history retention (`vpn_sessions`) | inside the same 00:30 job, **own window** | `VPN_SESSION_RETENTION_DAYS` |
 | Config retention (`device_configs`/`config_backups`) | Daily, fixed 00:45 **server-local** | `CONFIG_RETENTION_DAYS` / `CONFIG_BACKUP_RETENTION_DAYS` |
@@ -2553,16 +2568,25 @@ Two halves, and the second is the one that matters:
    (00:30) and `[config-retention]` (00:45). It is also better on the merits — 00:10 measured a
    fleet half-updated by that night's own pull.
 2. ⛔ **Moving a time is not a fix, it is a better guess.** Any single-tick daily job stays one
-   blocked second from losing a day, so an **hourly guarded pass** (`37 * * * *`) now writes only
+   blocked second from losing a day, so a **guarded pass** (`41 2-23 * * *`) now writes only
    when the day has no row — `ON CONFLICT (snapshot_date) DO NOTHING`, against the table's own
    UNIQUE constraint. It can never overwrite a recorded day, so the 01:10 reading stays that day's
    reading, and a catch-up row is an honest later reading of the same day rather than a hole.
 
 `tests/engineSchedules.test.js` pins the RELATIONS, not the numbers: the daily tick may not land
 inside the collection window, the catch-up must run more often than daily, it must call the
-`ifAbsent` path and never the upserting one, no two daily jobs may share a minute, and every
-`cron.schedule` must be registered for shutdown. Four mutations verified, including restoring
-`10 0 * * *`.
+`ifAbsent` path and never the upserting one, neither snapshot job may share a tick with ANY other
+job, the catch-up may not fire at or before the daily tick's hour, and every `cron.schedule` must
+be registered for shutdown. Mutations verified, including restoring `10 0 * * *` and `37 * * * *`.
+
+⛔ **THE CATCH-UP FIRST SHIPPED AT `37 * * * *`, AND BOTH HALVES WERE WRONG.** It collided with
+`[snmp-poll]`'s computed `7,22,37,52` on the shipped defaults — the justification only checked the
+`*/n` schedules and missed the one job with a minute OFFSET — and at 00:37 it PRE-EMPTED the 01:10
+daily tick every day, computing the fleet snapshot twice nightly with the catch-up as the de-facto
+primary writer. ⛔ The test could not see either: it skipped every `hour === '*'` schedule promising
+a comparison that was never written, and it scraped only quoted literals so the five COMPUTED
+schedules were invisible. `lib/cronPlan.js` exists so that guard can see them. Detail in
+`gotchas.md`.
 
 ⛔ **These "fixed HH:MM" cron jobs run in the SERVER’S LOCAL ZONE, not UTC.** `node-cron` is
 registered with no `timezone` option, so `10 0 * * *` fires at 00:10 **Asia/Bangkok** on the
