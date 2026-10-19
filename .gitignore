@@ -65,6 +65,22 @@ certs/
 # secret in the product to the repository.
 .env.local.*.bak
 *.env.local.bak
+# ⛔ AND THE RULE ABOVE ONLY CATCHES NAMES THAT *END* IN .bak, WHICH THE REAL
+# FILES DO NOT. Found on the production server 2026-10-19, all untracked and
+# all visible to `git add -A`:
+#   .env.local.bak-20260912-230247   .env.local.bak-rollup
+#   .env.local.bak-20260914-141934   .env.local.repaired
+#   .env.local.bak-20260918-104802   .env.local.CORRUPT-20260924-123416
+#   .env.local.bak-20260921-230240
+# Every one holds CREDENTIAL_KEY, the database password and NEXTAUTH_SECRET --
+# the .CORRUPT one is the wreckage of the 2026-09-24 encoding incident, kept
+# deliberately. The note above this block already warned that "one `git add -A`
+# on the server would commit every secret in the product to the repository";
+# the pattern written to prevent it did not match the names actually produced.
+# A guard that cannot fire, on the file that holds every secret.
+.env.local.*
+# ...except the one that is MEANT to be committed and carries no values.
+!.env.local.example
 
 # Built installer packages (Build-SecVaultPackage.ps1). Large binaries, not source.
 dist/
