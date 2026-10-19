@@ -68,3 +68,14 @@ certs/
 
 # Built installer packages (Build-SecVaultPackage.ps1). Large binaries, not source.
 dist/
+
+# ⛔ Local development credentials. The REAL file lives in $HOME
+# (~/.secvault-local-secrets.json, mode 0600) precisely so git cannot address
+# it at all -- `git check-ignore` on it answers "outside repository", which is
+# a stronger guarantee than any rule in this file. These patterns exist only to
+# catch a COPY somebody drops in the tree "just for a minute": scripts/devdb.sh
+# refuses such a copy outright, and this is the second expression of that same
+# refusal. See docs/DEV-CREDENTIALS.md.
+*local-secrets*
+.pgpass
+*.pgpass
