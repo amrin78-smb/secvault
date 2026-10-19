@@ -79,3 +79,7 @@ dist/
 *local-secrets*
 .pgpass
 *.pgpass
+
+# Python bytecode from the dev helper scripts (scripts/devwinrm.py).
+__pycache__/
+*.pyc
