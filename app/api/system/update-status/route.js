@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.198.0': [
+    'The log-evidence window is now RESOLVED from the history that exists instead of being four separate hardcoded 30s. On the reference fleet it widens from 30 to 39 days, so rule-usage evidence rests on 9 more days of traffic.',
+    'Raising the old literal to 90 would have been destructive, not generous: the coverage gate requires the window to fit inside the history held, and running the real gate at 90 days takes the fleet from 15 of 15 devices covered to 0 of 15 \u2014 every "unused" finding would have silently disappeared.',
+    'The window is capped at 90 days, floored at the old 30 so it can never be narrower than before, and kept one day inside the available history because the gate compares exact hour-bucket counts.',
+    'An unreadable history falls back to the 30-day floor, never to the cap \u2014 the cap is the answer that would quietly empty the rule-cleanup loop on precisely the runs whose read failed.',
+    'Rule analysis, rule hygiene, the change-request document, the coverage register, /segmentation, /applications and the device rules page all now resolve the SAME window, so the register can no longer grade usage over a different span from the page it links to.',
+    'The .env.local backup written before a Settings change is now removed once the write has been verified, and kept only when something failed. Five such backups had accumulated on the reference deployment, each a full copy of CREDENTIAL_KEY, the database password and NEXTAUTH_SECRET.',
+  ],
   '2.197.0': [
     'The syslog collector now starts BEFORE the Next.js build during an update instead of after it. Measured over three real deploys it was down 144-182s, roughly 47s of which was spent waiting for a build it takes no part in.',
     'While the collector is stopped nothing is listening on 514, so datagrams are discarded by the OS rather than queued \u2014 UDP has no retry. At the measured 381-1,280 events/sec that build wait cost 18,000-60,000 permanently lost events per deploy.',

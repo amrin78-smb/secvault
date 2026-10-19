@@ -120,9 +120,15 @@ export async function PUT(request) {
     // ⛔ Stated in the response, not only in the UI. Node reads this value once,
     // at startup; until the service restarts the change has done nothing.
     restartRequired: !result.unchanged,
+    // ⛔ THE PREVIOUS VALUE IS THE RECOVERY INFORMATION, NOT A BACKUP PATH.
+    // setEnvValue removes its backup once it has verified the write, so a
+    // sentence naming that path would name a file that is no longer there —
+    // and the operator needs the old URL, which is what they have to type
+    // back. The path is mentioned only when a backup actually survived.
     recovery: result.unchanged ? null
-      : `If sign-in stops working, edit NEXTAUTH_URL in ${file} on the server and restart `
-        + 'SecVault-App with sc.exe. The previous file was saved as '
-        + `${result.backupPath || '(no change was needed)'}.`,
+      : `If sign-in stops working, set NEXTAUTH_URL back to `
+        + `${result.previous || '(it was not previously set)'} in ${file} on the server and `
+        + 'restart SecVault-App with sc.exe.'
+        + (result.backupPath ? ` A copy of the previous file is at ${result.backupPath}.` : ''),
   });
 }

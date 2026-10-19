@@ -789,7 +789,15 @@ describe('the SQL', () => {
     const hitCalls = pool.calls.filter((c) => /syslog_rule_hits_hourly/.test(c.sql));
     assert.equal(hitCalls.length, 1, 'only the firewall with unmeasured rules is visited');
     assert.equal(hitCalls[0].params[0], 'd-ekm');
-    assert.equal(pool.calls.length, 4, 'register + coverage + rules + one per affected firewall');
+    // ⛔ THE BOUND IS THE POINT, SO THE EXTRA STATEMENT IS COUNTED, NOT WAIVED.
+    // The fifth is the evidence-window resolver (lib/engines/evidenceWindow.js),
+    // one fleet-wide aggregate that replaced four hardcoded 30s. It is a flat
+    // cost — one statement however large the fleet — which is why it is
+    // acceptable here; the property this test defends is that the PER-FIREWALL
+    // work stays proportional to the firewalls that actually need it, and the
+    // assertion above still pins that at one.
+    assert.equal(pool.calls.length, 5,
+      'window resolver + register + coverage + rules + one per affected firewall');
   });
 
   it('the unmeasured-rule fetch is parameterised and selects the tri-state\'s third state', async () => {

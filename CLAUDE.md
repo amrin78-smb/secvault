@@ -384,6 +384,19 @@ copy a loader honours is the loader's property, and editing the wrong one report
 changing nothing — found by a test where the writer replaced the first occurrence and the parser
 read the last.
 
+⛔ **ITS BACKUP IS A RECOVERY MECHANISM, NOT AN ARCHIVE (v2.198.0).** It used to leave the
+timestamped backup on disk for ever on the SUCCESS path, and five had accumulated on the
+reference deployment — each a full copy of `CREDENTIAL_KEY`, the database password and
+`NEXTAUTH_SECRET`. ⛔ The exposure came from the DIRECTORY, not the file: a backup created in
+the install root inherits `C:\Apps\SecVault`'s ACL, which granted `BUILTIN\Users`
+`ReadAndExecute`, rather than `.env.local`'s own — so a non-admin local user could read the key
+that decrypts every row of `device_credentials`. (node's `mode: 0o600` does not produce an ACL
+on Windows.) The backup is now removed once the self-check has verified the write and kept only
+on a failure path, and it is taken AFTER the read-side refusals — the duplicate-key refusal
+used to write one and return no `backupPath`, orphaning it under a name the caller never saw.
+`previous` was always the real recovery information, so the console-address route's recovery
+sentence names the old value rather than a path. Full incident detail in `gotchas.md`.
+
 ⛔ **A restart is required and is stated in the API response, not only in the UI.** The panel shows
 the saved value and the RUNNING value separately whenever they differ.
 
@@ -1324,6 +1337,63 @@ hardcoded `E:\SecVaultSpool`, which is right for the reference deployment and wr
 machine without an E: drive. It now defaults under the install root and the installer creates it.
 
 ---
+
+## Log-evidence window (`lib/engines/evidenceWindow.js`, v2.198.0)
+
+How far back rule-usage evidence reaches. **ONE definition**, resolved at run time, shared by
+`ruleAnalysis.js`, `ruleHitCorrelation.js`, `ruleChangeRequestReport.js`, `ruleHygiene.js`,
+`coverageRegisterData.js`, `segmentationData.js` and `applicationViewData.js`.
+
+**Any change to MIN, MAX or the margin must be documented here before the code changes** — the
+same rule the security-score weights and the priority tree carry, and for the same reason: these
+bounds decide whether a rule-deletion recommendation exists at all.
+
+⛔ **IT WAS FOUR HARDCODED 30s, AND `coverageRegisterData.js` HAD ALREADY WRITTEN DOWN WHY THAT
+WAS DANGEROUS** — "the register must agree with the pages it indexes: a register that graded
+usage over a different window from /analysis would report a gap the rule-hygiene page does not
+show, or hide one it does." It then named the three other files holding their own copy and
+relied on all four being edited together, which is a hope, not an invariant.
+
+⛔ **A WIDER WINDOW CAN DELETE THE EVIDENCE, AND THAT IS THE WHOLE REASON THIS IS ADAPTIVE
+RATHER THAN A BIGGER LITERAL.** `ruleHitCorrelation.js` gates coverage on
+`sufficientHistory = historyHours >= windowHours`, and `unused` requires a MEASURED zero, which
+requires `covered`. Running the real gate against the live fleet's 41.1 days of
+`syslog_rollup_hourly` (2026-10-19): **15 of 15 devices covered at 30, 39 and 41 days — 0 of 15
+at 90.** A 30 → 90 bump reads as "more evidence" and silently produces none: all 185 `unused`
+findings disappear, the rule-cleanup loop empties, nothing errors.
+
+So the window is `clamp(floor(availableDays) - 1, 30, 90)`:
+- ⛔ **FLOORED AT 30, which is the no-regression guarantee** — exactly the literal every consumer
+  used before, so the resolved window can never be narrower than the behaviour it replaced. Below
+  30 days of history the window stays 30 and `sufficientHistory` correctly reports false, which is
+  what already happened.
+- ⛔ **CAPPED AT 90** — beyond a quarter, "this rule is unused" rests on traffic patterns too old
+  to act on, and the rollups are permanent so the window would otherwise grow for ever.
+- ⛔ **ONE DAY INSIDE the available history**, because the gate compares exact inclusive
+  hour-bucket counts and a window equal to the history passes by a single bucket.
+- ⛔ **AN UNREADABLE HISTORY FALLS BACK TO THE FLOOR, NEVER THE CAP.** The cap is the fallback
+  that empties the rule-cleanup loop on precisely the runs whose read failed — a failed read
+  recorded as a confident answer, this codebase's signature bug aimed at its own evidence.
+- ⛔ **KEYED ON THE YOUNGEST LOG SOURCE.** Not because `sufficientHistory` is per-device — it is
+  deliberately fleet-wide, from the GLOBAL first bucket — but because the per-device test is
+  `ratio >= 0.9`, and that 10% budget exists to absorb collector restarts and network blips
+  (this fleet's own deploys produce exactly those). Spending it on a device's late onboarding
+  leaves nothing for a real outage. Costs 2 days today (39 rather than 41), measured.
+- ⛔ **Onboarding a new firewall returns the fleet to the 30-day floor** until that device has 31
+  days of its own history. Stated rather than hidden; never worse than the old literal.
+
+⛔ **RESOLVED INSIDE THE FUNCTIONS THAT ALREADY HOLD A `pool`**, never threaded from call sites.
+`app/(dashboard)/devices/[id]/rules/page.js` passes no window at all and was previously taking
+`clampDays`' default of 30 — correct while everything used 30, a silent disagreement the moment
+the other surfaces became adaptive. It now picks up the resolved value untouched, and a future
+caller cannot reintroduce the split by omitting the argument. An EXPLICIT window still wins
+everywhere (`?days=`, a test pinning a number), and `resolveWindowDays`' pure `[7, 400]` clamp
+is unchanged — only the no-request default moved.
+
+⛔ **It costs ONE extra fleet-wide aggregate per pass** (~50 ms warm, ~330 ms cold). Flat in
+fleet size, which is why it is acceptable; `tests/coverageRegisterData.test.js` counts it rather
+than waiving it, because the property that test defends is that the PER-FIREWALL work stays
+proportional to the firewalls that need it.
 
 ## VPN Traffic Attribution (`/vpn?vtab=traffic`, added 2026-09-10, v2.101.0)
 
@@ -2755,9 +2825,14 @@ Two routes: `GET /api/system/update-status` (full live check, any git/network fa
 safe defaults, never a false-positive; `release_notes` hand-maintained per version) and `GET
 /api/system/update-available` (lightweight, cached, polled by the banner every 6h).
 
-**Trigger is a one-time SYSTEM scheduled task, not `child_process.spawn`** — the API runs as a
-limited service account that can't reliably start/stop services or survive its own parent service
-restarting:
+**Trigger is a one-time SYSTEM scheduled task, not `child_process.spawn`** — a spawned child
+could not survive its own parent service being restarted by the very script it is running.
+⛔ **CORRECTED 2026-10-19: this said the API "runs as a limited service account". It does not.**
+`sc.exe qc` reports `SERVICE_START_NAME : LocalSystem` for all three of `SecVault-App`,
+`SecVault-Engine` and `SecVault-Collector`. The scheduled task is still right, for the second
+reason alone. The privilege claim mattered because it was used to reason about file ACLs: every
+service already runs as SYSTEM, which is why removing `BUILTIN\Users` read from `.env.local`
+costs nothing (see `gotchas.md`):
 ```powershell
 schtasks /create /tn "SecVaultUpdate" /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File \"<repoRoot>\installer\Update-SecVault.ps1\"" /sc once /st 00:00 /f /ru SYSTEM
 schtasks /run /tn "SecVaultUpdate"

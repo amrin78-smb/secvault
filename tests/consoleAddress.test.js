@@ -197,11 +197,58 @@ describe('⛔ .env.local holds every secret the product has', () => {
     assert.match(text, /# Credentials encryption \(SEPARATE from NEXTAUTH_SECRET\)/);
   });
 
-  it('a backup is written before the change', () => {
+  // ⛔ THE BACKUP IS A RECOVERY MECHANISM, NOT AN ARCHIVE. Left behind on a
+  // SUCCESSFUL write it is a permanent second copy of CREDENTIAL_KEY, the
+  // database password and NEXTAUTH_SECRET, created in the install directory
+  // and so carrying THAT directory's ACL rather than .env.local's own. The
+  // reference deployment had accumulated five of them, the oldest a month
+  // old, plus a 2.06 GB corrupt one — all readable by BUILTIN\Users while
+  // .env.local itself was being guarded. So: kept on every failure, removed
+  // on success, and the three cases are pinned separately below because the
+  // dangerous one (success) is the one that leaves no trace of the mistake.
+  it('⛔ no backup survives a VERIFIED write, and none is left in the directory', () => {
     const file = tmpEnv(SAMPLE);
     const r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
-    assert.ok(r.backupPath && fs.existsSync(r.backupPath));
+    assert.equal(r.ok, true);
+    assert.equal(r.unchanged, false);
+    assert.equal(r.backupPath, null, 'a verified write reports no surviving backup');
+    // Asserted against the DIRECTORY, not just the returned path — a copy left
+    // behind under a name nobody reported is exactly the leak being closed.
+    const strays = fs.readdirSync(path.dirname(file)).filter((n) => n.endsWith('.bak'));
+    assert.deepEqual(strays, [], `no .bak may remain, found: ${strays.join(', ')}`);
+    // And the change itself still happened.
+    assert.equal(parseEnv(fs.readFileSync(file, 'utf8')).NEXTAUTH_URL, 'https://x.example.com');
+  });
+
+  it('⛔ the backup IS kept and reported when the write itself fails', () => {
+    const file = tmpEnv(SAMPLE);
+    // Fail the write AFTER the backup has been taken. Read-only on the target
+    // is the one failure reachable without stubbing fs.
+    fs.chmodSync(file, 0o444);
+    let r;
+    try {
+      r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
+    } finally {
+      fs.chmodSync(file, 0o644);
+    }
+    assert.equal(r.ok, false, 'an unwritable target must not report success');
+    assert.ok(r.backupPath, 'the failure path must report where the original is');
+    assert.ok(fs.existsSync(r.backupPath), 'and that file must still exist');
     assert.equal(fs.readFileSync(r.backupPath, 'utf8'), SAMPLE, 'the backup is the ORIGINAL');
+    // The original is intact either way.
+    assert.equal(fs.readFileSync(file, 'utf8'), SAMPLE);
+  });
+
+  it('⛔ a refused duplicate key leaves NO orphan backup behind', () => {
+    // This refusal changes nothing, so it needs no backup — and it used to
+    // return without a backupPath, orphaning a full copy of every secret in
+    // the file under a name the caller was never told.
+    const file = tmpEnv(`${SAMPLE}NEXTAUTH_URL=https://second.example.com\n`);
+    const r = setEnvValue(file, 'NEXTAUTH_URL', 'https://x.example.com');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /appears 2 times/);
+    const strays = fs.readdirSync(path.dirname(file)).filter((n) => n.endsWith('.bak'));
+    assert.deepEqual(strays, [], `a refusal must leave no .bak, found: ${strays.join(', ')}`);
   });
 
   it('an absent key is appended rather than silently dropped', () => {

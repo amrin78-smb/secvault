@@ -117,6 +117,66 @@ was that cue, which was never true.
   succeeded (output went to stderr, not a real failure) — accept `-1` as success for schema
   migration steps. Set `$env:PGPASSWORD` before calling `psql` for unattended execution.
 
+## ⛔ WIDENING AN EVIDENCE WINDOW CAN DELETE THE EVIDENCE (measured 2026-10-19)
+
+`logEvidenceDays` was 30, there were 41 days of rollups, and raising it to 90 looks like a free
+improvement. It is the opposite. `ruleHitCorrelation.js` gates coverage on
+`sufficientHistory = historyHours >= windowHours`, so a window that does not FIT INSIDE the
+history held makes `covered` false for every device — and `ruleAnalysis.js` emits `unused` only
+for a MEASURED zero, which requires `covered`. Running the real gate against the live fleet:
+**15 of 15 devices covered at 30, 39 and 41 days; 0 of 15 at 90.** All 185 `unused` findings
+would have vanished, the rule-cleanup loop would have emptied, and nothing would have errored.
+
+⛔ **The number that looks conservative is the dangerous one.** A reviewer checking "is 90 days
+too aggressive a claim?" is asking the wrong question — the risk is not overclaiming, it is a
+silent collapse to no claim at all.
+
+⛔ **And the obvious fallback is the wrong one.** When the history cannot be read, falling back
+to the CAP (the widest, most "inclusive" window) empties the queue on precisely the runs whose
+read failed. `lib/engines/evidenceWindow.js` falls back to the FLOOR, which is the behaviour
+that shipped for months.
+
+⛔ **`sufficientHistory` is FLEET-WIDE, from the GLOBAL first bucket — not per device.** An
+earlier version of this note said a window exceeding one late-joining device's own history
+would drop that device's coverage. Measured: it does not. The per-device test is
+`ratio >= MIN_COVERAGE_RATIO` (0.9), which a device missing the first 0.8 of a 41-day window
+still clears at 0.984. The real reason to key the window on the youngest source is that the
+10% ratio budget exists to absorb COLLECTOR RESTARTS AND NETWORK BLIPS — this fleet's own
+deploys produce exactly those — and spending it on a device's onboarding leaves nothing for a
+genuine outage.
+
+⛔ **A test that `find`s a query by TABLE NAME breaks when a second query touches that table.**
+The window resolver is a second aggregate over `syslog_rollup_hourly`, so
+`pool.find(/syslog_rollup_hourly/)` in `applicationView.test.js` and `segmentation.test.js`
+started matching the resolver instead of the coverage query and pinned the wrong one. Both now
+match on `hours_with_events` — what the query COMPUTES, which is also what the test is about.
+
+## ⛔ `.env.local` BACKUPS ACCUMULATED AS READABLE COPIES OF EVERY SECRET (found 2026-10-19)
+
+`lib/envFile.js` wrote a timestamped backup before each Settings change and left it on disk for
+ever on the SUCCESS path. Five had accumulated on the reference deployment, plus a 2.06 GB
+`.env.local.CORRUPT-*` from the em-dash encoding outage and a 0-byte `.env.local.repaired`.
+
+⛔ **The ACL is the part that made it a finding, and it was not the file's own ACL.** The backup
+is created IN THE INSTALL DIRECTORY, so it inherits `C:\Apps\SecVault`'s ACL — which granted
+`BUILTIN\Users` `ReadAndExecute` — rather than `.env.local`'s. A non-admin local user could read
+`CREDENTIAL_KEY` and so decrypt every row of `device_credentials`, i.e. the whole fleet's
+firewall admin passwords. ⛔ Note node's `mode: 0o600` on that write does essentially nothing on
+Windows; it does not produce an ACL.
+
+⛔ **The duplicate-key refusal orphaned one.** That branch returned `{ok:false}` with NO
+`backupPath`, having already written the file — a full copy of every secret under a name the
+caller was never told. The backup is now taken AFTER the read-side refusals, which need none.
+
+Fixed: the backup is removed once the self-check has verified the write, and kept and reported
+on every failure path. `previous` was always the real recovery information, so the console-url
+route's recovery sentence now names the old value rather than a path. On the server the stale
+files were moved to `C:\ProgramData\SecVault\env-archive` (SYSTEM + Administrators only,
+inheritance protected) and `.env.local`'s own ACL was tightened the same way — verified by a
+SYSTEM scheduled task actually reading the file, not by reading the ACL back. All three services
+run as **LocalSystem** (CLAUDE.md said "a limited service account"; it is not), so SYSTEM
+FullControl is what they need and removing Users costs nothing.
+
 ## Syslog archive (lib/syslog/archive.js)
 
 ⛔ **The archive is CONCATENATED GZIP MEMBERS — one per flush — and not every reader handles that.**

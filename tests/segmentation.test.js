@@ -495,7 +495,13 @@ describe('⛔ the reported window is the window that was MEASURED', () => {
     const run = async (asked) => {
       const pool = stubPool({ rules: [dbRule()], devices: [{ id: 'd1', name: 'fw-1' }] });
       const fleet = await loadFleetRulesWithEvidence(pool, asked, new Date('2026-09-14T00:00:00Z'));
-      const coverageCall = pool.find(/syslog_rollup_hourly/);
+      // ⛔ MATCHED ON `hours_with_events`, NOT ON THE TABLE NAME. The evidence
+      // window is now RESOLVED from a second aggregate over the same
+      // syslog_rollup_hourly table (lib/engines/evidenceWindow.js), so a
+      // matcher keyed on the table picked up the resolver's query and pinned
+      // the wrong one. Naming the query by what it COMPUTES keeps this test
+      // asserting the thing it was written to assert.
+      const coverageCall = pool.find(/hours_with_events/);
       assert.equal(
         coverageCall.params[1], fleet.windowDays * 24,
         `reported ${fleet.windowDays}d but measured ${coverageCall.params[1]}h for days=${asked}`

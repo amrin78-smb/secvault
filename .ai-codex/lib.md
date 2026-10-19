@@ -835,6 +835,50 @@ Palo Alto: POSITIONAL CSV. Rule NAME at index 11, action at index 30, and PAN-OS
 ⛔ `getThreatsBySeverity` merges PAN-OS and FortiOS severity vocabularies via `threatSeverityRank()` and returns `unranked` (word not recognized) and `unreported` (no severity at all) as SEPARATE counts — never folded into a level, because a threat filed under a guessed severity silently changes where it sorts. Each level also reports the vendor words that landed on it, so a merge is visibly a merge.
 ⛔ Rows with no `threat_name` are excluded from `getTopThreats`, not bucketed under a synthetic label that would top the chart.
 
+## lib/engines/evidenceWindow.js — the ONE log-evidence window (added 2026-10-19, v2.198.0)
+
+Pure policy (`resolveEvidenceWindow(availableDays)`) plus one bounded read
+(`loadFleetLogHistoryDays(pool, now)`), combined by `resolveEvidenceWindowDays(pool, now)`.
+Exports `MIN_EVIDENCE_WINDOW_DAYS` (30), `MAX_EVIDENCE_WINDOW_DAYS` (90), `SAFETY_MARGIN_DAYS` (1).
+
+Replaces FOUR hardcoded 30s — `ruleAnalysis.js`'s `logEvidenceDays`,
+`ruleChangeRequestReport.js`'s `EVIDENCE_WINDOW_DAYS` (which `ruleHygiene.js` imported),
+`coverageRegisterData.js`'s `LOG_EVIDENCE_WINDOW_DAYS` and `ruleHitCorrelation.js`'s
+`DEFAULT_WINDOW_DAYS` — plus the no-request defaults in `segmentationData.js` and
+`applicationViewData.js`. `coverageRegisterData.js`'s own header had stated the invariant
+("the register must agree with the pages it indexes") while relying on four files being
+edited together, which is a hope rather than an invariant.
+
+⛔ **The window is resolved INSIDE the functions that already hold a `pool`**, not threaded
+from call sites — `loadOptionsFromSettings`, `buildRequestReportData`, `buildRuleHygieneData`,
+`getCoverageRegister`, `loadFleetRulesWithEvidence`, `loadFleet` and `correlateDeviceRules`.
+So `app/(dashboard)/devices/[id]/rules/page.js`, which passes no window at all, picks up the
+resolved value without being touched, and a future caller cannot reintroduce the split by
+omitting the argument.
+
+⛔ **A WIDER WINDOW CAN DESTROY EVIDENCE.** `ruleHitCorrelation.js` gates on
+`sufficientHistory = historyHours >= windowHours`, so a window that does not fit inside the
+history held makes `covered` false everywhere, and `unused` requires a MEASURED zero. Real
+gate run against the live fleet (41.1 days of `syslog_rollup_hourly`), 2026-10-19:
+
+| window | sufficientHistory | devices covered | worst ratio |
+|---|---|---|---|
+| 30d (the old literal) | yes | 15/15 | 0.982 |
+| **39d (resolved)** | yes | **15/15** | 0.983 |
+| 41d | yes | 15/15 | 0.984 |
+| **90d (a naive bump)** | **NO** | **0/15** | 0.448 |
+
+⛔ **Floored at MIN, so it can never be narrower than the literal it replaced**; capped at MAX;
+held one day inside the available history because the gate compares exact hour-bucket counts.
+⛔ **An unreadable history falls back to the FLOOR, never the cap** — the cap is the answer that
+would empty the rule-cleanup loop on exactly the runs whose read failed.
+⛔ **Keyed on the YOUNGEST log source**, which costs 2 days of window today (39 rather than 41)
+and keeps the per-device 0.9 ratio budget available for collector restarts and network blips,
+which is what `MIN_COVERAGE_RATIO` exists to absorb. Onboarding a new firewall returns the
+fleet to the floor until that device has 31 days of its own history — never worse than before.
+Pinned by `tests/evidenceWindow.test.js` (35 cases, 6 mutations verified, including a
+source scan that fails the build if any consumer reintroduces a literal).
+
 ## lib/engines/ruleHitCorrelation.js — A3 grading + history (changed 2026-09-25, v2.189.0)
 
 Phase 8b's log-evidence engine gained the two things A3 is actually about. Fields ADDED to every
