@@ -2,7 +2,7 @@ import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
 import { IconDevices, IconChart, IconActivity, IconShield, IconGrid } from '../icons';
-import { getServerHealth, diskState, BYTES_IN_GB } from '../../lib/serverHealth';
+import { getServerHealth, diskState, formatBytes } from '../../lib/serverHealth';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,14 +15,16 @@ export const dynamic = 'force-dynamic';
 
 const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 
+// ⛔ THE DECISION LIVES IN lib/serverHealth.js, NOT HERE. What counts as a
+// measurement and what counts as an absence is the distinction this whole tab
+// exists to keep, and nothing in a JSX file is unit-testable in this repo (no
+// devDependencies, so no transform) -- which is how this function shipped
+// rendering a ZERO as "1 MB" and hid a live query defect behind it. Keep the
+// judgement in the lib and the hue here.
 function gb(bytes) {
-  if (bytes === null || bytes === undefined || !Number.isFinite(Number(bytes))) {
-    return <span style={{ color: 'var(--unmeasured)' }}>—</span>;
-  }
-  const v = Number(bytes) / BYTES_IN_GB;
-  // Below a gigabyte, "0.0 GB" is indistinguishable from nothing at all.
-  if (v < 1) return <>{Math.max(1, Math.round(Number(bytes) / (1024 ** 2)))} MB</>;
-  return <>{v >= 100 ? v.toFixed(0) : v.toFixed(1)} GB</>;
+  const { text, unmeasured } = formatBytes(bytes);
+  if (unmeasured) return <span style={{ color: 'var(--unmeasured)' }}>{text}</span>;
+  return <>{text}</>;
 }
 
 function num(v) {

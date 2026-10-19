@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.196.1': [
+    'Server tab: the largest-relations list reported every ordinary table as 0 bytes. pg_partition_tree() returns no rows for a relation that is neither partitioned nor a partition, so only syslog_events measured correctly.',
+    'That zero then rendered as "1 MB" because the formatter floored small values upward — so the panel showed a 717 GB database whose next four relations were each "1 MB", hiding ~6.9 GB of syslog detail rollups and device_configs at 776 MB.',
+    'Byte formatting moved into lib/serverHealth.js as a pure formatBytes(): zero now reads "0 bytes", a real sub-megabyte value reads "<1 MB", and only an unreadable figure renders as the hueless em-dash.',
+    'Measured live before and after; both fixes mutation-verified.',
+  ],
   '2.196.0': [
     "Internal only \u2014 nothing in the console changes. Adds two tools for exercising SecVault on a machine with no firewalls attached: one seeds a small mock fleet into a database, the other emits synthetic firewall logs so the collector, the hourly rollups and the rule-usage correlation all run for real.",
     "\u26d4 The mock fleet is deliberately uneven, because a uniformly healthy one only ever exercises the path that has never had a bug. It includes a firewall that reports no rule usage at all, one that reports a genuine zero, one whose version string cannot be read, and one nothing could be collected from \u2014 the four states the product has to tell apart.",

@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 
 const {
   diskState, getDatabaseSize, getSyslogRetention, getIngestHealth,
-  getServiceLiveness, volumeFor, volumeKey, BYTES_IN_GB,
+  getServiceLiveness, volumeFor, volumeKey, BYTES_IN_GB, formatBytes,
 } = require('../lib/serverHealth');
 
 const GB = BYTES_IN_GB;
@@ -323,4 +323,68 @@ test('⛔ getServerHealth still answers when the database is unreachable', async
     assert.match(svc.error, /ECONNREFUSED/);
   }
   assert.ok(Number.isFinite(health.process.uptimeSeconds));
+});
+
+// ── formatBytes: a zero is a zero, never a fabricated megabyte ──────────────
+//
+// ⛔ THIS IS THE TEST THAT WAS MISSING WHILE THE BUG WAS LIVE. The Server tab's
+// relation list computed 0 bytes for every non-partitioned table (see the note
+// in lib/serverHealth.js: pg_partition_tree returns no rows for an ordinary
+// relation), and the renderer's `Math.max(1, ...)` floor turned each of those
+// zeroes into "1 MB". So the panel showed a 717 GB database whose largest
+// relation was 706 GB and whose next four were each "1 MB" -- arithmetic that
+// cannot hold, presented with no indication anything had failed.
+//
+// The defect was reachable only through a live partitioned database, but the
+// MASKING was pure and always testable. Pin the masking.
+
+test('formatBytes: zero renders as zero, never as 1 MB', () => {
+  const r = formatBytes(0);
+  assert.equal(r.text, '0 bytes');
+  assert.equal(r.unmeasured, false, 'an empty relation is measured, not unknown');
+  assert.doesNotMatch(r.text, /1 MB/, 'a zero must never be floored up to a megabyte');
+});
+
+test('formatBytes: a real sub-megabyte value says so without inventing one', () => {
+  assert.equal(formatBytes(1).text, '<1 MB');
+  assert.equal(formatBytes(500 * 1000).text, '<1 MB');
+  // ...and a genuine megabyte is still reported as one.
+  assert.equal(formatBytes(1024 ** 2).text, '1 MB');
+});
+
+test('formatBytes: unreadable figures are unmeasured, not zero', () => {
+  for (const v of [null, undefined, NaN, 'nonsense', -1]) {
+    const r = formatBytes(v);
+    assert.equal(r.unmeasured, true, `${String(v)} must be unmeasured`);
+    assert.equal(r.text, '—');
+  }
+});
+
+test('formatBytes: unmeasured and zero never render alike', () => {
+  // The whole point of the tab's header rule. If these two ever collapse, a
+  // failed read becomes indistinguishable from an empty table.
+  assert.notEqual(formatBytes(null).text, formatBytes(0).text);
+  assert.notEqual(formatBytes(null).unmeasured, formatBytes(0).unmeasured);
+});
+
+test('formatBytes: gigabyte scale keeps one decimal below 100 and none above', () => {
+  assert.equal(formatBytes(1024 ** 3).text, '1.0 GB');
+  assert.equal(formatBytes(150 * 1024 ** 3).text, '150 GB');
+  assert.equal(formatBytes(759221100544).text, '707 GB'); // live syslog_events
+});
+
+// ⛔ The query must not compute a relation's size from pg_partition_tree ALONE.
+// That is a source assertion and normally the weaker kind, but the failure it
+// guards is invisible to every stub-pool test in this file: the stub returns
+// whatever rows it is told to, so only the real catalogue can disagree. Assert
+// the one property that made the live answer wrong.
+test('relation-size query does not rely on pg_partition_tree alone', () => {
+  const fsMod = require('node:fs');
+  const pathMod = require('node:path');
+  const src = fsMod.readFileSync(pathMod.join(__dirname, '..', 'lib', 'serverHealth.js'), 'utf8');
+  const m = src.match(/SELECT c\.relname,[\s\S]*?LIMIT 8`/);
+  assert.ok(m, 'relation-size query not found');
+  assert.match(m[0], /GREATEST\(/, 'ordinary tables need pg_total_relation_size too');
+  assert.match(m[0], /pg_total_relation_size\(c\.oid\)/,
+    'pg_partition_tree returns NO ROWS for a non-partitioned relation');
 });
