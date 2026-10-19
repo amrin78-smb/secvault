@@ -16,11 +16,18 @@ scripts/devdb.sh production -c "SELECT count(*) FROM devices"
 scripts/devdb.sh production                  # interactive psql
 scripts/devdb.sh dev -f /tmp/query.sql
 
-# WinRM (remote PowerShell on the Windows servers)
+# WinRM (remote PowerShell) -- PRODUCTION ONLY
 scripts/devwinrm.py production --probe        # authenticate only, run nothing
 scripts/devwinrm.py production --cmd 'sc.exe query SecVault-App'
-scripts/devwinrm.py production -- 'Get-Volume | Format-Table -AutoSize'
+
+# SSH -- STAGING ONLY (key-based, no password anywhere)
+ssh -i ~/.ssh/certvault_staging_ed25519 -o IdentitiesOnly=yes amrin78@192.168.31.10
 ```
+
+⛔ **The two machines take different transports and neither accepts the
+other's.** Production is WinRM (5985); staging is SSH (22). Staging has no
+WinRM listener and production answers nothing on 22 — see the measured table
+below.
 
 ## ⛔ Why it is not in the repo, even gitignored
 
@@ -94,8 +101,18 @@ field keep the old one until the `ALTER ROLE` above is run.
 
 # WinRM
 
-`.winrm.hosts.<target>` in the same file. `production` is `192.168.7.69:5985`
-(**VPN required**); `staging` is a fallback behind the SSH key.
+`.winrm.hosts.production` in the same file — `192.168.7.69:5985`, **VPN
+required**. ⛔ **There is no staging WinRM target.** One was added here in error
+on 2026-10-19 and removed the same day; staging is SSH (next section). A
+plausible-but-wrong route sitting beside the correct one is how the next
+session loses an afternoon on the wrong transport.
+
+Measured 2026-10-19:
+
+| host | 22 | 3389 | 5985 | 5986 |
+|---|---|---|---|---|
+| production `192.168.7.69` | — | open | **open** | — |
+| staging `192.168.31.10` | **open** | — | — | — |
 
 ## ⛔ NTLM only — `basic` is refused, not discouraged
 
@@ -176,3 +193,39 @@ It is a production server. `sc.exe` **always**, never `Start-Service` /
 `npm ci`, never `npm install`. Never restart, reconfigure or stop `sshd`
 remotely. Prefer read-only commands; anything that changes the box should be a
 deliberate, announced step, not a side effect of a diagnostic.
+
+
+---
+
+# SSH (staging)
+
+```
+host           192.168.31.10   (LAPTOP-6PETB251, Windows 11 Home)
+user           amrin78          (local administrator)
+identity       ~/.ssh/certvault_staging_ed25519
+auth           publickey ONLY -- password login is refused
+```
+
+Recorded under `.ssh.hosts.staging`. There is **no password to add**: the key is
+referenced by path and its bytes never enter the credential file. Verified
+working 2026-10-19 (`Microsoft Windows [Version 10.0.26200.9711]`).
+
+⛔ **The private key lives on this dev box ONLY and is never copied anywhere.**
+If another machine needs access, generate a key *there* and ask Amrin to
+authorise it.
+
+⛔ **NEVER restart, reconfigure or stop `sshd` on this box.** The last attempt
+took SSH down and only physical console access recovered it. Its OpenSSH is the
+GitHub build (`winget Microsoft.OpenSSH.Preview`); the Windows built-in
+capability install hangs, and its leftover `InstallPending` state once
+unregistered sshd outright. Port 22 needed an explicit inbound rule
+(`CertVault-SSH-In`).
+
+⛔ **The session is an elevated `cmd` shell, not PowerShell.** For PowerShell,
+`scp` a `.ps1` across and run
+`powershell -NoProfile -ExecutionPolicy Bypass -File <path>`. Avoid multi-line
+`-Command` — it does not survive the transport intact.
+
+Staging hosts **CertVault only** (`C:\Apps\CertVault`, port 3014). SecVault is
+not installed there. **Ask before installing anything.** Same key CertVault
+uses; see `certvault/CLAUDE.md`.

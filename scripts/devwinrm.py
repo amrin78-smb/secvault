@@ -90,6 +90,36 @@ def logon_names(t):
     return out, bool(pinned)
 
 
+def _clean_stderr(text):
+    """
+    Strip the CLIXML envelope PowerShell remoting wraps stderr in.
+
+    ⛔ STRIPS THE ENVELOPE, NEVER THE MESSAGE. An <S S="Error"> record carries
+    a real failure and is unwrapped and kept; only the progress/objects
+    scaffolding is dropped. Silently discarding an unrecognised shape here
+    would turn a remote error into a clean exit, which is the one outcome this
+    whole file is written to avoid.
+    """
+    import re
+    if "#< CLIXML" not in text:
+        return text.strip()
+    kept = []
+    for m in re.finditer(r'<S S="(?:Error|Warning)"[^>]*>(.*?)</S>', text, re.S):
+        frag = m.group(1)
+        frag = frag.replace("_x000D__x000A_", "\n").replace("_x000A_", "\n")
+        frag = (frag.replace("&lt;", "<").replace("&gt;", ">")
+                    .replace("&quot;", '"').replace("&apos;", "'").replace("&amp;", "&"))
+        kept.append(frag)
+    out = "".join(kept).strip()
+    if out:
+        return out
+    # Nothing recognised and the body was not just progress scaffolding: hand
+    # it back rather than swallowing it.
+    residue = re.sub(r"#< CLIXML\s*", "", text)
+    residue = re.sub(r"<Objs .*?</Objs>", "", residue, flags=re.S).strip()
+    return residue
+
+
 def main():
     argv = sys.argv[1:]
     if not argv:
@@ -171,7 +201,14 @@ def main():
             f"[devwinrm] LOCKOUT STRIKE against this account -- stop and check the password if\n"
             f"[devwinrm] they all fail rather than editing forms and retrying.\n")
 
-    ps = command if command else "$env:COMPUTERNAME; [Environment]::UserName"
+    # ⛔ A PowerShell remoting stream carries progress records as CLIXML on
+    # STDERR, so an ordinary successful command arrives with ~1 KB of
+    # <Objs Version="1.1.0.1"> noise wrapped around its real output -- and a
+    # GENUINE error arrives the same way, which means the noise trains you to
+    # ignore the channel that carries the failures. Silence the progress stream
+    # at the source rather than filtering it at every call site.
+    prelude = "$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Continue'; "
+    ps = prelude + (command if command else "$env:COMPUTERNAME; [Environment]::UserName")
     last = None
     for i, (tpl, name) in enumerate(names, 1):
         shown = name
@@ -203,7 +240,7 @@ def main():
                 f'[devwinrm] ⛔ PIN IT so later runs cost no lockout strikes. Set\n'
                 f'[devwinrm]    .winrm.hosts.{target_name}.logon_form = {json.dumps(tpl)}\n')
         sys.stdout.write(r.std_out.decode("utf-8", "replace"))
-        err = r.std_err.decode("utf-8", "replace").strip()
+        err = _clean_stderr(r.std_err.decode("utf-8", "replace"))
         if err:
             sys.stderr.write(err + "\n")
         sys.exit(r.status_code)
