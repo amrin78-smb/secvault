@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.197.0': [
+    'The syslog collector now starts BEFORE the Next.js build during an update instead of after it. Measured over three real deploys it was down 144-182s, roughly 47s of which was spent waiting for a build it takes no part in.',
+    'While the collector is stopped nothing is listening on 514, so datagrams are discarded by the OS rather than queued \u2014 UDP has no retry. At the measured 381-1,280 events/sec that build wait cost 18,000-60,000 permanently lost events per deploy.',
+    'New syslog_ingest_gaps table and a "Last ingest gap" row on the Server tab: the one kind of loss the dropped counter cannot see, because it can only count datagrams that reached the process.',
+    'It records a WINDOW, never an event count \u2014 what arrived while nothing listened is unknowable, and scaling a nearby rate by the gap would invent a measurement from an absence.',
+    'The update banner now names a collector that was deliberately not restarted; the flag tracking that was previously set in two places and read in none.',
+  ],
   '2.196.2': [
     'Vulnerability Trends had four missing days (2026-10-11, -12, -13, -15). The engine was healthy throughout — the 00:10 snapshot tick sat inside rule-version-pull\u2019s 12.8\u201315.8 minute run window, and node-cron loses a tick whose second passes while the event loop is busy.',
     'The tick moved to 01:10, clear of the nightly collection, retention and config-retention jobs — and it now measures a fleet that has finished updating rather than one mid-pull.',

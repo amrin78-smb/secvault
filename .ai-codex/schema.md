@@ -336,6 +336,37 @@ One row per flush: received / parsed / stored / **dropped** / unknown_vendor / u
 spool_backlog / batch_ms. ⛔ `dropped` is the number that matters — a collector silently losing
 datagrams under load looks exactly like a quiet network.
 
+### syslog_ingest_gaps   (added 2026-10-19, permanent)
+```
+id            BIGSERIAL PK
+detected_at   TIMESTAMPTZ NOT NULL DEFAULT now()   -- when this collector process started
+last_stat_at  TIMESTAMPTZ                          -- last successful flush before it; NULL if none
+gap_seconds   INTEGER                              -- UPPER BOUND; NULL = not determinable, never 0
+reason        TEXT NOT NULL                        -- measured | first_start | unreadable | clock_mismatch
+```
+Indexes: `idx_syslog_ingest_gaps_time`. One row per collector START.
+
+⛔ **This is the loss `syslog_ingest_stats.dropped` CANNOT see.** That counter is honest about
+buffer overflow, but it can only count datagrams that REACHED the process. While
+`SecVault-Collector` is stopped nothing is listening on 514, so the OS discards every datagram
+before any socket sees it, UDP does not retry, and no counter anywhere moves — a loss
+indistinguishable from a quiet network, which is exactly what the note above refuses to allow.
+Measured: **144–182s per deploy** at **381–1,280 events/sec**.
+
+⛔ **It records a WINDOW and never an EVENT COUNT.** How many arrived while nothing listened is
+unknowable — they were never received, parsed or stored — and multiplying a neighbouring rate by
+the gap would manufacture a measurement out of an absence. A test rejects any key on the read
+function matching `event|lost|estimat|received|count`.
+
+⛔ **`gap_seconds` is an UPPER BOUND.** It is measured from the last successful flush and the
+previous process may have kept listening for up to one `SYSLOG_FLUSH_MS` after it, so the true
+deaf window is `gap_seconds` minus at most that. Overstating is the safe direction.
+
+⛔ **NULL is "could not be determined", never zero**, and `reason` keeps the four cases apart — a
+first-ever start is not an outage. Surfaced on the dashboard Server tab beside `Dropped`.
+Written by `recordIngestGap()` in `services/collector.js` AFTER connectivity and BEFORE the
+listeners bind, so it reads the PREVIOUS process's last flush rather than racing this one's.
+
 ### config_backups
 ```
 id                UUID PK DEFAULT gen_random_uuid()

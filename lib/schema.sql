@@ -1974,6 +1974,45 @@ CREATE TABLE IF NOT EXISTS syslog_ingest_stats (
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_ingest_stats_time ON syslog_ingest_stats (recorded_at DESC);
 
+-- ⛔ THE ONE KIND OF LOSS syslog_ingest_stats CANNOT SEE (added 2026-10-19).
+-- `dropped` counts buffer overflow honestly, but it can only count datagrams
+-- that REACHED the process. While SecVault-Collector is stopped nothing is
+-- listening on 514, so the OS discards every datagram before any socket sees
+-- it -- UDP has no retry and nothing anywhere records that it happened. A
+-- deploy costs 144-182s of that (measured over three consecutive real deploys
+-- on the reference fleet), which at the observed 381-1,280 events/sec is tens
+-- of thousands of security events that exist in no table and in no counter.
+-- By this schema's own standard -- "a collector that silently loses datagrams
+-- under load is indistinguishable from a quiet network" -- that gap had to
+-- become visible, and the deploy window is knowable even though its contents
+-- are not.
+--
+-- ⛔ ONE ROW PER COLLECTOR START, AND IT RECORDS A WINDOW, NEVER AN EVENT
+-- COUNT. How many datagrams arrived while nothing was listening is genuinely
+-- unknowable -- they were never received, parsed or stored -- and multiplying
+-- a neighbouring rate by the gap would manufacture a measurement out of an
+-- absence, which is the bug class this file names most often. The window is a
+-- fact; the contents are not.
+--
+-- ⛔ gap_seconds IS AN UPPER BOUND and `reason` says so. It is measured from
+-- the last successful flush, and the previous process may have kept listening
+-- for up to one flush interval after it -- so the true deaf window is
+-- `gap_seconds` minus at most SYSLOG_FLUSH_MS. Overstating a gap is the safe
+-- direction; understating one hides loss.
+--
+-- ⛔ NULL gap_seconds IS "COULD NOT BE DETERMINED", NEVER ZERO. A first-ever
+-- start has no previous flush to measure from and is not an outage;
+-- `reason` separates first_start / measured / unreadable so the three can
+-- never be read as the same thing.
+CREATE TABLE IF NOT EXISTS syslog_ingest_gaps (
+  id           BIGSERIAL PRIMARY KEY,
+  detected_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_stat_at TIMESTAMPTZ,
+  gap_seconds  INTEGER,
+  reason       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_ingest_gaps_time ON syslog_ingest_gaps (detected_at DESC);
+
 -- ⛔ log_class: the event's kind, computed ONCE at ingest instead of being
 -- re-derived by every query. Added 2026-09-08 after measuring the alternative:
 -- the VPN and threat dashboards were matching `message LIKE '%subtype="vpn"%'`

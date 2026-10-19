@@ -1178,6 +1178,12 @@ const REGISTRY = [
   { mod: 'lib/serverHealth.js', fn: 'getSyslogRetention', args: () => [], spec: { object: [] } },
   { mod: 'lib/serverHealth.js', fn: 'getIngestHealth', args: () => [15], spec: { object: [] } },
   { mod: 'lib/serverHealth.js', fn: 'getServiceLiveness', args: () => [], spec: {} },
+  // Reached through getIngestHealth too, but registered in its own right so a
+  // syntax error in its SQL is attributed to it rather than to its caller --
+  // and because its own try/catch returns null on ANY failure, which is
+  // exactly the shape that hides a broken query from a checker that only
+  // asks "did it throw".
+  { mod: 'lib/serverHealth.js', fn: 'getLastIngestGap', args: () => [], spec: {} },
 
   // ── per-user storage and directory mappings ─────────────────────────────
   //

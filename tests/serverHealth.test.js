@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 
 const {
   diskState, getDatabaseSize, getSyslogRetention, getIngestHealth,
-  getServiceLiveness, volumeFor, volumeKey, BYTES_IN_GB, formatBytes,
+  getServiceLiveness, volumeFor, volumeKey, BYTES_IN_GB, formatBytes, getLastIngestGap,
 } = require('../lib/serverHealth');
 
 const GB = BYTES_IN_GB;
@@ -387,4 +387,68 @@ test('relation-size query does not rely on pg_partition_tree alone', () => {
   assert.match(m[0], /GREATEST\(/, 'ordinary tables need pg_total_relation_size too');
   assert.match(m[0], /pg_total_relation_size\(c\.oid\)/,
     'pg_partition_tree returns NO ROWS for a non-partitioned relation');
+});
+
+// ── the ingest gap: the loss `dropped` cannot see ──────────────────────────
+//
+// ⛔ syslog_ingest_stats.dropped is honest about buffer overflow, but it can
+// only count datagrams that REACHED the process. While SecVault-Collector is
+// stopped — 144-182s on every deploy, measured on the reference fleet — the OS
+// discards each one before any socket sees it. UDP does not retry, so those
+// events exist nowhere and no counter moves: a loss indistinguishable from a
+// quiet network, which is the one thing this product does not let a number do.
+
+test('a gap of unknown length is never reported as zero', async () => {
+  for (const reason of ['first_start', 'unreadable', 'clock_mismatch']) {
+    const g = await getLastIngestGap({
+      query: async () => ({ rows: [{ detected_at: new Date(), last_stat_at: null, gap_seconds: null, reason }] }),
+    });
+    assert.equal(g.gapSeconds, null, `${reason} must not become a number`);
+    assert.equal(g.reason, reason, 'the reason must survive so the three stay distinguishable');
+  }
+});
+
+test('an unreadable gaps table does not blank the ingest panel', async () => {
+  // ⛔ An installation that has not yet run the migration adding
+  // syslog_ingest_gaps must not lose the diagnostics beside it. null renders
+  // as not-measured; it must never be an object implying a zero gap.
+  const g = await getLastIngestGap({
+    query: async () => { throw new Error('relation "syslog_ingest_gaps" does not exist'); },
+  });
+  assert.equal(g, null);
+});
+
+test('no recorded gap is null, not a zero-length gap', async () => {
+  assert.equal(await getLastIngestGap({ query: async () => ({ rows: [] }) }), null);
+});
+
+test('a measured gap carries its window and never an event count', async () => {
+  const g = await getLastIngestGap({
+    query: async () => ({ rows: [{
+      detected_at: new Date('2026-10-07T00:11:04Z'),
+      last_stat_at: new Date('2026-10-07T00:08:06Z'),
+      gap_seconds: 178, reason: 'measured',
+    }] }),
+  });
+  assert.equal(g.gapSeconds, 178);
+  assert.equal(g.reason, 'measured');
+  // ⛔ What arrived while nothing listened is UNKNOWABLE. Scaling a
+  // neighbouring rate by the gap would manufacture a measurement out of an
+  // absence — the bug class this repo names most often. No such key may exist.
+  for (const k of Object.keys(g)) {
+    assert.doesNotMatch(k, /event|lost|estimat|received|count/i,
+      `getLastIngestGap must not carry an event estimate (found "${k}")`);
+  }
+});
+
+test('getIngestHealth carries lastGap on BOTH its success and error shapes', async () => {
+  // ⛔ The error shape omitting a key the renderer reads has already shipped
+  // once here: `flushes` was missing, so `flushes === 0` was false on a DB
+  // failure and the banner that says ingest is broken was SUPPRESSED by the
+  // breakage it reports.
+  const ok = await getIngestHealth({ query: async () => ({ rows: [{}] }) }, 15);
+  assert.ok('lastGap' in ok, 'success shape must carry lastGap');
+  const bad = await getIngestHealth({ query: async () => { throw new Error('down'); } }, 15);
+  assert.ok('lastGap' in bad, 'error shape must carry lastGap');
+  assert.equal(bad.lastGap, null);
 });

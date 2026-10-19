@@ -233,6 +233,36 @@ export default async function ServerHealthWidgets() {
           sub="files written but not yet inserted"
         />
         <Row label="Flushes in window" value={num(h.ingest.flushes)} />
+        {/* ⛔ THE LOSS `Dropped` ABOVE CANNOT SEE. That counter is honest about
+            overflow but only counts datagrams that reached the process. While
+            the collector is stopped — every deploy — the OS discards them
+            before any socket sees them, UDP does not retry, and no counter
+            anywhere moves. Shown as a WINDOW, never an event count: what
+            arrived while nothing listened is unknowable, and scaling a
+            neighbouring rate by it would invent a measurement from an absence. */}
+        <Row
+          label="Last ingest gap"
+          value={
+            h.ingest.lastGap === null || h.ingest.lastGap === undefined ? (
+              <span style={{ color: 'var(--unmeasured)' }}>—</span>
+            ) : h.ingest.lastGap.gapSeconds === null ? (
+              // first_start / unreadable / clock_mismatch — each a real state,
+              // and none of them a zero-second gap.
+              <span style={{ color: 'var(--unmeasured)' }}>
+                not measured ({h.ingest.lastGap.reason})
+              </span>
+            ) : (
+              <span style={{ color: h.ingest.lastGap.gapSeconds >= 60 ? 'var(--yellow)' : undefined }}>
+                {h.ingest.lastGap.gapSeconds}s
+              </span>
+            )
+          }
+          sub={
+            h.ingest.lastGap && h.ingest.lastGap.gapSeconds !== null
+              ? 'nothing was listening; upper bound. Events in this window were discarded by the OS and are counted nowhere'
+              : 'time the collector was not listening (deploys, restarts)'
+          }
+        />
         {h.ingest.flushes === 0 ? (
           /* ⛔ NO FLUSHES IS NOT ZERO DROPS. An absent collector would otherwise
              render as a clean ingest — the most reassuring possible way to show

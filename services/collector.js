@@ -927,6 +927,78 @@ function startTcp(port) {
 }
 
 // --- lifecycle -------------------------------------------------------------
+
+// ⛔ RECORD THE WINDOW IN WHICH NOTHING WAS LISTENING.
+//
+// `dropped` in syslog_ingest_stats is honest about overflow, but it can only
+// count datagrams that reached this process. While the service is stopped --
+// every deploy, 144-182s measured on the reference fleet -- the OS discards
+// each datagram before any socket sees it. UDP has no retry, so those events
+// exist nowhere and no counter moves. That is precisely the shape this
+// codebase refuses elsewhere: a loss indistinguishable from a quiet network.
+//
+// ⛔ IT RECORDS A WINDOW AND NEVER AN EVENT COUNT. How many arrived while
+// nothing listened is unknowable; multiplying a neighbouring rate by the gap
+// would manufacture a measurement out of an absence.
+//
+// ⛔ THE GAP IS AN UPPER BOUND. It is measured from the last successful flush,
+// and the previous process may have kept listening for up to one flush
+// interval after it. Overstating is the safe direction here.
+//
+// ⛔ NEVER THROWS AND NEVER BLOCKS THE BIND. A failure to record a gap must
+// not stop the collector listening -- that would turn an accounting problem
+// into the very outage it exists to measure.
+async function recordIngestGap() {
+  try {
+    const { rows } = await pool.query(
+      'SELECT max(recorded_at) AS last_stat FROM syslog_ingest_stats'
+    );
+    const last = rows.length > 0 ? rows[0].last_stat : null;
+    if (last === null || last === undefined) {
+      // No previous flush at all: a first-ever start is not an outage, and
+      // calling it a zero-second one would be a fabricated measurement.
+      await pool.query(
+        'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES (NULL, NULL, $1)',
+        ['first_start']
+      );
+      log('ingest gap: none measurable - no previous flush recorded (first start).');
+      return;
+    }
+    const lastMs = new Date(last).getTime();
+    if (!Number.isFinite(lastMs)) {
+      await pool.query(
+        'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES (NULL, NULL, $1)',
+        ['unreadable']
+      );
+      log('WARN ingest gap: the last flush timestamp could not be read - gap NOT measured.');
+      return;
+    }
+    // ⛔ A clock that moved backwards gives a negative span. That is not a
+    // zero-length gap, it is a disagreement -- the same call vpn_sessions
+    // makes on a negative duration.
+    const secs = Math.round((Date.now() - lastMs) / 1000);
+    if (secs < 0) {
+      await pool.query(
+        'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES ($1, NULL, $2)',
+        [new Date(lastMs), 'clock_mismatch']
+      );
+      log('WARN ingest gap: last flush is in the FUTURE - clock disagreement, gap NOT measured.');
+      return;
+    }
+    await pool.query(
+      'INSERT INTO syslog_ingest_gaps (last_stat_at, gap_seconds, reason) VALUES ($1, $2, $3)',
+      [new Date(lastMs), secs, 'measured']
+    );
+    log(
+      `ingest gap: ${secs}s with nothing listening (upper bound; last flush ` +
+      `${new Date(lastMs).toISOString()}). Datagrams arriving in that window were ` +
+      'discarded by the OS and are not counted anywhere.'
+    );
+  } catch (err) {
+    log(`WARN ingest gap could not be recorded: ${err.message}`);
+  }
+}
+
 async function main() {
   log('SecVault-Collector starting.');
   log(`spool dir : ${SPOOL_DIR}`);
@@ -973,6 +1045,11 @@ async function main() {
   const rearmed = rearmFailedSpool();
   await pool.query('SELECT 1');
   log('database connectivity verified.');
+
+  // After connectivity, before binding: it reads the last flush time, which
+  // must be the PREVIOUS process's. Doing it after the listeners are up would
+  // race the first flush of this one.
+  await recordIngestGap();
 
   await maintenance();
   await refreshDeviceMap();

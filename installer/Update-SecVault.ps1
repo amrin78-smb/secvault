@@ -12,9 +12,11 @@
       4. npm ci
       5. node lib\migrate.js       (schema migration BEFORE services restart)
       5b. lib\schema-grants.sql    (readonly diagnostic grants -- best-effort)
+      5c. sc.exe start SecVault-Collector  (BEFORE the build -- it takes no part
+          in a Next.js build, and every second it is down is syslog discarded
+          by the OS, not queued. See the block above step 6.)
       6. npm run build
       7. sc.exe start SecVault-Engine
-      7b. sc.exe start SecVault-Collector
       8. sc.exe start SecVault-App
 
     Written for PowerShell 5.1  -  see CLAUDE.md "PowerShell (PS5 compatibility)".
@@ -675,6 +677,56 @@ Invoke-Step 'lib\schema-grants.sql (readonly grants)' {
 }
 
 # -----------------------------------------------------------------------
+# 5c. Start SecVault-Collector -- BEFORE the build, deliberately
+#
+# ⛔ MOVED HERE FROM AFTER `npm run build` ON 2026-10-19, REVERSING AN EARLIER
+# DELIBERATE CHOICE. The old position carried this reasoning: the collector
+# "does not depend on npm run build (no Next.js involvement), but it is gated
+# on it anyway rather than being the one service that comes up after a failed
+# update -- a half-started system is harder to reason about than a stopped
+# one." That is a real argument and it loses to a measurement.
+#
+# Measured on the reference deployment over three consecutive real deploys,
+# from `sc.exe stop SecVault-Collector` to `sc.exe start`: 144s, 178s, 182s.
+# Of that ~170s the collector spent ~47s waiting for a Next.js build it has no
+# part in. ⛔ WHILE IT IS DOWN THE DATAGRAMS ARE NOT QUEUED, THEY ARE GONE --
+# UDP has no retry and nothing is listening on 514, so the OS discards them
+# before any socket sees them. Measured ingest on this fleet: ~381 events/sec
+# in the quietest hour and ~1,280 in the busiest, i.e. the build alone costs
+# between 18,000 and 60,000 permanently lost security events per deploy.
+#
+# ⛔ AND THE TRADE IS THE ONE THIS PRODUCT MAKES EVERYWHERE ELSE. A broken
+# certificate degrades to HTTP rather than refusing to start; collection, CVE
+# assessment and alerting run in every licence state including fully expired --
+# both because evidence a customer cannot recover outranks a tidy failure
+# state. Syslog is the least recoverable data in the system: a failed build can
+# be fixed and re-run, a minute of discarded datagrams cannot.
+#
+# ⛔ THE MIGRATION GATE STAYS, AND IT IS THE ONE THAT MATTERS. The collector
+# INSERTs into syslog_events on its very first flush, so starting it against a
+# failed schema migration produces nothing but a stream of insert errors. That
+# is a real dependency; the build was not.
+#
+# So a failed BUILD now leaves capture running and the console down, which is a
+# half-started system on purpose: the half that cannot catch up later is the
+# half that keeps running.
+# -----------------------------------------------------------------------
+$collectorStartSkipped = $false
+if ($migrateSucceeded) {
+    Invoke-Step 'sc.exe start SecVault-Collector' {
+        $out = sc.exe start SecVault-Collector
+        $out | Write-Host
+        Add-Content -Path $LogFile -Value ($out -join "`n")
+        if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15)) {
+            Write-Log '  [WARN] SecVault-Collector did not reach Running state within 15s -- check logs\collector-stderr.log.'
+        }
+    }
+} else {
+    $collectorStartSkipped = $true
+    Write-Log '  [SKIP] SecVault-Collector not started -- the schema migration failed, so every insert would error.'
+}
+
+# -----------------------------------------------------------------------
 # 6. npm run build
 # -----------------------------------------------------------------------
 # ⛔ Bug fixed 2026-07-19, found in a follow-up bug sweep: Invoke-Step's
@@ -716,15 +768,10 @@ Invoke-Step 'sc.exe start SecVault-Engine' {
 }
 
 # -----------------------------------------------------------------------
-# 7b. Start SecVault-Collector
+# 7b. Register the daily backup task
 #
-# Gated on the migration the same way SecVault-App is: the collector INSERTs
-# into syslog_events on its very first flush, so starting it against a failed
-# schema migration would just produce a stream of insert errors. It does not
-# depend on `npm run build` (no Next.js involvement), but it is gated on it
-# anyway rather than being the one service that comes up after a failed
-# update -- a half-started system is harder to reason about than a stopped
-# one.
+# ⛔ The collector used to be started here. It now starts at step 5c, before
+# the build -- see the block there for the measurement that moved it.
 #
 # ⛔ REGISTER THE BACKUP TASK ON EVERY UPDATE, NOT ONLY AT INSTALL.
 #
@@ -755,25 +802,6 @@ Invoke-Step 'Register the daily backup task' {
         Write-Log "  [WARN] Could not register SecVaultBackup (exit $LASTEXITCODE). Run installer\Backup-SecVault.ps1 by hand or schedule it yourself."
         Add-Content -Path $LogFile -Value ($out -join "`n")
     }
-}
-
-# Started BEFORE SecVault-App so log ingestion resumes at the earliest
-# possible moment: while the collector is down, firewalls are still sending
-# and those datagrams are lost -- UDP has no retry.
-# -----------------------------------------------------------------------
-$collectorStartSkipped = $false
-if ($buildSucceeded -and $migrateSucceeded) {
-    Invoke-Step 'sc.exe start SecVault-Collector' {
-        $out = sc.exe start SecVault-Collector
-        $out | Write-Host
-        Add-Content -Path $LogFile -Value ($out -join "`n")
-        if (-not (Wait-ServiceStatus -ServiceName 'SecVault-Collector' -Status 'Running' -TimeoutSeconds 15)) {
-            Write-Log '  [WARN] SecVault-Collector did not reach Running state within 15s -- check logs\collector-stderr.log.'
-        }
-    }
-} else {
-    $collectorStartSkipped = $true
-    Write-Log '  [SKIP] SecVault-Collector not started -- migration or build failed.'
 }
 
 # -----------------------------------------------------------------------
@@ -1238,10 +1266,20 @@ if ($script:hadFailure) {
     # SKIPPED (build or migration failure) -- directly contradicting the SKIP
     # line just logged and telling an operator tailing update.log that
     # SecVault-App was restarted when it was deliberately left stopped.
-    if ($appStartSkipped) {
-        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. SecVault-App was NOT (re)started (see SKIP above); SecVault-Engine was still started as a best-effort recovery.'
+    # ⛔ AND THE SAME BUG WAS STILL PRESENT FOR THE COLLECTOR (fixed 2026-10-19).
+    # $collectorStartSkipped was set in two places and READ IN NONE, so a run
+    # that deliberately left the collector stopped still reported "Both
+    # services were still (re)started" -- a flag that cannot fire, in the exact
+    # shape the note above describes fixing for SecVault-App in July. Syslog is
+    # the one thing that cannot be caught up afterwards, so its absence is the
+    # most important sentence this banner can carry.
+    $notStarted = @()
+    if ($appStartSkipped) { $notStarted += 'SecVault-App' }
+    if ($collectorStartSkipped) { $notStarted += 'SecVault-Collector (syslog ingestion is NOT running -- datagrams are being discarded, not queued)' }
+    if ($notStarted.Count -gt 0) {
+        Write-Log ('SecVault update completed WITH ERRORS  -  see steps above. NOT (re)started: ' + ($notStarted -join '; ') + '. SecVault-Engine was still started as a best-effort recovery.')
     } else {
-        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. Both services were still (re)started as a best-effort recovery.'
+        Write-Log 'SecVault update completed WITH ERRORS  -  see steps above. All services were still (re)started as a best-effort recovery.'
     }
 } elseif (-not $collectorRegistered) {
     # ⛔ Not "successfully". The app and engine updated fine, but syslog

@@ -2619,11 +2619,35 @@ the window roughly triples.
 4. npm ci
 5. node lib/migrate.js          ← schema migration BEFORE start
 5b. lib/schema-grants.sql       ← readonly grants, best-effort (never fails the update)
+5c. sc.exe start SecVault-Collector   ← BEFORE the build: while it is down, UDP syslog is LOST
 6. npm run build
 7. sc.exe start SecVault-Engine
-7b. sc.exe start SecVault-Collector   ← before the App: while it is down, UDP syslog is LOST
 8. sc.exe start SecVault-App
 ```
+
+⛔ **THE COLLECTOR STARTS AT 5c, BEFORE THE BUILD, AND THAT REVERSES AN EARLIER
+DELIBERATE CHOICE (2026-10-19).** It used to start at 7b, after `npm run build`, with the stated
+reasoning that it "does not depend on npm run build … but is gated on it anyway rather than being
+the one service that comes up after a failed update — a half-started system is harder to reason
+about than a stopped one." That is a real argument and it loses to a measurement.
+
+Collector downtime over three consecutive real deploys: **144s, 178s, 182s**. Of that ~170s, ~47s
+was spent waiting for a Next.js build it takes no part in. ⛔ **While it is down the datagrams are
+not queued, they are gone** — nothing is listening on 514, so the OS discards them before any
+socket sees them, and UDP has no retry. At the measured **381 events/sec in the quietest hour and
+1,280 in the busiest**, the build alone cost 18,000–60,000 permanently lost security events per
+deploy.
+
+⛔ **The migration gate STAYS and is the one that matters** — the collector INSERTs into
+`syslog_events` on its first flush, so starting it against a failed migration yields nothing but
+insert errors. The build was never a real dependency. A failed build now leaves **capture running
+and the console down**: a half-started system on purpose, because the half that cannot catch up
+later is the half that keeps running. It is the same trade this product makes when a broken
+certificate degrades to HTTP and when collection runs in every licence state.
+
+⛔ **Deploy at night.** The hourly ingest curve spans 381/sec (05:00) to 1,280/sec (08:00), so the
+SAME deploy costs **3.4× more** in the morning than before dawn — a bigger lever than reducing the
+number of deploys. Two night deploys cost less than one daytime deploy.
 
 ⛔ **THE UPDATER UPDATES ITSELF, SO A FIX TO IT LANDS ONE DEPLOY LATE.** Step 3's `git pull`
 replaces `Update-SecVault.ps1` while that very script is running — and PowerShell parsed the OLD
