@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.199.1': [
+    'The brandmark now appears on the PDF report cover. It was a teal rounded square with a Helvetica \u201cS\u201d set inside it \u2014 a stand-in rather than a mark, and the only place in the product where the brand was a letter in a box.',
+    'Drawn in lib/reports/chassis.js, which is the ONE shared cover, so all twelve report builders pick it up at once rather than each growing their own copy.',
+    'The x and the 64pt height are the old square\u2019s, so the wordmark, tagline, accent rule, metadata and summary chips are all byte-identical in position \u2014 this file\u2019s own rule about not restyling a document an auditor may already hold.',
+    '\u26d4 The mark is CLIPPED to the shield before the even-odd fill. Both counters deliberately overrun the silhouette, and filling even-odd without the clip paints those overhangs as solid wedges floating beside the mark \u2014 it looks like a printing fault, and only a rendered page shows it.',
+    'Verified by rendering a real cover to PDF and reading it back as an image, not by asserting which pdfkit calls were issued. The fake doc in tests/sweepRegressions.test.js gained translate/scale/clip because it is an incomplete stub of pdfkit, not a specification of it.',
+  ],
   '2.199.0': [
     'New brandmark. The outlined shield-and-tick is replaced by an angular S whose own edges ARE the shield \u2014 the silhouette and the letterform are one object, cut by two counters that open in opposite directions.',
     'It is drawn with an SVG mask rather than counters painted in the background colour, so the cut-outs are genuinely transparent and the mark holds on the login page\u2019s gradient and on a single-ink PDF cover, not just on flat fills.',

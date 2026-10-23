@@ -40,6 +40,15 @@ function stubDoc() {
     lineWidth() { return this; },
     save() { return this; },
     restore() { return this; },
+    // The transform/clip trio the brandmark needs (v2.199.0). This stub is
+    // an incomplete fake of pdfkit, not a spec of it — real pdfkit has all
+    // three, and lib/reports/chassis.js's drawBrandMark is verified against
+    // a REAL rendered PDF, not against this. They are no-ops because every
+    // assertion here is about doc.y and about which ops were issued, and a
+    // transform changes neither.
+    translate() { return this; },
+    scale() { return this; },
+    clip() { return this; },
     fillColor(c) { this._fill = c; return this; },
     fontSize() { return this; },
     font() { return this; },

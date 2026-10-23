@@ -2867,8 +2867,14 @@ traffic and 10 hit the clean-zero branch.
 
 `chassis.js` — the ONE shared pdfkit drawing surface. Exports palette (`ACCENT NAVY MUTED LIGHT
 BORDER GREEN INK STATUS_RED ORANGE YELLOW BLUE UNMEASURED`), text helpers (`pdfSafe`
-`installPdfSafeText` `fmtStamp`), layout (`layoutOf` `ensureSpace`) and blocks (`drawCover`
-`sectionTitle` `paragraph` `labelledNote` `drawTable` `stampHeadersFooters`). ⛔ Extracted in
+`installPdfSafeText` `fmtStamp`), layout (`layoutOf` `ensureSpace`) and blocks (`drawBrandMark`
+`MARK_RATIO` `drawCover` `sectionTitle` `paragraph` `labelledNote` `drawTable`
+`stampHeadersFooters`). ⛔ `drawBrandMark` (v2.199.1) carries the THIRD copy of the mark's
+geometry — components/ui/BrandMark.js is JSX and app/icon.svg is a static file, so neither
+can be required from the engine; all three say so and change together. ⛔ It CLIPS to the
+shield before the even-odd fill: both counters overrun the silhouette by design, and an
+unclipped even-odd fill paints those overhangs as solid wedges beside the mark. Only a
+RENDERED page shows that, which is how it is verified. ⛔ Extracted in
 v2.119.0 from TWO diverged copies (`complianceReport.js` and `ruleChangeRequestReport.js`) — the
 change-request copy had grown an `ensureSpace` guard against pdfkit orphaning a table header across
 pages and the compliance copy never received it. New report builders MUST use this and must not
