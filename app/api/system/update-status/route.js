@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.199.0': [
+    'New brandmark. The outlined shield-and-tick is replaced by an angular S whose own edges ARE the shield \u2014 the silhouette and the letterform are one object, cut by two counters that open in opposite directions.',
+    'It is drawn with an SVG mask rather than counters painted in the background colour, so the cut-outs are genuinely transparent and the mark holds on the login page\u2019s gradient and on a single-ink PDF cover, not just on flat fills.',
+    'No gradient, deliberately: the shell is dark in BOTH themes, so the navy half of a navy-to-blue fade would be invisible exactly where the mark is used most. The brand hue is unchanged \u2014 teal stays, so no token moved and the severity ramp is untouched.',
+    'The shield existed TWICE, in Header.js and in the login page, the second with a comment claiming it was reused; both now render one components/ui/BrandMark.js. The header wordmark is also real text instead of SVG <text>, so it can be selected, found and read aloud, and can no longer carry a font-family that drifts from the body face.',
+    'SecVault had no favicon at all \u2014 the tab showed the browser default. app/icon.svg now carries the mark, following the browser chrome\u2019s light or dark theme rather than the in-app toggle.',
+    'The login eyebrow read \u201cFIREWALL SECURITY PLATFORM\u201d while lib/branding.js has always said \u201cFirewall Intelligence Platform\u201d. The page now reads the branding surface instead of a hardcoded copy a rebrand would miss.',
+  ],
   '2.198.1': [
     'Pre-deploy review pass over v2.196.1-v2.198.0. The evidence-window resolver ran once per DEVICE rather than once per pass, so nightly collection issued one fleet aggregate per firewall \u2014 and because each device resolved independently, two firewalls in one run could store different windows in their finding text.',
     'The hourly snapshot catch-up ticked at :37, the same second as the SNMP poll on the shipped defaults (7,22,37,52), and at 00:37 it pre-empted the 01:10 daily tick every day, computing the whole fleet snapshot twice nightly. Moved to :41, hours 2-23 \u2014 and the cron builders moved to lib/cronPlan.js so the schedule tests can finally see the five COMPUTED schedules that hid this.',

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 72" role="img" aria-label="SecVault">
+  <!--
+    The SecVault brandmark as the browser-tab icon. Geometry is identical to
+    components/ui/BrandMark.js; if that file's numbers change, change them here
+    too. This is a STATIC file served by Next's app/icon convention, so it
+    cannot read the CSS custom properties and the two token values below are
+    hardcoded copies of --navy / --primary (and their dark-theme pair).
+
+    There was no favicon at all before v2.199.0 — the tab showed the browser's
+    blank default page icon, on a console people keep pinned all day.
+
+    prefers-color-scheme is the browser CHROME's theme here, not the app's: the
+    icon sits on the tab strip, not on a SecVault page, so it must not follow
+    the in-app theme toggle.
+  -->
+  <style>
+    .sv-structure { fill: #101826; }
+    .sv-accent    { fill: #098294; }
+    @media (prefers-color-scheme: dark) {
+      .sv-structure { fill: #FFFFFF; }
+      .sv-accent    { fill: #22C1D6; }
+    }
+  </style>
+  <defs>
+    <mask id="sv-icon-mask" maskUnits="userSpaceOnUse" x="-10" y="-10" width="84" height="92">
+      <path d="M32 2 L60 12 V33 C60 51 48 64 32 70 C16 64 4 51 4 33 V12 Z" fill="#fff"/>
+      <polygon points="26,22 70,5.8 70,15.8 26,32" fill="#000"/>
+      <polygon points="-6,54.2 38,38 38,48 -6,64.2" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#sv-icon-mask)">
+    <rect x="-10" y="-10" width="84" height="92" class="sv-structure"/>
+    <polygon points="-10,45.3 74,14.3 74,24.8 -10,55.7" class="sv-accent"/>
+  </g>
+</svg>

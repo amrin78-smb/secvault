@@ -32,29 +32,8 @@ import { PRODUCT_NAME } from '../../../lib/branding';
 import { safeReturnPath } from '../../../lib/returnPath';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 import LoginBackdrop from '../../../components/auth/LoginBackdrop';
-
-// The shield from Header.js's SecVaultLogo — reused, not reinvented, so the
-// sign-in page is recognisably the same product as the rest of the app rather
-// than a generic auth template.
-function Shield(props) {
-  return (
-    <svg viewBox="0 0 38 40" fill="none" aria-hidden="true" {...props}>
-      <path
-        d="M19 3l13 5v8c0 9-5.5 15-13 18-7.5-3-13-9-13-18V8z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M13 19l4 4 8-9"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+import BrandMark from '../../../components/ui/BrandMark';
+import { PRODUCT_NAME_PARTS, PRODUCT_TAGLINE } from '../../../lib/branding';
 
 function Check(props) {
   return (
@@ -68,8 +47,8 @@ function Check(props) {
 function Wordmark({ size = 20 }) {
   return (
     <span style={{ fontSize: size, fontWeight: 700, letterSpacing: '-0.3px' }}>
-      <span style={{ color: 'var(--shell-fg)' }}>Sec</span>
-      <span style={{ color: 'var(--primary)' }}>Vault</span>
+      <span style={{ color: 'var(--shell-fg)' }}>{PRODUCT_NAME_PARTS[0]}</span>
+      <span style={{ color: 'var(--primary)' }}>{PRODUCT_NAME_PARTS[1]}</span>
     </span>
   );
 }
@@ -226,10 +205,20 @@ export default function LoginPage() {
           pill opposite this one; see the file header for why there is none
           here. */}
       <div className="login-chrome login-chrome-top">
-        <Shield style={{ width: 30, height: 30, color: 'var(--primary)' }} />
+        <BrandMark
+          markId="login-chrome"
+          height={32}
+          structure="var(--shell-fg)"
+          accent="var(--primary)"
+        />
         <div>
           <Wordmark size={20} />
-          <div className="login-eyebrow">FIREWALL SECURITY PLATFORM</div>
+          {/* ⛔ Was the literal "FIREWALL SECURITY PLATFORM" while
+              lib/branding.js has said "Firewall Intelligence Platform"
+              since it was written. That file calls itself the set of
+              strings a rebrand would change; a hardcoded copy beside it is
+              one a rebrand would MISS. */}
+          <div className="login-eyebrow">{PRODUCT_TAGLINE.toUpperCase()}</div>
         </div>
       </div>
 

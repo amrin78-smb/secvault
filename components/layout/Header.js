@@ -10,43 +10,37 @@ import ThemeToggle from './ThemeToggle';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
 import { PRODUCT_NAME_PARTS, PRODUCT_TAGLINE } from '../../lib/branding';
+import BrandMark from '../ui/BrandMark';
 
 function SecVaultLogo() {
   return (
-    <svg viewBox="0 0 190 40" style={{ height: 32, width: 'auto' }} aria-hidden="true">
-      <path
-        d="M19 3l13 5v8c0 9-5.5 15-13 18-7.5-3-13-9-13-18V8z"
-        fill="none"
-        stroke="var(--accent-teal)"
-        strokeWidth="2"
-        strokeLinejoin="round"
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <BrandMark
+        markId="header"
+        height={32}
+        structure="var(--shell-fg)"
+        accent="var(--accent-teal)"
       />
-      <path
-        d="M13 19l4 4 8-9"
-        fill="none"
-        stroke="var(--accent-teal)"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* ⛔ fontFamily came through style, not the SVG presentation
-          attribute, and it reads the token. It said "Inter, system-ui,
-          sans-serif" until 2026-09-09 — a leftover from before the fonts
-          were self-hosted, which meant the wordmark rendered in a
-          DIFFERENT face from every other word in the product, in the one
-          place a customer looks first. */}
-      <text
-        x="42"
-        y="27"
-        fontSize="22"
-        fontWeight="700"
-        letterSpacing="-0.3"
-        style={{ fontFamily: 'var(--font-sans)' }}
+      {/* ⛔ REAL TEXT, not <text> inside the SVG as this was until v2.199.0.
+          The SVG form could not be selected, found by the browser's own find,
+          or read out, and it carried its own fontFamily — which had silently
+          pointed at Inter for months after the fonts were self-hosted, so the
+          one word a customer reads first was set in a face used nowhere else
+          in the product. A span cannot drift from the body face. */}
+      <span
+        style={{
+          fontFamily: 'var(--font-sans)',
+          fontSize: 22,
+          fontWeight: 700,
+          letterSpacing: '-0.3px',
+          lineHeight: 1,
+          whiteSpace: 'nowrap',
+        }}
       >
-        <tspan fill="var(--shell-fg)">{PRODUCT_NAME_PARTS[0]}</tspan>
-        <tspan fill="var(--accent-teal)">{PRODUCT_NAME_PARTS[1]}</tspan>
-      </text>
-    </svg>
+        <span style={{ color: 'var(--shell-fg)' }}>{PRODUCT_NAME_PARTS[0]}</span>
+        <span style={{ color: 'var(--accent-teal)' }}>{PRODUCT_NAME_PARTS[1]}</span>
+      </span>
+    </div>
   );
 }
 

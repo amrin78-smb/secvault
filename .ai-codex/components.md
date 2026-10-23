@@ -32,6 +32,20 @@ tests/tunnelAnswer.test.js.
 
 ## ui/
 
+BrandMark  markId (REQUIRED), height=36, structure, accent, label? — the SecVault
+brandmark (v2.199.0): an angular S whose own edges ARE the shield. Replaced the outlined
+shield-and-tick, which was the category’s most-used silhouette drawn in 1.4-2.2px strokes.
+Rendered by Header.js and app/(auth)/login/page.js, which each carried their OWN copy of the
+old path — the login one with a comment claiming it was "reused, not reinvented", which was
+untrue of the code beneath it. ⛔ `markId` HAS NO DEFAULT: an SVG mask is referenced by a
+document-wide id, so a default would make a collision between two instances the normal case
+and invisible in review. Omitting it renders an unmasked block — loud, not subtly wrong.
+No useId(): Header.js is a SERVER component. ⛔ The counters are a MASK, not polygons painted
+in the ground colour — the cheaper trick is silently wrong on the login page’s gradient and
+on the pdfkit report cover. ⛔ NO GRADIENT: the shell is dark in BOTH themes, so a
+navy-to-blue fade loses half the mark exactly where it is used most. Geometry is duplicated
+ONCE, in app/icon.svg (a static file that cannot read the tokens); change both together.
+
 DeltaBadge  current, previous, goodDirection, comparisonLabel — "↑ 12 from yesterday".
 Lifted out of dashboard/HeadlineStats.js in v2.185.0 so a second page could use it; `GOOD`
 travels with it, because it is the vocabulary of `goodDirection` and a second copy is how two
@@ -88,7 +102,9 @@ and a visual regression is reviewable. Pinned by `tests/loginPage.test.js`.
 
 ## layout/
 
-Header (async server)  session — top navy header bar: logo, search, sync pill, bell, theme, user
+Header (async server)  session — top navy header bar: logo, search, sync pill, bell, theme, user.
+Its `SecVaultLogo` is BrandMark + a real-text wordmark; it was an SVG `<text>` until v2.199.0,
+which could not be selected or read aloud and carried a font-family that had drifted to Inter.
 (c) ThemeToggle  no props — light/dark theme toggle button
 (c) UserMenu  session — avatar + name/role dropdown (Settings, Sign Out)
 (c) UpdateNotifier  no props — dismissible update-available banner
