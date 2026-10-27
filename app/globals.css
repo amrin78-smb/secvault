@@ -1257,6 +1257,22 @@ textarea.input { resize: vertical; min-height: 80px; }
   transition: border-color 0.15s;
 }
 .select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
+/* ⛔ A SELECT INSIDE A FORM FIELD IS CAPPED, AND IT IS A BUG FIX NOT A
+   PREFERENCE (v2.204.0). `.form-field` is a flex column, so a `.select` with
+   no width of its own stretched to the full field — 1338px on the Users tab.
+   At that width Chromium detaches the option popup from the control: measured
+   live, a 1338px Role select produced an ~800px popup right-aligned to the
+   control and floating OVER the password input above it, with the option
+   labels clipped. Constraining the control to 320px made the popup align to
+   its left edge at the same width, verified by reproducing both states on the
+   running app.
+
+   ⛔ It is a MAX, not a width, so a narrow viewport still shrinks it, and a
+   field whose options are genuinely long can override locally. Text INPUTS
+   are deliberately untouched: a full-width text box is correct, and only a
+   select has a popup to misplace. `.filter-row .select` sets its own
+   `width: auto` and is unaffected. */
+.form-field .select { max-width: 420px; }
 select.input {
   width: 100%;
   padding: 9px 32px 9px 12px;

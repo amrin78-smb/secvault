@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.204.0': [
+    'Fixed the Role dropdown on Settings - Users. Opening it showed a list that was detached from the control: it floated over the password field above, was about half the width of the box it belonged to, and cut the first characters off each role name.',
+    'The cause was the dropdown stretching to the full width of the form. At that size the browser stops anchoring the option list to the control, so the list is now capped at a sensible width and lines up with the box.',
+    'The cap applies to dropdowns inside form fields only. Text boxes still fill the full width, and the filter dropdowns above tables are unaffected.',
+  ],
   '2.203.0': [
     'Text across the product is larger and the sizes are further apart. The three sizes used for almost every label, caption and table cell sat within 2px of each other, so size could not establish any hierarchy and the work was falling on colour and weight instead.',
     'Table cells go from 13.5px to 16px and table rows grow by 4px. The compact and dense table settings still shrink rows as before.',
