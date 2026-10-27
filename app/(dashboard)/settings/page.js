@@ -193,6 +193,23 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Manage app configuration, users, and updates." />
 
       <div
+        // ⛔ THE STICKY BAR MUST COVER THE SCROLLER'S OWN TOP PADDING.
+        // `.sv-content` is the scroll container and carries padding-top: 24px
+        // (--s5). `position: sticky; top: 0` pins to the PADDING EDGE, not the
+        // scrollport edge — so the bar settled 24px down and page content
+        // scrolled through the band above it in full view, between the licence
+        // banner and the tabs. Measured live: scroller top 139, tab bar top
+        // 163.
+        //
+        // The fix pulls the bar up over that band with a negative margin and
+        // pads it back, so its BACKGROUND covers the full 24px while the tabs
+        // themselves stay where they were. `top: 0` is unchanged — the bar
+        // still pins to the same place; it is now simply tall enough to hide
+        // what passes behind it.
+        //
+        // ⛔ Both values resolve through --s5, so they cannot drift apart from
+        // each other. If `.sv-content`'s padding ever changes, this must change
+        // with it — a hardcoded 24 here would silently reopen the gap.
         style={{
           display: 'flex',
           borderBottom: '1px solid var(--border)',
@@ -202,6 +219,8 @@ export default function SettingsPage() {
           top: 0,
           zIndex: 20,
           background: 'var(--bg-primary)',
+          marginTop: 'calc(-1 * var(--s5))',
+          paddingTop: 'var(--s5)',
         }}
       >
         {visibleTabs.map((tab) => (
