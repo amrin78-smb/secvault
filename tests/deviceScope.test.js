@@ -155,7 +155,21 @@ describe('loadScopeForSession', () => {
     })).then((s) => assert.equal(s.state, SCOPE_STATES.UNSCOPED));
   });
 
-  it('⛔ a GUID-shaped id from a non-local provider NEVER reaches the query', async () => {
+  it('⛔ an Entra account is UNSCOPED — it has no users row to hang a scope on', async () => {
+    // ⛔ CLASSIFIED, NOT GUESSED. v2.205.0 forbade deciding from the SHAPE of
+    // an id; this is an explicit entry in UNSCOPABLE_PROVIDERS, the same
+    // treatment LDAP has always had. The query must still never run — there is
+    // no users row for that oid to match.
+    let queried = false;
+    const s = await loadScopeForSession(
+      { user: { id: '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1', provider: 'entra' } },
+      pool(async () => { queried = true; return { rows: [] }; })
+    );
+    assert.equal(queried, false, 'an Entra oid must never be used as a users.id');
+    assert.equal(s.state, SCOPE_STATES.UNSCOPED);
+  });
+
+  it('⛔ a GUID-shaped id from an UNCLASSIFIED provider NEVER reaches the query', async () => {
     // ⛔ THE PHASE 0 DEFECT (.ai-codex/entra-sso-proposal.md). A Microsoft
     // Entra `oid` is a GUID and matches the local-UUID shape exactly. Under
     // the old shape test this was read as LOCAL, the lookup returned zero rows
@@ -172,7 +186,7 @@ describe('loadScopeForSession', () => {
     // old shape check restored, the state assertion alone stayed GREEN.
     let queried = false;
     const s = await loadScopeForSession(
-      { user: { id: ENTRA_OID, provider: 'entra' } },
+      { user: { id: ENTRA_OID, provider: 'saml' } },
       pool(async () => { queried = true; return { rows: [] }; })
     );
     assert.equal(queried, false, 'an unclassified provider must not reach the scope query');

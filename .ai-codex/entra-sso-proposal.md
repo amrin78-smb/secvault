@@ -262,6 +262,16 @@ are refused by `blocked`/scoped surfaces.
 **Phase 3 — scoping parity (only if customers ask).** Shadow `users` rows, Graph overage,
 scoping for Entra accounts.
 
+⛔ **PHASE 1 SHIPPED REFUSING ENTRA ON SCOPED SURFACES AND THAT WAS CHANGED IN v2.212.0.**
+The refusal was correct about the limitation and wrong about how it presented it: an
+Entra Super Admin saw an empty product under a banner reading "Your account is restricted
+to specific firewalls", which was false — nobody had restricted them, SecVault simply
+could not represent their identity. A refusal that misdescribes its own cause is worse
+than the limitation it guards. `entra` now sits in `UNSCOPABLE_PROVIDERS` beside `ldap`,
+so an Entra user sees the whole fleet exactly as an LDAP user always has, and what they
+can DO is governed by the group-to-role mapping. Phase 3 reverses this by moving `entra`
+to `SCOPABLE_PROVIDERS` once a shadow row exists.
+
 ---
 
 ## 9. Test plan

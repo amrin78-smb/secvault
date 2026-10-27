@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.212.0': [
+    'Entra accounts can now see the firewall fleet. They were being refused by every page that shows firewalls, under a message saying the account was restricted to specific firewalls - which was not true, nobody had restricted it.',
+    'An Entra user now sees the whole fleet, exactly as an LDAP user always has. What they can DO with it is still decided by which Entra group they are in.',
+    'Restricting an individual account to specific firewalls remains available for local accounts only, because the restriction is stored against a local account record that a directory account does not have.',
+    'A sign-in from an unrecognised source is still refused rather than shown the fleet; that protection is unchanged.',
+  ],
   '2.211.0': [
     'When an Entra sign-in is refused, SecVault now records WHY and shows it on the Single sign-on settings page. Until now the user simply arrived with no role and there was nothing on screen explaining it.',
     'The three causes need three different fixes - the group information was missing from the sign-in token, the person is in no mapped group, or they are in too many groups for Entra to list - so the reason names which one it was.',

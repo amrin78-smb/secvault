@@ -33,7 +33,7 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   passes the local-UUID test — so an Entra account would have been read as local, found to have no
   scope rows, and handed the whole fleet silently; it could not have been restricted even
   deliberately, because `user_device_scopes.user_id` has an FK to `users(id)`. **It now decides on
-  `session.user.provider`, and an unclassified provider DENIES.** ⛔ When any further phase ships,
+  `session.user.provider`, and an unclassified provider DENIES.** ⛔ v2.212.0 then listed `entra` as UNSCOPABLE beside `ldap` — an explicit classification, NOT a return to shape-guessing: an Entra account sees the whole fleet as an LDAP one always has, and cannot be restricted to specific firewalls until Phase 3 gives it a local shadow row. ⛔ When any further phase ships,
   correct that file's header AND this line in the SAME commit — the three entries below record what
   happens otherwise
 - `.ai-codex/analytics-proposal.md` — ⛔ **MOSTLY BUILT in v2.187.0-v2.191.0**, and this line said

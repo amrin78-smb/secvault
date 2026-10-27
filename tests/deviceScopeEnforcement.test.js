@@ -259,7 +259,7 @@ describe('⛔ loadScopeForSession — the PROVIDER decides, never the id shape',
     assert.equal(got.state, SCOPE_STATES.UNSCOPED);
   });
 
-  it('⛔ an Entra-shaped GUID is UNKNOWN, not UNSCOPED', async () => {
+  it('⛔ an Entra account is UNSCOPED by CLASSIFICATION, never by id shape', async () => {
     // ⛔ Phase 0 of .ai-codex/entra-sso-proposal.md. An Entra `oid` is a GUID
     // and passes a local-UUID shape test, so the old check read it as LOCAL,
     // found zero scope rows (there is no `users` row for it to have any), and
@@ -273,7 +273,10 @@ describe('⛔ loadScopeForSession — the PROVIDER decides, never the id shape',
       { query: async () => { queried = true; return { rows: [] }; } }
     );
     assert.equal(queried, false, 'the Entra oid must not be used as a users.id');
-    assert.equal(got.state, SCOPE_STATES.UNKNOWN);
+    // ⛔ UNSCOPED because 'entra' is listed in UNSCOPABLE_PROVIDERS (v2.212.0),
+    // the same treatment LDAP has. An UNRECOGNISED provider still denies — see
+    // the next case, which is the protection v2.205.0 actually added.
+    assert.equal(got.state, SCOPE_STATES.UNSCOPED);
   });
 
   it('⛔ an unrecognised or absent provider DENIES rather than defaulting', async () => {
