@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.202.0': [
+    'Lifecycle & Health: the "Not collected" tile now draws with the dashed, colourless treatment the rest of the product uses for something it could not measure. It was the one tile on that page whose whole job is to say "we could not read this", and it was the only one not drawn that way.',
+    'The "Devices" and "Total Rules" headline figures no longer render in a colour. A firewall count and a rule count are not risks, and colour in this product means risk — the rule findings that ARE risks keep their colours.',
+    'Ruleset Overview: the "Unused" count was drawn in blue, which made it look like a different kind of problem from "Shadow" and "Redundant". All three are filed at the same severity by the analysis engine, so all three now look the same.',
+    'Blue was also the wrong choice specifically: it is a status colour elsewhere in the product and sits one step from the brand teal, which is why it was removed from the findings palette in the first place.',
+  ],
   '2.201.0': [
     'The active item in the left navigation now fades left-to-right and carries a soft glow, replacing the flat wash it had before, so the page you are on is easier to pick out at a glance.',
     'The "you are here" bar on the left edge is kept deliberately: when the sidebar is collapsed the label is hidden and the item is only an icon, and the bar is the one marker that still works there.',

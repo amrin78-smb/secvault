@@ -142,8 +142,12 @@ export default async function HeadlineStats() {
         evidence={ev.devices}
         value={h.deviceCount}
         sub={`Online ${h.devicesOnline}`}
-        color="var(--accent-teal)"
-        textColor={TEXT_SAFE['var(--accent-teal)']}
+        // ⛔ NO HUE (v2.202.0). A firewall count is not a risk, and teal here
+        // was decoration -- "Colour means RISK". Since v2.200.0 removed the
+        // accent border, `color` only tints the NUMBER, so this was the brand
+        // hue on a neutral fact. Omitting it falls to StatCard's var(--border)
+        // sentinel, which renders the value as --text-primary. The icon chip
+        // keeps its tint: a chip is wayfinding, not severity.
         icon={IconDevices}
         iconColor="var(--tint-info-fg)"
         iconBg="var(--tint-info)"
@@ -210,8 +214,11 @@ export default async function HeadlineStats() {
         evidence={ev.rules}
         value={h.rulesTotal.toLocaleString()}
         sub={`${h.rulesEnabled.toLocaleString()} enabled`}
-        color="var(--blue)"
-        textColor={TEXT_SAFE['var(--blue)']}
+        // ⛔ NO HUE (v2.202.0), same call as "Devices" above. A rule COUNT is
+        // not a severity -- the risk lives in the rule-hygiene findings, which
+        // have their own tiles. --blue was doubly wrong here: it is a status
+        // token, and v2.87.0 moved --primary onto teal precisely so blue and
+        // the brand hue could not be confused for one another.
         icon={IconActivity}
         iconColor="var(--tint-info-fg)"
         iconBg="var(--tint-info)"

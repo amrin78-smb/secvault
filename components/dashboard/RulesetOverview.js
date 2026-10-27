@@ -86,7 +86,13 @@ export default async function RulesetOverview() {
     { label: 'Total Rules', value: totals.total, color: 'var(--text-primary)' },
     { label: 'Enabled', value: totals.enabled, color: 'var(--green)' },
     { label: 'Disabled', value: totals.disabled, color: 'var(--text-muted)' },
-    { label: 'Unused', value: findings.unused, color: findings.unused > 0 ? 'var(--blue)' : 'var(--text-muted)' },
+    // ⛔ --sev-med, NOT --blue (fixed v2.202.0). ruleAnalysis.js files an
+    // `unused` finding at severity 'medium' -- the SAME severity as shadow and
+    // redundant below -- so blue was claiming a distinction the engine never
+    // made, on top of being the hue severityRamp.js records as pulled out of
+    // the findings vocabulary in v2.87.0 (blue sits one step from the brand
+    // teal). These three tiles now agree with each other and with the engine.
+    { label: 'Unused', value: findings.unused, color: findings.unused > 0 ? 'var(--sev-med)' : 'var(--text-muted)' },
     { label: 'Shadow', value: findings.shadow, color: findings.shadow > 0 ? 'var(--yellow)' : 'var(--text-muted)' },
     {
       label: 'Redundant',

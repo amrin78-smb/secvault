@@ -530,11 +530,19 @@ export default async function LifecyclePage({ searchParams }) {
           sub="devices"
           color={staleSigDevices > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
         />
+        {/* ⛔ --unmeasured, NOT --text-muted (fixed v2.202.0). This tile counts
+            firewalls whose licence data SecVault could not read at all, which
+            is the product's canonical "not measured" state — but it was held
+            on the ordinary muted token, so it rendered as a normal quiet
+            category. Since v2.200.0 that token is also what earns the DASHED
+            tile border, so the one tile on this page whose entire job is to
+            say "we could not read this" was the only one not drawn that way,
+            directly under a banner reading "but not every contract could be". */}
         <StatCard
           label="Not collected"
           value={licenseGapDevices.length}
           sub="devices"
-          color="var(--text-muted)"
+          color="var(--unmeasured)"
         />
       </div>
 
