@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.209.2': [
+    'Fixed the "Sign in with Microsoft" button being almost unreadable on the login page. It used text and border colours that follow the light/dark setting, but the login card is dark whichever setting you are on, so in light mode it drew dark text on a dark card.',
+    'It was only legible while the mouse was over it, because hovering lightened the background enough to reveal the text.',
+    'The button and the divider above it now use the same fixed light colours as every other label on that card.',
+  ],
   '2.209.1': [
     'Fixed the Settings tab bar on scroll. Page content was visible in a 24px band above the tabs as it scrolled past, so cards appeared to run over the top of the tab row.',
     'The tab bar sticks to the top of the scrolling area, but that area has its own padding, and the bar was pinning below the padding rather than covering it.',

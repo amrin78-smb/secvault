@@ -1134,14 +1134,27 @@ tbody tr:hover td { background: var(--bg-primary); }
    SSO button must not out-shout the control most people use. It is outlined
    rather than filled, and sits below a divider that says these are
    alternatives rather than steps.
-   ⛔ The login card is on its own light surface in BOTH themes, so these use
-   the ordinary --text/--border tokens rather than the --shell-* family. */
+   ⛔ THE COMMENT HERE USED TO SAY the login card "is on its own LIGHT surface
+   in BOTH themes, so these use the ordinary --text/--border tokens". That was
+   simply false, and it made the button nearly invisible: the card is
+   rgba(255,255,255,0.065) over a near-black backdrop — DARK in both themes —
+   so --text-primary rendered near-black text on it in LIGHT mode. It only
+   became readable on hover, when the background lightened.
+
+   ⛔ This is the SAME TRAP as --primary on the sidebar, fixed in v2.201.0 one
+   release earlier, and I walked into it again while writing a comment
+   asserting the opposite. The test is not which element it is, it is WHAT
+   GROUND IT SITS ON: a surface that does not flip needs colours that do not
+   flip. Every sibling on this card already does it — .login-field label,
+   .login-input::placeholder and .login-hint are all rgba(255,255,255,…). */
 .login-sso-divider {
   display: flex;
   align-items: center;
   gap: var(--s3);
   margin: var(--s4) 0 var(--s3);
-  color: var(--text-muted);
+  /* Same rule as the button: this sits on the dark card, so it cannot use a
+     token that flips with the theme. */
+  color: rgba(255,255,255,0.45);
   font-size: var(--text-xs);
 }
 .login-sso-divider::before,
@@ -1149,7 +1162,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   content: '';
   flex: 1;
   height: 1px;
-  background: var(--border);
+  background: rgba(255,255,255,0.16);
 }
 .login-sso {
   width: 100%;
@@ -1158,9 +1171,9 @@ tbody tr:hover td { background: var(--bg-primary); }
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.92);
+  border: 1px solid rgba(255,255,255,0.22);
   border-radius: var(--radius-sm);
   font-size: var(--text-md);
   font-weight: 600;
@@ -1168,7 +1181,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
-.login-sso:hover:not(:disabled) { background: var(--surface-subtle); border-color: var(--border-light); }
+.login-sso:hover:not(:disabled) { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.34); }
 .login-sso:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
 .login-sso:disabled { opacity: 0.6; cursor: default; }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
