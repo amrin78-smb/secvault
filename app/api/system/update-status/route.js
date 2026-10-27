@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.203.0': [
+    'Text across the product is larger and the sizes are further apart. The three sizes used for almost every label, caption and table cell sat within 2px of each other, so size could not establish any hierarchy and the work was falling on colour and weight instead.',
+    'Table cells go from 13.5px to 16px and table rows grow by 4px. The compact and dense table settings still shrink rows as before.',
+    'Headline figures on the stat tiles are deliberately unchanged, so tile heights and the dashboard layout stay exactly where they were.',
+    'The sidebar and the compact tile figures were each pinned so they move by only 1px rather than riding the new scale up, which would have made the navigation larger than intended.',
+  ],
   '2.202.0': [
     'Lifecycle & Health: the "Not collected" tile now draws with the dashed, colourless treatment the rest of the product uses for something it could not measure. It was the one tile on that page whose whole job is to say "we could not read this", and it was the only one not drawn that way.',
     'The "Devices" and "Total Rules" headline figures no longer render in a colour. A firewall count and a rule count are not risks, and colour in this product means risk — the rule findings that ARE risks keep their colours.',

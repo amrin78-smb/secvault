@@ -260,12 +260,33 @@
      Raised 2026-09-09: the old scale topped out at 28px with 13px body, so no
      screen could establish a hierarchy and prose was cramped. Table-density
      steps (xs/sm/base) moved only half a point so no fixed-layout table
-     reflows; the body and heading steps carry the change. */
-  --text-xs:   11.5px;
-  --text-sm:   12.5px;
-  --text-base: 13.5px;
-  --text-md:   15px;
-  --text-lg:   17px;
+     reflows; the body and heading steps carry the change.
+
+     ⛔ WIDENED AGAIN v2.203.0, AND THIS TIME xs/sm/base ARE THE POINT.
+     The 2026-09-09 pass deliberately left them within half a point of each
+     other, which is why they ended up 11.5 / 12.5 / 13.5 — THREE SIZES INSIDE
+     2px. Those three are used 893 times between them (312 / 368 / 213), i.e.
+     almost every label, caption and table cell in the product, and at 1px
+     apart size could carry no hierarchy at all. The work was falling entirely
+     on colour and weight, which is a large part of why so much of the UI was
+     tinted: the ramp could not separate anything, so hue did it instead.
+
+     ⛔ --text-md IS THE DOCUMENT SIZE, NOT A HEADING SIZE. `html, body` reads
+     it (see the rule below), so --text-base has always been BELOW body text
+     despite its name. Every step therefore has to move together or the scale
+     stops being monotonic: at base 16 against the old md 15, a .card-title
+     would have rendered SMALLER than the paragraph under it.
+
+     ⛔ xl/2xl/3xl ARE DELIBERATELY UNCHANGED. --text-xl is .stat-value, and
+     the KPI tile's 94px min-height is a MEASURED number (see the geometry
+     comment further down). Moving xl would have moved every tile in the
+     product; leaving it means the headline figures stay exactly where they
+     are while everything beneath them gets legible. */
+  --text-xs:   12px;
+  --text-sm:   14px;
+  --text-base: 16px;
+  --text-md:   18px;
+  --text-lg:   20px;
   --text-xl:   22px;
   --text-2xl:  32px;
   --text-3xl:  40px;
@@ -733,8 +754,13 @@ tbody tr:hover td { background: var(--bg-primary); }
   transition: box-shadow 0.2s, transform 0.2s;
 }
 .kpi-card-compact:hover { box-shadow: var(--shadow-md); }
-/* 800 had no vendored face here either — see .stat-value above. */
-.stat-value-compact { font-size: var(--text-lg); font-weight: 600; line-height: 1; letter-spacing: -0.3px; }
+/* 800 had no vendored face here either — see .stat-value above.
+   ⛔ --text-md, NOT --text-lg (changed v2.203.0 with the ramp). This is the
+   SMALLER sibling of .stat-value (--text-xl, 22px), and the widened ramp took
+   lg to 20px — one pixel off the full-size value, which erases the whole
+   distinction between a compact tile and a standard one. md keeps it at 18:
+   a 1px change from the 17px it has always rendered at. */
+.stat-value-compact { font-size: var(--text-md); font-weight: 600; line-height: 1; letter-spacing: -0.3px; }
 
 /* ⛔ NOT MEASURED IS A DASHED BORDER, AND IT IS LOAD-BEARING (v2.200.0).
    Neutralising the accent edge above would otherwise have collapsed two
@@ -1521,7 +1547,12 @@ select.input {
   padding: var(--s2) 20px;
   border-radius: var(--radius);
   color: rgba(255,255,255,0.5);
-  font-size: var(--text-md);
+  /* ⛔ --text-base, NOT --text-md (changed v2.203.0 with the ramp). md is the
+     DOCUMENT size and the widened ramp took it to 18px; a sidebar at 18px is
+     larger than the reference design this was modelled on, which sets its nav
+     at 14. --text-base holds it at 16, a 1px change from the 15px it has
+     always been. */
+  font-size: var(--text-base);
   font-weight: 500;
   text-decoration: none;
   /* box-shadow joins the transition so the active glow fades in rather than
