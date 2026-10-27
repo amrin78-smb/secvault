@@ -121,3 +121,6 @@ secvault-*.dump
 # an archive inside a working tree also wrecks `git status` and `git pull`.
 spool/
 archive/
+
+# Playwright MCP scratch output (screenshots, snapshots, console logs)
+.playwright-mcp/

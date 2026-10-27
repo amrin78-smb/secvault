@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.200.0': [
+    'Stat tiles across the product lost their 4px coloured left edge and now carry a neutral 1px border on all four sides. "Colour means RISK" is the design rule, and a teal edge on "Devices" or a blue one on "Total Rules" was spending the risk vocabulary on decoration — around twenty coloured edges competed on the Overview page alone.',
+    'No risk signal was lost: a tile\'s colour already drove both the border and the headline number, so every severity, band and threshold hue is still shown, in its contrast-safe form on the number itself.',
+    'A tile whose value could not be measured now draws a DASHED border. Without it, neutralising the accent edge would have made "we could not measure this" look identical to "we measured this and it was unremarkable" — the two greys involved are four hex digits apart and indistinguishable on screen.',
+    'Headline numbers render at font-weight 600 instead of 800. Only 400/500/600/700 are shipped with the product, so 800 matched no font file at all and was being synthesised by the browser.',
+    'Tile labels stepped down one size and onto the muted colour so they recede behind the number they describe, and tiles gained horizontal padding. Tile height is deliberately unchanged.',
+  ],
   '2.199.1': [
     'The brandmark now appears on the PDF report cover. It was a teal rounded square with a Helvetica \u201cS\u201d set inside it \u2014 a stand-in rather than a mark, and the only place in the product where the brand was a letter in a box.',
     'Drawn in lib/reports/chassis.js, which is the ONE shared cover, so all twelve report builders pick it up at once rather than each growing their own copy.',

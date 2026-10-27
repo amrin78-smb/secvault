@@ -30,6 +30,15 @@ const TEXT_SAFE_VALUE = {
   'var(--sev-high)': 'var(--tint-orange-fg)',
   'var(--sev-med)': 'var(--tint-warn-fg)',
   'var(--sev-ok)': 'var(--tint-success-fg)',
+  // ⛔ ADDED v2.200.0, AND THE RESTYLE IS WHAT MADE IT MATTER. --sev-low was
+  // the one ramp hue missing from this map, so it fell through to the
+  // passthrough branch and rendered the number in the RAW slate. That was
+  // survivable while the 4px border carried the signal and the text was a
+  // second copy of it; now the number is the only carrier, so a ramp value
+  // that skips the text-safe remap is a contrast gap on the sole signal.
+  // Matches severityRamp.js's SEVERITY_TEXT_COLOR, where both `low` and
+  // `info` resolve to --text-muted.
+  'var(--sev-low)': 'var(--text-muted)',
 };
 
 export default function StatCard({
@@ -79,6 +88,22 @@ export default function StatCard({
   evidence,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
+  // ⛔ THE TILE BORDER IS NEUTRAL ON ALL FOUR SIDES (v2.200.0) and `color` no
+  // longer reaches it — it survives ONLY as the input to `valueColor` below,
+  // which tints the number. The accent edge was removed because "Colour means
+  // RISK" and most call sites were spending the risk vocabulary on decoration.
+  //
+  // ⛔ REMOVING THE CSS `border-left-width` ALONE WOULD NOT HAVE WORKED. The
+  // hue was applied here, INLINE, and an inline style beats any stylesheet —
+  // the tile would have rendered a 1px box with one coloured edge and three
+  // neutral ones, on every call site that passes a deliberate colour.
+  //
+  // ⛔ ONE EXCEPTION, AND IT IS NOT A HUE. An unmeasured tile is marked so the
+  // stylesheet can dash its border; see the ⛔ block beside
+  // `.kpi-card[data-unmeasured]` in app/globals.css for why neutralising this
+  // edge would otherwise have made "we could not measure this" look identical
+  // to "we measured this and it was unremarkable".
+  const unmeasured = color === 'var(--unmeasured)' ? '' : undefined;
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';
@@ -111,7 +136,7 @@ export default function StatCard({
   //      height this layout exists to save.
   if (layout === 'row') {
     return (
-      <div className={`${cardClass} ${className}`} style={{ borderLeftColor: color }}>
+      <div className={`${cardClass} ${className}`} data-unmeasured={unmeasured}>
         <div className="kpi-head-row">
           <div className="kpi-head-left">
             {icon && <IconChip icon={icon} color={iconColor} bg={iconBg} />}
@@ -133,10 +158,15 @@ export default function StatCard({
   return (
     <div
       className={`${cardClass} ${className}`}
-      style={{ borderLeftColor: color, position: 'relative' }}
+      data-unmeasured={unmeasured}
     >
+      {/* ⛔ These offsets MIRROR the card's padding so the chip lines up with
+          the content column beneath it; app/globals.css now pads
+          --s3/--s4 (12/16) and --s2/--s3 (8/12). Change the padding there and
+          these two numbers are wrong — they live in JS, so they will not show
+          up in a stylesheet diff. */}
       {icon && (
-        <div style={{ position: 'absolute', top: compact ? 6 : 12, right: compact ? 6 : 12 }}>
+        <div style={{ position: 'absolute', top: compact ? 8 : 12, right: compact ? 12 : 16 }}>
           <IconChip icon={icon} color={iconColor} bg={iconBg} />
         </div>
       )}

@@ -3075,6 +3075,37 @@ read every one to find out what it does. Used only by `.ev-*` and `EvidenceMark`
 visible on screen. A null hit count, a device with no ruleset, a compliance check SecVault cannot
 ask — none of these may be drawn as a zero, a pass, or a reassuring grey that reads as fine.
 
+⛔ **…AND ON A STAT TILE THAT STATE IS A DASHED BORDER (v2.200.0), BECAUSE GREY WAS NOT ENOUGH.**
+`--unmeasured` (`#8592A3`) and `--text-muted` (`#8494A8`) are four hex digits apart and
+indistinguishable on screen, so once the tile border went neutral (below) the only thing separating
+"we could not measure this" from "we measured this and it was unremarkable" was gone.
+`ChangeOutcomeBoard.js` ranks its four unjudgeable verdicts **above** `indistinguishable` and
+`tests/changeOutcomeBoard.test.js` fails the build if that inverts. `StatCard` marks the tile with
+`data-unmeasured` and `app/globals.css` dashes it — hueless by construction, because a gap in OUR
+evidence is not a severity and must never be ranked on the severity ramp.
+
+### ⛔ A STAT TILE'S BORDER IS NEUTRAL ON ALL FOUR SIDES (v2.200.0)
+
+The 4px coloured left edge every `.kpi-card`/`.kpi-card-compact` carried is gone. It was this
+section's own "Colour means RISK" rule being broken by the component that states it most often: a
+teal edge on "Devices", blue on "Total Rules", red permanently on "Denied Rules" and on "CPU" —
+about twenty coloured edges competing on the Overview page, most encoding nothing.
+
+⛔ **NO RISK SIGNAL WAS LOST, AND THAT IS THE ONLY REASON IT WAS SAFE.** `StatCard`'s `color` prop
+always drove **two** things — the border *and* the headline number, through its `TEXT_SAFE_VALUE`
+map. Every severity, band and threshold hue still shows, on the number, in the contrast-safe
+`--tint-*-fg` form. That is also where a severity belongs: the raw `--sev-*` ramp measures ~3.6:1,
+which clears WCAG 1.4.11's 3:1 for a graphic and **fails** 1.4.3's 4.5:1 for text.
+
+⛔ **THE HUE WAS SET INLINE, NOT IN THE STYLESHEET.** Dropping `border-left-width` in
+`globals.css` alone would have left a 1px box with one coloured edge and three neutral ones on
+every deliberate call site, because an inline style wins. Three files set it; all three were fixed
+together. If a fourth ever appears, it must be fixed in the same commit.
+
+⛔ **`font-weight: 800` ON `.stat-value` HAD NO FONT FILE.** Only 400/500/600/700 are vendored in
+`public/fonts/`, so the browser was synthesising or snapping to 700 — the number never rendered at
+the weight the rule asked for. It is 600 now, which is a real face.
+
 ### Themes
 
 - **Dual theme, light default**: `localStorage['secvault-theme']`, applied as `data-theme="dark"` on

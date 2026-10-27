@@ -603,15 +603,12 @@ tbody tr:hover td { background: var(--bg-primary); }
 }
 
 /* ── Stat / KPI cards ──────────────────────────────────────── */
-.stat-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s, transform 0.2s;
-}
-.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+/* ⛔ `.stat-card` USED TO LIVE HERE AND WAS DEAD (removed v2.200.0). Zero
+   matches across app/, components/, lib/ and tests/. It was a near-identical
+   sibling of `.kpi-card` below — same background, border, radius, shadow and
+   hover — so it would have drifted silently out of step with this restyle,
+   and the next session grepping for "the stat tile CSS" would have found two
+   definitions and had to guess which one ships. */
 /* ⛔ KPI CARD GEOMETRY, SIZED BY MEASUREMENT. The same component rendered at
    five different heights across the product: 115px on /lifecycle and
    /vulnerability, 93px on /analysis, 71px and 96px for the compact variant, and
@@ -632,16 +629,40 @@ tbody tr:hover td { background: var(--bg-primary); }
    own padding or font-size — that is how /exposure ended up at a sixth height,
    and it is the same class of mistake as a component inventing its own 7px gap
    (see the spacing note at the top of this file). */
-.stat-value { font-size: var(--text-xl); font-weight: 800; line-height: 1.1; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
-.stat-label { font-size: var(--text-base); font-weight: 500; color: var(--text-secondary); margin-top: 4px; }
+/* ⛔ WEIGHT 600, NOT 800, AND THAT IS A CORRECTNESS FIX RATHER THAN A TASTE
+   ONE. Only 400/500/600/700 are vendored in public/fonts/ (see the @font-face
+   block at the top of this file), so `font-weight: 800` matched NO face: the
+   browser synthesised one or snapped to 700, and the number never rendered at
+   the weight this rule asked for. 600 is a real file. */
+.stat-value { font-size: var(--text-xl); font-weight: 600; line-height: 1.1; letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
+/* The label DESCRIBES the number above it, so it recedes: one step down the
+   type ramp and onto the muted token. At --text-base/--text-secondary it was
+   competing with the value for the same attention. */
+.stat-label { font-size: var(--text-sm); font-weight: 500; color: var(--text-muted); margin-top: 4px; }
 .stat-sub   { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; line-height: 1.35; }
 
+/* ⛔ NEUTRAL ON ALL FOUR SIDES. The 4px coloured left edge that used to live
+   here was removed in v2.200.0: "Colour means RISK" is this file's own rule,
+   and a teal edge on "Devices" or a blue one on "Total Rules" spent the risk
+   vocabulary on decoration — roughly twenty coloured edges competed on the
+   Overview page alone.
+
+   ⛔ NO SIGNAL WAS LOST, and that is why this was safe. StatCard's `color`
+   prop drives TWO things, not one: this border AND the headline number, via
+   its TEXT_SAFE_VALUE map. The number keeps the hue in its contrast-safe
+   --tint-*-fg form, which is where a severity belongs anyway (the raw --sev-*
+   ramp measures ~3.6:1 and clears WCAG 1.4.11's graphical floor, not
+   1.4.3's 4.5:1 for text). See components/analysis/severityRamp.js.
+
+   ⛔ VERTICAL PADDING IS DELIBERATELY UNCHANGED at 12px. box-sizing is
+   border-box globally, so min-height below INCLUDES padding; widening it
+   vertically would eat the measured 94px from the inside. Only the
+   horizontal axis gained, 14px -> --s4. */
 .kpi-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-left-width: 4px;
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: var(--s3) var(--s4);
   /* The one uniform height for every standard KPI tile in the product.
      ⛔ Measured: 94px is what a tile with a ONE-LINE caption occupies. Tiles
      with no caption are padded up to it; captions are written short enough not
@@ -687,17 +708,41 @@ tbody tr:hover td { background: var(--bg-primary); }
    Used exclusively by the main Dashboard's widget grid, which needs a much
    higher information density (many small widgets, minimal scrolling) than
    a single-focus page does. */
+/* Same neutral-border change as .kpi-card above, 3px edge removed. ⛔ This
+   variant is NOT a flex column (no display/min-height/justify-content), so
+   anything done to .kpi-card's vertical alignment does not reach it — and the
+   main Dashboard widget grid is built entirely from this variant. */
 .kpi-card-compact {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-left-width: 3px;
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: var(--s2) var(--s3);
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
 }
 .kpi-card-compact:hover { box-shadow: var(--shadow-md); }
-.stat-value-compact { font-size: var(--text-lg); font-weight: 800; line-height: 1; letter-spacing: -0.5px; }
+/* 800 had no vendored face here either — see .stat-value above. */
+.stat-value-compact { font-size: var(--text-lg); font-weight: 600; line-height: 1; letter-spacing: -0.3px; }
+
+/* ⛔ NOT MEASURED IS A DASHED BORDER, AND IT IS LOAD-BEARING (v2.200.0).
+   Neutralising the accent edge above would otherwise have collapsed two
+   states that MUST stay apart. ChangeOutcomeBoard.js draws its four
+   unjudgeable verdicts with accent `var(--unmeasured)` and `indistinguishable`
+   with `var(--border)`; the 4px edge was the only thing separating them. The
+   value text cannot carry it either — --unmeasured (#8592A3) and
+   --text-muted (#8494A8) are four hex digits apart and indistinguishable on
+   screen. That file's own ⛔ says it plainly: "a flat grey fill reads as a
+   real, minor, muted category instead" of "there is no data here", and
+   tests/changeOutcomeBoard.test.js fails the build if the ranking inverts.
+
+   ⛔ HUELESS BY CONSTRUCTION, which is why a dash rather than a tint: a gap
+   in OUR evidence is not a severity and must never be ranked on the severity
+   ramp. This is the same rule --hatch exists for on a bar or a swatch, and it
+   reads LOUDER than the grey edge it replaces, not quieter. */
+.kpi-card[data-unmeasured],
+.kpi-card-compact[data-unmeasured] {
+  border-style: dashed;
+}
 
 /* ── StatCard row layout (layout="row") ─────────────────────────────────
    Puts the headline number to the RIGHT of the label instead of stacking it

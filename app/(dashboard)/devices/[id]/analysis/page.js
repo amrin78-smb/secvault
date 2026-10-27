@@ -392,7 +392,13 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
                 did) rather than StatCard's large stat-value size, which would
                 make a long timestamp string look out of place next to the
                 numeric tiles around it. */}
-            <div className="kpi-card" style={{ borderLeftColor: 'var(--border)' }}>
+            {/* ⛔ The inline borderLeftColor was dropped in v2.200.0 with the
+                accent edge itself. It was harmless here (it named --border),
+                but it was a THIRD site setting that property outside
+                StatCard, and an inline style beats the stylesheet — left in
+                place it would have pinned this one tile's left edge while
+                the five StatCards beside it went neutral. */}
+            <div className="kpi-card">
               <div style={{ fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--text-primary)' }}>
                 {formatDateTime(severitySummary.last_analyzed_at)}
               </div>

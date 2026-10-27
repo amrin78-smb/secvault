@@ -104,9 +104,16 @@ export default async function FleetAnalysisPage() {
       <AnswerHeader answer={answer} evidence={evidence} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        {/* Tile accents are GRAPHICS (a 4px left border), so they take the raw
-            --sev-* hues via SEVERITY_FILL. The table cells below are TEXT and
-            take SEVERITY_TEXT_COLOR instead — see severityRamp.js. */}
+        {/* ⛔ THIS COMMENT USED TO SAY "tile accents are GRAPHICS (a 4px left
+            border), so they take the raw --sev-* hues via SEVERITY_FILL".
+            That stopped being true in v2.200.0, when the accent edge was
+            removed and the tile border went neutral on all four sides.
+            SEVERITY_FILL is still passed — but it now lands on TEXT, because
+            StatCard's `color` is only an input to the value's colour.
+            Passing it stays correct ONLY because StatCard's TEXT_SAFE_VALUE
+            remaps every --sev-* to its --tint-*-fg pair; the raw ramp
+            measures ~3.6:1 and would fail WCAG 1.4.3 on a number. Do not
+            "simplify" that remap away. */}
         <StatCard label="Critical" value={totals.critical} color={totals.critical > 0 ? SEVERITY_FILL.critical : 'var(--text-muted)'} />
         <StatCard label="High" value={totals.high} color={totals.high > 0 ? SEVERITY_FILL.high : 'var(--text-muted)'} />
         <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? SEVERITY_FILL.medium : 'var(--text-muted)'} />
@@ -191,8 +198,13 @@ export default async function FleetAnalysisPage() {
                     3.64:1 on white — it clears 1.4.11's 3:1 for a graphical
                     object and FAILS 1.4.3's 4.5:1 for text. The --tint-*-fg
                     pairs in SEVERITY_TEXT_COLOR clear 4.5:1 in both themes by
-                    construction. (The StatCards above are 32px/800 and clear
-                    the large-text threshold on the raw hue, so they keep it.) */}
+                    construction. (⛔ The parenthetical here used to read "the
+                    StatCards above are 32px/800 and clear the large-text
+                    threshold on the raw hue, so they keep it." Both halves
+                    were wrong by v2.200.0: .stat-value is --text-xl/600, not
+                    32px/800 — and 800 never had a vendored face to begin with
+                    — and the tiles do NOT keep the raw hue, because
+                    TEXT_SAFE_VALUE remaps it. The two surfaces now agree.) */}
                 <td
                   style={{
                     color: r.critical > 0 ? SEVERITY_TEXT_COLOR.critical : 'var(--text-muted)',
