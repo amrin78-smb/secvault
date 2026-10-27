@@ -229,16 +229,18 @@ describe('⛔ scopesEmptiedByDeviceDeletion — deleting a firewall can WIDEN ac
   });
 });
 
-describe('⛔ loadScopeForSession — three cases, not two', () => {
+describe('⛔ loadScopeForSession — the PROVIDER decides, never the id shape', () => {
   const pool = { query: async () => ({ rows: [] }) };
+  const LOCAL = '11111111-2222-3333-4444-555555555555';
 
-  it('a session with NO id is UNKNOWN, not unscoped', async () => {
-    // This fell open: an id-less session took the same branch as an LDAP one
-    // and was reported UNSCOPED, i.e. handed the whole fleet. "This provider
-    // cannot be scoped" and "we do not know who this is" are different facts.
-    for (const s of [{ user: {} }, { user: { id: '' } }, { user: { id: null } }, { user: { id: 7 } }]) {
-      const got = await loadScopeForSession(s, pool);
-      assert.equal(got.state, SCOPE_STATES.UNKNOWN, JSON.stringify(s));
+  it('a local session with NO usable id is UNKNOWN, not unscoped', async () => {
+    // This fell open twice over. First an id-less session took the same branch
+    // as an LDAP one and was handed the whole fleet. Then the shape test that
+    // fixed it became the NEXT fail-open — see the Entra case below.
+    for (const u of [{ provider: 'local' }, { id: '', provider: 'local' },
+                     { id: null, provider: 'local' }, { id: 7, provider: 'local' }]) {
+      const got = await loadScopeForSession({ user: u }, pool);
+      assert.equal(got.state, SCOPE_STATES.UNKNOWN, JSON.stringify(u));
     }
   });
 
@@ -247,23 +249,44 @@ describe('⛔ loadScopeForSession — three cases, not two', () => {
     assert.equal((await loadScopeForSession({}, pool)).state, SCOPE_STATES.UNKNOWN);
   });
 
-  it('an LDAP username is UNSCOPED — a real identity with no users row', async () => {
-    const got = await loadScopeForSession({ user: { id: 'FIRMANS0' } }, pool);
+  it('an LDAP account is UNSCOPED — a real identity with no users row', async () => {
+    const got = await loadScopeForSession({ user: { id: 'FIRMANS0', provider: 'ldap' } }, pool);
     assert.equal(got.state, SCOPE_STATES.UNSCOPED);
   });
 
-  it('a local UUID with no rows is UNSCOPED', async () => {
-    const got = await loadScopeForSession(
-      { user: { id: '11111111-2222-3333-4444-555555555555' } }, pool
-    );
+  it('a local account with no rows is UNSCOPED', async () => {
+    const got = await loadScopeForSession({ user: { id: LOCAL, provider: 'local' } }, pool);
     assert.equal(got.state, SCOPE_STATES.UNSCOPED);
+  });
+
+  it('⛔ an Entra-shaped GUID is UNKNOWN, not UNSCOPED', async () => {
+    // ⛔ Phase 0 of .ai-codex/entra-sso-proposal.md. An Entra `oid` is a GUID
+    // and passes a local-UUID shape test, so the old check read it as LOCAL,
+    // found zero scope rows (there is no `users` row for it to have any), and
+    // zero rows means UNSCOPED: the whole fleet, silently. A shape test cannot
+    // be made safe by adding shapes — provenance is the fact that matters.
+    // ⛔ Assert the query NEVER RAN. A throwing pool reaches UNKNOWN through
+    // the catch as well, so a state-only assertion is green under the bug.
+    let queried = false;
+    const got = await loadScopeForSession(
+      { user: { id: '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1', provider: 'entra' } },
+      { query: async () => { queried = true; return { rows: [] }; } }
+    );
+    assert.equal(queried, false, 'the Entra oid must not be used as a users.id');
+    assert.equal(got.state, SCOPE_STATES.UNKNOWN);
+  });
+
+  it('⛔ an unrecognised or absent provider DENIES rather than defaulting', async () => {
+    for (const u of [{ id: LOCAL }, { id: LOCAL, provider: '' },
+                     { id: LOCAL, provider: 'saml' }, { id: LOCAL, provider: 7 }]) {
+      const got = await loadScopeForSession({ user: u }, pool);
+      assert.equal(got.state, SCOPE_STATES.UNKNOWN, JSON.stringify(u));
+    }
   });
 
   it('⛔ a THROWN read is UNKNOWN, never unscoped', async () => {
     const failing = { query: async () => { throw new Error('down'); } };
-    const got = await loadScopeForSession(
-      { user: { id: '11111111-2222-3333-4444-555555555555' } }, failing
-    );
+    const got = await loadScopeForSession({ user: { id: LOCAL, provider: 'local' } }, failing);
     assert.equal(got.state, SCOPE_STATES.UNKNOWN, 'a database blip must not widen access');
   });
 });

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.205.0': [
+    'Security fix. Whether an account can be restricted to specific firewalls is now decided by which system the account signs in from, rather than by guessing from the format of its internal id.',
+    'The old check assumed a local account and a directory account always look different. That holds for the two sign-in methods supported today, but a Microsoft account id has the same format as a local one — so such an account would have been treated as local, found to have no restrictions on record, and shown every firewall, with nothing on screen indicating it.',
+    'It also could not have been restricted even on purpose, because the restriction is stored against a local account record that a directory account does not have.',
+    'An account from an unrecognised sign-in method is now refused access to firewall pages rather than being shown all of them, and the refusal is logged.',
+    'No change for anyone signing in today with a local or LDAP account.',
+  ],
   '2.204.0': [
     'Fixed the Role dropdown on Settings - Users. Opening it showed a list that was detached from the control: it floated over the password field above, was about half the width of the box it belonged to, and cut the first characters off each role name.',
     'The cause was the dropdown stretching to the full width of the form. At that size the browser stops anchoring the option list to the control, so the list is now capped at a sensible width and lines up with the box.',

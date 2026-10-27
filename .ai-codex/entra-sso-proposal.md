@@ -1,8 +1,8 @@
 # Microsoft Entra ID SSO — proposal
 
-⛔ **STATUS: PROPOSAL ONLY (not built), as of v2.204.0.**
-This file is the design record. When any phase ships, **correct this line in the same
-commit** and amend the entry in CLAUDE.md's index list. That list has carried a stale
+⛔ **STATUS: PHASE 0 BUILT in v2.205.0. PHASES 1-3 ARE PROPOSAL ONLY (not built).**
+This file is the design record. When any further phase ships, **correct this line in the
+same commit** and amend the entry in CLAUDE.md's index list. That list has carried a stale
 "PROPOSAL ONLY" over shipped work **three separate times** (central CVE feed, analytics,
 application view), so treat the header as part of the deliverable, not documentation about it.
 
@@ -28,11 +28,18 @@ deliberately carries no devDependencies.
 
 ---
 
-## 1. ⛔ THE BLOCKING DEFECT: an Entra account is handed the whole fleet
+## 1. ⛔ THE BLOCKING DEFECT: an Entra account is handed the whole fleet — FIXED v2.205.0
 
-**This must be fixed before the provider is wired, not after.** It is not a new bug; it
-is an existing one that only becomes reachable the moment a third identity provider
-exists.
+**Shipped.** Kept here in full because it is the reason Phase 0 exists and because the
+failure mode is worth not re-introducing. `loadScopeForSession` now decides on
+`session.user.provider`; what follows is what it used to do.
+
+⛔ **The test for it nearly did not work, and that is the part to remember.** The first
+version asserted only that an Entra-shaped id resolved `UNKNOWN`, using a pool that threw
+if queried. But the OLD code reached `UNKNOWN` too — via `catch` -> `scopeFromRows(null)`
+— so the test passed under the bug. Mutation-verified and corrected to assert **that the
+query never ran**. Asserting the state was testing the mechanism; asserting the query was
+testing the outcome.
 
 `lib/deviceScope.js:185` decides whether an account can be scoped by the **shape of
 `session.user.id`**:
@@ -204,11 +211,12 @@ A smaller product, honestly described, is the behaviour the register already def
 
 ## 8. Phases
 
-**Phase 0 — the prerequisite (ships alone, before any Entra code).**
-Fix `loadScopeForSession` to decide on `provider`, not id shape (§1). Add the test pinning
-a GUID-shaped non-local id. This is worth doing **whether or not Entra is ever built**,
-because the fail-open is already in the code and only needs a third provider to become
-reachable.
+**Phase 0 — the prerequisite. ⛔ SHIPPED v2.205.0.**
+`loadScopeForSession` decides on `provider`, not id shape (§1). `SCOPABLE_PROVIDERS` =
+`{local}`, `UNSCOPABLE_PROVIDERS` = `{ldap}`, anything else — including absent — is
+`UNKNOWN`, which denies, and is logged. Shape matching survives only as a contradiction
+check on a provider claiming to be local. Six tests across `deviceScope.test.js` and
+`deviceScopeEnforcement.test.js`, mutation-verified against the restored shape check.
 
 **Phase 1 — sign-in.** Provider registered, `directory_role_mappings` with `provider`,
 Settings panel, fail-closed on zero mappings, overage refused with a reason. Entra users

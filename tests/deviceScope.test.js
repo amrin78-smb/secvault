@@ -135,10 +135,10 @@ describe('⛔ junk input denies rather than throwing', () => {
 describe('loadScopeForSession', () => {
   const pool = (impl) => ({ query: impl });
 
-  it('reads the scope for a local (UUID) account', async () => {
+  it('reads the scope for a local account', async () => {
     const seen = [];
     const s = await loadScopeForSession(
-      { user: { id: UUID } },
+      { user: { id: UUID, provider: 'local' } },
       pool(async (sql, params) => { seen.push({ sql, params }); return { rows: [{ device_id: A }] }; })
     );
     assert.equal(s.state, SCOPE_STATES.SCOPED);
@@ -146,17 +146,61 @@ describe('loadScopeForSession', () => {
   });
 
   it('⛔ an LDAP account is UNSCOPED — it has no users row to hang a scope on', () => {
-    // The two providers do not return the same kind of id, so the SHAPE is
-    // checked rather than the provider name trusted — the call saved views
-    // already make.
-    return loadScopeForSession({ user: { id: 'firmans0' } }, pool(async () => {
-      throw new Error('must not query for a non-UUID id');
+    // ⛔ Decided on the PROVIDER, not the id shape. This test used to pass a
+    // non-UUID id and rely on the shape test; that only worked while exactly
+    // two providers existed and their shapes happened to differ. See the
+    // Entra case below for what that cost.
+    return loadScopeForSession({ user: { id: 'firmans0', provider: 'ldap' } }, pool(async () => {
+      throw new Error('must not query for an unscopable provider');
     })).then((s) => assert.equal(s.state, SCOPE_STATES.UNSCOPED));
+  });
+
+  it('⛔ a GUID-shaped id from a non-local provider NEVER reaches the query', async () => {
+    // ⛔ THE PHASE 0 DEFECT (.ai-codex/entra-sso-proposal.md). A Microsoft
+    // Entra `oid` is a GUID and matches the local-UUID shape exactly. Under
+    // the old shape test this was read as LOCAL, the lookup returned zero rows
+    // (there is no `users` row for it to have any), and zero rows is UNSCOPED
+    // — the whole fleet, silently. It must be UNKNOWN, which denies, and the
+    // query must not run at all.
+    const ENTRA_OID = '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1';
+    assert.match(ENTRA_OID, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      'the fixture must genuinely look like a local UUID, or this proves nothing');
+    // ⛔ THE ASSERTION IS "THE QUERY NEVER RAN", NOT "THE STATE IS UNKNOWN".
+    // A throwing pool would make the old code reach UNKNOWN too, via the
+    // catch -> scopeFromRows(null) path — so asserting only the state passes
+    // over the very bug this test exists for. Verified by mutation: with the
+    // old shape check restored, the state assertion alone stayed GREEN.
+    let queried = false;
+    const s = await loadScopeForSession(
+      { user: { id: ENTRA_OID, provider: 'entra' } },
+      pool(async () => { queried = true; return { rows: [] }; })
+    );
+    assert.equal(queried, false, 'an unclassified provider must not reach the scope query');
+    assert.equal(s.state, SCOPE_STATES.UNKNOWN, 'an unclassified provider must deny');
+    assert.equal(canSeeDevice(s, A), false, 'and must not see a device');
+  });
+
+  it('⛔ a session with no provider is UNKNOWN, not unscoped', async () => {
+    const s = await loadScopeForSession(
+      { user: { id: UUID } },
+      pool(async () => { throw new Error('must not query without a provider'); })
+    );
+    assert.equal(s.state, SCOPE_STATES.UNKNOWN);
+  });
+
+  it('⛔ a local provider whose id is not a UUID is a contradiction, so UNKNOWN', async () => {
+    // Not "another provider" — the claim and the id disagree, and guessing
+    // which half is right is how the original fail-open was built.
+    const s = await loadScopeForSession(
+      { user: { id: 'firmans0', provider: 'local' } },
+      pool(async () => { throw new Error('must not query a malformed local id'); })
+    );
+    assert.equal(s.state, SCOPE_STATES.UNKNOWN);
   });
 
   it('⛔ a throwing pool yields UNKNOWN, never unscoped', async () => {
     const s = await loadScopeForSession(
-      { user: { id: UUID } },
+      { user: { id: UUID, provider: 'local' } },
       pool(async () => { throw new Error('db down'); })
     );
     assert.equal(s.state, SCOPE_STATES.UNKNOWN, 'a database blip must not widen access');
