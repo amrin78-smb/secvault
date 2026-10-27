@@ -101,6 +101,39 @@ CREATE TABLE IF NOT EXISTS ldap_role_mappings (
 -- Its own table, holding no secret — a group DN is not sensitive, and seeing
 -- which groups map to which role is exactly what a diagnostic query is for.
 
+-- ⛔ THE NAME IS NOW A MISNOMER AND THAT IS A DELIBERATE TRADE (v2.206.0).
+-- This table holds mappings for EVERY directory provider, not only LDAP —
+-- `provider` below says which. .ai-codex/entra-sso-proposal.md proposed
+-- renaming it to `directory_role_mappings` with a compatibility view; that was
+-- rejected during implementation. A rename needs a non-idempotent
+-- `ALTER TABLE ... RENAME`, which must then be guarded by a DO block against
+-- pg_class, plus a view and duplicate grants — and lib/migrate.js sends this
+-- whole file as ONE multi-statement batch, where any error aborts the entire
+-- migration. A misleading table name is cosmetic; a migration that aborts
+-- half-way on a live firewall platform is not. Columns are additive and
+-- idempotent, so that is what this does.
+--
+-- ⛔ `provider` DEFAULTS TO 'ldap', which is what makes this safe on an
+-- existing install: every row already in the table was an LDAP mapping, so the
+-- default states a fact rather than guessing one.
+ALTER TABLE ldap_role_mappings
+  ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'ldap';
+-- The operator's own label for an Entra group. ⛔ DISPLAY ONLY, NEVER MATCHED:
+-- an Entra group id is a GUID and unreadable, so the panel is unadministrable
+-- without a name beside it — but a display name is mutable in Entra and two
+-- groups may share one, so matching on it would be both unstable and ambiguous.
+ALTER TABLE ldap_role_mappings
+  ADD COLUMN IF NOT EXISTS display_name TEXT;
+-- ⛔ UNIQUENESS IS PER PROVIDER. It used to be a column-level UNIQUE on
+-- group_dn_normalised alone, which would let an LDAP DN and an Entra GUID
+-- collide in one index — and, worse, would stop the same group key being
+-- mapped under two providers even where that is legitimate. The old
+-- constraint's generated name is dropped IF EXISTS so this is re-runnable.
+ALTER TABLE ldap_role_mappings
+  DROP CONSTRAINT IF EXISTS ldap_role_mappings_group_dn_normalised_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_mapping
+  ON ldap_role_mappings (provider, group_dn_normalised);
+
 -- MFA secrets. This table holds the TOTP
 -- shared secret (encrypted with the same AES-256-GCM as device_credentials,
 -- via lib/credStore.js) and bcrypt hashes of the recovery codes. It must NEVER

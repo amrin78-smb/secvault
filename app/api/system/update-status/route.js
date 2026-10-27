@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.206.0': [
+    'Microsoft Entra ID single sign-on can now be configured. It is entirely optional: with no tenant configured nothing changes, no sign-in button appears, and nothing is reported as a fault.',
+    'Local accounts are unaffected and always remain available. Signing in locally never depends on Entra, so an internet outage cannot lock you out of the console that manages your firewalls.',
+    'A configured tenant on its own grants nobody access. Until at least one Entra group is mapped to a SecVault role in Settings, no directory user can sign in. This is deliberately stricter than LDAP, where an empty mapping list preserves existing access.',
+    'If Entra cannot tell SecVault which groups a user belongs to - which happens for users in more than about 200 groups - the sign-in is refused and the reason is named, rather than treating the user as belonging to no groups.',
+    'Group-to-role mappings now record which directory they came from, so an LDAP group and an Entra group can never be confused for one another.',
+  ],
   '2.205.0': [
     'Security fix. Whether an account can be restricted to specific firewalls is now decided by which system the account signs in from, rather than by guessing from the format of its internal id.',
     'The old check assumed a local account and a directory account always look different. That holds for the two sign-in methods supported today, but a Microsoft account id has the same format as a local one — so such an account would have been treated as local, found to have no restrictions on record, and shown every firewall, with nothing on screen indicating it.',

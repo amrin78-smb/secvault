@@ -6,6 +6,8 @@ import ldap from 'ldapjs';
 import { pool } from '../../../../lib/db';
 import { sessionOptions } from '../../../../lib/sessionPolicy';
 import * as ldapRoles from '../../../../lib/ldapRoles';
+import AzureADProvider from 'next-auth/providers/azure-ad';
+import * as entraRoles from '../../../../lib/entraRoles';
 
 
 // ⛔ SEARCH-THEN-BIND, BECAUSE A USER'S DN CANNOT BE BUILT FROM THEIR USERNAME.
@@ -378,6 +380,54 @@ export const authOptions = {
         }
       },
     }),
+    // ⛔ ENTRA IS APPENDED ONLY WHEN CONFIGURED, AND THAT DIFFERS FROM LDAP
+    // ABOVE ON PURPOSE. The LDAP provider is always registered and returns
+    // null when LDAP_URL is unset, which is fine for a credentials form --
+    // it simply never authenticates. Entra is OAUTH: registering it
+    // unconfigured would render a "Sign in with Microsoft" button that cannot
+    // complete, and an operator meeting a button that fails concludes the
+    // product is broken rather than that they have not finished configuring
+    // it. Absent is the honest state.
+    //
+    // ⛔ THIS CAN NEVER AFFECT LOCAL SIGN-IN. It is a push onto the END of the
+    // array; the local credentials provider above is unconditional and is not
+    // touched by any of this. If login.microsoftonline.com is unreachable --
+    // which on a segmented or air-gapped install is the NORMAL state, not a
+    // fault -- local sign-in is unaffected. An internet outage must never lock
+    // an operator out of the console that manages their firewalls.
+    ...(entraRoles.isEntraConfigured(process.env)
+      ? [
+          AzureADProvider({
+            id: 'entra',
+            name: 'Microsoft Entra ID',
+            clientId: process.env.ENTRA_CLIENT_ID,
+            clientSecret: process.env.ENTRA_CLIENT_SECRET,
+            tenantId: process.env.ENTRA_TENANT_ID,
+            // ⛔ The group claim rides the ID TOKEN, so the profile callback is
+            // where it can be read. Claims are carried onto the token in jwt()
+            // below and re-resolved on every token use, exactly as LDAP groups
+            // are -- a mapping change must apply immediately, not at next
+            // sign-in.
+            authorization: { params: { scope: 'openid profile email' } },
+            profile(profile) {
+              return {
+                // ⛔ The Entra object id, NOT an email. It is immutable;
+                // a UPN is not. lib/deviceScope.js refuses to treat this as a
+                // local users.id -- see Phase 0 there.
+                id: profile.oid || profile.sub,
+                name: profile.preferred_username || profile.email || profile.name || null,
+                email: profile.email || null,
+                role: null,
+                entraClaims: {
+                  groups: profile.groups,
+                  _claim_names: profile._claim_names,
+                  _claim_sources: profile._claim_sources,
+                },
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   // ⛔ THE IDLE TIMEOUT IS ENFORCED HERE, BY TOKEN EXPIRY, not by the browser.
   // This was `{ strategy: 'jwt' }` with no maxAge, so NextAuth's default of
@@ -401,6 +451,12 @@ export const authOptions = {
         token.role = user.role || null;
         // Carried so the LDAP re-check below can re-map without re-binding.
         if (user.ldapGroups !== undefined) token.ldapGroups = user.ldapGroups;
+        // Same, for Entra: the id_token's group claim captured at sign-in.
+        // ⛔ Stored WHOLE rather than reduced to an array here, because the
+        // overage pointer (_claim_names/_claim_sources) is part of the answer
+        // -- a token with no `groups` key and a pointer means "too many to
+        // list", not "none", and flattening it now would throw that away.
+        if (user.entraClaims !== undefined) token.entraClaims = user.entraClaims;
       }
 
       // ⛔ LDAP ROLES ARE RE-RESOLVED ON EVERY TOKEN USE TOO, from the groups
@@ -423,6 +479,32 @@ export const authOptions = {
           token.role = ldapRoles.isPermitted(again) ? again.role : null;
         } catch {
           token.role = null;
+        }
+      }
+
+      // ⛔ ENTRA ROLES RE-RESOLVE ON EVERY TOKEN USE, for exactly the reasons
+      // the LDAP block above gives: a mapping an administrator revoked must
+      // stop working at once, not at the end of the JWT's life. Same
+      // asymmetry, stated rather than hidden -- a MAPPING change applies
+      // immediately; a change to the user's GROUP MEMBERSHIP in Entra applies
+      // at their next sign-in, because re-reading the directory would put a
+      // Microsoft round-trip on the authorisation path of every request.
+      //
+      // ⛔ FAILS CLOSED to null, and so does an unreadable mapping table:
+      // ldapRoles.loadMappings THROWS rather than returning [] precisely so
+      // that a database blip cannot be mistaken for "no mappings configured".
+      if (token.provider === 'entra') {
+        try {
+          const mappings = await ldapRoles.loadMappings(pool, 'entra');
+          const again = entraRoles.resolveEntraRole({
+            claims: token.entraClaims,
+            mappings: mappings.map((m) => ({ groupKey: m.groupDn, role: m.role })),
+          });
+          token.role = again.role || null;
+          token.entraOutcome = again.outcome;
+        } catch {
+          token.role = null;
+          token.entraOutcome = entraRoles.OUTCOME.GROUPS_UNREADABLE;
         }
       }
 

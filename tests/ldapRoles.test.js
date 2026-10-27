@@ -199,10 +199,36 @@ describe('⛔ loadMappings THROWS rather than returning an empty list', () => {
       query: async (q, p) => { sql = q; params = p; return { rows: [{}] }; },
     };
     await L.upsertMapping(pool, { groupDn: '  CN=A, DC=x  ', role: 'admin' });
-    assert.match(sql, /ON CONFLICT \(group_dn_normalised\)/);
+    // ⛔ THE CONFLICT TARGET MUST MATCH THE INDEX, which became
+    // (provider, group_dn_normalised) in v2.206.0 when this table started
+    // holding Entra mappings as well. Left on the old single column, this
+    // statement builds and then fails at RUNTIME against the real schema --
+    // a clean deploy and a save button that does not work.
+    assert.match(sql, /ON CONFLICT \(provider, group_dn_normalised\)/);
     assert.equal(params[1], 'cn=a,dc=x');
     // …while the operator's own spelling is what gets stored for display.
     assert.equal(params[0], 'CN=A, DC=x');
+  });
+
+  it('⛔ defaults to the ldap provider, so no existing caller can reach Entra rows', async () => {
+    // An LDAP login resolving against an Entra GUID mapping would be a
+    // cross-provider grant -- the one thing the provider column exists to stop.
+    let loadParams = [];
+    await L.loadMappings({ query: async (q, p) => { loadParams = p; return { rows: [] }; } });
+    assert.deepEqual(loadParams, ['ldap']);
+
+    let upsertParams = [];
+    await L.upsertMapping(
+      { query: async (q, p) => { upsertParams = p; return { rows: [{}] }; } },
+      { groupDn: 'CN=A,DC=x', role: 'admin' }
+    );
+    assert.equal(upsertParams[4], 'ldap', 'an omitted provider must not write an Entra row');
+  });
+
+  it('reads only the requested provider when one is named', async () => {
+    let loadParams = [];
+    await L.loadMappings({ query: async (q, p) => { loadParams = p; return { rows: [] }; } }, 'entra');
+    assert.deepEqual(loadParams, ['entra']);
   });
 });
 
