@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.211.0': [
+    'When an Entra sign-in is refused, SecVault now records WHY and shows it on the Single sign-on settings page. Until now the user simply arrived with no role and there was nothing on screen explaining it.',
+    'The three causes need three different fixes - the group information was missing from the sign-in token, the person is in no mapped group, or they are in too many groups for Entra to list - so the reason names which one it was.',
+    'The last five refusals are listed beside the settings that cause them, with who was refused and when.',
+    'Refusals are recorded once per sign-in, not on every page load.',
+  ],
   '2.210.0': [
     'Split Settings - Users into two tabs. It had grown to hold local accounts, LDAP group mappings, the Entra tenant settings and Entra group mappings all on one page - about five screens of scrolling.',
     'Users now holds accounts only. A new "Single sign-on" tab holds the directory integration, so adding a person and configuring a directory are no longer the same page.',

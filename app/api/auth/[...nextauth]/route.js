@@ -8,6 +8,7 @@ import { sessionOptions } from '../../../../lib/sessionPolicy';
 import * as ldapRoles from '../../../../lib/ldapRoles';
 import AzureADProvider from 'next-auth/providers/azure-ad';
 import * as entraRoles from '../../../../lib/entraRoles';
+import { logActivity } from '../../../../lib/activityLog';
 
 
 // ⛔ SEARCH-THEN-BIND, BECAUSE A USER'S DN CANNOT BE BUILT FROM THEIR USERNAME.
@@ -494,6 +495,8 @@ export const authOptions = {
       // ldapRoles.loadMappings THROWS rather than returning [] precisely so
       // that a database blip cannot be mistaken for "no mappings configured".
       if (token.provider === 'entra') {
+        let outcome = entraRoles.OUTCOME.GROUPS_UNREADABLE;
+        let reason = 'The Entra role mappings could not be read.';
         try {
           const mappings = await ldapRoles.loadMappings(pool, 'entra');
           const again = entraRoles.resolveEntraRole({
@@ -501,10 +504,43 @@ export const authOptions = {
             mappings: mappings.map((m) => ({ groupKey: m.groupDn, role: m.role })),
           });
           token.role = again.role || null;
-          token.entraOutcome = again.outcome;
+          outcome = again.outcome;
+          reason = again.reason || '';
         } catch {
           token.role = null;
-          token.entraOutcome = entraRoles.OUTCOME.GROUPS_UNREADABLE;
+        }
+        token.entraOutcome = outcome;
+
+        // ⛔ RECORDED ONLY ON THE INITIAL SIGN-IN, NEVER ON EVERY TOKEN USE.
+        // This callback runs on EVERY REQUEST -- that is the whole point of
+        // re-resolving the role here -- so writing an audit row unconditionally
+        // would put one INSERT on every page load and bury activity_log. `user`
+        // is set by NextAuth only on the first call after a sign-in.
+        //
+        // ⛔ THIS EXISTS BECAUSE THE REASON WAS BEING COMPUTED AND THEN THROWN
+        // AWAY. resolveEntraRole produces a named, actionable outcome for each
+        // way a sign-in can fail -- unreadable claim, no matching group, group
+        // overage -- and all of it was stored on the token where nobody could
+        // read it. An operator met "No Role" and had nothing to act on. A
+        // reason that cannot be read is a guard that cannot fire.
+        if (user) {
+          const who = token.name || token.email || 'unknown';
+          if (token.role) {
+            console.log(`[entra] sign-in: ${who} -> ${token.role} (${outcome})`);
+          } else {
+            console.warn(`[entra] sign-in REFUSED: ${who} — ${outcome}: ${reason}`);
+            // Best-effort, like every other logActivity call site: a failure to
+            // record must never turn a completed sign-in decision into an error.
+            try {
+              await logActivity(pool, {
+                actor: who,
+                action: 'entra_signin_refused',
+                detail: `${outcome}: ${reason}`,
+              });
+            } catch (auditErr) {
+              console.warn(`[entra] could not record the refusal: ${auditErr.message}`);
+            }
+          }
         }
       }
 

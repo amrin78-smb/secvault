@@ -122,6 +122,33 @@ export default function EntraSsoPanel() {
           </div>
         ) : null}
 
+        {/* ⛔ REFUSED SIGN-INS, SHOWN BESIDE THE SETTINGS THAT CAUSE THEM.
+            Without this an operator meets "No Role" in the header and has
+            nothing to act on — the reason existed but only on the token. The
+            three causes need three different fixes (the claim is missing from
+            the ID token / the user is in no mapped group / too many group
+            memberships), so naming which one it was is the whole value. */}
+        {(data.refusals || []).length > 0 ? (
+          <div style={{
+            background: 'var(--tint-warn)', color: 'var(--tint-warn-fg)',
+            padding: 'var(--s3)', borderRadius: 'var(--radius-sm)',
+            marginBottom: 'var(--s4)',
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 'var(--s2)', fontSize: 'var(--text-sm)' }}>
+              Recent refused sign-ins
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>
+              {data.refusals.map((r, i) => (
+                <div key={i} style={{ fontSize: 'var(--text-xs)', lineHeight: 1.5 }}>
+                  <strong>{r.actor}</strong>
+                  {r.at ? ` · ${new Date(r.at).toLocaleString()}` : ''}
+                  <div>{r.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* ⛔ THE REDIRECT URI IS SHOWN, NOT DESCRIBED. It must be registered in
             Entra byte for byte, and a mismatch fails on Microsoft's side with
             an error that never reaches our logs — so the exact string belongs

@@ -66,8 +66,33 @@ export async function GET() {
     );
   }
 
+  // ⛔ THE REFUSALS ARE THE POINT OF THIS ENDPOINT NOW, not a decoration.
+  // resolveEntraRole produces a named reason for every way a sign-in can fail,
+  // and until v2.211.0 all of it was stored on the token where nobody could
+  // read it: an operator met "No Role" in the header and had nothing to act
+  // on. Surfaced HERE, beside the settings that cause them, because that is
+  // where the fix is made.
+  //
+  // ⛔ READ-ONLY and best-effort: a failure to list refusals must not stop the
+  // settings themselves loading, or a logging problem becomes a configuration
+  // outage.
+  let refusals = [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT actor, detail, occurred_at
+         FROM activity_log
+        WHERE action = 'entra_signin_refused'
+        ORDER BY occurred_at DESC
+        LIMIT 5`
+    );
+    refusals = rows.map((r) => ({ actor: r.actor, detail: r.detail, at: r.occurred_at }));
+  } catch {
+    refusals = [];
+  }
+
   const val = (k) => (saved[k] || '').trim();
   return NextResponse.json({
+    refusals,
     tenantId: val('ENTRA_TENANT_ID'),
     clientId: val('ENTRA_CLIENT_ID'),
     // ⛔ NEVER the value. Only whether one exists.
