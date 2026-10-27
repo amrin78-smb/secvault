@@ -26,6 +26,14 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/central-cve-feed-proposal.md` — ⛔ **BUILT in v2.137.0-v2.139.0**, this line said
   "PROPOSAL ONLY (not built)" for thirty-odd versions after it shipped. Kept as the design record
   for `lib/feeds/cveHub.js`; read the "Central CVE feed" section of this file for what actually runs
+- `.ai-codex/entra-sso-proposal.md` — ⛔ **PROPOSAL ONLY (not built), as of v2.204.0.** Microsoft
+  Entra ID SSO. Its **Phase 0 is a live fail-open that exists TODAY and is worth fixing whether or
+  not Entra is ever built**: `lib/deviceScope.js` decides whether an account may be scoped from the
+  SHAPE of `session.user.id`, and an Entra `oid` is a GUID that passes the local-UUID test — so an
+  Entra account would be handed the whole fleet, and could not be restricted even deliberately
+  (`user_device_scopes.user_id` has an FK to `users(id)`). Decide on `session.user.provider`, never
+  on id shape. ⛔ When any phase ships, correct that file's header AND this line in the SAME commit —
+  the three entries below record what happens otherwise
 - `.ai-codex/analytics-proposal.md` — ⛔ **MOSTLY BUILT in v2.187.0-v2.191.0**, and this line said
   "PROPOSAL ONLY (not built)" for five versions after the first of them shipped — the same drift the
   central-CVE-feed entry above records, in the same list, two lines apart. Analytics with no LLM and
