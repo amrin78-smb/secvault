@@ -218,7 +218,7 @@ export default function EntraRolesPanel() {
             </div>
           )}
 
-          <div style={{ marginTop: 'var(--s5)', display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+          <div className="form-grid" style={{ marginTop: 'var(--s5)' }}>
             <div className="form-field">
               <label htmlFor="entra_group_id">Entra group object ID</label>
               <input
@@ -267,16 +267,13 @@ export default function EntraRolesPanel() {
               />
             </div>
             {status ? (
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{status}</div>
+              <div className="span-2" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{status}</div>
             ) : null}
-            <Button
-              variant="primary"
-              onClick={save}
-              disabled={busy || !groupId.trim()}
-              style={{ alignSelf: 'flex-start' }}
-            >
-              Add mapping
-            </Button>
+            <div className="span-2">
+              <Button variant="primary" onClick={save} disabled={busy || !groupId.trim()}>
+                Add mapping
+              </Button>
+            </div>
           </div>
         </CardBody>
       </Card>

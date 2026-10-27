@@ -197,8 +197,21 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, width: '100%' }}>
-      <PageHeader title="Settings" subtitle="Manage app configuration, users, and updates." />
+    // ⛔ gap 24 -> 0 AND the header's own margin suppressed, because the space
+    // between the title and the tab bar was THREE spacings stacked: this flex
+    // gap (24), .page-header's own margin-bottom (20), and the 24px of padding
+    // the sticky tab bar carries to cover the scroller's top padding (see the
+    // ⛔ block on that element). About 68px of nothing.
+    //
+    // ⛔ THE TAB BAR'S PADDING IS NOT NEGOTIABLE — remove it and page content
+    // scrolls visibly through the band above the stuck bar again (v2.209.1).
+    // So the two REDUNDANT spacings go instead: the flex gap here was doing the
+    // same job as the header's margin, and `.settings-head` zeroes that margin
+    // for this page only, leaving the bar's padding as the single separator.
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, width: '100%' }}>
+      <div className="settings-head">
+        <PageHeader title="Settings" subtitle="Manage app configuration, users, and updates." />
+      </div>
 
       <div
         // ⛔ THE STICKY BAR MUST COVER THE SCROLLER'S OWN TOP PADDING.

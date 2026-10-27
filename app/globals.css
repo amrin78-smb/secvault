@@ -1347,6 +1347,39 @@ textarea.input { resize: vertical; min-height: 80px; }
    change — it needs re-probing on a running instance. */
 .form-field .input,
 .form-field .select { max-width: 420px; }
+
+/* ── Form grid (v2.213.0) ───────────────────────────────────────────────
+   ⛔ CAPPING THE FIELDS WAS ONLY HALF THE FIX. With inputs capped at 420px a
+   settings panel still left ~1000px of empty space to the right: the width was
+   reclaimed, not used. This pairs short fields into columns, which also halves
+   the vertical height of every form it is applied to.
+
+   ⛔ `auto-fit` + `minmax`, NOT a fixed two-column template. A fixed template
+   would still be two columns at phone width, where each one is unusable. This
+   collapses to one column on its own, with no media query to keep in step with
+   the sidebar's own breakpoints.
+
+   ⛔ CAPPED AT TWO COLUMNS by max-width (2 x 420 + the gap). Three columns of
+   form fields read as a table of inputs rather than a form, and the eye loses
+   which label belongs to which box. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--s4) var(--s5);
+  max-width: 884px;
+}
+/* For a field that must not be halved — a long URL, a note, a secret whose
+   placeholder is a sentence. */
+.form-grid .span-2 { grid-column: 1 / -1; }
+
+/* ⛔ SETTINGS HEADER (v2.213.0). Scoped to this page because the space it
+   removes only exists here: the Settings tab bar is sticky and carries 24px of
+   its own top padding (to cover the scroller's padding — see the ⛔ block on
+   that element), so the header's margin-bottom was a THIRD separator stacked
+   on a flex gap and that padding. Other pages have no sticky bar below the
+   header and still need the margin. */
+.settings-head .page-header { margin-bottom: 0; }
+.form-grid .span-2 .input { max-width: 884px; }
 select.input {
   width: 100%;
   padding: 9px 32px 9px 12px;

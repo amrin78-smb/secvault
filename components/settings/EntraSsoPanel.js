@@ -171,7 +171,7 @@ export default function EntraSsoPanel() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
+        <div className="form-grid">
           <div className="form-field">
             <label htmlFor="entra_tenant">Directory (tenant) ID</label>
             <input
@@ -196,7 +196,10 @@ export default function EntraSsoPanel() {
               autoComplete="off"
             />
           </div>
-          <div className="form-field">
+          {/* ⛔ SPANS BOTH COLUMNS. Its hint is a full sentence about what blank
+              means, and halving the field would wrap that into four lines
+              beside an empty cell. */}
+          <div className="form-field span-2">
             <label htmlFor="entra_secret">
               Client secret {data.clientSecretSet ? '(a secret is stored)' : '(none stored)'}
             </label>
@@ -220,12 +223,14 @@ export default function EntraSsoPanel() {
           </div>
 
           {status ? (
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{status}</div>
+            <div className="span-2" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>{status}</div>
           ) : null}
 
-          <Button variant="primary" onClick={save} disabled={busy} style={{ alignSelf: 'flex-start' }}>
-            Save
-          </Button>
+          <div className="span-2">
+            <Button variant="primary" onClick={save} disabled={busy}>
+              Save
+            </Button>
+          </div>
         </div>
       </CardBody>
     </Card>

@@ -256,6 +256,10 @@ export default function UsersPanel() {
       )}
 
       <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* ⛔ The THREE FIELDS pair up; the status line and the submit button
+            stay outside the grid so they span the form rather than becoming a
+            third and fourth cell. */}
+        <div className="form-grid">
         <div className="form-field">
           <label htmlFor="new_username">New user — username</label>
           <input
@@ -296,6 +300,8 @@ export default function UsersPanel() {
               <option key={r} value={r}>{ROLE_LABELS[r]}</option>
             ))}
           </select>
+        </div>
+
         </div>
 
         {status && <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{status}</p>}
