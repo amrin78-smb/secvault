@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.213.0': [
+    'Form fields across Settings, Firewalls, Credential Profiles and SNMP no longer stretch to the full width of the screen. A username or an ID was being given the width of the whole page, which wasted the space and made short values look like long ones.',
+    'Fields are capped at a readable width and line up with the dropdowns beside them, instead of each one ending somewhere different.',
+    'It is a cap, not a fixed width: narrow windows still shrink the fields to fit.',
+  ],
   '2.212.0': [
     'Entra accounts can now see the firewall fleet. They were being refused by every page that shows firewalls, under a message saying the account was restricted to specific firewalls - which was not true, nobody had restricted it.',
     'An Entra user now sees the whole fleet, exactly as an LDAP user always has. What they can DO with it is still decided by which Entra group they are in.',

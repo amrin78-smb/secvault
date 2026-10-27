@@ -1329,6 +1329,23 @@ textarea.input { resize: vertical; min-height: 80px; }
    are deliberately untouched: a full-width text box is correct, and only a
    select has a popup to misplace. `.filter-row .select` sets its own
    `width: auto` and is unaffected. */
+/* ⛔ ONE RULE FOR BOTH, so an input and the select beside it can never drift
+   to different widths and leave a form looking ragged. The select half of this
+   is the v2.204.0 popup fix above; the input half was added in v2.213.0 for a
+   different reason — a 36-character GUID was being given the full 1600px of a
+   settings panel, which wastes the space and makes a short value look like a
+   long one.
+
+   ⛔ A MAX, NEVER A WIDTH. It only caps: a narrow viewport still shrinks these
+   to fit, and a field that genuinely needs more (a long URL, a note) can
+   override locally. Scoped to `.form-field` so table filters, the header
+   search and modal inputs are untouched — those have their own geometry.
+
+   ⛔ 420px IS THE SELECT'S TESTED-SAFE WIDTH and the input follows it rather
+   than the other way round. The popup detaches from its control somewhere
+   between 420 and 1338 (measured), so widening this is not a free cosmetic
+   change — it needs re-probing on a running instance. */
+.form-field .input,
 .form-field .select { max-width: 420px; }
 select.input {
   width: 100%;
