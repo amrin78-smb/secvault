@@ -132,6 +132,18 @@
   --shell-fg:     #FFFFFF;
   --shell-fg-ok:  #6FE0AC;
   --shell-fg-bad: #FF9296;
+  /* ⛔ THE BRAND ACCENT AS SEEN ON THE DARK SHELL, AND IT IS A FOURTH MEMBER OF
+     THE FAMILY ABOVE FOR THE SAME REASON (v2.201.0). --primary flips with the
+     theme (#098294 light / #22C1D6 dark) while --navy does NOT, so building
+     the sidebar's active state from --primary paints a DARK teal on a DARK
+     ground in light mode. The old flat `--accent-teal-bg` wash got away with
+     that only because a 20%-alpha fill is forgiving; a gradient and a glow are
+     not, and the affordance that would go invisible is the one telling you
+     which page you are on. This is the dark-theme teal, pinned, in both
+     themes — never redefine it below. */
+  --shell-accent: #22C1D6;
+  --shell-accent-soft: rgba(34, 193, 214, 0.30);
+  --shell-accent-fade: rgba(34, 193, 214, 0.04);
 
   --bg-primary:     #F7F9FB;
   --bg-card:        #FFFFFF;
@@ -1512,7 +1524,10 @@ select.input {
   font-size: var(--text-md);
   font-weight: 500;
   text-decoration: none;
-  transition: background 0.12s, color 0.12s;
+  /* box-shadow joins the transition so the active glow fades in rather than
+     snapping. The global prefers-reduced-motion block caps every duration, and
+     this moves nothing, so no separate override is needed here. */
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -1527,17 +1542,56 @@ select.input {
 }
 .sv-nav-chip svg { width: 16px; height: 16px; }
 .sv-nav a:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.sv-nav a.active { background: var(--accent-teal-bg); color: #fff; }
+/* ⛔ THE ACTIVE ITEM FADES LEFT-TO-RIGHT AND CARRIES A GLOW (v2.201.0).
+   It replaced a FLAT --accent-teal-bg wash. Three things make it work:
+
+   1. ⛔ EVERY COLOUR HERE IS --shell-accent*, NEVER --primary. The sidebar is
+      dark in BOTH themes but --primary is not, so --primary would render a
+      dark teal glow on a dark ground in light mode. See the ⛔ beside
+      --shell-accent for the full reasoning. If you ever reach for --primary
+      or --accent-teal-bg in this rule, you are reintroducing that bug.
+   2. ⛔ TEAL, NOT BLUE. The source design used #2563eb. v2.87.0 moved
+      --primary off the suite red onto teal precisely so one hue was not doing
+      both "interactive" and "critically exposed", and --blue is still a live
+      status token — a blue glow reopens that collision one hue over.
+   3. The gradient runs to a near-transparent 4%, not to zero, so the right
+      edge still separates from the nav ground instead of ending on a hard
+      stop you can see.
+
+   The 1px inset ring in the box-shadow is what reads as a border; an actual
+   `border` property would change the element's box and shift every label by a
+   pixel on activation. */
+.sv-nav a.active {
+  background: linear-gradient(
+    to right,
+    var(--shell-accent-soft),
+    var(--shell-accent-fade)
+  );
+  color: #fff;
+  box-shadow:
+    inset 0 0 0 1px rgba(34, 193, 214, 0.45),
+    0 0 18px -6px rgba(34, 193, 214, 0.65);
+}
 /* The active chip is ALWAYS the brand accent -- see the note in Sidebar.js.
    --chip-bg/--chip-color are no longer set by that component; .widget-icon-chip
    above still uses them and is unaffected. */
-.sv-nav a.active .sv-nav-chip { background: var(--accent-teal-bg); color: var(--primary); }
+/* ⛔ --shell-accent, not --primary: the chip sits on the dark shell too, and
+   --primary flipped this glyph to a dark teal on a dark chip in light mode. */
+.sv-nav a.active .sv-nav-chip {
+  background: rgba(34, 193, 214, 0.18);
+  color: var(--shell-accent);
+}
+/* ⛔ THE LEFT BAR STAYS, AND IT IS NOT REDUNDANT WITH THE GLOW ABOVE. The
+   source design has no bar because its sidebar never collapses. This one does
+   — and collapsed, the label is hidden and the item is just a chip, so the bar
+   is the only "you are here" marker that survives. Same --shell-accent rule:
+   it was --primary, i.e. invisible-ish on the dark rail in light mode. */
 .sv-nav a.active::before {
   content: '';
   position: absolute;
   left: 0; top: 50%; transform: translateY(-50%);
   width: 3px; height: 20px; border-radius: 0 3px 3px 0;
-  background: var(--primary);
+  background: var(--shell-accent);
 }
 .sv-collapse-btn {
   display: flex; align-items: center; gap: 10px; justify-content: flex-start;

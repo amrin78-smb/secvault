@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.201.0': [
+    'The active item in the left navigation now fades left-to-right and carries a soft glow, replacing the flat wash it had before, so the page you are on is easier to pick out at a glance.',
+    'The "you are here" bar on the left edge is kept deliberately: when the sidebar is collapsed the label is hidden and the item is only an icon, and the bar is the one marker that still works there.',
+    'Fixed a latent bug while doing it — the sidebar is dark in BOTH light and dark mode, but the accent colour used for the active item was the one that flips with the theme, so in light mode it was drawing a dark teal on a dark bar. The shell now has its own pinned accent that does not flip.',
+    'The active icon badge and the edge bar were carrying the same flipping colour and are fixed with it.',
+  ],
   '2.200.0': [
     'Stat tiles across the product lost their 4px coloured left edge and now carry a neutral 1px border on all four sides. "Colour means RISK" is the design rule, and a teal edge on "Devices" or a blue one on "Total Rules" was spending the risk vocabulary on decoration — around twenty coloured edges competed on the Overview page alone.',
     'No risk signal was lost: a tile\'s colour already drove both the border and the headline number, so every severity, band and threshold hue is still shown, in its contrast-safe form on the number itself.',
