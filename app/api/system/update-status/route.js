@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.207.0': [
+    'Settings - Users gains an "Entra group access" panel for mapping Entra groups to SecVault roles. Until now Entra sign-in could be switched on but no mapping could be entered, so every sign-in was refused with nowhere to fix it.',
+    'A mapping is entered by the group\'s object ID, with a name beside it for the list. The ID is what SecVault matches on, because an Entra group name can be changed and two groups can share one.',
+    'The panel says plainly when Entra is configured but no group is mapped, because in that state nobody can sign in and an empty list does not say so on its own.',
+    'It is a separate panel from the LDAP one on purpose: an empty mapping list means the opposite thing for each - every LDAP user becomes an Administrator, while no Entra user can sign in at all.',
+  ],
   '2.206.0': [
     'Microsoft Entra ID single sign-on can now be configured. It is entirely optional: with no tenant configured nothing changes, no sign-in button appears, and nothing is reported as a fault.',
     'Local accounts are unaffected and always remain available. Signing in locally never depends on Entra, so an internet outage cannot lock you out of the console that manages your firewalls.',

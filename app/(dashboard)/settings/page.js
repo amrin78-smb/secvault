@@ -8,6 +8,7 @@ import UpdatePanel from '../../../components/settings/UpdatePanel';
 import LicensePanel from '../../../components/settings/LicensePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import LdapRolesPanel from '../../../components/settings/LdapRolesPanel';
+import EntraRolesPanel from '../../../components/settings/EntraRolesPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import SessionTimeoutPanel from '../../../components/settings/SessionTimeoutPanel';
 import TlsPanel from '../../../components/settings/TlsPanel';
@@ -351,6 +352,12 @@ export default function SettingsPage() {
               creating an account — reached through a group whose membership
               SecVault cannot see. */}
           <LdapRolesPanel />
+          {/* ⛔ A SEPARATE PANEL, not a tab inside the LDAP one: an empty
+              mapping list means the OPPOSITE thing for each directory
+              (LDAP empty = everyone is an Administrator; Entra empty =
+              nobody can sign in), and those two sentences cannot share
+              one table without one of them becoming ambiguous. */}
+          <EntraRolesPanel />
         </div>
       )}
 
