@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.210.0': [
+    'Split Settings - Users into two tabs. It had grown to hold local accounts, LDAP group mappings, the Entra tenant settings and Entra group mappings all on one page - about five screens of scrolling.',
+    'Users now holds accounts only. A new "Single sign-on" tab holds the directory integration, so adding a person and configuring a directory are no longer the same page.',
+    'On the new tab, Entra comes first and LDAP last, because Entra is what a new installation is set up with and LDAP is the legacy path.',
+    'Both tabs need the same permission as before, so nothing is reachable that was not reachable already.',
+  ],
   '2.209.2': [
     'Fixed the "Sign in with Microsoft" button being almost unreadable on the login page. It used text and border colours that follow the light/dark setting, but the login card is dark whichever setting you are on, so in light mode it drew dark text on a dark card.',
     'It was only legible while the mouse was over it, because hovering lightened the background enough to reveal the text.',

@@ -33,6 +33,14 @@ const TABS = [
   { key: 'general', label: 'General' },
   { key: 'security', label: 'Security' },
   { key: 'users', label: 'Users', requires: 'manage_users' },
+  // ⛔ SPLIT OUT OF `users` IN v2.210.0. That tab had grown to carry local
+  // accounts, LDAP group mappings, the Entra tenant and Entra group
+  // mappings — five screens of scrolling, where the thing an
+  // administrator opens it for (adding a person) was at the top and
+  // everything else buried below. They are also different jobs: who has
+  // an account here, versus which directory is trusted to issue them.
+  // ⛔ SAME CAPABILITY, so nothing becomes reachable that was not before.
+  { key: 'signon', label: 'Single sign-on', requires: 'manage_users' },
   { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
   { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
   { key: 'certificate', label: 'Certificate', requires: 'manage_settings' },
@@ -371,24 +379,37 @@ export default function SettingsPage() {
       {effectiveTab === 'users' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s6)' }}>
           <UsersPanel />
-          {/* ⛔ UNDER USERS, NOT SETTINGS, because it is gated on the SAME
-              capability as the route behind it (manage_users, super_admin
-              only). A mapping here says "everyone in this directory group
-              administers the firewall platform", which is the same authority as
-              creating an account — reached through a group whose membership
-              SecVault cannot see. */}
-          <LdapRolesPanel />
-          {/* ⛔ A SEPARATE PANEL, not a tab inside the LDAP one: an empty
-              mapping list means the OPPOSITE thing for each directory
-              (LDAP empty = everyone is an Administrator; Entra empty =
-              nobody can sign in), and those two sentences cannot share
-              one table without one of them becoming ambiguous. */}
+        </div>
+      )}
+
+      {effectiveTab === 'signon' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s6)' }}>
+          {/* ⛔ ENTRA FIRST, LDAP SECOND, and that is not alphabetical or
+              chronological — it is the order of consequence. Entra is the path
+              a new installation is actually set up on; LDAP is the legacy one,
+              and its panel carries the loudest warning in the product (with
+              zero mappings, EVERY directory user is an Administrator). Putting
+              the legacy integration first buried the thing most people came to
+              configure under four screens of something most of them do not
+              use — which is what made the old Users tab unusable. */}
+
           {/* ⛔ CONFIGURATION ABOVE MAPPINGS, because that is the order the
-              work happens in: a mapping is meaningless until a tenant
-              exists, and the mapping panel's own "not configured" notice
-              points at exactly the panel above it. */}
+              work happens in: a mapping is meaningless until a tenant exists,
+              and the mapping panel's own "not configured" notice points at
+              exactly the panel above it. */}
           <EntraSsoPanel />
+          {/* ⛔ A SEPARATE PANEL from the LDAP one below, not a tab inside it:
+              an empty mapping list means the OPPOSITE thing for each directory
+              (LDAP empty = everyone is an Administrator; Entra empty = nobody
+              can sign in), and those two sentences cannot share one table
+              without one of them becoming ambiguous. */}
           <EntraRolesPanel />
+          {/* ⛔ GATED ON manage_users LIKE THE REST OF THIS TAB, because the
+              route behind it is. A mapping here says "everyone in this
+              directory group administers the firewall platform" — the same
+              authority as creating an account, reached through a group whose
+              membership SecVault cannot see. */}
+          <LdapRolesPanel />
         </div>
       )}
 
