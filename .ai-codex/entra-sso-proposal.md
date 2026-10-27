@@ -87,6 +87,40 @@ whose id is not a UUID is a contradiction and must resolve `UNKNOWN`, not be tru
 
 ---
 
+## 1b. What to configure IN ENTRA (the other half of the exchange)
+
+The three values SecVault needs (`ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`,
+`ENTRA_CLIENT_SECRET`) all come FROM the app registration. But the registration also
+needs one value FROM us, and it must match byte for byte or Entra refuses the sign-in
+on its own side, before SecVault is ever reached.
+
+| Entra asks for | value |
+|---|---|
+| **Redirect URI** (a.k.a. Reply URL) — platform **Web** | `<NEXTAUTH_URL>/api/auth/callback/entra` |
+| Supported account types | Single tenant, unless the customer federates guests |
+| Implicit grant / hybrid | **not needed** — leave off |
+| API permissions | `openid`, `profile`, `email` (delegated). ⛔ `GroupMember.Read.All` is NOT needed and should not be granted — see §5 |
+| Token configuration → groups claim | emit **"Groups assigned to the application"**, NOT "All groups" — see §5 |
+
+⛔ **THE REDIRECT URI IS DERIVED FROM THE PROVIDER ID**, which is `entra`. NextAuth builds
+`<NEXTAUTH_URL>/api/auth/callback/<id>`, so renaming the id silently invalidates every
+customer's app registration, with the error surfacing on Microsoft's side rather than
+ours. Pinned by `tests/entraRoles.test.js`.
+
+⛔ **IT MUST MATCH `NEXTAUTH_URL` EXACTLY** — scheme, host and port. This is the same
+value Settings → Certificate → Console address writes, and the console-address guard
+already refuses a scheme that disagrees with the transport. A console reached on
+`https://secvault.example.com:3010` needs that exact origin in the Redirect URI;
+`http://`, a bare IP, or a trailing slash will all be rejected by Entra.
+
+⛔ **"ENTITY ID" IS A SAML QUESTION, AND THIS IS NOT SAML.** If an identity team asks for
+an Entity ID and an ACS/Consumer URL, they are provisioning a SAML application — those
+fields have no equivalent here. This integration is **OIDC / OAuth2**, where the
+equivalents are the Client ID (which Entra issues, not us) and the Redirect URI above.
+Answering a SAML questionnaire with OIDC values produces a registration that cannot
+work, so the right response is to ask for an **App registration**, not an
+**Enterprise application SAML setup**.
+
 ## 2. Scope of the change
 
 | file | change |

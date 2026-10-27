@@ -60,6 +60,35 @@ describe('⛔ the local account is never affected by Entra configuration', () =>
   });
 });
 
+describe('⛔ the provider id IS the redirect URI, so it cannot be renamed casually', () => {
+  it('the provider is registered as `entra`', () => {
+    // ⛔ NextAuth derives the OAuth callback from the provider id:
+    //     <NEXTAUTH_URL>/api/auth/callback/<id>
+    // That exact URL is typed into the Entra app registration's Redirect URI
+    // by whoever sets the tenant up, and Entra REFUSES any mismatch outright.
+    // Renaming this id silently invalidates every customer's app registration
+    // with an error that appears on Microsoft's side, not ours -- so it is
+    // pinned here rather than left as an implementation detail.
+    const fs = require('node:fs');
+    const src = fs.readFileSync(
+      require('node:path').join(__dirname, '..', 'app', 'api', 'auth', '[...nextauth]', 'route.js'),
+      'utf8'
+    );
+    assert.match(src, /AzureADProvider\(\{\s*\n\s*id: 'entra'/,
+      'the callback path /api/auth/callback/entra is registered with customers; do not rename it');
+  });
+
+  it('the login page asks for that same id', () => {
+    const fs = require('node:fs');
+    const src = fs.readFileSync(
+      require('node:path').join(__dirname, '..', 'app', '(auth)', 'login', 'page.js'),
+      'utf8'
+    );
+    assert.match(src, /signIn\('entra'/, 'the button must call the id the provider registered');
+    assert.match(src, /p && p\.entra/, 'and must only render when the server reports that provider');
+  });
+});
+
 describe('⛔ the group overage is refused, never read as "no groups"', () => {
   it('detects the overage pointer in either claim', () => {
     assert.equal(hasGroupOverage({ _claim_names: { groups: 'src1' } }), true);

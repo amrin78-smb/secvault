@@ -25,7 +25,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
+import { signIn, getProviders } from 'next-auth/react';
 import { PRODUCT_NAME } from '../../../lib/branding';
 // ⛔ A PURE MODULE, NOT A LOCAL HELPER. The first version lived here, could
 // not be imported by a test, and was bypassable with an embedded tab.
@@ -81,6 +81,26 @@ export default function LoginPage() {
   // when someone needs it — it can only be absent for the case we positively
   // established does not need one.
   const [showCode, setShowCode] = useState(false);
+  // ⛔ FALSE BY DEFAULT, and only ever set true by a positive answer from the
+  // server. The same rule the MFA code field learned the hard way in
+  // v2.193.1: a control that starts visible and is hidden by a later answer
+  // is visible on every page load in practice. Here the cost of getting it
+  // wrong is a "Sign in with Microsoft" button on an installation that has no
+  // tenant — a button that cannot complete, which reads as a broken product.
+  const [entraAvailable, setEntraAvailable] = useState(false);
+
+  // ⛔ DISCOVERY IS ADDITIVE AND MUST NEVER BLOCK LOCAL SIGN-IN. It runs after
+  // paint, in its own effect, and every failure is swallowed to the default of
+  // "no button". If this endpoint is slow or unreachable the local form above
+  // is completely unaffected -- an outage must not stand between an operator
+  // and the console that manages their firewalls.
+  useEffect(() => {
+    let alive = true;
+    getProviders()
+      .then((p) => { if (alive && p && p.entra) setEntraAvailable(true); })
+      .catch(() => { /* no button; local sign-in is untouched */ });
+    return () => { alive = false; };
+  }, []);
   const [asked, setAsked] = useState(false);
   const totpRef = useRef(null);
 
@@ -360,6 +380,39 @@ export default function LoginPage() {
                 'Sign in'
               )}
             </button>
+
+            {/* ⛔ THE SSO BUTTON IS THE ONLY WAY IN FOR AN OAUTH PROVIDER, and
+                it did not exist until v2.208.0. A custom `pages.signIn` means
+                NextAuth never renders its own provider buttons, and this form
+                only ever calls signIn('local'). LDAP survives that because it
+                is a CREDENTIALS provider reachable by POST; an OAuth provider
+                cannot be — there is nothing to type into a username box. So
+                v2.206.0 registered a provider no one could reach.
+
+                ⛔ IT RENDERS ONLY WHEN THE SERVER SAYS THE PROVIDER EXISTS.
+                getProviders() reports what is actually registered, so it
+                cannot drift from the server's own view the way a second env
+                check on the client would.
+
+                ⛔ IT IS PURELY ADDITIVE AND NEVER BLOCKS. The discovery runs
+                after paint, failures are swallowed, and nothing above this
+                point waits on it — if Microsoft or the providers endpoint is
+                unreachable, the local form above is untouched. An internet
+                outage must not stand between an operator and the console that
+                manages their firewalls. */}
+            {entraAvailable ? (
+              <>
+                <div className="login-sso-divider"><span>or</span></div>
+                <button
+                  type="button"
+                  className="login-sso"
+                  disabled={submitting}
+                  onClick={() => signIn('entra', { callbackUrl: returnTo.current })}
+                >
+                  Sign in with Microsoft
+                </button>
+              </>
+            ) : null}
           </form>
         </div>
       </div>

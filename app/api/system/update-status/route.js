@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.208.0': [
+    'Added the "Sign in with Microsoft" button to the login page. Entra sign-in was registered in 2.206.0 but there was no way to start it from the login screen, so it could not actually be used.',
+    'The button only appears when Entra is configured on the installation, and it asks the server which sign-in methods exist rather than guessing.',
+    'It can never interfere with signing in locally: the check runs after the page has drawn, and if it fails for any reason the local form is unaffected and simply no button appears.',
+    'The button is styled as a secondary option below the normal sign-in, because on most installations local sign-in is the only method in use.',
+  ],
   '2.207.0': [
     'Settings - Users gains an "Entra group access" panel for mapping Entra groups to SecVault roles. Until now Entra sign-in could be switched on but no mapping could be entered, so every sign-in was refused with nowhere to fix it.',
     'A mapping is entered by the group\'s object ID, with a name beside it for the list. The ID is what SecVault matches on, because an Entra group name can be changed and two groups can share one.',

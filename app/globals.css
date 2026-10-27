@@ -1127,6 +1127,50 @@ tbody tr:hover td { background: var(--bg-primary); }
 }
 .login-submit:hover:not(:disabled) { background: #0C93A7; border-color: #0C93A7; }
 .login-submit:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+
+/* ── SSO sign-in (v2.208.0) ─────────────────────────────────────────────
+   ⛔ SECONDARY BY DESIGN. The local form is the primary path on every
+   installation and the overwhelming majority have no tenant at all, so the
+   SSO button must not out-shout the control most people use. It is outlined
+   rather than filled, and sits below a divider that says these are
+   alternatives rather than steps.
+   ⛔ The login card is on its own light surface in BOTH themes, so these use
+   the ordinary --text/--border tokens rather than the --shell-* family. */
+.login-sso-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: var(--s4) 0 var(--s3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.login-sso-divider::before,
+.login-sso-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.login-sso {
+  width: 100%;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.login-sso:hover:not(:disabled) { background: var(--surface-subtle); border-color: var(--border-light); }
+.login-sso:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.login-sso:disabled { opacity: 0.6; cursor: default; }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
 
 .login-note {
