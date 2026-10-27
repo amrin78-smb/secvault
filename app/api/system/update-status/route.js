@@ -10,6 +10,7 @@ const releaseNotes = {
   '2.209.1': [
     'Fixed the Settings tab bar on scroll. Page content was visible in a 24px band above the tabs as it scrolled past, so cards appeared to run over the top of the tab row.',
     'The tab bar sticks to the top of the scrolling area, but that area has its own padding, and the bar was pinning below the padding rather than covering it.',
+    'The tabs themselves have not moved; the bar simply now covers the strip above them.',
   ],
   '2.209.0': [
     'Entra ID single sign-on can now be configured from Settings - Users instead of by hand-editing a file on the server. Enter the tenant ID, client ID and client secret in the console and save.',
