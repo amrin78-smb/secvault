@@ -258,6 +258,9 @@ const API_ROUTES = [
   { path: '/api/segmentation', methods: ['GET', 'POST', 'DELETE'], capability: 'operate' },
   { path: '/api/settings', methods: ['GET', 'PUT'], capability: 'manage_settings' },
   { path: '/api/system/console-url', methods: ['GET', 'PUT'], capability: 'manage_settings' },
+  // ⛔ manage_users, NOT manage_settings: whoever sets the tenant decides which
+  // directory is trusted to issue identities for this platform.
+  { path: '/api/system/entra', methods: ['GET', 'PUT'], capability: 'manage_users' },
   { path: '/api/system/session-policy', methods: ['GET', 'PUT'], capability: 'manage_settings' },
   { path: '/api/system/tls', methods: ['GET', 'POST'], capability: 'manage_settings' },
   { path: '/api/system/update', methods: ['POST'], capability: 'run_update' },
@@ -326,6 +329,7 @@ const READ_CHECKS = [
   { path: '/api/segmentation' },
   { path: '/api/settings', capability: 'manage_settings' },
   { path: '/api/system/console-url', capability: 'manage_settings' },
+  { path: '/api/system/entra', capability: 'manage_users' },
   { path: '/api/system/session-policy' },
   { path: '/api/system/tls', capability: 'manage_settings' },
   { path: '/api/system/update-available', sideEffect: true },

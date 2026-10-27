@@ -8,6 +8,7 @@ import UpdatePanel from '../../../components/settings/UpdatePanel';
 import LicensePanel from '../../../components/settings/LicensePanel';
 import UsersPanel from '../../../components/settings/UsersPanel';
 import LdapRolesPanel from '../../../components/settings/LdapRolesPanel';
+import EntraSsoPanel from '../../../components/settings/EntraSsoPanel';
 import EntraRolesPanel from '../../../components/settings/EntraRolesPanel';
 import SecurityPanel from '../../../components/settings/SecurityPanel';
 import SessionTimeoutPanel from '../../../components/settings/SessionTimeoutPanel';
@@ -357,6 +358,11 @@ export default function SettingsPage() {
               (LDAP empty = everyone is an Administrator; Entra empty =
               nobody can sign in), and those two sentences cannot share
               one table without one of them becoming ambiguous. */}
+          {/* ⛔ CONFIGURATION ABOVE MAPPINGS, because that is the order the
+              work happens in: a mapping is meaningless until a tenant
+              exists, and the mapping panel's own "not configured" notice
+              points at exactly the panel above it. */}
+          <EntraSsoPanel />
           <EntraRolesPanel />
         </div>
       )}

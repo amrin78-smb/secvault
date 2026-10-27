@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.209.0': [
+    'Entra ID single sign-on can now be configured from Settings - Users instead of by hand-editing a file on the server. Enter the tenant ID, client ID and client secret in the console and save.',
+    'The client secret is write-only: it is never sent back to the browser, and the panel shows only whether one is stored. Leaving the field blank keeps the existing secret rather than clearing it.',
+    'The exact Redirect URI to register in Entra is shown on the panel, derived from the console address, so it does not have to be assembled by hand.',
+    'The panel states when settings are saved but not yet in force - SecVault reads them once at startup, so a service restart is still required.',
+    'Only a Super Admin can change these settings, which is stricter than other settings: whoever sets the tenant decides which directory is trusted to issue identities for the platform.',
+  ],
   '2.208.0': [
     'Added the "Sign in with Microsoft" button to the login page. Entra sign-in was registered in 2.206.0 but there was no way to start it from the login screen, so it could not actually be used.',
     'The button only appears when Entra is configured on the installation, and it asks the server which sign-in methods exist rather than guessing.',
