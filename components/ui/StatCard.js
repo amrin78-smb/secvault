@@ -1,9 +1,14 @@
 import IconChip from './IconChip';
 import { EvidenceMark } from './Evidence';
 
-// Suite `.kpi-card` colored-left-border tile — the standard stat-grid unit
-// used across every dashboard/summary page. `color` is any CSS color value
-// (a var(--...) token or a literal hex), applied as the left border accent.
+// The standard stat-grid unit used across every dashboard/summary page.
+// ⛔ THE "colored-left-border tile" THIS COMMENT USED TO CALL ITSELF HAS HAD NO
+// COLOURED BORDER SINCE v2.200.0, and `color` has not been "applied as the left
+// border accent" since then either — it is the input to the headline NUMBER's
+// colour (see `valueColor` below), plus the one data-unmeasured signal. The
+// stale sentence sat at the top of the file the restyle was made in, which is
+// how three other files ended up describing the same removed border; fixed
+// here and in components/dashboard/HeadlineStats.js in the same sweep.
 // `compact` swaps in the smaller `-compact` class variants (app/globals.css)
 // for the main Dashboard's higher-density widget grid — every other page's
 // StatCard usage is unaffected since compact defaults to false.
@@ -45,9 +50,9 @@ export default function StatCard({
   label,
   value,
   sub,
-  // ⛔ The accent border and the VALUE TEXT are different jobs and must not
-  // share a default. This was one `color` prop applied to BOTH, defaulting to
-  // --border — so any call site that omitted it rendered its headline number
+  // ⛔ The (then) accent border and the VALUE TEXT are different jobs and must
+  // not share a default. This was one `color` prop applied to BOTH, defaulting
+  // to --border — so any call site that omitted it rendered its headline number
   // in the border token. Measured live: "24" on /vulnerability at 1.39:1
   // contrast in dark and 1.23:1 in light (28px/800 weight needs 3.0), i.e.
   // effectively invisible. Same on /devices/<id>/analysis?tab=summary for
@@ -62,9 +67,10 @@ export default function StatCard({
   // "stack" (default, unchanged everywhere) or "row" -- number to the RIGHT of
   // the label rather than above it. See the layout note below.
   layout = 'stack',
-  // ⛔ The accent BORDER and the value TEXT are different jobs with different
-  // contrast requirements, and `color` was doing both. A raw severity hue is fine
-  // as a 4px border or a dot; as 17px text it measured 3.64:1 on white for
+  // ⛔ A raw severity hue and the value TEXT are different jobs with different
+  // contrast requirements, and `color` used to do both (it drove a 4px accent
+  // border as well, removed in v2.200.0). A raw hue is fine as a border or a
+  // dot; as 17px text it measured 3.64:1 on white for
   // --yellow and --orange, under WCAG 1.4.3’s 4.5:1 minimum. The old justification
   // ("32px/800 clears the large-text threshold") stopped holding when the compact
   // tiles shrank the value. Pass the text-safe counterpart here —

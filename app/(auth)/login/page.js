@@ -117,11 +117,48 @@ export default function LoginPage() {
   // page that renders a moment later is a worse trade than reading the query
   // string directly once the browser has it.
   const [timedOut, setTimedOut] = useState(false);
+  // ⛔ A SIGN-IN MICROSOFT ACCEPTED AND SECVAULT REFUSED, which until now ended
+  // with the user back on this page and nothing on it. The named reason goes to
+  // the ADMINISTRATOR, in Settings -> Single sign-on, and that is the right
+  // place for it; what was missing was anything at all for the person standing
+  // in front of the refusal.
+  const [ssoRefused, setSsoRefused] = useState(false);
+  // ⛔ A DIFFERENT FACT FROM `refused`, AND IT GETS ITS OWN STATE AND ITS OWN
+  // COPY. `refused` is TERMINAL: the front door turned the account away and
+  // nothing the user does will change that until an administrator maps a
+  // group. This one fires when an ALREADY-ISSUED session's role has gone null
+  // mid-session, which is frequently TRANSIENT — so "sign in again" is honest
+  // advice here and would be a lie there.
+  //
+  // ⛔ AND THE COPY MUST BE PROVIDER-NEUTRAL. This same value fires for a
+  // deleted local account and for a database outage, so it may not say
+  // directory, Microsoft, SSO or Entra: telling a local admin whose database
+  // blipped that their single sign-on failed sends them to debug a system they
+  // do not use. The parameter name says `sso` because that is the agreed cue
+  // namespace with the sign-in route, not because the cause is SSO.
+  const [ssoNoRole, setSsoNoRole] = useState(false);
   const returnTo = useRef('/');
 
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     setTimedOut(q.get('reason') === 'timeout');
+    // ⛔ AN EXACT MATCH AGAINST ONE KNOWN VALUE, AND THE QUERY STRING IS NEVER
+    // RENDERED. The copy below is a literal in this file; nothing the caller
+    // put in the URL reaches the page. Echoing a `reason` back would turn an
+    // UNAUTHENTICATED page into a surface for writing arbitrary text under the
+    // product's own brand — a link that reads "your password has expired, call
+    // this number" served from the real console on the real hostname. Same
+    // instinct as safeReturnPath() above: match what we recognise, discard the
+    // rest. A value we do not recognise sets nothing and renders nothing,
+    // rather than a blank panel.
+    // ⛔ TWO EQUALITY TESTS, NOT A LOOKUP TABLE, AND THE SECOND VALUE IS
+    // EXACTLY WHEN THAT TEMPTATION ARRIVES. `NOTICES[q.get('sso')]` reads
+    // tidier and answers TRUTHY for `toString`, `constructor` and
+    // `valueOf` — every one of which would put something nobody wrote onto an
+    // unauthenticated page. Two literals compared with === cannot do that, and
+    // a third value should be a third line, not a refactor.
+    setSsoRefused(q.get('sso') === 'refused');
+    setSsoNoRole(q.get('sso') === 'norole');
     returnTo.current = safeReturnPath(q.get('callbackUrl'));
   }, []);
 
@@ -351,6 +388,52 @@ export default function LoginPage() {
                 style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.14em' }}
               />
             </div>
+            )}
+
+            {/* ⛔ INFORMATION, NOT DANGER — the same call the timeout notice
+                below makes, and for a sharper reason. Their credentials were
+                correct and Microsoft accepted them; the refusal happened after
+                that, on our side. Shown in the danger tint this reads as a
+                rejected sign-in, and the next thing the user does is doubt a
+                password that is fine — or try it again until something locks.
+
+                ⛔ IT DOES NOT SAY WHICH REFUSAL OCCURRED. Missing group claim,
+                no matching group, and a claims overage need three different
+                administrator fixes, and naming them here would publish the
+                tenant's group-mapping state to anyone who can reach the login
+                page unauthenticated. The specific, named reason already goes
+                where the person who can act on it will see it: Settings ->
+                Single sign-on. This page's job is to stop the user retrying a
+                sign-in that will never work and point them at a human.
+
+                ⛔ SUPPRESSED ONCE A LOCAL ATTEMPT HAS FAILED, matching the
+                timeout notice: the error is the fresher fact and two notices
+                stacked over the button read as one confused message. */}
+            {ssoRefused && !error && (
+              <p className="login-note login-note-info">
+                Microsoft signed you in, but this account is not mapped to a SecVault role, so
+                there is nothing for it to open yet. Ask a SecVault administrator to map one of
+                your directory groups to a role, then sign in again.
+              </p>
+            )}
+
+            {/* ⛔ PROVIDER-NEUTRAL ON PURPOSE — see the state declaration. The
+                session's role went null, and the three causes (an SSO account
+                unmapped mid-session, a deleted local account, a database the
+                role could not be re-read from) are indistinguishable from
+                here. Naming any one of them would be a confident wrong
+                mechanism, which this codebase rates worse than none: it sends
+                the user, and whoever they ask, to fix the wrong thing.
+
+                ⛔ IT TELLS THEM TO SIGN IN AGAIN, which the `refused` notice
+                above deliberately does NOT. That difference is the whole
+                reason these are two values: a transient cause clears on a new
+                sign-in, and a terminal one wastes the user's afternoon. */}
+            {ssoNoRole && !error && (
+              <p className="login-note login-note-info">
+                Your session no longer has access to SecVault. Sign in again; if this keeps
+                happening, ask an administrator to check your account.
+              </p>
             )}
 
             {/* ⛔ A TIMEOUT IS NOT A FAILURE, and it is tinted as information

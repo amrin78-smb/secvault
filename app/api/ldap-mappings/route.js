@@ -21,6 +21,52 @@ function ldapConfigured() {
   return !!(process.env.LDAP_URL || '').trim();
 }
 
+const PROVIDERS = new Set(['ldap', 'entra']);
+
+/**
+ * Which directory a request is about.
+ *
+ * ⛔ AN UNRECOGNISED PROVIDER IS REFUSED, AND SO IS A MALFORMED ONE — the
+ * comment here used to claim the first while the code quietly did neither for
+ * the second. `typeof body.provider === 'string' && body.provider ? ... :
+ * 'ldap'` refused `'saml'` but silently accepted `0`, `null` and `{}` as LDAP.
+ *
+ * ⛔ ONLY AN OMITTED KEY DEFAULTS, and that default is the back-compatible
+ * choice, not a convenience: every caller written before the `provider` column
+ * existed sends no provider and means LDAP, and `LdapRolesPanel` still does.
+ * A key that is PRESENT but not a usable provider name is a malformed request
+ * and is refused — a value somebody meant to send must never be silently
+ * replaced by a different directory, because the result is a cross-directory
+ * grant created by a typo.
+ *
+ * @returns {{provider: string|null, error: string|null}}
+ */
+function providerFromBody(body) {
+  const src = body && typeof body === 'object' ? body : {};
+  if (!Object.prototype.hasOwnProperty.call(src, 'provider') || src.provider === undefined) {
+    return { provider: 'ldap', error: null };
+  }
+  if (typeof src.provider !== 'string' || !PROVIDERS.has(src.provider)) {
+    return {
+      provider: null,
+      error: `'${String(src.provider)}' is not a directory this installation understands.`,
+    };
+  }
+  return { provider: src.provider, error: null };
+}
+
+/**
+ * The same decision for a query string, where an absent param is indistinguishable
+ * from an omitted key and means the same thing.
+ */
+function providerFromQuery(raw) {
+  if (raw === null || raw === '') return { provider: 'ldap', error: null };
+  if (!PROVIDERS.has(raw)) {
+    return { provider: null, error: `'${raw}' is not a directory this installation understands.` };
+  }
+  return { provider: raw, error: null };
+}
+
 /**
  * List the mappings, plus the state the panel must warn about.
  */
@@ -79,16 +125,10 @@ export async function POST(request) {
   const role = typeof body.role === 'string' ? body.role.trim() : '';
   const description = typeof body.description === 'string' ? body.description.trim() : '';
   const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : '';
-  // ⛔ AN UNRECOGNISED PROVIDER IS REFUSED, NOT DEFAULTED. Defaulting would let
-  // a malformed request write an LDAP mapping that an administrator believes is
-  // an Entra one, or the reverse — a cross-directory grant created by a typo.
-  const provider = typeof body.provider === 'string' && body.provider ? body.provider : 'ldap';
-  if (provider !== 'ldap' && provider !== 'entra') {
-    return NextResponse.json(
-      { error: `'${provider}' is not a directory this installation understands.` },
-      { status: 400 }
-    );
-  }
+  // ⛔ AN UNRECOGNISED *OR MALFORMED* PROVIDER IS REFUSED, NOT DEFAULTED — see
+  // providerFromBody() above for why only an omitted key may fall back to LDAP.
+  const { provider, error: providerError } = providerFromBody(body);
+  if (providerError) return NextResponse.json({ error: providerError }, { status: 400 });
 
   if (!groupDn) {
     return NextResponse.json(
@@ -167,18 +207,39 @@ export async function DELETE(request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  // ⛔ THE DELETE IS SCOPED TO ONE DIRECTORY, so an id is not on its own
+  // sufficient authority over a table that holds both. An absent param means
+  // LDAP, which is what every caller predating the `provider` column sends;
+  // a mismatch simply finds no row and 404s, which is the safe direction.
+  const { provider, error: providerError } = providerFromQuery(searchParams.get('provider'));
+  if (providerError) return NextResponse.json({ error: providerError }, { status: 400 });
 
   try {
-    const removed = await ldapRoles.deleteMapping(pool, id);
-    if (!removed) return NextResponse.json({ error: 'No such mapping.' }, { status: 404 });
-    const mappings = await ldapRoles.loadMappings(pool);
+    const removedFrom = await ldapRoles.deleteMapping(pool, id, provider);
+    if (!removedFrom) return NextResponse.json({ error: 'No such mapping.' }, { status: 404 });
+    // ⛔ COUNTED FOR THE DIRECTORY THAT ACTUALLY CHANGED. This used to call
+    // loadMappings(pool) with no argument, taking the 'ldap' default, so
+    // deleting an ENTRA mapping reported LDAP's count — and on the live data
+    // (3 Entra rows, 0 LDAP rows) every Entra deletion claimed LDAP legacy mode
+    // had reopened. The flag was right only by coincidence of which panel
+    // happened to be calling.
+    const mappings = await ldapRoles.loadMappings(pool, removedFrom);
+    const empty = mappings.length === 0;
     return NextResponse.json({
       ok: true,
+      provider: removedFrom,
       // ⛔ REMOVING THE LAST MAPPING RE-OPENS LEGACY MODE, which is a far bigger
       // change than "one row deleted" — the whole directory becomes
       // Administrators again on their next login. Saying so here is what stops
       // that being discovered months later.
-      legacyModeReopened: mappings.length === 0 && ldapConfigured(),
+      legacyModeReopened: removedFrom === 'ldap' && empty && ldapConfigured(),
+      // ⛔ THE ENTRA CONSEQUENCE IS THE EXACT OPPOSITE AND WAS NOT REPORTED AT
+      // ALL. POST warns on the FIRST Entra mapping because that is what opens
+      // sign-in; DELETE said nothing when the LAST one went, which is what
+      // CLOSES it — no Entra user can sign in from that moment. Same empty
+      // table, opposite consequences, so they are two fields and never one.
+      entraLastMappingRemoved: removedFrom === 'entra' && empty
+        && entraRoles.isEntraConfigured(process.env),
     });
   } catch (err) {
     return NextResponse.json(

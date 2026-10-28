@@ -34,25 +34,28 @@ const BAND_COLOR = {
   poor: 'var(--red)',
 };
 
-// ⛔ TEXT-SAFE counterparts of BAND_COLOR. The band hue stays on the tile’s left
-// border (not text, no contrast floor); the headline NUMBER uses these. Measured
-// before this split: "320" on --orange and "51" on --yellow both sat at 3.64:1.
-const BAND_TEXT_COLOR = {
-  excellent: 'var(--tint-success-fg)',
-  good: 'var(--tint-success-fg)',
-  fair: 'var(--tint-warn-fg)',
-  poor: 'var(--tint-danger-fg)',
-};
-
-// The same mapping for the tiles that pass a fixed hue rather than a band.
-const TEXT_SAFE = {
-  'var(--red)': 'var(--tint-danger-fg)',
-  'var(--yellow)': 'var(--tint-warn-fg)',
-  'var(--orange)': 'var(--tint-orange-fg)',
-  'var(--green)': 'var(--tint-success-fg)',
-  'var(--blue)': 'var(--tint-info-fg)',
-  'var(--accent-teal)': 'var(--tint-teal-fg)',
-};
+// ⛔ BOTH LOCAL TEXT-SAFE MAPS ARE GONE, AND THEIR COMMENTS WERE DESCRIBING A
+// BORDER THAT NO LONGER EXISTS. They read "the band hue stays on the tile's
+// LEFT BORDER (not text, no contrast floor)" and "colours the accent border and
+// the value together" — true of v2.199, wrong since v2.200.0 removed the 4px
+// accent edge. `color` now drives ONE thing, the headline number, through
+// StatCard's own TEXT_SAFE_VALUE map. v2.200.0/v2.202.0 fixed exactly this
+// class of stale comment in two other files and missed this one in the same
+// sweep; a comment asserting an affordance the component does not have is how
+// the next reader reintroduces it.
+//
+// ⛔ AND FOUR OF THE SIX RAW-HUE ENTRIES WERE ALREADY DEAD — --blue and
+// --accent-teal lost their only consumers when v2.202.0 de-coloured "Total
+// Rules" and "Devices", and --orange/--green never had one. The two live
+// entries (--red, --yellow) were byte-identical to StatCard's own map, so this
+// was a second copy of a lookup whose whole design note says it lives in ONE
+// place: "Mapped HERE rather than at each call site on purpose... there are ~40
+// call sites and the next one added would have been wrong again." Two maps that
+// agree today are two maps that disagree later. Checked entry by entry before
+// deleting: StatCard maps --green/--yellow/--red to --tint-success-fg/
+// --tint-warn-fg/--tint-danger-fg, i.e. exactly what the band map held, and
+// passes var(--unmeasured) through untouched, which is what the null-band
+// fallback relied on. Behaviour is unchanged; the duplication is not.
 
 const BAND_LABEL = {
   excellent: 'Excellent',
@@ -68,8 +71,12 @@ const BAND_LABEL = {
 // These two tiles used to fall through to StatCard's var(--border) SENTINEL,
 // which that component reads as "the caller passed no colour" and answers by
 // rendering the value in ordinary body text. So the em-dash looked exactly
-// like any other unstyled number rather than like a gap. --unmeasured says
-// the true thing, and colours the accent border and the value together.
+// like any other unstyled number rather than like a gap. --unmeasured says the
+// true thing, and it now does TWO jobs rather than the "accent border and the
+// value" this comment used to claim: StatCard reads this exact token as the
+// signal to stamp data-unmeasured, which app/globals.css answers with a DASHED
+// tile border (v2.200.0). Hueless by construction, and louder than the grey
+// edge it replaced.
 const UNMEASURED = 'var(--unmeasured)';
 
 function scoreValue(score) {
@@ -173,7 +180,6 @@ export default async function HeadlineStats() {
             : `${BAND_LABEL[secBand]} · ${secSub}${coverageNote ? ` · ${coverageNote}` : ''}`
         }
         color={BAND_COLOR[secBand] || UNMEASURED}
-        textColor={BAND_TEXT_COLOR[secBand] || UNMEASURED}
         icon={IconShield}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"
@@ -186,8 +192,18 @@ export default async function HeadlineStats() {
         evidence={ev.patchNow}
         value={h.patchNowCount}
         sub="Patch now"
-        color="var(--red)"
-        textColor={TEXT_SAFE['var(--red)']}
+        // ⛔ GATED ON THE COUNT. This was unconditional, so a CLEAN fleet
+        // rendered a red 0 and (next tile) an amber 0 as the two loudest
+        // figures on the Overview — "Colour means RISK" spent on the absence of
+        // risk, which is worse than decoration: it trains the operator to read
+        // red as furniture, and the first real patch_now then arrives in a hue
+        // they have learned to skip. Zero falls to StatCard's var(--border)
+        // sentinel and renders as --text-primary, exactly like "Devices" and
+        // "Total Rules" beside it. The hue is kept for a non-zero count because
+        // there it IS a risk signal — the same gate the /lifecycle tiles have
+        // always had. textColor is omitted: StatCard's own TEXT_SAFE_VALUE maps
+        // --red to --tint-danger-fg, which is what the deleted local map held.
+        color={h.patchNowCount > 0 ? 'var(--red)' : undefined}
         icon={IconAlertTriangle}
         iconColor="var(--tint-danger-fg)"
         iconBg="var(--tint-danger)"
@@ -200,8 +216,8 @@ export default async function HeadlineStats() {
         evidence={ev.highRisk}
         value={h.highRiskCount}
         sub="Critical + high findings"
-        color="var(--yellow)"
-        textColor={TEXT_SAFE['var(--yellow)']}
+        // Gated on the count, same call as "Critical Alerts" above.
+        color={h.highRiskCount > 0 ? 'var(--yellow)' : undefined}
         icon={IconTrendingUp}
         iconColor="var(--tint-warn-fg)"
         iconBg="var(--tint-warn)"
@@ -232,7 +248,6 @@ export default async function HeadlineStats() {
         value={<>{scoreValue(h.complianceScore)}<span style={{ fontSize: '0.5em', color: 'var(--text-muted)' }}> / 100</span></>}
         sub={h.complianceScore === null ? 'Nothing measurable yet' : BAND_LABEL[compBand]}
         color={BAND_COLOR[compBand] || UNMEASURED}
-        textColor={BAND_TEXT_COLOR[compBand] || UNMEASURED}
         icon={IconChart}
         iconColor="var(--tint-success-fg)"
         iconBg="var(--tint-success)"

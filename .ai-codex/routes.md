@@ -557,16 +557,65 @@ independently flagged `unused`/`redundant`/`shadow`. So retirement can never pro
 exists only for the retired application. Honoured rather than worked around; widening it is a product
 decision, not a bug fix.
 
-## LDAP group-to-role mapping (v2.134.0)
+## Directory group-to-role mapping (v2.134.0; Entra added v2.206.0)
 
-GET /api/ldap-mappings [manage_users] [db] — mappings + `legacyModeActive` (LDAP on, zero mappings =
-  every directory user is an Administrator right now) + `bindAccountConfigured` (without a service
-  account SecVault cannot search, so no mapping can ever match).
-POST /api/ldap-mappings [manage_users] [db] — upsert {groupDn, role, description}. Keyed on the
-  NORMALISED dn. Returns `legacyModeEnded` when this was the FIRST mapping, because that changes the
-  outcome for every other directory user on their next login.
-DELETE /api/ldap-mappings?id= [manage_users] [db] — returns `legacyModeReopened` when it was the
-  LAST one, which re-grants Administrator to the whole directory.
+⛔ **ONE ROUTE SERVES BOTH DIRECTORIES**, over one table (`ldap_role_mappings`, whose name is now a
+misnomer — see schema.md). `provider` is `ldap` | `entra`, DEFAULTING TO `ldap` so every caller
+predating the column stays correct; any other value is a 400.
+
+GET /api/ldap-mappings [manage_users] [db] — LDAP `mappings` + `legacyModeActive` (LDAP on, zero
+  mappings = every directory user is an Administrator right now) + `bindAccountConfigured` (without
+  a service account SecVault cannot search, so no mapping can ever match); plus `entraMappings`,
+  `entraConfigured` and `entraNoMappings`. ⛔ **`entraNoMappings` IS THE INVERSE OF
+  `legacyModeActive`, NOT ANOTHER NAME FOR IT**: zero LDAP mappings grants everyone Administrator,
+  zero Entra mappings refuses everyone. Two fields because one panel cannot render both sentences.
+POST /api/ldap-mappings [manage_users] [db] — upsert {groupDn, role, description, provider?,
+  displayName?}. Keyed on the NORMALISED key, per provider. Returns `legacyModeEnded` when this was
+  the FIRST LDAP mapping (it changes the outcome for every other directory user on their next
+  login), or `entraFirstMapping` when it was the first Entra one (it is what makes Entra sign-in
+  possible at all).
+DELETE /api/ldap-mappings?id=&provider= [manage_users] [db] — returns `legacyModeReopened` only
+  when an **LDAP** mapping was the last LDAP one, which re-grants Administrator to the whole
+  directory. ⛔ It reports the provider the row was actually `removedFrom`: the emptiness check is
+  per provider, so a mixed table does not let an Entra deletion claim LDAP legacy mode.
 
 ⛔ `manage_users`, NOT `manage_settings` — super_admin only. A mapping says "everyone in this group
 administers the firewall platform", reached through a membership list SecVault cannot see.
+
+## /api/system/entra  (v2.209.0)
+
+GET /api/system/entra [auth] [manage_users] — `{tenantId, clientId, clientSecretSet, configured,
+  restartPending, restartPendingFields, runningConfigured, redirectUri, consoleUrl, refusals,
+  refusalState, refusalWindowDays, refusalNote}`. ⛔ **`clientSecretSet` IS A BOOLEAN AND THE
+  SECRET IS NEVER RETURNED** — the same contract `product_license_key` has via `HIDDEN_KEYS`: a
+  value nothing needs back must not be readable back. ⛔ **SAVED vs RUNNING are separate facts**
+  and both are reported, because NextAuth builds its provider array once at startup;
+  `restartPendingFields` names the LABELS that differ (never the values, which is what lets the
+  secret be compared at all). ⛔ An UNREADABLE `.env.local` is a 500, never an empty form —
+  reporting "unconfigured" for a file we could not read would invite an administrator to retype a
+  tenant that is already there, and the write would then be made against a file whose contents are
+  unknown. ⛔ `refusals` (v2.211.0) is the recent `entra_signin_refused` rows from `activity_log`,
+  read best-effort so a logging problem does not become a configuration outage — and
+  **`refusalState` is TRI-STATE (`some`/`none`/`unknown`)**, because an unreadable log is not a
+  statement that nothing was refused. ⛔ **Time-bounded as well as count-bounded**
+  (`REFUSAL_WINDOW_DAYS`): nothing clears these rows, so `LIMIT 5` alone would leave an amber panel
+  on screen for ever after the misconfiguration was fixed — once sign-in works, no newer refusals
+  arrive to push the old ones out.
+PUT /api/system/entra [auth] [manage_users] — writes the three `ENTRA_*` keys to `.env.local` via
+  `lib/envFile.js`. Clearing all three DISABLES SSO. ⛔ An OMITTED `clientSecret` leaves the stored
+  one alone while an EMPTY STRING clears it — collapsing those would make every edit of the tenant
+  id wipe the secret, since the form can never pre-fill a value it is not given. ⛔ The secret is
+  written FIRST, so a partial failure leaves a tenant without a usable secret (refused at sign-in)
+  rather than a secret beside a tenant id that no longer matches it. ⛔ `restartRequired` is always
+  true and is stated in the RESPONSE, not only in the UI.
+
+⛔ **GATED ON `manage_users`, NOT `manage_settings` — DELIBERATELY STRICTER THAN THE
+CONSOLE-ADDRESS PANEL IT IS MODELLED ON.** Whoever sets the tenant decides WHICH DIRECTORY IS
+TRUSTED TO ISSUE IDENTITIES for this platform. An `admin` who could point `ENTRA_TENANT_ID` at a
+tenant they control, map a group they own to Super Admin and sign in would have escalated past
+every other guard without touching the Users panel — the same authority as creating an account,
+which is the reasoning `/api/ldap-mappings` already uses for the mappings themselves.
+Configuring the issuer cannot be a lesser privilege than configuring the groups.
+⛔ It lives in `.env.local` rather than the database because that is FORCED, not chosen: NextAuth
+builds its provider array at module load from `process.env`, so a tenant stored in a table is not
+available at the moment the provider would have to be registered.

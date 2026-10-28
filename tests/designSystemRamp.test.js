@@ -473,6 +473,55 @@ const FINDING_TILE_LABEL =
 
 const RAW_RAMP_PROP = /\bcolor=(?:"(var\(--(?:blue|yellow)\))"|\{\s*'(var\(--(?:blue|yellow)\))'\s*\})/;
 
+// ⛔ AND THE SAME TILE WRITTEN AS A DATA ROW INSTEAD OF AN ELEMENT, which is
+// how this case went blind to the one file it was written for.
+//
+// components/dashboard/RulesetOverview.js builds its tiles as an ARRAY of
+// { label, value, color } objects rendered through .map(), so there is no
+// `<StatCard label="Unused" color="var(--blue)" />` anywhere in it to match --
+// the element scan above found NOTHING in that file, ever. It therefore never
+// saw the --blue on "Unused" it exists to catch (hand-fixed in v2.202.0, not
+// by this guard), and could not see that the SAME release left `Shadow` and
+// `Redundant` on the raw var(--yellow) one line below. A guard that cannot see
+// the shape the offender is written in is a guard that cannot fire.
+//
+// ⛔ SCOPED BY `value:`, NOT BY `label:` ALONE, and the scope is the design.
+// A StatCard tile descriptor carries the NUMBER; a chart legend entry does not.
+// components/devices/OverviewRuleHygieneCard.js's CATEGORY_DEFS
+// ({ key, label, color } -- six deliberately distinct categorical fills,
+// including --red on `unused` which the engine files as medium) and
+// components/analysis/RuleStatsBarChart.js's bar definitions are legends for a
+// CHART, where distinguishable hues are the job and no ranking is read off a
+// single swatch. Requiring `value:` separates the two mechanically instead of
+// by a filename list. Measured when this was written: 163 object literals in
+// the repo carry label+value, and ZERO of them pair a finding label with a raw
+// ramp hue -- so this starts green and fails only on a new offender.
+const TILE_OBJECT = /\{(?:[^{}]|\{[^{}]*\})*\}/g;
+const OBJ_LABEL = /\blabel:\s*'([^']*)'/;
+const OBJ_COLOR = /\bcolor:\s*([^,}]*)/;
+const RAW_RAMP_VALUE = /var\(--(?:blue|yellow)\)/;
+
+// Every tile DECLARATION in a file, in both syntaxes, as { label, hue, shape }.
+// One extractor for both so the two forms cannot drift apart on which labels or
+// which hues they consider -- the same reason sourceFiles() is shared.
+function tileDeclarations(code) {
+  const out = [];
+  for (const el of code.match(/<StatCard\b[\s\S]{0,900}?\/>/g) || []) {
+    const label = /\blabel="([^"]*)"/.exec(el);
+    const hue = RAW_RAMP_PROP.exec(el);
+    if (label && hue) out.push({ label: label[1], hue: hue[1] || hue[2], shape: '<StatCard>' });
+  }
+  for (const obj of code.match(TILE_OBJECT) || []) {
+    if (!/\bvalue:/.test(obj)) continue;
+    const label = OBJ_LABEL.exec(obj);
+    const color = OBJ_COLOR.exec(obj);
+    if (!label || !color) continue;
+    const hue = RAW_RAMP_VALUE.exec(color[1]);
+    if (hue) out.push({ label: label[1], hue: hue[0], shape: '{ label, value, color }' });
+  }
+  return out;
+}
+
 test('no tile counting a named FINDING TYPE wears a raw --blue or --yellow', () => {
   const offenders = [];
   for (const file of sourceFiles()) {
@@ -481,17 +530,10 @@ test('no tile counting a named FINDING TYPE wears a raw --blue or --yellow', () 
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
-    // Each <StatCard ... /> element, props-chunk only. Self-closing is the only
-    // form this component is ever used in; the 900-char bound keeps a runaway
-    // match from swallowing the rest of the file if that ever changes.
-    const elements = code.match(/<StatCard\b[\s\S]{0,900}?\/>/g) || [];
-    for (const el of elements) {
-      const label = /\blabel="([^"]*)"/.exec(el);
-      const hue = RAW_RAMP_PROP.exec(el);
-      if (!label || !hue) continue;
-      if (!FINDING_TILE_LABEL.test(label[1].trim())) continue;
+    for (const t of tileDeclarations(code)) {
+      if (!FINDING_TILE_LABEL.test(t.label.trim())) continue;
       offenders.push(
-        `${path.relative(REPO, file)}: <StatCard label="${label[1]}" color="${hue[1] || hue[2]}">`
+        `${path.relative(REPO, file)}: ${t.shape} label="${t.label}" color="${t.hue}"`
       );
     }
   }
@@ -505,4 +547,92 @@ test('no tile counting a named FINDING TYPE wears a raw --blue or --yellow', () 
       'severity at all:\n' +
       offenders.join('\n')
   );
+});
+
+// ⛔ BOTH SYNTAXES ARE ACTUALLY REACHED. Without this the extractor could lose
+// one branch (a changed JSX bound, a regex typo) and the suite would stay green
+// over a scan that had quietly stopped looking -- which is precisely the way
+// the element-only version failed. It asserts the EXTRACTOR sees a tile written
+// each way, not that any particular file is clean, so it does not go stale when
+// a real call site is fixed.
+test('the tile scan sees BOTH an element tile and an array-built tile', () => {
+  const asElement = '<StatCard label="Unused" value={3} color="var(--yellow)" />';
+  const asObject = "const t = [{ label: 'Unused', value: findings.unused, color: 'var(--yellow)' }];";
+
+  for (const [shape, src] of [['element', asElement], ['object literal', asObject]]) {
+    const found = tileDeclarations(src);
+    assert.equal(found.length, 1, `the tile scan missed a tile written as an ${shape}`);
+    assert.equal(found[0].label, 'Unused');
+    assert.ok(/--yellow/.test(found[0].hue), `hue not extracted from the ${shape} form`);
+  }
+
+  // And a chart legend entry -- no `value:` -- is deliberately NOT a tile.
+  assert.deepEqual(
+    tileDeclarations("const d = [{ key: 'redundant', label: 'Redundant Rules', color: 'var(--yellow)' }];"),
+    [],
+    'a chart legend entry was read as a stat tile; categorical chart fills are ' +
+      'not a severity claim and flagging them would train everyone to ignore ' +
+      'this failure'
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 7. ⛔ --text-muted IS A CAPTION COLOUR AND NOTHING MEASURED IT.
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Every --tint-*/-fg pair is pinned at 4.5:1 above and --unmeasured is pinned on
+// two surfaces, and --text-muted -- the token under every stat caption, table
+// heading and hint in the product -- had no guard at all. v2.203.0 then moved
+// .stat-label onto it, which took the label from 9.00:1 to 4.506:1 on a white
+// card: a PASS, by 0.006, with nothing in the repo measuring the margin. (The
+// label has since been moved back to --text-secondary; .stat-sub, .rpt-tile-label
+// and .ev-note still sit on --text-muted on --bg-card.)
+//
+// ⛔ TWO OF ITS SURFACES ARE BELOW 4.5 TODAY AND THIS IS A RATCHET, NOT A PASS.
+// Measured, light theme: --text-muted is 4.270:1 on --bg-primary -- which is the
+// `th` rule's own background, so every table column heading in light theme is
+// under WCAG 1.4.3 -- and 4.085:1 on --surface-subtle. Fixing that means moving
+// the token, and --unmeasured already sits at #666F7B for the same reason, so
+// the two would collide and that is a palette decision rather than a bug sweep.
+// Reported, not fixed. What is pinned here is that it may not get WORSE: the
+// floors below are the measured values, so lightening --text-muted fails the
+// build and the message says what the target is.
+test('--text-muted is legible where captions actually sit, and never gets worse', () => {
+  const { light, dark } = tokens();
+  for (const [theme, t] of [['light', light], ['dark', dark]]) {
+    const fg = t['--text-muted'];
+    assert.ok(HEX.test(fg), `--text-muted should be a hex in ${theme}, got "${fg}"`);
+
+    // The surface .stat-sub / .rpt-tile-label / .ev-note are drawn on. A hard
+    // 4.5:1 floor: this one is a real pass in both themes.
+    const card = contrast(fg, t['--bg-card']);
+    assert.ok(
+      card >= 4.5,
+      `--text-muted (${fg}) on --bg-card is ${card.toFixed(3)}:1 in ${theme} theme, below ` +
+        "WCAG 1.4.3's 4.5:1. Every stat caption and report-tile label in the product is " +
+        'drawn in this token on a card; it is the one surface where it has margin, and ' +
+        'the margin is 0.006 in light theme — do not spend it.'
+    );
+
+    // RATCHET floors: measured 2026-10-28, and in LIGHT theme both are BELOW
+    // 4.5 and reported rather than fixed. They must not regress while the
+    // palette decision is outstanding. Each is the measured ratio less 0.01, so
+    // the floor cannot be tripped by float noise in the last printed digit --
+    // measured light 4.270 / 4.085, dark 6.199 / 5.029.
+    const floors = theme === 'light'
+      ? { '--bg-primary': 4.26, '--surface-subtle': 4.07 }
+      : { '--bg-primary': 6.18, '--surface-subtle': 5.01 };
+    for (const [surface, floor] of Object.entries(floors)) {
+      const ratio = contrast(fg, surfaceHex(t, surface));
+      assert.ok(
+        ratio >= floor,
+        `--text-muted (${fg}) on ${surface} is ${ratio.toFixed(3)}:1 in ${theme} theme, worse ` +
+          `than the ${floor}:1 measured when this guard was written. In light theme this token ` +
+          'is ALREADY under 4.5:1 on both of these surfaces — `th` sets ' +
+          '`color: var(--text-muted); background: var(--bg-primary)`, so table headings are the ' +
+          'live case — and the fix is to darken the token, which collides with --unmeasured ' +
+          '(#666F7B) and needs a palette decision. Until then it may not get worse.'
+      );
+    }
+  }
 });

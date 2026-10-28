@@ -2,9 +2,25 @@
   <!--
     The SecVault brandmark as the browser-tab icon. Geometry is identical to
     components/ui/BrandMark.js; if that file's numbers change, change them here
-    too. This is a STATIC file served by Next's app/icon convention, so it
-    cannot read the CSS custom properties and the two token values below are
-    hardcoded copies of --navy / --primary (and their dark-theme pair).
+    too.
+
+    WHY THE HUES ARE LITERAL HEX, which is the thing a later session will want
+    to "fix": this is a STATIC file served by Next's app/icon convention, so it
+    is never inside a SecVault document and has no palette to read. It cannot
+    use the CSS custom properties at all. The four values below are hardcoded
+    copies of the navy and primary tokens in app/globals.css, plus their
+    dark-theme pair.
+
+    XML FORBIDS A DOUBLE HYPHEN INSIDE A COMMENT, and the first version of this
+    note spelled those two token names with their usual two-dash prefix. An SVG
+    served as image/svg+xml is parsed STRICTLY, so the whole file was rejected
+    and every browser fell back to its blank default page icon: the favicon
+    added in v2.199.0 never rendered anywhere, and the comment written to
+    explain the hardcoded hues is what broke the file it was explaining. It
+    shipped that way because nothing in the repo parsed this file — 5,887
+    passing tests, a clean build and a verified deploy all said nothing.
+    tests/appChrome.test.js parses it now. Name those tokens in words here;
+    never write the prefix.
 
     There was no favicon at all before v2.199.0 — the tab showed the browser's
     blank default page icon, on a console people keep pinned all day.

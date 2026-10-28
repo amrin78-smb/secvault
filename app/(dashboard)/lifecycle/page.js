@@ -537,12 +537,24 @@ export default async function LifecyclePage({ searchParams }) {
             category. Since v2.200.0 that token is also what earns the DASHED
             tile border, so the one tile on this page whose entire job is to
             say "we could not read this" was the only one not drawn that way,
-            directly under a banner reading "but not every contract could be". */}
+            directly under a banner reading "but not every contract could be".
+
+            ⛔ AND IT IS GATED ON THE COUNT, WHICH v2.202.0 FORGOT — the four
+            tiles above it have always been, and this one was unconditional. So
+            on a fleet where licence collection SUCCEEDED EVERYWHERE the page
+            drew a dashed, hueless tile reading "0 / Not collected / devices":
+            the design system's "we could not measure this" treatment applied
+            to a measurement that succeeded, which is the failed-read-as-a-fact
+            rule running BACKWARDS — asserting a gap we do not have. A measured
+            zero is an ordinary quiet fact and takes --text-muted like every
+            other zero on this row. It was dormant only because the reference
+            fleet's count is non-zero; it fires the day collection gets
+            healthy, i.e. precisely when nobody is looking for it. */}
         <StatCard
           label="Not collected"
           value={licenseGapDevices.length}
           sub="devices"
-          color="var(--unmeasured)"
+          color={licenseGapDevices.length > 0 ? 'var(--unmeasured)' : 'var(--text-muted)'}
         />
       </div>
 

@@ -202,6 +202,30 @@ describe('loadScopeForSession', () => {
     assert.equal(s.state, SCOPE_STATES.UNKNOWN);
   });
 
+  it('⛔ an UNSCOPABLE provider with no usable id is UNKNOWN, never the whole fleet', async () => {
+    // ⛔ ORDER IS LOAD-BEARING. With the provider branches ahead of the id
+    // check, `{ id: null, provider: 'entra' }` — an Entra id_token carrying
+    // neither `oid` nor `sub` — took the UNSCOPABLE branch and resolved to
+    // `unscoped`, i.e. every firewall, silently, for a session SecVault could
+    // not identify. The byte-identical `local` case was denied, so the
+    // three-state rule held for one provider out of three.
+    //
+    // ⛔ The query must not run either: without an id there is nothing to bind,
+    // and a pool that throws would otherwise reach UNKNOWN through the catch
+    // and make a state-only assertion green under the bug.
+    for (const user of [{ provider: 'entra' }, { id: null, provider: 'entra' },
+                        { id: '', provider: 'ldap' }, { id: 7, provider: 'ldap' }]) {
+      let queried = false;
+      const s = await loadScopeForSession({ user }, pool(async () => {
+        queried = true;
+        return { rows: [] };
+      }));
+      assert.equal(queried, false, `must not query: ${JSON.stringify(user)}`);
+      assert.equal(s.state, SCOPE_STATES.UNKNOWN, JSON.stringify(user));
+      assert.equal(canSeeDevice(s, A), false, 'and must not see a device');
+    }
+  });
+
   it('⛔ a local provider whose id is not a UUID is a contradiction, so UNKNOWN', async () => {
     // Not "another provider" — the claim and the id disagree, and guessing
     // which half is right is how the original fail-open was built.

@@ -15,11 +15,23 @@ import BrandMark from '../ui/BrandMark';
 function SecVaultLogo() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* ⛔ --shell-accent, NOT --accent-teal (which IS --primary and FLIPS).
+          FOURTH occurrence of the trap --shell-accent was created to end, one
+          release after the token appeared: .sv-topbar is --navy, which does not
+          flip. Measured on --navy: --accent-teal is 3.92:1 in LIGHT (the
+          default) and 8.36:1 in dark, while --shell-accent is 8.19:1 in both.
+          So the shield and the "Vault" half of the wordmark rendered in a dull
+          dark teal while the active sidebar item an inch below glowed bright
+          cyan -- two brand hues on the same non-flipping ground, 2.1x apart, on
+          the first thing a customer looks at. It clears large-text 3:1, so this
+          is brand consistency rather than legibility, which is why nothing
+          caught it. The test is not which element it is, it is WHAT GROUND IT
+          SITS ON. */}
       <BrandMark
         markId="header"
         height={32}
         structure="var(--shell-fg)"
-        accent="var(--accent-teal)"
+        accent="var(--shell-accent)"
       />
       {/* ⛔ REAL TEXT, not <text> inside the SVG as this was until v2.199.0.
           The SVG form could not be selected, found by the browser's own find,
@@ -38,7 +50,8 @@ function SecVaultLogo() {
         }}
       >
         <span style={{ color: 'var(--shell-fg)' }}>{PRODUCT_NAME_PARTS[0]}</span>
-        <span style={{ color: 'var(--accent-teal)' }}>{PRODUCT_NAME_PARTS[1]}</span>
+        {/* --shell-accent, same reason as the mark above. */}
+        <span style={{ color: 'var(--shell-accent)' }}>{PRODUCT_NAME_PARTS[1]}</span>
       </span>
     </div>
   );

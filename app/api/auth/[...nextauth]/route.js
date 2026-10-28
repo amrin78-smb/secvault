@@ -441,6 +441,83 @@ export const authOptions = {
     signIn: '/login',
   },
   callbacks: {
+    // ⛔ THE FRONT DOOR. WITHOUT THIS CALLBACK A REFUSED ENTRA SIGN-IN WAS NOT
+    // REFUSED — IT WAS LOGGED AS REFUSED AND THEN COMPLETED.
+    //
+    // `pages.signIn` above is a PAGE PATH, not a callback, and NextAuth's
+    // default `signIn` callback returns `true`. So the Entra branch of jwt()
+    // computed a refusal, printed `[entra] sign-in REFUSED`, wrote an
+    // `entra_signin_refused` row to activity_log — and then returned the token.
+    // The OAuth sign-in completed every time. Production's activity_log shows
+    // two real users took that path on 2026-10-27.
+    //
+    // ⛔ AND THE SESSION IT HANDED THEM WAS NOT HARMLESS. Nothing downstream
+    // re-checks the role for a READ: middleware only required that a token
+    // exist, app/(dashboard)/layout.js redirects only on a device-scope
+    // refusal, GET API routes are deliberately not RBAC-gated, and
+    // lib/deviceScope.js classifies `entra` as UNSCOPABLE — which returns
+    // UNSCOPED, i.e. THE WHOLE FLEET. A refused user got read access to every
+    // firewall, its rules, its configs, its CVEs and its compliance posture.
+    //
+    // The credentials providers do not need this: `authorize()` returns null on
+    // a refusal, which NextAuth already treats as a failed sign-in. OAuth has
+    // no equivalent — the provider has already authenticated the person, and
+    // whether SecVault ACCEPTS them is this callback's only chance to say.
+    //
+    // ⛔ IT CALLS THE SAME `decideEntraAccess` jwt() CALLS, AND THE SAME
+    // `isEntraPermitted`. Two copies of "may this person in" would eventually
+    // disagree, and the wrong one would be the one granting access.
+    async signIn({ user, account }) {
+      if (!account || account.provider !== 'entra') return true;
+
+      const decision = await entraRoles.decideEntraAccess(pool, user && user.entraClaims);
+      const who = (user && (user.name || user.email)) || 'unknown';
+
+      if (entraRoles.isEntraPermitted(decision)) {
+        console.log(`[entra] sign-in: ${who} -> ${decision.role} (${decision.outcome})`);
+        return true;
+      }
+
+      // ⛔ THE REASON GOES TO THE SERVER LOG AND TO activity_log, WHICH IS
+      // WHERE Settings -> Single sign-on READS IT. It does NOT go in the
+      // redirect below: `no_matching_group`, `groups_unreadable` and
+      // `groups_overage` need three different ADMINISTRATOR fixes, and naming
+      // which one applies on a pre-authentication page would tell an
+      // unauthenticated visitor how the customer's directory is wired. Same
+      // rule the login form already follows for MFA — one message to the user,
+      // the specific reason to the log.
+      console.warn(`[entra] sign-in REFUSED: ${who} — ${decision.outcome}: ${decision.reason}`
+        + (decision.error ? ` [${decision.error}]` : ''));
+      try {
+        await logActivity(pool, {
+          actor: who,
+          action: 'entra_signin_refused',
+          detail: `${decision.outcome}: ${decision.reason}`,
+        });
+      } catch (auditErr) {
+        // Belt and braces: lib/activityLog.js swallows its own failures by
+        // contract ("NEVER throws") and warns, so this catch is for a future
+        // change to that contract rather than for today's behaviour.
+        console.warn(`[entra] could not record the refusal: ${auditErr.message}`);
+      }
+      // ⛔ THE AUDIT ROW IS THE ONE RECORD THAT GOES MISSING ON THE
+      // mappings_unreadable PATH, because the database that could not supply
+      // the mappings is the same one this INSERT needs. Settings -> Single
+      // sign-on reads refusals out of activity_log, so on that path the SERVER
+      // LOG above is the only evidence the sign-in was refused. Stated here so
+      // nobody reads an empty refusal list as "no refusals happened".
+
+      // ⛔ A STRING RETURN IS A REDIRECT (next-auth/core/routes/callback.js: a
+      // falsy return goes to /api/auth/error?error=AccessDenied instead). The
+      // login page renders its own explanation for `sso=refused`; a bare bounce
+      // to /login reads as "my password stopped working", which sends the user
+      // to reset a credential that is working perfectly.
+      //
+      // ⛔ NO SESSION COOKIE IS ISSUED ON THIS PATH. NextAuth returns before
+      // callbackHandler runs, so there is no token for jwt() to decorate and
+      // nothing for middleware to admit.
+      return '/login?sso=refused';
+    },
     async jwt({ token, user, account }) {
       if (user) {
         token.id = user.id;
@@ -494,53 +571,53 @@ export const authOptions = {
       // ⛔ FAILS CLOSED to null, and so does an unreadable mapping table:
       // ldapRoles.loadMappings THROWS rather than returning [] precisely so
       // that a database blip cannot be mistaken for "no mappings configured".
+      // That throw is caught inside decideEntraAccess, which returns its own
+      // MAPPINGS_UNREADABLE outcome — a SecVault fault, no longer wearing
+      // GROUPS_UNREADABLE's "check your app registration" label.
+      //
+      // ⛔ `isEntraPermitted`, NOT `again.role || null`. The old line was
+      // exactly the `!!role` test lib/ldapRoles.js's own comment says
+      // `isPermitted` exists to prevent, sitting one provider away from the
+      // LDAP branch that calls it correctly.
+      //
+      // ⛔ THIS IS THE LAYER THAT CATCHES A MID-SESSION REVOCATION, and the
+      // signIn callback cannot: the front door has already been passed. A
+      // mapping an administrator removes must stop working at once, not at the
+      // end of a token's 30-day life. ⛔ A role that goes NULL here is also
+      // DENIED STRUCTURALLY, in middleware.js — see the roleRefusal() note
+      // there. Nulling the role alone was never enough, because nothing on the
+      // read path consults it.
       if (token.provider === 'entra') {
-        let outcome = entraRoles.OUTCOME.GROUPS_UNREADABLE;
-        let reason = 'The Entra role mappings could not be read.';
-        try {
-          const mappings = await ldapRoles.loadMappings(pool, 'entra');
-          const again = entraRoles.resolveEntraRole({
-            claims: token.entraClaims,
-            mappings: mappings.map((m) => ({ groupKey: m.groupDn, role: m.role })),
-          });
-          token.role = again.role || null;
-          outcome = again.outcome;
-          reason = again.reason || '';
-        } catch {
-          token.role = null;
-        }
-        token.entraOutcome = outcome;
+        const again = await entraRoles.decideEntraAccess(pool, token.entraClaims);
+        token.role = entraRoles.isEntraPermitted(again) ? again.role : null;
 
-        // ⛔ RECORDED ONLY ON THE INITIAL SIGN-IN, NEVER ON EVERY TOKEN USE.
-        // This callback runs on EVERY REQUEST -- that is the whole point of
-        // re-resolving the role here -- so writing an audit row unconditionally
-        // would put one INSERT on every page load and bury activity_log. `user`
-        // is set by NextAuth only on the first call after a sign-in.
+        // ⛔ NOTHING IS LOGGED OR AUDITED HERE, AND NOTHING IS STORED ON THE
+        // TOKEN. The sign-in decision — with its log line and its activity_log
+        // row — belongs to the signIn callback above, which now actually
+        // enforces it; duplicating it here would print every sign-in twice.
+        // This callback runs on EVERY REQUEST, so an unconditional write of
+        // either kind would bury activity_log under one INSERT per page load.
         //
-        // ⛔ THIS EXISTS BECAUSE THE REASON WAS BEING COMPUTED AND THEN THROWN
-        // AWAY. resolveEntraRole produces a named, actionable outcome for each
-        // way a sign-in can fail -- unreadable claim, no matching group, group
-        // overage -- and all of it was stored on the token where nobody could
-        // read it. An operator met "No Role" and had nothing to act on. A
-        // reason that cannot be read is a guard that cannot fire.
-        if (user) {
-          const who = token.name || token.email || 'unknown';
-          if (token.role) {
-            console.log(`[entra] sign-in: ${who} -> ${token.role} (${outcome})`);
-          } else {
-            console.warn(`[entra] sign-in REFUSED: ${who} — ${outcome}: ${reason}`);
-            // Best-effort, like every other logActivity call site: a failure to
-            // record must never turn a completed sign-in decision into an error.
-            try {
-              await logActivity(pool, {
-                actor: who,
-                action: 'entra_signin_refused',
-                detail: `${outcome}: ${reason}`,
-              });
-            } catch (auditErr) {
-              console.warn(`[entra] could not record the refusal: ${auditErr.message}`);
-            }
-          }
+        // ⛔ `token.entraOutcome` IS GONE. It was written on every single
+        // request and READ BY NOTHING — a repo-wide grep found exactly one
+        // occurrence, the assignment itself. v2.211.0 was titled "the refusal
+        // reason existed and nobody could read it" and fixed the REASON by
+        // logging it, while leaving in place the token field whose
+        // unreadability it diagnosed. The outcome now has one home per
+        // audience: the server log and activity_log for the administrator
+        // (surfaced in Settings -> Single sign-on, beside the settings that
+        // cause it), and nothing at all on a pre-authentication page, where
+        // naming it would disclose how the customer's directory is wired.
+        //
+        // ⛔ ONE EXCEPTION, AND IT IS A DISAGREEMENT DETECTOR. If `user` is set
+        // we are on the first call after a sign-in that signIn() just
+        // PERMITTED, so a refusal here means the two decisions disagreed
+        // within milliseconds — a mapping changed mid-flight, or the two calls
+        // are no longer asking the same question. Silence would make that
+        // invisible.
+        if (user && !token.role) {
+          console.warn(`[entra] ${again.outcome}: signIn permitted this sign-in and the token `
+            + 're-resolution refused it. The session carries no role and will be denied.');
         }
       }
 

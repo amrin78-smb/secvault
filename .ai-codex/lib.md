@@ -3127,12 +3127,105 @@ Pure `resolveRole` + three pool-taking storage functions. Full rules in CLAUDE.m
   significant (`CN=Help Desk`).
 - `isMappableRole(role)` — validated against rbac's `ASSIGNABLE_ROLES`, never a local list.
 - `isPermitted(resolution)` — deliberately not `!!role`.
-- `loadMappings(pool)` ⛔ **THROWS** on a read failure; `[]` is an instruction, not an absence.
-- `upsertMapping` / `deleteMapping`.
+- `loadMappings(pool, provider = 'ldap')` ⛔ **THROWS** on a read failure; `[]` is an instruction,
+  not an absence. ⛔ The `provider` argument (v2.206.0) is what makes this table serve BOTH
+  directories; omitting it answers for LDAP, which keeps every existing caller correct.
+- `upsertMapping(pool, {groupDn, role, description, provider = 'ldap', displayName})` /
+  `deleteMapping`. ⛔ The upsert's `ON CONFLICT` target is `(provider, group_dn_normalised)`,
+  matching the index that replaced the old column-level UNIQUE — see schema.md.
 
 `app/api/auth/[...nextauth]/route.js` uses it twice: at `authorize()` (refusing the login when the
 mapping table is unreadable) and in `jwt()` on EVERY token use, so a revoked mapping applies at once
 rather than at JWT expiry. 24 tests, 7 mutations verified to bite.
+
+## entraRoles.js (v2.206.0) — which role an Entra ID user gets
+
+Phase 1 of `.ai-codex/entra-sso-proposal.md`. ⛔ **IT DELEGATES THE JUDGEMENT TO `ldapRoles`
+RATHER THAN RE-IMPLEMENTING IT.** "A directory says this person is in these groups — what role is
+that?" is not LDAP-specific, and two files answering it would eventually disagree with the wrong
+one granting access. This file owns only what is genuinely different about Entra: the GROUP CLAIM,
+which can be absent for a reason that is not "no groups", and the ZERO-MAPPINGS call, which is the
+OPPOSITE of LDAP's.
+
+- `OUTCOME` — `mapped` | `no_mappings` | `no_matching_group` | `groups_unreadable` |
+  `groups_overage` | `mappings_unreadable` | `mappings_malformed`. ⛔ Every member is returned by
+  some input and a test proves it; a seventh (`NOT_CONFIGURED`) that nothing returned and nothing
+  read was REMOVED rather than kept for completeness — a dead state in the enum driving an
+  authorisation decision invites a branch that can never fire.
+- `hasGroupOverage(claims)` — is Entra telling us the claim was TRUNCATED, via
+  `_claim_names`/`_claim_sources`? It omits `groups` entirely past ~200 memberships.
+- `groupsFromClaims(claims)` → `{groups, overage}`. ⛔ **THREE outcomes, not two**: an array
+  (however short), or `null` meaning WE COULD NOT ASK. `null` and `[]` must reach the resolver as
+  different things. A user in 201 groups is not a user in zero — and it is the most
+  group-assigned accounts, i.e. the customer's administrators, that it would hit.
+- `resolveEntraRole({claims, mappings})` → `{role, outcome, matched, reason}`. Checks overage
+  FIRST, then an unreadable claim, then zero mappings, then delegates the match to
+  `ldapRoles.resolveRole` (most-privileged-match-wins, unchanged; an Entra group GUID simply
+  occupies the `groupDn` field).
+- `isEntraPermitted(resolution)` — delegates to `ldapRoles.isPermitted`. ⛔ A function, never
+  `!!role`: the role must be present AND be one a mapping may grant.
+- `decideEntraAccess(pool, claims)` — **the ONE Entra sign-in decision**, called by both
+  `callbacks.signIn` and `callbacks.jwt` so the front door and the per-request re-resolution
+  cannot disagree.
+- `isEntraConfigured(env = process.env)` — all three `ENTRA_*` vars present. ⛔ Unconfigured is
+  NOT an error and not a broken button: the provider is never registered, so nothing renders and
+  nothing is logged as a fault — the same contract `CVE_HUB_LICENSE_KEY` returning `notRun` has.
+
+⛔ **ZERO MAPPINGS DENY, WHICH IS THE DELIBERATE OPPOSITE OF `ldapRoles`.** LDAP treats an empty
+table as "grant `admin`" because it shipped before mappings existed and making empty mean deny
+would have locked every installed customer out on the upgrade that delivered it. That reasoning
+does not transfer: SecVault has never shipped Entra SSO, so there is no installed base to protect
+and failing open would only create a hole. The same call `productLicense.js` makes about `modules`
+while the sibling suite apps fail open.
+
+## entraSettings.js — validating and SEQUENCING a change to the trusted directory
+
+Pure decision layer behind `PUT/GET /api/system/entra` (`manage_users`), split out of that route
+because the route imports next-auth and could not be tested at all — the same reason
+`lib/consoleUrl.js` is "pure and separately tested", for a field that is strictly more dangerous.
+Three defects shipped here while it was untestable. Tests: `tests/entraSettingsRoute.test.js`.
+
+- `ENTRA_KEYS` · `ENTRA_FIELD_LABELS` · `REFUSAL_WINDOW_DAYS` (7) · `GUID`
+- `normaliseEntraInput(body)` → `{tenantId, clientId, clientSecret, blankedByTrim}`. ⛔ The secret
+  is THREE-WAY: `undefined` = keep the stored one, `''` = clear it, a value = replace. It is now
+  TRIMMED — `parseEnv` trims on read, so surrounding whitespace never survived the round trip
+  anyway, while a pasted trailing NEWLINE hit `setEnvValue`'s line-break refusal. ⛔ A
+  whitespace-only secret is `blankedByTrim` and REFUSED, never read as "remove it".
+- `duplicateEntraKeys(text, keys)` — pre-flight, using `envFile`'s own `LINE_RE` (one parser, not
+  two). ⛔ Following both `.env.local.example` and the setup doc's hand-edit fallback duplicates all
+  three keys, which is the reproduced cause of the silent-success bug below.
+- `planEntraWrite(input, {storedSecret})` → `{ok, disabling, configured, writes}` |
+  `{ok:false, status, error}`. ⛔ **THE WRITE ORDER IS `OFF → CHANGE → ON`**: blank
+  `ENTRA_TENANT_ID` first, then the secret and client id, then the real tenant LAST. The route used
+  to write the secret first and a comment claimed that left "a tenant WITHOUT a usable secret"; it
+  produced the exact inverse — a NEW SECRET beside the OLD TENANT — and since `isEntraConfigured`
+  needs all three non-empty, and all three already are on a live install, no partial sequence could
+  ever turn the feature off. The order now MAKES that state unreachable instead of asserting it:
+  any failure after the first write leaves the tenant blank, so SSO is definitively OFF and local
+  accounts are untouched. Costs two extra writes on a secret-only rotation, deliberately.
+  ⛔ Blank ids with no secret instruction is a 400 NAMING the Turn-off control — it used to answer
+  "must be a GUID", telling the operator to restore the value they had just removed, and the
+  `disabling` branch was unreachable from the form at all.
+- `applyEntraWrites(writes, write)` → `{ok, landed, changed}` | `{ok:false, failedKey, error,
+  landed, backupPath}`. ⛔ **`setEnvValue` RETURNS `{ok:false, error}`; IT DOES NOT THROW** — a
+  verdict to INSPECT, not an exception to catch. The route wrapped three bare calls in a
+  `try/catch` and read nothing, so every refused write answered HTTP 200 `ok:true` with all three
+  keys reported written. `write` is INJECTED, so a test drives every refusal shape with no server.
+- `entraWriteFailureAnswer(outcome)` → the 500 body, naming WHICH keys landed and whether SSO is
+  now off. ⛔ Labels only, never values.
+- `entraRestartPending(saved, running)` → `{pending, fields}`. ⛔ Compares **VALUES, including the
+  secret, server-side**; only the field LABEL travels. The panel compared configured-NESS
+  (boolean vs boolean, both true on a live install), so a client-secret ROTATION never showed the
+  banner — the process kept presenting the REVOKED secret while the UI implied otherwise.
+- `refusalQuery(windowDays, limit)` → `{text, values}`. ⛔ Built here so the TIME BOUND is a
+  contract a test can assert rather than a line of source; the list had no bound at all, so a
+  fixed problem left a permanent amber panel.
+- `entraRefusalAnswer(rows, readFailed)` → `{refusals, refusalState, refusalWindowDays,
+  refusalNote}`. ⛔ `none` | `some` | `unknown` — a failed log read is NOT an empty list.
+
+⛔ **NOTHING HERE RETURNS THE CLIENT SECRET, AND NOTHING RETURNS `envFile`'s `previous`** — for
+`ENTRA_CLIENT_SECRET` that IS the old secret. The console-address route forwards `previous` to its
+client; copying that pattern would put a live credential in an HTTP response body.
 
 ## deviceScope.js / deviceScopePaths.js / deviceScopeCoverage.js — per-user firewall scoping
 
@@ -3144,9 +3237,13 @@ Full rules in CLAUDE.md's "Per-user device scoping". The surface:
 - `scopeFromRows(rows)` — `null` => unknown, `[]` => unscoped, rows with no usable id => unknown.
 - `canSeeDevice` / `filterDevices` / `scopeSqlClause` (⛔ unknown yields ` AND FALSE`, never an
   absent clause) / `isScoped` / `refusalMessage`.
-- `loadScopeForSession(session, pool)` — ⛔ **THREE cases, not two** (v2.174.0): no session or no
-  id => `unknown`; a non-empty non-UUID id => LDAP, `unscoped`; a UUID => read the table. An
-  id-less session previously took the LDAP branch and was handed the fleet.
+- `loadScopeForSession(session, pool)` — ⛔ **DECIDES ON `session.user.provider`, NEVER ON THE
+  SHAPE OF THE ID** (v2.205.0). `SCOPABLE_PROVIDERS` = `{local}`; `UNSCOPABLE_PROVIDERS` =
+  `{ldap, entra}` (v2.212.0) => `unscoped`; anything else, including absent, => `unknown`, logged.
+  No session, or no usable id for any provider, => `unknown`. The UUID regex survives ONLY as a
+  contradiction check on a provider claiming to be local. ⛔ The shape test it replaced was a
+  fail-open waiting for a third provider: an Entra `oid` IS a GUID, so an Entra account read as
+  local, found zero scope rows, and zero rows means `unscoped` — the whole fleet, silently.
 - `scopeAssignmentRefusal(role, deviceIds)` (v2.174.0) → refusal sentence or `null`. ⛔ An account
   holding `manage_users` may not be scoped — the scope endpoint is itself `blocked`, so it would be
   an unrecoverable lockout. Decided on the CAPABILITY; `admin` IS scopable. Clearing is always OK.

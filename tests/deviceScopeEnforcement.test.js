@@ -111,20 +111,158 @@ describe('pageRefusal — the authoritative page verdict', () => {
   });
 });
 
-describe('⛔ the layout is wired to the verdict, and middleware feeds it the path', () => {
-  // Wiring only — the VERDICT is tested above, by behaviour. These two
-  // assertions exist because the pure function is worth nothing uncalled, and
-  // there is no render harness in this repo that could catch that.
-  it('the dashboard layout calls pageRefusal with a live scope read', () => {
-    const src = code(read('app/(dashboard)/layout.js'));
-    assert.match(src, /pageRefusal\(/, 'the layout must call the verdict');
-    assert.match(src, /loadScopeForSession\(/, 'and must read the scope from the database');
-    assert.match(src, /redirect\(/, 'and must act on a refusal');
-    assert.match(src, /headers\(\)\.get\(PATHNAME_HEADER\)/,
-      'and must read the forwarded pathname — by the shared constant, so the layout and '
-      + 'middleware cannot drift onto two different header names');
+// ⛔ THE LAYOUT IS TESTED BY RUNNING IT, BECAUSE THE SOURCE-SHAPED VERSION
+// COULD NOT FAIL.
+//
+// What stood here was four greps: `pageRefusal(`, `loadScopeForSession(`,
+// `redirect(` and `headers().get(PATHNAME_HEADER)`. Mutation-verified: change
+// the layout's `if (refusedPath)` to `if (false && refusedPath)` and all four
+// still match, so the whole suite stayed green over a page-level device-scope
+// boundary that could never fire. This file's own header warned that a
+// source-shaped test "would pass over an if-block someone had commented out" —
+// the comment-stripper handles that ONE form, and nothing else: a disabled
+// condition, an ignored return value, or an early `return null` from
+// `refusedSurfaceFor` are all invisible to a grep.
+//
+// So this builds the smallest harness that answers the only question that
+// matters — GIVEN a blocked path and a scope, does the layout REDIRECT? The
+// file is compiled with the JSX-aware parser tests/jsxSyntax.test.js already
+// uses (`next/dist/build/swc`; `next` is a runtime dependency, so this adds no
+// devDependency, which package.json deliberately has none of). Its imports are
+// then resolved by hand: the REAL lib/deviceScope and lib/deviceScopePaths, so
+// the verdict under test is the shipped one; a stub pool and session; and inert
+// placeholders for the components, which are only ever turned into React
+// elements here and never rendered.
+//
+// ⛔ The pathname is served under the REAL PATHNAME_HEADER constant, so a
+// layout reading some other header name gets null and refuses nothing — which
+// is what the fourth grep used to be for, now decided by behaviour.
+function loadDashboardLayout({ session, pathname, scopeRows, scopeThrows }) {
+  let transformSync;
+  try {
+    ({ transformSync } = require('next/dist/build/swc'));
+  } catch (err) {
+    // ⛔ FAIL, NEVER SKIP. A green tick over an unrun check is the
+    // guard-that-cannot-fire pattern this whole file is about.
+    assert.fail('Could not load next/dist/build/swc, so the layout was not exercised: '
+      + err.message);
+  }
+  const { code: compiled } = transformSync(read('app/(dashboard)/layout.js'), {
+    filename: 'layout.js',
+    jsc: {
+      parser: { syntax: 'ecmascript', jsx: true },
+      target: 'es2022',
+      transform: { react: { runtime: 'automatic' } },
+    },
+    module: { type: 'commonjs' },
+    isModule: true,
   });
 
+  const redirects = [];
+  const queries = [];
+  const inert = { __esModule: true, default: function Inert() { return null; } };
+  const stubs = {
+    'next/headers': {
+      headers: () => ({ get: (name) => (name === PATHNAME_HEADER ? pathname : null) }),
+    },
+    'next/navigation': {
+      // Next's own redirect() throws, and the layout relies on that to stop
+      // rendering. A stub that returned would let a broken guard still look
+      // like a refusal.
+      redirect: (url) => { redirects.push(url); throw new Error('NEXT_REDIRECT ' + url); },
+    },
+    'next-auth': { getServerSession: async () => session },
+    '../api/auth/[...nextauth]/route': { authOptions: {} },
+    '../../lib/db': {
+      pool: {
+        query: async (...args) => {
+          queries.push(args);
+          if (scopeThrows) throw new Error('connection terminated');
+          return { rows: scopeRows || [] };
+        },
+      },
+    },
+    '../../components/ui/Evidence': { EvidenceProvider: function EvidenceProvider() { return null; } },
+  };
+  const fakeRequire = (id) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, id)) return stubs[id];
+    if (id.startsWith('../../components/')) return inert;
+    if (id === 'react' || id === 'react/jsx-runtime') return require(id);
+    if (id.startsWith('../../lib/')) return require('../lib/' + id.slice('../../lib/'.length));
+    if (id === '../../package.json') return require('../package.json');
+    throw new Error('the layout grew an import this harness does not model: ' + id);
+  };
+  const mod = { exports: {} };
+  // eslint-disable-next-line no-new-func
+  new Function('require', 'module', 'exports', compiled)(fakeRequire, mod, mod.exports);
+  return { Layout: mod.exports.default, redirects, queries };
+}
+
+async function renderLayout(opts) {
+  const h = loadDashboardLayout(opts);
+  let rendered = null;
+  try {
+    rendered = await h.Layout({ children: null });
+  } catch (err) {
+    if (!/NEXT_REDIRECT/.test(err.message)) throw err;
+  }
+  return { redirects: h.redirects, queries: h.queries, rendered };
+}
+
+describe('⛔ the layout REFUSES, not merely mentions the verdict', () => {
+  const LOCAL_ID = '11111111-2222-3333-4444-555555555555';
+  const localSession = { user: { id: LOCAL_ID, provider: 'local' } };
+
+  it('a SCOPED account is redirected away from a blocked page', async () => {
+    const r = await renderLayout({
+      session: localSession, pathname: BLOCKED_PAGE, scopeRows: [{ device_id: 'dev-1' }],
+    });
+    assert.deepEqual(r.redirects, [`/devices?scopeBlocked=${encodeURIComponent(BLOCKED_PAGE)}`],
+      'the refusal must happen and must name the surface it refused');
+    assert.equal(r.rendered, null, 'and the page must not render anyway');
+  });
+
+  it('⛔ A FAILED SCOPE READ IS REFUSED TOO — the case that regresses silently', async () => {
+    // "We could not measure this account's access" must not be served as
+    // "unrestricted". A database blip must never widen anyone's fleet.
+    const r = await renderLayout({
+      session: localSession, pathname: BLOCKED_PAGE, scopeThrows: true,
+    });
+    assert.equal(r.redirects.length, 1, 'an unknown scope must refuse a blocked page');
+  });
+
+  it('an UNSCOPED account is refused nothing — every account today is unscoped', async () => {
+    const r = await renderLayout({
+      session: localSession, pathname: BLOCKED_PAGE, scopeRows: [],
+    });
+    assert.deepEqual(r.redirects, []);
+    assert.ok(r.rendered, 'the shell must still render');
+  });
+
+  it('a scoped account still reaches a scope-AWARE page, with no scope read at all', async () => {
+    // ⛔ The second half is the cost claim in the layout's own comment: the
+    // scope is read ONLY for a surface that could be refused.
+    const r = await renderLayout({
+      session: localSession, pathname: AWARE_PAGE, scopeRows: [{ device_id: 'dev-1' }],
+    });
+    assert.deepEqual(r.redirects, []);
+    assert.equal(r.queries.length, 0, 'an unrefusable page must not cost a database round-trip');
+  });
+
+  it('⛔ no forwarded pathname refuses NOTHING, and that is not a fail-open', async () => {
+    // It means middleware did not run, so the matcher is broken. Refusing
+    // every page would lock a scoped account out of /devices too — an outage
+    // in place of a boundary.
+    for (const bad of [null, undefined, 'compliance']) {
+      const r = await renderLayout({
+        session: localSession, pathname: bad, scopeRows: [{ device_id: 'dev-1' }],
+      });
+      assert.deepEqual(r.redirects, [], JSON.stringify(bad));
+    }
+  });
+});
+
+describe('⛔ middleware feeds the layout the path', () => {
   it('middleware forwards the pathname on the REQUEST headers', () => {
     const src = code(read('middleware.js'));
     assert.match(src, /PATHNAME_HEADER/, 'middleware must set the forwarding header');
@@ -144,9 +282,47 @@ describe('⛔ the layout is wired to the verdict, and middleware feeds it the pa
   it('⛔ middleware no longer claims the token is re-read from the database', () => {
     // The comment that said so was false and sent a reader looking for a
     // freshness guarantee that did not exist.
-    const src = read('middleware.js');
-    assert.doesNotMatch(src, /re-read from the database on every\s*\n?\/\/\s*token use/,
-      'the false freshness claim must not come back');
+    //
+    // ⛔ THE GUARD WAS PINNED TO ONE LINE-WRAPPING AND SO COULD BARELY FIRE.
+    // It matched `every\s*\n?//\s*token use` — i.e. the claim had to be broken
+    // across a line at exactly that word. Written on one line, or wrapped
+    // anywhere else, the same false sentence sailed through. The prose is
+    // therefore normalised first: comment markers stripped, all whitespace
+    // collapsed, so wrapping cannot hide anything.
+    //
+    // ⛔ A QUOTED COPY IS ALLOWED, AND MUST BE. middleware.js names the old
+    // claim in quotes in order to explain why it was wrong — exactly the
+    // comment that stops someone reinstating it. A banned-construct assertion
+    // that matches the comment explaining the ban is a mistake this repo has
+    // already made twice; the fix is never to delete the explanation.
+    const CLAIM = /re-read from the database on every token use/i;
+    const asserted = (src) => src
+      .replace(/\r/g, '')
+      .replace(/^[ \t]*\/\/[ \t]?/gm, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/"[^"]*"/g, ' ')
+      .replace(/“[^”]*”/g, ' ');
+
+    // ⛔ PROVEN NON-VACUOUS AGAINST A SYNTHETIC REINSTATEMENT, not against
+    // middleware.js's current wording — which another author may legitimately
+    // rephrase, and a guard that quietly depends on one sentence staying put is
+    // how this one stopped working in the first place.
+    for (const wrapping of [
+      '// the flag is re-read from the database on every token use',
+      '// the flag is re-read from the\n// database on every token use',
+      '// the flag is\n// re-read from the database on\n// every token use',
+      '  //re-read from the database on every token use, says the comment',
+    ]) {
+      assert.match(asserted(wrapping), CLAIM,
+        `the guard must see the claim however it is wrapped: ${JSON.stringify(wrapping)}`);
+    }
+    assert.doesNotMatch(asserted('// It said the flag is "re-read from the\n'
+      + '// database on every token use". It does not.'), CLAIM,
+      'and must still tolerate the quotation that explains the ban');
+
+    assert.doesNotMatch(asserted(read('middleware.js')), CLAIM,
+      'the false freshness claim must not come back — middleware reads the cookie claim, '
+      + 'and getToken() never runs the jwt() callback that would refresh it');
   });
 });
 
@@ -241,6 +417,39 @@ describe('⛔ loadScopeForSession — the PROVIDER decides, never the id shape',
                      { id: null, provider: 'local' }, { id: 7, provider: 'local' }]) {
       const got = await loadScopeForSession({ user: u }, pool);
       assert.equal(got.state, SCOPE_STATES.UNKNOWN, JSON.stringify(u));
+    }
+  });
+
+  it('⛔ an UNSCOPABLE provider with no usable id is UNKNOWN TOO, not the whole fleet', async () => {
+    // ⛔ THE INVARIANT ABOVE HELD FOR `local` ONLY, AND IT WAS UN-PINNED IN THE
+    // SAME COMMIT THAT BROKE IT. This case used to be covered here; v2.205.0
+    // renamed the test "a local session with NO usable id" and added
+    // `provider: 'local'` to all four fixtures, after moving the provider
+    // branches AHEAD of the id check. From then on `{ id: null, provider:
+    // 'entra' }` — an Entra id_token carrying neither `oid` nor `sub` — took
+    // the UNSCOPABLE branch and resolved to `unscoped`: the ENTIRE FLEET, with
+    // nothing logged, while the byte-identical `local` fixture one test up was
+    // correctly denied.
+    //
+    // "This provider cannot own a scope" is a claim about a real directory
+    // person. Without an id there is no person, only a failed read of the
+    // session — and a failed read is never an affirmative answer.
+    for (const u of [{ provider: 'entra' }, { id: null, provider: 'entra' },
+                     { id: '', provider: 'ldap' }, { id: 7, provider: 'ldap' },
+                     { id: {}, provider: 'ldap' }]) {
+      const got = await loadScopeForSession({ user: u }, pool);
+      assert.equal(got.state, SCOPE_STATES.UNKNOWN, JSON.stringify(u));
+    }
+  });
+
+  it('⛔ …and the other direction: a REAL unscopable identity is still UNSCOPED', async () => {
+    // The fix must not become "every directory account is denied". An LDAP or
+    // Entra user with a usable id is a real person with no `users` row, which
+    // is genuinely unscoped and has been for this product's whole life.
+    for (const u of [{ id: 'FIRMANS0', provider: 'ldap' },
+                     { id: '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1', provider: 'entra' }]) {
+      const got = await loadScopeForSession({ user: u }, pool);
+      assert.equal(got.state, SCOPE_STATES.UNSCOPED, JSON.stringify(u));
     }
   });
 

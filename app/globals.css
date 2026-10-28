@@ -144,6 +144,31 @@
   --shell-accent: #22C1D6;
   --shell-accent-soft: rgba(34, 193, 214, 0.30);
   --shell-accent-fade: rgba(34, 193, 214, 0.04);
+  /* ⛔ THE REST OF THE FAMILY, ADDED BECAUSE .sv-nav a.active WAS HARDCODING
+     THESE THREE ALPHAS AS LITERAL rgba(34, 193, 214, ...) — three times, in
+     the rule immediately below the comment that created --shell-accent for
+     exactly this reason. A literal is not a token: changing --shell-accent
+     would have moved the gradient and the bar while the inset ring, the glow
+     and the chip wash stayed on the old hue, which is the "you are here"
+     affordance disagreeing with itself. Alphas are unchanged (0.45 / 0.65 /
+     0.18 — measured values, not re-picked), so this is a refactor with no
+     pixel moving. ⛔ Never redefined in the dark block: the shell is dark in
+     BOTH themes, same contract as --shell-accent itself. */
+  --shell-accent-ring: rgba(34, 193, 214, 0.45);
+  --shell-accent-glow: rgba(34, 193, 214, 0.65);
+  --shell-accent-chip: rgba(34, 193, 214, 0.18);
+  /* ⛔ THE FOCUS RING FOR ANY NON-FLIPPING DARK SURFACE — the shell and the
+     login card. --focus-ring itself FLIPS (rgba teal 0.22 light / 0.34 dark)
+     because it is picked for a light card, and the login card is DARK in both
+     themes, so it rendered the weaker of the two values on the ground that
+     needed the stronger one. Measured against the card's own rendered pixel
+     (#17313D, sampled in Chromium): --focus-ring 1.32:1 light and 1.97:1 dark
+     — both under WCAG 1.4.11/2.4.11's 3:1, i.e. keyboard focus was effectively
+     invisible, and 35% weaker in the DEFAULT theme purely because the token
+     flipped. 0.75 alpha measures 4.22:1 on that ground and 3.83-5.09:1 across
+     the plausible range of card grounds, so it clears 3:1 wherever the page's
+     gradient puts the card. */
+  --shell-focus-ring: rgba(34, 193, 214, 0.75);
 
   --bg-primary:     #F7F9FB;
   --bg-card:        #FFFFFF;
@@ -168,10 +193,41 @@
      comfortable is the default and lives here; [data-density] below
      overrides only these three. A table cell that hardcodes its padding
      opts itself out silently, exactly like a hardcoded border-radius does
-     under the corners switch. */
+     under the corners switch.
+
+     ⛔ --row-font DOES NOT TRACK --text-base ANY MORE, AND THAT IS THE FIX FOR
+     A REGRESSION THE DENSITY CONTROL IS FORBIDDEN FROM CAUSING. v2.203.0 moved
+     --text-base 13.5px -> 16px (+18.5%) for readability — a deliberate change,
+     kept — but this token read it, and `td` is
+     `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`. Measured
+     in Chromium, table-layout:fixed, 4 columns at 900px, the live device name
+     `TSR-TL-FGT-01.thaiunion.co.th` (29 chars): at 13.5px the cell overflowed
+     by 0px, at 16px by 28px — roughly 25 of 29 characters plus an ellipsis.
+
+     ⛔ IT MADE `dense` THE ONLY WAY TO READ A VALUE `comfortable` HID, which
+     inverts this block's own rule three lines up: density must never truncate
+     a value. Measured as (natural string width - the cell's content box), so a
+     negative number is SLACK; same cell, same string, before -> after:
+       comfortable  +28.08px clipped -> +0.44px   (16px -> --text-sm 14px)
+       compact      +20.08px clipped -> -7.56px   (16px -> --text-sm 14px)
+       dense        -11.56px slack   -> -39.19px  (14px -> --text-xs 12px)
+
+     ⛔ THE REMAINING 0.44px IS STATED, NOT ROUNDED AWAY. This fixture is the
+     BOUNDARY case on purpose: that 29-character FQDN fitted a 193px content box
+     with 6.47px to spare at the pre-v2.203.0 13.5px and misses by 0.44px at 14,
+     so it still earns an ellipsis on its last glyph in a 4-column 900px table.
+     No step on the ramp closes it — 12px at comfortable density IS dense — and
+     inventing an off-ramp 13px would opt this token out of the scale the same
+     way a hardcoded 7px gap does. What is gone is the REGRESSION: 25 of 29
+     characters lost, with `dense` as the only way to see them.
+
+     14px is still LARGER than the 13.5px rows rendered at before v2.203.0, so
+     the readability gain is kept where it fits and given up only where it
+     clipped. The ramp itself is untouched: body, labels, captions and headings
+     all still read the widened steps. */
   --row-pad-y:  12px;
   --row-pad-x:  16px;
-  --row-font:   var(--text-base);
+  --row-font:   var(--text-sm);
 
   --sidebar-width:  240px;
   --sidebar-width-collapsed: 64px;
@@ -378,16 +434,21 @@
 
    ⛔ These override ROW GEOMETRY ONLY. Density must never hide a column,
    truncate a value or drop a badge -- a denser table shows the same facts
-   in less space, not fewer facts. */
+   in less space, not fewer facts.
+
+   ⛔ compact SHARES comfortable's FONT ON PURPOSE -- it is the PADDING step,
+   and that relationship predates the ramp change (both read one token). Only
+   dense steps the type down. See the ⛔ beside --row-font in :root for the
+   measured overflow this block was repaired from. */
 :root[data-density="compact"] {
   --row-pad-y: 8px;
   --row-pad-x: 12px;
-  --row-font:  var(--text-base);
+  --row-font:  var(--text-sm);
 }
 :root[data-density="dense"] {
   --row-pad-y: 5px;
   --row-pad-x: 10px;
-  --row-font:  var(--text-sm);
+  --row-font:  var(--text-xs);
 }
 
 :root[data-corners="square"] {
@@ -669,10 +730,37 @@ tbody tr:hover td { background: var(--bg-primary); }
    the weight this rule asked for. 600 is a real file. */
 .stat-value { font-size: var(--text-xl); font-weight: 600; line-height: 1.1; letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
 /* The label DESCRIBES the number above it, so it recedes: one step down the
-   type ramp and onto the muted token. At --text-base/--text-secondary it was
-   competing with the value for the same attention. */
-.stat-label { font-size: var(--text-sm); font-weight: 500; color: var(--text-muted); margin-top: 4px; }
-.stat-sub   { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; line-height: 1.35; }
+   type ramp from the document size. It does NOT recede onto the muted token.
+
+   ⛔ THREE ROLES, THREE TREATMENTS — AND THE LABEL AND THE CAPTION HAD
+   COLLAPSED INTO ONE. v2.203.0 moved .stat-label --text-base -> --text-sm AND
+   --text-secondary -> --text-muted, which is exactly what .stat-sub already
+   was. The production minifier then MERGED the two selectors
+   (`.stat-label,.stat-sub{font-size:var(--text-sm);color:var(--text-muted)}`),
+   which is independent proof rather than an opinion: computed live, both read
+   14px / rgb(105,120,139) and differed only in font-weight. On /lifecycle the
+   label "Expired" and the caption "renewal events" read as one block, so the
+   tile had a number and then a paragraph.
+
+   ⛔ THE SIZE STEP WAS RIGHT, THE COLOUR STEP WAS THE ONE TO UNDO. The value
+   (--text-xl / 600 / --text-primary) is what must win, and 14px beside 22px
+   already loses — spending the muted token on it as WELL left nothing to
+   distinguish the caption. Measured on --bg-card, light theme:
+   --text-muted 4.506:1 (clears 4.5 by 0.006, with nothing measuring it) ->
+   --text-secondary 9.003:1. The caption keeps --text-muted and steps DOWN to
+   --text-xs, so the three roles now separate on BOTH axes:
+     value    22px / 600 / --text-primary
+     label    14px / 500 / --text-secondary
+     caption  12px / 400 / --text-muted
+
+   ⛔ IT ALSO ENDS A DISAGREEMENT BETWEEN THE TWO VARIANTS OF ONE COMPONENT.
+   .stat-label-compact never left --text-secondary, so the full-size label and
+   its compact sibling were on different colour tokens; they now differ only by
+   a ramp step, which is the whole point of a compact variant. --text-muted is
+   now pinned by tests/designSystemRamp.test.js, which measures it rather than
+   trusting this comment. */
+.stat-label { font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary); margin-top: 4px; }
+.stat-sub   { font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; line-height: 1.35; }
 
 /* ⛔ NEUTRAL ON ALL FOUR SIDES. The 4px coloured left edge that used to live
    here was removed in v2.200.0: "Colour means RISK" is this file's own rule,
@@ -701,7 +789,27 @@ tbody tr:hover td { background: var(--bg-primary); }
      with no caption are padded up to it; captions are written short enough not
      to wrap past it. It is a min-height rather than a fixed height so a very
      narrow viewport grows the tile instead of clipping the text — uniform in
-     practice, never truncated. */
+     practice, never truncated.
+
+     ⛔ RE-MEASURED, AND THE NUMBER HAD STOPPED BEING TRUE. v2.203.0's own note
+     says xl/2xl/3xl were held still precisely because "the KPI tile's 94px
+     min-height is a MEASURED number" — but the tile's height is set by the
+     LABEL and the CAPTION, not by .stat-value, and that pass moved BOTH onto
+     --text-sm. Same markup, Chromium, old ramp -> v2.203.0 ramp:
+       label only            94.00 -> 94.00   (the min-height floor holds)
+       label + caption       94.00 -> 96.77   (floor exceeded by 2.77px)
+       label + caption+delta 94.00+ -> grew with it
+     Siblings in a grid row still stretch to equal, so nothing looked ragged
+     WITHIN a row; what drifted was the tile height BETWEEN pages, which is the
+     inconsistency this number exists to end.
+
+     ⛔ RESTORED RATHER THAN RE-NUMBERED, by the .stat-sub step down to
+     --text-xs (see the ⛔ on .stat-label/.stat-sub above, which was a contrast
+     fix first and a geometry fix second). Re-measured after: label only 94.00,
+     label + caption 94.06 — a 0.06px sub-pixel residue from a 12px caption at
+     line-height 1.35, i.e. the floor is doing the work again. If a future ramp
+     change moves --text-sm or --text-xs, re-measure these three and either
+     restore the floor or change the number HERE with the reason. */
   min-height: 94px;
   display: flex;
   flex-direction: column;
@@ -1016,7 +1124,9 @@ tbody tr:hover td { background: var(--bg-primary); }
   line-height: 1.45;
   color: rgba(255,255,255,0.74);
 }
-.login-proof-row svg { margin-top: 2px; flex-shrink: 0; color: var(--primary); }
+/* ⛔ --shell-accent: these ticks sit on the login page's own dark ground in
+   both themes -- see .login-card's border-top above. */
+.login-proof-row svg { margin-top: 2px; flex-shrink: 0; color: var(--shell-accent); }
 
 .login-card {
   width: 392px;
@@ -1028,7 +1138,11 @@ tbody tr:hover td { background: var(--bg-primary); }
   backdrop-filter: blur(18px) saturate(1.1);
   -webkit-backdrop-filter: blur(18px) saturate(1.1);
   border: 1px solid rgba(255,255,255,0.14);
-  border-top: 2px solid var(--primary);
+  /* ⛔ --shell-accent, not --primary: this card is dark in BOTH themes and
+     --primary flips, so in light mode the one accent stripe on the first
+     screen a customer sees rendered in the dull #098294 at 3.92:1 on the card
+     instead of the 8.19:1 cyan the dark theme got. Same call as --shell-fg. */
+  border-top: 2px solid var(--shell-accent);
   border-radius: var(--radius);
   padding: var(--s6);
   box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.25);
@@ -1084,10 +1198,14 @@ tbody tr:hover td { background: var(--bg-primary); }
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
 }
 .login-input::placeholder { color: rgba(255,255,255,0.3); }
+/* ⛔ --shell-accent / --shell-focus-ring, NEVER --primary / --focus-ring. Same
+   trap as the SSO button below and the sidebar in v2.201.0: this card is dark
+   in BOTH themes and both of those tokens flip. See the ⛔ beside
+   --shell-focus-ring for the measured ratios. */
 .login-input:focus {
-  border-color: var(--primary);
+  border-color: var(--shell-accent);
   background: rgba(255,255,255,0.09);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  box-shadow: 0 0 0 3px var(--shell-focus-ring);
 }
 
 /* ⛔ NOT .btn-primary, AND THE REASON HAS CHANGED — do not collapse the two.
@@ -1126,7 +1244,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   transition: background 0.12s, opacity 0.12s;
 }
 .login-submit:hover:not(:disabled) { background: #0C93A7; border-color: #0C93A7; }
-.login-submit:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.login-submit:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--shell-focus-ring); }
 
 /* ── SSO sign-in (v2.208.0) ─────────────────────────────────────────────
    ⛔ SECONDARY BY DESIGN. The local form is the primary path on every
@@ -1182,7 +1300,7 @@ tbody tr:hover td { background: var(--bg-primary); }
   transition: background 0.12s, border-color 0.12s;
 }
 .login-sso:hover:not(:disabled) { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.34); }
-.login-sso:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+.login-sso:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--shell-focus-ring); }
 .login-sso:disabled { opacity: 0.6; cursor: default; }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
 
@@ -1213,8 +1331,12 @@ tbody tr:hover td { background: var(--bg-primary); }
   .login-compact-brand { display: block; }
   .login-card { width: 100%; max-width: 392px; }
 }
+/* ⛔ .login-sso IS IN THIS LIST. It was added in v2.208.0 with its own
+   `transition` and left out of here, so the one control a keyboard user is
+   most likely to reach still animated for someone who asked the OS for no
+   motion. Every transitioning element on this card belongs in this list. */
 @media (prefers-reduced-motion: reduce) {
-  .login-input, .login-submit { transition: none; }
+  .login-input, .login-submit, .login-sso { transition: none; }
 }
 
 /* ── Quiet identity link ───────────────────────────────────────
@@ -1359,17 +1481,56 @@ textarea.input { resize: vertical; min-height: 80px; }
    collapses to one column on its own, with no media query to keep in step with
    the sidebar's own breakpoints.
 
-   ⛔ CAPPED AT TWO COLUMNS by max-width (2 x 420 + the gap). Three columns of
-   form fields read as a table of inputs rather than a form, and the eye loses
-   which label belongs to which box. */
+   ⛔ CAPPED AT TWO COLUMNS, AND THE CAP IS ARITHMETIC RATHER THAN AN ASSERTION.
+   Three columns of form fields read as a table of inputs rather than a form and
+   the eye loses which label belongs to which box, so the cap matters — but
+   max-width ALONE does not produce it. auto-fit packs as many tracks as fit, so
+   the real condition is `3 * minTrack + 2 * gap > max-width`. Measured the
+   moment the duplicate rule below was removed and this one actually applied:
+   `minmax(260px, 1fr)` under an 884px cap rendered THREE columns of 278.656px
+   at 1600px (3*260 + 2*24 = 828, comfortably inside 884). The old rule's `1fr
+   1fr` had been hiding that, so the two-column claim had never been tested.
+   At 320px: 3*320 + 48 = 1008 > 884, so three can never fit, with 124px of
+   margin rather than the 4px a 280px track would have left; and 2*320 + 24 =
+   664, so a container narrower than that drops to one column on its own.
+
+   ⛔ `min(320px, 100%)`, NOT A BARE 320px. A minmax() track floor is a HARD
+   minimum: on a container narrower than the floor the single track keeps its
+   width and overflows the page horizontally. `min(..., 100%)` lets the last
+   column shrink with the container instead, which is the whole point of
+   collapsing without a media query.
+
+   ⛔ THIS IS THE ONLY `.form-grid` IN THIS FILE, AND IT HAS TO STAY THAT WAY
+   (fixed after v2.213.0). A SECOND `.form-grid { display: grid;
+   grid-template-columns: 1fr 1fr; gap: 16px }` already existed 25 lines below,
+   under "Form layout helpers". Same specificity, declared LATER, so it won
+   every property it restated and the whole rule above was dead except
+   `max-width` — which is the one property the old rule did not mention, so the
+   884px cap landed and nothing else did. Measured in Chromium against the
+   shipped bundle, computed `grid-template-columns`: 1600px -> 434px 434px,
+   768px -> 331px 331px, 375px -> 139px 130px, and the 16/24 gap flattened to
+   16/16. `auto-fit`/`minmax` never applied ONCE.
+
+   ⛔ THE COST WAS EXACTLY WHAT THE auto-fit WAS CHOSEN TO PREVENT. At phone
+   width every Settings form (UsersPanel, EntraSsoPanel, EntraRolesPanel) held
+   two ~139px columns, so "Directory (tenant) ID" wrapped to three lines above
+   a box showing ~8 characters of a 36-character GUID. A duplicate rule is not
+   a style question: it silently reverses a decision and leaves both halves of
+   the argument in the file, so the next reader finds the comment that explains
+   a behaviour the page does not have. */
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: var(--s4) var(--s5);
   max-width: 884px;
 }
 /* For a field that must not be halved — a long URL, a note, a secret whose
-   placeholder is a sentence. */
+   placeholder is a sentence.
+   ⛔ ONE NAME, NOT TWO. `.form-span { grid-column: 1 / -1 }` sat beside the
+   duplicate `.form-grid` below and did exactly this, under a second name, with
+   ZERO call sites anywhere in the repo — every consumer uses `.span-2`. Two
+   names for one behaviour is how a form ends up half-converted; the dead one
+   was removed rather than kept "in case". */
 .form-grid .span-2 { grid-column: 1 / -1; }
 
 /* ⛔ SETTINGS HEADER (v2.213.0). Scoped to this page because the space it
@@ -1379,6 +1540,19 @@ textarea.input { resize: vertical; min-height: 80px; }
    on a flex gap and that padding. Other pages have no sticky bar below the
    header and still need the margin. */
 .settings-head .page-header { margin-bottom: 0; }
+/* ⛔ THE INPUT IS LIFTED TO THE FULL SPAN AND THE SELECT DELIBERATELY IS NOT,
+   so this is an asymmetry on purpose rather than a missing companion rule. A
+   span-2 exists for a value that is genuinely long — a URL, a note, a secret
+   whose placeholder is a sentence — so the text box should use the room. A
+   `.select`'s content is a fixed set of short labels, so it gains nothing; and
+   420px is the SELECT'S TESTED-SAFE WIDTH (see the v2.204.0 ⛔ above), with the
+   popup measured detaching from its control somewhere between 420px and
+   1338px. 884px sits inside that unmeasured band, so widening it here would
+   trade a cosmetic gap for a re-run of a real popup bug, and it cannot be
+   re-probed from a static fixture — a native option popup is not in the DOM.
+   If a span-2 select ever genuinely needs the width, probe it on a running
+   instance first and record the number here. Measured today: span 884px,
+   input 884px, select 420px. */
 .form-grid .span-2 .input { max-width: 884px; }
 select.input {
   width: 100%;
@@ -1388,13 +1562,16 @@ select.input {
   background: var(--bg-card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 12px center;
 }
 
-/* ── Form layout helpers ───────────────────────────────────── */
-.form-grid   { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* ── Form layout helpers ─────────────────────────────────────
+   ⛔ `.form-grid` AND `.form-span` USED TO LIVE HERE AND BOTH ARE GONE — see
+   the ⛔ block on the single surviving `.form-grid` above. The copy here was
+   the LATER of two identical-specificity rules, so it won, and v2.213.0's
+   auto-fit/minmax never ran anywhere. Do not re-add a `.form-grid` to this
+   block; there is one definition and it is the one above. */
 .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
 .form-field  { display: flex; flex-direction: column; gap: 5px; }
 .form-field label { font-size: var(--text-base); font-weight: 500; color: var(--text-secondary); }
 .form-field .hint { font-size: var(--text-sm); color: var(--text-muted); }
-.form-span   { grid-column: 1 / -1; }
 .form-section {
   background: var(--bg-card);
   border-radius: var(--radius);
@@ -1722,17 +1899,24 @@ select.input {
     var(--shell-accent-fade)
   );
   color: #fff;
+  /* ⛔ TOKENS, NOT LITERALS. These two were hardcoded rgba(34, 193, 214, ...)
+     -- the same hue --shell-accent names, written out by hand in the rule
+     whose own ⛔ above says "EVERY COLOUR HERE IS --shell-accent*". Moving
+     --shell-accent would have left the ring and the glow behind on the old
+     value. Alphas unchanged. */
   box-shadow:
-    inset 0 0 0 1px rgba(34, 193, 214, 0.45),
-    0 0 18px -6px rgba(34, 193, 214, 0.65);
+    inset 0 0 0 1px var(--shell-accent-ring),
+    0 0 18px -6px var(--shell-accent-glow);
 }
 /* The active chip is ALWAYS the brand accent -- see the note in Sidebar.js.
    --chip-bg/--chip-color are no longer set by that component; .widget-icon-chip
    above still uses them and is unaffected. */
 /* ⛔ --shell-accent, not --primary: the chip sits on the dark shell too, and
    --primary flipped this glyph to a dark teal on a dark chip in light mode. */
+/* ⛔ The wash was a hardcoded rgba of the same hue -- see the box-shadow
+   above. --shell-accent-chip is that value, named. */
 .sv-nav a.active .sv-nav-chip {
-  background: rgba(34, 193, 214, 0.18);
+  background: var(--shell-accent-chip);
   color: var(--shell-accent);
 }
 /* ⛔ THE LEFT BAR STAYS, AND IT IS NOT REDUNDANT WITH THE GLOW ABOVE. The
@@ -1915,6 +2099,20 @@ input[type='search']:focus-visible,
   outline-offset: 2px;
 }
 
+/* ⛔ AND EVERY OTHER FOCUSABLE ON THE SHELL TAKES --shell-accent, FOR THE SAME
+   REASON ONE LINE UP. The generic rule above paints --primary, which FLIPS
+   while --navy does not: measured on --navy, --primary is 8.36:1 in dark and
+   3.92:1 in LIGHT -- the default theme -- against --shell-accent's 8.19:1 in
+   both. So the theme toggle, the notification bell, the avatar menu and every
+   sidebar link had a keyboard ring less than half as visible as the one the
+   search box beside them was already special-cased to get. The search input
+   keeps white: it sits INSIDE a filled field on the bar, where a teal ring
+   would read as the field's own border rather than as focus. */
+.sv-topbar :where(a, button, [role="button"], [tabindex]:not([tabindex="-1"]), summary):focus-visible,
+.sv-sidebar :where(a, button, [role="button"], [tabindex]:not([tabindex="-1"]), summary):focus-visible {
+  outline-color: var(--shell-accent);
+}
+
 .input:focus-visible,
 .select:focus-visible {
   outline: 2px solid var(--primary);
@@ -2062,9 +2260,14 @@ tbody tr td { transition: background 0.12s ease; }
   border-radius: var(--radius-sm);
   background: var(--evidence-wash);
   color: var(--evidence);
+  /* ⛔ 500 IS THE HEAVIEST REAL MONO FACE. public/fonts/ vendors IBM Plex Mono
+     at 400 and 500 ONLY, so 700 here was SYNTHESISED bold — and faux bold on a
+     single 10px glyph inside a 15px box smears the stroke rather than
+     thickening it. Do not raise this without vendoring a mono 600/700 .woff2,
+     which is a dependency decision, not a style one. */
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
   transition: border-color .12s ease, transform .12s ease;
@@ -2108,7 +2311,8 @@ tbody tr td { transition: background 0.12s ease; }
 }
 .ev-close {
   background: none; border: none; cursor: pointer; padding: 4px 6px;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  /* 500: no mono 700 face is vendored — see .ev-mark above. */
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
   color: var(--text-muted);
 }
 .ev-close:hover { color: var(--text-primary); }
@@ -2423,9 +2627,16 @@ tbody tr td { transition: background 0.12s ease; }
   background: var(--bg-card);
   padding: var(--s3);
 }
+/* ⛔ 600, NOT 650, AND IT IS THE SAME CORRECTNESS FIX .stat-value TOOK IN
+   v2.200.0. Only 400/500/600/700 are vendored (see the @font-face block at the
+   top of this file), and CSS font matching resolves a 650 request upward to
+   700 — measured in Chromium, identical text at 32px: 600 = 290.094px while
+   650, 700 and 800 all = 293.609px, i.e. the same face. So 650 was never a
+   weight, it was 700 spelled in a way that hid which face would render. 600 is
+   the weight every other headline figure in the product uses. */
 .rpt-tile-value {
   font-size: var(--text-2xl);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }

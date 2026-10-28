@@ -363,7 +363,9 @@ export async function ThreatActivityWidget() {
           </Empty>
         ) : (
           <>
-            <div style={{ fontSize: 26, fontWeight: 800, color: total > 0 ? 'var(--red)' : 'var(--text-primary)' }}>
+            {/* ⛔ 600, NOT 800 -- 800 names no vendored face. See the ⛔ beside
+                the eventsPerSec figure below for the measurement. */}
+            <div style={{ fontSize: 26, fontWeight: 600, color: total > 0 ? 'var(--red)' : 'var(--text-primary)' }}>
               <Num value={total} />
             </div>
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -408,11 +410,19 @@ export async function IngestHealthWidget() {
           <>
             <div style={{ display: 'flex', gap: 20, marginBottom: 8 }}>
               <div>
-                <div style={{ fontSize: 24, fontWeight: 800 }}><Num value={h.eventsPerSec} /></div>
+                {/* ⛔ 600, NOT 800. public/fonts/ vendors IBM Plex Sans at
+                    400/500/600/700 only, so 800 named NO face: measured in
+                    Chromium, identical text at 32px renders 650, 700 and 800
+                    at exactly 293.609px (600 = 290.094px) -- 800 was 700
+                    spelled in a way that hid which face would render. 600 is
+                    what .stat-value/.stat-value-compact were moved to in
+                    v2.200.0 for this reason, and it is now the one weight every
+                    headline figure in the product uses. */}
+                <div style={{ fontSize: 24, fontWeight: 600 }}><Num value={h.eventsPerSec} /></div>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>events/sec</div>
               </div>
               <div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: dropTone }}><Num value={h.dropped} /></div>
+                <div style={{ fontSize: 24, fontWeight: 600, color: dropTone }}><Num value={h.dropped} /></div>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>dropped</div>
               </div>
             </div>

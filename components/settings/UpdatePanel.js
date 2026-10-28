@@ -109,7 +109,12 @@ function fmtReleaseDate(d) {
 // Presentational-only, kept top-level rather than inlined into the overlay.
 function CountdownNumber({ value }) {
   return (
-    <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1, margin: '4px 0 10px', color: 'var(--primary)' }}>
+    // ⛔ 600, NOT 800. Only 400/500/600/700 are vendored in public/fonts/, so
+    // 800 named no face -- measured in Chromium, 650/700/800 all render the
+    // SAME face (identical advance width) while 600 is its own. Same fix
+    // .stat-value took in v2.200.0; at 40px with nothing else on screen, 600
+    // carries the figure perfectly.
+    <div style={{ fontSize: 40, fontWeight: 600, lineHeight: 1, margin: '4px 0 10px', color: 'var(--primary)' }}>
       {value}
     </div>
   );

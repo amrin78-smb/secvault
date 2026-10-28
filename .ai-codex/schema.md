@@ -1330,16 +1330,44 @@ No new tables — the verdict is computed at read time from the key, the install
 of `devices WHERE active = true`. A stored licence verdict would go stale against the fleet it
 describes.
 
-## ldap_role_mappings (v2.134.0)
+## ldap_role_mappings (v2.134.0; `provider`/`display_name` v2.206.0)
 
-`id | group_dn | group_dn_normalised (UNIQUE) | role | description | created_at | updated_at`
+`id | group_dn | group_dn_normalised | role | description | provider | display_name | created_at |
+updated_at`, UNIQUE on **`(provider, group_dn_normalised)`** via `uq_directory_mapping`.
 
-⛔ An EMPTY table is an INSTRUCTION, not an absence — zero rows means legacy mode (grant `admin`,
-as every release before mappings existed); one row closes the gate. ⛔ `group_dn_normalised` carries
-the uniqueness so the same group cannot be mapped twice to two roles, while `group_dn` keeps the
-operator's own spelling for display. No CHECK on `role` — validated in app code against
-`ASSIGNABLE_ROLES`, same convention as `users.role`. Granted to both readonly roles: a group DN is
-not a secret.
+⛔ **THE NAME IS NOW A MISNOMER AND THAT IS A DELIBERATE TRADE.** This table holds mappings for
+EVERY directory provider; `provider` says which. `.ai-codex/entra-sso-proposal.md` proposed
+renaming it to `directory_role_mappings` with a compatibility view, and that was REJECTED during
+implementation: a rename needs a non-idempotent `ALTER TABLE ... RENAME`, which must then be
+guarded by a DO block against `pg_class`, plus a view and duplicate grants — and `lib/migrate.js`
+sends the whole file as ONE multi-statement batch where any error aborts the entire migration. A
+misleading table name is cosmetic; a migration that aborts half-way on a live firewall platform is
+not. Columns are additive and idempotent, so that is what this does.
+
+⛔ **`provider` IS `NOT NULL DEFAULT 'ldap'`, which is what makes it safe on an existing install**
+— every row already in the table WAS an LDAP mapping, so the default states a fact rather than
+guessing one.
+
+⛔ **`display_name` IS DISPLAY ONLY AND IS NEVER MATCHED.** An Entra group id is a GUID and
+unreadable, so the panel is unadministrable without a name beside it — but a display name is
+mutable in Entra and two groups may share one, so matching on it would be both unstable and
+ambiguous.
+
+⛔ **UNIQUENESS MOVED FROM THE COLUMN TO THE PAIR.** The column-level `UNIQUE` on
+`group_dn_normalised` alone would let an LDAP DN and an Entra GUID collide in one index and —
+worse — would stop the same group key being mapped under two providers where that is legitimate.
+`schema.sql` drops the old generated constraint name `IF EXISTS` so this is re-runnable, then
+creates `uq_directory_mapping`. The base `CREATE TABLE` still declares the old column-level
+`UNIQUE`, so on a FRESH install it is created and immediately dropped three statements later —
+harmless, and `ON CONFLICT (provider, group_dn_normalised)` in `ldapRoles.upsertMapping` targets
+the index either way.
+
+⛔ An EMPTY table is an INSTRUCTION, not an absence — **and it means OPPOSITE things per
+provider**: zero `ldap` rows is legacy mode (grant `admin`, as every release before mappings
+existed), zero `entra` rows REFUSES every Entra sign-in. Emptiness must therefore always be
+measured per provider; a mixed table once let an Entra deletion report LDAP legacy mode reopening.
+No CHECK on `role` — validated in app code against `ASSIGNABLE_ROLES`, same convention as
+`users.role`. Granted to both readonly roles: a group DN is not a secret.
 
 ## user_device_scopes (v2.168.0)
 

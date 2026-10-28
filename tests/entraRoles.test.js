@@ -16,7 +16,13 @@ const { SUPER_ADMIN_ROLE, ADMIN_ROLE, OPERATOR_ROLE } = require('../lib/rbac');
 
 const G_ADMIN = '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1';
 const G_OPS = '1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7081';
-const map = (groupKey, role) => ({ groupKey, role });
+// ⛔ `groupDn`, NOT `groupKey`. This is the field name `ldapRoles.resolveRole`
+// and `ldapRoles.loadMappings` both use, so an Entra mapping row now travels
+// from the database to the resolver under ONE name with no re-shaping step in
+// between. The old second name is what made the auth route's shim possible —
+// see tests/entraAuthRefusal.test.js, which pins the failure a dropped key
+// used to produce.
+const map = (groupDn, role) => ({ groupDn, role });
 
 describe('⛔ the local account is never affected by Entra configuration', () => {
   it('isEntraConfigured is false unless ALL THREE values are present', () => {

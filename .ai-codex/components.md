@@ -844,10 +844,44 @@ Submit is disabled at zero proposed. All components at module top level.
   re-appears as the situation worsens; `expired`/`invalid` cannot be dismissed at all. The
   decision function `bannerFor` lives in `lib/productLicense.js`, not here, so it is testable.
 
+## EntraSsoPanel (v2.209.0) + EntraRolesPanel (v2.207.0)
+
+Both `components/settings/`, both under Settings → **Single sign-on** (`manage_users`, super_admin
+only — the tab was split out of **Users** in v2.210.0). Rendered in this order, which is the order
+the work happens in: a mapping is meaningless until a tenant exists.
+
+`EntraSsoPanel` (no props) — the tenant. Writes `ENTRA_TENANT_ID` / `ENTRA_CLIENT_ID` /
+`ENTRA_CLIENT_SECRET` to `.env.local` via `PUT /api/system/entra`, the same precedent
+`ConsoleAddressPanel` and `SessionTimeoutPanel` set. ⛔ **It exists because "edit `.env.local` on
+the server" is not a setup step a customer can be given** — SecVault ships to customers who
+administer it through this console. ⛔ **The secret is WRITE-ONLY**: the API reports only whether
+one is set, so the field cannot be pre-filled and a blank box looks identical to a cleared one —
+the label therefore has to say that blank KEEPS the stored secret. ⛔ Shows the SAVED value beside
+the RUNNING one when they differ (NextAuth reads its provider array once at startup), and prints
+the exact **Redirect URI** to register in Entra rather than describing it, because a mismatch fails
+on Microsoft's side with an error that never reaches our logs. ⛔ Lists **recent refused sign-ins**
+with the named cause, which is the whole value — the causes (no readable group claim / no mapped
+group / group overage / an unreadable mapping table, which is a SecVault fault rather than a
+customer misconfiguration) need different administrator fixes, and before v2.211.0 all of it was
+computed and then stored on the token where nobody could read it. ⛔ It renders `refusalState`
+TRI-STATE: an unreadable activity log says so rather than showing an empty, reassuring list.
+
+`EntraRolesPanel` (no props) — the Entra group-to-role mappings, over the same
+`/api/ldap-mappings` route and the same table as the LDAP panel below, with `provider='entra'`.
+
+⛔ **TWO PANELS, NOT ONE, AND MERGING THEM WAS CONSIDERED AND REJECTED: AN EMPTY MAPPING LIST
+MEANS THE OPPOSITE THING IN EACH.** Empty LDAP mappings means every directory user is an
+Administrator *right now*; empty Entra mappings means nobody can sign in at all. Those are the
+single most important sentences on each panel, and one combined table would have to render both
+warnings over one list — or, worse, pick one. ⛔ The role dropdown is sourced from rbac's
+`ASSIGNABLE_ROLES`, not a local list: `UsersPanel` shipped a hardcoded one that still offered
+`viewer` after the server stopped accepting it, and the form looked fine while silently creating an
+Operator.
+
 ## LdapRolesPanel (v2.134.0)
 
-`components/settings/LdapRolesPanel.js`, rendered under Settings → **Users** (same `manage_users`
-gate as its route). ⛔ The WARNING is the point, not the table: with LDAP on and no mappings, a
+`components/settings/LdapRolesPanel.js`, rendered under Settings → **Single sign-on** since
+v2.210.0 (it was under **Users**; same `manage_users` gate as its route either way). ⛔ The WARNING is the point, not the table: with LDAP on and no mappings, a
 full-danger panel states that every directory user is an Administrator right now — an empty table
 looks like an unused feature, not a standing grant. Also warns when no service account is
 configured (without one SecVault cannot search, so no mapping can ever match), confirms when the

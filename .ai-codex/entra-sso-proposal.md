@@ -1,10 +1,26 @@
 # Microsoft Entra ID SSO — proposal
 
-⛔ **STATUS: PHASE 0 BUILT in v2.205.0. PHASES 1-3 ARE PROPOSAL ONLY (not built).**
-This file is the design record. When any further phase ships, **correct this line in the
-same commit** and amend the entry in CLAUDE.md's index list. That list has carried a stale
-"PROPOSAL ONLY" over shipped work **three separate times** (central CVE feed, analytics,
-application view), so treat the header as part of the deliverable, not documentation about it.
+⛔ **STATUS: PHASES 0, 1 AND 2 ARE BUILT. ONLY PHASE 3 IS PROPOSAL ONLY (not built).**
+
+| phase | state | where |
+|---|---|---|
+| 0 — scope decides on `provider`, not id shape | **SHIPPED v2.205.0** | `lib/deviceScope.js` |
+| 1 — sign-in: provider, `provider` column, mapping panel, fail-closed on zero mappings, overage refused | **SHIPPED v2.206.0–v2.208.0** | `lib/entraRoles.js`, `app/api/auth/[...nextauth]/route.js`, `components/settings/EntraRolesPanel.js` |
+| 1b — tenant configurable from the console | **SHIPPED v2.209.0** (not in the original plan) | `app/api/system/entra/route.js`, `components/settings/EntraSsoPanel.js` |
+| 2 — the refused-sign-in log | **SHIPPED v2.211.0** | `jwt()` → `activity_log` `entra_signin_refused`, surfaced by `GET /api/system/entra` |
+| 3 — scoping parity: shadow `users` rows, Graph overage | **NOT BUILT** | — |
+
+This file is the design record. When Phase 3 ships, **correct this line in the same commit**
+and amend the entry in CLAUDE.md's index list.
+
+⛔ **THIS HEADER READ "PHASES 1-3 ARE PROPOSAL ONLY" FOR SEVEN VERSIONS AFTER PHASE 1 SHIPPED,
+AND IT SAID IN ITS OWN NEXT SENTENCE WHY THAT MATTERS.** The warning below was written and
+then not acted on by the commits it was written for — §8 carried a "PHASE 1 SHIPPED" note
+while this line three hundred lines above it said the opposite, so the file contradicted
+itself and the stale claim was the one a reader met first. CLAUDE.md's index list has now
+carried a stale "PROPOSAL ONLY" over shipped work **four separate times** (central CVE feed,
+analytics, application view, and this). Treat the header as part of the deliverable, not as
+documentation about it.
 
 ---
 
@@ -128,7 +144,7 @@ work, so the right response is to ask for an **App registration**, not an
 | `app/api/auth/[...nextauth]/route.js` | add `AzureADProvider`; `jwt()` re-resolves Entra roles like LDAP |
 | `lib/entraRoles.js` *(new)* | thin wrapper over `ldapRoles.resolveRole`; owns group-claim handling |
 | `lib/deviceScope.js` | **§1 prerequisite** — decide on provider, not id shape |
-| `lib/schema.sql` | `directory_role_mappings` (see §3) |
+| `lib/schema.sql` | `directory_role_mappings` (see §3) — ⛔ **SHIPPED DIFFERENTLY**: `ldap_role_mappings` + `provider`, no rename |
 | `components/settings/LdapRolesPanel.js` | becomes provider-aware, or gains a sibling |
 | `.env.local.example` | `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET` |
 
@@ -149,13 +165,27 @@ Two further problems a GUID brings:
 - ⛔ **A GUID and a DN must not collide in one unique index.** Scope the uniqueness to
   `(provider, group_key_normalised)`.
 
-**Proposal:** rename to `directory_role_mappings` with a `provider` column
+**Proposal was:** rename to `directory_role_mappings` with a `provider` column
 (`'ldap' | 'entra'`), `group_key` (DN or GUID), `group_key_normalised`, `display_name`,
-`role`, `description`. Keep `ldap_role_mappings` as a **view** for one release so nothing
-reading it breaks, per this codebase's habit of not silently changing a shape others read.
+`role`, `description`, keeping `ldap_role_mappings` as a **view** for one release.
 
-⛔ Migration is a **data move, so it goes through `lib/backfillLedger.js`** with a revision —
-not an unguarded statement in `schema.sql` that re-runs every deploy.
+⛔ **WHAT SHIPPED (v2.206.0) IS NARROWER, AND THE RENAME WAS REJECTED DURING
+IMPLEMENTATION.** `ldap_role_mappings` keeps its name and gains `provider`
+(`NOT NULL DEFAULT 'ldap'` — every existing row WAS an LDAP mapping, so the default states a
+fact) and `display_name`; the column-level `UNIQUE` on `group_dn_normalised` is dropped and
+replaced by `uq_directory_mapping (provider, group_dn_normalised)`. `group_dn` keeps its name
+and simply holds a GUID for Entra rows.
+
+The rename lost on a migration-safety argument, not a naming one: `ALTER TABLE ... RENAME` is
+not idempotent, so it needs a DO block against `pg_class`, plus the view and duplicate grants
+— and `lib/migrate.js` sends `schema.sql` as ONE multi-statement batch where any error aborts
+the entire migration. **A misleading table name is cosmetic; a migration that aborts half-way
+on a live firewall platform is not.** `ADD COLUMN IF NOT EXISTS` and
+`CREATE UNIQUE INDEX IF NOT EXISTS` are additive and re-runnable, so that is what it does, and
+the reasoning is written out in `schema.sql` beside the columns.
+
+⛔ **No `backfillLedger.js` revision was needed either**, because nothing moved: the default
+on `provider` classifies every existing row correctly without touching data.
 
 ---
 
@@ -225,7 +255,7 @@ Entra needs outbound HTTPS to `login.microsoftonline.com` **at every sign-in**.
 
 | feature | today | with Entra |
 |---|---|---|
-| device scoping | local only | **blocked until §1 + a design** — see below |
+| device scoping | local only | **not available** — `entra` is UNSCOPABLE (v2.212.0); Phase 3 — see below |
 | saved views | local only (UUID id) | same question as scoping |
 | SecVault TOTP | local only (needs a `users` row) | **not offered** — MFA belongs in Entra |
 | `activity_log` actor | `session.user.name` | unchanged (UPN) |
@@ -238,8 +268,10 @@ better than this product's hand-rolled TOTP for those users.
 ⛔ **Per-user device scoping for Entra needs a `users`-row-shaped anchor** — a local
 shadow row keyed on the Entra `oid`, created on first sign-in. That is a real design
 decision with its own failure modes (what happens when the account is deleted in Entra?),
-so **Phase 1 ships with Entra accounts refused by scoped surfaces**, not silently unscoped.
-A smaller product, honestly described, is the behaviour the register already defines.
+so **Phase 1 shipped with Entra accounts refused by scoped surfaces** — ⛔ and that was
+REVERSED in v2.212.0. An Entra account is now UNSCOPED (it sees the whole fleet, exactly as an
+LDAP account always has) rather than refused, because the refusal misdescribed its own cause:
+see the ⛔ note at the end of §8.
 
 ---
 
@@ -247,20 +279,47 @@ A smaller product, honestly described, is the behaviour the register already def
 
 **Phase 0 — the prerequisite. ⛔ SHIPPED v2.205.0.**
 `loadScopeForSession` decides on `provider`, not id shape (§1). `SCOPABLE_PROVIDERS` =
-`{local}`, `UNSCOPABLE_PROVIDERS` = `{ldap}`, anything else — including absent — is
+`{local}`, `UNSCOPABLE_PROVIDERS` = `{ldap}` — **`{ldap, entra}` since v2.212.0**, see the
+⛔ note at the end of this section — anything else, including absent, is
 `UNKNOWN`, which denies, and is logged. Shape matching survives only as a contradiction
 check on a provider claiming to be local. Six tests across `deviceScope.test.js` and
 `deviceScopeEnforcement.test.js`, mutation-verified against the restored shape check.
 
-**Phase 1 — sign-in.** Provider registered, `directory_role_mappings` with `provider`,
-Settings panel, fail-closed on zero mappings, overage refused with a reason. Entra users
-are refused by `blocked`/scoped surfaces.
+**Phase 1 — sign-in. ⛔ SHIPPED v2.206.0–v2.208.0.** `AzureADProvider` appended to the
+provider array ONLY when all three `ENTRA_*` vars are set; `lib/entraRoles.js` owning the
+group claim and the zero-mappings call; `EntraRolesPanel`; fail-closed on zero mappings;
+overage refused with a named reason. ⛔ **Two things here landed differently from this plan**:
+the table was NOT renamed to `directory_role_mappings` — `ldap_role_mappings` gained a
+`provider` column instead, because a rename needs a non-idempotent `ALTER TABLE` inside the
+one multi-statement batch `migrate.js` sends, where any error aborts the whole migration
+(the reasoning is written out in `lib/schema.sql` beside the column). And Entra accounts are
+no longer refused by scoped surfaces — see the ⛔ note at the end of this section.
 
-**Phase 2 — administration.** Group picker showing display names beside GUIDs; an
-"unmapped sign-in attempt" log so an admin can see who was refused and why.
+**Phase 1b — configurable from the console. ⛔ SHIPPED v2.209.0, and it was not in this plan
+at all.** `GET/PUT /api/system/entra` + `EntraSsoPanel` write the three `ENTRA_*` values to
+`.env.local` through `lib/envFile.js`. It was added because "edit `.env.local` on the server"
+is not a setup step a customer can be given — the same conclusion Settings → Certificate →
+Console address and Settings → Security had already reached. ⛔ Gated on `manage_users`, not
+`manage_settings`: whoever sets the tenant decides WHICH DIRECTORY IS TRUSTED to issue
+identities, which cannot be a lesser privilege than configuring the group mappings.
 
-**Phase 3 — scoping parity (only if customers ask).** Shadow `users` rows, Graph overage,
-scoping for Entra accounts.
+**Phase 2 — administration. ⛔ SHIPPED v2.211.0.** The refused-sign-in log: the `signIn`
+callback writes an `entra_signin_refused` row to `activity_log`, and `GET /api/system/entra`
+returns the recent ones so `EntraSsoPanel` shows them beside the settings that cause them.
+⛔ **The refusal is split in two, deliberately**: the user is redirected to
+`/login?sso=refused` and told only that the account is not mapped to a role, while the NAMED
+cause (`no_matching_group` / `groups_unreadable` / `groups_overage` — three different
+administrator fixes) goes to the log and the Settings panel. Naming it on a pre-authentication
+page would tell an unauthenticated visitor how the customer's directory is wired, the same
+rule the login form already follows for MFA. ⛔ **The GROUP PICKER was not built and is not
+needed**: `ldap_role_mappings.display_name` carries the operator's own label beside the GUID,
+which is what made the panel administrable. A picker would mean a Microsoft Graph call, i.e.
+the `GroupMember.Read.All` consent this design deliberately asks the customer's Entra
+administrator NOT to grant.
+
+**Phase 3 — scoping parity (only if customers ask). ⛔ NOT BUILT — the only unbuilt phase.**
+Shadow `users` rows keyed on the Entra `oid`, Graph overage resolution, scoping for Entra
+accounts. Shipping it moves `entra` from `UNSCOPABLE_PROVIDERS` to `SCOPABLE_PROVIDERS`.
 
 ⛔ **PHASE 1 SHIPPED REFUSING ENTRA ON SCOPED SURFACES AND THAT WAS CHANGED IN v2.212.0.**
 The refusal was correct about the limitation and wrong about how it presented it: an
@@ -282,8 +341,10 @@ Everything here is pure or pool-taking, so it belongs in `npm test` rather than 
 - **zero mappings → refuse** (the inverse of the LDAP legacy-mode test)
 - overage claim → refuse with a named reason, **never** "no role"
 - `groups` absent vs `groups: []` resolve **differently**
-- ⛔ **a GUID-shaped id with `provider: 'entra'` never reaches the scope query**, and
-  resolves `UNKNOWN` not `UNSCOPED` — mutation-verified, because this is the §1 defect
+- ⛔ **a GUID-shaped id with `provider: 'entra'` never reaches the scope query** —
+  mutation-verified, because this is the §1 defect. It resolved `UNKNOWN` as Phase 1
+  shipped; since v2.212.0 it resolves `UNSCOPED`. **What the test pins either way is that
+  the shape of the id decides nothing** — the answer comes from the provider list
 - an unreachable Entra endpoint does not prevent local credentials sign-in
 
 ⛔ Each test must include the **"we could not read this"** case, not only pass and fail —

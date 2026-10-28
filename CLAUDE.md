@@ -26,16 +26,26 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/central-cve-feed-proposal.md` — ⛔ **BUILT in v2.137.0-v2.139.0**, this line said
   "PROPOSAL ONLY (not built)" for thirty-odd versions after it shipped. Kept as the design record
   for `lib/feeds/cveHub.js`; read the "Central CVE feed" section of this file for what actually runs
-- `.ai-codex/entra-sso-proposal.md` — ⛔ **PHASE 0 BUILT in v2.205.0. PHASES 1-3 ARE PROPOSAL ONLY
-  (not built).** Microsoft Entra ID SSO. ⛔ **Phase 0 was a live fail-open and is now FIXED, and it
+- `.ai-codex/entra-sso-proposal.md` — ⛔ **PHASES 0, 1 AND 2 ARE BUILT. ONLY PHASE 3 IS PROPOSAL
+  ONLY (not built).** Phase 0 v2.205.0 (the scope fail-open below), Phase 1 v2.206.0-v2.208.0
+  (provider registered, `ldap_role_mappings.provider`, the Entra mapping panel, fail-closed on zero
+  mappings, group overage refused with a named reason), Phase 2 v2.211.0 (the refused-sign-in log,
+  so an administrator can see who was turned away and why). **Phase 3** — shadow `users` rows so
+  Entra accounts can be device-scoped, plus Graph overage resolution — is the only unbuilt part.
+  ⛔ **THIS LINE READ "PHASES 1-3 ARE PROPOSAL ONLY" WHILE TWO OF THEM WERE LIVE, AND THAT IS THE
+  FOURTH TIME THAT EXACT PHRASE HAS GONE STALE IN THIS LIST** (central CVE feed, analytics,
+  application view, and now this). Worse than the other three: the line was *edited* in v2.212.0 to
+  append the `UNSCOPABLE_PROVIDERS` note below, so someone was inside this sentence and left the
+  false half of it standing. The pattern — not any one instance — is why the rule under
+  "Maintaining the index" says the SAME commit. ⛔ **Phase 0 was a live fail-open and is now FIXED, and it
   was worth doing whether or not Entra is ever built**: `lib/deviceScope.js` used to decide whether
   an account may be scoped from the SHAPE of `session.user.id`, and an Entra `oid` is a GUID that
   passes the local-UUID test — so an Entra account would have been read as local, found to have no
   scope rows, and handed the whole fleet silently; it could not have been restricted even
   deliberately, because `user_device_scopes.user_id` has an FK to `users(id)`. **It now decides on
-  `session.user.provider`, and an unclassified provider DENIES.** ⛔ v2.212.0 then listed `entra` as UNSCOPABLE beside `ldap` — an explicit classification, NOT a return to shape-guessing: an Entra account sees the whole fleet as an LDAP one always has, and cannot be restricted to specific firewalls until Phase 3 gives it a local shadow row. ⛔ When any further phase ships,
-  correct that file's header AND this line in the SAME commit — the three entries below record what
-  happens otherwise
+  `session.user.provider`, and an unclassified provider DENIES.** ⛔ v2.212.0 then listed `entra` as UNSCOPABLE beside `ldap` — an explicit classification, NOT a return to shape-guessing: an Entra account sees the whole fleet as an LDAP one always has, and cannot be restricted to specific firewalls until Phase 3 gives it a local shadow row. ⛔ When Phase 3 ships,
+  correct that file's header AND this line in the SAME commit — the entries around this one record
+  what happens otherwise
 - `.ai-codex/analytics-proposal.md` — ⛔ **MOSTLY BUILT in v2.187.0-v2.191.0**, and this line said
   "PROPOSAL ONLY (not built)" for five versions after the first of them shipped — the same drift the
   central-CVE-feed entry above records, in the same list, two lines apart. Analytics with no LLM and
@@ -438,7 +448,7 @@ node reads the certificate once, at startup.
 | Layer | Technology |
 |---|---|
 | Frontend + API | Next.js 14.2.35, React 18.3, App Router (`app/` directory — NOT `pages/`) |
-| Auth | next-auth 4.24.7, standalone (no suite SSO dependency) |
+| Auth | next-auth 4.24.15, standalone (no suite SSO dependency) |
 | Database | PostgreSQL 16, `pg` module (pool pattern) |
 | Runtime | Node.js v20 **on the server**; the Linux dev box runs **Node 22** via nvm (`. "$NVM_DIR/nvm.sh"; nvm use 22`). ⛔ They are not interchangeable — see Testing. |
 | CSS | Plain CSS custom properties + suite utility classes (`app/globals.css`) — NO framework. See "Design System" below. |
@@ -550,9 +560,17 @@ Key generated at install time into `.env.local`'s `CREDENTIAL_KEY` via `RNGCrypt
 
 ## Authentication
 
-NextAuth 4.24.7, JWT strategy, two providers:
+NextAuth 4.24.15, JWT strategy, **three** providers:
 1. **Local admin** — username + bcrypt hash, now stored per-user in the `users` table (see RBAC).
 2. **LDAP/AD** — optional, `LDAP_URL` + `LDAP_BASE_DN` in `.env.local`.
+3. **Microsoft Entra ID** (v2.206.0) — optional OIDC, `next-auth/providers/azure-ad` under the
+   provider id `entra`. ⛔ **Appended ONLY when all three `ENTRA_*` vars are set, which differs
+   from LDAP on purpose**: the LDAP credentials provider is always registered and simply never
+   authenticates when `LDAP_URL` is unset, which is harmless for a form. Entra is OAuth, so
+   registering it unconfigured renders a sign-in button that cannot complete. Absent is the honest
+   state. ⛔ **Local sign-in is never affected by any of this** — Entra is a push onto the END of
+   the array, and on a segmented or air-gapped install `login.microsoftonline.com` being
+   unreachable is the NORMAL state, not a fault.
 
 `NEXTAUTH_SECRET` generated at install, separate from any suite secret. If `NETVAULT_URL` is set,
 SecVault can optionally federate SSO to NetVault — default disabled, do not implement suite SSO as
@@ -2014,7 +2032,11 @@ today, so a test pins it against a synthetic one.
 of them — so a new route is a deliberate decision, never a default. It also re-derives the
 device-touching set from SOURCE, catching a file that grew a device query after being classified
 `no-device-data`. The aware count has a FLOOR that may not fall. Shipped at 4 aware / 71 blocked /
-39 no-device-data; now **4 / 88 / 23**.
+39 no-device-data; measured 2026-10-28 at **6 aware / 90 blocked / 25 no-device-data**.
+⛔ **The floor is still the SHIPPED 4, not the current 6** (`AWARE_FLOOR` in
+`tests/deviceScopeCoverage.test.js`), so two surfaces could be demoted from `aware` without
+failing the build while this paragraph says the count never falls. Raising it is a code change,
+not a documentation one — and a floor two below the real figure is a guard that fires late.
 
 ⛔ **THE SOURCE CHECK READ ONLY THE SURFACE FILE, AND THAT IS WHERE IT LEAKED (v2.174.0).** A route
 whose device query lives one import away was invisible to it. Six were: every `/api/applications`
@@ -2938,6 +2960,47 @@ LDAP_BASE_DN=
 LDAP_BIND_DN=
 LDAP_BIND_PASSWORD=
 
+# Microsoft Entra ID SSO (optional — v2.206.0, Phase 1 of
+# .ai-codex/entra-sso-proposal.md). ⛔ THESE WERE ABSENT FROM THIS LIST
+# ENTIRELY for seven versions, so a session reading only CLAUDE.md would not
+# know which directory this console trusts to issue identities, or that it is
+# configurable at all.
+#
+# ⛔ ALL THREE ARE REQUIRED TOGETHER. With any one blank, isEntraConfigured()
+# is false, the AzureAD provider is never appended to NextAuth's provider
+# array, NO SIGN-IN BUTTON RENDERS and nothing is logged as a fault — that is
+# the normal state for an installation that does not use SSO, the same contract
+# CVE_HUB_LICENSE_KEY has. A half-configured tenant would render a "Sign in
+# with Microsoft" button that cannot complete, and an operator meeting a button
+# that fails concludes the product is broken rather than unfinished.
+#
+# ⛔ READ ONCE AT STARTUP, like ENABLE_TLS and SESSION_IDLE_MINUTES: NextAuth
+# builds its provider array at module load, so nothing here takes effect until
+# SecVault-App restarts. That is WHY the tenant lives here rather than in a
+# settings table — a row in a table is not available at the moment the
+# provider array is built.
+#
+# ⛔ SETTABLE FROM SETTINGS -> SINGLE SIGN-ON (v2.209.0), which writes them
+# through lib/envFile.js; hand-editing this file is the fallback, not the
+# instruction. Gated on manage_users (super_admin only), deliberately STRICTER
+# than the manage_settings of the console-address panel it is modelled on:
+# whoever sets the tenant decides which directory is trusted to issue
+# identities for this platform.
+#
+# ⛔ THE SECRET IS WRITE-ONLY. GET /api/system/entra reports only WHETHER one
+# is set, never the value — the same contract product_license_key has via
+# HIDDEN_KEYS. Leaving the field blank in the panel KEEPS the stored secret;
+# only clearing all three fields turns SSO off.
+#
+# ⛔ Entra accounts are governed by ldap_role_mappings rows with
+# provider='entra', and ZERO such rows DENY every Entra sign-in — the
+# deliberate opposite of LDAP, where zero rows grant legacy `admin`. See the
+# "LDAP group-to-role mapping" section above for why the two differ.
+ENTRA_TENANT_ID=                           # Directory (tenant) ID, a GUID
+ENTRA_CLIENT_ID=                           # Application (client) ID, a GUID — not the Object ID
+ENTRA_CLIENT_SECRET=                       # the secret VALUE, not its ID. Note its expiry date:
+                                           # sign-in stops working when it lapses.
+
 # SMC
 ALLOW_SELF_SIGNED_SSL=true                 # Accept self-signed certs from SMC
 
@@ -3020,6 +3083,19 @@ LOG_RETENTION_WARM_DAYS=365
 # WITHOUT MFA - the harness cannot supply a second factor.
 SMOKE_USER=
 SMOKE_PASS=
+# ⛔ THE OTHER THREE THIS HARNESS READS, which were absent from this list and
+# are still absent from .env.local.example. They are normally passed on the
+# command line rather than stored, but they ARE environment variables this repo
+# reads, and this section's own rule is "every variable referenced in code must
+# be here".
+SMOKE_URL=                                 # blank = https://127.0.0.1:3010
+SMOKE_INSECURE=                            # `1` accepts an unverified certificate. Implied for a
+                                           # loopback host; a REMOTE host needs it typed by a human
+                                           # who meant it, because the sweep signs in with real
+                                           # credentials and an unverified TLS connection is a
+                                           # convenient way to talk to an impostor.
+SMOKE_TIMEOUT_MS=                          # blank = 30000 for `npm run smoke`, 60000 for
+                                           # `npm run apisweep` — two defaults, one variable
 
 
 # Commercial licence (optional — leave BLANK on every normal install)
@@ -3183,6 +3259,29 @@ and `-fg` · **space `--s1`(4px) … `--s9`(96px)** · radius `--radius-sm`/`--r
 `--radius-pill` · type `--text-xs` … `--text-3xl`, `--font-sans`, `--font-mono`.
 
 Density adds `--row-pad-y` / `--row-pad-x` / `--row-font`.
+
+⛔ **THE NON-FLIPPING SHELL FAMILY IS NOW SIX TOKENS, AND IT KEEPS GROWING BECAUSE THE TRAP KEEPS
+BEING WALKED INTO.** Besides `--shell-fg*` and `--shell-accent`/`-soft`/`-fade` there are now
+`--shell-accent-ring`/`-glow`/`-chip` (the active nav item, which had the same three rgba literals
+hardcoded beside the tokens created for them) and **`--shell-focus-ring`** (the login card's focus
+rings, which were on the flipping `--focus-ring` at **1.33:1** in light theme — an invisible
+keyboard focus, three lines under a comment saying a surface that does not flip needs colours that
+do not flip). Measured after: **4.65:1 light / 4.76:1 dark**, identical across themes. The header
+wordmark was on `--accent-teal` at 3.92:1 light while the nav glow inches below it sat at 8.19:1 —
+two brand hues on one non-flipping ground. ⛔ **The test is never which element it is, it is WHAT
+GROUND IT SITS ON**: `--navy`, the login card and the sidebar are dark in BOTH themes, so any
+theme-flipping token placed on them is wrong in one theme by construction.
+
+⛔ **`--row-font` NO LONGER TRACKS `--text-base`, and that is deliberate.** v2.203.0 raised the
+ramp (`--text-base` 13.5px → 16px) for readability, and because `--row-font` resolved from it every
+`table-layout: fixed` cell silently lost ~18% of its character budget: a 29-character device FQDN
+that fitted at 13.5px clipped to ~25 characters plus an ellipsis, and switching to `dense` became
+the only way to READ a value `comfortable` hid — which is the one thing the density control is
+forbidden from doing ("never hide a column, truncate a value or drop a badge"). Row geometry is now
+its own axis: comfortable/compact resolve `--text-sm`, dense `--text-xs`. Measured slack on that
+string, 4×225px columns: comfortable **+28.1px clipped → +0.4px**, dense **−39.2px**. The residual
+0.4px is honest and recorded in the stylesheet — no ramp step closes it, and an off-scale 13px
+would opt the token out of the scale it belongs to.
 
 ⛔ **Spacing is a token scale now.** Before the rewrite there was none: 14 distinct inline gap
 values (including 1, 3, 5, 7 and 14px) and five near-identical paddings doing the same job. A

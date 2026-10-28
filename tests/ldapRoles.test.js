@@ -225,10 +225,120 @@ describe('⛔ loadMappings THROWS rather than returning an empty list', () => {
     assert.equal(upsertParams[4], 'ldap', 'an omitted provider must not write an Entra row');
   });
 
-  it('reads only the requested provider when one is named', async () => {
+  it('names the requested provider in the bind parameters', async () => {
     let loadParams = [];
     await L.loadMappings({ query: async (q, p) => { loadParams = p; return { rows: [] }; } }, 'entra');
     assert.deepEqual(loadParams, ['entra']);
+  });
+});
+
+// ⛔ THE PROVIDER FILTER IS THE MOST CONSEQUENTIAL INVARIANT IN THIS FILE, AND
+// IT WAS PINNED BY A TEST THAT COULD NOT FAIL.
+//
+// The two tests above assert only the BIND PARAMETER. Mutation-verified: delete
+// `WHERE provider = $1` from loadMappings while keeping `[provider]`, and both
+// of them stay green — `$1` simply becomes an unused parameter.
+//
+// What that costs on the live reference deployment, measured: `ldap_role_mappings`
+// holds 3 rows, all `provider='entra'`, and 0 with `provider='ldap'`. A
+// loadMappings that ignored the filter would hand those 3 Entra rows to the LDAP
+// login path, which would see a NON-EMPTY mapping list, END LEGACY MODE, and
+// then refuse every existing LDAP user for not being in an Entra GUID group.
+// Nothing would error; the directory would simply stop working.
+//
+// So these tests assert the RESULT SET instead. `fakeTable` is a minimal model
+// of a database rather than of our implementation: given no provider predicate
+// it returns every row, exactly as Postgres would. That survives a rewrite of
+// the SQL, which a regex over the statement text does not.
+function fakeTable(rows) {
+  const seen = [];
+  return {
+    seen,
+    query: async (sql, params = []) => {
+      seen.push({ sql, params });
+      let out = rows.slice();
+      for (const col of ['provider', 'id']) {
+        const m = new RegExp(`\\b${col}\\s*=\\s*\\$(\\d+)`, 'i').exec(sql);
+        // A column the statement does not constrain is a column the database
+        // does not filter on. That is the whole point: a dropped predicate
+        // must widen the result set here exactly as it would in Postgres.
+        if (!m) continue;
+        const want = params[Number(m[1]) - 1];
+        out = out.filter((r) => r[col] === want);
+      }
+      return { rows: out };
+    },
+  };
+}
+
+describe('⛔ one table, two directories — the provider filter decides, not the caller', () => {
+  const ROWS = [
+    { id: 'l1', group_dn: G_ADMIN, role: 'admin', provider: 'ldap' },
+    { id: 'e1', group_dn: '8f4a1c2e-9b7d-4e6a-bc13-5d2f70a9e4c1', role: 'super_admin', provider: 'entra' },
+    { id: 'e2', group_dn: 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e', role: 'operator', provider: 'entra' },
+  ];
+
+  it('the fixture is mixed, or this proves nothing', () => {
+    assert.ok(ROWS.some((r) => r.provider === 'ldap'));
+    assert.ok(ROWS.some((r) => r.provider === 'entra'));
+  });
+
+  it('loadMappings returns ONLY the ldap rows by default', async () => {
+    const got = await L.loadMappings(fakeTable(ROWS));
+    assert.deepEqual(got.map((r) => r.id), ['l1'],
+      'an Entra mapping reaching the LDAP login path is a cross-directory grant');
+  });
+
+  it('loadMappings returns ONLY the entra rows when entra is asked for', async () => {
+    const got = await L.loadMappings(fakeTable(ROWS), 'entra');
+    assert.deepEqual(got.map((r) => r.id).sort(), ['e1', 'e2']);
+  });
+
+  it('⛔ a provider with no rows reads as EMPTY, not as the other directory', async () => {
+    // This is the live state for LDAP on the reference deployment: 3 Entra
+    // mappings, 0 LDAP ones. Empty is what keeps legacy mode correctly ON for
+    // LDAP, and it must not be contaminated by the Entra rows beside it.
+    const entraOnly = ROWS.filter((r) => r.provider === 'entra');
+    const loaded = await L.loadMappings(fakeTable(entraOnly));
+    assert.deepEqual(loaded, []);
+    // …and the end-to-end consequence, through the judgement this file exists
+    // to protect: legacy mode, not a refusal. Chained off the loaded list on
+    // purpose — with the filter gone this is the sentence that changes, from
+    // "every directory user is an Administrator" to "every one is refused".
+    const res = L.resolveRole({ groups: [G_OTHER], mappings: loaded });
+    assert.equal(res.outcome, L.OUTCOME.LEGACY_NO_MAPPINGS);
+  });
+
+  it('⛔ deleteMapping cannot reach another directory\'s row', async () => {
+    // `DELETE ... WHERE id = $1` made the id the sole authority over a table
+    // holding both directories. Each panel only ever shows its own ids, so this
+    // was not reachable through the UI — but a cross-provider primitive with no
+    // allow-list check is one replayed id away from revoking the wrong
+    // directory's access.
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'e1', 'ldap'), null,
+      'an Entra id must not be deletable as an LDAP mapping');
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'l1', 'entra'), null,
+      'and the reverse');
+  });
+
+  it('deleteMapping returns the provider it actually deleted from', async () => {
+    // ⛔ The PROVIDER, not a boolean, so the caller reports the consequence for
+    // the directory it changed. With a boolean the route recomputed its
+    // "legacy mode reopened" count against the 'ldap' default, so deleting an
+    // Entra mapping claimed LDAP legacy mode had reopened.
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'e1', 'entra'), 'entra');
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'l1', 'ldap'), 'ldap');
+  });
+
+  it('deleteMapping defaults to ldap, and that default can only ever REFUSE', async () => {
+    // The default exists so a caller written before the provider column keeps
+    // working. Its only possible failure is declining to delete an Entra row.
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'l1'), 'ldap');
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'e1'), null);
+  });
+
+  it('a miss is null, never a silent success', async () => {
+    assert.equal(await L.deleteMapping(fakeTable(ROWS), 'nope', 'ldap'), null);
   });
 });
 

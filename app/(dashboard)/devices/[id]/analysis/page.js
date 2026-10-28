@@ -332,20 +332,41 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
             <Link href={`/devices/${device.id}/rules`} style={{ textDecoration: 'none' }}>
               <StatCard label="Total Rules" value={ruleStats.total_rules} />
             </Link>
+            {/* ⛔ NO HUE ON ANY OF THESE THREE (v2.213.x), and the v2.202.0
+                decoration sweep skipped this page INCLUDING ITS OWN CITED
+                EXAMPLE — v2.200.0's commit message named the problem as "red
+                permanently on 'Denied Rules'". The 4px border was removed; the
+                hue was not, and since `color` now routes to the headline NUMBER
+                through StatCard's TEXT_SAFE_VALUE map, the red moved somewhere
+                MORE prominent than the edge it was taken off.
+
+                ⛔ ALL THREE ENCODE NO RISK, and two of them encode it
+                BACKWARDS. A deny rule is the GOOD direction on a firewall, so
+                permanent red on "Denied Rules" taught the operator to read this
+                product's most urgent signal as decoration — the exact dilution
+                "Colour means RISK" exists to prevent. "Allowed Rules" wore
+                --green with the inverse semantics beside it. "NAT Enabled" is a
+                plain count wearing --blue, a status token v2.87.0 pulled out of
+                the severity vocabulary precisely because it sits one step from
+                the brand teal. Omitting `color` falls to StatCard's
+                var(--border) sentinel, which renders the number as
+                --text-primary. The genuine risk tile on this row ("Allowed
+                Any-to-Any") keeps its red AND is already gated on the count
+                being non-zero, which is the pattern. */}
             <Link href={`/devices/${device.id}/rules?action=allow`} style={{ textDecoration: 'none' }}>
-              <StatCard label="Allowed Rules" value={ruleStats.allowed_count} color="var(--green)" />
+              <StatCard label="Allowed Rules" value={ruleStats.allowed_count} />
             </Link>
             <Link
               href={`/devices/${device.id}/rules?action=deny,drop,reject,block`}
               style={{ textDecoration: 'none' }}
             >
-              <StatCard label="Denied Rules" value={ruleStats.denied_count} color="var(--red)" />
+              <StatCard label="Denied Rules" value={ruleStats.denied_count} />
             </Link>
             <Link href={`/devices/${device.id}/rules?enabled=false`} style={{ textDecoration: 'none' }}>
               <StatCard label="Inactive Rules" value={ruleStats.inactive_count} />
             </Link>
             <Link href={`/devices/${device.id}/rules?nat=true`} style={{ textDecoration: 'none' }}>
-              <StatCard label="NAT Enabled" value={ruleStats.nat_count || 0} color="var(--blue)" />
+              <StatCard label="NAT Enabled" value={ruleStats.nat_count || 0} />
             </Link>
             <Link
               href={`/devices/${device.id}/analysis?tab=findings&finding_type=any_any`}

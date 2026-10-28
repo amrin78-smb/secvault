@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.214.0': [
+    'SECURITY: a Microsoft sign-in that SecVault refused was not actually being refused. The refusal was decided correctly, written to the sign-in log and shown on the Single sign-on page - and then the sign-in completed anyway. Anyone in your directory who was not in a mapped group could sign in and READ the whole fleet: firewalls, rules, configurations, vulnerabilities and compliance results. They could not change anything. This is fixed: the sign-in is now turned away at the door, with no session created, and the person is told their account is not mapped to a role.',
+    'A session whose access is withdrawn while it is open - a mapping removed, an account deleted - is now refused on its next request instead of continuing until the sign-in expired. Signing in again restores access as soon as the account is valid again.',
+    'Saving Single sign-on settings now reports a failure as a failure. If the settings file could not be written, SecVault said "Saved" and changed nothing. It now names which values were stored, and refuses before writing if the file has duplicate entries - the state you get by following the old setup guide, which told you to add by hand the three lines the example file already contains.',
+    'Single sign-on can now be turned off from Settings. The page said to clear the fields, which answered "the Directory (tenant) ID must be a GUID" and left no way to switch it off from the console. Changing a tenant or rotating a client secret also now shows the "restart required" notice, which only appeared the very first time it was set up - so a rotated secret looked live while the old one was still in use.',
+    'The browser tab icon never worked. It has shown your browser default since it was added: the file was not valid, so nothing could draw it. Reports, forms and tiles also read better - forms now become a single column on narrow screens instead of two unusable ones, long values in tables are no longer cut short at the default density, and the header, keyboard focus outlines and table headings have the contrast they were meant to have.',
+    'Tiles no longer colour a count that carries no risk, and no longer mark a measurement that succeeded as "not collected". A zero is shown plainly, and the dashed, colourless styling now means only what it is supposed to mean: SecVault could not measure this.',
+  ],
   '2.213.0': [
     'Form fields across Settings, Firewalls, Credential Profiles and SNMP no longer stretch to the full width of the screen. A username or an ID was being given the width of the whole page, which wasted the space and made short values look like long ones.',
     'Fields are capped at a readable width and line up with the dropdowns beside them, instead of each one ending somewhere different.',
@@ -105,18 +113,18 @@ const releaseNotes = {
   ],
   '2.199.1': [
     'The brandmark now appears on the PDF report cover. It was a teal rounded square with a Helvetica \u201cS\u201d set inside it \u2014 a stand-in rather than a mark, and the only place in the product where the brand was a letter in a box.',
-    'Drawn in lib/reports/chassis.js, which is the ONE shared cover, so all twelve report builders pick it up at once rather than each growing their own copy.',
+    'It is drawn on the one shared report cover, so all twelve reports pick it up at once rather than each keeping its own copy.',
     'The x and the 64pt height are the old square\u2019s, so the wordmark, tagline, accent rule, metadata and summary chips are all byte-identical in position \u2014 this file\u2019s own rule about not restyling a document an auditor may already hold.',
     '\u26d4 The mark is CLIPPED to the shield before the even-odd fill. Both counters deliberately overrun the silhouette, and filling even-odd without the clip paints those overhangs as solid wedges floating beside the mark \u2014 it looks like a printing fault, and only a rendered page shows it.',
-    'Verified by rendering a real cover to PDF and reading it back as an image, not by asserting which pdfkit calls were issued. The fake doc in tests/sweepRegressions.test.js gained translate/scale/clip because it is an incomplete stub of pdfkit, not a specification of it.',
+    'Verified by rendering a real cover to PDF and reading the page back as an image, rather than by checking which drawing commands were issued — only a rendered page shows the fault above.',
   ],
   '2.199.0': [
     'New brandmark. The outlined shield-and-tick is replaced by an angular S whose own edges ARE the shield \u2014 the silhouette and the letterform are one object, cut by two counters that open in opposite directions.',
     'It is drawn with an SVG mask rather than counters painted in the background colour, so the cut-outs are genuinely transparent and the mark holds on the login page\u2019s gradient and on a single-ink PDF cover, not just on flat fills.',
     'No gradient, deliberately: the shell is dark in BOTH themes, so the navy half of a navy-to-blue fade would be invisible exactly where the mark is used most. The brand hue is unchanged \u2014 teal stays, so no token moved and the severity ramp is untouched.',
-    'The shield existed TWICE, in Header.js and in the login page, the second with a comment claiming it was reused; both now render one components/ui/BrandMark.js. The header wordmark is also real text instead of SVG <text>, so it can be selected, found and read aloud, and can no longer carry a font-family that drifts from the body face.',
-    'SecVault had no favicon at all \u2014 the tab showed the browser default. app/icon.svg now carries the mark, following the browser chrome\u2019s light or dark theme rather than the in-app toggle.',
-    'The login eyebrow read \u201cFIREWALL SECURITY PLATFORM\u201d while lib/branding.js has always said \u201cFirewall Intelligence Platform\u201d. The page now reads the branding surface instead of a hardcoded copy a rebrand would miss.',
+    'The shield existed TWICE \u2014 once in the header and once on the login page, the second with a comment claiming it was reused. Both now render one shared mark. The header wordmark is also real text rather than part of the drawing, so it can be selected, searched and read aloud by a screen reader.',
+    'SecVault had no favicon at all \u2014 the tab showed the browser default. The tab now carries the mark, following the browser\u2019s own light or dark setting rather than the in-app toggle.',
+    'The login eyebrow read \u201cFIREWALL SECURITY PLATFORM\u201d while the product\u2019s own branding has always said \u201cFirewall Intelligence Platform\u201d. The page now reads that branding instead of a hardcoded copy a rebrand would miss.',
   ],
   '2.198.1': [
     'Pre-deploy review pass over v2.196.1-v2.198.0. The evidence-window resolver ran once per DEVICE rather than once per pass, so nightly collection issued one fleet aggregate per firewall \u2014 and because each device resolved independently, two firewalls in one run could store different windows in their finding text.',

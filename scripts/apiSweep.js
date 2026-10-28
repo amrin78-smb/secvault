@@ -61,17 +61,35 @@
 //
 // ─── WHAT THIS DOES NOT COVER, STATED UP FRONT ───────────────────────────────
 //
-// 1. ⛔ ROLE-SPECIFIC AUTHORISATION. There is ONE account available to the
-//    harness and it is a super_admin, which holds all nine capabilities. So a
-//    genuine 403 cannot be produced live, and this sweep does NOT fake a
-//    session to manufacture one — a forged cookie would test the forgery, not
-//    the boundary. What IS asserted live is the other direction and it is not
-//    nothing: a route declaring a capability must NOT deny the session that
-//    holds every one of them. That catches a mistyped capability constant,
-//    which lib/rbac.js denies to EVERY role including super_admin. And any 403
-//    that does come back must NAME the capability in its body. The denial
-//    itself — operator refused `manage_users` — needs a second, lower-privilege
-//    test account. Until one exists this is a real gap, not a covered case.
+// 1. ⛔ ROLE-SPECIFIC AUTHORISATION IS NOW COVERED, AND THE EXPECTATION IS
+//    DERIVED FROM THE SESSION RATHER THAN ASSUMED. This file used to assume its
+//    account was a super_admin holding all nine capabilities, so a 403 was
+//    always a failure. The sweep's own credentials then changed to a dedicated
+//    `secvault-smoke` account with role `admin` — which holds neither
+//    `manage_users` nor `manage_credential_profiles` — and four routes answering
+//    403 CORRECTLY were counted as failures:
+//
+//      /api/credential-profiles  /api/ldap-mappings  /api/system/entra  /api/users
+//
+//    A harness reporting four false failures is worse than one with a gap: the
+//    output stops being read. So the sweep now LEARNS ITS OWN ROLE from
+//    /api/auth/session — an inert GET under a prefix it already calls — maps it
+//    through lib/rbac.js's ROLE_CAPABILITIES, and asserts BOTH directions:
+//
+//      the session HOLDS the declared capability  ->  must NOT be denied (403 is
+//        a failure; this is what catches a mistyped constant, which can() denies
+//        to EVERY role including super_admin)
+//      the session LACKS it                       ->  must answer 403, and that
+//        403 must name the capability. A 200 there is a real hole and is shouted
+//        about — the denial direction this file could not test before.
+//
+//    ⛔ AN UNDETERMINED ROLE IS `unknown`, NOT "holds nothing". Reading a failed
+//    /api/auth/session as an account with no capabilities would make every
+//    gated route expect a 403 and report the whole product broken. It falls back
+//    to the old assume-everything behaviour AND is counted as a coverage gap, so
+//    the sweep exits INCOMPLETE rather than clean. This sweep still does NOT
+//    fake a session to manufacture a denial — a forged cookie would test the
+//    forgery, not the boundary.
 //    tests/apiSweepHarness.test.js drives the denial shapes synthetically.
 // 2. RESPONSE BODY SEMANTICS. A 200 whose JSON parses is asserted; whether the
 //    numbers in it are right is the engines' own tests' job.
@@ -114,7 +132,7 @@ const path = require('node:path');
 // registry. Requiring it is cheap: `builder` is a lazy `() => require(...)`, so
 // pdfkit and the engine graph stay unloaded.
 const { REPORTS } = require('../lib/reports/catalogue');
-const { ALL_CAPABILITIES } = require('../lib/rbac');
+const { ALL_CAPABILITIES, ROLE_CAPABILITIES } = require('../lib/rbac');
 
 const BASE = (process.env.SMOKE_URL || 'https://127.0.0.1:3010').replace(/\/+$/, '');
 const USER = process.env.SMOKE_USER || 'admin';
@@ -529,6 +547,52 @@ async function login() {
   }
 }
 
+/**
+ * Who did we sign in as, and therefore what may this sweep expect?
+ *
+ * ⛔ IT ASKS THE PRODUCT RATHER THAN TRUSTING SMOKE_USER. A username says
+ * nothing about a role, and the role is what decides whether a 403 is the
+ * correct answer. /api/auth/session is a GET under the one prefix this harness
+ * already calls twice (csrf, then the credentials callback), so it adds no new
+ * surface. ⛔ IT IS NOT QUITE INERT, AND THIS FILE DOES NOT CLAIM OTHERWISE:
+ * NextAuth may re-issue the session cookie on it, and SecVault's own jwt()
+ * callback re-reads the account's role from the database. Both land entirely
+ * inside this harness's own cookie jar — every browser does the same thing on
+ * every page load — and neither touches fleet data, a score or a finding, so it
+ * is not added to SIDE_EFFECTING_GETS, which is about the CHECK tables.
+ *
+ * ⛔ IT NEVER GUESSES. Anything it cannot read — a non-200, a non-JSON body, a
+ * session with no role, a role lib/rbac.js does not know — returns
+ * `capabilities: null` WITH a reason, and the caller treats that as a coverage
+ * gap rather than as an account with no authority.
+ */
+async function discoverSession() {
+  let obs;
+  try {
+    obs = await capture(await req('/api/auth/session'));
+  } catch (err) {
+    return { role: null, capabilities: null, error: `/api/auth/session could not be read: ${(err && err.message) || err}` };
+  }
+  if (obs.status !== 200) {
+    return { role: null, capabilities: null, error: `/api/auth/session answered ${obs.status}` };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(obs.body);
+  } catch {
+    return { role: null, capabilities: null, error: '/api/auth/session did not return JSON' };
+  }
+  const role = parsed && parsed.user && typeof parsed.user.role === 'string' ? parsed.user.role : null;
+  if (!role) {
+    return { role: null, capabilities: null, error: '/api/auth/session carries no user.role' };
+  }
+  const capabilities = capabilitiesForRole(role);
+  if (!capabilities) {
+    return { role, capabilities: null, error: `lib/rbac.js grants no capabilities to role "${role}"` };
+  }
+  return { role, capabilities, error: null };
+}
+
 // ─── the pure verdict logic ─────────────────────────────────────────────────
 //
 // ⛔ PURE, AND EXPORTED, SO THE HARNESS ITSELF CAN BE TESTED. A sweep that has
@@ -605,14 +669,57 @@ function anonVerdict(route, observed) {
 }
 
 /**
+ * The capabilities a role holds, or null when the role is not one lib/rbac.js
+ * knows.
+ *
+ * ⛔ OWN PROPERTY ONLY. `ROLE_CAPABILITIES['constructor']` reaches the prototype
+ * chain and returns a truthy non-array — the same asymmetry lib/rbac.js's own
+ * capabilitiesOf() was fixed for.
+ */
+function capabilitiesForRole(role) {
+  if (typeof role !== 'string' || role === '') return null;
+  if (!Object.prototype.hasOwnProperty.call(ROLE_CAPABILITIES, role)) return null;
+  const caps = ROLE_CAPABILITIES[role];
+  return Array.isArray(caps) ? caps : null;
+}
+
+/**
+ * The capability list to judge against, or null for "we do not know".
+ *
+ * ⛔ NULL IS UNKNOWN AND MEANS "ASSUME EVERY CAPABILITY", NOT "NONE". Reading a
+ * failed session lookup as an account holding nothing would turn every gated
+ * route into an expected 403 and report the entire product broken — a failed
+ * read recorded as a fact, aimed at the harness's own expectations. The caller
+ * counts the unknown as a coverage gap instead.
+ */
+function heldCapabilities(session) {
+  if (!session) return null;
+  if (Array.isArray(session)) return session;
+  return Array.isArray(session.capabilities) ? session.capabilities : null;
+}
+
+/**
  * The authenticated contract for one check.
  *
- * The session used here holds EVERY capability, which is what makes the 403
- * branch meaningful: a 403 can only mean the route asked for an authority
- * lib/rbac.js does not recognise.
+ * `session` is `{ role, capabilities }` for the account that signed in, or null
+ * when it could not be determined — in which case this behaves exactly as it
+ * did before the role was discovered at all: every capability is assumed held,
+ * so a 403 is a failure.
+ *
+ * ⛔ BOTH DIRECTIONS ARE ASSERTED ONCE THE ROLE IS KNOWN. A capability the
+ * session HOLDS must not be denied (that is what catches a mistyped constant,
+ * which can() denies to every role). A capability it LACKS must be denied with
+ * a 403 that names it — and a 200 there is the hole this sweep previously had
+ * no account to look for.
  */
-function authedVerdict(check, observed) {
-  const expect = check.expect || [200];
+function authedVerdict(check, observed, session = null) {
+  const held = heldCapabilities(session);
+  const declared = check.capability || null;
+  const role = (session && session.role) || null;
+  // ⛔ ONLY WITH A KNOWN ROLE. With `held === null` this is false for every
+  // check and the function's old behaviour is unchanged.
+  const lacks = Boolean(declared && held && !held.includes(declared));
+  const expect = lacks ? [403] : (check.expect || [200]);
   const type = check.type || 'json';
   const checks = ['status'];
   const fail = (reason) => ({ key: check.key || check.path, ok: false, reason, status: observed.status, checks });
@@ -622,6 +729,23 @@ function authedVerdict(check, observed) {
     checks.push('no-server-error');
     const shown = observed.body ? `body: ${observed.body.slice(0, 300).replace(/\s+/g, ' ')}` : UNCAUGHT_500_HINT;
     return fail(`HTTP ${observed.status} — ${shown}`);
+  }
+
+  // ⛔ THE DENIAL DIRECTION, AND IT IS A LOUD FAILURE. A session that does not
+  // hold the capability a route declares must be refused. Anything other than a
+  // 403 here means the gate did not fire — which is the one thing a sweep run
+  // by a privileged account can never see, and the reason the `secvault-smoke`
+  // account being an `admin` rather than a super_admin is coverage rather than
+  // an inconvenience.
+  if (lacks) {
+    checks.push('capability-gate-fires');
+    if (observed.status !== 403) {
+      return fail(
+        `HTTP ${observed.status} for a session that does NOT hold "${declared}"`
+        + `${role ? ` (role "${role}")` : ''} — the capability gate did not fire. `
+        + 'This route is reachable by an account that lib/rbac.js says may not reach it.'
+      );
+    }
   }
 
   if (observed.status === 403) {
@@ -648,9 +772,17 @@ function authedVerdict(check, observed) {
       );
     }
     if (!expect.includes(403)) {
+      // ⛔ THE SENTENCE NAMES WHAT THE SESSION ACTUALLY HOLDS, AND IT USED TO
+      // ASSERT "this session holds every capability" UNCONDITIONALLY. That was
+      // true only while the harness signed in as a super_admin; once it moved
+      // to an `admin` account the claim was false and four correct 403s were
+      // reported as failures with a reason that sent the reader looking for a
+      // mistyped constant that did not exist.
       return fail(
-        `403 requiring "${named}" — this session holds every capability, so the route is gating on `
-        + 'one it should not, or a constant is mistyped (can() denies an unrecognised string to every role)'
+        `403 requiring "${named}" — this session`
+        + `${role ? ` (role "${role}")` : ''} ${held ? 'holds that capability' : 'holds every capability'}`
+        + ', so the route is gating on one it should not, or a constant is mistyped '
+        + '(can() denies an unrecognised string to every role)'
       );
     }
   }
@@ -1117,7 +1249,7 @@ async function runMatcherProbes(probes) {
   return results;
 }
 
-async function runAuthed(checks, fixtures) {
+async function runAuthed(checks, fixtures, session = null) {
   const results = [];
   const unresolved = [];
   for (const c of checks) {
@@ -1132,7 +1264,7 @@ async function runAuthed(checks, fixtures) {
       opts.body = JSON.stringify(c.body);
     }
     const res = await req(p, opts);
-    const verdict = authedVerdict(c, await capture(res));
+    const verdict = authedVerdict(c, await capture(res), session);
     results.push({ ...verdict, key: c.key || p, why: c.why || null });
   }
   return { results, unresolved };
@@ -1167,11 +1299,29 @@ async function main() {
     process.exit(EXIT.UNREACHABLE);
   }
 
+  // ⛔ WHO WE ARE, BEFORE JUDGING ANYTHING. Every capability-gated check's
+  // expectation depends on it, and an undetermined role is a coverage gap
+  // rather than an assumption either way.
+  const session = await discoverSession();
   const { fixtures, errors: fixtureErrors, gaps } = await discoverFixtures();
+  if (session.capabilities) {
+    const lacking = ALL_CAPABILITIES.filter((c) => !session.capabilities.includes(c));
+    console.log(
+      `[apisweep] signed in as role "${session.role}" — holds ${session.capabilities.length}/`
+      + `${ALL_CAPABILITIES.length} capabilities${lacking.length ? `, lacks ${lacking.join(', ')}` : ''}`
+    );
+  } else {
+    gaps.push(
+      `the signed-in role could not be determined (${session.error}) — every capability-gated `
+      + 'check falls back to assuming the session holds everything, so no DENIAL is asserted'
+    );
+  }
   for (const e of fixtureErrors) console.log(`  FAIL  fixture  ${e}`);
 
   const checks = assertSafeChecks([...READ_CHECKS, ...reportChecks(REPORTS), ...REPORT_PARAM_CASES], API_ROUTES);
-  const { results: authedResults, unresolved } = await runAuthed(checks, fixtures);
+  const { results: authedResults, unresolved } = await runAuthed(
+    checks, fixtures, session.capabilities ? session : null
+  );
 
   for (const r of authedResults) {
     if (r.ok) console.log(`  ok    ${r.status}  ${r.key}${r.bytes ? `  (${r.bytes} bytes)` : ''}`);
@@ -1193,10 +1343,26 @@ async function main() {
   // is a real coverage gap and the operator has to be told which checks it cost.
   for (const g of gaps) console.log(`  gap   ${g}`);
   for (const u of unresolved) console.log(`  unrun ${u.key} — no fixture for {${u.missing.join('}, {')}}`);
-  console.log(
-    '  note  role-specific denial (a 403 for a session that genuinely lacks a capability) is NOT '
-    + 'covered — it needs a second, non-super_admin test account.'
-  );
+  // ⛔ THE NOTE IS DERIVED, NOT TYPED. It used to say flatly that role-specific
+  // denial "is NOT covered — it needs a second, non-super_admin test account".
+  // One exists now, so a hardcoded sentence would be a note disclaiming
+  // coverage the sweep had just exercised — the stale-reason trap this codebase
+  // names repeatedly. It reports what this run actually proved.
+  if (session.capabilities) {
+    const denied = checks.filter((c) => c.capability && !session.capabilities.includes(c.capability));
+    console.log(
+      denied.length
+        ? `  note  role-specific DENIAL asserted on ${denied.length} check(s) this "${session.role}" `
+          + `session may not reach: ${denied.map((c) => c.key || c.path).join(', ')}`
+        : `  note  this "${session.role}" session holds every capability any check declares, so the `
+          + 'DENIAL direction was not exercised — it needs an account lacking one.'
+    );
+  } else {
+    console.log(
+      '  note  role-specific denial is NOT covered on this run: the signed-in role could not be '
+      + 'determined, so every gated check assumed the session holds everything.'
+    );
+  }
   for (const [p, effect] of SIDE_EFFECTING_GETS) {
     if (checks.some((c) => String(c.path).split('?')[0] === p)) {
       console.log(`  note  GET ${p} is not inert: it ${effect}.`);
@@ -1242,6 +1408,8 @@ module.exports = {
   anonVerdict,
   authedVerdict,
   sweepVerdict,
+  capabilitiesForRole,
+  heldCapabilities,
   // ⛔ EXPORTED BECAUSE A MUTATION ESCAPED WITHOUT IT. The harness test built
   // its own `observed` objects, so re-introducing capture()'s 4 KB slice — the
   // one real defect this sweep has had — changed nothing and the suite stayed

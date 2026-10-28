@@ -94,11 +94,27 @@ export default function EntraRolesPanel() {
     if (!window.confirm(msg)) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/ldap-mappings?id=${encodeURIComponent(m.id)}`, { method: 'DELETE' });
+      // ⛔ THE PROVIDER IS SENT, not inferred from the id. One table holds both
+      // directories' mappings and the DELETE is scoped to one of them, so an id
+      // alone is not sufficient authority over it. Omitting this param means
+      // LDAP — which is correct for the panel that predates the column, and
+      // would silently 404 here.
+      const res = await fetch(
+        `/api/ldap-mappings?id=${encodeURIComponent(m.id)}&provider=entra`,
+        { method: 'DELETE' }
+      );
+      const b = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
         setStatus(b.error || `HTTP ${res.status}`);
       } else {
+        // ⛔ Said at the moment it becomes true, the mirror of the first-mapping
+        // message above. The confirm dialog warned BEFORE; this confirms the
+        // state afterwards, because the dialog can be dismissed by a browser
+        // that suppresses them and because the API is the authority on what the
+        // table now holds.
+        setStatus(b.entraLastMappingRemoved
+          ? 'Removed. That was the last Entra mapping, so NO Entra user can sign in now.'
+          : 'Removed.');
         await load();
       }
     } finally {

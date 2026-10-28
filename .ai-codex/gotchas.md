@@ -151,6 +151,53 @@ The window resolver is a second aggregate over `syslog_rollup_hourly`, so
 started matching the resolver instead of the coverage query and pinned the wrong one. Both now
 match on `hours_with_events` — what the query COMPUTES, which is also what the test is about.
 
+## ⛔ AN XML COMMENT MAY NOT CONTAIN `--`, AND THE FAVICON WAS INERT FOR 14 VERSIONS (found 2026-10-28)
+
+`app/icon.svg` carried a comment explaining — correctly and usefully — why its two brand hues are
+literal hex rather than CSS custom properties, and it NAMED those tokens: `--navy` and `--primary`.
+**XML forbids a double hyphen inside a comment.** An SVG served as `image/svg+xml` is parsed
+strictly, so the whole document was rejected: the browser fell back to its blank default page icon
+and the favicon added in v2.199.0 never rendered anywhere, on a console people keep pinned all day.
+**The comment written to explain the file is what broke the file.**
+
+⛔ **IT SHIPPED THAT WAY BECAUSE NOTHING IN THE REPO PARSED IT.** The whole suite passed,
+`npm run build` was clean, the deploy verified and the page-render sweep was green — none of them
+reads this file. The build copies the bytes through verbatim and serves them with a one-year
+`max-age`, so a browser that cached the failure cached it for a year. **An asset nothing parses is
+an asset nothing protects**, and `app/` holds several of these (`icon.svg`, `robots.txt`, the font
+files) that sit outside every gate in this repo.
+
+⛔ **THE RULE IS NOT "AVOID TOKEN NAMES".** Any `--` is fatal: an em-dash written as `--`, a
+`--flag` in an example command, a horizontal rule, `prefers-color-scheme` ranges written with two
+hyphens. Spell a CSS custom property in prose as "the navy token", or move the note to a `.js`
+file beside it. Fixed, with the explanation kept in the comment it broke, and
+`tests/appChrome.test.js` now validates the file as XML and scans every comment for `--`
+(`fast-xml-parser` is already a runtime dependency, so this added nothing to `npm ci`).
+
+## ⛔ `setEnvValue` RETURNS `{ok:false}` AND DOES NOT THROW — try/catch ALONE REPORTS SUCCESS (found 2026-10-28)
+
+`lib/envFile.js`'s `setEnvValue` reports **every** refusal as a return value: an invalid key, a
+value containing a line break, an unreadable file, a `.env.local` over the 1 MB size tripwire, a
+DUPLICATED key, and a failed post-write verification. **None of them throws.** So a caller shaped
+like
+
+```js
+try { setEnvValue(file, KEY, value); } catch (err) { return 500; }
+return NextResponse.json({ ok: true, restartRequired: true });
+```
+
+reports a completed write for a write that did not happen — and the administrator is told to
+restart a service to apply a setting that was never saved. It had bitten
+`app/api/system/entra/route.js`, which wrote three keys that way; `console-url` and
+`session-policy` both check `result.ok` (the latter says so in a ⛔ comment above the call), so two
+of the three callers were already right and the pattern to copy was already in the repo.
+
+⛔ **This is the failed-read-as-a-fact rule on the WRITE side**, and it is easy to repeat because
+the code reads as handled: there IS error handling, it is just handling a failure mode this
+function does not use. When several keys are written in one request, check EACH result and report
+which ones landed — a partial write is a real state, and "all three saved" over two of three is
+the more dangerous answer.
+
 ## ⛔ `.env.local` BACKUPS ACCUMULATED AS READABLE COPIES OF EVERY SECRET (found 2026-10-19)
 
 `lib/envFile.js` wrote a timestamped backup before each Settings change and left it on disk for

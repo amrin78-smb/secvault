@@ -223,11 +223,18 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
                     flexWrap: 'wrap',
                   }}
                 >
+                  {/* ⛔ 600, NOT 650. Only 400/500/600/700 are vendored in
+                      public/fonts/, and CSS font matching resolves 650 UPWARD:
+                      measured in Chromium, 650/700/800 all render at the same
+                      advance width while 600 is its own face. So 650 was 700
+                      wearing a number that hid which face would appear. 600 is
+                      what .card-title already uses for a heading of this
+                      size. */}
                   <h2
                     style={{
                       margin: 0,
                       fontSize: 'var(--text-lg)',
-                      fontWeight: 650,
+                      fontWeight: 600,
                       color: 'var(--text-primary)',
                     }}
                   >

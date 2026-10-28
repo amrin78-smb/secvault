@@ -45,6 +45,28 @@ function stripComments(src) {
 const code = stripComments(page);
 const backdropCode = stripComments(backdrop);
 
+/**
+ * The initial value of ONE named useState declaration, as written.
+ *
+ * ⛔ THIS EXISTS BECAUSE A BARE REGEX OVER THE WHOLE FILE CANNOT PIN A DEFAULT.
+ * The showCode guard below used to be `assert.match(code, /useState\(false\)/)`
+ * — and the page declares SIX states that way. Mutating the showCode line to
+ * `useState(true)`, which is the exact regression the test names in its own
+ * failure message, left it green: any of the other five satisfied it. That is
+ * the shape CLAUDE.md records for v2.193.0 itself, where 24 tests pinned the
+ * MECHANISM and none pinned the DEFAULT, and the feature shipped doing nothing.
+ *
+ * Returns null when the declaration is absent, so a RENAMED state fails its
+ * assertion loudly instead of quietly matching something else.
+ */
+function initialStateOf(name) {
+  const re = new RegExp(
+    `const\\s*\\[\\s*${name}\\s*,\\s*set[A-Za-z0-9_]+\\s*\\]\\s*=\\s*useState\\(([^)]*)\\)`
+  );
+  const m = re.exec(code);
+  return m ? m[1].trim() : null;
+}
+
 describe('⛔ the sign-in page is PRE-AUTH — what it must never disclose', () => {
   it('never prints a version or build number', () => {
     // Measured live before this was removed: the login HTML read
@@ -95,7 +117,14 @@ describe('⛔ the sign-in form is not an ORACLE', () => {
     // Since the answer only arrives after a submit, and a user without MFA is
     // signed in BY that submit, the box showed on every page load and was never
     // hidden in practice — the feature shipped doing nothing.
-    assert.match(code, /useState\(false\)/, 'showCode must start hidden');
+    //
+    // ⛔ AND THE GUARD ON THAT WAS ITSELF A GUARD THAT COULD NOT FIRE, for five
+    // versions. See initialStateOf() at the top of this file for what it missed
+    // and why a whole-file regex can never pin a default.
+    assert.notEqual(initialStateOf('showCode'), null,
+      'the showCode state is gone or renamed — if that is deliberate, rewrite this test rather than deleting it');
+    assert.equal(initialStateOf('showCode'), 'false',
+      'showCode must start hidden — starting visible makes the reveal logic inert, which is how v2.193.0 shipped');
     // ⛔ CONDITIONALLY RENDERED, not merely marked `hidden`: `.login-field`
     // sets display:flex, which beats the UA `[hidden]` rule, so the attribute
     // was inert and the box stayed on screen.
@@ -161,6 +190,188 @@ describe('⛔ the sign-in form is not an ORACLE', () => {
       assert.doesNotMatch(m, /code (was|is) (wrong|invalid|incorrect)|invalid code|wrong password|bad password/i,
         `a failure message distinguishes the factor that failed: "${m}"`);
     }
+  });
+});
+
+describe('⛔ controls that must start HIDDEN, for the same reason showCode does', () => {
+  it('the Microsoft button is off until the SERVER says the provider exists', () => {
+    // A "Sign in with Microsoft" button on an installation with no tenant is a
+    // button that cannot complete — it reads as a broken product on the first
+    // screen anybody sees. Starting it true and hiding it on a negative answer
+    // repeats v2.193.0 exactly: the answer arrives after paint, so the wrong
+    // default is what every visitor sees.
+    assert.notEqual(initialStateOf('entraAvailable'), null,
+      'the entraAvailable state is gone or renamed — if deliberate, rewrite this test');
+    assert.equal(initialStateOf('entraAvailable'), 'false',
+      'the SSO button must start hidden and be revealed by getProviders(), never the reverse');
+  });
+});
+
+describe('⛔ the two sign-in cues explain themselves, and echo nothing', () => {
+  // TWO agreed literals, and they are NOT interchangeable:
+  //
+  //   /login?sso=refused — TERMINAL. The front door turned the account away;
+  //                        an administrator must map a group before anything
+  //                        changes. Telling this user to sign in again wastes
+  //                        their afternoon.
+  //   /login?sso=norole  — frequently TRANSIENT. An already-issued session's
+  //                        role went null, so signing in again genuinely does
+  //                        fix it. Its causes include a deleted LOCAL account
+  //                        and a database outage, so its copy may not name a
+  //                        provider at all.
+  //
+  // ⛔ BEHAVIOUR, NOT SHAPE. Each case below pulls the page's OWN matching
+  // expression and RUNS it against real query strings. A regex asserting the
+  // line still looks similar would be satisfied by a startsWith, a case fold
+  // or a lookup in a map object — three plausible "improvements", each of
+  // which renders a panel for values nobody agreed to. CLAUDE.md records the
+  // same move on cveHub's freshnessErrors(): a test that asserted the line
+  // EXISTED passed while the line never ran.
+  const CUES = [
+    { state: 'ssoRefused', setter: 'setSsoRefused', value: 'refused' },
+    { state: 'ssoNoRole', setter: 'setSsoNoRole', value: 'norole' },
+  ];
+
+  const matcherFor = (cue) => {
+    const assign = new RegExp(`${cue.setter}\\(([^;]+)\\);`).exec(code);
+    assert.ok(assign,
+      `nothing assigns ${cue.state}: a user sent to /login?sso=${cue.value} lands on a silent page`);
+    return (search) => {
+      const q = new URLSearchParams(search);
+      // eslint-disable-next-line no-new-func
+      return Function('q', `return (${assign[1]});`)(q);
+    };
+  };
+
+  const blockFor = (cue) => {
+    const at = code.indexOf(`${cue.state} &&`);
+    assert.ok(at > -1, `${cue.state} is set and nothing renders it — the state is dead`);
+    const end = code.indexOf('</p>', at);
+    assert.ok(end > at, 'the notice block could not be bounded');
+    return code.slice(at, end);
+  };
+
+  /**
+   * The words a user actually reads, with the condition and the tag stripped.
+   *
+   * ⛔ THE COPY, NOT THE BLOCK, AND THE DIFFERENCE WAS MEASURED. The
+   * "do not share one piece of copy" case below first compared blockFor()
+   * output — which BEGINS with `ssoRefused &&` or `ssoNoRole &&`, so the two
+   * can never be equal and the assertion could never fail. Mutating the page
+   * to render byte-identical sentences for both cues left it GREEN. That is
+   * the same guard-that-cannot-fire shape this file already records twice (the
+   * whole-file useState regex, and v2.193.2 asserting an attribute instead of
+   * what rendered); it is easy to write and invisible once written.
+   */
+  const copyFor = (cue) => {
+    const m = /<p className="[^"]*">([\s\S]*)$/.exec(blockFor(cue));
+    assert.ok(m, `the ${cue.state} notice is not a <p> with a class — rewrite this helper`);
+    return m[1].replace(/\s+/g, ' ').trim();
+  };
+
+  for (const cue of CUES) {
+    it(`?sso=${cue.value} renders for that value, and NOTHING for anything else`, () => {
+      const matches = matcherFor(cue);
+      assert.equal(matches(`?sso=${cue.value}`), true, 'the agreed value must show its notice');
+
+      // ⛔ THE "WE CANNOT TELL" CASES, which are the ones that rot silently. An
+      // unrecognised value must render NOTHING — not an empty panel, and above
+      // all not a guess at what happened. Absence of a recognised cue is not
+      // evidence of a cue.
+      assert.equal(matches(''), false, 'no sso parameter at all must render nothing');
+      assert.equal(matches('?sso='), false, 'an empty value must render nothing');
+      assert.equal(matches(`?sso=${cue.value.toUpperCase()}`), false,
+        'case must not be folded — these are agreed literals between two files, not user input');
+      assert.equal(matches(`?sso=${cue.value}-by-policy`), false,
+        'a prefix match would accept outcomes nobody defined');
+      assert.equal(matches('?sso=denied'), false, 'an unrecognised outcome must render nothing');
+
+      // ⛔ THE PROTOTYPE CASES, and they matter MORE now there are two values:
+      // a second literal is exactly when `NOTICES[q.get('sso')]` starts to
+      // look like the tidy refactor. That lookup answers TRUTHY for all three
+      // of these and would push something nobody wrote onto an unauthenticated
+      // page. Two equality tests cannot; a third cue is a third line.
+      for (const inherited of ['toString', 'constructor', 'valueOf']) {
+        assert.equal(matches(`?sso=${inherited}`), false,
+          `the match must be an equality test, never a property lookup (?sso=${inherited} matched)`);
+      }
+    });
+  }
+
+  it('⛔ the two cues never fire for each other', () => {
+    // They carry OPPOSITE advice — one says sign in again, the other says do
+    // not bother until someone acts. A widened match that crossed them over
+    // would be worse than either notice missing.
+    for (const cue of CUES) {
+      const matches = matcherFor(cue);
+      for (const other of CUES) {
+        if (other === cue) continue;
+        assert.equal(matches(`?sso=${other.value}`), false,
+          `?sso=${other.value} also triggers the ${cue.state} notice — the advice would contradict itself`);
+      }
+    }
+  });
+
+  it('⛔ never renders text taken from the URL', () => {
+    // This page is UNAUTHENTICATED. Printing caller-supplied text under the
+    // product's own brand, on the real hostname, behind the real certificate,
+    // is how a login page becomes a phishing surface — "your password has
+    // expired, call this number" served by the genuine console. The copy is a
+    // literal in the page; the query string only ever SELECTS it.
+    assert.doesNotMatch(code, /\{\s*q\.get\(/, 'query-string text is being rendered into the page');
+    assert.doesNotMatch(code, /set(Sso|SSO)(Reason|Message|Detail|Error)\b/,
+      'a reason string from the URL is being held in state — match a known value and render your own copy');
+  });
+
+  for (const cue of CUES) {
+    it(`?sso=${cue.value} is tinted as INFORMATION, like the timeout and unlike a failure`, () => {
+      // ⛔ THE SHARPEST VERSION OF THE TIMEOUT ARGUMENT. Nothing the user typed
+      // was wrong — in the refusal case their credentials were accepted before
+      // SecVault turned them away, and in the role case they were accepted at
+      // sign-in. In the danger tint either one reads as a rejected password,
+      // and the next thing the user does is doubt one that is fine, or retry
+      // it until something locks.
+      const block = blockFor(cue);
+      assert.match(block, /login-note-info/, 'the notice lost its information tint');
+      assert.doesNotMatch(block, /login-note-error/,
+        'tinted as danger, this accuses the one thing that was NOT wrong');
+    });
+  }
+
+  it('⛔ refused: does not disclose WHICH refusal occurred, and points at a human', () => {
+    // Missing group claim, no matching group, and a claims overage need three
+    // different administrator fixes, and naming them here publishes the
+    // tenant's group-mapping state to anyone who can load the login page. The
+    // named reason already goes where it can be acted on: Settings -> Single
+    // sign-on. What this page owes the user is "stop retrying, ask someone".
+    const block = blockFor(CUES[0]);
+    assert.doesNotMatch(block, /overage|claim|no matching|unmapped group|tenant|object id/i,
+      'the notice names the specific refusal — that belongs in Settings, not on an unauthenticated page');
+    assert.match(block, /administrator/i,
+      'the notice must say who can fix this, or it is a dead end wearing an explanation');
+  });
+
+  it('⛔ norole: is PROVIDER-NEUTRAL, because the cause is often not SSO at all', () => {
+    // ⛔ THIS VALUE ALSO FIRES FOR A DELETED LOCAL ACCOUNT AND FOR A DATABASE
+    // OUTAGE. Telling a local administrator whose database blipped that their
+    // single sign-on failed sends them, and whoever they ask, to debug a
+    // system they may not even run — a confident wrong mechanism, which this
+    // codebase rates worse than no explanation at all. The three causes are
+    // genuinely indistinguishable from the login page, so the copy names none
+    // of them.
+    const block = blockFor(CUES[1]);
+    assert.doesNotMatch(block, /microsoft|entra|directory|single sign|\bSSO\b|tenant|azure|LDAP/i,
+      'the role notice names a provider — it also fires for a local account and for a database outage');
+    assert.match(block, /administrator/i, 'the notice must say who can look into it');
+  });
+
+  it('⛔ the two cues do not share one piece of copy', () => {
+    // If they ever collapse into the same sentence, one of the two situations
+    // is being described wrongly — the whole reason there are two values is
+    // that "sign in again" is correct advice for exactly one of them.
+    const [refused, norole] = CUES.map(copyFor);
+    assert.ok(refused.length > 0 && norole.length > 0, 'a cue renders an empty notice');
+    assert.notEqual(refused, norole, 'both cues render the same notice — then one of them is lying');
   });
 });
 

@@ -5,6 +5,10 @@ import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
 import IconChip from '../ui/IconChip';
 import { IconChart } from '../icons';
+// ⛔ THE RAMP IS IMPORTED, NEVER RESTATED. severityRamp.js is the one place
+// that maps a severity to a hue; this widget's tiles used to carry hand-written
+// tokens and drifted off it twice (see the ⛔ on the tile list below).
+import { SEVERITY_FILL } from '../analysis/severityRamp';
 
 // Fleet-wide rule totals (active devices only) -- mirrors the same
 // `JOIN devices d ON d.id = fr.device_id WHERE d.active = true` filter used
@@ -82,24 +86,52 @@ export default async function RulesetOverview() {
 
   const findings = await getFleetFindingCounts(pool);
 
+  // ⛔ THE FINDING TILES TAKE THEIR HUE FROM THE ENGINE'S OWN SEVERITY,
+  // VIA THE SHARED RAMP. Nothing is hand-copied here any more: the key is the
+  // severity lib/engines/ruleAnalysis.js writes for that finding_type, and the
+  // colour comes from severityRamp.js's SEVERITY_FILL, which already holds the
+  // semantic aliases. A hand-written token in this file is how the drift below
+  // happened twice.
+  //
+  // ⛔ v2.202.0 MOVED "Unused" TO --sev-med AND ITS COMMENT CLAIMED ALL THREE
+  // TILES NOW AGREED "with each other and with the engine". Both halves were
+  // wrong. They agreed on HUE and not on TOKEN -- --sev-med IS var(--yellow),
+  // so Shadow and Redundant rendered identically while sitting on the raw hue,
+  // and moving the alias would have repainted one tile and left two behind with
+  // no diff to explain it. And they did NOT agree with the engine: ruleAnalysis
+  // files `shadow` at severity 'high', not 'medium' (line 658), so the comment
+  // asserted a fact about the engine that the engine contradicts, and painting
+  // shadow amber under-stated it by a whole band on the fleet's own dashboard.
+  //
+  // ⛔ THE GUARD COULD NOT SEE ANY OF IT, which is why it survived a release
+  // looking straight at it. tests/designSystemRamp.test.js scanned
+  // `<StatCard .../>` ELEMENTS for a literal label= and color=; these tiles are
+  // an ARRAY rendered through .map(), so the scan matched nothing in this file
+  // at all. It now reads object-literal tiles too -- see the "array-built tile"
+  // case there.
+  //
+  // ⛔ A ZERO COUNT GETS NO HUE. "Colour means RISK", and zero findings of a
+  // type is the absence of risk -- the same gate the /lifecycle tiles have
+  // always had, and the one HeadlineStats' "Critical Alerts" was missing.
+  const findingTile = (label, count, severity) => ({
+    label,
+    value: count,
+    color: count > 0 ? SEVERITY_FILL[severity] : 'var(--text-muted)',
+  });
+
   const tiles = [
     { label: 'Total Rules', value: totals.total, color: 'var(--text-primary)' },
-    { label: 'Enabled', value: totals.enabled, color: 'var(--green)' },
+    // ⛔ NO HUE ON "Enabled" (same call v2.202.0 made for "Devices" and
+    // "Total Rules" on the Overview). A count of enabled rules is not a risk
+    // measurement, and --green here was the severity vocabulary spent on
+    // furniture -- one tile along from three that genuinely encode severity.
+    // --text-primary is the neutral StatCard already falls back to.
+    { label: 'Enabled', value: totals.enabled, color: 'var(--text-primary)' },
     { label: 'Disabled', value: totals.disabled, color: 'var(--text-muted)' },
-    // ⛔ --sev-med, NOT --blue (fixed v2.202.0). ruleAnalysis.js files an
-    // `unused` finding at severity 'medium' -- the SAME severity as shadow and
-    // redundant below -- so blue was claiming a distinction the engine never
-    // made, on top of being the hue severityRamp.js records as pulled out of
-    // the findings vocabulary in v2.87.0 (blue sits one step from the brand
-    // teal). These three tiles now agree with each other and with the engine.
-    { label: 'Unused', value: findings.unused, color: findings.unused > 0 ? 'var(--sev-med)' : 'var(--text-muted)' },
-    { label: 'Shadow', value: findings.shadow, color: findings.shadow > 0 ? 'var(--yellow)' : 'var(--text-muted)' },
-    {
-      label: 'Redundant',
-      value: findings.redundant,
-      color: findings.redundant > 0 ? 'var(--yellow)' : 'var(--text-muted)',
-    },
-    { label: 'Any-Any', value: findings.any_any, color: findings.any_any > 0 ? 'var(--red)' : 'var(--text-muted)' },
+    findingTile('Unused', findings.unused, 'medium'),
+    findingTile('Shadow', findings.shadow, 'high'),
+    findingTile('Redundant', findings.redundant, 'medium'),
+    findingTile('Any-Any', findings.any_any, 'critical'),
   ];
 
   return (
