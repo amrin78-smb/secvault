@@ -446,7 +446,22 @@ const SIDE_EFFECTING_GETS = new Map([
 const REPORT_PARAM_CASES = [
   { path: '/api/reports/no-such-report-xyz/pdf', expect: [404], why: 'unknown report id — 404, never a zero-byte PDF someone would file' },
   { path: '/api/reports/rule-hygiene/pdf?deviceId=not-a-uuid', expect: [400], why: 'malformed deviceId is a bad request, not an empty fleet report' },
-  { path: '/api/reports/compliance-fleet/pdf?deviceId={unknownUuid}', expect: [400], why: 'a report that cannot narrow refuses a deviceId rather than ignoring it' },
+  // ⛔ THIS CASE USED TO NAME compliance-fleet AND HAD BEEN FAILING EVER SINCE
+  // THAT REPORT GAINED `optionalDevice: true`. The contract below is real and
+  // worth testing -- it just stopped applying to that report the day it learned
+  // to narrow, and the check went on asserting 400 against a route correctly
+  // answering 404. A permanently-red assertion is worse than none: it is the
+  // one failure everybody learns to scroll past. `executive-summary` is the
+  // only fleet report that genuinely cannot narrow, so it is the only honest
+  // subject for this contract -- and if it ever gains `optionalDevice`, this
+  // line must move with it rather than be waived.
+  { path: '/api/reports/executive-summary/pdf?deviceId={unknownUuid}', expect: [400], why: 'a report that cannot narrow refuses a deviceId rather than ignoring it' },
+  // ⛔ AND THE OTHER HALF, which nothing covered: a report that CAN narrow,
+  // handed a well-formed id for a firewall that does not exist, must say so
+  // rather than quietly rendering the whole fleet under one device's name. That
+  // silent widening is the mislabelled-artefact failure this block exists to
+  // prevent, and it is the direction an `optionalDevice` report can fail in.
+  { path: '/api/reports/compliance-fleet/pdf?deviceId={unknownUuid}', expect: [404], why: 'an optional-device report refuses an unknown firewall rather than widening to the fleet' },
   { path: '/api/reports/compliance-fleet/pdf?standard=BOGUS', expect: [400], why: 'an out-of-allow-list param value is refused, never dropped' },
   { path: '/api/reports/traffic-activity/pdf?from=notadate', expect: [400], why: 'a range param is validated by shape' },
   { path: '/api/reports/traffic-activity/pdf?to=notadate', expect: [400], why: 'both ends of the range, not just the first' },
