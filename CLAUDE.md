@@ -3249,6 +3249,31 @@ and update notices are one `NoticeBar` strip of `.notice-row`s on `--bg-card`, t
 renewal still weeks away is an action to schedule, and a full-width amber band for it was the
 chrome breaking the rule the palette keeps.
 
+⛔ **AND THE NOTICE ESCALATES, BECAUSE A COUNTDOWN THAT NEVER CHANGES IS NOT A COUNTDOWN
+(v2.215.2).** `renewalDue` flipped once at **60 days** and nothing moved again until the licence
+had ALREADY lapsed, so the entire two-month notice period rendered in one flat tone and the day
+before expiry was indistinguishable from the day the notice first appeared. Inside
+`RENEWAL_URGENT_DAYS` (**14**) an `active` licence now goes `bad`.
+
+⛔ **THE OBVIOUS VERSION OF THAT FIX CONTAINED AN INVERSION.** Escalating `active` while leaving
+`grace` on `warn` would have made an **already-lapsed** subscription render QUIETER than a live
+one. Every individual rule would have been defensible and the RANKING still wrong — which is
+exactly how `SegmentationBoard` shipped three violation tints in the reverse order of its own
+`ACTION_ORDER`. `grace` is now `bad` too. ⛔ `tests/productLicense.test.js` therefore asserts the
+PROPERTY, walking one licence from 200 days out to 90 days expired and requiring that the tone
+rank **never decreases** — not a table of per-state colours, which is the shape of test that
+passed while that bug was live.
+
+⛔ **LOUDNESS AND UNDISMISSABILITY ARE SEPARATE DECISIONS.** A licence three days from expiry is
+red and still dismissible: nothing has been withheld yet, and `licenceBanner.js`'s own rule is
+that "a reminder you cannot silence is just noise". Only `expired`/`invalid` — the point where
+the product actually refuses writes — cannot be dismissed.
+
+⛔ **ONE DEFINITION, TWO SURFACES.** `renewalTone()` lives in `lib/licenceBanner.js` (the
+zero-import file a client bundle can load) and is used by BOTH `bannerFor` (the strip) and
+`licenceSentence` (Settings → Subscription). They computed it separately before, so the panel
+could have escalated on a different day from the banner directly above it.
+
 ⛔ **WHEN THE GROUND STOPS SHOUTING, THE SENTENCE HAS TO SAY IT — AND THAT EXPOSED A COPY BUG THE
 BAND HAD BEEN COVERING.** The banner read *"Licensed to … until 2026-11-30 — renews in 31 days"*,
 reported by the customer reading their own console. It describes a subscription that renews

@@ -7,8 +7,16 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.215.2': [
+    'The subscription notice now gets louder as the date approaches. It used to look the same 60 days out as it did the day before the licence lapsed, so the countdown never actually counted. Inside the last 14 days it turns red.',
+    'A subscription already past its end date but still inside its grace period was being shown MORE quietly than one with two weeks left to run. Both are now red, in the right order.',
+    'The Subscription page and the notice at the top of the screen now change on the same day. They worked it out separately before, so the page could have disagreed with the banner directly above it.',
+    'A red notice can still be dismissed for the session while the licence is merely close to expiry. Only a subscription that has fully lapsed — the point where firewalls can no longer be added and settings no longer changed — refuses to be silenced.',
+  ],
   '2.215.1': [
-    'The subscription notice said a licence "renews in N days", which reads as though it renews itself. SecVault has no licence server and cannot renew anything: a renewal is a new key, issued for this server and activated in Settings. The notice now says the licence EXPIRES in N days and does not renew automatically.',
+    'The subscription notice said a licence "renews in N days", which reads as though it renews itself. It now says the licence EXPIRES in N days and does not renew automatically.',
+    'SecVault has no licence server and never contacts one, so nothing about a subscription can renew on its own: a renewal is a new key, issued against this server and activated in Settings. The old wording described a mechanism this product does not have.',
+    'The wording was reported by a customer reading their own console. It most likely became misleading in the previous release, when the notice stopped being a full-width coloured band — the band had been carrying the urgency, and once it went, the sentence was left saying the wrong thing on its own.',
   ],
   '2.215.0': [
     'The console is quieter to read, with nothing removed. Panels inside a card no longer draw their own boxes, so a page shows about half as many borders as before and the eye can tell at a glance what is a page, what is a card and what is a number inside one.',

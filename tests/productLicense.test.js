@@ -402,6 +402,83 @@ describe('the banner sentence', () => {
   });
 });
 
+describe('⛔ the licence notice gets LOUDER as expiry approaches, never quieter', () => {
+  // ⛔ THE PROPERTY, NOT THE NUMBERS. Before this existed `renewalDue` flipped
+  // once at 60 days and nothing moved again until the licence had ALREADY
+  // lapsed, so the whole two-month notice period rendered in one flat tone and
+  // the day before expiry looked exactly like the day the notice appeared.
+  //
+  // ⛔ AND THE OBVIOUS FIX HAD AN INVERSION IN IT. Escalating `active` to
+  // `bad` inside the last fortnight while GRACE stayed on `warn` would have
+  // made an ALREADY-LAPSED subscription render QUIETER than a live one. Each
+  // rule would have been individually defensible and the ranking still wrong —
+  // which is exactly how SegmentationBoard shipped three violation tints in
+  // the reverse order of its own action list. So this walks the whole
+  // lifecycle and asserts monotonicity rather than pinning per-state colours.
+  const RANK = { ok: 0, info: 0, warn: 1, bad: 2 };
+
+  it('tone never decreases from healthy through to long expired', () => {
+    const days = [200, 90, 61, 60, 45, 30, 15, 14, 7, 1, 0, -1, -10, -14, -30, -90];
+    let prev = -1;
+    let prevLabel = 'start';
+    for (const d of days) {
+      const v = verdict({ expiry: iso(d) }, 12);
+      const tone = L.licenceSentence(v).tone;
+      const rank = RANK[tone];
+      assert.notEqual(rank, undefined, `unranked tone "${tone}" at ${d} days`);
+      assert.ok(
+        rank >= prev,
+        `severity FELL from ${prevLabel} to ${d} days (${tone}) — an expiring or `
+          + 'expired licence must never render quieter than a healthier one'
+      );
+      prev = rank;
+      prevLabel = `${d} days`;
+    }
+  });
+
+  it('the banner and the Settings panel escalate on the SAME day', () => {
+    // Two surfaces, one rule. They used to compute tone independently, so a
+    // panel could contradict the strip directly above it.
+    for (const d of [60, 20, 15, 14, 13, 1]) {
+      const v = verdict({ expiry: iso(d) }, 12);
+      const banner = L.bannerFor({ ...v, sentence: L.licenceSentence(v) });
+      assert.equal(
+        banner.tone,
+        L.licenceSentence(v).tone,
+        `banner and panel disagree at ${d} days`
+      );
+    }
+  });
+
+  it('the escalation happens at the boundary, not a day either side of it', () => {
+    const toneAt = (d) => L.licenceSentence(verdict({ expiry: iso(d) }, 12)).tone;
+    assert.equal(toneAt(L.RENEWAL_URGENT_DAYS + 1), 'warn');
+    assert.equal(toneAt(L.RENEWAL_URGENT_DAYS), 'bad');
+  });
+
+  it('⛔ a missing day count stays at warn rather than inventing a deadline', () => {
+    // renewalDue is derived from daysRemaining, so a non-number is a defect,
+    // not a state. Escalating on it would make a glitch look like a deadline.
+    for (const bad of [null, undefined, NaN, 'soon']) {
+      assert.equal(L.renewalTone({ renewalDue: true, daysRemaining: bad }), 'warn');
+    }
+  });
+
+  it('⛔ only a state the product has actually withheld something for is undismissable', () => {
+    // The loud ground and the inability to silence it are SEPARATE decisions.
+    // A licence with 3 days left is red but still dismissible — nothing has
+    // been taken away yet, and a reminder you cannot silence is just noise.
+    const at = (d) => {
+      const v = verdict({ expiry: iso(d) }, 12);
+      return L.bannerFor({ ...v, sentence: L.licenceSentence(v) });
+    };
+    assert.equal(at(3).tone, 'bad');
+    assert.equal(at(3).dismissible, true);
+    assert.equal(at(-5).dismissible, true, 'grace is loud but still a reminder');
+    assert.equal(at(-30).dismissible, false, 'past grace, the product withholds writes');
+  });
+});
+
 describe('the banner only speaks when there is something to do', () => {
   const { bannerFor } = L;
 

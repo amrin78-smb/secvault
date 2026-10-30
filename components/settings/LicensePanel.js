@@ -161,7 +161,13 @@ export default function LicensePanel() {
             <span style={{ fontSize: 'var(--text-lg)', fontWeight: 600 }}>
               {STATUS_LABEL[info.status] || 'Unknown'}
             </span>
-            {info.renewalDue && info.status === 'active' ? <Badge color="warning">Renewal due</Badge> : null}
+            {/* ⛔ THE BADGE FOLLOWS THE TONE. Hardcoded `warning`, it stayed
+                amber inside the final fortnight while the dot beside it had
+                already gone red — two marks for one fact, disagreeing, three
+                pixels apart. */}
+            {info.renewalDue && info.status === 'active'
+              ? <Badge color={tone === 'bad' ? 'danger' : 'warning'}>Renewal due</Badge>
+              : null}
           </div>
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             {info.sentence && info.sentence.text}
