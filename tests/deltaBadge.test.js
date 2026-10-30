@@ -76,8 +76,30 @@ const html = (props) => {
   return renderToStaticMarkup(React.createElement(DeltaBadge, props));
 };
 
-/** The visible words, tags stripped and whitespace collapsed. */
+/** Every word in the markup, tags stripped — visible AND assistive. */
 const text = (props) => html(props).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+// ⛔ VISIBLE AND ANNOUNCED ARE DIFFERENT QUESTIONS AND THIS SUITE USED TO ASK
+// ONLY ONE (v2.215.0). `text()` strips every tag, so it could not tell a
+// sentence printed on screen from the same sentence carried in an .sr-only
+// span — which is exactly the distinction the zero-state now turns on: a
+// sighted reader gets the glyph "▬ 0", a screen reader still gets the full
+// phrase. Asserting the stripped string pinned the MECHANISM (what the markup
+// happens to contain) rather than the OUTCOME (what each reader receives), so
+// it failed on a change that kept its own rule intact.
+/** What a sighted reader sees: .sr-only subtrees removed first. */
+const visibleText = (props) =>
+  html(props)
+    .replace(/<span class="sr-only">.*?<\/span>/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** What a screen reader is handed: only the .sr-only subtrees. */
+const assistiveText = (props) => {
+  const found = [...html(props).matchAll(/<span class="sr-only">(.*?)<\/span>/g)];
+  return found.map((m) => m[1]).join(' ').replace(/\s+/g, ' ').trim();
+};
 
 describe('DeltaBadge — an absent comparison renders NOTHING', () => {
   // ⛔ Not a 0 and not an em-dash. A 0 reads as "unchanged", which is a
@@ -117,12 +139,35 @@ describe('DeltaBadge — an absent comparison renders NOTHING', () => {
 });
 
 describe('DeltaBadge — a zero difference says so, in words', () => {
-  it('prints "No change since yesterday" by default', () => {
-    assert.equal(text({ current: 51, previous: 51, goodDirection: GOOD.up }), 'No change since yesterday');
+  // ⛔ RULE 2 IS UNCHANGED AND THESE PIN IT FROM BOTH SIDES. A measured zero
+  // must stay distinguishable from an absent comparison, which renders
+  // NOTHING AT ALL (the suite above). What v2.215.0 changed is only WHICH
+  // READER GETS THE PROSE: the glyph is on screen, the sentence is announced.
+  // Collapsing either into the other would merge "we have no baseline" with
+  // "it did not move" — a failed read recorded as an affirmative value.
+  it('shows a hueless glyph rather than a sentence', () => {
+    assert.equal(visibleText({ current: 51, previous: 51, goodDirection: GOOD.up }), '▬ 0');
+    assert.equal(visibleText({ current: 0, previous: 0, goodDirection: GOOD.down }), '▬ 0');
   });
 
-  it('prints it for a genuine zero-to-zero comparison too', () => {
-    assert.equal(text({ current: 0, previous: 0, goodDirection: GOOD.down }), 'No change since yesterday');
+  it('still SAYS SO, in words, to a screen reader', () => {
+    assert.equal(
+      assistiveText({ current: 51, previous: 51, goodDirection: GOOD.up }),
+      'No change since yesterday'
+    );
+    assert.equal(
+      assistiveText({ current: 0, previous: 0, goodDirection: GOOD.down }),
+      'No change since yesterday'
+    );
+  });
+
+  it('is still visibly distinct from an absent comparison, which renders nothing', () => {
+    // The whole point of rule 2, asserted as a COMPARISON rather than as a
+    // string: these two must never render the same thing.
+    const measuredZero = html({ current: 51, previous: 51, goodDirection: GOOD.up });
+    const noBaseline = html({ current: 51, previous: null, goodDirection: GOOD.up });
+    assert.equal(noBaseline, '');
+    assert.notEqual(measuredZero, '');
   });
 
   it('carries no arrow and no severity hue', () => {
@@ -191,8 +236,9 @@ describe('DeltaBadge — comparisonLabel', () => {
   });
 
   it('the no-change sentence FOLLOWS the label rather than hardcoding yesterday', () => {
+    // Announced, not printed — see the helpers at the top of this file.
     assert.equal(
-      text({ current: 51, previous: 51, goodDirection: GOOD.up, comparisonLabel: 'vs previous 24h' }),
+      assistiveText({ current: 51, previous: 51, goodDirection: GOOD.up, comparisonLabel: 'vs previous 24h' }),
       'No change vs previous 24h'
     );
   });
@@ -201,7 +247,7 @@ describe('DeltaBadge — comparisonLabel', () => {
     // "No change" with no period stated is a comparison against nothing.
     for (const comparisonLabel of ['', '   ', null, 42]) {
       assert.equal(
-        text({ current: 51, previous: 51, goodDirection: GOOD.up, comparisonLabel }),
+        assistiveText({ current: 51, previous: 51, goodDirection: GOOD.up, comparisonLabel }),
         'No change since yesterday'
       );
       assert.equal(

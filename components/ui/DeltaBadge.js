@@ -74,9 +74,23 @@ export default function DeltaBadge({
       : DEFAULT_COMPARISON_LABEL;
 
   if (diff === 0) {
+    // ⛔ A GLYPH, NOT A SENTENCE (v2.215.0) — AND RULE 2 IS INTACT. The three
+    // states are still three: nothing at all (no prior value), "▬ 0" (measured
+    // and genuinely unchanged), "↑ 3 from yesterday" (moved). Deleting this
+    // branch outright was considered and REFUSED: it would have collapsed "we
+    // have no baseline" into "it did not move", which is this codebase's
+    // signature bug — a failed read recorded as an affirmative value — wearing
+    // a visual costume.
+    //
+    // ⛔ THE PHRASE SURVIVES FOR SCREEN READERS, verbatim. What was removed is
+    // 23px of repeated prose per tile (globals.css measured it), which on the
+    // Overview printed the identical sentence on FIVE OF SIX tiles and read as
+    // texture rather than as information. ExDomainVault makes the same call
+    // with the same glyph for the same reason.
     return (
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-        {noChangePhrase(label)}
+        <span aria-hidden="true">▬ 0</span>
+        <span className="sr-only">{noChangePhrase(label)}</span>
       </span>
     );
   }

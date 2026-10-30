@@ -13,7 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { IconRefresh } from '../icons';
+import { NoticeRow } from './NoticeBar';
 import { PRODUCT_NAME } from '../../lib/branding';
 
 const DISMISS_KEY_PREFIX = 'sv-update-dismissed-';
@@ -65,61 +65,22 @@ export default function UpdateNotifier() {
 
   if (!info || !info.available || dismissed) return null;
 
+  // ⛔ RENDERS A ROW, NOT A BANNER (v2.215.0). The full-bleed --tint-info bar
+  // this used to draw was 5.2% of the Overview's content pixels and one of the
+  // seven surface levels that page was stacking; it now shares one quiet strip
+  // with the subscription notice and carries its tone on a dot. The contrast
+  // note that used to live here is obsolete in its specifics — the row is on
+  // --bg-card with --text-secondary — but its RULE still holds: never put
+  // white on a token that flips with the theme.
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 16,
-        width: '100%',
-        flexShrink: 0,
-        padding: '10px 24px',
-        /* ⛔ WHITE ON --blue IS 2.48:1 IN DARK THEME. --blue flips with the
-           theme (#2F6FE0 light → #6BA5FF dark); white text passes at 4.70:1 on
-           the light value and fails badly on the lighter dark one, so this
-           banner was legible for exactly half its users. The --tint-* pairs are
-           the tokens globals.css guarantees at >=4.5:1 in BOTH themes by
-           construction — measured here at 5.97:1 light and 8.53:1 dark over
-           --bg-primary. This banner sits in the content column, not on --navy,
-           so --tint-info-fg (which flips) is correct; --shell-fg would be the
-           right choice only on the header or sidebar. */
-        background: 'var(--tint-info)',
-        color: 'var(--tint-info-fg)',
-        borderBottom: '1px solid var(--border)',
-      }}
+    <NoticeRow
+      tone="info"
+      onDismiss={handleDismiss}
+      action={<Link href="/settings" className="notice-link">Go to Settings</Link>}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <IconRefresh width={16} height={16} style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 'var(--text-base)', fontWeight: 500 }}>
-          {info.latest
-            ? `${PRODUCT_NAME} v${info.latest} is available`
-            : `A ${PRODUCT_NAME} update is available`}
-        </span>
-        <Link
-          href="/settings"
-          style={{ color: 'var(--tint-info-fg)', textDecoration: 'underline', fontWeight: 600, fontSize: 'var(--text-base)', whiteSpace: 'nowrap' }}
-        >
-          Go to Settings
-        </Link>
-      </div>
-      <button
-        type="button"
-        onClick={handleDismiss}
-        aria-label="Dismiss"
-        style={{
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--tint-info-fg)',
-          cursor: 'pointer',
-          fontSize: 18,
-          lineHeight: 1,
-          padding: 0,
-          flexShrink: 0,
-        }}
-      >
-        ×
-      </button>
-    </div>
+      {info.latest
+        ? `${PRODUCT_NAME} v${info.latest} is available`
+        : `A ${PRODUCT_NAME} update is available`}
+    </NoticeRow>
   );
 }

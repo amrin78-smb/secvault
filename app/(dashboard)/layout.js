@@ -11,6 +11,7 @@ import Sidebar from '../../components/layout/Sidebar';
 import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
 import SubscriptionNotifier from '../../components/layout/SubscriptionNotifier';
+import { NoticeBar } from '../../components/layout/NoticeBar';
 import NavProgress from '../../components/layout/NavProgress';
 import IdleTimeout from '../../components/layout/IdleTimeout';
 import { EvidenceProvider } from '../../components/ui/Evidence';
@@ -108,8 +109,15 @@ export default async function DashboardLayout({ children }) {
           <Suspense fallback={null}>
             <NavProgress />
           </Suspense>
-          <SubscriptionNotifier />
-          <UpdateNotifier />
+          {/* ⛔ ONE STRIP, NOT TWO BANNERS (v2.215.0). Each notice is still
+              independently conditional and independently dismissible; what
+              changed is that they no longer each paint a full-width tinted
+              ground. The container draws nothing when both are silent — the
+              border lives on the last ROW, not on the bar. */}
+          <NoticeBar>
+            <SubscriptionNotifier />
+            <UpdateNotifier />
+          </NoticeBar>
           {/* ⛔ Mounted ONCE, here, rather than per page. The drawer is a
               single global surface so the affordance is identical everywhere —
               a dashboard tile, a table cell and a report row all open the same

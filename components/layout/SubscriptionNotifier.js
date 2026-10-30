@@ -20,14 +20,9 @@ import Link from 'next/link';
 // fails the build outright. The rule is not duplicated here — two copies would
 // eventually disagree about when to warn someone their subscription lapsed.
 import { bannerFor } from '../../lib/licenceBanner';
+import { NoticeRow } from './NoticeBar';
 
 const DISMISS_PREFIX = 'sv-subscription-dismissed-';
-
-const TONE_STYLE = {
-  warn: { bg: 'var(--tint-warn)', fg: 'var(--tint-warn-fg)' },
-  bad: { bg: 'var(--tint-danger)', fg: 'var(--tint-danger-fg)' },
-  info: { bg: 'var(--tint-info)', fg: 'var(--tint-info-fg)' },
-};
 
 export default function SubscriptionNotifier() {
   const [info, setInfo] = useState(null);
@@ -68,8 +63,6 @@ export default function SubscriptionNotifier() {
   if (!banner) return null;
   if (banner.dismissible && dismissed) return null;
 
-  const style = TONE_STYLE[banner.tone] || TONE_STYLE.info;
-
   function dismiss() {
     try {
       sessionStorage.setItem(DISMISS_PREFIX + info.status + '-' + info.daysRemaining, '1');
@@ -77,41 +70,18 @@ export default function SubscriptionNotifier() {
     setDismissed(true);
   }
 
+  // ⛔ RENDERS A ROW, NOT A BANNER (v2.215.0), and `bad` is the ONE tone that
+  // keeps a coloured ground. A lapsed or lapsing subscription is risk; "renews
+  // in 31 days" is information, and a full-width amber band for it spent the
+  // risk vocabulary on chrome — measured at 4.1% of the Overview's content
+  // pixels, and the only WARM surface anywhere on the page.
   return (
-    <div
-      role="status"
-      style={{
-        background: style.bg,
-        color: style.fg,
-        padding: 'var(--s3) var(--s5)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--s4)',
-        fontSize: 'var(--text-sm)',
-        lineHeight: 1.5,
-        borderBottom: '1px solid var(--border)',
-      }}
+    <NoticeRow
+      tone={banner.tone}
+      onDismiss={banner.dismissible ? dismiss : undefined}
+      action={<Link href="/settings?tab=subscription" className="notice-link">Subscription</Link>}
     >
-      <span style={{ flex: 1, minWidth: 0 }}>{info.sentence.text}</span>
-      <Link
-        href="/settings?tab=subscription"
-        style={{ color: 'inherit', fontWeight: 600, textDecoration: 'underline', whiteSpace: 'nowrap' }}
-      >
-        Subscription
-      </Link>
-      {banner.dismissible ? (
-        <button
-          type="button"
-          onClick={dismiss}
-          aria-label="Dismiss"
-          style={{
-            background: 'none', border: 'none', color: 'inherit', cursor: 'pointer',
-            fontSize: 'var(--text-lg)', lineHeight: 1, padding: 0,
-          }}
-        >
-          ×
-        </button>
-      ) : null}
-    </div>
+      {info.sentence.text}
+    </NoticeRow>
   );
 }
