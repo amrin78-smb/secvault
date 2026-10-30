@@ -2,8 +2,6 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
-import IconChip from '../ui/IconChip';
-import { IconClock } from '../icons';
 import { licenseStatus } from '../../lib/engines/deviceHealth';
 
 export const dynamic = 'force-dynamic';
@@ -112,10 +110,7 @@ export default async function LicenceExpiryWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconClock} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-          Licence &amp; Support Expiry
-        </CardTitle>
+        <CardTitle compact>Licence &amp; support expiry</CardTitle>
       </CardHeader>
       <CardBody>
         {nothingCollected ? (

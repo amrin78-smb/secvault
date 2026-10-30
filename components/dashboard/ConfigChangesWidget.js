@@ -1,11 +1,9 @@
 import Link from 'next/link';
 import { describeConfigChange } from '../../lib/configChangeSummary';
 import { pool } from '../../lib/db';
-import Card from '../ui/Card';
+import Card, { CardTitle } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
-import IconChip from '../ui/IconChip';
 import NotMeasured from '../ui/NotMeasured';
-import { IconRefresh } from '../icons';
 
 // Dashboard widget: fleet-wide config-change summary over the trailing
 // `days` window. Standalone, read-only, server component -- not wired into
@@ -91,20 +89,11 @@ export default async function ConfigChangesWidget({ days = 7 }) {
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 'var(--s2)' }}>
-          {/* ⛔ NOT --tint-purple. app/globals.css aliases exactly that pair as
-              --evidence / --evidence-wash, and violet is reserved for the
-              EVIDENCE axis and nothing else -- this chip was pixel-identical to
-              an EvidenceMark, so the one mark in the product that means "here is
-              how we know this" stopped being learnable at a glance the moment a
-              decorative widget header wore it too. --tint-info is the app's
-              neutral informational pair (DeviceStatusSummary already uses it for
-              the same kind of factual, non-risk widget). Blue is barred from the
-              SEVERITY RAMP, not from the palette: a config change is an event,
-              not a severity, so nothing here reads as a risk level. */}
-          <IconChip icon={IconRefresh} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Config Changes ({days}d)
-        </div>
+        {/* ⛔ NO ICON CHIP. A tinted glyph beside a card title is decoration, and
+            this product's own rule is that colour means RISK -- a config change
+            is an event, not a severity. The heading itself is now the only thing
+            announcing the card, which is what CardTitle is for. */}
+        <CardTitle compact>Config changes ({days}d)</CardTitle>
       </div>
       <div className="card-body-compact">
         {totalCount === 0 ? (

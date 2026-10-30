@@ -3,9 +3,7 @@ import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import Table from '../ui/Table';
-import IconChip from '../ui/IconChip';
 import WebActivityPanel from '../traffic/WebActivityPanel';
-import { IconDevices, IconGrid, IconShield, IconChart, IconActivity } from '../icons';
 import {
   getTopHosts,
   getTopApplications,
@@ -78,7 +76,6 @@ function Empty({ children }) {
   return <div style={{ fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>{children}</div>;
 }
 
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 const rowLabel = {
   fontSize: 'var(--text-base)',
   overflow: 'hidden',
@@ -103,10 +100,7 @@ export async function TopHostsWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconDevices} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Top Hosts by Traffic (24h)
-        </CardTitle>
+        <CardTitle compact>Top hosts by traffic (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -181,10 +175,7 @@ export async function TopApplicationsWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Top Applications (24h)
-        </CardTitle>
+        <CardTitle compact>Top applications (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {applications.length === 0 ? (
@@ -236,10 +227,7 @@ export async function ProtocolBreakdownWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-          Protocols (24h)
-        </CardTitle>
+        <CardTitle compact>Protocols (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -282,10 +270,7 @@ export async function BlockedDestinationsWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
-          Top Blocked Destinations (24h)
-        </CardTitle>
+        <CardTitle compact>Top blocked destinations (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -335,10 +320,7 @@ export async function DeviceTrafficTable() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconActivity} color="var(--tint-success-fg)" bg="var(--tint-success)" />
-          Traffic &amp; Security by Device (24h)
-        </CardTitle>
+        <CardTitle compact>Traffic &amp; security by device (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (

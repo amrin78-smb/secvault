@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import IconChip from '../ui/IconChip';
-import { IconTopology, IconUser, IconGrid } from '../icons';
 import { getTopCountries, getTopUsers, getTopUrlCategories } from '../../lib/syslog/trafficStats';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +15,6 @@ export const dynamic = 'force-dynamic';
 // a device that does not populate it simply contributes to `unreported` rather
 // than being silently excluded.
 
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 const rowLabel = {
   fontSize: 'var(--text-base)',
   overflow: 'hidden',
@@ -57,10 +54,7 @@ export async function TopCountriesWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconTopology} color="var(--tint-teal-fg)" bg="var(--tint-teal)" />
-          Top Destination Countries (24h)
-        </CardTitle>
+        <CardTitle compact>Top destination countries (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {countries.length === 0 ? (
@@ -118,10 +112,7 @@ export async function TopUsersWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconUser} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Top Users (24h)
-        </CardTitle>
+        <CardTitle compact>Top users (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {users.length === 0 ? (
@@ -178,10 +169,7 @@ export async function UrlCategoriesWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Web / Application Categories (24h)
-        </CardTitle>
+        <CardTitle compact>Web / application categories (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (

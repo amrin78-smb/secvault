@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import IconChip from '../ui/IconChip';
-import { IconDevices, IconGrid, IconShield, IconChart, IconActivity } from '../icons';
 import WebActivityPanel from '../traffic/WebActivityPanel';
 import {
   getTrafficTimeline,
@@ -39,8 +37,6 @@ export const dynamic = 'force-dynamic';
 // stated at the top; the widgets are only drawn once it is established that
 // there is something to draw.
 
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
-
 function Num({ value }) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) {
     // ⛔ Em-dash, never 0 — see the ranking note in TrafficWidgets.
@@ -66,14 +62,16 @@ function Empty({ children }) {
   );
 }
 
-function Panel({ icon, tint, tintBg, title, children }) {
+// ⛔ `icon`/`tint`/`tintBg` ARE GONE, NOT MERELY UNUSED (v2.215.0). The card
+// heading no longer carries a coloured chip, so nine call sites were each
+// passing a hue into a prop nothing read — and a prop that is accepted and
+// ignored is how the next person concludes the chip is configurable and
+// spends an afternoon finding out it is not.
+function Panel({ title, children }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={icon} color={tint} bg={tintBg} />
-          {title}
-        </CardTitle>
+        <CardTitle compact>{title}</CardTitle>
       </CardHeader>
       <CardBody>{children}</CardBody>
     </Card>
@@ -299,7 +297,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           empty. */}
       {web ? <div style={{ marginBottom: 16 }}><WebActivityPanel web={web} perDevice /></div> : null}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-        <Panel icon={IconActivity} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Log Volume (24h)">
+        <Panel title="Log volume (24h)">
           <div style={{ display: 'flex', gap: 'var(--s5)', flexWrap: 'wrap', marginBottom: 'var(--s4)' }}>
             <div>
               <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700 }}>
@@ -366,7 +364,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           ) : null}
         </Panel>
 
-        <Panel icon={IconShield} tint="var(--tint-danger-fg)" tintBg="var(--tint-danger)" title="Session Outcomes (24h)">
+        <Panel title="Session outcomes (24h)">
           {actions.length === 0 ? (
             <Empty>This firewall logged no action field in the window.</Empty>
           ) : (
@@ -391,7 +389,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconDevices} tint="var(--tint-info-fg)" tintBg="var(--tint-info)" title="Top Hosts (24h)">
+        <Panel title="Top hosts (24h)">
           {hosts.length === 0 ? (
             <Empty>No per-host rows for this firewall — its logs carry no source address, or the
               detail rollup has aged out of its shorter retention window.</Empty>
@@ -409,7 +407,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconGrid} tint="var(--tint-purple-fg)" tintBg="var(--tint-purple)" title="Top Applications (24h)">
+        <Panel title="Top applications (24h)">
           {/* ⛔ getTopApplications returns {applications, unclassified}, NOT an
               array — and the unclassified count is scoped to this device, so the
               caption describes the same population as the list above it. */}
@@ -438,7 +436,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconChart} tint="var(--tint-warn-fg)" tintBg="var(--tint-warn)" title="Protocols (24h)">
+        <Panel title="Protocols (24h)">
           {protocols.length === 0 ? (
             <Empty>No protocol field recorded for this firewall.</Empty>
           ) : (
@@ -451,7 +449,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconActivity} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Top Rules by Traffic (24h)">
+        <Panel title="Top rules by traffic (24h)">
           {/* ⛔ THE ONE WIDGET HERE A LOG ANALYSER CANNOT DRAW. It joins traffic
               to this firewall's own RULEBASE, which is what makes the `unused`
               findings on Rule hygiene evidence rather than assumption. ⛔ A rule
@@ -495,7 +493,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconShield} tint="var(--tint-danger-fg)" tintBg="var(--tint-danger)" title="Threat Activity (24h)">
+        <Panel title="Threat activity (24h)">
           {/* ⛔ ATTACK CONTEXT, NOT PRIORITISATION. Threat signatures were
               deliberately REJECTED as a CVE band modifier: they fire on nearly
               every device, so admitting them would push ~every assessment to
@@ -556,7 +554,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconChart} tint="var(--tint-warn-fg)" tintBg="var(--tint-warn)" title="Reached This Firewall (24h)">
+        <Panel title="Reached this firewall (24h)">
           {/* ⛔ THE SAME EVIDENCE /exposure AND log_hit ARE BUILT ON. Exposure
               says a path is open; this says whether anyone knocked and whether
               they got in. ⛔ `public_source` and `allowed` are SEPARATE facts and
@@ -639,7 +637,7 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
           )}
         </Panel>
 
-        <Panel icon={IconShield} tint="var(--tint-danger-fg)" tintBg="var(--tint-danger)" title="Top Blocked Destinations (24h)">
+        <Panel title="Top blocked destinations (24h)">
           {blocked.length === 0 ? (
             <Empty>Nothing blocked was recorded with a destination for this firewall in the window.</Empty>
           ) : (

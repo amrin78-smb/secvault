@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.215.0': [
+    'The console is quieter to read, with nothing removed. Panels inside a card no longer draw their own boxes, so a page shows about half as many borders as before and the eye can tell at a glance what is a page, what is a card and what is a number inside one.',
+    'Card headings now look like headings. They were set smaller and fainter than the text underneath them, in tracked capitals, which left nothing on screen announcing what each panel was - so the layout had to be worked out from the boxes around it. They are now larger, darker and in ordinary sentence case.',
+    'The subscription and update notices share one slim strip instead of each painting a full-width coloured band across every page. Both still appear exactly when they did before and can still be dismissed separately. A subscription that has lapsed or is about to keeps its red bar - that one is worth interrupting you for.',
+    'The headline sentence at the top of a page is now plain text rather than a box sitting above more boxes, and the headline figures start higher up the screen. On a laptop that is roughly one tile row of content recovered without changing a single number.',
+    'A figure that has not moved since yesterday now shows a short dash-and-zero mark instead of repeating the same sentence under five tiles. Screen readers still hear the full wording, and a figure with nothing to compare against still shows nothing at all - "unchanged" and "not known" remain different things.',
+    'Coloured icons have been taken off panel headings. Colour in SecVault means risk, and a heading is not a risk; the severity colours on numbers, badges and charts are unchanged.',
+  ],
   '2.214.0': [
     'SECURITY: a Microsoft sign-in that SecVault refused was not actually being refused. The refusal was decided correctly, written to the sign-in log and shown on the Single sign-on page - and then the sign-in completed anyway. Anyone in your directory who was not in a mapped group could sign in and READ the whole fleet: firewalls, rules, configurations, vulnerabilities and compliance results. They could not change anything. This is fixed: the sign-in is now turned away at the door, with no session created, and the person is told their account is not mapped to a role.',
     'A session whose access is withdrawn while it is open - a mapping removed, an account deleted - is now refused on its next request instead of continuing until the sign-in expired. Signing in again restores access as soon as the account is valid again.',

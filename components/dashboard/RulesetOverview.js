@@ -1,10 +1,8 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card from '../ui/Card';
+import Card, { CardTitle } from '../ui/Card';
 import StatCard from '../ui/StatCard';
 import EmptyState from '../ui/EmptyState';
-import IconChip from '../ui/IconChip';
-import { IconChart } from '../icons';
 // ⛔ THE RAMP IS IMPORTED, NEVER RESTATED. severityRamp.js is the one place
 // that maps a severity to a hue; this widget's tiles used to carry hand-written
 // tokens and drifted off it twice (see the ⛔ on the tile list below).
@@ -44,14 +42,6 @@ async function getFleetFindingCounts(dbPool) {
   return rows[0];
 }
 
-const headingStyle = {
-  fontSize: 'var(--text-xs)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  color: 'var(--text-muted)',
-  marginBottom: 4,
-};
-
 const subtextStyle = {
   fontSize: 10,
   color: 'var(--text-muted)',
@@ -74,10 +64,7 @@ export default async function RulesetOverview() {
     return (
       <Card>
         <div className="card-body-compact">
-          <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-            Ruleset Overview
-          </div>
+          <CardTitle compact>Ruleset overview</CardTitle>
           <EmptyState message="No rules collected yet — add a device and run a collect to see fleet-wide rule health." />
         </div>
       </Card>
@@ -137,10 +124,7 @@ export default async function RulesetOverview() {
   return (
     <Card>
       <div className="card-body-compact">
-        <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconChart} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-          Ruleset Overview
-        </div>
+        <CardTitle compact>Ruleset overview</CardTitle>
         <div style={subtextStyle}>
           Fleet-wide rule counts. A rule can carry more than one finding type at once, so
           Unused/Shadow/Redundant/Any-Any won&apos;t sum to Total.

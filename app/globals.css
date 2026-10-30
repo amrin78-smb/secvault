@@ -924,18 +924,24 @@ tbody tr:hover td { background: var(--bg-primary); }
    --unmeasured and --text-muted are four hex digits apart. Clearing
    border-color here would have made an unmeasured tile identical to a measured
    one: this codebase's signature bug, applied to the signal that exists to
-   prevent it. Pinned by tests/designSystemRamp.test.js. */
+   prevent it. Pinned by tests/cardSurfaces.test.js, whose guard was verified
+   by deleting the :not() and watching it go red. */
 .card .kpi-card-compact:not([data-unmeasured]) {
   background: none;
   border-color: transparent;
   box-shadow: none;
 }
-/* The flattened tile keeps its padding so the numbers still sit on a grid,
-   but gains a hairline SEPARATOR instead of a full box — one edge per gap
-   rather than four per tile. Suppressed on the first tile of each row by the
-   grid itself having no column before it. */
-.card .kpi-card-compact:not([data-unmeasured]) { border-left: 1px solid var(--border-light); border-radius: 0; }
-.card .kpi-card-compact:not([data-unmeasured]):first-child { border-left-color: transparent; }
+/* ⛔ NO DIVIDER RULE EITHER, AND A FIRST DRAFT OF THIS BLOCK HAD ONE. It gave
+   each flattened tile a hairline border-left suppressed on :first-child —
+   which is wrong here, because several of these grids wrap every tile in its
+   own <Link> (RulesetOverview does). The tile is then always the first child
+   OF THE LINK, so :first-child matches EVERY tile and the separator silently
+   renders nowhere; in the grids that do NOT wrap, it would have rendered on
+   all but one. One rule, two different results, neither announced.
+
+   Whitespace separates them instead — which is what the comparison product
+   does inside its own cards, and it is one fewer edge rather than one more. */
+.card .kpi-card-compact:not([data-unmeasured]) { padding: var(--s2) var(--s3); }
 
 /* ── StatCard row layout (layout="row") ─────────────────────────────────
    Puts the headline number to the RIGHT of the label instead of stacking it
@@ -986,6 +992,17 @@ tbody tr:hover td { background: var(--bg-primary); }
   justify-content: space-between;
 }
 .card-title-compact { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+/* ⛔ THE GAP UNDER A WIDGET HEADING LIVES HERE, NOT AT THE CALL SITE (v2.215.0).
+   The hand-rolled `headingStyle` objects this class replaced each carried their
+   own `marginBottom: 4`, and when they were deleted two of the converting
+   passes disagreed about it — one re-added it inline, one dropped it, so the
+   same heading sat at two different heights on one page. That is precisely the
+   drift a shared class exists to end, so the spacing is part of the class.
+   ⛔ Reset inside a card HEADER, which already supplies its own padding. */
+.card-body .card-title-compact,
+.card-body-compact .card-title-compact { margin-bottom: var(--s1); }
+.card-header .card-title-compact,
+.card-header-compact .card-title-compact { margin-bottom: 0; }
 .card-body-compact { padding: 12px; }
 
 /* Scoped table-density override (does NOT touch the global th/td rule above,

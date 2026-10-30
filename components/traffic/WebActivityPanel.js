@@ -1,6 +1,4 @@
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import IconChip from '../ui/IconChip';
-import { IconGrid } from '../icons';
 // ⛔ EVERY SENTENCE THIS PANEL PRINTS IS BUILT BY A PURE MODULE, NOT INLINE.
 // The bars are almost incapable of being wrong; the claims beside them are the
 // feature, and JSX cannot be unit-tested by `node:test` (there is no transform
@@ -37,8 +35,6 @@ import {
 //   3. which firewalls can answer the question at all.
 // Showing 1 without 2 turns a floor into a total. Showing 1 without 3 turns a
 // statement about six firewalls into a statement about sixteen.
-
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 
 // ⛔ Em dash, never 0 — the same rule as every other figure in this product.
 function Measure({ text }) {
@@ -113,10 +109,7 @@ export default function WebActivityPanel({ web, perDevice = false }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconGrid} color="var(--tint-teal-fg)" bg="var(--tint-teal)" />
-          Web &amp; application activity ({hours}h)
-        </CardTitle>
+        <CardTitle compact>Web &amp; application activity ({hours}h)</CardTitle>
       </CardHeader>
       <CardBody>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>

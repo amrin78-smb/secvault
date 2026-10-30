@@ -4,9 +4,13 @@
 // container for callers that lay out their own padding.
 //
 // All four accept `style`. The sub-components did NOT until 2026-09-08, so the
-// `display:flex` every syslog widget passed to CardTitle -- to sit an IconChip
+// `display:flex` the syslog widgets passed to CardTitle -- to sit an IconChip
 // beside its text -- was silently dropped. React does not warn on an unused
 // prop, so it rendered subtly wrong and looked deliberate.
+// ⛔ NO WIDGET PASSES THAT ANY MORE (v2.215.0): the chips are off card headings
+// entirely, so the flex wrapper they needed is gone with them. The RULE above
+// still stands and is why `style` is still forwarded -- a prop accepted and
+// ignored is worse than one that does not exist.
 export default function Card({ className = '', children, style }) {
   return (
     <div className={`card ${className}`} style={style}>

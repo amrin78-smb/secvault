@@ -1,8 +1,6 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import IconChip from '../ui/IconChip';
-import { IconShield } from '../icons';
 import { STANDARDS } from '../compliance/ComplianceMatrix';
 
 export const dynamic = 'force-dynamic';
@@ -81,10 +79,7 @@ export default async function ComplianceStandardsBreakdown() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="var(--tint-success-fg)" bg="var(--tint-success)" />
-          Score by Standard (Fleet)
-        </CardTitle>
+        <CardTitle compact>Score by standard (fleet)</CardTitle>
       </CardHeader>
       <CardBody>
         {!anyMeasured ? (

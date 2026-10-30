@@ -4,9 +4,7 @@ import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import NotMeasured from '../ui/NotMeasured';
-import IconChip from '../ui/IconChip';
 import Pagination from '../ui/Pagination';
-import { IconActivity } from '../icons';
 import { resolvePage, pageWindow } from '../../lib/pagination';
 import {
   getVpnActivityByDeviceRollup,
@@ -384,10 +382,7 @@ export default async function VpnSyslogActivity({ searchParams, page }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconActivity} color="var(--green)" bg="var(--tint-success)" />
-          VPN Activity from Logs (24h)
-        </CardTitle>
+        <CardTitle compact>VPN activity from logs (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {byDevice.length === 0 ? (

@@ -1,10 +1,8 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card from '../ui/Card';
+import Card, { CardTitle } from '../ui/Card';
 import Badge from '../ui/Badge';
 import EmptyState from '../ui/EmptyState';
-import IconChip from '../ui/IconChip';
-import { IconBell } from '../icons';
 import CVEBadge from '../cve/CVEBadge';
 
 // Dashboard widget: the most recent fleet-wide patch-now CVE assessments.
@@ -54,10 +52,7 @@ export default async function RecentCriticalAlerts({ limit = 5 }) {
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconBell} color="var(--tint-orange-fg)" bg="var(--tint-orange)" />
-          Recent Critical Alerts
-        </div>
+        <CardTitle compact>Recent critical alerts</CardTitle>
       </div>
       <div className="card-body-compact">
         {items.length === 0 ? (

@@ -1,9 +1,7 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card from '../ui/Card';
+import Card, { CardTitle } from '../ui/Card';
 import Badge from '../ui/Badge';
-import IconChip from '../ui/IconChip';
-import { IconSearch } from '../icons';
 import StandardDonut from '../compliance/StandardDonut';
 import { STANDARDS, scoreColor } from '../compliance/ComplianceMatrix';
 
@@ -85,14 +83,6 @@ async function computeLiveFleetCompliance(dbPool) {
   return { overall, byStandard };
 }
 
-const headingStyle = {
-  fontSize: 'var(--text-xs)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  color: 'var(--text-muted)',
-  marginBottom: 4,
-};
-
 const subtextStyle = {
   fontSize: 10,
   color: 'var(--text-muted)',
@@ -141,10 +131,7 @@ export default async function ComplianceScoreWidget() {
   return (
     <Card>
       <div className="card-body-compact">
-        <div style={{ ...headingStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconSearch} color="var(--tint-success-fg)" bg="var(--tint-success)" />
-          Compliance Score
-        </div>
+        <CardTitle compact>Compliance score</CardTitle>
         <div style={subtextStyle}>{asOfLabel}</div>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
           <StandardDonut pct={overall} size={84} />

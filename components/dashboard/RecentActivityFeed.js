@@ -1,12 +1,10 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
-import Card from '../ui/Card';
+import Card, { CardTitle } from '../ui/Card';
 import Table from '../ui/Table';
 import EmptyState from '../ui/EmptyState';
-import IconChip from '../ui/IconChip';
 import Pagination from '../ui/Pagination';
 import { resolvePage, pageWindow, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
-import { IconClock } from '../icons';
 
 // Dashboard widget: fleet-wide view of activity_log -- the SAME table
 // components/analysis/TrackingTab.js already renders per-device, just
@@ -106,10 +104,7 @@ export default async function RecentActivityFeed({
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconClock} color="var(--text-secondary)" bg="var(--surface-subtle)" />
-          Recent Activity
-        </div>
+        <CardTitle compact>Recent activity</CardTitle>
       </div>
       <div className="card-body-compact">
         {entries.length === 0 ? (

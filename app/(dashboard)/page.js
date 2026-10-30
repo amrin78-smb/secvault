@@ -1,10 +1,8 @@
 import { pool } from '../../lib/db';
 import { timeAgo as formatRelative, titleCase, FEED_LABELS, feedStatusRank, newestFeedAt } from '../../lib/formatDisplay';
 import Badge from '../../components/ui/Badge';
-import Card from '../../components/ui/Card';
-import IconChip from '../../components/ui/IconChip';
+import Card, { CardTitle } from '../../components/ui/Card';
 import TabBar from '../../components/ui/TabBar';
-import { IconDevices, IconShield, IconTrendingUp } from '../../components/icons';
 import { DASHBOARD_TABS, resolveDashboardTab } from '../../lib/dashboardTabs';
 import AutoRefresh from '../../components/dashboard/AutoRefresh';
 import CveSeveritySummary from '../../components/dashboard/CveSeveritySummary';
@@ -144,14 +142,11 @@ function syncBadgeColor(status) {
 
 // Module top level, never nested in the page component — CLAUDE.md's React
 // rule (a component defined inside a component remounts on every render).
-function WidgetCard({ icon, color, bg, title, children }) {
+function WidgetCard({ title, children }) {
   return (
     <Card>
       <div className="card-header-compact">
-        <div className="card-title-compact" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={icon} color={color} bg={bg} />
-          {title}
-        </div>
+        <CardTitle compact>{title}</CardTitle>
       </div>
       <div className="card-body-compact">{children}</div>
     </Card>
@@ -160,7 +155,7 @@ function WidgetCard({ icon, color, bg, title, children }) {
 
 function CveSeverityCard() {
   return (
-    <WidgetCard icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" title="CVE Severity (Fleet)">
+    <WidgetCard title="CVE severity (fleet)">
       <CveSeveritySummary />
     </WidgetCard>
   );
@@ -168,12 +163,7 @@ function CveSeverityCard() {
 
 function TopRiskyCard() {
   return (
-    <WidgetCard
-      icon={IconTrendingUp}
-      color="var(--tint-danger-fg)"
-      bg="var(--tint-danger)"
-      title="Top Risky Devices"
-    >
+    <WidgetCard title="Top risky devices">
       <TopRiskyDevices />
     </WidgetCard>
   );
@@ -181,7 +171,7 @@ function TopRiskyCard() {
 
 function VendorCard() {
   return (
-    <WidgetCard icon={IconDevices} color="var(--tint-teal-fg)" bg="var(--tint-teal)" title="Vendor Distribution">
+    <WidgetCard title="Vendor distribution">
       <VendorDistribution />
     </WidgetCard>
   );

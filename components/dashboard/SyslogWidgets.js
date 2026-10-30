@@ -2,8 +2,6 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
-import IconChip from '../ui/IconChip';
-import { IconActivity, IconShield, IconTrendingUp, IconDevices, IconRefresh } from '../icons';
 import { classifyAction } from '../../lib/syslog/actions';
 import {
   getTrafficTimeline,
@@ -86,10 +84,7 @@ export async function TrafficVolumeWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconActivity} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Log Volume (24h)
-        </CardTitle>
+        <CardTitle compact>Log volume (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -185,10 +180,7 @@ export async function TopTalkersWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconDevices} color="var(--tint-success-fg)" bg="var(--tint-success)" />
-          Top Log Sources (24h)
-        </CardTitle>
+        <CardTitle compact>Top log sources (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -244,10 +236,7 @@ export async function ActionBreakdownWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
-          Session Outcomes (24h)
-        </CardTitle>
+        <CardTitle compact>Session outcomes (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -303,10 +292,7 @@ export async function TopRulesWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconTrendingUp} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-          Busiest Rules (today)
-        </CardTitle>
+        <CardTitle compact>Busiest rules (today)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -350,10 +336,7 @@ export async function ThreatActivityWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
-          Threat &amp; UTM Events (24h)
-        </CardTitle>
+        <CardTitle compact>Threat &amp; UTM events (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -394,10 +377,7 @@ export async function IngestHealthWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconChip icon={IconRefresh} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Collector Health
-        </CardTitle>
+        <CardTitle compact>Collector health</CardTitle>
       </CardHeader>
       <CardBody>
         {h.flushes === 0 ? (

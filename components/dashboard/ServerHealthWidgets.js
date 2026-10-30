@@ -1,7 +1,5 @@
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import IconChip from '../ui/IconChip';
-import { IconDevices, IconChart, IconActivity, IconShield, IconGrid } from '../icons';
 import { getServerHealth, diskState, formatBytes } from '../../lib/serverHealth';
 
 export const dynamic = 'force-dynamic';
@@ -12,8 +10,6 @@ export const dynamic = 'force-dynamic';
 // this tab that rule is not cosmetic: "0 GB free" is an emergency and "we could
 // not read the volume" is a gap in our own instrumentation, and the two must
 // never look alike. Same reason `hit_count` is tri-state.
-
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 
 // ⛔ THE DECISION LIVES IN lib/serverHealth.js, NOT HERE. What counts as a
 // measurement and what counts as an absence is the distinction this whole tab
@@ -41,14 +37,11 @@ function ago(seconds) {
   return <>{Math.round(seconds / 3600)}h ago</>;
 }
 
-function Panel({ icon, tint, tintBg, title, children }) {
+function Panel({ title, children }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={icon} color={tint} bg={tintBg} />
-          {title}
-        </CardTitle>
+        <CardTitle compact>{title}</CardTitle>
       </CardHeader>
       <CardBody>{children}</CardBody>
     </Card>
@@ -92,7 +85,7 @@ export default async function ServerHealthWidgets() {
 
   return (
     <>
-      <Panel icon={IconDevices} tint="var(--tint-info-fg)" tintBg="var(--tint-info)" title="Disk">
+      <Panel title="Disk">
         {h.disks.map((d) => {
           const state = diskState(d);
           return (
@@ -148,7 +141,7 @@ export default async function ServerHealthWidgets() {
         </div>
       </Panel>
 
-      <Panel icon={IconChart} tint="var(--tint-purple-fg)" tintBg="var(--tint-purple)" title="Database">
+      <Panel title="Database">
         <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, marginBottom: 'var(--s3)' }}>
           {gb(h.database.totalBytes)}
         </div>
@@ -193,7 +186,7 @@ export default async function ServerHealthWidgets() {
         ) : null}
       </Panel>
 
-      <Panel icon={IconGrid} tint="var(--tint-teal-fg)" tintBg="var(--tint-teal)" title="Raw syslog retention">
+      <Panel title="Raw syslog retention">
         {h.retention.error ? (
           <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
             Partition catalogue not measured — {h.retention.error}
@@ -216,7 +209,7 @@ export default async function ServerHealthWidgets() {
         </div>
       </Panel>
 
-      <Panel icon={IconActivity} tint="var(--tint-warn-fg)" tintBg="var(--tint-warn)" title={`Ingest (last ${h.ingest.windowMinutes} min)`}>
+      <Panel title={`Ingest (last ${h.ingest.windowMinutes} min)`}>
         {/* THE PANEL WHOSE JOB IS TO SAY INGEST IS BROKEN MUST SAY SO. Its error
             was never rendered at all, and because the error shape omitted
             `flushes`, the "no flushes recorded" banner below was ALSO suppressed
@@ -301,7 +294,7 @@ export default async function ServerHealthWidgets() {
         ) : null}
       </Panel>
 
-      <Panel icon={IconShield} tint="var(--tint-success-fg)" tintBg="var(--tint-success)" title="Services">
+      <Panel title="Services">
         {/* ⛔ INFERRED FROM WHAT EACH SERVICE WRITES, not from sc.exe. NSSM
             reports a crash-looping process as Running, so the service state
             would be LESS truthful than the evidence — and asking Windows would

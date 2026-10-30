@@ -3,8 +3,6 @@ import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
 import Badge from '../ui/Badge';
 import Table from '../ui/Table';
-import IconChip from '../ui/IconChip';
-import { IconAlertTriangle, IconShield, IconActivity, IconBell } from '../icons';
 import {
   getTopAttackers,
   getTopTargets,
@@ -31,7 +29,6 @@ export const dynamic = 'force-dynamic';
 // vocabularies, mapped onto one scale by threatSeverityRank(); words it does
 // not recognize are counted separately rather than guessed into a level.
 
-const titleStyle = { display: 'flex', alignItems: 'center', gap: 8 };
 const rowLabel = {
   fontSize: 'var(--text-base)',
   overflow: 'hidden',
@@ -123,10 +120,7 @@ export async function TopAttackersWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconAlertTriangle} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
-          Top Attackers (24h)
-        </CardTitle>
+        <CardTitle compact>Top attackers (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -179,10 +173,7 @@ export async function TopTargetsWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="var(--tint-orange-fg)" bg="var(--tint-orange)" />
-          Most Targeted Hosts (24h)
-        </CardTitle>
+        <CardTitle compact>Most targeted hosts (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -227,10 +218,7 @@ export async function TopThreatsWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconBell} color="var(--tint-info-fg)" bg="var(--tint-info)" />
-          Top Threats (24h)
-        </CardTitle>
+        <CardTitle compact>Top threats (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
@@ -289,10 +277,7 @@ export async function ThreatSeverityWidget() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconActivity} color="var(--tint-warn-fg)" bg="var(--tint-warn)" />
-          Threats by Severity (24h)
-        </CardTitle>
+        <CardTitle compact>Threats by severity (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {levels.length === 0 && unranked === 0 && unreported === 0 ? (
@@ -344,10 +329,7 @@ export async function DeviceThreatTable() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle style={titleStyle}>
-          <IconChip icon={IconShield} color="var(--tint-danger-fg)" bg="var(--tint-danger)" />
-          Security Events by Device (24h)
-        </CardTitle>
+        <CardTitle compact>Security events by device (24h)</CardTitle>
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (

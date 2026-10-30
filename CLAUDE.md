@@ -3192,6 +3192,97 @@ together. If a fourth ever appears, it must be fixed in the same commit.
 `public/fonts/`, so the browser was synthesising or snapping to 700 — the number never rendered at
 the weight the rule asked for. It is 600 now, which is a real face.
 
+### ⛔ HOW MANY SURFACES A PAGE MAY DRAW (v2.215.0)
+
+**Three in the content column, plus the header. Not seven.**
+
+Measured against ExDomainVault's dashboard — same viewport, both sidebars cropped, the image
+median-filtered twice so text and icons drop out and only real surfaces remain:
+
+| | ExDomainVault | SecVault (before) |
+|---|---:|---:|
+| distinct surface levels in the content area | **2** | **7** |
+| long edges drawn (>=120px horizontal / >=60px vertical) | **28** | **57** |
+| saturated pixels | 4.15% | 2.25% |
+| share of that colour in its dominant hue family | **85%** | 38% |
+| first content begins at | y=209 (23% of viewport) | y=331 (**36%**) |
+
+⛔ **THE TOKENS WERE NEVER THE PROBLEM — USAGE HAD DRIFTED OFF THEM.** `--bg-primary`,
+`--bg-card` and `--surface-subtle` are three, which is right. The other four levels were
+components inventing their own ground: the update banner (`#192639`, L 36.6, **5.2% of all
+content pixels**), the licence banner (`#2C281C`, L 40.0, **4.1%, and the only WARM surface
+anywhere on the page**), the header (`#0E1622`, L 21.2) and a table header row. Five cool greys
+within 22 luminance points of each other, two of them 3-7 L apart. The eye builds a page model
+from a SMALL NUMBER OF CLEARLY SEPARATED LAYERS; at seven it stops trying and reads the borders
+instead — which is why more borders kept being added.
+
+⛔ **A BORDER INSIDE A BORDER IS THE SECOND HALF OF THE SAME MISTAKE.** CVE Severity was a
+bordered card holding four bordered tiles; Ruleset Overview a bordered card holding seven. That
+is four extra edges per tile carrying nothing the outer card had not already said.
+`app/globals.css` now flattens `.card .kpi-card-compact` with a DESCENDANT RULE rather than an
+opt-in prop — there are ~10 call sites and the next one added would otherwise be wrong by
+default. ⛔ **`[data-unmeasured]` IS EXCLUDED, AND THAT EXCLUSION IS LOAD-BEARING**: the dashed
+border is the only carrier of "we could not measure this" on a tile (this file's own v2.200.0
+note records that grey was not enough, because `--unmeasured` and `--text-muted` are four hex
+digits apart). Clearing `border-color` there would have made an unmeasured tile identical to a
+measured one — this codebase's signature bug aimed at the signal that exists to prevent it.
+
+⛔ **THE HEADING LAYER EXISTED AND WAS BEING BYPASSED.** `.card-title` (18px/600/`--text-primary`)
+and `.card-title-compact` (14px/600/`--text-primary`) were both already in `globals.css` and both
+are correct. Every dashboard widget ignored them for a hand-rolled `headingStyle` — 12px,
+UPPERCASE, `.06em` tracked, on `--text-muted` — i.e. a LABEL treatment applied to a HEADING, so
+the card title rendered SMALLER AND FAINTER THAN THE BODY TEXT BENEATH IT. It was not even a
+shared object: the same literal was copy-pasted into four widget files, each with a `fontSize: 10`
+off the type scale. ⛔ A page with no title layer has to be parsed from its boxes, so the two
+defects fed each other. `CardTitle` takes `compact`; new widgets use it.
+
+⛔ **COLOUR: THE PROBLEM WAS NEVER VOLUME, IT WAS CONCENTRATION.** EDV spends nearly TWICE the
+saturated pixels we do and puts **85% of them in one blue/cyan family**, so it reads as "a blue
+product" and a red thing means something. SecVault spent less colour across five families with no
+dominant — teal icon chips on headings, amber pills, a red donut, orange and green numbers. The
+icon chip on a card heading is gone for that reason: this file's own "Colour means RISK" rule, and
+a heading is not a risk.
+
+⛔ **TONE BELONGS ON A MARK, NOT ON A FULL-BLEED GROUND — WITH ONE EXCEPTION.** The subscription
+and update notices are one `NoticeBar` strip of `.notice-row`s on `--bg-card`, tone carried by a
+7px dot. **`bad` keeps its coloured ground**, because a lapsed subscription genuinely is risk;
+"renews in 31 days" is not, and a full-width amber band for it was the chrome breaking the rule
+the palette keeps. Each notice stays independently conditional and independently dismissible —
+nothing about WHEN a notice shows changed. ⛔ The strip's border sits on the LAST ROW, never on the
+container: both notices are usually absent, and a border on the container is a 1px banner nobody
+can dismiss.
+
+⛔ **`.answer-header` HAS NO BOX.** It was a bordered `--bg-card` panel padded 24px on four sides,
+sitting directly above a row of bordered tiles, so every answer-first page opened with two stacked
+boxes before the first number and the most important sentence on the page wore the same chrome as
+a widget. It is now plain type on the canvas. The dot, the coverage line and the actions are
+unchanged.
+
+⛔ **A MEASURED ZERO IS A GLYPH, NOT A SENTENCE, AND NOT NOTHING.** `DeltaBadge` printed "No change
+since yesterday" under five of six Overview tiles — 23px per tile of identical prose, which reads
+as texture rather than information. It now shows `▬ 0` with the phrase intact for screen readers.
+⛔ **DELETING THE BRANCH WAS CONSIDERED AND REFUSED**: rule 1 (no prior value) renders NOTHING and
+rule 2 (measured and unchanged) must stay visibly distinct from it, or "we have no baseline"
+collapses into "it did not move". ⛔ `tests/deltaBadge.test.js` could not see the difference,
+because it stripped every tag and so could not tell a sentence on screen from the same sentence in
+an `.sr-only` span — it pinned the MECHANISM, not the OUTCOME. Split into `visibleText()` and
+`assistiveText()`; three mutations verified red.
+
+⛔ **`.stat-label` IS 12px AND ITS COLOUR MUST NOT FOLLOW.** The tile's value:label size ratio was
+22:14 = 1.57 against EDV's 24:12 = 2.0, and at 1.57 the label competes with the number instead of
+describing it; 22:12 = 1.83 is as close as this ramp reaches (24px is off-scale — see the ramp
+under Tokens). ⛔ The COLOUR step is the one that must not be taken, and v2.203.0 records why: it
+moved size and colour together, which made `.stat-label` byte-identical to `.stat-sub` and the
+production minifier MERGED the two selectors. Label and caption separate on WEIGHT and COLOUR
+(500/`--text-secondary` vs 400/`--text-muted`), not on size — which is how EDV separates its own
+label from its hint.
+
+⛔ **WHAT WAS RULED OUT FIRST, so nobody re-litigates it.** The font (both antialias; Inter would
+not have fixed this), resting shadows (both have them — `--shadow-sm` at rest, `--shadow-md` on
+hover), translucent vs opaque tints (both translucent), and total colour volume (ours was already
+lower). The gap was surfaces, edges, the heading layer and colour concentration — nothing the
+token file was getting wrong.
+
 ### Themes
 
 - **Dual theme, light default**: `localStorage['secvault-theme']`, applied as `data-theme="dark"` on
