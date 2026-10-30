@@ -5,7 +5,7 @@
 // authenticated page but never on /login.
 //
 // ⛔ IT STAYS QUIET WHILE THERE IS NOTHING TO DO. A healthy trial with three
-// weeks left and a licence that renews in eight months both render NOTHING. A
+// weeks left and a licence that expires in eight months both render NOTHING. A
 // banner that is always present is a banner nobody reads, and this one has to
 // still work on the day it says the subscription has lapsed.
 //
@@ -71,10 +71,14 @@ export default function SubscriptionNotifier() {
   }
 
   // ⛔ RENDERS A ROW, NOT A BANNER (v2.215.0), and `bad` is the ONE tone that
-  // keeps a coloured ground. A lapsed or lapsing subscription is risk; "renews
-  // in 31 days" is information, and a full-width amber band for it spent the
-  // risk vocabulary on chrome — measured at 4.1% of the Overview's content
-  // pixels, and the only WARM surface anywhere on the page.
+  // keeps a coloured ground. A LAPSED subscription is risk; one still inside
+  // its renewal notice is an action to schedule, and a full-width amber band
+  // for it spent the risk vocabulary on chrome — measured at 4.1% of the
+  // Overview's content pixels, and the only WARM surface anywhere on the page.
+  // ⛔ The SENTENCE then has to carry the urgency the ground no longer does,
+  // which is why licenceSentence() says "expires in N days. It does not renew
+  // automatically" rather than the "renews in N days" a customer read as
+  // confirmation that nothing was needed.
   return (
     <NoticeRow
       tone={banner.tone}

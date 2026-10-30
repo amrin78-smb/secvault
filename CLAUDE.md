@@ -3245,9 +3245,21 @@ a heading is not a risk.
 
 ⛔ **TONE BELONGS ON A MARK, NOT ON A FULL-BLEED GROUND — WITH ONE EXCEPTION.** The subscription
 and update notices are one `NoticeBar` strip of `.notice-row`s on `--bg-card`, tone carried by a
-7px dot. **`bad` keeps its coloured ground**, because a lapsed subscription genuinely is risk;
-"renews in 31 days" is not, and a full-width amber band for it was the chrome breaking the rule
-the palette keeps. Each notice stays independently conditional and independently dismissible —
+7px dot. **`bad` keeps its coloured ground**, because a lapsed subscription genuinely is risk; a
+renewal still weeks away is an action to schedule, and a full-width amber band for it was the
+chrome breaking the rule the palette keeps.
+
+⛔ **WHEN THE GROUND STOPS SHOUTING, THE SENTENCE HAS TO SAY IT — AND THAT EXPOSED A COPY BUG THE
+BAND HAD BEEN COVERING.** The banner read *"Licensed to … until 2026-11-30 — renews in 31 days"*,
+reported by the customer reading their own console. It describes a subscription that renews
+ITSELF, so the one sentence whose entire job is to prompt an action read as confirmation that no
+action was needed. **Nothing in this product can auto-renew** — there is no licence server, no
+call-home and no billing integration anywhere in this codebase (see "The secret, honestly" above);
+renewal means a NEW KEY minted against this server's id and activated by a person in Settings →
+Subscription. It now reads *"expires in 31 days. It does not renew automatically: a new licence
+key must be activated."* ⛔ Both halves are required and `tests/productLicense.test.js` pins the
+second NEGATIVELY: "expires" alone still leaves a reader who has met a hundred auto-renewing SaaS
+subscriptions assuming this is one. Each notice stays independently conditional and independently dismissible —
 nothing about WHEN a notice shows changed. ⛔ The strip's border sits on the LAST ROW, never on the
 container: both notices are usually absent, and a border on the container is a 1px banner nobody
 can dismiss.

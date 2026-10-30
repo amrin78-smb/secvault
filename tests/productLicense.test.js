@@ -358,6 +358,36 @@ describe('the banner sentence', () => {
     assert.match(s.text, /Covers 20 firewalls, 12 in use/);
   });
 
+  it('⛔ a licence due for renewal never implies it renews ITSELF', () => {
+    // ⛔ REPORTED BY THE CUSTOMER OFF THEIR OWN BANNER. It read "Licensed to
+    // ... until 2026-11-30 — renews in 31 days", which describes a
+    // subscription that renews on its own, so the one sentence whose job is
+    // to prompt an action read as confirmation that none was needed. Nothing
+    // here can auto-renew: no licence server, no call-home, no billing
+    // integration. Renewal is a new key, minted for this server's id and
+    // pasted into Settings by a person.
+    const s = L.licenceSentence(verdict({ expiry: iso(31) }, 12));
+    assert.equal(s.tone, 'warn');
+    assert.match(s.text, /expires in 31 days/);
+    assert.match(s.text, /does not renew automatically/);
+    // ⛔ Asserted NEGATIVELY as well, because the positive half above still
+    // passes on a sentence that says both things. "renew" alone is fine —
+    // "does not renew automatically" contains it — so this pins the specific
+    // broken phrasing and its obvious variants.
+    assert.ok(!/renews in/i.test(s.text), 'the sentence implies automatic renewal: ' + s.text);
+    assert.ok(!/auto-?renew(s|ing)?\b/i.test(s.text.replace(/does not renew automatically/i, '')),
+      'the sentence implies automatic renewal: ' + s.text);
+  });
+
+  it('a licence NOT yet due for renewal stays quiet and green', () => {
+    // The other side: the wording above must not leak onto every healthy
+    // licence, which would make the notice permanent and therefore ignored.
+    const s = L.licenceSentence(verdict({ expiry: iso(200) }, 12));
+    assert.equal(s.tone, 'ok');
+    assert.ok(!/expires in/.test(s.text), 'a healthy licence should not be counting down');
+    assert.ok(!/does not renew automatically/.test(s.text));
+  });
+
   it('⛔ an undeterminable state is HUELESS, never green', () => {
     assert.equal(L.licenceSentence(null).tone, 'unknown');
     assert.equal(L.licenceSentence({ status: 'nonsense' }).tone, 'unknown');

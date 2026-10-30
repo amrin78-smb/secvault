@@ -10,9 +10,11 @@
 // carried by a dot rather than by a coloured ground.
 //
 // ⛔ `bad` KEEPS ITS GROUND. A lapsed subscription is genuinely risk and this
-// product's own rule is that colour means risk; "renews in 31 days" is not, and
-// a full-width amber band for it was the chrome breaking the rule the palette
-// keeps. See the ⛔ block beside .notice-bar in app/globals.css.
+// product's own rule is that colour means risk; a renewal still weeks away is
+// an action to schedule, and a full-width amber band for it was the chrome
+// breaking the rule the palette keeps. ⛔ The WORDS then carry what the ground
+// no longer does — see licenceSentence() in lib/productLicense.js.
+// See also the ⛔ block beside .notice-bar in app/globals.css.
 
 export function NoticeBar({ children }) {
   return <div className="notice-bar">{children}</div>;

@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.215.1': [
+    'The subscription notice said a licence "renews in N days", which reads as though it renews itself. SecVault has no licence server and cannot renew anything: a renewal is a new key, issued for this server and activated in Settings. The notice now says the licence EXPIRES in N days and does not renew automatically.',
+  ],
   '2.215.0': [
     'The console is quieter to read, with nothing removed. Panels inside a card no longer draw their own boxes, so a page shows about half as many borders as before and the eye can tell at a glance what is a page, what is a card and what is a number inside one.',
     'Card headings now look like headings. They were set smaller and fainter than the text underneath them, in tracked capitals, which left nothing on screen announcing what each panel was - so the layout had to be worked out from the boxes around it. They are now larger, darker and in ordinary sentence case.',
