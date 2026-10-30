@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
+import Card, { CardTitle, CardBody } from '../ui/Card';
 import DownloadButton from '../ui/DownloadButton';
 
 // Shortcuts to things an operator actually does from the dashboard.
@@ -31,9 +31,14 @@ const ITEM_STYLE = {
 export default function QuickActions() {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Quick Actions</CardTitle>
-      </CardHeader>
+      {/* ⛔ `compact` AND SENTENCE CASE, to match its row (v2.215.0). This was
+          the one card on the Overview still on the full-size .card-title: it
+          sits in the same grid row as "Top risky devices" and "Recent critical
+          alerts", so at 18px against their 14px it read as a section heading
+          for the whole row rather than as one card's own title. */}
+      <div className="card-header-compact">
+        <CardTitle compact>Quick actions</CardTitle>
+      </div>
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {ACTIONS.map((a) =>
