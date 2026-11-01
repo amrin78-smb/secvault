@@ -1890,8 +1890,8 @@ html[data-nav="rail"] .sv-sidebar { width: var(--sidebar-width-collapsed); min-w
 /* Collapsed: no headings, so a hairline keeps the clusters legible. */
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group,
 html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group {
-  margin-top: var(--s2);
-  padding-top: var(--s2);
+  margin-top: var(--s1);
+  padding-top: var(--s1);
   border-top: 1px solid rgba(255,255,255,0.07);
 }
 .sv-nav a {
@@ -1918,8 +1918,18 @@ html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group {
   white-space: nowrap;
   overflow: hidden;
 }
+/* ⛔ 4px VERTICAL, AND THE NUMBER WAS MEASURED, NOT CHOSEN. Flattening the
+   sections means the rail shows all SEVENTEEN destinations at once, and at the
+   8px padding the expanded rail uses that came to 829px of content in a 740px
+   column on a 1279x860 laptop — an 89px overflow, i.e. a navigation you have
+   to scroll to see all of, which is a navigation you stop trusting to be
+   showing you everything. 4px takes the rows to 32px and the whole rail to
+   ~623px, which clears a 740px-tall window with room to spare. The chip inside
+   is still 24px, so the hit area stays above WCAG 2.5.8's 24x24 floor; only
+   the air around it went. `.sv-nav`'s own overflow-y stays as the safety net
+   for a future eighteenth entry. */
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav a,
-html[data-nav="rail"] .sv-sidebar .sv-nav a { padding: var(--s2); justify-content: center; margin: 0 8px; }
+html[data-nav="rail"] .sv-sidebar .sv-nav a { padding: var(--s1) var(--s2); justify-content: center; margin: 0 8px; }
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-text,
 html[data-nav="rail"] .sv-sidebar .sv-nav-text { display: none; }
 .sv-nav-chip {
@@ -2126,6 +2136,8 @@ html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-items::before,
 html[data-nav="rail"] .sv-sidebar .sv-nav-items::before { display: none; }
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-items a,
 html[data-nav="rail"] .sv-sidebar .sv-nav-items a {
+  /* Only the INDENT is reset; the vertical padding above must survive, or the
+     flattened destinations stand taller than the leaf ones beside them. */
   padding-left: var(--s2);
   font-size: var(--text-base);
 }

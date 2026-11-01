@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.216.1': [
+    'When the sidebar is showing icons only, all seventeen destinations now fit on screen at once on a normal laptop. They did not quite: measured on a 1279x860 window the rail ran 89 pixels past the bottom, so the last few could only be reached by scrolling a strip of unlabelled icons.',
+    'The rows are now 32 pixels apart instead of 40, and the dividers between groups are thinner. Nothing was removed and the icons themselves are unchanged.',
+    'Below about 740 pixels of window height the rail still scrolls, which is the intended fallback rather than a fault.',
+  ],
   '2.216.0': [
     'The sidebar is organised into seven sections you can open and close, instead of fifteen links all competing for attention at once. Overview, Work queue, Assets, Investigate, Risk, Compliance and Reports. The section you are in opens itself.',
     'Nothing moved. Every page is at exactly the same address it was, so saved links, links inside alerts that have already been sent, and URLs pasted into tickets all still work. Only the menu changed.',
