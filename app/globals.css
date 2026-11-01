@@ -678,11 +678,46 @@ tbody tr:hover td { background: var(--bg-primary); }
 /* ── Page header ───────────────────────────────────────────── */
 .page-header {
   display: flex;
-  align-items: center;
+  /* ⛔ flex-start, NOT center (v2.217.0). The header gained an optional
+     breadcrumb, eyebrow and freshness line, so the left block is now taller
+     than the action buttons on the right — centred, the buttons floated to the
+     middle of a four-line stack instead of sitting on the title they belong
+     to. Pages passing only {title, subtitle} are unaffected: two lines against
+     one button row look the same either way. */
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 20px;
   gap: 16px;
   flex-wrap: wrap;
+}
+.page-header-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.page-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  width: fit-content;
+}
+.page-back:hover { color: var(--primary); text-decoration: underline; }
+.page-eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* ⛔ --text-secondary, not --text-muted: in light theme --text-muted measures
+     4.27:1 on --bg-primary, under WCAG 1.4.3's 4.5:1. An eyebrow states the
+     page's SCOPE — how many firewalls these numbers are about — which is not
+     something to render in the faintest ink available. */
+  color: var(--text-secondary);
+}
+.page-meta {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
 }
 .page-title {
   font-size: var(--text-xl);
@@ -2021,6 +2056,100 @@ html[data-nav="rail"] .sv-sidebar .sv-collapse-btn svg { transform: rotate(180de
 }
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-version,
 html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-align: center; }
+
+/* ════════════════════════════════════════════════════════════════════
+   The shared filter bar (v2.217.0) — components/ui/FilterBar.js
+   ────────────────────────────────────────────────────────────────────
+   ⛔ EVERY CONTROL HERE USES .input / .select RATHER THAN ITS OWN BOX.
+   `ExposureFilters.js` styled its <select> with a hardcoded padding and a
+   hardcoded border, which opted that one control out of the density and the
+   corner settings while every control around it honoured them. Same failure
+   mode this file already records for a table cell that hardcodes
+   `padding: 12px 16px`: it does not look broken, it looks slightly wrong, and
+   nothing points at the cause.
+   ════════════════════════════════════════════════════════════════════ */
+.filter-bar { display: flex; flex-direction: column; gap: var(--s3); margin-bottom: var(--s4); }
+.filter-controls { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: flex-end; }
+.filter-controls[hidden] { display: none; }
+.filter-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* The search box takes the slack so the selects keep their natural width. */
+.filter-field[data-grow="true"] { flex: 1 1 220px; }
+.filter-label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  /* ⛔ --text-secondary, NOT --text-muted. In light theme --text-muted measures
+     4.27:1 on --bg-primary, under WCAG 1.4.3's 4.5:1 — the same shortfall
+     recorded against the table column headings. A control's label is the only
+     thing saying what the control filters; it does not get to be the faintest
+     text on the page. */
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.filter-control { width: auto; min-width: 130px; }
+
+.filter-more {
+  align-self: flex-end;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.filter-more:hover { border-color: var(--primary); color: var(--primary); }
+
+/* ── What is applied ─────────────────────────────────────────────────
+   ⛔ A SHORT TABLE AND A FILTERED TABLE LOOK IDENTICAL, and on this product
+   that is not cosmetic: a forgotten device filter on /exposure renders a near
+   empty table that reads as "no exposure found". This row is the only thing
+   that can tell them apart. */
+.filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--text-xs);
+}
+.filter-count { color: var(--text-secondary); }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--s2);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--primary); }
+.filter-chip-key { color: var(--text-secondary); }
+.filter-chip-val { font-weight: 600; }
+.filter-chip-x { color: var(--text-muted); font-size: var(--text-sm); line-height: 1; }
+.filter-chip:hover .filter-chip-x { color: var(--primary); }
+/* ⛔ A FILTER THIS BAR HAS NO DEFINITION FOR IS STILL SHOWN, under its raw key
+   and marked. Skipping it would hide an active filter from the one row whose
+   job is to list the active filters. It is HUELESS — a gap in our labelling is
+   not a severity and must never be ranked on the severity ramp. */
+.filter-chip[data-unknown] { border-style: dashed; }
+.filter-chip[data-unknown] .filter-chip-key { font-family: var(--font-mono); }
+.filter-clear {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: var(--s1);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 /* ════════════════════════════════════════════════════════════════════
    Seven primary destinations, three rail shapes (v2.216.0)

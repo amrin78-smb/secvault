@@ -402,11 +402,16 @@ export default async function ExposurePage({ searchParams }) {
                     marginBottom: 'var(--s4)',
                   }}
                 >
+                  {/* ⛔ `currentLimit` IS GONE AND ITS ABSENCE IS THE FIX.
+                      The filter used to need telling about rows-per-page so it
+                      could re-add it to a query it rebuilt from scratch; it
+                      now MERGES, so `limit` survives because nothing deletes
+                      it. A parameter carried by hand is one the next
+                      parameter's author forgets. */}
                   <ExposureFilters
                     currentDeviceId={selectedDeviceId}
                     devices={deviceOptions}
                     unassessed={unassessed}
-                    currentLimit={searchParams?.limit || ''}
                   />
                   {/* ⛔ NAMES THE SCOPE WHENEVER ONE IS APPLIED. Without this the
                       table below reads as the whole estate while the tiles above

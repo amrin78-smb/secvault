@@ -33,7 +33,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO = path.join(__dirname, '..');
-const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+
+// ⛔ CSS COMMENTS ARE STRIPPED BEFORE ANY TOKEN IS EXTRACTED, AND THIS GUARD
+// HAD TO LEARN THAT THE HARD WAY. The token readers below find a value with
+// patterns like /--text-muted:\s*([^;]+)/, which matched the first occurrence
+// of the NAME anywhere in the file — including inside a ⛔ comment explaining
+// why some element must NOT use that token. v2.217.0 added exactly such a
+// comment above `.page-eyebrow` and this suite reported
+// `--text-muted should be a hex in dark, got "in light theme --text-muted
+// measures 4.27:1 ..."` — i.e. it read a sentence about the token as the
+// token's value.
+//
+// Prose read as code, which is the same defect that made the device-scope
+// check believe lib/notificationChannels.js held device data because a comment
+// said it did not, and that made the Intent tab test fail on its own comment.
+// CSS has one comment form, so one regex covers it. Whitespace is left in
+// place so nothing two declarations apart becomes adjacent.
+const stripCssComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, ' ');
+const read = (rel) => {
+  const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
+  return rel.endsWith('.css') ? stripCssComments(src) : src;
+};
 
 // ── Loading the maps out of ESM source ───────────────────────────────────
 // `npm test` is `node --test tests/` with no "type":"module", so these files

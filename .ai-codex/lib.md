@@ -405,6 +405,36 @@ Client module. Table density, stamped as `data-density` on `<html>`. Structural 
 ⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
 ⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
 
+## lib/urlFilters.js (v2.217.0)
+
+The URL is the filter state; this is the pure arithmetic on it. CommonJS, so `node:test` can
+require it.
+
+`mergeFilterQuery(current, changes, {reset})` · `filterHref(basePath, current, changes, opts)` ·
+`clearedFilterQuery(current)` · `hasActiveFilters(current)` · `activeFilterChips(current, defs)` ·
+`NON_FILTER_PARAMS`.
+
+⛔ **MERGE, NEVER REBUILD — and the bug this ends is recorded in the codebase itself.**
+`components/exposure/ExposureFilters.js` carried a comment admitting that choosing a firewall
+silently reset a reader who had selected 200 rows back to 50, because that copy REBUILT the query
+from the two parameters it knew about. Its own header claimed everything but `page` was carried
+over; the comment ended "and the code carried nothing". Four pages each had a copy and each got a
+different subset right. A filter control knows about its own parameters and must not have an
+opinion about anybody else's.
+⛔ **AN EMPTY VALUE DELETES.** "All" in a select is the ABSENCE of a filter, not a filter whose
+value is nothing — `?vendor=` is something the server then has to decide how to read. But a falsy
+REAL value (`0`, `false`) is kept: collapsing the two is how a legitimate 0 disappears.
+⛔ **`page` RESETS BY DEFAULT**, because a page number from a larger result set lands past the end
+of a smaller one and renders an empty table — which on `/exposure` reads as "no exposure found"
+rather than "wrong page". An EXPLICIT `{page: n}` still wins, so pagination itself works.
+⛔ **"Clear filters" KEEPS THE NON-FILTERS** (`limit`, `tab`, `sort`…). Three of the four copies
+pushed a bare path, throwing away state the operator deliberately set.
+⛔ **`tab`/`vtab`/`view` ARE NON-FILTERS** because a chip that removes them is a chip that
+NAVIGATES SOMEWHERE ELSE while appearing to widen a result set.
+⛔ **AN UNRECOGNISED FILTER STILL YIELDS A CHIP**, marked `known: false`. Skipping it hides an
+active filter from the one row whose job is to list them — "unknown is not nothing", pointed at the
+UI's own state.
+
 ## lib/navLayout.js (v2.216.0)
 
 Where the navigation rail changes shape, in ONE place. Fourth member of the theme/corners/density

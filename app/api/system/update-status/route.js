@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.217.0': [
+    'Filtered tables now show you what is filtering them. Every applied filter appears as a chip you can click to remove, with a count beside it ("Showing 2 of 8 firewalls") and a Clear filters link. A short table and a filtered table used to look identical.',
+    'Changing a filter no longer throws away the rest of your settings. Picking a firewall on the Exposure page used to quietly reset rows-per-page from 200 back to 50; that whole class of problem is gone, because filters now change one thing and leave everything else alone.',
+    'The Alerts filters gained the count, the chips and the Clear link they never had, and the Exposure firewall picker now matches the size and corner settings the rest of the product uses.',
+    'Page headings can now carry a back link, the scope they cover and when the data was last collected, so "how fresh is this" sits with the numbers it applies to rather than further down the page.',
+  ],
   '2.216.1': [
     'When the sidebar is showing icons only, all seventeen destinations now fit on screen at once on a normal laptop. They did not quite: measured on a 1279x860 window the rail ran 89 pixels past the bottom, so the last few could only be reached by scrolling a strip of unlabelled icons.',
     'The rows are now 32 pixels apart instead of 40, and the dividers between groups are thinner. Nothing was removed and the icons themselves are unchanged.',

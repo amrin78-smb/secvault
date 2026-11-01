@@ -32,6 +32,34 @@ tests/tunnelAnswer.test.js.
 
 ## ui/
 
+(c) FilterBar  children, defs, basePath, count, advanced — the shared results-first filter row:
+controls, then WHAT IS APPLIED, then the table. Exports `FilterBar` (default), `FilterField`,
+`FilterSelect`, `FilterSearch` and `useFilterNav(basePath)`. Used by `/devices`, `/alerts`,
+`/exposure`.
+
+⛔ **IT REPLACED FOUR HAND-ROLLED COPIES THAT EACH GOT A DIFFERENT SUBSET RIGHT.** `DeviceFilters`
+had a debounced search, a count line and a clear affordance; `AlertsFilters` had none of those;
+`ExposureFilters` styled its own `<select>` with a hardcoded padding and border, opting that one
+control out of the density and corner settings every control around it honours — the same failure
+mode CLAUDE.md records for a table cell that hardcodes `padding: 12px 16px`. None of the four showed
+WHICH filters were applied.
+
+⛔ **THE CHIPS ARE THE POINT, NOT DECORATION.** A short table and a filtered table look identical,
+and on this product that is not cosmetic: an operator on `/exposure` with a forgotten device filter
+sees a near-empty table and reads it as "no exposure", which is the failed-read-as-a-fact rule
+wearing a UI costume. ⛔ **A filter the bar has no definition for is STILL SHOWN**, under its raw key
+and with a DASHED, HUELESS border — skipping it would hide an active filter from the one row whose
+job is to list the active filters, and a gap in our labelling is not a severity.
+
+⛔ **AN ADVANCED PANEL OPENS ITSELF WHEN SOMETHING INSIDE IT IS APPLIED**, so an active filter can
+never sit inside a collapsed section with nothing on screen to say so.
+
+⛔ **`FilterSelect` IS NOT A STRAITJACKET.** `ExposureFilters` keeps its own `<select>` (it carries
+an `<optgroup>` of firewalls that could not be assessed, each disabled and titled with its error)
+and uses `FilterField` for the shared label and box. A `FilterSelect` general enough to express that
+would be a worse component than two that each do one thing.
+
+
 BrandMark  markId (REQUIRED), height=36, structure, accent, label? — the SecVault
 brandmark (v2.199.0): an angular S whose own edges ARE the shield. Replaced the outlined
 shield-and-tick, which was the category’s most-used silhouette drawn in 1.4-2.2px strokes.
@@ -1012,3 +1040,14 @@ ServerHealthWidgets  (no props) — the dashboard's `?tab=server` body. Disk vol
   an unmeasured volume as a HATCHED bar, never a zero-width or full-width one —
   both would be claims the data does not support. ⛔ Distinct from
   FleetSystemHealth, which is the FIREWALLS' health.
+
+**PageHeader** (v2.217.0) gained four OPT-IN props beside `{title, subtitle, actions}`: `back`
+({href,label} breadcrumb, rendered ABOVE the title so it does not compete with it), `eyebrow` (the
+count or scope the page covers), `meta` (data-as-of / assessment freshness — ⛔ in the HEADER
+because "when was this measured" qualifies everything below it, and a freshness note placed after
+the numbers it qualifies has already been overtaken by the reader), and `primary` (ONE primary
+action). ⛔ All thirty-one existing call sites render exactly as before: a shared header that
+required a migration to adopt would not get adopted, and the product would keep two header shapes.
+⛔ `primary` is a separate prop rather than a convention about the first child of `actions`, because
+a convention cannot be enforced or tested. A page with two equally-weighted buttons keeps passing
+both through `actions`, which honestly says it has no single primary action.
