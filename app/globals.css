@@ -1830,7 +1830,8 @@ select.input {
   overflow-x: hidden;
   transition: width 0.18s ease, min-width 0.18s ease;
 }
-.sv-sidebar.collapsed { width: var(--sidebar-width-collapsed); min-width: var(--sidebar-width-collapsed); }
+html[data-nav="wide"] .sv-sidebar.collapsed,
+html[data-nav="rail"] .sv-sidebar { width: var(--sidebar-width-collapsed); min-width: var(--sidebar-width-collapsed); }
 /* Retained: the single "Navigation" heading this replaced is gone, but the
    class is still referenced by the login brand panel. */
 .sv-nav-label {
@@ -1881,23 +1882,14 @@ select.input {
 /* ⛔ This gap is what separates the four questions, so it is TRIMMED, never
    collapsed — losing it turns four clusters back into one long list. */
 .sv-nav-group + .sv-nav-group { margin-top: var(--s3); }
-.sv-nav-group-label {
-  padding: 0 22px var(--s1);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  /* Bold: at 10px with 0.16em tracking on a dark ground, 500 read as a faint
-     caption rather than a heading for the cluster beneath it. */
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.30);
-  white-space: nowrap;
-  overflow: hidden;
-}
+/* The per-cluster caption that used to sit here is gone: a label with no
+   disclosure is a caption, not a structure. .sv-nav-section below is the
+   button that replaced it. */
 /* Settings sits at the bottom of the rail, away from the four questions. */
 .sv-nav-group-pinned { margin-top: auto; padding-top: var(--s3); }
 /* Collapsed: no headings, so a hairline keeps the clusters legible. */
-.sv-sidebar.collapsed .sv-nav-group + .sv-nav-group {
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group,
+html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group {
   margin-top: var(--s2);
   padding-top: var(--s2);
   border-top: 1px solid rgba(255,255,255,0.07);
@@ -1926,8 +1918,10 @@ select.input {
   white-space: nowrap;
   overflow: hidden;
 }
-.sv-sidebar.collapsed .sv-nav a { padding: var(--s2); justify-content: center; margin: 0 8px; }
-.sv-sidebar.collapsed .sv-nav a span:not(.sv-nav-chip) { display: none; }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav a,
+html[data-nav="rail"] .sv-sidebar .sv-nav a { padding: var(--s2); justify-content: center; margin: 0 8px; }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-text,
+html[data-nav="rail"] .sv-sidebar .sv-nav-text { display: none; }
 .sv-nav-chip {
   /* 24 with a 16px glyph inside still leaves 4px of breathing room. */
   width: 24px; height: 24px; border-radius: var(--radius-sm); flex-shrink: 0;
@@ -2003,9 +1997,11 @@ select.input {
   transition: background 0.15s, color 0.15s;
 }
 .sv-collapse-btn:hover { background: rgba(255,255,255,0.06); color: #fff; }
-.sv-sidebar.collapsed .sv-collapse-btn { justify-content: center; padding: 10px; margin: 4px 8px; width: auto; }
-.sv-sidebar.collapsed .sv-collapse-btn span { display: none; }
-.sv-sidebar.collapsed .sv-collapse-btn svg { transform: rotate(180deg); }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-collapse-btn,
+html[data-nav="rail"] .sv-sidebar .sv-collapse-btn { justify-content: center; padding: 10px; margin: 4px 8px; width: auto; }
+
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-collapse-btn svg,
+html[data-nav="rail"] .sv-sidebar .sv-collapse-btn svg { transform: rotate(180deg); }
 .sv-version {
   padding: 6px 22px 14px;
   font-size: var(--text-xs);
@@ -2013,7 +2009,224 @@ select.input {
   white-space: nowrap;
   overflow: hidden;
 }
-.sv-sidebar.collapsed .sv-version { padding: 6px 8px 14px; text-align: center; }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-version,
+html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-align: center; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Seven primary destinations, three rail shapes (v2.216.0)
+   ────────────────────────────────────────────────────────────────────
+   ⛔ THERE IS NOT A SINGLE VIEWPORT WIDTH IN THIS SECTION, AND THAT IS THE
+   POINT. The shape in force arrives as `html[data-nav]`, stamped before first
+   paint by the inline script in app/layout.js and kept current on resize.
+   `lib/navLayout.js` owns the two numbers; the script is built from them and
+   the component reads the same attribute. A `@media (max-width: 1280px)` here
+   would be a third copy of a breakpoint, in a third language, and it would
+   also measure the viewport slightly differently from the script (media
+   queries and innerWidth disagree by a scrollbar), putting the boundary in two
+   places a few pixels apart.
+
+   ⛔ AND IF THE SCRIPT NEVER RUNS, NOTHING IN THIS SECTION APPLIES. The rail
+   stays at its full width with every destination labelled — the shape that
+   conceals nothing. A navigation's failure mode has to be "too much room
+   taken", never "no way to get anywhere".
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── The section disclosure ──────────────────────────────────────────
+   ⛔ A BUTTON, NOT A LINK, AND IT NAVIGATES NOWHERE. A header that both
+   navigated and expanded would have two outcomes for one gesture, no single
+   accessible name, and no explainable keyboard behaviour. The section's
+   landing page is its FIRST CHILD instead, so nothing sits further away than
+   its own label. It is a real <button>, so Enter and Space already work and
+   `aria-expanded` is already announced — there is no key handling in the
+   component at all, which is why there is none to get wrong. */
+.sv-nav-section {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 10px;
+  padding: var(--s2) 20px;
+  width: calc(100% - 20px);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  /* Brighter than a leaf link (0.5) because this is the heading layer — the
+     same reasoning as the card-title fix in v2.215.0, where the heading was
+     rendering fainter than the body beneath it. */
+  color: rgba(255,255,255,0.62);
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.sv-nav-section:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.sv-nav-section .sv-nav-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-nav-caret { flex-shrink: 0; opacity: 0.5; transition: transform 0.15s; }
+.sv-nav-group[data-expanded="false"] .sv-nav-caret { transform: rotate(-90deg); }
+.sv-nav-group[data-expanded="false"] .sv-nav-items { display: none; }
+
+/* ⛔ THE HEADER'S OWN "YOU ARE HERE" BAR EXISTS **ONLY** WHILE THE SECTION IS
+   SHUT, and that is what makes it safe to honour an operator who closes the
+   section they are standing in. Collapsed, the active link is not on screen
+   and this bar is the only marker left; expanded, the link carries its own
+   glow and bar, and drawing both would mark one page twice. The white text
+   below is kept in both states so the section still reads as current without
+   relying on the bar. (A screen reader is told by `aria-current` on the link,
+   never by either of these.) */
+.sv-nav-section[data-active] { color: #fff; }
+.sv-nav-section[data-active] .sv-nav-chip { color: var(--shell-accent); }
+.sv-nav-group[data-expanded="false"] .sv-nav-section[data-active]::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0;
+  /* --shell-accent, never --primary: this rail is dark in BOTH themes. */
+  background: var(--shell-accent);
+}
+
+/* ── The destinations inside a section ───────────────────────────────
+   Subordinate on SIZE and on the hairline, not on colour: the leaf colour is
+   already rgba(255,255,255,0.5) and taking it lower would put the inactive
+   destinations under the contrast floor on this ground. */
+.sv-nav-items { display: flex; flex-direction: column; position: relative; }
+.sv-nav-items::before {
+  content: '';
+  position: absolute;
+  left: 31px; top: 2px; bottom: 2px;
+  width: 1px;
+  background: rgba(255,255,255,0.08);
+}
+.sv-nav-items a { padding-left: 32px; font-size: var(--text-sm); }
+
+/* ── Icon rail (1024–1279px, or collapsed by choice at full width) ───
+   ⛔ EVERY DESTINATION IS SHOWN FLAT, AND THE SECTION HEADERS GO AWAY. There
+   is no room for a label at 64px, so a disclosure there would be an unlabelled
+   chevron opening a list of unlabelled icons — and a flyout on hover would
+   make a whole section of the product reachable only by pointing at it, which
+   is the one thing the brief rules out. Collapsing the structure and showing
+   all fifteen icons keeps everything exactly one click away, which is what the
+   rail was always for. The grouping survives as the hairlines between
+   clusters (the rule generalised further up this file) and as the `aria-label`
+   on each list. */
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-section,
+html[data-nav="rail"] .sv-sidebar .sv-nav-section { display: none; }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-group[data-expanded="false"] .sv-nav-items,
+html[data-nav="rail"] .sv-sidebar .sv-nav-group[data-expanded="false"] .sv-nav-items {
+  display: flex;
+}
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-items::before,
+html[data-nav="rail"] .sv-sidebar .sv-nav-items::before { display: none; }
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-items a,
+html[data-nav="rail"] .sv-sidebar .sv-nav-items a {
+  padding-left: var(--s2);
+  font-size: var(--text-base);
+}
+/* The collapse button is a preference about horizontal room, and between
+   1024 and 1279 there is no choice to express — the rail is icons either way.
+   Hiding it stops it reading as broken. */
+html[data-nav="rail"] .sv-sidebar .sv-collapse-btn { display: none; }
+
+/* ── Off-canvas drawer (below 1024px) ────────────────────────────────
+   ⛔ FULL LABELS, NOT THE ICON RAIL. A panel that takes over the screen has
+   room for words, so the drawer is the WIDE shape — which is also why none of
+   the icon-rail selectors above mention `[data-nav="drawer"]`: they key on
+   `wide`/`rail` only, so a stored `collapsed` preference cannot leak in here
+   and render a 64px strip over a phone. */
+html[data-nav="drawer"] .sv-sidebar {
+  position: fixed;
+  top: var(--header-height);
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  z-index: 200;
+  transform: translateX(-100%);
+  /* ⛔ `visibility` IS NOT COSMETIC HERE. A panel held off-screen by a
+     transform is still in the tab order and still read out, so a keyboard user
+     at this width would tab into a navigation they cannot see. The 0s delay is
+     what keeps the slide-out visible: visibility flips AFTER the transform
+     finishes, rather than snapping the panel away at the start of it. The
+     global prefers-reduced-motion block collapses both durations. */
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s linear 0.2s;
+}
+html[data-nav="drawer"] .sv-shell[data-drawer-open="true"] .sv-sidebar {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform 0.2s ease, visibility 0s linear 0s;
+  box-shadow: 0 0 40px rgba(0,0,0,0.45);
+}
+/* Out of flow, so the content column takes the whole width underneath it. */
+html[data-nav="drawer"] .sv-sidebar .sv-collapse-btn { display: none; }
+
+.sv-nav-backdrop {
+  /* ⛔ A REAL BUTTON, so "dismiss by clicking away" exists for a keyboard and
+     a screen reader too and not only for a pointer. Rendered only while the
+     drawer is open, so it is never in the tab order otherwise. */
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  background: rgba(8, 14, 22, 0.55);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+html[data-nav="drawer"] .sv-nav-backdrop { display: block; }
+
+/* The header trigger: the only way to the navigation below 1024px, and
+   absent — not merely invisible — at every width where it does nothing. */
+.sv-nav-trigger { display: none; flex-shrink: 0; }
+html[data-nav="drawer"] .sv-nav-trigger { display: flex; }
+
+/* ── Rail chrome, behind a hairline ──────────────────────────────────
+   The collapse control and the version line used to sit flush under the last
+   destination in the same rhythm, so the rail ended in three rows of which
+   only one was a place you could go. */
+.sv-sidebar-footer {
+  margin-top: auto;
+  padding-top: var(--s2);
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+/* ── Skip to content ─────────────────────────────────────────────────
+   ⛔ `position: fixed`, NOT absolute: .sv-shell is `overflow: hidden`, which
+   would clip an absolutely-positioned link parked off-screen and then fail to
+   reveal it on focus. Visible only when focused, which is the whole contract —
+   it must not take space from the people who do not need it. */
+.skip-link {
+  position: fixed;
+  left: var(--s3);
+  top: -200%;
+  z-index: 300;
+  padding: var(--s2) var(--s4);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-md);
+}
+.skip-link:focus {
+  top: var(--s3);
+  /* --focus-ring, not --shell-focus-ring: this chip sits on --bg-card, which
+     DOES flip, so the flipping token is the correct one here. */
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* The target is a <main tabIndex={-1}>; it must not draw a ring of its own
+   when the skip link hands focus over. */
+.sv-content:focus { outline: none; }
 
 /* ── Read-only mode (expired license — carried over for suite parity,
    unused today, harmless if never toggled) ────────────────────── */

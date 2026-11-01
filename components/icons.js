@@ -116,6 +116,18 @@ export function IconMoon(p) {
   );
 }
 
+// The off-canvas navigation trigger. Only ever rendered below 1024px, where
+// the rail cannot share the screen with content — see lib/navLayout.js.
+export function IconMenu(p) {
+  return (
+    <svg {...base(p)}>
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
 export function IconChevronLeft(p) {
   return (
     <svg {...base(p)}>

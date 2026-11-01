@@ -110,12 +110,44 @@ which could not be selected or read aloud and carried a font-family that had dri
 (c) UpdateNotifier  no props — dismissible update-available banner
 (c) HeaderSearch  no props — debounced header search (devices + advisories), "/" shortcut
 (c) NotificationBell  no props — bell dropdown, polls notification summary every 60s
-(c) Sidebar  version, capabilities — collapsible nav sidebar, four groups (Monitor / Inventory /
-Risk / Access) plus a pinned Settings. ⛔ Every entry must keep a DISTINCT GLYPH — that, not colour,
-is the per-item wayfinding cue; the active chip is always the brand accent. `/applications`
-(v2.124.0) sits in **Risk, beside Segmentation**: both are declared intent re-checked against the
-collected rulebase, and Inventory holds what SecVault COLLECTED rather than what an operator
-DECLARED.
+(c) NavDrawerToggle  no props — the hamburger that reaches the rail below 1024px. ⛔ Its
+visibility is a STYLESHEET rule keyed on `html[data-nav]`, never React state, so it is correct on
+the first paint and is not in the tab order at widths where it does nothing. It is the ONLY way to
+the navigation in the drawer shape; `aria-controls="sv-primary-nav"` names the rail, which lives in
+a different subtree.
+(c) NavState  children — `NavProvider` + `useNavState()`. Renders the `.sv-shell` element itself
+and holds the shape (`wide`/`rail`/`drawer`), `drawerOpen`, and the trigger ref for focus return.
+⛔ A CONTEXT RATHER THAN SIDEBAR STATE because the control that opens the rail is in the HEADER
+while the rail is in the body — two subtrees, one fact. ⛔ It wraps the shell but does NOT clientify
+it: `children` is the already-rendered server tree, passed straight through.
+(c) Sidebar  version, capabilities — the nav rail. **v2.216.0: SEVEN collapsible sections**
+(Overview / Work queue / Assets / Investigate / Risk / Compliance / Reports) plus a pinned Settings,
+replacing four labelled clusters of fifteen peer links. The registry itself is DATA in
+`lib/navRegistry.js`; this component is the renderer (icon-name → component map, the three shapes,
+the drawer's focus behaviour). `/applications` (v2.124.0) sits in **Risk, beside Segmentation**:
+both are declared intent re-checked against the collected rulebase, and Assets holds what SecVault
+COLLECTED rather than what an operator DECLARED.
+
+⛔ **A SECTION HEADER IS A BUTTON AND NAVIGATES NOWHERE.** "Clicking it navigates AND expands" has
+two outcomes for one gesture, no single accessible name and no explainable keyboard behaviour. The
+section's landing page is its FIRST CHILD instead (Assets → Firewalls, Work queue → Queue), so
+nothing sits further away than its own label. Being a real `<button>` is why Enter/Space and
+`aria-expanded` work with no key handling in the component at all.
+
+⛔ **THE ACTIVE SECTION OPENS ITSELF; A STORED CHOICE STILL WINS.** `undefined` in the persisted map
+means "no opinion" and follows the current page. A stored `false` is honoured even for the active
+section — which is only safe BECAUSE a shut-but-active header draws its own left accent bar. Drop
+that bar and collapsing the current section hides the page you are on from the navigation with no
+"you are here" left anywhere.
+
+⛔ **TWO GLYPH LAYERS, TWO INVARIANTS (v2.216.0).** Every ITEM glyph must differ from every other
+item's — that is the wayfinding cue, and at rail width the icons are all there is. The seven
+TOP-LEVEL glyphs must differ from each other. But a section header MAY reuse one of ITS OWN
+children's (Assets and Firewalls are both IconDevices) and may NOT borrow an unrelated section's.
+This is why Investigate takes IconActivity rather than the IconSearch that reads better — IconSearch
+is Compliance's. The old guard asserted "every icon named anywhere in Sidebar.js is unique", which
+stopped being the invariant the moment the registry gained a level and then FAILED ON CORRECT CODE.
+All three rules are in `tests/navigation.test.js`.
 
 ⛔ **ONE RENDERED ENTRY FOR TWO ROUTES (2026-09-29).** The sidebar reached 16 destinations and
 scrolled. Segmentation and Applications now share a single entry labelled **Intent**; both pages
@@ -128,6 +160,29 @@ four tabs.
 ⛔ **NOTHING MOVED AT THE ROUTING LAYER.** `/segmentation` and `/applications` both still exist and
 still resolve — CLAUDE.md's rule is that hrefs never change, because both are already in sent
 notifications and pasted tickets. No redirect, no route deletion. Only what Sidebar RENDERS changed.
+
+⛔ **THREE RAIL SHAPES, AND NO BREAKPOINT IN THE STYLESHEET (v2.216.0).** `lib/navLayout.js` owns the
+two widths; a blocking inline script in `app/layout.js` stamps `html[data-nav]` before first paint
+and keeps it current on resize (the fourth member of the THEME/CORNERS/DENSITY family, and the only
+one that also LISTENS, because the right answer changes while the page is open). `app/globals.css`
+keys purely on that attribute and contains no rail width at all — a `@media (max-width: 1280px)`
+there would be a third copy of a number in a third language, and it would also measure the viewport
+slightly differently from `innerWidth` (they disagree by a scrollbar), putting the boundary in two
+places a few pixels apart. ⛔ If the script never runs, NOTHING applies and the rail stays full
+width with every label: a navigation's failure mode must be "too much room taken", never "no way to
+get anywhere".
+
+- **wide** (≥1280px) — full labels; the collapse button is a preference and applies only here.
+- **rail** (1024–1279px) — icons only, and ⛔ the section headers are HIDDEN while every item is
+  shown FLAT. There is no room for a label at 64px, so a disclosure there would be an unlabelled
+  chevron opening unlabelled icons, and a hover flyout would make a whole section reachable only by
+  pointing at it. Flattening keeps all fifteen destinations exactly one click away. The grouping
+  survives as the hairlines between clusters and the `aria-label` on each list.
+- **drawer** (<1024px) — off-canvas, and it is the WIDE shape, not the rail: a panel that takes over
+  the screen has room for words. ⛔ No icon-rail selector mentions the drawer shape, so a stored
+  `collapsed` preference cannot leak in and render a 64px strip over a phone. ⛔ `visibility`, not
+  just `transform`: a panel held off-screen by a transform alone is still in the tab order and still
+  read out, so a keyboard user would tab into a navigation they cannot see.
 
 ⛔ **`navHidden` IS NOT `requires`, AND THE DISTINCTION IS LOAD-BEARING.** `requires` is an
 AUTHORISATION gate (the page refuses too; hiding only stops discovery). `navHidden` is a LAYOUT

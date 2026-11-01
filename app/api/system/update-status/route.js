@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.216.0': [
+    'The sidebar is organised into seven sections you can open and close, instead of fifteen links all competing for attention at once. Overview, Work queue, Assets, Investigate, Risk, Compliance and Reports. The section you are in opens itself.',
+    'Nothing moved. Every page is at exactly the same address it was, so saved links, links inside alerts that have already been sent, and URLs pasted into tickets all still work. Only the menu changed.',
+    'The sidebar now adapts to the width of your screen. On a smaller laptop it shrinks to icons before the page beside it gets cramped, and on a narrow window it slides away entirely behind a button in the top bar.',
+    'Every destination is still one click away when the sidebar is showing icons only: the sections flatten out rather than hiding behind a hover.',
+    'Added a "Skip to content" link for anyone navigating by keyboard, so the whole menu no longer has to be tabbed through on every page load.',
+    'Settings, the collapse control and the version number now sit below a dividing line, so the bottom of the sidebar no longer reads as three more places you could go.',
+  ],
   '2.215.2': [
     'The subscription notice now gets louder as the date approaches. It used to look the same 60 days out as it did the day before the licence lapsed, so the countdown never actually counted. Inside the last 14 days it turns red.',
     'A subscription already past its end date but still inside its grace period was being shown MORE quietly than one with two weeks left to run. Both are now red, in the right order.',

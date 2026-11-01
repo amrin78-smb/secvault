@@ -6,6 +6,7 @@
 import { pool } from '../../lib/db';
 import { getSyncPillStatus } from '../../lib/feedStatus';
 import HeaderSearch from './HeaderSearch';
+import NavDrawerToggle from './NavDrawerToggle';
 import ThemeToggle from './ThemeToggle';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
@@ -147,6 +148,14 @@ export default async function Header({ session }) {
 
   return (
     <header className="sv-topbar">
+      {/* ⛔ FIRST IN THE HEADER, AND INVISIBLE ABOVE 1023px. Below that width
+          the rail is off-canvas and this button is the ONLY way to reach the
+          navigation, so it leads the bar rather than sitting among the
+          secondary controls on the right. Its visibility is a stylesheet rule
+          keyed on `html[data-nav]`, not React state, so it is correct on the
+          first paint and is not in the tab order at widths where it does
+          nothing — see components/layout/NavDrawerToggle.js. */}
+      <NavDrawerToggle />
       <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
         <SecVaultLogo />
       </div>

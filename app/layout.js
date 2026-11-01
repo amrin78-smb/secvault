@@ -3,6 +3,7 @@ import { PRODUCT_NAME } from '../lib/branding';
 import { THEME_INIT_SCRIPT } from '../lib/theme';
 import { CORNERS_INIT_SCRIPT } from '../lib/corners';
 import { DENSITY_INIT_SCRIPT } from '../lib/density';
+import { NAV_MODE_INIT_SCRIPT } from '../lib/navLayout';
 
 export const metadata = {
   // ⛔ FROM THE BRANDING SURFACE, NOT A LITERAL. This was hardcoded 'SecVault'
@@ -36,6 +37,14 @@ export default function RootLayout({ children }) {
         <script dangerouslySetInnerHTML={{ __html: CORNERS_INIT_SCRIPT }} />
         {/* Third of the same family, for table density. See lib/density.js. */}
         <script dangerouslySetInnerHTML={{ __html: DENSITY_INIT_SCRIPT }} />
+        {/* ⛔ FOURTH OF THE FAMILY, AND THE ONLY ONE THAT ALSO LISTENS. The
+            other three read a stored preference once; the shape of the
+            navigation rail depends on the VIEWPORT, which changes while the
+            page is open, so this one installs a resize handler as well.
+            app/globals.css carries no widths for the rail at all — it keys
+            purely on the `data-nav` attribute this stamps, which is what keeps
+            the breakpoints to a single definition. See lib/navLayout.js. */}
+        <script dangerouslySetInnerHTML={{ __html: NAV_MODE_INIT_SCRIPT }} />
       </head>
       <body>{children}</body>
     </html>

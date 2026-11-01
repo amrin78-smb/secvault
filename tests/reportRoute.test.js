@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { REPORTS, reportById, visibleReports, SCOPES } = require('../lib/reports/catalogue');
+const { NAV } = require('../lib/navRegistry');
 
 const ROOT = path.join(__dirname, '..');
 const routeSrc = fs.readFileSync(
@@ -152,12 +153,22 @@ describe('the page and the registry cannot drift', () => {
   });
 
   it('is reachable from the sidebar with its own glyph', () => {
-    // Every nav entry must keep a DISTINCT glyph; that, not colour, is the
-    // per-item wayfinding cue.
-    assert.match(sidebarSrc, /href: '\/reports'/);
-    assert.match(sidebarSrc, /Icon: IconReport/);
-    const glyphs = [...sidebarSrc.matchAll(/Icon: (Icon\w+)/g)].map((m) => m[1]);
-    assert.equal(new Set(glyphs).size, glyphs.length, 'two nav entries share a glyph');
+    // Every nav DESTINATION must keep a distinct glyph; that, not colour, is
+    // the per-item wayfinding cue, and at rail width (1024-1279px) the icons
+    // are all the operator has.
+    //
+    // ⛔ READ FROM THE REGISTRY, NOT FROM Sidebar.js's SOURCE. This used to
+    // scrape /Icon: (Icon\w+)/ over the component and assert every match was
+    // unique. When the registry gained a second level that stopped being the
+    // invariant — a section header may share its own landing page's glyph, so
+    // Assets and Firewalls are both IconDevices — and the scrape failed on
+    // correct code. The full two-layer rule lives in tests/navigation.test.js;
+    // what this file needs is only that Reports is there and is distinct.
+    const entry = NAV.find((i) => i.href === '/reports');
+    assert.ok(entry, '/reports left the nav registry');
+    assert.equal(entry.icon, 'IconReport');
+    const glyphs = NAV.map((i) => i.icon);
+    assert.equal(new Set(glyphs).size, glyphs.length, 'two nav destinations share a glyph');
   });
 });
 

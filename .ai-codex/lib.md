@@ -405,6 +405,61 @@ Client module. Table density, stamped as `data-density` on `<html>`. Structural 
 ⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
 ⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
 
+## lib/navLayout.js (v2.216.0)
+
+Where the navigation rail changes shape, in ONE place. Fourth member of the theme/corners/density
+family, and the only one that also installs a RESIZE LISTENER — the other three read a stored
+preference once, but the right shape here changes while the page is open.
+
+`NAV_DRAWER_BELOW` = 1024 · `NAV_RAIL_BELOW` = 1280 · `NAV_MODES` -> `['wide','rail','drawer']`
+`NAV_MODE_ATTR` = `'data-nav'` (on `<html>`) · `NAV_MODE_EVENT` = `'secvault:navmode'`
+`navModeFor(width)` -> the shape · `navModeFromDocument()` -> the shape in force, safe on the server
+`NAV_MODE_INIT_SCRIPT` — the pre-paint inline script, BUILT from the two constants above.
+
+⛔ **`app/globals.css` CONTAINS NO RAIL WIDTH AT ALL** — it keys purely on `html[data-nav]`, and
+`tests/navLayout.test.js` fails the build on a width-based `@media` touching the shell. Three
+parties need to agree on the shape (script, stylesheet, component); written as literals that is two
+numbers in three languages, and the dangerous disagreement is silent: if the stylesheet pushes the
+rail off-canvas while the component still thinks the viewport is wide, the header's trigger is
+`display:none` and there is NO WAY to reach the navigation at all.
+⛔ **THE READER IS `innerWidth`, NOT A MEDIA QUERY, DELIBERATELY.** The two measure the viewport
+differently by the width of a scrollbar. Keying the CSS on an attribute means there is nothing for
+the script to disagree WITH.
+⛔ **AN UNMEASURABLE WIDTH IS `wide`, WHICH HIDES NOTHING.** This renders on the server, where there
+is no viewport. Guessing `drawer` there would serve a screen with the navigation pushed off the side
+and, if the script then failed, permanently. The failed-read rule pointed at a layout.
+
+## lib/navRegistry.js (v2.216.0)
+
+Every destination in the product, as DATA. CommonJS (like `rbac.js`/`navLayout.js`) so `node:test`
+can require it; icons are named as STRINGS because this file must load outside a JSX pipeline —
+`components/layout/Sidebar.js` owns the name → component map.
+
+`NAV_SECTIONS` -> the seven sections, each a LEAF (`{href,label,icon,exact?}`) or a GROUP
+(`{group,icon,items[]}`), discriminated on `items`.
+`NAV_TOP_LEVEL` -> the seven rows the operator scans. `SETTINGS_ITEM` -> pinned outside the seven.
+`NAV` -> every destination flattened, `navHidden` and capability-gated ones INCLUDED.
+`visibleNavItems(section, capabilities)` -> what the rail renders. `isActive(pathname, href, exact,
+alsoActiveFor)` and `sectionIsActive(pathname, section)` -> pure active-state rules.
+
+⛔ **IT MOVED OUT OF THE COMPONENT BECAUSE THE TESTS COULD NOT SEE IT.** Three test files reached
+the registry by REGEX over `Sidebar.js` — `/\{\s*href:\s*'([^']+)'/` and `/Icon: (Icon\w+)/`. The
+first silently required `href` to be the FIRST key in each object literal, so writing `label` first
+would have hidden a destination from the guard that exists to stop destinations going missing. The
+second could only express "every icon named anywhere in this file is unique", which stopped being
+the invariant once the registry gained a level — and then failed on correct code. A guard that can
+only see the shape of the source is the test-the-mechanism pattern this codebase has paid for
+repeatedly.
+⛔ **`NAV` INCLUDES WHAT THE SIDEBAR HIDES.** `HeaderSearch`'s `matchPages()` filters over it, so an
+entry missing here is a page the palette quietly stops finding — no error, no broken link, just "no
+results" for a page that works.
+⛔ **`sectionIsActive` TESTS HIDDEN AND UNAUTHORISED ITEMS TOO.** `/applications` is `navHidden` but
+IS a page you can be standing on, and a section header going dark there would tell the operator they
+are nowhere. Authorisation is irrelevant to the question: if the page rendered, you are on it.
+⛔ **`isActive` REQUIRES A PATH-SEGMENT BOUNDARY** (`pathname === base || startsWith(base + '/')`).
+A bare `startsWith` would light Firewalls for a future `/devices-archive` and the Work queue for
+`/workspaces`.
+
 ## lib/savedViews.js
 
 Named filter/column/sort states per user per table (`saved_views`). All functions take `pool`.

@@ -3,26 +3,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { PRODUCT_NAME } from '../../lib/branding';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  IconDashboard,
-  IconBell,
-  IconDevices,
-  IconShield,
-  IconChart,
-  IconSearch,
-  IconSettings,
-  IconChevronLeft,
-  IconUser,
-  IconTopology,
-  IconLifecycle,
-  IconDocument,
-  IconAlertTriangle,
-  IconGrid,
-  IconChecklist,
-  IconReport,
-  IconApplications, IconEyeOff, IconOddOneOut,
-} from '../icons';
+  NAV_SECTIONS,
+  SETTINGS_ITEM,
+  NAV,
+  visibleNavItems,
+  isActive,
+  sectionIsActive,
+} from '../../lib/navRegistry';
+import { useNavState } from './NavState';
+import * as Icons from '../icons';
+import { IconChevronLeft, IconChevronDown } from '../icons';
 
 // ⛔ THE ACTIVE NAV CHIP IS ALWAYS THE BRAND ACCENT (2026-09-09, Phase 1).
 //
@@ -36,140 +28,97 @@ import {
 // three inches from severity badges that use red to mean "critically
 // exposed". An interface element must never borrow the severity palette.
 //
-// The old comments here defended the hues on the grounds that the chip colour
-// is "the ONLY wayfinding cue when the sidebar is collapsed". That was not
-// true: collapsed or not, only one chip is ever coloured, so eleven of the
-// twelve were already indistinguishable. The actual per-item cue is the
-// GLYPH, and all twelve glyphs are distinct — which is the invariant worth
-// keeping, and the one to check when adding a nav entry.
-//
-// Icon reuse note (Phase 7, Compliance): IconShield is already taken by
-// "Vulnerability" (formerly "CVE Posture" -- merged with the separate
-// "Advisories" entry, which used to take IconDocument, into one /vulnerability
-// page in the Vulnerability merge), so Compliance reuses IconSearch (a
-// magnifying glass reads reasonably as "audit/inspect") rather than inventing
-// a new SVG icon file -- the same "reuse what's there even if not a perfect
-// semantic match" call this file already made when Alerts reused IconBell.
-// ⛔ GROUPS ARE THE STRUCTURE, LABELS ARE THE LANGUAGE (2026-09-09,
-// redesign Phase 2). Twelve flat, equally-weighted destinations asked the
-// operator to hold the whole product in their head. They answer four
-// questions, and the groups are how people actually work: what is happening,
-// what do I have, what is wrong with it, who is getting in.
-//
-// ⛔ HREFS ARE UNCHANGED. Only the LABELS were renamed. Every bookmark,
-// every link in a sent notification, every URL pasted into a ticket still
-// resolves. Renaming a route to match a renamed label would be a much larger
-// and much less reversible change, and it buys nothing the label does not.
-//
-// The renames trade "what the engine does" for "what the operator gets":
-//   Dashboard -> Overview          Devices -> Firewalls
-//   Rule Analysis -> Rule hygiene  Vulnerability -> Vulnerabilities
-//   VPN -> VPN & identity
-// "Rule Analysis" describes our engine; "Rule hygiene" describes their
-// problem. "Devices" is what the table is called internally; a customer with
-// a fleet of firewalls calls them firewalls.
-//
-// ⛔ Settings is deliberately OUTSIDE the groups and pinned last. It is not
-// one of the four questions, and filing it under any of them would make that
-// group mean less.
-const NAV_GROUPS = [
-  { group: 'Monitor', items: [
-    { href: '/', label: 'Overview', Icon: IconDashboard, exact: true },
-    // ⛔ SECOND, not first. The Overview answers "how is the fleet"; this
-    // answers "what do I do about it", and it reads as the follow-on rather
-    // than the front door. Placing it above the dashboard would also make the
-    // first thing a new evaluator sees a to-do list rather than a posture.
-    { href: '/work', label: 'Work queue', Icon: IconChecklist },
-    { href: '/alerts', label: 'Alerts', Icon: IconBell },
-    // Where SecVault cannot see. Sits in Monitor rather than Risk because it
-    // is not a finding about the firewalls -- it is a statement about how
-    // much of everything else on this product is actually measured.
-    { href: '/coverage', label: 'Coverage', Icon: IconEyeOff },
-    // ⛔ The only nav entry with a capability requirement today. Log search
-    // returns unredacted syslog; the Operator role does not include it. Hiding
-    // it here stops discovery — app/(dashboard)/logs/page.js is what actually
-    // refuses the request.
-    { href: '/logs', label: 'Log search', Icon: IconDocument, requires: 'view_log_search' },
-    // Sits with Overview and Work queue because it answers the same question
-    // one step further on: what do I hand to someone else. Not filed under
-    // Risk — a compliance PDF and a lifecycle PDF are not risk views.
-    { href: '/reports', label: 'Reports', Icon: IconReport },
-  ] },
-  { group: 'Inventory', items: [
-    { href: '/devices', label: 'Firewalls', Icon: IconDevices },
-    { href: '/topology', label: 'Topology', Icon: IconTopology },
-    { href: '/lifecycle', label: 'Lifecycle', Icon: IconLifecycle },
-  ] },
-  { group: 'Risk', items: [
-    { href: '/vulnerability', label: 'Vulnerabilities', Icon: IconShield },
-    { href: '/exposure', label: 'Exposure', Icon: IconAlertTriangle },
-    // ⛔ ONE RENDERED ENTRY FOR TWO ROUTES (2026-09-29). The sidebar had grown
-    // to 16 destinations and scrolled; this pair is the only one where merging
-    // is a LEGIBILITY win rather than hiding a destination behind a click, for
-    // the reason the Applications comment below already gave — same mechanic,
-    // one grain finer. `components/layout/IntentTabs.js` carries the strip.
-    //
-    // ⛔ NOTHING MOVED AT THE ROUTING LAYER. /segmentation and /applications
-    // both still exist and still resolve; CLAUDE.md's rule is that hrefs never
-    // change, because both are already in sent notifications and pasted tickets.
-    // Only what this file RENDERS changed.
-    { href: '/segmentation', label: 'Intent', Icon: IconGrid, alsoActiveFor: ['/applications'] },
-    // Which firewall is unlike its peers. In Risk rather than Inventory
-    // because a deviation is a triage lead -- though never, on its own, a
-    // fault: the odd one out may be the only one configured deliberately.
-    { href: '/conformance', label: 'Conformance', Icon: IconOddOneOut },
-    // ⛔ FILED UNDER RISK, BESIDE SEGMENTATION, AND NOT UNDER INVENTORY.
-    // It is tempting to read "applications" as a list of things you have.
-    // What this page actually produces is VERDICTS: a declared flow that a
-    // rule permits but should not, and a flow the application needs that a
-    // rule blocks. That is the SAME MECHANIC as Segmentation, one grain
-    // finer — declared intent re-checked against the collected rulebase,
-    // honest about what it could not verify — and sitting the two together
-    // is what makes the pair legible: zone-to-zone policy, then
-    // application-to-flow. Inventory holds what SecVault COLLECTED
-    // (firewalls, links, licences); everything here is something the
-    // operator DECLARED and SecVault then judged.
-    // ⛔ `navHidden` REMOVES IT FROM THE SIDEBAR, NOT FROM THE PRODUCT. It must
-    // stay in NAV_GROUPS because `NAV` is what HeaderSearch's matchPages()
-    // filters over — dropping the entry outright would make Ctrl+K answer "no
-    // results" to 'applications', 'apps', 'flows', 'cloud', 'office 365' and
-    // 'saas', which is precisely the failure PAGE_KEYWORDS exists to prevent.
-    // Reachable by URL, by the palette, and by the Intent tab strip.
-    { href: '/applications', label: 'Applications', Icon: IconApplications, navHidden: true },
-    { href: '/analysis', label: 'Rule hygiene', Icon: IconChart },
-    { href: '/compliance', label: 'Compliance', Icon: IconSearch },
-  ] },
-  { group: 'Access', items: [
-    // No dedicated VPN/tunnel glyph exists in components/icons.js -- IconUser
-    // is reused because VPN is fundamentally remote-USER access. Same "reuse
-    // what exists" call already made for Compliance -> IconSearch and
-    // Log search -> IconDocument (a log IS a record).
-    { href: '/vpn', label: 'VPN & identity', Icon: IconUser },
-  ] },
-];
+// ⛔ THE REGISTRY ITSELF NOW LIVES IN lib/navRegistry.js, as data. This file is
+// the RENDERER: it maps icon names to components, owns the three rail shapes
+// and the drawer's focus behaviour, and nothing else. The structure moved out
+// so the tests could assert it by behaviour instead of by regex over this
+// file's source — see that file's header for what the regexes could not see.
 
-const SETTINGS_ITEM = { href: '/settings', label: 'Settings', Icon: IconSettings };
+// ⛔ Re-exported so `components/layout/HeaderSearch.js` keeps its import. The
+// palette's page results filter over this list, and a destination missing from
+// it is a page the search quietly stops finding.
+export { NAV };
 
-// Flat list for anything that needs every destination (the active-item lookup,
-// and the command palette’s page results).
-export const NAV = [...NAV_GROUPS.flatMap((g) => g.items), SETTINGS_ITEM];
+/**
+ * Icon name → component.
+ *
+ * ⛔ A NAME WITH NO COMPONENT RENDERS NOTHING RATHER THAN THROWING, and
+ * `tests/navigation.test.js` fails the build on one. Crashing the whole shell
+ * because a glyph was misspelled would take the navigation down with it; a
+ * chip with no glyph is a legible row with a gap in it, and the test is what
+ * stops that reaching a release.
+ */
+function glyph(name) {
+  const Cmp = Icons[name];
+  return typeof Cmp === 'function' ? Cmp : null;
+}
+
+function NavChip({ icon }) {
+  const Icon = glyph(icon);
+  return (
+    <span className="sv-nav-chip">
+      {Icon ? <Icon width={16} height={16} /> : null}
+    </span>
+  );
+}
 
 const COLLAPSE_KEY = 'secvault-sidebar-collapsed';
+const GROUPS_KEY = 'secvault-nav-groups';
 
-function isActive(pathname, href, exact, alsoActiveFor) {
-  if (exact) return pathname === href;
-  const under = (base) => pathname === base || pathname.startsWith(`${base}/`);
-  if (under(href)) return true;
-  // ⛔ A SIBLING ROUTE SHARING THIS ENTRY MUST LIGHT IT UP. Without this the
-  // Intent entry goes dark on /applications and the sidebar claims you are
-  // nowhere — worse than an unmerged list, because the operator cannot tell
-  // which section they are in.
-  return Array.isArray(alsoActiveFor) && alsoActiveFor.some(under);
+function readStoredGroups() {
+  try {
+    const raw = localStorage.getItem(GROUPS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // ⛔ Only genuine booleans are honoured. A corrupted or hand-edited value
+    // falls back to the auto behaviour rather than being coerced — a truthy
+    // string would pin a section open for ever with nothing to explain why,
+    // and this file cannot render a value it does not understand.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [k, v] of Object.entries(parsed)) if (typeof v === 'boolean') out[k] = v;
+    return out;
+  } catch (_err) {
+    return {};
+  }
+}
+
+/**
+ * One destination row.
+ *
+ * ⛔ Module top level, never nested inside Sidebar. CLAUDE.md's first Critical
+ * Rule: a component defined inside a component remounts on every render.
+ */
+function NavLink({ item, active, showLabels }) {
+  return (
+    <Link
+      href={item.href}
+      className={active ? 'active' : ''}
+      // aria-current is what tells a screen reader which destination is
+      // showing; the glow, the chip and the left bar only say it visually.
+      aria-current={active ? 'page' : undefined}
+      // A title is the label's stand-in only while the label is hidden. Set
+      // unconditionally it would produce a tooltip duplicating text already on
+      // screen, which screen readers read twice.
+      title={showLabels ? undefined : item.label}
+    >
+      <NavChip icon={item.icon} />
+      <span className="sv-nav-text">{item.label}</span>
+    </Link>
+  );
 }
 
 export default function Sidebar({ version, capabilities }) {
   const pathname = usePathname();
+  const { mode, drawerOpen, closeDrawer, focusTrigger } = useNavState();
   const [collapsed, setCollapsed] = useState(false);
+  // ⛔ USER INTENT ONLY — an absent key means "no opinion", which resolves to
+  // the active-section behaviour below. Seeding this with every section set to
+  // false would make a stored preference indistinguishable from the default,
+  // and the auto-expand would never be able to fire.
+  const [openGroups, setOpenGroups] = useState({});
+  const asideRef = useRef(null);
+  const wasOpen = useRef(false);
 
   useEffect(() => {
     try {
@@ -177,7 +126,23 @@ export default function Sidebar({ version, capabilities }) {
     } catch (_err) {
       // ignore — collapse just won't persist
     }
+    setOpenGroups(readStoredGroups());
   }, []);
+
+  // ⛔ FOCUS MOVES INTO THE DRAWER WHEN IT OPENS AND BACK WHEN IT CLOSES.
+  // Without the first half, a keyboard user who activates the trigger is still
+  // standing in the header and has to tab through it to reach a navigation
+  // that is now covering the page. Without the second, dismissing the drawer
+  // drops focus to the top of the document and the page starts again.
+  useEffect(() => {
+    if (drawerOpen && !wasOpen.current) {
+      const first = asideRef.current && asideRef.current.querySelector('a, button');
+      if (first) first.focus();
+    } else if (!drawerOpen && wasOpen.current) {
+      focusTrigger();
+    }
+    wasOpen.current = drawerOpen;
+  }, [drawerOpen, focusTrigger]);
 
   function toggle() {
     setCollapsed((c) => {
@@ -191,73 +156,138 @@ export default function Sidebar({ version, capabilities }) {
     });
   }
 
+  const toggleGroup = useCallback((label, nextOpen) => {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [label]: nextOpen };
+      try {
+        localStorage.setItem(GROUPS_KEY, JSON.stringify(next));
+      } catch (_err) {
+        // ignore — the choice just won't persist across reloads
+      }
+      return next;
+    });
+  }, []);
+
+  // ⛔ THE COLLAPSE PREFERENCE ONLY APPLIES AT FULL WIDTH. Between 1024 and
+  // 1279 the stylesheet forces the rail to icons regardless, and below 1024 it
+  // is off-canvas; honouring a stored `collapsed` there would change nothing
+  // visible while making the button inside the drawer lie about what it does.
+  const railIsIcons = mode === 'rail' || (mode === 'wide' && collapsed);
+  // Labels are present in the drawer exactly as at full width — a panel that
+  // takes over the screen has room for them.
+  const showLabels = !railIsIcons || mode === 'drawer';
+
+  const settingsActive = isActive(pathname, SETTINGS_ITEM.href, false);
+
   return (
-    <aside className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}>
-      <nav className="sv-nav">
-        {NAV_GROUPS.map(({ group, items: allItems }) => {
-          // A group whose every entry is hidden must not leave its label behind.
-          // ⛔ TWO SEPARATE REASONS AN ENTRY IS NOT RENDERED, and they are not
-          // the same thing. `requires` is an AUTHORISATION gate — the page
-          // itself refuses too, this only stops discovery. `navHidden` is a
-          // LAYOUT choice for a destination that is still fully available by
-          // URL, by Ctrl+K and from another page's tab strip. Collapsing them
-          // into one flag would eventually hide a page from someone entitled
-          // to it, or advertise one they are not.
-          const items = allItems.filter(
-            (it) => !it.navHidden
-              && (!it.requires || !capabilities || capabilities[it.requires])
-          );
-          if (items.length === 0) return null;
-          return (
-          <div key={group} className="sv-nav-group">
-            {/* Hidden when collapsed: at 64px there is no room for a heading,
-                and the grouping still reads from the gap between clusters. */}
-            {!collapsed && <div className="sv-nav-group-label">{group}</div>}
-            {items.map(({ href, label, Icon, exact, alsoActiveFor }) => {
-              const active = isActive(pathname, href, exact, alsoActiveFor);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={active ? 'active' : ''}
-                  title={collapsed ? label : undefined}
-                >
-                  <span className="sv-nav-chip">
-                    <Icon width={16} height={16} />
-                  </span>
-                  <span>{label}</span>
-                </Link>
-              );
-            })}
-          </div>
-          );
-        })}
-        <div className="sv-nav-group sv-nav-group-pinned">
-          <Link
-            href={SETTINGS_ITEM.href}
-            className={isActive(pathname, SETTINGS_ITEM.href, false) ? 'active' : ''}
-            title={collapsed ? SETTINGS_ITEM.label : undefined}
-          >
-            <span className="sv-nav-chip">
-              <SETTINGS_ITEM.Icon width={16} height={16} />
-            </span>
-            <span>{SETTINGS_ITEM.label}</span>
-          </Link>
-        </div>
-      </nav>
-
-      <button
-        type="button"
-        className="sv-collapse-btn"
-        onClick={toggle}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+    <>
+      {/* ⛔ A BACKDROP, NOT JUST A VISUAL WASH. It is what makes "click
+          anywhere else to dismiss" true, and it is a real <button> so the same
+          gesture exists for a keyboard and a screen reader rather than only
+          for a mouse. Rendered only while open, so it is never in the tab
+          order otherwise. */}
+      {drawerOpen && (
+        <button
+          type="button"
+          className="sv-nav-backdrop"
+          aria-label="Close navigation"
+          onClick={closeDrawer}
+        />
+      )}
+      <aside
+        ref={asideRef}
+        // The id the header's trigger names in aria-controls. The two live in
+        // different subtrees, so the relationship exists only through this.
+        id="sv-primary-nav"
+        className={`sv-sidebar${collapsed ? ' collapsed' : ''}`}
       >
-        <IconChevronLeft width={18} height={18} />
-        <span>Collapse</span>
-      </button>
+        <nav className="sv-nav" aria-label="Primary">
+          {NAV_SECTIONS.map((section) => {
+            const active = sectionIsActive(pathname, section);
 
-      <div className="sv-version">{PRODUCT_NAME}{version ? ` v${version}` : ''}</div>
-    </aside>
+            // ── A leaf: one row that navigates.
+            if (!section.items) {
+              return (
+                <div key={section.href} className="sv-nav-group">
+                  <NavLink item={section} active={active} showLabels={showLabels} />
+                </div>
+              );
+            }
+
+            const items = visibleNavItems(section, capabilities);
+            // A section whose every entry is hidden must not leave its header
+            // behind — an expandable nothing.
+            if (items.length === 0) return null;
+
+            // ⛔ THE ACTIVE SECTION OPENS ITSELF, AND A STORED CHOICE STILL
+            // WINS. `undefined` means the operator has no opinion about this
+            // section, so it follows the page they are on; `false` means they
+            // closed it, and that is honoured even here — which is only safe
+            // BECAUSE a shut section carries its own active bar (see
+            // `.sv-nav-group[data-expanded="false"] .sv-nav-section[data-active]`
+            // in globals.css). Without that marker, honouring the collapse
+            // would hide the current page from the navigation with no "you are
+            // here" left anywhere on screen.
+            const stored = openGroups[section.group];
+            const expanded = typeof stored === 'boolean' ? stored : active;
+            const bodyId = `sv-nav-${section.group.replace(/\s+/g, '-').toLowerCase()}`;
+
+            return (
+              <div key={section.group} className="sv-nav-group" data-expanded={expanded}>
+                <button
+                  type="button"
+                  className="sv-nav-section"
+                  data-active={active ? 'true' : undefined}
+                  aria-expanded={expanded}
+                  aria-controls={bodyId}
+                  onClick={() => toggleGroup(section.group, !expanded)}
+                >
+                  <NavChip icon={section.icon} />
+                  <span className="sv-nav-text">{section.group}</span>
+                  <IconChevronDown className="sv-nav-caret" width={12} height={12} />
+                </button>
+                {/* ⛔ aria-label ON THE LIST, because at rail width the header
+                    above is display:none and the grouping would otherwise be
+                    announced as one undifferentiated run of links. */}
+                <div className="sv-nav-items" id={bodyId} aria-label={section.group}>
+                  {items.map((item) => (
+                    <NavLink
+                      key={item.href}
+                      item={item}
+                      active={isActive(pathname, item.href, item.exact, item.alsoActiveFor)}
+                      showLabels={showLabels}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="sv-nav-group sv-nav-group-pinned">
+            <NavLink item={SETTINGS_ITEM} active={settingsActive} showLabels={showLabels} />
+          </div>
+        </nav>
+
+        {/* ⛔ CHROME, BEHIND A HAIRLINE, NOT TWO MORE NAV ROWS. The collapse
+            control and the version line used to sit flush under the last
+            destination in the same type and the same rhythm, so the rail ended
+            in three rows of which only one was a place you could go. The rule
+            separates "where can I go" from "what is this, and how do I make it
+            smaller". */}
+        <div className="sv-sidebar-footer">
+          <button
+            type="button"
+            className="sv-collapse-btn"
+            onClick={toggle}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <IconChevronLeft width={18} height={18} />
+            <span className="sv-nav-text">Collapse</span>
+          </button>
+          <div className="sv-version">{PRODUCT_NAME}{version ? ` v${version}` : ''}</div>
+        </div>
+      </aside>
+    </>
   );
 }

@@ -3355,12 +3355,73 @@ around it changes — the same failure mode as a hardcoded `border-radius` under
 badge. A denser table shows the same facts in less space, not fewer facts — otherwise the control
 becomes a data-integrity setting an operator can get wrong from a dropdown.
 
-### Navigation (v2.88.0)
+### Navigation (v2.88.0, restructured v2.216.0)
 
-Twelve flat destinations became four groups — **Monitor / Inventory / Risk / Access** — plus a
-pinned Settings, in `components/layout/Sidebar.js`. Labels were renamed to the operator’s language:
-Dashboard->Overview, Devices->Firewalls, Rule Analysis->Rule hygiene, Vulnerability->Vulnerabilities,
-VPN->VPN & identity.
+⛔ **SEVEN COLLAPSIBLE SECTIONS, NOT FIFTEEN PEER LINKS — AND THE PREVIOUS SENTENCE HERE WAS
+ALREADY DESCRIBING SOMETHING THAT NO LONGER EXISTED.** It read "Twelve flat destinations became
+four groups — Monitor / Inventory / Risk / Access", which was true of v2.88.0 and had drifted to
+fifteen destinations by v2.216.0. The four clusters were real and the labels were right, but a
+label with no DISCLOSURE is a caption, not a structure: all fifteen destinations were on screen at
+once, which is what pushed the rail to the bottom of a 900px viewport and made the vertical-space
+tuning in `globals.css` necessary in the first place.
+
+The seven are **Overview / Work queue / Assets / Investigate / Risk / Compliance / Reports**, plus a
+pinned Settings. The registry is DATA in `lib/navRegistry.js`; `components/layout/Sidebar.js` is
+only the renderer. Labels are the operator's language, not the engine's: Dashboard->Overview,
+Devices->Firewalls, Rule Analysis->Rule hygiene, Vulnerability->Vulnerabilities, VPN->VPN & identity,
+Coverage->Data coverage, Topology->Topology & paths.
+
+⛔ **HREFS ARE UNCHANGED.** Only labels and grouping moved, so every bookmark, every link inside an
+already-sent notification and every URL pasted into a ticket still resolves. Do not "finish the job"
+by renaming the routes. Three successive restructures have now said this; `tests/navigation.test.js`
+asserts every historical destination is still in the registry and still has a page file behind it.
+
+⛔ **A SECTION HEADER IS A BUTTON AND NAVIGATES NOWHERE.** "Clicking it navigates AND expands" has
+two outcomes for one gesture, no single accessible name and no explainable keyboard behaviour. The
+section's landing page is its FIRST CHILD (Assets -> Firewalls, Work queue -> Queue), so nothing
+sits further away than its own label. The active section opens itself; a stored collapse is honoured
+even for the active section, which is only safe BECAUSE a shut-but-active header draws its own
+accent bar — remove that bar and collapsing the current section hides the page you are on with no
+"you are here" left anywhere.
+
+⛔ **COMPLIANCE AND REPORTS ARE LEAVES, AND THAT IS A REFUSAL RATHER THAN AN OMISSION.** They would
+read naturally as groups over Assessments / Framework comparison / Exceptions and Catalog /
+Generated / Schedules. Four of those six ARE NOT ROUTES — the framework comparison is a `?view=`,
+exceptions are a panel inside a device's assessment, and neither generated-report history nor
+schedules exist anywhere in this product. A disclosure holding one real destination and two entries
+that cannot be opened is a menu that lies about what the product does.
+
+⛔ **THREE RAIL SHAPES, AND NO BREAKPOINT IN THE STYLESHEET.** `lib/navLayout.js` owns the two
+widths (1024, 1280); a blocking inline script in `app/layout.js` stamps `html[data-nav]` before
+first paint and keeps it current on resize — the fourth member of the THEME/CORNERS/DENSITY family,
+and the only one that also LISTENS, because unlike a theme the right answer changes while the page
+is open. `app/globals.css` keys purely on that attribute and carries NO rail width at all: a
+`@media (max-width: 1280px)` there would be a third copy of a number in a third language, and it
+would also measure the viewport differently from `innerWidth` (they disagree by a scrollbar),
+putting the boundary in two places a few pixels apart. ⛔ **If the script never runs, nothing
+applies and the rail stays full width with every label** — a navigation's failure mode must be "too
+much room taken", never "no way to get anywhere".
+
+- **wide** (>=1280px) full labels; the collapse button is a preference and applies only here.
+- **rail** (1024-1279px) icons only, and ⛔ the section headers are HIDDEN while every item shows
+  FLAT. At 64px there is no room for a label, so a disclosure would be an unlabelled chevron opening
+  unlabelled icons, and a hover flyout would make a whole section reachable only by pointing at it.
+  Flattening keeps all fifteen destinations exactly one click away.
+- **drawer** (<1024px) off-canvas, and it is the WIDE shape rather than the rail: a panel that takes
+  over the screen has room for words. ⛔ No icon-rail selector mentions the drawer shape, so a
+  stored `collapsed` preference cannot leak in and render a 64px strip over a phone. ⛔ The closed
+  panel sets `visibility: hidden`, not just a transform — a panel held off-screen by a transform
+  alone is still in the tab order and still read out, so a keyboard user would tab into a navigation
+  they cannot see.
+
+⛔ **TWO GLYPH LAYERS, TWO INVARIANTS.** Every nav entry must keep a DISTINCT GLYPH — that, not
+colour, is the per-item wayfinding cue, and at rail width the icons are all there is. The seven
+TOP-LEVEL glyphs must also differ from each other. But a section header MAY reuse one of ITS OWN
+children's (Assets and Firewalls are both `IconDevices`) and may NOT borrow an unrelated section's,
+which is why Investigate takes `IconActivity` rather than the `IconSearch` that reads better —
+`IconSearch` is Compliance's. ⛔ The old guard asserted "every icon named anywhere in `Sidebar.js`
+is unique"; that stopped being the invariant the moment the registry gained a level, and then it
+FAILED ON CORRECT CODE. All three rules are now asserted against the registry, not the source.
 
 ⛔ **HREFS ARE UNCHANGED.** Only labels moved, so every bookmark, every link inside an already-sent
 notification and every URL pasted into a ticket still resolves. Do not "finish the job" by renaming

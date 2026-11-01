@@ -8,6 +8,7 @@ import { pool } from '../../lib/db';
 import { loadScopeForSession } from '../../lib/deviceScope';
 import { blockedSurfaceFor, pageRefusal, PATHNAME_HEADER } from '../../lib/deviceScopePaths';
 import Sidebar from '../../components/layout/Sidebar';
+import { NavProvider } from '../../components/layout/NavState';
 import Header from '../../components/layout/Header';
 import UpdateNotifier from '../../components/layout/UpdateNotifier';
 import SubscriptionNotifier from '../../components/layout/SubscriptionNotifier';
@@ -92,7 +93,19 @@ export default async function DashboardLayout({ children }) {
   const capabilities = capabilitiesOf(session);
 
   return (
-    <div className="sv-shell">
+    /* ⛔ THE SHELL ELEMENT ITSELF LIVES IN NavProvider, which is a client
+       component — because the control that opens the navigation below 1024px
+       sits in the HEADER while the navigation sits in the rail, two subtrees
+       that cannot share state any other way. Everything below is still
+       server-rendered and passed through as children; nothing here became a
+       client component. */
+    <NavProvider>
+      {/* ⛔ THE FIRST FOCUSABLE THING ON EVERY PAGE. The rail now puts seven
+          section headers and up to five links ahead of the content, so a
+          keyboard user reached the page body only by traversing the whole
+          navigation on every single load. It is visually hidden until focused
+          (.skip-link in globals.css). */}
+      <a className="skip-link" href="#sv-main">Skip to content</a>
       {/* ⛔ INSIDE THE DASHBOARD LAYOUT ONLY, so it never mounts on /login —
           a timeout modal over the sign-in page would be nonsense, and the
           component's own signOut() would loop. The server expires the token
@@ -124,10 +137,11 @@ export default async function DashboardLayout({ children }) {
               panel. Server components below can hand it evidence as a prop
               because a descriptor from lib/evidence.js is plain JSON. */}
           <EvidenceProvider>
-            <main className="sv-content">{children}</main>
+            {/* tabIndex -1 so the skip link above can land here. */}
+            <main className="sv-content" id="sv-main" tabIndex={-1}>{children}</main>
           </EvidenceProvider>
         </div>
       </div>
-    </div>
+    </NavProvider>
   );
 }
