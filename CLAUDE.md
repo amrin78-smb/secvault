@@ -3192,6 +3192,76 @@ together. If a fourth ever appears, it must be fixed in the same commit.
 `public/fonts/`, so the browser was synthesising or snapping to 700 — the number never rendered at
 the weight the rule asked for. It is 600 now, which is a real face.
 
+### ⛔ HOW MANY HEADLINE FIGURES, AND IN WHAT ORDER (v2.218.0)
+
+**Three questions, not six equal tiles.** The Overview opened with six headline figures in one
+`repeat(auto-fit, minmax(190px, 1fr))` grid — every one the same size and the same weight, so a
+firewall COUNT sat beside a patch-now count with nothing on the page saying which was the reason to
+still be reading. They are now grouped under the three questions an operator actually arrives with,
+in the order they ask them:
+
+1. **What needs attention** — Critical Alerts, High Risks. Links to `/work`; it never acts here.
+2. **Fleet posture** — Security Score, Compliance Score, Devices, Total Rules.
+3. **Can these numbers be trusted?** — coverage, as a plain list. Links to `/coverage`.
+
+⛔ **NOTHING WAS REMOVED.** All six figures survive with their evidence marks, their deltas and
+their coverage caveats. `tests/overviewSections.test.js` fails the build if a tile, a drawer or a
+delta disappears in a future layout change.
+
+⛔ **EXPLICIT COLUMN COUNTS, NEVER `auto-fit`.** Measured at 1440 with the rail expanded, the old
+grid rendered FIVE ACROSS AND ORPHANED THE SIXTH — which reads as a layout fault rather than as a
+group. `auto-fit` cannot be fixed by tuning the minmax, because it does not know how many tiles
+there are: any width that fits five will orphan a sixth. Each section now declares a column count
+its tile count divides into, and the responsive steps divide too (**4 → 2 → 1, never through 3**, or
+a four-tile section orphans its fourth on the way down). A future three-tile section needs its own
+step (3 → 1, skipping 2) rather than joining this rule.
+
+⛔ **THE TRUST SECTION IS NOT TILES AND NOT A PERCENTAGE.** Everything above it is a measurement;
+this is a QUALIFIER on those measurements. As tiles it would read as the seventh and eighth headline
+figures — the complaint the sections exist to answer. And "62% coverage" would be one number
+covering three different problems with three different first steps, so each figure keeps its own
+denominator and its own sentence. ⛔ **"Never collected from" and "last collected over N days ago"
+stay TWO counts**: the first is a credential or reachability problem, the second is a job that
+stopped running, and folding them loses which one you have. ⛔ **A coverage figure short of the
+fleet is PARTIAL COVERAGE and renders amber with a ⚠ glyph** — never by colour alone, and never on
+the danger end of the ramp, because a gap in OUR collection is not a severity of the customer's.
+⛔ The two counts ride on the `devices` scan `getDeviceCounts` was already doing (no new query), and
+`STALE_AFTER_DAYS` is IMPORTED from `coverageRegister.js` — a summary calling a device stale on a
+different threshold from the register it links to would send the operator to a page that disagrees
+with the line they clicked.
+
+### ⛔ A FILTER MUST NEVER BECOME AN ALL-CLEAR (v2.218.0)
+
+`/work` gained filters (search, band, severity, source, plus firewall and evidence behind a
+disclosure). The dangerous part is not the filtering, it is the summary:
+
+⛔ **`summarise()` IS COMPUTED ON THE UNFILTERED LIST, ALWAYS.** It carries the band counts, the
+failed-source list and the truncation disclosure, and `buildWorkQueueAnswer` is forbidden from
+claiming an empty queue while any of those is non-zero. Summarising the filtered list instead would
+make `?severity=critical` with no matches render the page's own headline as "nothing outstanding"
+over a queue with thirty items in it — a filter silently becoming an all-clear, on the one screen
+whose entire job is to say what is outstanding.
+
+⛔ **THE ALL-CLAIM IS GATED ON THE UNFILTERED TOTAL, AND "FILTERED TO NOTHING" HAS ITS OWN
+SENTENCE.** The two are worded apart, not merely gated apart: "No items match these filters" says
+nothing about the fleet, while the all-clear says everything about it, and a reader must never have
+to check the filter chips to work out which one they are looking at. Both incompleteness banners
+read the summary, so a filter cannot silence them either.
+
+⛔ **AN UNRECOGNISED FILTER VALUE MATCHES NOTHING, NEVER EVERYTHING.** Returning the whole queue
+would look like the filter had been applied and matched everything — the operator reads a full list
+as "all of these are critical".
+
+⛔ **NOTHING EXPANDS BY DEFAULT.** The first item of each band used to, on the argument that a page
+of uniformly closed rows teaches nobody there is anything underneath them. With three bands that
+expanded THREE items on arrival, pushing the part being triaged below the fold on every load and
+every AutoRefresh. The chevron on every row carries the affordance instead.
+
+⛔ **NO OWNER, STATUS, DUE DATE OR COMMENT CONTROL** — a refusal, not an omission. None is persisted
+anywhere in this product. Rendering them backed by local component state would give an operator a
+control that forgets what they typed the moment they navigate, on the screen they use to decide
+what to do next. `tests/workQueueFilter.test.js` fails the build if one appears.
+
 ### ⛔ HOW MANY SURFACES A PAGE MAY DRAW (v2.215.0)
 
 **Three in the content column, plus the header. Not seven.**

@@ -4,7 +4,7 @@ import EmptyState from '../../../components/ui/EmptyState';
 import WorkQueueBoard from '../../../components/work/WorkQueueBoard';
 import { pool } from '../../../lib/db';
 import { gatherWorkQueue } from '../../../lib/engines/workQueueData';
-import { rankItems, summarise } from '../../../lib/engines/workQueue';
+import { rankItems, summarise, filterWorkItems, workFilterOptions } from '../../../lib/engines/workQueue';
 import { evaluateSegmentation } from '../../../lib/engines/segmentationData';
 import { evaluateAllApplications } from '../../../lib/engines/applicationViewData';
 import { buildWorkQueueAnswer } from '../../../lib/answers';
@@ -26,7 +26,7 @@ export const dynamic = 'force-dynamic';
 // anyone reading the gather list. Its failure is caught here and reported as a
 // failed source, exactly like the eight query-backed ones.
 
-export default async function WorkQueuePage() {
+export default async function WorkQueuePage({ searchParams }) {
   let segmentation = null;
   let segmentationError = null;
   try {
@@ -103,16 +103,46 @@ export default async function WorkQueuePage() {
   }
 
   const items = rankItems(gathered.items);
+
+  // ⛔ THE SUMMARY IS COMPUTED ON THE **UNFILTERED** LIST, AND THAT SEPARATION
+  // IS THE WHOLE SAFETY PROPERTY OF ADDING FILTERS TO THIS PAGE.
+  // `summarise()` carries the band counts, the failed-source list and the
+  // truncation disclosure, and `buildWorkQueueAnswer` is forbidden from
+  // claiming an empty queue while any of those is non-zero. Summarising the
+  // filtered list instead would make "Severity: critical" with no matches
+  // render the page's own headline as "nothing outstanding" — a filter
+  // silently becoming an all-clear, on the one screen whose job is to say what
+  // is outstanding. The banners above the list describe the REAL queue for the
+  // same reason: a source that failed is still missing from a filtered view.
   const summary = summarise(items, sources);
   const answer = buildWorkQueueAnswer(summary);
+
+  const filters = {
+    band: searchParams?.band || '',
+    severity: searchParams?.severity || '',
+    type: searchParams?.type || '',
+    evidence: searchParams?.evidence || '',
+    device: searchParams?.device || '',
+    q: searchParams?.q || '',
+  };
+  const shown = filterWorkItems(items, filters);
+  // ⛔ Options come from the FULL list, so narrowing by one field never empties
+  // the controls for the others — a filter set that collapses as you use it is
+  // one you cannot back out of.
+  const options = workFilterOptions(items);
 
   return (
     <div>
       <PageHeader
         title="Work queue"
         subtitle="Everything outstanding across the product, in the order worth doing it."
+        eyebrow={`${items.length} item${items.length === 1 ? '' : 's'} across ${summary.sourcesTotal} engines`}
       />
-      <WorkQueueBoard result={{ items, summary, answer, sources }} />
+      <WorkQueueBoard
+        result={{ items: shown, summary, answer, sources }}
+        totalItems={items.length}
+        options={options}
+      />
     </div>
   );
 }

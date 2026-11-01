@@ -2058,6 +2058,92 @@ html[data-nav="wide"] .sv-sidebar.collapsed .sv-version,
 html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-align: center; }
 
 /* ════════════════════════════════════════════════════════════════════
+   Overview sections (v2.218.0)
+   ────────────────────────────────────────────────────────────────────
+   ⛔ EXPLICIT COLUMN COUNTS, NOT `auto-fit`. The Overview's six headline
+   figures sat in `repeat(auto-fit, minmax(190px, 1fr))`, so the row broke
+   wherever the viewport happened to fall — at 1440 with the rail expanded that
+   is FIVE ACROSS AND ONE ORPHANED, which reads as a layout fault rather than
+   as a group. `auto-fit` cannot be fixed by tuning the minmax, because it does
+   not know how many tiles there are: any width that fits five will orphan the
+   sixth.
+
+   So each section declares its own column count, chosen so the tile count
+   divides into it at EVERY step down: 4 -> 2 -> 1 and 2 -> 1 both land clean.
+   A future section with three tiles would need its own step (3 -> 1, skipping
+   2) rather than being added to this rule.
+   ════════════════════════════════════════════════════════════════════ */
+.ov-section { display: flex; flex-direction: column; gap: var(--s2); }
+.ov-section + .ov-section { margin-top: var(--s4); }
+.ov-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+/* ⛔ A REAL HEADING LAYER, AND IT IS NOT THE 12px UPPERCASE LABEL TREATMENT
+   v2.215.0 had to go round the whole dashboard removing. These are the three
+   questions the page answers; rendered at --text-xs on --text-muted they would
+   be smaller and fainter than the tile labels beneath them, which is the
+   "label-as-heading" defect by another route. */
+.ov-section-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.ov-section-link {
+  font-size: var(--text-sm);
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ov-section-link:hover { text-decoration: underline; }
+
+.ov-grid { display: grid; gap: 10px; }
+.ov-grid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ov-grid[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* ⛔ 4 -> 2 BEFORE 2 -> 1, so a four-tile section never passes through three
+   columns and orphans its fourth on the way down. */
+@media (max-width: 1100px) {
+  .ov-grid[data-cols="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .ov-grid[data-cols="2"],
+  .ov-grid[data-cols="4"] { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── "Can these numbers be trusted?" ─────────────────────────────────
+   ⛔ NOT TILES, AND NOT A PERCENTAGE. Everything above this is a measurement;
+   this is a statement about how much of the fleet those measurements cover,
+   which is a QUALIFIER on them rather than more KPIs competing with them.
+   Rendered as tiles it would read as the seventh and eighth headline figures —
+   the exact complaint the sections exist to answer. And a single "62%
+   coverage" would be one number covering three different problems with three
+   different first steps, so each figure keeps its own denominator. */
+.ov-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.ov-trust-item { display: flex; align-items: baseline; gap: 4px; }
+.ov-trust-n { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ov-trust-of { color: var(--text-muted); }
+/* ⛔ THE TWO PROBLEM ENTRIES GET A HUE **AND** A GLYPH. Status is never carried
+   by colour alone — and this one is a gap in OUR collection rather than a
+   severity of the customer's, so it takes --tint-warn-fg (an action to
+   schedule) rather than anything on the danger end of the ramp. */
+.ov-trust-item[data-bad] .ov-trust-n,
+.ov-trust-item[data-bad] .ov-trust-label { color: var(--tint-warn-fg); }
+.ov-trust-item[data-bad] .ov-trust-n::before { content: '⚠ '; }
+
+/* ════════════════════════════════════════════════════════════════════
    The shared filter bar (v2.217.0) — components/ui/FilterBar.js
    ────────────────────────────────────────────────────────────────────
    ⛔ EVERY CONTROL HERE USES .input / .select RATHER THAN ITS OWN BOX.

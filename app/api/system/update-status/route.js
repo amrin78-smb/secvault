@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.218.0': [
+    'The Overview now answers three questions in order instead of showing six equal numbers: what needs attention, how the fleet is doing, and whether these numbers can be trusted. Every figure that was there before is still there — it just sits under the question it answers.',
+    'Added a "Can these numbers be trusted?" line showing how much of the fleet each figure actually covers: how many firewalls are reachable, how many have been assessed, and how many have been collected from recently. A firewall nothing has been pulled from and one whose last pull is weeks old are counted separately, because they need different fixes.',
+    'The headline tiles no longer break into a ragged row with one card stranded on its own. Each group now has a fixed number of columns that its cards divide into at every screen size.',
+    'The work queue gained filters: search, band, severity and source, with firewall and evidence behind "More filters". Filtering never changes the summary at the top — if a filter matches nothing you are told that it matched nothing, never that the queue is empty.',
+    'Work queue items no longer open themselves. Three bands meant three expanded items on every load, pushing the rest of the list off screen; every row still expands on click.',
+  ],
   '2.217.0': [
     'Filtered tables now show you what is filtering them. Every applied filter appears as a chip you can click to remove, with a count beside it ("Showing 2 of 8 firewalls") and a Clear filters link. A short table and a filtered table used to look identical.',
     'Changing a filter no longer throws away the rest of your settings. Picking a firewall on the Exposure page used to quietly reset rows-per-page from 200 back to 50; that whole class of problem is gone, because filters now change one thing and leave everything else alone.',

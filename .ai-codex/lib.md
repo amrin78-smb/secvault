@@ -405,6 +405,37 @@ Client module. Table density, stamped as `data-density` on `<html>`. Structural 
 ⛔ Works ONLY because table padding/font resolve through `--row-pad-y`/`--row-pad-x`/`--row-font`. A hardcoded cell padding opts itself out silently.
 ⛔ Density changes ROW GEOMETRY ONLY — it must never hide a column, truncate a value or drop a badge. A denser table shows the same facts in less space, not fewer facts.
 
+## lib/engines/workQueue.js — filtering (v2.218.0)
+
+`filterWorkItems(items, filters)` and `workFilterOptions(items)`, both pure.
+
+⛔ **`filterWorkItems` FILTERS WHAT IS DRAWN AND MUST NEVER FEED `summarise()`.** The summary
+carries the band counts, the failed-source list and the truncation disclosure, and
+`buildWorkQueueAnswer` refuses to claim an empty queue while any is non-zero. Summarising the
+filtered list would make `?severity=critical` with no matches render the page's headline as
+"nothing outstanding". `app/(dashboard)/work/page.js` summarises the full list and filters only for
+display; `tests/workQueueFilter.test.js` pins the separation from both sides.
+⛔ **AN UNRECOGNISED VALUE MATCHES NOTHING, NEVER EVERYTHING** — a full list returned for
+`?severity=criticl` reads as "all of these are critical".
+⛔ **THE FIREWALL FILTER MATCHES `affects` (DISPLAY NAMES), NOT device ids.** An item spanning
+several firewalls deliberately names no `device_id` (the one-device-or-none rule), so an id filter
+would drop exactly the broad items an operator most wants when filtering by a firewall.
+⛔ **`workFilterOptions` IS DERIVED FROM THE ITEMS**, never hardcoded, and keeps the CANONICAL order
+for bands and evidence (sorting them would put "Needs a human" in the middle of the control). The
+page derives them from the FULL list, so narrowing by one field never empties the controls for the
+others.
+
+## lib/engines/fleetHeadline.js — collection freshness (v2.218.0)
+
+`devicesCollectedFresh`, `devicesNeverCollected` and `collectionStaleAfterDays` join the returned
+headline. ⛔ Both counts are FILTERs on the `devices` scan `getDeviceCounts` was already doing — no
+new query, no new round trip. ⛔ `STALE_AFTER_DAYS` is imported from `coverageRegister.js` rather
+than written as a literal: `/coverage` is the page the trust section links to, and a summary
+calling a device stale on a different threshold would send the operator to a page that disagrees
+with the line they clicked. ⛔ Three separate counts, never one percentage — "collected recently",
+"collected, but longer ago" and "never collected" are three problems with three different first
+steps.
+
 ## lib/urlFilters.js (v2.217.0)
 
 The URL is the filter state; this is the pure arithmetic on it. CommonJS, so `node:test` can

@@ -1051,3 +1051,26 @@ required a migration to adopt would not get adopted, and the product would keep 
 ⛔ `primary` is a separate prop rather than a convention about the first child of `actions`, because
 a convention cannot be enforced or tested. A page with two equally-weighted buttons keeps passing
 both through `actions`, which honestly says it has no single primary action.
+
+## Overview + work queue (v2.218.0)
+
+**HeadlineStats** renders THREE SECTIONS, not six equal tiles: *What needs attention* (Critical
+Alerts, High Risks, → `/work`), *Fleet posture* (Security, Compliance, Devices, Total Rules), and
+*Can these numbers be trusted?* (coverage, → `/coverage`). ⛔ Nothing was removed — all six figures
+keep their evidence marks, deltas and coverage caveats, and `tests/overviewSections.test.js` fails
+the build if one disappears in a future layout change. ⛔ `.ov-grid[data-cols=N]` with an EXPLICIT
+column count, never `auto-fit`: measured at 1440 with the rail expanded the old grid rendered five
+across and orphaned the sixth. The responsive steps divide too (4 → 2 → 1, never through 3). ⛔ The
+trust section is a LIST, not tiles, and never a single percentage — see CLAUDE.md for why.
+
+**WorkQueueFilters** (c) — the queue's triage controls over the shared `FilterBar`. Options come
+from `workFilterOptions(items)`, derived from the items present, so a control never offers a value
+that can only return nothing. ⛔ No owner/status/due-date/comment control: none is persisted, and a
+control backed by local state forgets what the operator typed the moment they navigate.
+
+**WorkQueueBoard** now takes `{result, totalItems, options}`. ⛔ `result.items` is the FILTERED
+list while `result.summary` describes the WHOLE queue, and the all-clear is gated on `totalItems`
+— without that, `?severity=critical` matching nothing would render "an all-clear that SecVault is
+prepared to stand behind" over a thirty-item queue. "Filtered to nothing" has its own, differently
+worded empty state. ⛔ Nothing expands by default any more (three bands meant three expanded items
+on arrival).

@@ -12,6 +12,7 @@ import EmptyState from '../ui/EmptyState';
 // System note in CLAUDE.md — dropping blue out of severity is what makes the
 // whole separation hold). Never re-declare this locally.
 import { SEVERITY_BADGE_COLOR } from '../analysis/severityRamp';
+import WorkQueueFilters from './WorkQueueFilters';
 
 // THE WORK QUEUE, drawn. One ranked list across every engine in the product.
 //
@@ -117,17 +118,21 @@ function Field({ label, children }) {
  * explanatory fields go behind the click, because not knowing WHY yet is not
  * the same as being misled.
  *
- * @param {boolean} defaultOpen  the first item of each band opens by default,
- *   so the depth is discoverable rather than hidden behind a row that looks
- *   inert. A page of uniformly closed rows teaches nobody that there is
- *   anything underneath them.
+ * ⛔ NOTHING OPENS BY DEFAULT ANY MORE (v2.218.0). The first item of each band
+ * used to, on the argument that "a page of uniformly closed rows teaches
+ * nobody that there is anything underneath them". That argument is real but it
+ * was being paid for three times over: with three bands it expanded THREE
+ * items, pushing the rest of the queue — the part an operator is triaging —
+ * below the fold on arrival, and it did so on every load and every
+ * AutoRefresh. Discoverability is carried by the chevron on every row instead,
+ * which is the affordance that was already there. A triage list's default
+ * state is compact.
  */
-function WorkItem({ item, defaultOpen = false }) {
+function WorkItem({ item }) {
   const unmeasured = item.evidence === 'unmeasured';
   return (
     <details
       className="wq-item"
-      open={defaultOpen}
       style={{
         border: '1px solid var(--border)',
         borderLeft: `3px solid ${unmeasured ? 'var(--unmeasured)' : 'var(--border)'}`,
@@ -264,8 +269,8 @@ function Band({ band, items }) {
             </p>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s3)' }}>
-            {items.map((it, i) => (
-              <WorkItem key={it.key} item={it} defaultOpen={i === 0} />
+            {items.map((it) => (
+              <WorkItem key={it.key} item={it} />
             ))}
           </div>
         </div>
@@ -274,9 +279,17 @@ function Band({ band, items }) {
   );
 }
 
-export default function WorkQueueBoard({ result }) {
+export default function WorkQueueBoard({ result, totalItems, options }) {
   const { items, summary, answer, sources } = result;
   const byBand = (key) => items.filter((i) => i.band === key);
+  // ⛔ `items` IS THE FILTERED LIST; `summary` DESCRIBES THE WHOLE QUEUE.
+  // The headline sentence, the band counts and both incompleteness banners
+  // below are deliberately computed from the UNFILTERED queue in
+  // app/(dashboard)/work/page.js — a filter that narrowed the summary would
+  // let "Severity: critical" with no matches render this page's own headline
+  // as "nothing outstanding".
+  const total = typeof totalItems === 'number' ? totalItems : items.length;
+  const filtered = total !== items.length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s4)' }}>
@@ -291,6 +304,10 @@ export default function WorkQueueBoard({ result }) {
           />
         </CardBody>
       </Card>
+
+      {options ? (
+        <WorkQueueFilters options={options} shown={items.length} total={total} />
+      ) : null}
 
       {/* ⛔ A FAILED SOURCE IS A BANNER, NOT A FOOTNOTE. The queue is shorter
           than the truth whenever this shows, and a shorter queue reads as good
@@ -353,7 +370,21 @@ export default function WorkQueueBoard({ result }) {
         </Card>
       ) : null}
 
-      {items.length === 0 && summary.sourcesFailed === 0 ? (
+      {/* ⛔ THE ALL-CLEAR REQUIRES THE **UNFILTERED** QUEUE TO BE EMPTY, AND
+          THE FILTERED CASE GETS ITS OWN SENTENCE. Adding filters to this page
+          put the product's strongest claim one query parameter away from being
+          false: `items` is now the narrowed list, so `?severity=critical` with
+          no matches would have rendered "Nothing is outstanding across any
+          engine... an all-clear that SecVault is prepared to stand behind"
+          over a queue with forty items in it. That is a filter silently
+          becoming an all-clear — the failed-read-as-a-fact rule aimed at the
+          one screen whose entire job is to say what is outstanding.
+
+          ⛔ The two states are also WORDED apart, not merely gated apart. "No
+          items match these filters" says nothing about the fleet; the
+          all-clear says everything about it, and a reader must never have to
+          check the filter chips to work out which one they are looking at. */}
+      {total === 0 && summary.sourcesFailed === 0 ? (
         <Card>
           <CardBody>
             <EmptyState
@@ -366,9 +397,32 @@ export default function WorkQueueBoard({ result }) {
         </Card>
       ) : null}
 
-      {BANDS.map((band) => (
-        <Band key={band.key} band={band} items={byBand(band.key)} />
-      ))}
+      {items.length === 0 && total > 0 ? (
+        <Card>
+          <CardBody>
+            <EmptyState
+              message={
+                `No items match these filters. The queue still holds ${total} item`
+                + `${total === 1 ? '' : 's'} — clear the filters above to see them.`
+              }
+            />
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {/* ⛔ UNDER A FILTER, A BAND WITH NO MATCHES IS HIDDEN RATHER THAN DRAWN
+          EMPTY — but with NO filter applied all three always render, which is
+          the rule this file opens with: `verify` is never a collapsed footer,
+          because a firewall SecVault cannot collect from produces no CVEs, no
+          failing checks and no rule findings, and this band is where that is
+          said out loud. Hiding it when the operator has explicitly narrowed to
+          another band is not hiding it from the product; the chips above say
+          what was narrowed, and clearing them brings it back. */}
+      {BANDS.map((band) => {
+        const inBand = byBand(band.key);
+        if (filtered && inBand.length === 0) return null;
+        return <Band key={band.key} band={band} items={inBand} />;
+      })}
 
       <Card>
         <CardBody>
