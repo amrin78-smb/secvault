@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.221.3': [
+    'On a narrow screen the Settings sections keep their headings above their items instead of collapsing into one row, which is where the old confusing layout came from in the first place.',
+    'The behaviour was already right by accident; the stylesheet comment beside it described the broken shape, so the next person reading the two together would have "fixed" it back.',
+    'A test now fails the build if the groups are ever flattened into a single strip.',
+  ],
   '2.221.2': [
     'The new Columns choice was showing up among the applied filters as a meaningless chip, and "Clear filters" would have silently put back columns you had deliberately hidden.',
     'This is the second control in two releases to make the same mistake — anything that changes what you can see of a row, rather than which rows match, is not a filter.',

@@ -3556,21 +3556,31 @@ a.th-sort:focus-visible {
   gap: var(--s6);
   align-items: start;
 }
-/* ⛔ The rail collapses ABOVE the nav's own drawer breakpoint. Side by side
-   at 900px the panels are too narrow to hold a two-column form, so the rail
-   goes horizontal-scrolling across the top rather than squeezing content it
-   is only there to reach. */
+/* ⛔ THE RAIL MOVES ABOVE THE PANEL, AND THE GROUPS STAY STACKED. Side by
+   side at 1080px the panels are too narrow to hold a two-column form, so the
+   rail goes on top — but it does NOT become one horizontal strip, and that is
+   the load-bearing half.
+
+   A single strip would put the three group labels back on one baseline with
+   their items, which is EXACTLY the defect this rail replaced ("an unfinished
+   non-clickable menu"). Stacking the groups keeps every heading above its own
+   list at every width; only the ITEMS within a group go horizontal, and they
+   scroll rather than wrap.
+
+   ⛔ `flex-direction: column` is inherited from the base rule and is stated
+   here anyway. The first version relied on the inheritance, and the comment
+   above it said the rail "goes horizontal-scrolling across the top" — so the
+   next person to read the two together would have "fixed" the rail into the
+   broken shape by making the comment true. */
 @media (max-width: 1080px) {
   .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
   .settings-rail {
     position: static;
-    display: flex;
-    gap: var(--s5);
-    overflow-x: auto;
-    padding-bottom: var(--s2);
+    flex-direction: column;
+    gap: var(--s4);
+    padding-bottom: var(--s3);
     border-bottom: 1px solid var(--border);
   }
-  .settings-rail-group { min-width: max-content; }
 }
 
 .settings-rail {
@@ -3595,7 +3605,10 @@ a.th-sort:focus-visible {
   padding: 0 var(--s3);
 }
 .settings-rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
-@media (max-width: 1080px) { .settings-rail-list { flex-direction: row; gap: var(--s1); } }
+/* ⛔ The ITEMS go horizontal, the GROUPS do not — see the block above. */
+@media (max-width: 1080px) {
+  .settings-rail-list { flex-direction: row; gap: var(--s1); overflow-x: auto; }
+}
 .settings-rail-item {
   display: block;
   width: 100%;

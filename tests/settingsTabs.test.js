@@ -216,3 +216,36 @@ describe('resolution', () => {
     assert.match(PAGE, /aria-current=\{effectiveTab === tab\.key \? 'page' : undefined\}/);
   });
 });
+
+describe('⛔ the grouping survives every width', () => {
+  // The horizontal row this rail replaced read as greyed-out tabs because a
+  // label BEFORE items on one baseline is a peer of them. Collapsing the rail
+  // into a single strip at narrow widths would reinstate exactly that.
+  const CSS = stripComments(
+    fs.readFileSync(path.join(__dirname, '..', 'app', 'globals.css'), 'utf8')
+  );
+  const block = (() => {
+    const i = CSS.indexOf('@media (max-width: 1080px)');
+    assert.ok(i > -1, 'the rail has no responsive block');
+    return CSS.slice(i, CSS.indexOf('\n}', i));
+  })();
+
+  it('the groups stay stacked, so each heading keeps its own list beneath it', () => {
+    assert.match(block, /\.settings-rail \{[^}]*flex-direction: column/,
+      'a single horizontal strip puts the labels back on the items\u2019 baseline');
+  });
+
+  it('the rail moves above the panel rather than squeezing it', () => {
+    assert.match(block, /grid-template-columns: minmax\(0, 1fr\)/);
+  });
+
+  it('⛔ the group label is a real heading, not a styled span', () => {
+    assert.match(PAGE, /<h2 className="settings-rail-label"/);
+    assert.match(PAGE, /aria-labelledby=\{`settings-group-\$\{g\.key\}`\}/);
+  });
+
+  it('⛔ the horizontal tab row is gone for good', () => {
+    assert.equal(/settings-group-label|className="settings-tab"/.test(PAGE), false,
+      'the inline grouped row read as an unfinished non-clickable menu');
+  });
+});
