@@ -49,7 +49,7 @@ export default async function CoveragePage() {
     return (
       <>
         <PageHeader
-          title="Coverage"
+          title="Data health"
           subtitle="Where SecVault cannot see, and what that costs."
         />
         <Card>
@@ -86,7 +86,7 @@ export default async function CoveragePage() {
   return (
     <>
       <PageHeader
-        title="Coverage"
+        title="Data health"
         subtitle={
           isScoped(scope)
             ? 'Where SecVault cannot see across the firewalls you can access, and what that costs.'

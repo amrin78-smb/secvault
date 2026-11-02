@@ -5,6 +5,7 @@ import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import StatCard from '../../../components/ui/StatCard';
+import KpiRow from '../../../components/ui/KpiRow';
 import PageHeader from '../../../components/ui/PageHeader';
 import AnswerHeader from '../../../components/ui/AnswerHeader';
 import { buildRuleHygieneAnswer } from '../../../lib/answers';
@@ -94,8 +95,14 @@ export default async function FleetAnalysisPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ⛔ THE SCOPE MOVED OUT OF THE TITLE AND INTO THE EYEBROW. The title
+          was "Rule hygiene — Fleet" while the nav entry that leads here reads
+          "Rule hygiene", so the page an operator landed on was never quite the
+          one they clicked. "Fleet" is a SCOPE, not part of the page's name —
+          which is exactly what PageHeader's eyebrow is for. */}
       <PageHeader
-        title="Rule hygiene — Fleet"
+        title="Rule hygiene"
+        eyebrow={`Whole fleet · ${totals.total} findings`}
         subtitle="Rule findings across every active firewall. Open a firewall to see its cleanup, optimization and reorder detail."
       />
 
@@ -103,7 +110,13 @@ export default async function FleetAnalysisPage() {
           claim: rules with no usage data can never be judged unused. */}
       <AnswerHeader answer={answer} evidence={evidence} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+      {/* ⛔ FOUR SEVERITIES, AND "Total Findings" IS NOT A FIFTH. It was the
+          SUM of the other four presented as a peer of them, so the row both
+          double-counted on screen and could not divide into any column count —
+          five tiles render ragged at every intermediate width. The total is
+          the page's SCOPE, so it moved to the header eyebrow, where the
+          firewall count already lives. */}
+      <KpiRow cols={4}>
         {/* ⛔ THIS COMMENT USED TO SAY "tile accents are GRAPHICS (a 4px left
             border), so they take the raw --sev-* hues via SEVERITY_FILL".
             That stopped being true in v2.200.0, when the accent edge was
@@ -118,13 +131,7 @@ export default async function FleetAnalysisPage() {
         <StatCard label="High" value={totals.high} color={totals.high > 0 ? SEVERITY_FILL.high : 'var(--text-muted)'} />
         <StatCard label="Medium" value={totals.medium} color={totals.medium > 0 ? SEVERITY_FILL.medium : 'var(--text-muted)'} />
         <StatCard label="Info" value={totals.info} color={totals.info > 0 ? SEVERITY_FILL.info : 'var(--text-muted)'} />
-        <StatCard
-          label="Total Findings"
-          value={totals.total}
-          color="var(--text-primary)"
-          evidence={evidence}
-        />
-      </div>
+      </KpiRow>
 
       {rows.length === 0 ? (
         <EmptyState message="No active devices — add one to see rule hygiene." />

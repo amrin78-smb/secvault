@@ -201,6 +201,13 @@ describe('⛔ the four hand-rolled copies are gone, not merely bypassed', () => 
       'components/devices/DeviceFilters.js',
       'components/alerts/AlertsFilters.js',
       'components/exposure/ExposureFilters.js',
+      // ⛔ THE FOURTH AND LAST, adopted in v2.220.0. Phase 1 left it
+      // deliberately because /vpn was Phase 5's work; it had all three of the
+      // gaps the other three had, and its `set()` carried a comment
+      // explaining that it had to RE-ADD `vtab` by hand or narrowing by
+      // country would bounce the reader back to Fleet Status — which is what
+      // a near-miss on the merge-never-rebuild rule looks like.
+      'components/vpn/VpnThreatFilters.js',
     ]) {
       const src = read(p);
       assert.match(src, /from '\.\.\/ui\/FilterBar'/, `${p} does not use the shared bar`);
@@ -232,5 +239,45 @@ describe('⛔ the four hand-rolled copies are gone, not merely bypassed', () => 
     const src = read('components/exposure/ExposureFilters.js');
     assert.ok(!/borderRadius:\s*'var\(--radius-sm\)'/.test(src), 'hand-rolled control box is back');
     assert.match(src, /className="select filter-control"/);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⛔ A WINDOW IS NOT A FILTER
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('the detection window survives "Clear filters"', () => {
+  // ⛔ MEASURED AS A REAL REGRESSION DURING v2.220.0. With `dHours` absent
+  // from NON_FILTER_PARAMS, adopting the shared bar on /vpn made "Clear
+  // filters" drop `dHours=168` — silently returning a 7-day investigation to
+  // the 24-hour default and changing every number on the page, while
+  // appearing to do nothing but remove a chip.
+  const defs = [
+    { key: 'dq', label: 'Search' },
+    { key: 'dCountry', label: 'Country' },
+    { key: 'dSeverity', label: 'Severity' },
+  ];
+  const qs = 'vtab=detections&dHours=168&dCountry=Poland';
+
+  test('clearing filters KEEPS the window and the tab', () => {
+    const cleared = clearedFilterQuery(qs);
+    assert.match(cleared, /dHours=168/, 'the window is what the detections are computed over');
+    assert.match(cleared, /vtab=detections/);
+    assert.ok(!/dCountry/.test(cleared), 'a real filter must still clear');
+  });
+
+  test('⛔ the window never renders as a chip', () => {
+    const keys = activeFilterChips(qs, defs).map((c) => c.key);
+    assert.deepEqual(keys, ['dCountry'],
+      'widening the window is asking a different question, not clearing a filter');
+  });
+
+  test('⛔ and it is not in the VPN bar\u2019s defs, so nothing can chip it by accident', () => {
+    const src = stripComments(
+      fs.readFileSync(path.join(ROOT, 'components/vpn/VpnThreatFilters.js'), 'utf8')
+    );
+    const defsBlock = src.slice(src.indexOf('const DEFS = ['), src.indexOf('];', src.indexOf('const DEFS = [')));
+    assert.ok(!/dHours/.test(defsBlock), 'dHours must stay a control, never a filter definition');
+    assert.match(src, /param="dHours"/, 'but the control itself must still be rendered');
   });
 });

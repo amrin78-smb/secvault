@@ -9,6 +9,7 @@ import Table from '../../../components/ui/Table';
 import Badge from '../../../components/ui/Badge';
 import EmptyState from '../../../components/ui/EmptyState';
 import StatCard from '../../../components/ui/StatCard';
+import KpiRow from '../../../components/ui/KpiRow';
 import Pagination from '../../../components/ui/Pagination';
 import { paginateArray } from '../../../lib/pagination';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
@@ -498,13 +499,13 @@ export default async function LifecyclePage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Lifecycle &amp; Health"
+        title="Lifecycle &amp; health"
         subtitle="Support contracts, HA state and signature freshness across the fleet."
       />
 
       <AnswerHeader answer={lifecycleAnswer} evidence={lifecycleEv} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+      <KpiRow cols={4}>
         <StatCard
           label="Expired"
           evidence={lifecycleEv}
@@ -530,33 +531,39 @@ export default async function LifecyclePage({ searchParams }) {
           sub="devices"
           color={staleSigDevices > 0 ? 'var(--yellow)' : 'var(--text-muted)'}
         />
-        {/* ⛔ --unmeasured, NOT --text-muted (fixed v2.202.0). This tile counts
-            firewalls whose licence data SecVault could not read at all, which
-            is the product's canonical "not measured" state — but it was held
-            on the ordinary muted token, so it rendered as a normal quiet
-            category. Since v2.200.0 that token is also what earns the DASHED
-            tile border, so the one tile on this page whose entire job is to
-            say "we could not read this" was the only one not drawn that way,
-            directly under a banner reading "but not every contract could be".
+      </KpiRow>
 
-            ⛔ AND IT IS GATED ON THE COUNT, WHICH v2.202.0 FORGOT — the four
-            tiles above it have always been, and this one was unconditional. So
-            on a fleet where licence collection SUCCEEDED EVERYWHERE the page
-            drew a dashed, hueless tile reading "0 / Not collected / devices":
-            the design system's "we could not measure this" treatment applied
-            to a measurement that succeeded, which is the failed-read-as-a-fact
-            rule running BACKWARDS — asserting a gap we do not have. A measured
-            zero is an ordinary quiet fact and takes --text-muted like every
-            other zero on this row. It was dormant only because the reference
-            fleet's count is non-zero; it fires the day collection gets
-            healthy, i.e. precisely when nobody is looking for it. */}
-        <StatCard
-          label="Not collected"
-          value={licenseGapDevices.length}
-          sub="devices"
-          color={licenseGapDevices.length > 0 ? 'var(--unmeasured)' : 'var(--text-muted)'}
-        />
-      </div>
+      {/* ⛔ MOVED OUT OF THE TILE ROW, NOT DELETED, AND THE REASONING BELOW IS
+          WHY IT COULD NOT JUST BE A FIFTH CARD. Five tiles divide into no
+          column count, so the row rendered ragged at every intermediate
+          width — but the real argument is that this figure is a different
+          KIND of statement from the four above it. Those are findings about
+          the fleet's contracts; this is a statement about how much of the
+          fleet SecVault could read at all, which is a QUALIFIER on them. The
+          Overview draws the same distinction between its posture figures and
+          its trust section, for the same reason.
+
+          ⛔ --unmeasured, NOT --text-muted (fixed v2.202.0). This counts
+          firewalls whose licence data SecVault could not read at all, which
+          is the product's canonical "not measured" state — but it was held on
+          the ordinary muted token, so it rendered as a normal quiet category.
+
+          ⛔ AND IT IS GATED ON THE COUNT, WHICH v2.202.0 FORGOT. Unconditional,
+          on a fleet where licence collection SUCCEEDED EVERYWHERE, it drew a
+          hueless "0 / Not collected": the "we could not measure this"
+          treatment applied to a measurement that succeeded — the
+          failed-read-as-a-fact rule running BACKWARDS, asserting a gap we do
+          not have. As a line rather than a tile the gate is simply whether to
+          render it, which cannot be got wrong by forgetting a colour. */}
+      {licenseGapDevices.length > 0 && (
+        <p className="kpi-row-caption" style={{ color: 'var(--unmeasured)' }}>
+          <span aria-hidden="true">⚠</span>{' '}
+          Licence data could not be collected from{' '}
+          <strong style={{ color: 'var(--unmeasured)' }}>{licenseGapDevices.length}</strong>{' '}
+          firewall{licenseGapDevices.length === 1 ? '' : 's'} — those contribute nothing to the
+          four figures above.
+        </p>
+      )}
 
       {/* Support &amp; Licence Renewals — expanded by default: the primary use. */}
       <Card>

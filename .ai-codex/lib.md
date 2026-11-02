@@ -3885,3 +3885,32 @@ leaves.
 Maps each sort key to the ARIA token it actually sorts in, for `aria-sort` on
 `/devices`' column headers. ⛔ It has to be right rather than plausible: a
 screen reader announces it verbatim.
+
+## `lib/logSearchFields.js` — v2.220.0
+
+The log search form's fields as DATA, in three tiers: `essential` (7),
+`advanced` (10, behind a disclosure), `hidden` (6 accepted params with no
+control, carried as hidden inputs). Plus `advancedIsApplied`, `logFilterChips`,
+`withoutLogFilter`, `ALL_FIELD_NAMES`.
+
+⛔ It exists for the COMPLETENESS GUARD: `tests/logSearchFields.test.js`
+compares this list against `/logs`' accepted-parameter list, so a param that
+the form cannot render (and therefore DELETES on the next submit, widening the
+search) fails the build. ⛔ `limit`/`page` are `tier: null` — rendered
+elsewhere, never chips. ⛔ An unrecognised param still chips, marked unknown.
+
+## `lib/settingsTabs.js` — v2.220.0
+
+`SETTINGS_GROUPS` (My preferences / Administration / System), `SETTINGS_TABS`,
+`LEGACY_TAB_ALIASES`, `resolveSettingsTab`, `visibleSettingsGroups`,
+`visibleSettingsTabs`, `groupForSettingsTab`.
+
+⛔ No tab in My preferences may carry a capability — that is the group's
+definition. ⛔ An empty group is dropped. ⛔ `general`/`security` kept their keys
+though their contents moved. ⛔ The session timeout deliberately stayed personal;
+Feed Sync moved to Administration.
+
+## `lib/urlFilters.js` — `dHours` added to NON_FILTER_PARAMS, v2.220.0
+
+The VPN detection window. "Clear filters" dropping it silently reset a 7-day
+investigation to 24 hours and changed every number on the page.

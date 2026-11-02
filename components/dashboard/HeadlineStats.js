@@ -1,4 +1,5 @@
 import { pool } from '../../lib/db';
+import KpiRow from '../ui/KpiRow';
 import StatCard from '../ui/StatCard';
 import { getFleetHeadline, getPreviousHeadline } from '../../lib/engines/fleetHeadline';
 import { securityScoreBand } from '../../lib/engines/securityScore';
@@ -216,7 +217,7 @@ export default async function HeadlineStats() {
               landing page would give the operator two places to do one job. */}
           <a className="ov-section-link" href="/work">Open the work queue →</a>
         </div>
-        <div className="ov-grid" data-cols="2">
+        <KpiRow cols={2}>
         <StatCard
           compact
           layout="row"
@@ -255,14 +256,14 @@ export default async function HeadlineStats() {
           iconBg="var(--tint-warn)"
           delta={<DeltaBadge current={h.highRiskCount} previous={prev?.high_risk_count} goodDirection={GOOD.down} />}
         />
-        </div>
+        </KpiRow>
       </section>
 
       <section className="ov-section" aria-labelledby="ov-posture">
         <div className="ov-section-head">
           <h2 className="ov-section-title" id="ov-posture">Fleet posture</h2>
         </div>
-        <div className="ov-grid" data-cols="4">
+        <KpiRow cols={4}>
         <StatCard
           compact
           layout="row"
@@ -342,7 +343,7 @@ export default async function HeadlineStats() {
           iconBg="var(--tint-info)"
           delta={<DeltaBadge current={h.rulesTotal} previous={prev?.rules_total} goodDirection={GOOD.down} />}
         />
-        </div>
+        </KpiRow>
       </section>
 
       {/* ⛔ THE THIRD QUESTION, AND IT IS DELIBERATELY NOT TILES. Everything

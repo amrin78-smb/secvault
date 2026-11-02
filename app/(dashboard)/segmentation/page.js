@@ -57,7 +57,7 @@ export default async function SegmentationPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Segmentation"
+        title="Intent"
         subtitle="What you say must not connect, checked against what the rules permit and what the traffic actually did."
       />
 

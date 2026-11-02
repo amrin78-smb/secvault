@@ -427,7 +427,14 @@ describe('⛔ an incomplete register says so, above the numbers it qualifies', (
 
   it('⛔ every headline count routes through that refusal', () => {
     const tiles = CODE.match(/<StatCard[\s\S]{0,700}?\/>/g) || [];
-    assert.ok(tiles.length >= 5, `expected the summary tiles, found ${tiles.length}`);
+    // ⛔ A FLOOR THAT PROVES THE SCAN FOUND SOMETHING, NOT A PINNED DESIGN.
+    // This read `>= 5` and failed on correct code in v2.220.0, when the
+    // register-total tile became a caption and the row went to four — the
+    // design-system cap on primary indicators. The invariant here is "every
+    // tile's value goes through reportableCount", and a hardcoded tile count
+    // asserts a layout decision while LOOKING like it asserts that. The floor
+    // exists only so a broken regex cannot pass over zero tiles.
+    assert.ok(tiles.length >= 3, `the tile scan found ${tiles.length} — it is measuring nothing`);
     for (const tile of tiles) {
       assert.match(
         tile,
@@ -436,6 +443,17 @@ describe('⛔ an incomplete register says so, above the numbers it qualifies', (
       );
     }
     assert.match(CODE, /const incomplete = registerIsIncomplete\(failures\)/);
+  });
+
+  it('⛔ the register total is still reported, as a caption rather than a tile', () => {
+    // It stopped being one of five equal cards; it must not have stopped
+    // being reported. It routes through the same refusal as every count.
+    assert.match(CODE, /kpi-row-caption/);
+    assert.match(
+      CODE,
+      /Covering[\s\S]{0,200}?statValue\(reportableCount\(devices, incomplete\)/,
+      'the denominator must still refuse to print while the register is incomplete'
+    );
   });
 
   it('the note says the counts are a floor, not a total', () => {

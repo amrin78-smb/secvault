@@ -20,7 +20,8 @@
 // coming from Switzerland" wants that answered across every detection at once,
 // and each panel already states how many of how many it is showing.
 
-import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
+import FilterBar, { FilterSelect, FilterSearch, useFilterNav } from '../ui/FilterBar';
 
 // ⛔ WINDOW OPTIONS STOP AT 192 HOURS because that is the engine's own
 // MAX_WINDOW_HOURS. Offering a value it will silently clamp would show a
@@ -63,100 +64,84 @@ const SEVERITIES = [
   { value: 'low', label: 'Low' },
 ];
 
-const FIELD = {
-  padding: '7px 10px',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg-card)',
-  color: 'var(--text-primary)',
-  fontSize: 'var(--text-base)',
-  fontFamily: 'inherit',
-};
+// ⛔ THE FOURTH HAND-ROLLED FILTER BAR, AND THE LAST (v2.220.0). Phase 1
+// moved /devices, /alerts and /exposure onto the shared FilterBar and left
+// this one deliberately, because the VPN page was Phase 5's work. It had the
+// same three gaps the other three had:
+//
+//   • NO CHIPS AND NO COUNT. A narrowed detections list and a quiet fleet
+//     looked identical the moment you glanced away from the controls.
+//   • IT REBUILT THE QUERY. `set()` copied the whole URL and then had to
+//     RE-ADD `vtab` by hand, with a comment explaining that narrowing by
+//     country would otherwise bounce the reader back to Fleet Status. That
+//     is the merge-never-rebuild rule being re-implemented per component,
+//     and the comment is what a near-miss looks like.
+//   • Reset cleared a HARDCODED list of three keys, so a fourth filter added
+//     later would have survived a reset nobody could see had failed.
+//
+// ⛔ `dHours` IS NOT A FILTER AND IS NOT CLEARED. It is the detection WINDOW:
+// every detection in lib/engines/vpnDetections.js is computed over it, and
+// "clear" cannot mean "all of time" when the baseline gates are expressed in
+// days. It stays a control and never becomes a chip — the same call
+// lib/urlFilters.js makes for `limit`.
+
+const DEFS = [
+  { key: 'dq', label: 'Search' },
+  { key: 'dCountry', label: 'Country' },
+  { key: 'dSeverity', label: 'Severity', options: SEVERITIES },
+];
 
 export default function VpnThreatFilters({ countries = [], hours = 24 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const params = useSearchParams();
+  // ⛔ `vtab` IS CARRIED, NOT RE-ADDED. useFilterNav MERGES into the current
+  // query, and lib/urlFilters.js classes `vtab` as a non-filter — so the tab
+  // survives a filter change because nothing deletes it, rather than because
+  // somebody remembered to put it back.
+  const nav = useFilterNav('/vpn');
 
-  const set = (key, value) => {
-    const next = new URLSearchParams(searchParams.toString());
-    if (value) next.set(key, value);
-    else next.delete(key);
-    // ⛔ The TAB is part of the URL and must survive a filter change, or
-    // narrowing by country would bounce the reader back to Fleet Status.
-    next.set('vtab', 'detections');
-    router.push(`${pathname}?${next.toString()}`);
-  };
-
-  const q = searchParams.get('dq') || '';
-  const country = searchParams.get('dCountry') || '';
-  const severity = searchParams.get('dSeverity') || '';
-  const active = Boolean(q || country || severity);
+  const countryOptions = [
+    { value: '', label: 'All countries' },
+    ...countries.map((c) => ({ value: c, label: c })),
+  ];
+  const defs = DEFS.map((d) => (d.key === 'dCountry' ? { ...d, options: countryOptions } : d));
+  const set = (k, v) => nav.set({ [k]: v });
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: 'var(--s3)',
-        marginBottom: 'var(--s5)',
-      }}
-    >
-      <input
-        type="search"
-        defaultValue={q}
-        placeholder="Search account, address or country..."
-        aria-label="Search detections"
-        style={{ ...FIELD, minWidth: 260, flex: '1 1 260px' }}
-        // Committed on Enter or blur, never per keystroke: every change here is
-        // a full server navigation.
-        onKeyDown={(e) => { if (e.key === 'Enter') set('dq', e.currentTarget.value.trim()); }}
-        onBlur={(e) => { if (e.currentTarget.value.trim() !== q) set('dq', e.currentTarget.value.trim()); }}
+    <FilterBar basePath="/vpn" defs={defs}>
+      <FilterSearch
+        param="dq"
+        placeholder="Search detections…"
+        value={params.get('dq') || ''}
+        onChange={set}
       />
-
-      <select
-        value={country}
-        onChange={(e) => set('dCountry', e.target.value)}
-        aria-label="Filter by country"
-        style={FIELD}
-      >
-        <option value="">All countries</option>
-        {countries.map((c) => <option key={c} value={c}>{c}</option>)}
-      </select>
-
-      <select
-        value={severity}
-        onChange={(e) => set('dSeverity', e.target.value)}
-        aria-label="Filter by severity"
-        style={FIELD}
-      >
-        {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
-
-      <select
+      <FilterSelect
+        label="Country"
+        param="dCountry"
+        value={params.get('dCountry')}
+        options={countryOptions}
+        onChange={set}
+        idPrefix="vpn"
+      />
+      <FilterSelect
+        label="Severity"
+        param="dSeverity"
+        value={params.get('dSeverity')}
+        options={SEVERITIES}
+        onChange={set}
+        idPrefix="vpn"
+      />
+      {/* ⛔ A CONTROL, NEVER A CHIP. It is not in `defs`, so "Clear filters"
+          leaves it alone and it never appears in the applied list — widening
+          the window is not clearing a filter, it is asking a different
+          question. */}
+      <FilterSelect
+        label="Window"
+        param="dHours"
         value={String(hours)}
-        onChange={(e) => set('dHours', e.target.value)}
-        aria-label="Detection window"
-        style={FIELD}
-      >
-        {windowOptions(hours).map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-      </select>
-
-      {active && (
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            const next = new URLSearchParams(searchParams.toString());
-            for (const k of ['dq', 'dCountry', 'dSeverity']) next.delete(k);
-            next.set('vtab', 'detections');
-            router.push(`${pathname}?${next.toString()}`);
-          }}
-        >
-          Reset
-        </button>
-      )}
-    </div>
+        options={windowOptions(hours)}
+        onChange={set}
+        idPrefix="vpn"
+      />
+    </FilterBar>
   );
 }

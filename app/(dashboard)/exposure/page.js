@@ -295,7 +295,7 @@ export default async function ExposurePage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <PageHeader
-        title="Internet Exposure"
+        title="Exposure"
         subtitle={
           'What is reachable from the internet, through which rule, to which internal host — ' +
           'and whether traffic was actually observed arriving.'

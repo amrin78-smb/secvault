@@ -20,39 +20,21 @@ import CredentialProfilesPanel from '../../../components/settings/CredentialProf
 import NotificationsPanel from '../../../components/settings/NotificationsPanel';
 import AppearancePanel from '../../../components/settings/AppearancePanel';
 import pkg from '../../../package.json';
+import {
+  SETTINGS_TABS, visibleSettingsGroups, visibleSettingsTabs,
+} from '../../../lib/settingsTabs';
 
-// ⛔ `requires` is the capability needed to SEE the tab at all. A tab with no
-// requirement is open to every authenticated role — today that is General
-// (which holds per-user appearance and your own password, both self-service)
-// and About.
+// ⛔ THE TAB LIST MOVED TO lib/settingsTabs.js AND GREW A GROUPING. Ten
+// tabs sat in one flat row, and the two an ordinary operator could open both
+// MIXED their own settings with the whole installation's — Appearance and
+// your password beside the server's feed schedule, your MFA beside the idle
+// timeout that signs out every user. Three groups now: My preferences,
+// Administration, System. See that file for why the session timeout stayed
+// personal when the feed schedule did not.
 //
-// ⛔ Hiding a tab is NOT the security boundary. Every panel behind these tabs
-// is backed by a route that checks the same capability server-side; this list
+// ⛔ Hiding a tab is NOT the security boundary. Every panel behind these is
+// backed by a route that checks the same capability server-side; the list
 // exists so an Operator is not shown five doors that all refuse to open.
-const TABS = [
-  { key: 'general', label: 'General' },
-  { key: 'security', label: 'Security' },
-  { key: 'users', label: 'Users', requires: 'manage_users' },
-  // ⛔ SPLIT OUT OF `users` IN v2.210.0. That tab had grown to carry local
-  // accounts, LDAP group mappings, the Entra tenant and Entra group
-  // mappings — five screens of scrolling, where the thing an
-  // administrator opens it for (adding a person) was at the top and
-  // everything else buried below. They are also different jobs: who has
-  // an account here, versus which directory is trusted to issue them.
-  // ⛔ SAME CAPABILITY, so nothing becomes reachable that was not before.
-  { key: 'signon', label: 'Single sign-on', requires: 'manage_users' },
-  { key: 'profiles', label: 'Credential Profiles', requires: 'manage_credential_profiles' },
-  { key: 'notifications', label: 'Notifications', requires: 'manage_settings' },
-  { key: 'certificate', label: 'Certificate', requires: 'manage_settings' },
-  // ⛔ VISIBLE TO EVERY ROLE, unlike the other administrative tabs. The panel
-  // is where the Server ID lives, and an operator asked to read it off the
-  // server for a renewal should not have to borrow a Super Admin account to
-  // do it. Only the ACTIVATION controls are gated, by MANAGE_LICENSE, both in
-  // the panel and in the route behind it.
-  { key: 'subscription', label: 'Subscription' },
-  { key: 'updates', label: 'Updates', requires: 'run_update' },
-  { key: 'about', label: 'About' },
-];
 
 const ABOUT_ROWS = [
   ['Product', `${PRODUCT_NAME} — ${PRODUCT_TAGLINE}`],
@@ -94,7 +76,8 @@ export default function SettingsPage() {
   // active tab must fall back to one that exists — otherwise the page renders
   // a tab bar with nothing under it, which looks like a broken page rather
   // than a restriction.
-  const visibleTabs = TABS.filter((t) => !t.requires || caps[t.requires]);
+  const groups = visibleSettingsGroups(caps);
+  const visibleTabs = visibleSettingsTabs(caps);
   const effectiveTab = visibleTabs.some((t) => t.key === activeTab)
     ? activeTab
     : (visibleTabs[0] ? visibleTabs[0].key : 'general');
@@ -127,7 +110,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get('tab');
-    if (tab && TABS.some((t) => t.key === tab)) {
+    if (tab && SETTINGS_TABS.some((t) => t.key === tab)) {
       setActiveTab(tab);
     }
   }, []);
@@ -250,131 +233,135 @@ export default function SettingsPage() {
           paddingTop: 'var(--s5)',
         }}
       >
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              padding: '9px 16px',
-              fontSize: 'var(--text-md)',
-              fontWeight: effectiveTab === tab.key ? 600 : 400,
-              color: effectiveTab === tab.key ? 'var(--primary)' : 'var(--text-muted)',
-              background: 'none',
-              border: 'none',
-              borderBottom: effectiveTab === tab.key ? '2px solid var(--primary)' : '2px solid transparent',
-              cursor: 'pointer',
-              marginBottom: '-1px',
-            }}
-          >
-            {tab.label}
-          </button>
+        {/* ⛔ ONE ROW, GROUPED BY A LABEL RATHER THAN SPLIT INTO TWO ROWS.
+            A second tab row here would be the shape /analysis needed for
+            fourteen views across four TASKS; these ten are one list whose
+            entries differ by WHOSE setting they are, which a quiet heading
+            says without adding a level of navigation to cross. */}
+        {groups.map((g) => (
+          <div key={g.key} className="settings-group">
+            <span className="settings-group-label">{g.label}</span>
+            {g.tabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className="settings-tab"
+                data-active={effectiveTab === tab.key ? '' : undefined}
+                aria-current={effectiveTab === tab.key ? 'page' : undefined}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 
-      {effectiveTab === 'general' && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
-            gap: 24,
-            alignItems: 'start',
-            maxWidth: 1200,
-          }}
-        >
-          <AppearancePanel />
+      {/* ⛔ APPEARANCE ONLY NOW. This tab held Appearance (yours), Change
+          password (yours) AND Feed Sync (the server's collection schedule,
+          affecting every user) in one two-column grid — and it is the tab with
+          no capability requirement, so every role met a global control beside
+          their own theme picker. Feed Sync moved to Administration; the
+          password moved to My account, beside the second factor it belongs
+          with. */}
+      {effectiveTab === 'general' && <AppearancePanel />}
 
-          {/* ⛔ A GLOBAL app setting, so it is gated even though the tab that
-              holds it is open to everyone. The General tab also carries the
-              per-user Appearance controls and your own password, both of which
-              are self-service and stay available to every role. */}
-          {caps.manage_settings && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Feed Sync</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <form onSubmit={handleGeneralSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="form-field">
-                  <label htmlFor="feed_poll_interval_hours">Feed poll interval (hours)</label>
-                  <input
-                    id="feed_poll_interval_hours"
-                    type="number"
-                    min="1"
-                    disabled={loading || !caps.manage_settings}
-                    value={feedPollIntervalHours}
-                    onChange={(e) => setFeedPollIntervalHours(e.target.value)}
-                    className="input"
-                  />
-                </div>
-
-                {generalStatus && (
-                  <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{generalStatus}</p>
-                )}
-
-                {caps.manage_settings && (
-                  <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
-                    Save
-                  </Button>
-                )}
-              </form>
-            </CardBody>
-          </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Change Your Password</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="form-field">
-                  <label htmlFor="current_password">Current password</label>
-                  <input
-                    id="current_password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    required
-                    className="input"
-                  />
-                </div>
-
-                <div className="form-field">
-                  <label htmlFor="new_password">New password</label>
-                  <input
-                    id="new_password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    required
-                    minLength={8}
-                    className="input"
-                  />
-                </div>
-
-                {passwordStatus && (
-                  <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{passwordStatus}</p>
-                )}
-
-                <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
-                  Update Password
-                </Button>
-              </form>
-            </CardBody>
-          </Card>
-        </div>
-      )}
-
+      {/* ⛔ "MY ACCOUNT" — the things that are yours and nobody else's: your
+          password and your second factor, which were in two different tabs.
+          ⛔ THE KEY IS STILL `security`, so every ?tab=security link already
+          written down lands on the control it always did. */}
       {effectiveTab === 'security' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s5)' }}>
           <SecurityPanel />
+            <Card>
+              <CardHeader>
+                <CardTitle>Change Your Password</CardTitle>
+              </CardHeader>
+              <CardBody>
+                <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="form-field">
+                    <label htmlFor="current_password">Current password</label>
+                    <input
+                      id="current_password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                      className="input"
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label htmlFor="new_password">New password</label>
+                    <input
+                      id="new_password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                      minLength={8}
+                      className="input"
+                    />
+                  </div>
+
+                  {passwordStatus && (
+                    <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{passwordStatus}</p>
+                  )}
+
+                  <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
+                    Update Password
+                  </Button>
+                </form>
+              </CardBody>
+            </Card>
           {/* ⛔ SHOWN TO EVERY ROLE, EDITABLE ONLY WITH manage_settings. Every
               role is SUBJECT to the timeout, and someone signed out after half
               an hour who cannot find out why concludes the product is broken
               rather than that a policy is in force. */}
           <SessionTimeoutPanel canManage={Boolean(caps.manage_settings)} />
+        </div>
+      )}
+
+      {/* ⛔ MOVED OUT OF GENERAL. The feed poll interval is the server's
+          collection schedule; it has no personal aspect at all and was living
+          in the one tab every role can open. The capability check is on the
+          TAB now rather than wrapped around the card, so an Operator is not
+          shown a heading over a control that is not there. */}
+      {effectiveTab === 'feeds' && caps.manage_settings && (
+        <div style={{ maxWidth: 620 }}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Feed Sync</CardTitle>
+              </CardHeader>
+              <CardBody>
+                <form onSubmit={handleGeneralSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="form-field">
+                    <label htmlFor="feed_poll_interval_hours">Feed poll interval (hours)</label>
+                    <input
+                      id="feed_poll_interval_hours"
+                      type="number"
+                      min="1"
+                      disabled={loading || !caps.manage_settings}
+                      value={feedPollIntervalHours}
+                      onChange={(e) => setFeedPollIntervalHours(e.target.value)}
+                      className="input"
+                    />
+                  </div>
+
+                  {generalStatus && (
+                    <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>{generalStatus}</p>
+                  )}
+
+                  {caps.manage_settings && (
+                    <Button type="submit" variant="primary" style={{ alignSelf: 'flex-start' }}>
+                      Save
+                    </Button>
+                  )}
+                </form>
+              </CardBody>
+            </Card>
         </div>
       )}
 

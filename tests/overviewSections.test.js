@@ -82,37 +82,37 @@ describe('⛔ three questions, and every figure kept', () => {
 });
 
 describe('⛔ THE GRID CANNOT ORPHAN A TILE', () => {
-  test('sections declare an EXPLICIT column count, never auto-fit', () => {
-    assert.match(HEADLINE, /data-cols="2"/);
-    assert.match(HEADLINE, /data-cols="4"/);
+  // ⛔ THE COLUMN RULES MOVED TO components/ui/KpiRow.js IN v2.220.0, and
+  // tests/kpiRow.test.js owns them now — including "every responsive step
+  // divides". This file used to assert them against `.ov-grid`, a stylesheet
+  // block that was the SAME RULE as the KPI-row block written twice, four
+  // hundred lines apart, with two @media (max-width: 1100px) copies. What
+  // belongs HERE is the Overview's own decision: how many tiles each section
+  // has and that the declared count matches.
+
+  test('sections use the shared KpiRow, never a hand-rolled grid', () => {
+    assert.match(HEADLINE, /<KpiRow cols=\{2\}>/);
+    assert.match(HEADLINE, /<KpiRow cols=\{4\}>/);
     assert.ok(!/auto-fit/.test(HEADLINE),
       'auto-fit is back — it cannot know how many tiles there are, so it will orphan one again');
+    assert.ok(!/ov-grid/.test(HEADLINE), 'the retired duplicate is back');
   });
 
   test('each declared column count divides its tile count', () => {
-    // 2 tiles in 2 columns, 4 tiles in 4. The whole fix.
-    const sections = [...HEADLINE.matchAll(/data-cols="(\d)"([\s\S]*?)<\/div>/g)];
-    assert.ok(sections.length >= 2, 'the section grids have moved');
+    const sections = [...HEADLINE.matchAll(/<KpiRow cols=\{(\d)\}>([\s\S]*?)<\/KpiRow>/g)];
+    assert.equal(sections.length, 2, 'the section grids have moved');
     for (const [, cols, body] of sections) {
       const tiles = (body.match(/<StatCard/g) || []).length;
-      assert.equal(tiles % Number(cols), 0,
+      assert.equal(tiles, Number(cols),
         `a ${cols}-column section holds ${tiles} tiles, so the last row is short`);
     }
   });
 
-  test('⛔ the responsive steps also divide — 4 goes to 2, never through 3', () => {
-    // A four-tile section passing through three columns orphans its fourth on
-    // the way down, which is the same defect at a different width.
-    const four = CSS.match(/\.ov-grid\[data-cols="4"\]\s*\{[^}]*repeat\((\d)/g) || [];
-    const counts = four.map((m) => Number(m.match(/repeat\((\d)/)[1]));
-    assert.ok(counts.length >= 2, 'there is no responsive step for the four-column section');
-    for (const n of counts) {
-      assert.equal(4 % n, 0, `a four-tile section drops to ${n} columns, orphaning a tile`);
-    }
-  });
-
-  test('the two-column section collapses straight to one', () => {
-    assert.match(CSS, /\.ov-grid\[data-cols="2"\],[\s\S]{0,80}grid-template-columns: minmax\(0, 1fr\)/);
+  test('⛔ the six figures are still 2 + 4, not one row of six', () => {
+    const counts = [...HEADLINE.matchAll(/<KpiRow cols=\{(\d)\}>/g)].map((m) => Number(m[1]));
+    assert.deepEqual(counts, [2, 4],
+      'the grouping is the feature: two things that need action, four that describe posture');
+    assert.equal(counts.reduce((a, b) => a + b, 0), 6, 'a figure was added or lost');
   });
 });
 

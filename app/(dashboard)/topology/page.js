@@ -56,7 +56,7 @@ export default function TopologyPage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
-        title="Topology"
+        title="Topology &amp; paths"
         subtitle="Multi-hop path simulation across your managed firewall fleet."
         actions={viewToggle(view)}
       />

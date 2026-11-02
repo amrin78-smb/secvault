@@ -55,6 +55,7 @@ import Link from 'next/link';
 import Card, { CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import Disclosure from '../ui/Disclosure';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
@@ -787,17 +788,21 @@ export default function CoverageRegister({ entries, summary, failures, generated
           a set of counts that already looked complete. */}
       <FailuresBanner failures={failures} />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-          gap: 'var(--s4)',
-        }}
-      >
-        <StatCard
-          label="Firewalls in this register"
-          value={statValue(reportableCount(devices, incomplete), why('The register could not report how many firewalls it covers.'))}
-        />
+      {/* ⛔ THE REGISTER TOTAL IS A DENOMINATOR, NOT A FINDING, so it is a
+          caption rather than the fifth tile. It was one of five equal cards,
+          which made "how many firewalls this covers" compete with "how many
+          have a blind spot" — and five tiles divide into no column count, so
+          the row rendered ragged at every intermediate width. Four findings
+          and one caption, per the design system’s cap of four primary
+          indicators. */}
+      <p className="kpi-row-caption">
+        Covering{' '}
+        <strong>
+          {statValue(reportableCount(devices, incomplete), why('The register could not report how many firewalls it covers.'))}
+        </strong>{' '}
+        firewalls.
+      </p>
+      <KpiRow cols={4}>
         {/* ⛔ HUELESS. A gap in OUR evidence is not a severity, and putting it
             on the severity ramp would rank it against the fleet's real
             exposure on a scale that measures neither. */}
@@ -829,7 +834,7 @@ export default function CoverageRegister({ entries, summary, failures, generated
           textColor="var(--text-muted)"
           sub="collectable, not a verdict"
         />
-      </div>
+      </KpiRow>
 
       {rows.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s2)' }}>

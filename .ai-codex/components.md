@@ -1112,3 +1112,29 @@ Two-level tab bar. Props: `groups`, `leaves` (both from
 with different accessible names; `aria-current` in both rows. ⛔ The rows are
 deliberately styled differently and NEITHER WRAPS — drawn alike they read as one
 wrapped row of twenty tabs.
+
+## KpiRow (`components/ui/KpiRow.js`) — v2.220.0
+
+`<KpiRow cols={n}>` for a row of stat tiles. Props: `cols` (1–6, declared never
+counted), `children`, `className`, `style`.
+
+⛔ Replaces ~20 hand-rolled `repeat(auto-fit, minmax(Npx, 1fr))` grids: auto-fit
+cannot know the tile count, so any width that fits five orphans a sixth. ⛔ Every
+responsive step divides (6→3→2→1, 4→2→1, 3→1, 2→1); five drops straight to one.
+⛔ A bad `cols` falls back to one column, never auto-fit. ⛔ Retired `.ov-grid`,
+which was the same rule written twice. Adopted by HeadlineStats, /lifecycle,
+/analysis and CoverageRegister.
+
+## LogSearchForm (`components/logs/LogSearchForm.js`) — rewritten v2.220.0
+
+Now renders over `lib/logSearchFields.js` instead of nineteen hand-written
+controls. Essential tier up front; the rest in a `<details>` rendered `open`
+SERVER-SIDE when anything inside is applied; six control-less params carried as
+hidden inputs; every applied filter a removable chip. Still a plain GET form —
+no client state, no `'use client'`.
+
+## VpnThreatFilters (`components/vpn/VpnThreatFilters.js`) — rewritten v2.220.0
+
+The fourth and last hand-rolled filter bar, now on the shared `FilterBar`. Gained
+chips, a count and Clear. ⛔ `dHours` stays a CONTROL and never a filter def, so
+Clear cannot reset the detection window.

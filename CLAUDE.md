@@ -3262,6 +3262,116 @@ anywhere in this product. Rendering them backed by local component state would g
 control that forgets what they typed the moment they navigate, on the screen they use to decide
 what to do next. `tests/workQueueFilter.test.js` fails the build if one appears.
 
+### ⛔ THE PAGE YOU LAND ON IS NAMED THE SAME AS THE LINK YOU CLICKED (v2.220.0)
+
+Measured: **nine of seventeen** nav destinations opened with a title that did
+not match the entry leading there. "Intent" opened a page headed
+"Segmentation" — two words sharing nothing, so an operator had no way to tell
+they had arrived. Also "Data coverage"/"Coverage", "Exposure"/"Internet
+Exposure", "Topology & paths"/"Topology", "Rule hygiene"/"Rule hygiene —
+Fleet", "Lifecycle"/"Lifecycle & Health".
+
+⛔ **`tests/pageTitles.test.js` CHECKS BOTH DIRECTIONS AT ONCE**, which is the
+point: either side failing fails the build, so the registry and the page can
+never be edited apart. It decodes HTML entities first (`&amp;` in JSX against a
+literal `&` in the registry) and carries exactly two named exemptions.
+
+⛔ **IT ALSO CHECKS A PAGE'S SECOND HEADER BRANCH.** `/coverage` and
+`/conformance` each render a different `PageHeader` on their no-data path;
+renaming one and not the other makes a page's NAME depend on whether the fleet
+has data.
+
+⛔ **COVERAGE IS "DATA HEALTH" NOW AND THE ROUTE IS STILL `/coverage`.** Do not
+"finish the job" by renaming the route — it would break every bookmark and the
+`deviceScopeCoverage` register that classifies it. The fourth restructure to
+say this.
+
+### ⛔ ONE KPI-ROW RULE, NOT TWENTY (v2.220.0)
+
+`components/ui/KpiRow.js` + `.kpi-row[data-cols]`. v2.218.0 established
+explicit column counts on the Overview and left every other page
+re-implementing the broken version: ~20 `repeat(auto-fit, minmax(Npx, 1fr))`
+grids with hand-picked minmaxes.
+
+⛔ **EVERY RESPONSIVE STEP DIVIDES: 6→3→2→1, 4→2→1, 3→1, 2→1.** Five drops
+straight to one because **nothing divides five** — an awkward tile count is
+surfaced, never smoothed over with a ragged 3+2.
+
+⛔ **FOUR PRIMARY INDICATORS MAXIMUM, and three pages were at five.** In each
+case the fifth was not a peer: `/analysis`'s "Total Findings" was the SUM of
+the other four, `CoverageRegister`'s "Firewalls in this register" was the
+DENOMINATOR, and `/lifecycle`'s "Not collected" was a COVERAGE figure. Each
+moved to a caption or an eyebrow; none was deleted, and a test pins that each
+is still reported.
+
+⛔ **`cols` IS DECLARED AND THE COMPONENT NEVER COUNTS ITS OWN CHILDREN.** A
+tile rendered only when a count is non-zero would change the column count with
+the DATA — right in development, ragged in production. ⛔ A bad `cols` falls
+back to ONE column, never auto-fit: one column is obviously wrong, which gets
+it fixed.
+
+⛔ **`.ov-grid` WAS RETIRED BECAUSE IT WAS THIS RULE WRITTEN TWICE**, including
+two `@media (max-width: 1100px)` blocks four hundred lines apart. A test
+scanning for "the 1100px kpi-row step" found the OTHER copy and reported that
+no step existed — what duplicated CSS costs before the copies even drift.
+
+### ⛔ LOG SEARCH: ESSENTIAL FIRST, AND A PARAM WITH NO FIELD IS A BUG (v2.220.0)
+
+`lib/logSearchFields.js` holds the fields as DATA. Nineteen controls used to be
+on screen before any result.
+
+⛔ **THE REGISTRY EXISTS FOR THE COMPLETENESS GUARD, NOT THE LAYOUT.** The form
+is the whole query and carries no hidden inputs, so anything `/logs` accepts
+but the form cannot render **disappears on the first re-submit, silently
+WIDENING the search while looking unchanged**. That had happened twice
+(`srcCountry`, then `authOutcome`) and the warning lived in a comment, which
+cannot fail a build. Measured: **six more** accepted params had no control
+(`vendor`, `logSubtype`, `protocol`, `sourceIp`, `urlCategory`, `srcPort`).
+They are carried as hidden inputs and shown as chips.
+
+⛔ **TWO MECHANISMS, BOTH REQUIRED, because §8's hard half is "do not hide an
+active advanced filter without an indicator".** The `<details>` is rendered
+`open` SERVER-SIDE when anything inside is applied (no client state — React
+state would be shut on first paint over an applied filter), AND every applied
+filter is a removable chip. The disclosure is invisible once scrolled past;
+chips alone leave the operator hunting for the control.
+
+⛔ **A FIELD WITH NO CONTROL OPENS THE PANEL TOO.** Those matter more, not
+less: with nothing on screen for them, a shut panel leaves nothing at all
+between the operator and a filter narrowing their results.
+
+### ⛔ SETTINGS: WHOSE SETTING IS THIS (v2.220.0)
+
+`lib/settingsTabs.js`. Ten flat tabs became **My preferences / Administration /
+System** — and the defect was INSIDE two tabs, not only between them: the two
+an Operator can open both mixed personal with installation-wide (Appearance +
+your password + **Feed Sync**; MFA + the **idle timeout**).
+
+⛔ **A GROUP WITH NO VISIBLE TABS IS NOT RENDERED** — a heading over nothing
+reads as a loading failure.
+
+⛔ **THE SESSION TIMEOUT STAYED IN "MY ACCOUNT", REVERSING THIS WORK'S OWN
+FIRST DRAFT.** An admin-gated Sessions tab would have REMOVED a deliberate
+behaviour: `SessionTimeoutPanel` is shown to every role and editable only with
+`manage_settings`, because every role is subject to the timeout and someone
+signed out who cannot find out why concludes the product is broken. Gating it
+would hide the explanation from exactly the people who need it, for a tidier
+grouping. **Feed Sync** is what genuinely had no personal aspect, and that is
+what moved.
+
+⛔ **`general` AND `security` KEPT THEIR KEYS** although their contents moved,
+so every `?tab=` link already written down still lands on the control it did.
+
+### ⛔ `dHours` IS A WINDOW, NOT A FILTER (v2.220.0)
+
+Adopting the shared `FilterBar` on `/vpn` — the fourth and last hand-rolled
+filter bar — made "Clear filters" drop `dHours=168`, **silently returning a
+7-day investigation to the 24-hour default and changing every number on the
+page** while appearing only to remove a chip. Every detection in
+`vpnDetections.js` is computed over that window and its baseline gates are in
+days, so "clear" cannot mean "all of time". It is in `NON_FILTER_PARAMS` with
+`limit` and `tab`.
+
 ### ⛔ A FIREWALL'S PAGES CARRY THE FIREWALL (v2.219.0)
 
 `lib/deviceContext.js` (pure facts + one loader), `lib/deviceNav.js` (the
