@@ -22,6 +22,12 @@ import { getExposureCorrelationForDevice } from '../../lib/engines/exposureCorre
 // OverviewComplianceCard.js's "Fully Compliant" state avoids over-dramatizing
 // a good outcome.
 
+// ⛔ FIVE, AND THE REST ARE COUNTED RATHER THAN DROPPED. This widget shares a
+// row with two cards holding four figures each; it is an overview, not the
+// findings table. Measured on the live fleet, one device (IDC FW) has 167
+// high/critical exposure findings against a single patch-now CVE.
+const MAX_SHOWN = 5;
+
 function formatCvss(score) {
   if (score === null || score === undefined) return null;
   return Number(score).toFixed(1);
@@ -58,6 +64,15 @@ export default async function OverviewExposureCard({ deviceId }) {
   if (inputs.finding_count === 0) missingInputs.push('no rule-analysis findings have been produced for this device');
   if (inputs.patch_now_count === 0) missingInputs.push('this device has no open patch-now CVE assessment');
 
+  // ⛔ THE CVE SET IS A PROPERTY OF THE DEVICE, SO IT IS STATED ONCE.
+  // `cves` is identical on every correlation — exposureCorrelation.js joins
+  // each exposure finding against THE SAME device-level patch_now set — so
+  // taking it from the first row is not a shortcut, it is the shape of the
+  // data. A test pins that they really are identical.
+  const cves = correlations.length > 0 ? correlations[0].cves : [];
+  const shown = correlations.slice(0, MAX_SHOWN);
+  const more = correlations.length - shown.length;
+
   return (
     <Card>
       <CardBody>
@@ -78,65 +93,84 @@ export default async function OverviewExposureCard({ deviceId }) {
               : `This correlation could not be computed: ${missingInputs.join(', and ')}. That is not the same as "no exposure risk" — one of the two inputs is missing.`}
           </p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {correlations.map(({ finding, cves }) => (
-              <div
-                key={finding.id}
-                style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)',
-                  // Spacing scale, not a literal pair — --s3/--s4 ARE 12/16px
-                  // today, so this is visually identical and stays in step
-                  // with any future spacing change.
-                  padding: 'var(--s3) var(--s4)',
-                }}
-              >
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <SeverityBadge severity={finding.severity} />
-                  <FindingTypeBadge type={finding.finding_type} />
-                </div>
-                <p style={{ margin: '0 0 10px', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-                  {finding.detail}
-                </p>
+          <>
+            {/* ⛔ THE CORRELATION IS STATED ONCE, AT DEVICE LEVEL, IN THE
+                ENGINE'S OWN TERMS. Each finding used to carry its own
+                "Correlated with N open patch-now CVE(s) on this device: …"
+                block — so with 1 CVE and 167 findings (IDC FW, measured on
+                the live fleet) the identical three lines rendered 167 times.
+                ⛔ AND IT OVERCLAIMED. exposureCorrelation.js states plainly
+                that this is "a DEVICE-LEVEL correlation, not a claim that a
+                specific rule and a specific CVE target the identical
+                service/port — no such mapping exists anywhere in this
+                codebase's data model". Printed under each rule, it read as
+                exactly that per-rule claim. One sentence above the list says
+                what the engine actually found. */}
+            <p style={{ margin: '0 0 var(--s2)', fontSize: 'var(--text-base)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              <strong style={{ color: 'var(--text-primary)' }}>
+                {correlations.length} rule{correlations.length === 1 ? '' : 's'}
+              </strong>{' '}
+              widen{correlations.length === 1 ? 's' : ''} what can reach this firewall, while{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>
+                {cves.length} unpatched CVE{cves.length === 1 ? ' is' : 's are'}
+              </strong>{' '}
+              open on it.
+            </p>
 
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>
-                  Correlated with {cves.length} open patch-now CVE{cves.length === 1 ? '' : 's'} on this device:
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {cves.map((cve) => (
-                    <div
-                      key={cve.advisory_id}
-                      style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}
-                    >
-                      {cve.advisory_url ? (
-                        <a
-                          href={cve.advisory_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="link-quiet"
-                        >
-                          {cve.cve_id}
-                        </a>
-                      ) : (
-                        <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{cve.cve_id}</span>
-                      )}
-                      {/* An unscored CVE is the SCORER's gap. "CVSS —" with no
-                          explanation reads as a low or absent severity. */}
-                      {formatCvss(cve.cvss_score) === null ? (
-                        <NotMeasured
-                          text="CVSS —"
-                          reason="No CVSS base score has been published for this CVE yet. It is unscored, not low-severity."
-                        />
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)' }}>CVSS {formatCvss(cve.cvss_score)}</span>
-                      )}
-                      <CVEBadge kevListed={cve.kev_listed} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--s2) var(--s3)', marginBottom: 'var(--s3)' }}>
+              {cves.map((cve) => (
+                <span
+                  key={cve.advisory_id}
+                  style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: 'var(--text-sm)' }}
+                >
+                  {cve.advisory_url ? (
+                    <a href={cve.advisory_url} target="_blank" rel="noopener noreferrer" className="link-quiet">
+                      {cve.cve_id}
+                    </a>
+                  ) : (
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{cve.cve_id}</span>
+                  )}
+                  {/* An unscored CVE is the SCORER's gap. "CVSS —" with no
+                      explanation reads as a low or absent severity. */}
+                  {formatCvss(cve.cvss_score) === null ? (
+                    <NotMeasured
+                      text="CVSS —"
+                      reason="No CVSS base score has been published for this CVE yet. It is unscored, not low-severity."
+                    />
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>CVSS {formatCvss(cve.cvss_score)}</span>
+                  )}
+                  <CVEBadge kevListed={cve.kev_listed} />
+                </span>
+              ))}
+            </div>
+
+            {/* ⛔ ONE LINE PER RULE, AND CAPPED. This was a bordered card per
+                finding; uncapped, IDC FW rendered 167 of them inside an
+                overview widget whose two neighbours hold four figures each.
+                The overview's job is the worst few and a way through to the
+                rest. */}
+            <ul className="exp-list">
+              {shown.map(({ finding }) => (
+                <li key={finding.id} className="exp-item">
+                  <span className="exp-badges">
+                    <SeverityBadge severity={finding.severity} />
+                    <FindingTypeBadge type={finding.finding_type} />
+                  </span>
+                  <span className="exp-detail">{finding.detail}</span>
+                </li>
+              ))}
+            </ul>
+
+            {/* ⛔ THE REMAINDER IS COUNTED, NOT DROPPED. A truncated list that
+                looks complete is the more insidious failure — the operator
+                works to the bottom and believes they are finished. */}
+            {more > 0 && (
+              <a className="exp-more" href={`/devices/${deviceId}/analysis?tab=findings`}>
+                {more} more exposure finding{more === 1 ? '' : 's'} →
+              </a>
+            )}
+          </>
         )}
       </CardBody>
     </Card>

@@ -1158,3 +1158,14 @@ the hidden count, because a table missing columns still looks like a table.
 `.settings-rail`. The horizontal grouped row read as greyed-out tabs; a label
 before items on one baseline is a peer of them, and above a list it is a
 heading. Group labels are real `<h2>`s with `aria-labelledby` lists.
+
+## OverviewExposureCard — restructured v2.222.0
+
+The device Overview's exposure widget. The device-level CVE set is stated ONCE
+above the list (it is identical on every correlation); each finding is one line
+(severity · type · detail); capped at `MAX_SHOWN` = 5 with the remainder counted
+and linked. ⛔ The old per-finding "Correlated with N open patch-now CVEs" block
+both repeated one fact up to 167 times and read as the per-rule claim
+`exposureCorrelation.js` explicitly disclaims. ⛔ The three empty states and the
+unmeasured-CVSS treatment are unchanged. The overview grid now uses
+`align-items: start`.

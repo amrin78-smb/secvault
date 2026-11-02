@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.222.0': [
+    'The Exposure Risk panel on a firewall\u2019s overview no longer repeats the same vulnerability under every rule. The CVE is a fact about the firewall, not about each rule, so it is now stated once at the top — on one real device that block was being printed 167 times.',
+    'It also stopped implying something it never measured. SecVault correlates "this rule widens what can reach this box" with "this box has an unpatched vulnerability"; it does not claim the rule and the CVE involve the same port. Printed under each rule, it read as though it did.',
+    'The rule list is now one line each and shows the worst five, with a link to the rest, instead of a bordered card per finding with no limit.',
+    'The two panels beside it no longer stretch to match its height, which is where the large empty areas came from.',
+  ],
   '2.221.3': [
     'On a narrow screen the Settings sections keep their headings above their items instead of collapsing into one row, which is where the old confusing layout came from in the first place.',
     'The behaviour was already right by accident; the stylesheet comment beside it described the broken shape, so the next person reading the two together would have "fixed" it back.',

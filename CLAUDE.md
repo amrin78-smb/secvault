@@ -3262,6 +3262,36 @@ anywhere in this product. Rendering them backed by local component state would g
 control that forgets what they typed the moment they navigate, on the screen they use to decide
 what to do next. `tests/workQueueFilter.test.js` fails the build if one appears.
 
+### ⛔ A DEVICE-LEVEL FACT REPEATED PER ROW BECOMES A PER-ROW CLAIM (v2.222.0)
+
+`OverviewExposureCard` printed, under EVERY exposure finding, *"Correlated
+with N open patch-now CVE(s) on this device: CVE-… CVSS … KEV"*. `cves` is
+the SAME device-level set on every correlation, so that block rendered once
+per finding — measured on the live fleet, **IDC FW has 167 high/critical
+exposure findings against ONE patch-now CVE**, so the identical three lines
+rendered 167 times inside an overview widget.
+
+⛔ **AND THE REPETITION OVERCLAIMED AGAINST ITS OWN ENGINE.**
+`exposureCorrelation.js` states that this is *"a DEVICE-LEVEL correlation,
+not a claim that a specific rule and a specific CVE target the identical
+service/port — no such mapping exists anywhere in this codebase's data
+model"*. Printed under each rule, it read as exactly that per-rule claim. The
+fix is therefore not only shorter, it is more honest: the correlation is
+stated ONCE above the list, in the engine's own terms, and each rule is one
+line. ⛔ **If this ever stops being a device-level correlation, the layout has
+to change with it** — a test asserts the engine still carries that disclaimer.
+
+⛔ **CAPPED AT FIVE WITH THE REMAINDER COUNTED.** An overview widget shows the
+worst few and a way through to the rest; a truncated list that looks complete
+is the more insidious failure.
+
+⛔ **AND THE GRID STOPPED STRETCHING.** A CSS grid sizes every item to its
+row's height, so the two four-figure cards beside this one were padded with
+several hundred pixels of nothing to match it. `align-items: start`. **A
+ragged bottom edge is the correct outcome, not a defect to tidy away** —
+these cards answer unrelated questions and have genuinely different amounts
+to say, and equal heights were buying tidiness with empty space.
+
 ### ⛔ A GROUP LABEL IN A HORIZONTAL ROW READS AS A DISABLED TAB (v2.221.0)
 
 Settings' three groups were labels sitting inline in the tab row. The CSS

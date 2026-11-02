@@ -3852,3 +3852,42 @@ a.th-sort:focus-visible {
 @media (max-width: 1200px) { [data-col-priority="4"] { display: none; } }
 @media (max-width: 1000px) { [data-col-priority="3"] { display: none; } }
 @media (max-width: 820px)  { [data-col-priority="2"] { display: none; } }
+
+/* ── Device exposure-risk list (v2.222.0) ───────────────────────────────
+   ⛔ ONE LINE PER RULE, NOT A BORDERED CARD EACH. The card form repeated the
+   device-level CVE block under every finding — the same three lines up to
+   167 times on one live device — and that repetition also read as a per-rule
+   claim the engine explicitly does not make. The correlation is now stated
+   once above the list. */
+.exp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.exp-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--border-light);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.exp-item:first-child { border-top: none; padding-top: 0; }
+.exp-badges { display: inline-flex; gap: 6px; flex: none; }
+/* ⛔ WRAPS, NEVER TRUNCATES. The detail names the rule and the ports it
+   opens; an ellipsis here removes the only identifying information on the
+   row, and the density control is explicitly forbidden from hiding a value. */
+.exp-detail { color: var(--text-secondary); min-width: 0; overflow-wrap: anywhere; }
+.exp-more {
+  display: inline-block;
+  margin-top: var(--s3);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+.exp-more:hover { text-decoration: underline; }

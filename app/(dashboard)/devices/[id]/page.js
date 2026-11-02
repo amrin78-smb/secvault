@@ -913,7 +913,27 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             )}
           </div>
 
-          <div className="device-overview-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+          {/* ⛔ `align-items: start`, SO A SHORT CARD IS SHORT. A CSS grid
+              stretches every item to its row's height by default, so the two
+              four-figure cards beside Exposure Risk were padded out with
+              several hundred pixels of nothing to match it — which is what
+              made the long list look worse than it was. Reported directly:
+              "does not look good especially because of the long empty space
+              at its neighbouring widget."
+              ⛔ A ragged bottom edge is the correct outcome here, not a
+              defect to tidy away. These three cards answer unrelated
+              questions and have genuinely different amounts to say; equal
+              heights were buying visual tidiness with empty space. */
+          }
+          <div
+            className="device-overview-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
+              gap: 16,
+              alignItems: 'start',
+            }}
+          >
             <OverviewCveCard deviceId={device.id} />
             <OverviewExposureCard deviceId={device.id} />
             <OverviewHealthCard deviceId={device.id} />
