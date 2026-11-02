@@ -72,11 +72,25 @@ if (BASE.startsWith('https://') && (isLocal || process.env.SMOKE_INSECURE === '1
 // declared the list, wrote the warning above it, and then never used it, which
 // would have let the next person add `markers: ['Compliance']` and get a green
 // sweep from a blank page wrapped in a working sidebar.
-const NAV_LABELS = [
-  'Overview', 'Work queue', 'Alerts', 'Log search', 'Reports', 'Firewalls', 'Topology',
-  'Lifecycle', 'Vulnerabilities', 'Exposure', 'Segmentation', 'Applications',
-  'Rule hygiene', 'Compliance', 'VPN & identity', 'Settings',
-];
+// ⛔ DERIVED FROM THE REGISTRY, NOT A SECOND COPY. This was a hardcoded list,
+// and v2.220.0's nav renames made it STALE THE MOMENT THEY LANDED: it still
+// said 'Topology', 'Segmentation' and 'Coverage' while the sidebar had moved
+// to 'Topology & paths', 'Intent' and 'Data health'. So the guard was
+// protecting against three labels that no longer render and failing to protect
+// against the three that do — a guard that cannot fire, in the file whose own
+// comment explains why this guard exists. Reading lib/navRegistry.js means a
+// future rename cannot do it again.
+const { NAV_SECTIONS } = require('../lib/navRegistry');
+const NAV_LABELS = (() => {
+  const out = new Set();
+  for (const s of NAV_SECTIONS) {
+    if (s.group) { out.add(s.group); for (const i of s.items) out.add(i.label); }
+    else out.add(s.label);
+  }
+  // Rendered by the shell outside the nav registry.
+  out.add('Settings');
+  return [...out];
+})();
 
 const STATIC_ROUTES = [
   { path: '/login', anon: true, markers: ['Firewall security posture, in one place.'] },
@@ -133,7 +147,12 @@ const STATIC_ROUTES = [
   { path: '/exposure', markers: ['What is reachable from the internet, through which rule, to which internal host'] },
   { path: '/segmentation', markers: ['What you say must not connect'] },
   { path: '/applications', markers: ['What each application needs from the network'] },
-  { path: '/analysis', markers: ['Rule hygiene — Fleet', 'Rule hygiene &#x2014; Fleet'] },
+  // ⛔ THE SUBTITLE, NOT THE TITLE. This read 'Rule hygiene — Fleet' until
+  // v2.220.0 aligned every page title with the nav entry that leads to it —
+  // at which point the title BECAME a nav label, which this harness forbids as
+  // a marker because the sidebar renders it into every page. The sweep caught
+  // it on the first run after the rename, which is the harness working.
+  { path: '/analysis', markers: ['Rule findings across every active firewall'] },
   { path: '/compliance', markers: ['Compare PCI DSS', 'No active devices', 'PCI DSS'] },
   { path: '/settings', markers: ['Manage app configuration, users, and updates.'] },
   // ⛔ SWEPT SEPARATELY, because `/vulnerability` alone only loads the DEFAULT

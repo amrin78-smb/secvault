@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.220.1': [
+    'The page-render sweep that runs after every deploy was looking for the old name of the fleet rule-hygiene page and reporting it as blank. The page was fine; the check was out of date, and it is now looking for text that belongs to the page rather than to its heading.',
+    'That check also kept its own copy of the sidebar\u2019s labels, which the renames in 2.220.0 made stale on the same day — so it was guarding against three labels that no longer exist and none of the three that do. It reads the real list now.',
+    'No change to the product itself; both fixes are to the checks that run around it.',
+  ],
   '2.220.0': [
     'Log search no longer shows nineteen filters before it shows a single result. The window, the firewall, the log type and the two addresses are up front; everything else is behind "More filters", which opens itself whenever something inside it is in use and says how many — so a filter can never be narrowing your results invisibly.',
     'Six log-search filters that arrive on links from elsewhere in the product had no control at all, so pressing Search deleted them and quietly widened the search while the form looked unchanged. They are now preserved and shown as removable chips, alongside every other applied filter.',
