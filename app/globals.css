@@ -2129,7 +2129,10 @@ html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-alig
 }
 .ov-trust-item { display: flex; align-items: baseline; gap: 4px; }
 .ov-trust-n { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-.ov-trust-of { color: var(--text-muted); }
+/* ⛔ --text-secondary: this sits on --bg-primary, where --text-muted is
+   4.270:1. It is the " of 8" denominator inside "Can these numbers be
+   trusted?", the section whose whole purpose is coverage honesty. */
+.ov-trust-of { color: var(--text-secondary); }
 /* ⛔ THE TWO PROBLEM ENTRIES GET A HUE **AND** A GLYPH. Status is never carried
    by colour alone — and this one is a gap in OUR collection rather than a
    severity of the customer's, so it takes --tint-warn-fg (an action to
@@ -2367,6 +2370,16 @@ html[data-nav="drawer"] .sv-sidebar {
   top: var(--header-height);
   left: 0;
   bottom: 0;
+  /* ⛔ `height: auto` IS LOAD-BEARING, AND WITHOUT IT `bottom: 0` DID NOTHING.
+     The base .sv-sidebar rule sets `height: 100%`, and for a FIXED box `top` +
+     `height` win while `bottom` is ignored — and the percentage resolves
+     against the VIEWPORT, not against the .sv-body row this panel is no longer
+     a flex child of. So the drawer ran from y=72 to y=72+100vh: exactly
+     --header-height too tall, with .sv-sidebar-footer (the version line) below
+     the fold at every viewport height and nothing to scroll, because the panel
+     is fixed and its content fits. Measured at 1023x800: top 72, bottom 872,
+     footer 824-872, invisible. */
+  height: auto;
   width: var(--sidebar-width);
   min-width: var(--sidebar-width);
   z-index: 200;
@@ -2805,7 +2818,9 @@ tbody tr td { transition: background 0.12s ease; }
 .ev-kick {
   display: flex; align-items: center; justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 10px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+  /* 500: no mono 700 face is vendored (public/fonts/ has mono 400 and 500
+     only), so 700 was a browser-synthesised bold. Same fix .ev-close took. */
+  font-size: 10px; font-weight: 500; letter-spacing: .15em; text-transform: uppercase;
   color: var(--evidence);
 }
 .ev-close {
@@ -2827,7 +2842,8 @@ tbody tr td { transition: background 0.12s ease; }
 .ev-sec > b {
   display: block; margin-bottom: var(--s3);
   font-family: var(--font-mono);
-  font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  /* 500: no mono 700 face is vendored — see .ev-kick. */
+  font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase;
   color: var(--text-muted);
 }
 
@@ -2919,7 +2935,14 @@ tbody tr td { transition: background 0.12s ease; }
 .answer-context {
   font-family: var(--font-mono);
   font-size: var(--text-xs); letter-spacing: .09em; text-transform: uppercase;
-  color: var(--text-muted); margin-bottom: var(--s3);
+  /* ⛔ --text-secondary, NOT --text-muted. v2.215.0 removed .answer-header's
+     --bg-card ground, which moved this line onto .sv-content's --bg-primary --
+     and --text-muted measures 4.506:1 on --bg-card (AA by 0.006) but only
+     4.270:1 on --bg-primary, i.e. BELOW AA. designSystemRamp.test.js says of
+     that margin in its own message: "do not spend it". The flattening spent
+     it. --text-secondary is 8.531:1 there. Same fix .page-eyebrow and
+     .filter-label already took, with the same figure in their comments. */
+  color: var(--text-secondary); margin-bottom: var(--s3);
 }
 .answer-sentence {
   margin: 0;
@@ -2939,7 +2962,11 @@ tbody tr td { transition: background 0.12s ease; }
   display: flex; align-items: flex-start; gap: var(--s2);
   margin-top: var(--s3);
   font-size: var(--text-base);
-  color: var(--text-muted);
+  /* ⛔ See .answer-context: on --bg-primary, --text-muted is 4.270:1. This is
+     the line that states WHAT COULD NOT BE MEASURED -- the product's own
+     honesty mechanism, on eleven pages -- so it is the last thing that should
+     be the hardest to read. */
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .answer-hatch {
@@ -3233,6 +3260,15 @@ tbody tr td { transition: background 0.12s ease; }
   background: none; border: 0; color: var(--text-muted); cursor: pointer;
   font-size: var(--text-lg); line-height: 1; padding: 0 2px; flex: none;
 }
+/* ⛔ THE TINTED SURFACE'S OWN INK, not --text-muted. This file's rule is that
+   any tinted surface behind text MUST use a paired --tint-X and --tint-X-fg, and
+   .notice-dismiss set its own colour on the element, beating the row's
+   inherited pairing: 3.896:1 on the composited --tint-danger ground against
+   the row text's 5.868:1, at 20px/400 (below the 24px large-text threshold, so
+   4.5:1 applies). A licence is `bad` AND dismissible for at least 28 days of
+   every year, during which the only control on the red strip was the faintest
+   thing on it. The .notice-link rule two lines up already does exactly this. */
+.notice-row[data-tone="bad"] .notice-dismiss { color: inherit; }
 .notice-dismiss:hover { color: var(--text-primary); }
 
 /* ── Persistent device context header (v2.219.0, Phase 3) ────────────────
@@ -3601,7 +3637,10 @@ a.th-sort:focus-visible {
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  /* ⛔ --text-secondary: .settings-rail has no ground of its own, so this sits
+     on --bg-primary where --text-muted is 4.270:1 — below AA. At 12px/700 it is
+     not WCAG "large text" either, so 4.5:1 applies. See .answer-context. */
+  color: var(--text-secondary);
   padding: 0 var(--s3);
 }
 .settings-rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import Badge from '../ui/Badge';
 import TimeAgo from '../ui/TimeAgo';
 import { vendorLabel } from './vendorMeta';
-import { PollHealthDot } from './DevicePostureCells';
+import { PollHealthDot, PollHealthNote } from './DevicePostureCells';
 
 // THE PERSISTENT DEVICE CONTEXT HEADER. Rendered at the top of every
 // per-device page, so the asset, how fresh SecVault's view of it is, and what
@@ -53,7 +53,13 @@ function Freshness({ label, fresh, staleAfterDays }) {
       : fresh.state === 'stale'
         ? `Over ${staleAfterDays} days ago. Everything derived from it is that old too.`
         : fresh.state === 'unknown'
-          ? 'The recorded time is in the future — the device clock and the server clock disagree, so the age cannot be stated.'
+          // ⛔ THE CARRIED REASON WINS. `unknown` has two causes now — a future
+          // timestamp (clocks disagree) and "it happened but no timestamp was
+          // recorded" — and printing the clock sentence for the second would be
+          // a confident wrong mechanism on a strip whose job is saying what is
+          // and is not known.
+          ? (fresh.reason
+            || 'The recorded time is in the future — the device clock and the server clock disagree, so the age cannot be stated.')
           : undefined;
   return (
     <span className="fact" style={{ color: tone.color }} title={title}>
@@ -130,8 +136,18 @@ export default function DeviceContextHeader({
 
       <div className="dev-ctx-head">
         <div className="dev-ctx-ident">
+          {/* ⛔ THE DOT ALONE CARRIED `degraded` BY COLOUR, ON SIX PAGES. A
+              firewall whose config collection is succeeding 4 polls in 10 showed
+              a yellow dot and nothing else: unreadable on touch, invisible to
+              anyone not hovering, and status by hue alone, which this product
+              forbids. /devices had always paired the same dot with this note;
+              the header imported only the dot. PollHealthNote self-suppresses
+              for healthy and flaky, so a healthy header stays quiet. */}
           {c ? (
-            <PollHealthDot band={c.reachability.band} health={c.reachability.health} />
+            <>
+              <PollHealthDot band={c.reachability.band} health={c.reachability.health} />
+              <PollHealthNote band={c.reachability.band} health={c.reachability.health} />
+            </>
           ) : null}
           <h1 className="dev-ctx-name">{name}</h1>
           {vendor && (

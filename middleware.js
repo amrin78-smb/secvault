@@ -140,9 +140,19 @@ export async function middleware(request) {
 // ⛔ AND THE CLAIM READ HERE CAN BE STALE, WHICH IS WHY THE DIRECTION MATTERS.
 // `getToken()` only decrypts the cookie; it does not run callbacks.jwt (the
 // device-scope note below has the verification). So `token.role` is whatever
-// was written the last time NextAuth re-issued the cookie — on sign-in, on a
-// getServerSession() that re-issues, or on the /api/auth/session keep-alive
-// that components/layout/IdleTimeout.js fires on real activity. With the idle
+// was written the last time NextAuth re-issued the cookie — on sign-in, or on
+// the /api/auth/session keep-alive that components/layout/IdleTimeout.js fires
+// on real activity.
+//
+// ⛔ THIS SENTENCE USED TO NAME `getServerSession()` AS A THIRD RE-ISSUE PATH,
+// AND IT IS NOT ONE. In App Router server components and route handlers
+// next-auth builds a STUB response whose cookie setters are no-ops and throws
+// it away — `components/layout/IdleTimeout.js` and `lib/sessionPolicy.js` both
+// state this correctly and both say it was verified against next-auth 4.24.15.
+// The CONCLUSION below is unaffected and is still the safe one (the claim can
+// be as old as the token), but a confident wrong mechanism inside a
+// security-freshness argument is what sent a previous session to fix the wrong
+// thing at v2.174.0. With the idle
 // timeout switched off nothing fires that keep-alive and the claim can be as
 // old as the token. Both directions, and neither is a new hole:
 //

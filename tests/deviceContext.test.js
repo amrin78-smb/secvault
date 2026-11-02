@@ -46,6 +46,7 @@ function healthy(over = {}) {
     critical_cve_count: 0,
     critical_findings: 0,
     high_findings: 0,
+    open_findings: 0,
     compliance_pct: 51,
     open_diffs: 0,
     config_snapshot_count: 4,
@@ -106,6 +107,38 @@ describe('a figure that was not measured is not a zero', () => {
     const cleanAndAnalysed = deviceContextFacts(healthy(), { now: NOW });
     assert.equal(cleanAndAnalysed.posture.openFindings.measured, true);
     assert.equal(cleanAndAnalysed.posture.openFindings.value, 0);
+  });
+
+  // ⛔ THE TILE IS LABELLED "Open findings" AND LINKS TO THE UNFILTERED
+  // FINDINGS TAB, SO IT MUST COUNT EVERY SEVERITY. It summed critical + high
+  // only, and the version of this file that shipped that pinned the bug: the
+  // fixture set those two to 0, never set a medium count, and the assertion
+  // above therefore agreed that the zero was correct.
+  //
+  // ⛔ IT WAS THE COMMON CASE. ruleAnalysis.js emits `medium` for EIGHT of
+  // thirteen finding types and `info` for a ninth, so only four could ever
+  // reach the tile -- and `unused`, 185 live on the reference fleet, is one of
+  // the eight. A firewall in that state reported a MEASURED ZERO (no em-dash,
+  // no hue, no named gap) on all six of its pages while /devices banded it
+  // `medium` from the same rows.
+  it('⛔ "Open findings" counts EVERY severity, not just critical and high', () => {
+    const mediumOnly = deviceContextFacts(
+      healthy({ critical_findings: 0, high_findings: 0, open_findings: 197 }),
+      { now: NOW }
+    );
+    assert.equal(mediumOnly.posture.openFindings.measured, true);
+    assert.equal(mediumOnly.posture.openFindings.value, 197,
+      'a firewall whose findings are all medium/info must not read as a measured zero');
+
+    // And the query has to supply it, or the figure is 0 for every device on a
+    // live database however correct the arithmetic here is.
+    const src = stripComments(
+      fs.readFileSync(path.join(__dirname, '..', 'lib', 'deviceContext.js'), 'utf8')
+    );
+    assert.match(src, /COUNT\(\*\)\s+AS open_findings/,
+      'the lateral must count all rule_analysis_results rows for this device');
+    assert.doesNotMatch(src, /critical_findings \|\| 0\) \+ \(r\.high_findings/,
+      'summing only critical+high is the regression this test exists for');
   });
 
   it('⛔ drift needs TWO snapshots — one is a device collected from with nothing to compare', () => {
@@ -170,8 +203,16 @@ describe('reachability', () => {
       healthy({ last_connectivity_ok: true, pollBand: 'failing' }), { now: NOW }
     );
     assert.equal(f.reachability.band, 'failing');
-    assert.equal(f.reachability.lastManualOk, true,
-      'the manual result is still carried — labelled as what it is, not as reachability');
+
+    // ⛔ AND THE PROBE BOOLEAN IS NOT CARRIED AT ALL ANY MORE. It used to be,
+    // under a comment saying the manual result "is still carried — labelled as
+    // what it is" — but nothing on any page ever read it, so that described
+    // code which did not exist, and this assertion pinned the dead field in
+    // place. Reachability here is the dot plus PollHealthNote; the
+    // latest-probe boolean is still shown on /devices, where the fleet
+    // comparison lives.
+    assert.equal(f.reachability.lastManualOk, undefined,
+      'a field no surface renders must not be carried as though it were displayed');
   });
 
   it('⛔ an absent band is `unknown`, never `healthy`', () => {

@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { mergeFilterQuery } from '../../lib/urlFilters';
+import { filterHref } from '../../lib/urlFilters';
 import { resolveColumns, toggleColumn } from '../../lib/tableColumns';
 
 // Choose which columns a wide table shows.
 //
-// ⛔ IT WRITES THE URL THROUGH `mergeFilterQuery`, like every other control in
+// ⛔ IT WRITES THE URL THROUGH `filterHref`, like every other control in
 // this product. Rebuilding the query here would discard the filters and the
 // sort — the exact defect Phase 1 removed from four separate filter bars, and
 // this is the fifth control that would have reintroduced it.
@@ -41,7 +41,12 @@ export default function ColumnChooser({ basePath, defs, param = 'cols', label = 
 
   const toggle = (key) => {
     const next = toggleColumn(defs, value, key);
-    router.push(`${basePath}?${mergeFilterQuery(qs, { [param]: next }, { reset: [] })}`);
+    // ⛔ `filterHref`, not a hand-built template. The interpolated form emits a
+    // dangling `?` when the merge returns an empty string — un-hiding the last
+    // hidden column on an otherwise-bare URL navigated to `/devices?`. Cosmetic,
+    // and the shared helper already handles it, so there is no reason to keep a
+    // second way of building the same URL.
+    router.push(filterHref(basePath, qs, { [param]: next }, { reset: [] }));
   };
 
   return (

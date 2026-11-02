@@ -409,11 +409,30 @@ export default function LoginPage() {
                 ⛔ SUPPRESSED ONCE A LOCAL ATTEMPT HAS FAILED, matching the
                 timeout notice: the error is the fresher fact and two notices
                 stacked over the button read as one confused message. */}
+            {/* ⛔ CAUSE-NEUTRAL, AND IT USED NOT TO BE. The copy here named one
+                of SIX refusal outcomes as THE cause ("not mapped to a SecVault
+                role") and told the user to ask for a mapping. That is the right
+                instruction for exactly two of them — `no_mappings` and
+                `no_matching_group`. For `groups_overage` the fix is the app
+                registration emitting app-assigned groups only; for
+                `groups_unreadable` it is emitting a groups claim at all; for
+                `mappings_unreadable` PostgreSQL is down; and for
+                `mappings_malformed` lib/entraRoles.js states that re-saving the
+                mappings will NOT fix it. Five of six were sent to the wrong
+                person, which is the confident-wrong-mechanism failure this
+                codebase rates worse than saying nothing.
+
+                ⛔ AND IT SAID "sign in again", which the comment immediately
+                below asserts this notice deliberately does not — the two
+                notices existing separately is the whole point, because a
+                terminal cause wastes the user's afternoon. The REASON is
+                recorded per refusal (v2.211.0) and readable by the person who
+                can act on it, so this points there rather than guessing. */}
             {ssoRefused && !error && (
               <p className="login-note login-note-info">
-                Microsoft signed you in, but this account is not mapped to a SecVault role, so
-                there is nothing for it to open yet. Ask a SecVault administrator to map one of
-                your directory groups to a role, then sign in again.
+                Microsoft signed you in, but SecVault did not grant this account access. A
+                SecVault administrator can see the reason under Settings &rsaquo; Single
+                sign-on and will need to act on it before this will work.
               </p>
             )}
 

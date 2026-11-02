@@ -5,6 +5,9 @@ import { authOptions } from '../auth/[...nextauth]/route';
 import { can, MANAGE_USERS, forbiddenResponse } from '../../../lib/rbac';
 import * as ldapRoles from '../../../lib/ldapRoles';
 import * as entraRoles from '../../../lib/entraRoles';
+import path from 'path';
+import { readEnvFile } from '../../../lib/envFile';
+import { findGitRoot } from '../../../lib/updateCheck';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +19,34 @@ export const dynamic = 'force-dynamic';
 // Users panel — it is a larger one, because the membership is maintained
 // somewhere SecVault cannot see. It belongs with whoever can also create
 // accounts, never with every administrator.
+
+// ⛔ CONFIGURED-NESS IS READ FROM THE SAVED FILE AS WELL AS THE RUNNING ENV,
+// AND READING ONLY THE RUNNING ENV HID THE WARNING EXACTLY WHEN IT WAS
+// ACTIONABLE. `process.env` is populated once at startup, and
+// `PUT /api/system/entra` answers `restartRequired: true` by design — so
+// between saving the tenant in Settings → Single sign-on and restarting
+// SecVault-App, `isEntraConfigured(process.env)` is FALSE.
+//
+// During that sitting the panel therefore suppressed "No Entra user can sign in
+// yet", which is the single most important sentence on it, and rendered the
+// "not configured" card instead — telling the administrator to set the three
+// variables "in .env.local", the file the panel directly above had just written
+// for them, and the hand-editing v2.209.0 exists to remove. They restart,
+// announce SSO is live, and only then discover that zero `provider='entra'`
+// rows means every sign-in is refused.
+//
+// A failed read is treated as "nothing saved" rather than throwing: this is a
+// presentational hint beside a mapping table, and the mappings matter more than
+// the hint. The UNKNOWN case cannot arise usefully here — if the file is
+// unreadable the running env is still authoritative for what is in force.
+function savedEntraEnv() {
+  try {
+    const root = findGitRoot(process.cwd()) || process.cwd();
+    return readEnvFile(path.join(root, '.env.local')).values || {};
+  } catch {
+    return {};
+  }
+}
 
 function ldapConfigured() {
   return !!(process.env.LDAP_URL || '').trim();
@@ -84,16 +115,26 @@ export async function GET() {
     // single most important warning on this panel ambiguous.
     const mappings = await ldapRoles.loadMappings(pool, 'ldap');
     const entraMappings = await ldapRoles.loadMappings(pool, 'entra');
+    const entraRunning = entraRoles.isEntraConfigured(process.env);
+    const entraSaved = entraRoles.isEntraConfigured(savedEntraEnv());
+    // Configured for the purpose of this panel's warnings means "an
+    // administrator has expressed the intent", which a saved file states just
+    // as well as a running process.
+    const entraConfigured = entraRunning || entraSaved;
     return NextResponse.json({
       mappings,
       entraMappings,
       ldapConfigured: ldapConfigured(),
-      entraConfigured: entraRoles.isEntraConfigured(process.env),
+      entraConfigured,
+      // ⛔ SO THE PANEL CAN SAY "saved, restart required" RATHER THAN "not
+      // configured" — two different instructions, and the second sends the
+      // administrator to edit a file by hand.
+      entraRestartRequired: entraSaved && !entraRunning,
       // ⛔ THE INVERSE OF legacyModeActive BELOW, AND THE PANEL MUST NOT
       // PRESENT THEM THE SAME WAY. Zero LDAP mappings means everyone is an
       // Administrator; zero ENTRA mappings means nobody can sign in at all.
       // Same empty table, opposite consequences.
-      entraNoMappings: entraRoles.isEntraConfigured(process.env) && entraMappings.length === 0,
+      entraNoMappings: entraConfigured && entraMappings.length === 0,
       // ⛔ THE PANEL MUST BE ABLE TO SAY THIS OUT LOUD. Zero mappings with LDAP
       // switched on means every person who can bind to the directory is an
       // Administrator of this platform right now. That is the state the product

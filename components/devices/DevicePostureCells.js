@@ -295,9 +295,15 @@ export function CveCell({ patchNow, scheduled, versionString, lastAssessedAt, as
 }
 
 // Collector health for one device. ⛔ Replaces the StatusDot that used to be
-// driven by devices.last_connectivity_ok — a single value written ONLY by the
-// manual "Test connectivity" button, so it could be weeks stale and showed
-// TSR_EKC as fine while every one of its polls had failed for 19 days.
+// driven by devices.last_connectivity_ok — a single LATEST BOOLEAN, where this
+// is a success RATE over history, and only the second can tell a firewall that
+// is answering from one that answered once. It showed TSR_EKC as fine while
+// every one of its polls had failed for 19 days.
+//
+// ⛔ "written ONLY by the manual 'Test connectivity' button" was the reason
+// given here and it has gone stale: lib/adapters/index.js now writes that
+// column on EVERY collectAndStore pass. The conclusion stands on the
+// boolean-vs-rate distinction above, which does not expire.
 //
 // ⛔ Per-source, never blended. TUG is 166/166 on metrics and badly degraded on
 // its VPN poll; one averaged number would hide precisely the broken collector.
@@ -360,7 +366,17 @@ export function PollHealthNote({ band, health }) {
         fontSize: 'var(--text-xs)',
         // healthy/flaky returned above, so the fall-through band is 'unknown'
         // — never observed, which is --unmeasured and not a ramp hue.
-        color: band === 'failing' ? 'var(--red)' : band === 'degraded' ? 'var(--yellow)' : 'var(--unmeasured)',
+        //
+        // ⛔ THE PAIRED `-fg` FORMS, NOT THE RAW RAMP. globals.css states that
+        // the raw --sev-*/--yellow/--red ramp is for GRAPHICS: measured,
+        // --yellow is 3.641:1 on --bg-card and 3.450:1 on --bg-primary, which
+        // clears 1.4.11's 3:1 for a graphic and FAILS 1.4.3's 4.5:1 for text.
+        // This is text. --tint-warn-fg is 5.801/5.496 and --tint-danger-fg
+        // 6.787/6.431. It mattered more once this note was mounted on the six
+        // per-device pages as well as /devices.
+        color: band === 'failing'
+          ? 'var(--tint-danger-fg)'
+          : band === 'degraded' ? 'var(--tint-warn-fg)' : 'var(--unmeasured)',
       }}
     >
       {tone.label}{pct}

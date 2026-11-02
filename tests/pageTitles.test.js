@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { NAV_SECTIONS } = require('../lib/navRegistry');
+const { DEVICE_NAV } = require('../lib/deviceNav');
 
 const REPO = path.join(__dirname, '..');
 
@@ -103,6 +104,62 @@ describe('every nav destination opens with the title it was clicked by', () => {
       Object.keys(EXEMPT).length <= 2,
       'each exemption is a destination this guard no longer protects'
     );
+  });
+});
+
+// ⛔ THE SAME GUARD OVER THE PER-DEVICE NAV, WHICH IT NEVER SAW. This file
+// reads NAV_SECTIONS only, so the ten-entry DEVICE_NAV added in v2.219.0 was
+// uncovered — and it had shipped with the very defect this file exists for:
+// "Policy" opened a page headed "Firewall rules", two names sharing no word,
+// which is the Intent/Segmentation shape exactly. "Changes" opened "Config
+// changes". Fixed by titling the pages for the links that lead to them.
+//
+// ⛔ MOST DEVICE_NAV ENTRIES ARE `?tab=` VIEWS INSIDE /devices/[id] AND HAVE NO
+// PageHeader OF THEIR OWN — the context header carries the device's identity
+// instead. Those are named here with a reason each rather than skipped
+// silently, following this file's own convention.
+const DEVICE_EXEMPT = Object.freeze({
+  overview: 'a ?tab= view inside /devices/[id]; the context header carries the name',
+  cves: 'a ?tab= view, no PageHeader of its own',
+  logs: 'a ?tab= view, no PageHeader of its own',
+  admins: 'a ?tab= view, no PageHeader of its own',
+  manage: 'a ?tab= view, no PageHeader of its own',
+  compliance: 'an absolute route to /compliance/[deviceId], whose title names the framework',
+});
+
+describe('every per-device nav entry opens with the title it was clicked by', () => {
+  const titleIn = (rel) => {
+    const file = path.join(REPO, rel);
+    if (!fs.existsSync(file)) return null;
+    const src = fs.readFileSync(file, 'utf8');
+    const m = src.match(/<PageHeader[\s\S]{0,300}?title=(?:"([^"]+)"|\{`([^`]+)`\}|\{'([^']+)'\})/);
+    return m ? decode(m[1] || m[2] || m[3]) : null;
+  };
+
+  for (const entry of DEVICE_NAV) {
+    if (DEVICE_EXEMPT[entry.key]) continue;
+    it(`${entry.label} (${entry.path || entry.absolute})`, () => {
+      const rel = `app/(dashboard)/devices/[id]${entry.path}/page.js`;
+      const title = titleIn(rel);
+      assert.ok(title !== null, `${rel} has no findable PageHeader title`);
+      assert.equal(title, decode(entry.label),
+        `the device nav says "${entry.label}" and the page says "${title}" — an operator `
+        + 'clicking the first cannot tell they arrived at the second');
+    });
+  }
+
+  it('⛔ every device exemption still names a real entry', () => {
+    const keys = new Set(DEVICE_NAV.map((e) => e.key));
+    for (const k of Object.keys(DEVICE_EXEMPT)) {
+      assert.ok(keys.has(k), `exemption for "${k}" no longer matches any DEVICE_NAV entry`);
+    }
+  });
+
+  it('⛔ the device exemptions have not grown into a way of avoiding the check', () => {
+    const covered = DEVICE_NAV.filter((e) => !DEVICE_EXEMPT[e.key]);
+    assert.ok(covered.length >= 4,
+      `only ${covered.length} device nav entries are checked; each exemption is an entry `
+      + 'this guard no longer protects');
   });
 });
 

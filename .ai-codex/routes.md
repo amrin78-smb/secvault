@@ -250,6 +250,59 @@ POST /api/users [admin] [db] — create user (bcrypt hash, role defaults to view
 PUT /api/users/[id] [admin] [db] — update role and/or password; blocks a role change that would remove the last admin.
 DELETE /api/users/[id] [admin] [db] — delete user; blocks deleting your own logged-in account and blocks removing the last admin.
 
+## /api/users/[id]/device-scope
+
+⛔ **BOTH VERBS ARE `manage_users` (super_admin only), NOT `manage_settings`** — whoever can widen
+an account's device scope decides who sees which customer's firewalls, so it sits with whoever can
+also create accounts. ⛔ The route is itself classified **`blocked`** in `lib/deviceScopeCoverage.js`:
+it returns the NAMES of firewalls the caller may not hold.
+
+GET /api/users/[id]/device-scope [super_admin] [db] — that account's granted firewalls plus its
+`state`, and a `note` saying in words what the state means. 400 on a non-UUID id; **500 on a read
+failure** — this is an administrator's read, so it reports the failure rather than answering. ⛔ Do
+NOT confuse that with ENFORCEMENT: the `unknown`-state-denies rule lives in
+`loadScopeForSession` (`lib/deviceScope.js`), which is what every protected surface calls. This
+route never decides access.
+
+PUT /api/users/[id]/device-scope [super_admin] [db] — replace the scope with `{deviceIds: []}`.
+⛔ **AN EMPTY ARRAY WIDENS ACCESS RATHER THAN REVOKING IT** (zero rows means UNSCOPED = the whole
+fleet), and the 200 response says so in `note` rather than leaving it to be discovered; to revoke
+access, disable the account. Refusals, each for its own reason: **409** when the target holds
+`manage_users` — a Super Admin who scoped themselves, or the only other one, would be refused by the
+only endpoint that can undo it, recoverable only by a direct database edit (checked on the
+CAPABILITY, never the word "admin", because `admin` does not hold it and IS scopable); **400** when
+`deviceIds` is not an array, contains a non-UUID, or names a device that does not exist (accepting a
+typo would silently grant FEWER firewalls than intended); **404** when the user does not exist.
+⛔ `appliesTo` states the one real residual: pages re-read the database every render so they apply
+at once, while API endpoints are gated by middleware reading a claim in the signed session cookie,
+so a NEWLY GRANTED restriction reaches them only when that cookie is re-issued — sign the account
+out to apply it immediately. ⛔ A POST-COMMIT failure returns **200** with `readBackFailed: true`,
+NOT a 500: the scope IS set, and reporting it as a failure would tell an administrator their
+restriction was rejected when it is already in force.
+
+## /api/users/[id]/mfa
+
+⛔ All three verbs are `manage_users` (super_admin only), and this is the route by which a Super
+Admin resets MFA on **another** account — one of the three independent ways back in from a lockout
+(the others are recovery codes and `node lib/mfa-reset.js <username>` on the server). Distinct from
+`/api/mfa`, which acts on `session.user.id` and is the documented third exception to the
+mutating-route rule.
+
+GET /api/users/[id]/mfa [super_admin] [db] — that account's enrolment status. 400 on a non-UUID id.
+PUT /api/users/[id]/mfa [super_admin] [db] — `{required: true|false}` sets `user_mfa.required`. 400
+unless the value is exactly boolean; 404 if the user does not exist. ⛔ SecVault deliberately does
+NOT implement NetVault's `enrolmentRequired` enforcement — `authorize()` does not refuse a login for
+an account flagged required that never enrolled, so do not add the response field without the
+enforcement it describes.
+DELETE /api/users/[id]/mfa [super_admin] [db] — clear the second factor on that account (the
+lockout path above). 400 on a non-UUID id; 404 if the user does not exist. Writes an `mfa_reset`
+line to `activity_log`, and a failed audit write is warned, never fatal — the reset has already
+happened. ⛔ **IT REFUSES TO ACT ON THE CALLER'S OWN ACCOUNT (400), AND THAT IS A REAL BOUNDARY
+RATHER THAN TIDINESS.** Changing your own MFA goes through `/api/mfa`, which demands a CURRENT
+CODE; without this refusal a Super Admin holding only a password could clear their own second
+factor through the admin path and the factor would not be a second one. ⛔ It removes only the
+second factor, never the password.
+
 ## /api/vpn/detections/export
 
 GET /api/vpn/detections/export [auth: `view_identity`] [db] — one VPN threat detection as CSV

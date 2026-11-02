@@ -38,6 +38,7 @@ import { IconChevronLeft, IconChevronDown } from '../icons';
 // palette's page results filter over this list, and a destination missing from
 // it is a page the search quietly stops finding.
 export { NAV };
+export { glyph };
 
 /**
  * Icon name → component.
@@ -48,6 +49,15 @@ export { NAV };
  * chip with no glyph is a legible row with a gap in it, and the test is what
  * stops that reaching a release.
  */
+// ⛔ EXPORTED because HeaderSearch needs the SAME resolution and did not have
+// it. v2.216.0 moved the registry to lib/navRegistry.js and renamed the key
+// from `Icon` (a component reference) to `icon` (a string name); this file was
+// updated and `HeaderSearch.js` was not, so its `<p.Icon />` was rendering
+// `undefined` for every page result and THROWING -- with no error.js anywhere
+// under app/, that unmounted the root and the operator got a blank page with
+// "Application error" on it, for typing two characters into the header search.
+// One resolver, exported, is what stops a second consumer reinventing a worse
+// one.
 function glyph(name) {
   const Cmp = Icons[name];
   return typeof Cmp === 'function' ? Cmp : null;
@@ -249,7 +259,15 @@ export default function Sidebar({ version, capabilities }) {
                 {/* ⛔ aria-label ON THE LIST, because at rail width the header
                     above is display:none and the grouping would otherwise be
                     announced as one undifferentiated run of links. */}
-                <div className="sv-nav-items" id={bodyId} aria-label={section.group}>
+                {/* ⛔ role="group" IS WHAT MAKES THE aria-label LEGAL AND RELIABLE. A
+                      bare <div> maps to `generic`, where ARIA 1.2 prohibits an
+                      accessible name — Chromium happens to compute it anyway, but
+                      "the browser we tried does it" is not the contract, and the
+                      label is what stops the fifteen destinations being announced
+                      as one undifferentiated run of links at rail width. The
+                      element already has the name and is already the aria-controls
+                      target; this is the one word that was missing. */}
+                  <div className="sv-nav-items" id={bodyId} role="group" aria-label={section.group}>
                   {items.map((item) => (
                     <NavLink
                       key={item.href}

@@ -58,11 +58,20 @@ describe('listing', () => {
     assert.match(fn.slice(0, fn.indexOf('\n}')), /LEFT JOIN devices d/);
   });
 
-  it('the limit is bounded and parameterised', () => {
+  // ⛔ THE BOUND IS ASSERTED BY BEHAVIOUR, NOT BY THE ARITHMETIC'S SPELLING.
+  // This used to require the literal `Math.min(Math.max(` in the source, which
+  // is "testing the mechanism, not the outcome" — it failed on CORRECT code the
+  // moment the clamp was rewritten to stop a negative limit resolving to ONE
+  // row, and it would have passed just as happily over a clamp that was
+  // reshuffled into something wrong. The real bound is exercised in
+  // "listRecentJobs clamps the limit rather than trusting it" below; what is
+  // worth pinning HERE is that the value is parameterised rather than
+  // interpolated into the SQL.
+  it('the limit is parameterised, never interpolated', () => {
     const fn = JOBS_LIB.slice(JOBS_LIB.indexOf('async function listRecentJobs'));
     const body = fn.slice(0, fn.indexOf('\n}'));
-    assert.match(body, /Math\.min\(Math\.max\(/);
     assert.match(body, /LIMIT \$1/);
+    assert.doesNotMatch(body, /LIMIT \$\{/, 'the limit must never be interpolated into the SQL');
   });
 });
 
@@ -153,6 +162,86 @@ describe('the panel', () => {
 describe('the collection-health indicator', () => {
   const counts = (o) => ({ deviceCount: 8, devicesCollectedFresh: 8, devicesNeverCollected: 0, collectionStaleAfterDays: 7, ...o });
 
+  // ⛔ A FAILED FIRST READ MUST NOT LOOK LIKE A READ IN FLIGHT. `jobs` is null
+  // in both cases — before the first poll, and after one that failed, because
+  // the catch keeps the last good list rather than blanking it. The panel
+  // therefore has to branch on BOTH, or a 503 on the first poll renders
+  // "Loading…" indefinitely over the one state it exists to surface.
+  it('⛔ a failed FIRST read says so, rather than claiming to be loading', () => {
+    const panel = read('components/layout/JobCentre.js');
+    assert.match(panel, /jobs === null && failed \?/,
+      'the failed-and-empty case must be branched BEFORE the plain null case, '
+      + 'or a 503 on the first poll shows "Loading…" for ever');
+    assert.match(panel, /could not read the job list/i);
+    // The ordering is the whole fix: a plain `jobs === null` test first would
+    // shadow it.
+    assert.ok(
+      panel.indexOf('jobs === null && failed') < panel.indexOf('>Loading'),
+      'the failed branch must come first'
+    );
+  });
+
+  // ⛔ THE ENGINE IS EXERCISED, NOT REGEXED. Every property of listRecentJobs
+  // that matters was asserted by slicing the source and matching characters —
+  // the single query, the LEFT JOIN, the live-first ORDER BY — while
+  // tests/backgroundJobs.test.js never called the function at all. A rewrite
+  // that kept the right words and changed the behaviour passed 6442 tests, and
+  // the suite's stub-pool pattern was already sitting there to prevent exactly
+  // that.
+  it('⛔ listRecentJobs: ONE query, live first, device name LEFT-joined', async () => {
+    const { listRecentJobs } = require('../lib/engines/backgroundJobs');
+    const seen = [];
+    const stub = {
+      query: async (sql, params) => {
+        seen.push({ sql, params });
+        return { rows: [{ id: 'j1', status: 'running', device_name: null }] };
+      },
+    };
+
+    const rows = await listRecentJobs(stub, { limit: 5 });
+    assert.deepEqual(rows, [{ id: 'j1', status: 'running', device_name: null }],
+      'the rows are returned as the database gave them');
+
+    // ⛔ ONE query. Two can disagree: a job finishing between them appears in
+    // NEITHER list, and "in neither" is a job that vanishes from the panel
+    // whose purpose is not losing track of it.
+    assert.equal(seen.length, 1, `issued ${seen.length} queries, must be exactly 1`);
+
+    const { sql, params } = seen[0];
+    // ⛔ LEFT JOIN, not JOIN — a finished DELETE is exactly the case where the
+    // device row is gone, and an inner join would drop the job that mattered.
+    assert.match(sql, /LEFT JOIN devices/i);
+    assert.doesNotMatch(sql, /\n\s*(INNER )?JOIN devices/i);
+    // Live work first, then newest.
+    assert.match(sql, /ORDER BY[\s\S]*queued[\s\S]*running[\s\S]*DESC/i);
+    assert.deepEqual(params, [5], 'the limit must be parameterised, never interpolated');
+  });
+
+  it('⛔ listRecentJobs clamps the limit rather than trusting it', async () => {
+    const { listRecentJobs } = require('../lib/engines/backgroundJobs');
+    const asked = [];
+    const stub = { query: async (_s, p) => { asked.push(p[0]); return { rows: [] }; } };
+    for (const given of [0, -5, 1000, 'abc', 7, 7.9]) {
+      await listRecentJobs(stub, { limit: given });
+    }
+    // ⛔ A NEGATIVE FALLS BACK TO THE DEFAULT, NOT TO 1. It used to clamp to 1
+    // (`Number(-5) || 20` is -5, then Math.max(-5, 1)), which presents a
+    // one-row list as "recent background jobs" — a truncated list that looks
+    // complete.
+    assert.deepEqual(asked, [20, 20, 100, 20, 7, 7],
+      'an unbounded, negative or nonsense limit must not reach the database');
+  });
+
+  // ⛔ A FAILED READ MUST NOT RESOLVE. listRecentJobs has no try/catch by
+  // design, so the throw reaches the route, which answers 503 — the whole
+  // reason the route is not allowed to return `{jobs: []}`.
+  it('⛔ a failed query THROWS rather than resolving to an empty list', async () => {
+    const { listRecentJobs } = require('../lib/engines/backgroundJobs');
+    const stub = { query: async () => { throw new Error('connection terminated'); } };
+    await assert.rejects(() => listRecentJobs(stub), /connection terminated/,
+      'resolving to [] here would render "Nothing has run recently" over a failed read');
+  });
+
   it('⛔ A HEALTHY FLEET RENDERS NOTHING', () => {
     const h = describeCollectionHealth(counts());
     assert.equal(h.state, 'ok');
@@ -179,6 +268,42 @@ describe('the collection-health indicator', () => {
     assert.equal(/getFleetHeadline/.test(lib), false,
       'the indicator renders on every page and must not pay for the security '
       + 'score and compliance roll-up to learn four counts');
+  });
+
+  // ⛔ AN EMPTY FLEET IS A SUCCESSFUL READ, AND IT WAS REPORTED AS A FAILED ONE.
+  // `total <= 0` used to sit inside the unreadable guard, so a fresh install —
+  // or any install whose devices are all `active = false`, since
+  // getDeviceCounts filters on that — got byte-identical output to a count that
+  // threw: a COLLECTION UNKNOWN chip on every page of the console, hovering
+  // "SecVault could not count how recently it collected from the fleet". It
+  // counted perfectly; there was simply nothing in the inventory. That is
+  // `none` collapsed into `unknown`, which this product keeps apart everywhere
+  // else, on the SECOND indicator in this file to lie about itself.
+  it('⛔ AN EMPTY FLEET IS `empty` AND SILENT — not `unknown`, and not a chip', () => {
+    const e = describeCollectionHealth({ total: 0, collected_fresh: 0, never_collected: 0 });
+    assert.equal(e.state, 'empty', 'a successful count of zero is not a failed count');
+    assert.equal(e.label, null, 'no fleet means no figures whose currency could be in doubt');
+    assert.equal(e.title, null);
+    // And it must stay distinguishable from the failed read.
+    assert.notEqual(e.state, describeCollectionHealth(null).state);
+  });
+
+  // ⛔ `Number(null)` IS 0, AND 0 IS FINITE. An explicit null count used to
+  // become a confident measured zero: `{total: 8, collected_fresh: null}` gave
+  // `0/8 CURRENT` and "8 last collected over 7 days ago" — a failed read
+  // printed as a precise fact. CLAUDE.md names this exact trap in the licensing
+  // section. No current caller can produce it; this function is exported and
+  // its own comment invites new ones.
+  it('⛔ a NULL count is unknown, never a measured zero', () => {
+    for (const bad of [
+      { total: 8, collected_fresh: null, never_collected: null },
+      counts({ devicesCollectedFresh: null }),
+      counts({ deviceCount: null }),
+    ]) {
+      const h = describeCollectionHealth(bad);
+      assert.equal(h.state, 'unknown', JSON.stringify(bad));
+      assert.equal(h.label, 'COLLECTION UNKNOWN');
+    }
   });
 
   it('⛔ AN UNREADABLE COUNT IS `unknown`, NEVER `ok`', () => {

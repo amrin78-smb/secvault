@@ -1,5 +1,6 @@
 import { pool } from '../../lib/db';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import EmptyState from '../ui/EmptyState';
 
 // Dashboard widget: CURRENT (live) fleet-wide CVE severity counts, plus an
@@ -34,7 +35,15 @@ export default async function CveSeveritySummary() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+      {/* ⛔ AN EXPLICIT COLUMN COUNT, NOT `auto-fit`. Four tiles at
+          minmax(120px) with an 8px gap resolve to THREE columns for every
+          container width in [376px, 504px) — three across and Low orphaned on
+          a second row, which reads as a layout fault rather than as a group.
+          auto-fit cannot be tuned out of this, because it does not know how
+          many tiles there are: any width that fits five will orphan a sixth,
+          and any that fits three orphans a fourth. KpiRow's 4 -> 2 -> 1 steps
+          all divide. */}
+      <KpiRow cols={4}>
         {SEVERITY.map(({ key, label, color }) => {
           const sub = comparison
             ? deltaLabel(live[key] - Number(comparison[snapshotKey[key]] ?? 0), comparisonGapDays)
@@ -42,7 +51,7 @@ export default async function CveSeveritySummary() {
           const tileColor = live[key] > 0 ? color : 'var(--text-muted)';
           return <StatCard key={key} label={label} value={live[key]} color={tileColor} sub={sub} compact />;
         })}
-      </div>
+      </KpiRow>
       <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
         {total} scored CVE assessment{total === 1 ? '' : 's'} across active devices.
       </div>

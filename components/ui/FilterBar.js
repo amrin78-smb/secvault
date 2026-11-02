@@ -162,10 +162,30 @@ export default function FilterBar({
   // Otherwise an active filter sits inside a collapsed section with nothing on
   // screen to say so — and the chips below are the only trace. Starting open
   // when it has state is cheaper to understand than a badge on the toggle.
+  //
+  // ⛔ SEEDED, NOT OR-ED, AND THAT DISTINCTION IS THE WHOLE BUG. This read
+  // `open = showAdvanced || advancedApplied`, so with an advanced filter
+  // applied `open` was permanently true: clicking flipped `showAdvanced`
+  // between false and true while `open` never changed, the label never left
+  // 'Fewer filters', and `aria-expanded` stayed "true". A keyboard or
+  // screen-reader user got a button announcing itself expanded and refusing to
+  // respond — the comment above said "STARTING open", and the code was LOCKED
+  // open. `components/logs/LogSearchForm.js` already had this right with
+  // `<details open={openAdvanced || undefined}>`, which seeds the initial
+  // state and still lets the panel be collapsed.
   const advancedKeys = new Set(defs.filter((d) => d.advanced).map((d) => d.key));
   const advancedApplied = chips.some((c) => advancedKeys.has(c.key));
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const open = showAdvanced || advancedApplied;
+  const [open, setOpen] = useState(advancedApplied);
+
+  // ⛔ A NAVIGATION CAN APPLY ONE AFTER MOUNT. This component is not remounted
+  // when the query string changes, so seeding alone would leave the panel shut
+  // over a filter that became applied — which is the thing the disclosure must
+  // never do. Collapsing it again afterwards is the operator's choice, and the
+  // chips are rendered unconditionally, so an applied filter always has an
+  // indicator even when the panel is shut.
+  useEffect(() => {
+    if (advancedApplied) setOpen(true);
+  }, [advancedApplied]);
 
   function removeChip(key) {
     router.push(filterHref(basePath, qs, { [key]: '' }));
@@ -181,7 +201,7 @@ export default function FilterBar({
             className="filter-more"
             aria-expanded={open}
             aria-controls="filter-advanced"
-            onClick={() => setShowAdvanced((v) => !v)}
+            onClick={() => setOpen((v) => !v)}
           >
             {open ? 'Fewer filters' : advancedLabel}
           </button>

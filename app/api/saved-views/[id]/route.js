@@ -3,6 +3,7 @@ import { pool } from '../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { deleteSavedView } from '../../../../lib/savedViews';
+import { ownerOf, OWNER_STATES } from '../../../../lib/sessionOwner';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,34 +12,13 @@ export const dynamic = 'force-dynamic';
 // ID: an Entra `oid` is a GUID, so the shape test that used to live here read
 // an Entra session as a local account.
 //
-// ⛔ DUPLICATED FROM ../route.js, DELIBERATELY — two route files, one rule. If
-// either copy changes, change both in the same commit.
-const OWNING_PROVIDERS = new Set(['local']);
-const NON_OWNING_PROVIDERS = new Set(['ldap', 'entra']);
-const LOCAL_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OWNER_STATES = { OWNER: 'owner', NON_OWNING: 'non-owning', UNKNOWN: 'unknown' };
-
-function ownerOf(session) {
-  const id = session?.user?.id;
-  const provider = session?.user?.provider;
-  if (typeof provider !== 'string' || provider === '') {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider: null };
-  }
-  if (typeof id !== 'string' || id === '') {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  if (NON_OWNING_PROVIDERS.has(provider)) {
-    return { state: OWNER_STATES.NON_OWNING, userId: null, provider };
-  }
-  if (!OWNING_PROVIDERS.has(provider)) {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  if (!LOCAL_ID_SHAPE.test(id)) {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  return { state: OWNER_STATES.OWNER, userId: id, provider };
-}
-
+// ⛔ THE RULE NOW LIVES IN lib/sessionOwner.js. This file and ../route.js each
+// carried their own copy of it under a comment reading "change both in the
+// same commit" — a hope, not an invariant. A fourth provider added to one copy
+// and missed in the other would give an account that can CREATE saved views
+// and never delete one, told by a 500 that it is a fault rather than a
+// limitation. A third copy in /api/mfa was still deciding on the id's SHAPE,
+// which an Entra GUID defeats, and that one was live.
 // DELETE /api/saved-views/<id>
 export async function DELETE(_request, { params }) {
   const session = await getServerSession(authOptions);

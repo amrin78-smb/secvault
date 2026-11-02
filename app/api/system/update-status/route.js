@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.223.0': [
+    'Fixed a crash: typing into the header search (or Ctrl+K) and matching a page took the whole console down to a blank "Application error" screen. The page results were trying to draw an icon that had become a name rather than a picture, and there is no error boundary to contain that, so the failure reached the top of the app.',
+    'A firewall\u2019s pages reported "Open findings 0" when every one of its findings was medium or informational \u2014 only critical and high were being counted, which is four of the thirteen kinds SecVault produces. The same firewall was shown as "medium risk" on the Firewalls list from the same data.',
+    'A firewall that holds CVE assessments but no completed-assessment timestamp no longer claims it was never assessed, and a firewall whose collection is partly failing now says so in words rather than only by the colour of a dot.',
+    'Drilling into a rule from a firewall\u2019s Traffic tab could quietly search that firewall\u2019s whole 24 hours instead of that one rule, while the screen still showed the rule you clicked. The same class of problem on the Work queue and Exposure pages \u2014 a filter that appeared to be applied while showing everything \u2014 is fixed too.',
+    'Microsoft Entra accounts were offered a multi-factor setup they cannot have, ending in a button that silently did nothing; and the Single sign-on panel now warns that nobody can sign in yet while you are still sitting on the screen where you can fix it, instead of after a restart.',
+  ],
   '2.222.0': [
     'The Exposure Risk panel on a firewall\u2019s overview no longer repeats the same vulnerability under every rule. The CVE is a fact about the firewall, not about each rule, so it is now stated once at the top — on one real device that block was being printed 167 times.',
     'It also stopped implying something it never measured. SecVault correlates "this rule widens what can reach this box" with "this box has an unpatched vulnerability"; it does not claim the rule and the CVE involve the same port. Printed under each rule, it read as though it did.',

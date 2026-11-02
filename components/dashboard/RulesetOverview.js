@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardTitle } from '../ui/Card';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import EmptyState from '../ui/EmptyState';
 // ⛔ THE RAMP IS IMPORTED, NEVER RESTATED. severityRamp.js is the one place
 // that maps a severity to a hue; this widget's tiles used to carry hand-written
@@ -106,7 +107,15 @@ export default async function RulesetOverview() {
     color: count > 0 ? SEVERITY_FILL[severity] : 'var(--text-muted)',
   });
 
-  const tiles = [
+  // ⛔ TWO GROUPS, NOT SEVEN PEERS, AND THE CARD ALREADY SAID SO IN PROSE. Its
+  // own subtext reads "Unused/Shadow/Redundant/Any-Any won't sum to Total" —
+  // i.e. the composition counts and the finding counts are different units.
+  // They were nonetheless rendered as one `repeat(auto-fit, minmax(90px, 1fr))`
+  // row of SEVEN, and seven is prime: that grid is ragged at every column count
+  // except 1 and 7, so across the whole realistic width range it orphaned
+  // something. Split 3 + 4, both of which KpiRow supports and whose responsive
+  // steps divide (3 -> 1, 4 -> 2 -> 1).
+  const composition = [
     { label: 'Total Rules', value: totals.total, color: 'var(--text-primary)' },
     // ⛔ NO HUE ON "Enabled" (same call v2.202.0 made for "Devices" and
     // "Total Rules" on the Overview). A count of enabled rules is not a risk
@@ -115,6 +124,8 @@ export default async function RulesetOverview() {
     // --text-primary is the neutral StatCard already falls back to.
     { label: 'Enabled', value: totals.enabled, color: 'var(--text-primary)' },
     { label: 'Disabled', value: totals.disabled, color: 'var(--text-muted)' },
+  ];
+  const findingTiles = [
     findingTile('Unused', findings.unused, 'medium'),
     findingTile('Shadow', findings.shadow, 'high'),
     findingTile('Redundant', findings.redundant, 'medium'),
@@ -129,13 +140,20 @@ export default async function RulesetOverview() {
           Fleet-wide rule counts. A rule can carry more than one finding type at once, so
           Unused/Shadow/Redundant/Any-Any won&apos;t sum to Total.
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8 }}>
-          {tiles.map((t) => (
+        <KpiRow cols={3}>
+          {composition.map((t) => (
             <Link key={t.label} href="/analysis" style={{ textDecoration: 'none' }}>
               <StatCard label={t.label} value={t.value} color={t.color} compact />
             </Link>
           ))}
-        </div>
+        </KpiRow>
+        <KpiRow cols={4} style={{ marginTop: 'var(--s2)' }}>
+          {findingTiles.map((t) => (
+            <Link key={t.label} href="/analysis" style={{ textDecoration: 'none' }}>
+              <StatCard label={t.label} value={t.value} color={t.color} compact />
+            </Link>
+          ))}
+        </KpiRow>
       </div>
     </Card>
   );

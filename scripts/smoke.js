@@ -94,7 +94,15 @@ const NAV_LABELS = (() => {
 
 const STATIC_ROUTES = [
   { path: '/login', anon: true, markers: ['Firewall security posture, in one place.'] },
-  { path: '/', markers: ['Security Score', 'Overview sections'] },
+  // ⛔ `Overview sections` WAS A SECOND OR-BRANCH SATISFIED BY PAGE CHROME. It
+  // is the TabBar's `ariaLabel`, so it renders from the tab strip whether or
+  // not the body beneath it does — "a tab LABEL would be satisfied by the tab
+  // bar around a dead body", which this file's own comment forbids. The
+  // Overview's body is `{tab === 'overview' && (<div className="dashboard-widget-grid">
+  // …six widgets…)}` and none of the six contributed a marker, so an empty
+  // body still went green. `Ruleset overview` is one of those widgets' own
+  // CardTitles, and it is an AND so it cannot be satisfied by the chrome.
+  { path: '/', markers: ['Security Score'], alsoMarkers: ['Ruleset overview'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
   // ⛔ `alsoMarkers`, NOT a second `markers` entry — this is the exact case the
   // AND exists for, and I got it wrong first: `markers` is an OR, so adding the
@@ -135,7 +143,31 @@ const STATIC_ROUTES = [
   // "Log search is not part of the ... role". A marker no page can produce is a
   // marker that can only ever fail — harmless here only because the two beside it
   // are OR'd and do render, which is exactly how it went unnoticed.
-  { path: '/logs', markers: ['Search raw firewall logs', 'is not part of the', 'received_at'] },
+  // ⛔ `received_at` WAS A DEAD MARKER — nothing in the /logs render path emits
+  // it. It appears only as a SQL fragment and prose inside
+  // lib/syslog/logSearch.js; the page renders the camel-case `receivedAt`. It
+  // was inert inside an OR, so it made nothing easier to pass — the cost was
+  // that the harness reported coverage it did not have, and NOTHING in the
+  // sweep proved /logs renders its results table at all (the two surviving
+  // markers are the page subtitle and NoAccess.js's refusal text, both of
+  // which render with the table entirely blank). `App / Rule` is a column
+  // heading of that table. This is the THIRD dead marker on this line: the
+  // comment below records the previous two.
+  // ⛔ BOTH REAL RENDER PATHS OF THE RESULTS COMPONENT. `App / Rule` is a column
+  // heading of the results table and `Nothing in this window matched` is its
+  // zero-rows EmptyState — either one proves LogResults itself rendered, where
+  // the page subtitle only ever proved the shell did. Keeping both as OR
+  // branches is what makes the marker independent of whether the smoke fleet
+  // happens to hold matching events in the default window.
+  {
+    path: '/logs',
+    markers: [
+      'App / Rule',
+      'Nothing in this window matched',
+      'Search raw firewall logs',
+      'is not part of the',
+    ],
+  },
   { path: '/reports', markers: ['Point-in-time PDFs you can hand to an auditor'] },
   { path: '/devices', markers: ['Firewalls sending syslog from an address that is not in the inventory', 'Add firewall'] },
   { path: '/devices/discovered', markers: ['Discovered Senders'] },

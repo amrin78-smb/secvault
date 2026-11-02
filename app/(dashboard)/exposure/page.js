@@ -16,6 +16,14 @@ import { resolvePage, resolvePageSize, paginateArray, DEFAULT_PAGE_SIZE } from '
 
 export const dynamic = 'force-dynamic';
 
+// A repeated query parameter arrives as an array; narrow on its first value
+// rather than letting the whole filter fall away. Same call `lib/pagination.js`
+// and `/logs`' own `first()` already make.
+function firstParam(v) {
+  const x = Array.isArray(v) ? v[0] : v;
+  return typeof x === 'string' ? x : '';
+}
+
 // Internet Exposure & Attack Surface.
 //
 // Answers "what is reachable from the internet, through which rule, to which
@@ -275,7 +283,15 @@ export default async function ExposurePage({ searchParams }) {
     .map((e) => ({ deviceId: e.deviceId || null, name: e.name, error: e.error }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const selectedDeviceId = typeof searchParams?.device_id === 'string' ? searchParams.device_id : '';
+  // ⛔ A REPEATED PARAM IS AN ARRAY, AND THE OLD GUARD FELL TO THE WRONG SIDE.
+  // Next hands `?device_id=a&device_id=b` back as `['a','b']`, which is not a
+  // string, so this resolved to `''` — `selectedDevice` became null and the
+  // table fell back to EVERY path on the fleet, with no scope sentence, under
+  // two chips naming two firewalls. That is precisely what the comment below
+  // forbids, reached by widening rather than by an unknown id. Taking the
+  // first value keeps the refusal below intact: an id that is real narrows, an
+  // id that is not yields an empty table.
+  const selectedDeviceId = firstParam(searchParams?.device_id);
   // ⛔ An unknown device_id yields an EMPTY table, never a silent fall-back to
   // the whole fleet: showing every path under a filter the operator believes is
   // applied is the dangerous direction on an exposure report.

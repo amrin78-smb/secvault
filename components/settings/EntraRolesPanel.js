@@ -144,15 +144,36 @@ export default function EntraRolesPanel() {
           This product installs air-gapped by design, where Entra is
           unreachable and that is correct. A red "not configured" banner would
           train operators to ignore the banner that matters. */}
+      {/* ⛔ SAVED BUT NOT RUNNING IS ITS OWN SENTENCE, because the instruction
+          differs. NextAuth builds its provider array at module load, so a
+          tenant saved a moment ago is on disk and not in force; the old copy
+          told the administrator to set three variables "in .env.local" — the
+          file the Single sign-on panel had just written for them, and the hand
+          editing v2.209.0 exists to remove. The warning below is also now
+          shown in this state, because that sitting is exactly when mapping a
+          group is cheapest. */}
+      {data.entraRestartRequired ? (
+        <Card>
+          <CardBody>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              <strong>A tenant is saved but not yet in force.</strong>{' '}
+              SecVault reads the Entra settings once at startup, so single sign-on begins
+              working when the <code>SecVault-App</code> service is restarted. Map a group
+              to a role below first &mdash; until at least one mapping exists, every Entra
+              sign-in is refused.
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
       {!data.entraConfigured ? (
         <Card>
           <CardBody>
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
               <strong>Entra ID single sign-on is not configured, which is not a fault.</strong>{' '}
-              Mappings can be prepared here, but nothing uses them until{' '}
-              <code>ENTRA_TENANT_ID</code>, <code>ENTRA_CLIENT_ID</code> and{' '}
-              <code>ENTRA_CLIENT_SECRET</code> are all set in <code>.env.local</code>. Local
-              sign-in is unaffected either way.
+              Mappings can be prepared here, but nothing uses them until a tenant is set
+              under <strong>Settings &rsaquo; Single sign-on</strong>. Local sign-in is
+              unaffected either way.
             </div>
           </CardBody>
         </Card>

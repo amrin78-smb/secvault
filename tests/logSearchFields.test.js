@@ -50,6 +50,31 @@ describe('⛔ every parameter the page accepts can survive a re-submit', () => {
       + 'Search deletes them and silently widens the search: ' + orphans.join(', '));
   });
 
+  // ⛔ THE ENGINE IS THE UPSTREAM AUTHORITY, AND COMPARING THE TWO DOWNSTREAM
+  // COPIES TO EACH OTHER COULD NOT SEE THE REAL GAP. `ruleId` was registered in
+  // lib/syslog/logSearch.js and accepted by BOTH /api/logs routes while the page
+  // whitelist and the registry each omitted it — so the two assertions around
+  // this one AGREED WITH EACH OTHER and passed, for the third instance of the
+  // silent-widening bug this file exists to end. A guard whose two sides are
+  // both downstream of the thing it is really checking is the
+  // mechanism-not-outcome pattern wearing a completeness test's clothes.
+  it('⛔ every filter the SEARCH ENGINE accepts has a field here', () => {
+    const engine = stripComments(
+      fs.readFileSync(path.join(REPO, 'lib', 'syslog', 'logSearch.js'), 'utf8')
+    );
+    const block = engine.match(/const FILTERS = \{([\s\S]*?)\n\};/);
+    assert.ok(block, 'could not find FILTERS in lib/syslog/logSearch.js');
+    const keys = [...block[1].matchAll(/^\s{2}([a-zA-Z]+):\s*\{/gm)].map((x) => x[1]);
+    // A walk that found nothing would make this vacuously true.
+    assert.ok(keys.length > 15, `expected the engine's filter list, found ${keys.length}`);
+    const reg = new Set(ALL_FIELD_NAMES);
+    const orphans = keys.filter((k) => !reg.has(k));
+    assert.deepEqual(orphans, [],
+      'the search engine accepts these and the form cannot render them, so a link from '
+      + 'elsewhere in the product sets one and the first re-submit DELETES it, widening '
+      + 'the result set with nothing on screen to say so: ' + orphans.join(', '));
+  });
+
   it('no registry field is unknown to the page', () => {
     const accepted = new Set(acceptedParams());
     const unread = ALL_FIELD_NAMES.filter((n) => !accepted.has(n));

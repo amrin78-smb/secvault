@@ -136,6 +136,19 @@ which could not be selected or read aloud and carried a font-family that had dri
 (c) ThemeToggle  no props — light/dark theme toggle button
 (c) UserMenu  session — avatar + name/role dropdown (Settings, Sign Out)
 (c) UpdateNotifier  no props — dismissible update-available banner
+NoticeBar / NoticeRow  NoticeBar: children · NoticeRow: tone (`info`|`warn`|`bad`), children,
+action?, onDismiss? — the ONE strip above the page content that carries system notices. Mounted in
+`app/(dashboard)/layout.js`; `UpdateNotifier` and `SubscriptionNotifier` render `NoticeRow` INTO it
+and no page renders a row directly. Not a client component itself — it is plain markup used from
+both a server layout and two client notifiers. ⛔ It replaced TWO independent full-bleed tinted
+banners that were 9.3% of the Overview's content pixels and two of the seven surface levels that
+page drew. Tone is a 7px dot, NOT a coloured ground — except `bad`, which keeps its ground because
+a lapsed subscription genuinely is risk. ⛔ The strip's border sits on the LAST ROW
+(`.notice-row:last-child`), never on the container: both notices are usually absent, and a border
+on the container is a 1px banner nobody can dismiss. ⛔ Omitting `onDismiss` is what makes a notice
+undismissable, and that is a SEPARATE decision from its tone — a licence three days from expiry is
+`bad` and still dismissible; only `expired`/`invalid` cannot be silenced. Each notice stays
+independently conditional. See the ⛔ block beside `.notice-bar` in `app/globals.css`.
 (c) HeaderSearch  no props — debounced header search (devices + advisories), "/" shortcut
 (c) NotificationBell  no props — bell dropdown, polls notification summary every 60s
 (c) NavDrawerToggle  no props — the hamburger that reaches the rail below 1024px. ⛔ Its

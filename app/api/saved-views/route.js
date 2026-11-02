@@ -3,6 +3,7 @@ import { pool } from '../../../lib/db';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
 import { listSavedViews, saveView } from '../../../lib/savedViews';
+import { ownerOf, OWNER_STATES, PROVIDER_LABELS } from '../../../lib/sessionOwner';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,48 +48,13 @@ export const dynamic = 'force-dynamic';
 // to explain, the second is a fault to report, and they send a person to two
 // different places.
 //
-// ⛔ WHEN A PROVIDER IS ADDED, IT MUST BE LISTED IN ONE OF THESE TWO SETS. An
-// unclassified provider is UNKNOWN, which offers nothing rather than guessing —
-// and the guess that matters is the write, which cannot succeed anyway.
-const OWNING_PROVIDERS = new Set(['local']);
-const NON_OWNING_PROVIDERS = new Set(['ldap', 'entra']);
-
-// Kept only as a CONTRADICTION CHECK on a provider that claims to be local.
-// It is no longer how the decision is made.
-const LOCAL_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const OWNER_STATES = { OWNER: 'owner', NON_OWNING: 'non-owning', UNKNOWN: 'unknown' };
-
-const PROVIDER_LABELS = { ldap: 'LDAP', entra: 'Microsoft Entra ID' };
-
-// ⛔ DUPLICATED, DELIBERATELY, in app/api/saved-views/[id]/route.js — the two
-// handlers live in different route files and must agree. If this changes,
-// change both in the same commit.
-function ownerOf(session) {
-  const id = session?.user?.id;
-  const provider = session?.user?.provider;
-  if (typeof provider !== 'string' || provider === '') {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider: null };
-  }
-  // No usable id is a failed read OF THE SESSION, never a statement about the
-  // provider: "this real person owns no `users` row" needs a real person.
-  if (typeof id !== 'string' || id === '') {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  if (NON_OWNING_PROVIDERS.has(provider)) {
-    return { state: OWNER_STATES.NON_OWNING, userId: null, provider };
-  }
-  if (!OWNING_PROVIDERS.has(provider)) {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  // Local from here. An id that is not shaped like the UUID a `users` row
-  // actually has is a CONTRADICTION, not another provider.
-  if (!LOCAL_ID_SHAPE.test(id)) {
-    return { state: OWNER_STATES.UNKNOWN, userId: null, provider };
-  }
-  return { state: OWNER_STATES.OWNER, userId: id, provider };
-}
-
+// ⛔ THE RULE AND ITS PROVIDER SETS NOW LIVE IN lib/sessionOwner.js. They used
+// to be duplicated here and in ./[id]/route.js under a comment reading "change
+// both in the same commit" — a hope, not an invariant, and a fourth provider
+// added to one copy and missed in the other would give an account that can
+// CREATE saved views and never delete one, told by a 500 that it is a fault.
+// A third copy in /api/mfa was still deciding on the id's SHAPE, which an
+// Entra GUID defeats.
 function noOwnerBody(provider) {
   const label = PROVIDER_LABELS[provider] || 'a directory';
   return {

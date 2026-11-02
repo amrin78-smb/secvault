@@ -178,8 +178,16 @@ describe('the /devices adoption', () => {
 });
 
 describe('the chooser', () => {
-  it('⛔ WRITES THE URL THROUGH THE SHARED MERGE, never rebuilding it', () => {
-    assert.match(CHOOSER, /mergeFilterQuery\(qs, \{ \[param\]: next \}/);
+  it('⛔ WRITES THE URL THROUGH THE SHARED HELPERS, never rebuilding it', () => {
+    // ⛔ EITHER SHARED HELPER COUNTS. This used to require the exact call
+    // `mergeFilterQuery(qs, { [param]: next }`, which pinned one spelling: it
+    // failed on CORRECT code when the chooser moved to `filterHref` (the same
+    // merge plus the path, which also drops the dangling `?` the interpolated
+    // form emitted on an otherwise-bare URL). What matters is that the query is
+    // MERGED by lib/urlFilters and not rebuilt here.
+    assert.match(CHOOSER, /\b(filterHref|mergeFilterQuery)\(/,
+      'the chooser must write the URL through lib/urlFilters');
+    assert.match(CHOOSER, /from '[^']*lib\/urlFilters'/);
     assert.equal(/new URLSearchParams\(/.test(CHOOSER), false,
       'rebuilding the query discards the filters and the sort — the defect Phase 1 removed from four filter bars');
   });

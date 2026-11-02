@@ -205,8 +205,16 @@ export default async function DeviceRulesPage({ params, searchParams }) {
         fallback={device}
       />
 
+      {/* ⛔ TITLED FOR THE LINK THAT LEADS HERE. The device nav entry is
+          "Policy" and this page was headed "Firewall rules" — two names sharing
+          no word, which is exactly the Intent/Segmentation shape v2.220.0
+          existed to remove: an operator has no way to tell they arrived. The
+          descriptive words move to the subtitle rather than being lost, and
+          tests/pageTitles.test.js now covers DEVICE_NAV so the pair cannot
+          drift apart again. */}
       <PageHeader
-        title="Firewall rules"
+        title="Policy"
+        subtitle="Firewall rules collected from this device."
         actions={
           <a href={csvHref} className="btn btn-secondary">
             Export CSV

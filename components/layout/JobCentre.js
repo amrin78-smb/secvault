@@ -142,7 +142,20 @@ export default function JobCentre() {
             {failed && <span className="jobc-stale">could not refresh</span>}
           </div>
 
-          {jobs === null ? (
+          {/* ⛔ A FAILED FIRST READ IS NOT A READ IN FLIGHT. `jobs` stays null
+              both before the first poll AND after a poll that failed — the
+              catch deliberately leaves the last good list in place, which is
+              right when there IS one and wrong when there is not. So a 503 on
+              the first poll rendered "Loading…" for ever, re-polling every 60s,
+              and the one state this panel exists to make unmistakable (a
+              collection that failed while nobody was on its page) was presented
+              as a fetch still running. */}
+          {jobs === null && failed ? (
+            <p className="jobc-empty">
+              SecVault could not read the job list. Nothing is known about recent
+              collections or deletions until this succeeds.
+            </p>
+          ) : jobs === null ? (
             <p className="jobc-empty">Loading…</p>
           ) : jobs.length === 0 ? (
             <p className="jobc-empty">

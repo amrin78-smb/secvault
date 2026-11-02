@@ -349,6 +349,26 @@ describe('⛔ the two sign-in cues explain themselves, and echo nothing', () => 
       'the notice names the specific refusal — that belongs in Settings, not on an unauthenticated page');
     assert.match(block, /administrator/i,
       'the notice must say who can fix this, or it is a dead end wearing an explanation');
+
+    // ⛔ AND IT MUST NOT NAME A MAPPING EITHER, which is what actually shipped.
+    // The forbidden list above was written against the three causes that would
+    // LEAK tenant state, and "not mapped to a SecVault role" names a fourth
+    // that merely MISDIRECTS: it is the right instruction for two of the six
+    // refusal outcomes and the wrong one for groups_overage,
+    // groups_unreadable, mappings_unreadable and mappings_malformed — the last
+    // of which lib/entraRoles.js says re-saving the mappings will not fix.
+    assert.doesNotMatch(block, /\bmapp(ed|ing)/i,
+      'a mapping is the fix for only two of six refusal outcomes; naming it sends the '
+      + 'other four to the wrong person');
+
+    // ⛔ AND IT MUST NOT SAY "sign in again". That is the ssoNoRole notice's
+    // advice, and the two notices exist separately precisely because a
+    // terminal cause wastes the user's afternoon. The page shipped with the
+    // phrase here while the comment three lines below it asserted the
+    // opposite.
+    assert.doesNotMatch(block, /sign in again/i,
+      'retrying cannot clear a refusal — that is the whole reason refused and norole are '
+      + 'two different cues');
   });
 
   it('⛔ norole: is PROVIDER-NEUTRAL, because the cause is often not SSO at all', () => {

@@ -723,6 +723,42 @@ single COUNT on `application_flows` decides whether the whole-fleet load happens
 probe FAILS OPEN — an unreadable count falls through to the evaluation, because "we could not read
 the count" is not "nothing is declared".
 
+## lib/sessionOwner.js (v2.223.0)
+
+Can this session own PER-USER rows? Exports `ownerOf(session)` -> `{state, userId, provider}`,
+`OWNER_STATES` (`owner`/`non-owning`/`unknown`), `providerLabel`, plus `OWNING_PROVIDERS`
+(`local`), `NON_OWNING_PROVIDERS` (`ldap`, `entra`) and `LOCAL_ID_SHAPE`. CommonJS, like
+`rbac.js`, so `node:test` requires it untransformed while the ESM routes `import` from it.
+
+⛔ **EXTRACTED BECAUSE THE DECISION HAD THREE HAND-WRITTEN COPIES AND ONE WAS STILL WRONG.**
+v2.205.0 established product-wide that scopability is decided on `session.user.provider`, NEVER on
+the SHAPE of `session.user.id` — an Entra `oid` is a 36-character GUID that passes any local-UUID
+test. `lib/deviceScope.js` was fixed then and both `/api/saved-views` handlers were converted;
+**`/api/mfa` was not**, and kept `/^[0-9a-f-]{36}$/i` under a comment still asserting the
+superseded rule verbatim. An Entra session was therefore read as LOCAL, offered MFA enrolment it
+cannot hold (`user_mfa.user_id` references `users(id)`, which an Entra account has no row in), and
+the enrolment POST could only ever raise a foreign-key violation — on a route with no try/catch and
+a panel with no `catch`, i.e. a silently dead button.
+
+⛔ **THE TWO SAVED-VIEWS COPIES WERE "A HOPE, NOT AN INVARIANT"** — byte-identical constants under
+a comment reading "change both in the same commit", the same structure `evidenceWindow.js` was
+extracted for. A fourth provider added to one copy and missed in the other gives an account that
+can CREATE saved views and never delete one, told by a 500 that it is a fault.
+
+⛔ **THREE STATES, NEVER TWO.** "This provider cannot own rows" is a LIMITATION to explain;
+"we do not know who this is" is a FAULT to report, and they send a person to two different places.
+A missing/empty id is checked AHEAD of the provider branches (the load-bearing order
+`deviceScope.js` uses); an unclassified provider is `unknown`; and a `local` claim carrying a
+non-UUID id is a CONTRADICTION, also `unknown`. `LOCAL_ID_SHAPE` survives ONLY as that
+contradiction check and is no longer how the decision is made.
+
+⛔ `tests/sessionOwner.test.js` pins the states AND scans the three consumers: each must import
+this module, none may redefine `ownerOf` or the provider sets, and **no file under `app/`, `lib/`
+or `components/` may contain the loose `[0-9a-f-]{36}` form** — that regex is what an Entra GUID
+defeats. The scan is what replaces "change both in the same commit".
+
+[SENSITIVE] — entire file (authorization-adjacent: decides whose rows a session may touch)
+
 ## lib/rbac.js
 
 ⛔ REWRITTEN v2.110.0 — three roles (`super_admin`/`admin`/`operator`) behind a capability layer.

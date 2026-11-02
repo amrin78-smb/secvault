@@ -307,3 +307,55 @@ describe('a column selection is not a filter either', () => {
       'a "Clear filters" link over a table nobody filtered is a control that does nothing');
   });
 });
+
+// ⛔ THE GUARD THAT WOULD HAVE CAUGHT ALL THREE INSTANCES.
+//
+// `NON_FILTER_PARAMS` has now been wrong three times: `dHours` (v2.220.0),
+// `cols` (v2.221.2) and the six redirect parameters (v2.223.0). Every time, a
+// parameter that does NOT narrow the result set rendered as a removable chip
+// and made `hasActiveFilters` claim an unfiltered table was filtered — and
+// every time it was found by a human looking at the rendered chips, because
+// nothing enumerated what the adopting pages actually read.
+//
+// ⛔ IT CHECKS THE PAGES, NOT THE LIST. A test that asserted the set's own
+// contents would just restate it; the defect is always a parameter the set has
+// never heard of. So this walks each FilterBar-adopting page, extracts every
+// `searchParams?.X` it reads, and requires each to be either one of that
+// page's own filter definitions or a declared non-filter.
+describe('⛔ every parameter an adopting page reads is a declared filter or a declared non-filter', () => {
+  const PAGES = [
+    { page: 'app/(dashboard)/devices/page.js',  defs: 'components/devices/DeviceFilters.js' },
+    { page: 'app/(dashboard)/alerts/page.js',   defs: 'components/alerts/AlertsFilters.js' },
+    { page: 'app/(dashboard)/exposure/page.js', defs: 'components/exposure/ExposureFilters.js' },
+    { page: 'app/(dashboard)/work/page.js',     defs: 'components/work/WorkQueueFilters.js' },
+  ];
+
+  const read = (rel) => stripComments(
+    fs.readFileSync(path.join(ROOT, rel), 'utf8')
+  );
+
+  for (const { page, defs } of PAGES) {
+    test(`${page} reads nothing undeclared`, () => {
+      const pageSrc = read(page);
+      const defKeys = new Set(
+        [...read(defs).matchAll(/key:\s*'([a-zA-Z_]+)'/g)].map((m) => m[1])
+      );
+      // A walk that found no definitions would make this vacuously true.
+      assert.ok(defKeys.size > 0, `found no filter defs in ${defs}`);
+
+      const reads = [...new Set(
+        [...pageSrc.matchAll(/searchParams\?\.([a-zA-Z_]+)/g)].map((m) => m[1])
+      )];
+      assert.ok(reads.length > 0, `found no searchParams reads in ${page}`);
+
+      const undeclared = reads.filter(
+        (k) => !defKeys.has(k) && !NON_FILTER_PARAMS.has(k)
+      );
+      assert.deepEqual(undeclared, [],
+        `${page} reads these and they are neither one of ${defs}'s filter defs nor in `
+        + 'NON_FILTER_PARAMS. If a parameter narrows the result set it needs a def (so it gets '
+        + 'a labelled chip); if it does not, it belongs in NON_FILTER_PARAMS (so it neither '
+        + 'chips nor gets dropped by "Clear filters"): ' + undeclared.join(', '));
+    });
+  }
+});

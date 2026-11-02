@@ -2044,11 +2044,17 @@ today, so a test pins it against a synthetic one.
 of them — so a new route is a deliberate decision, never a default. It also re-derives the
 device-touching set from SOURCE, catching a file that grew a device query after being classified
 `no-device-data`. The aware count has a FLOOR that may not fall. Shipped at 4 aware / 71 blocked /
-39 no-device-data; measured 2026-10-28 at **6 aware / 90 blocked / 25 no-device-data**.
-⛔ **The floor is still the SHIPPED 4, not the current 6** (`AWARE_FLOOR` in
-`tests/deviceScopeCoverage.test.js`), so two surfaces could be demoted from `aware` without
-failing the build while this paragraph says the count never falls. Raising it is a code change,
-not a documentation one — and a floor two below the real figure is a guard that fires late.
+39 no-device-data; measured 2026-11-02 at **6 aware / 91 blocked / 25 no-device-data**.
+⛔ **THE FLOOR IS NOW THE REAL FIGURE (6), AND FOR THREE RELEASES IT WAS NOT.** `AWARE_FLOOR` in
+`tests/deviceScopeCoverage.test.js` sat at the SHIPPED 4 while the real count was 6, so this very
+paragraph claimed the count may never fall while two surfaces could be demoted without failing a
+build — and the named-surface assertion beside it covered only the ORIGINAL four, so demoting
+`/conformance` or `/coverage` was caught by NOTHING AT ALL. Measured by mutation: demoting
+`/conformance` under the old floor left `aware = 5 >= 4` and the suite stayed GREEN. Both halves are
+fixed together — the floor is 6 and all six are NAMED — because a count alone cannot say WHICH six,
+and six other surfaces going aware while these regressed would satisfy it.
+⛔ Raising this floor is a CODE change, which is exactly why writing the gap down did not close it.
+When a seventh surface becomes `aware`, move the floor AND name it in the SAME commit.
 
 ⛔ **THE SOURCE CHECK READ ONLY THE SURFACE FILE, AND THAT IS WHERE IT LEAKED (v2.174.0).** A route
 whose device query lives one import away was invisible to it. Six were: every `/api/applications`
@@ -3083,8 +3089,14 @@ SYSLOG_ROLLUP_RECENT_HOURS=1               # frequent narrow re-aggregation (+1h
 SYSLOG_ROLLUP_LOOKBACK_HOURS=24            # hourly WIDE sweep, SLICED 6h/pass; catches late-arriving events
 SYSLOG_ROLLUP_INTERVAL_MINUTES=5
 LOG_HIT_LOOKBACK_DAYS=7                    # [log-hit] window; SHORTER than retention on purpose
-DISCOVERY_LOOKBACK_HOURS=24                 # window for "firewalls sending syslog that are not in
-                                            # the inventory" (/devices/discovered)
+DISCOVERY_LOOKBACK_HOURS=48                 # window for "firewalls sending syslog that are not in
+                                            # the inventory" (/devices/discovered).
+                                            # ⛔ THIS LINE SAID 24 AND THE CODE HAS ALWAYS SAID 48
+                                            # (services/engine-worker.js's `fallback`), as does
+                                            # .env.local.example. Two of three agreed and this file
+                                            # -- the contract document -- was the odd one out, which
+                                            # is the direction that matters: a session trusting it
+                                            # would halve the window in its head.
 
 # Log retention
 LOG_RETENTION_HOT_DAYS=90
@@ -3535,10 +3547,23 @@ VPN, Metrics, Admins and Manage ARE in the nav, because dropping a real route to
 match a seven-item list would be removing a capability to simplify.
 
 ⛔ **REACHABILITY IS POLL HEALTH, NEVER `devices.last_connectivity_ok`.** That
-column is written only by the manual "Test connectivity" button and showed
-TSR_EKC green while every scheduled poll had failed for 19 days. `/devices`
-already learned this; a header on six more pages must not reintroduce it on all
-of them. The manual result is still shown, labelled as what it is.
+column is a single LATEST BOOLEAN where poll health is a success RATE over
+history, and only the second can tell a firewall that is answering from one that
+answered once. It showed TSR_EKC green while every scheduled poll had failed for
+19 days. `/devices` already learned this; a header on six more pages must not
+reintroduce it on all of them.
+⛔ **TWO SENTENCES THAT USED TO SIT HERE WERE BOTH FALSE, and both are corrected
+rather than deleted.** (1) The column is NOT "written only by the manual Test
+connectivity button" — `lib/adapters/index.js` writes it on EVERY
+`collectAndStore` pass and says so in its own comment; the conclusion above now
+rests on the boolean-vs-rate distinction, which cannot expire. (2) "The manual
+result is still shown, labelled as what it is" described code that did not
+exist: `lastManualOk`/`lastManualAt` were carried on the context object and read
+by NO surface, so they were dead fields propped up by a documented claim. They
+are gone; reachability in the header is the dot **plus `PollHealthNote`**, which
+is what stops the `degraded` band being carried by colour alone on six pages.
+The latest-probe boolean is still shown on `/devices`, where the fleet
+comparison lives.
 
 ⛔ **EVERY POSTURE FIGURE IS TRI-STATE AND `measured` IS PASSED IN, NEVER
 DERIVED FROM `n > 0`.** Deriving it makes every genuine zero indistinguishable

@@ -51,6 +51,7 @@ const {
   isActive,
   sectionIsActive,
 } = require('../lib/navRegistry');
+const { SETTINGS_TABS } = require('../lib/settingsTabs');
 
 const ROOT = path.join(__dirname, '..');
 const SIDEBAR = path.join(ROOT, 'components', 'layout', 'Sidebar.js');
@@ -184,9 +185,21 @@ describe('⛔ two glyph layers, with different invariants', () => {
     // The registry names icons as STRINGS so it can be required outside a JSX
     // pipeline. The cost is that a typo renders an empty chip instead of
     // failing to compile, so this is the guard that makes that trade safe.
+    // ⛔ THE MODULE'S EXPORTS, NOT ITS DECLARATION KEYWORD. This used to assert
+    // `export function <Name>`, which pins the FORM the file happens to use
+    // today: converting any icon to `export const IconX = (p) => …` would
+    // break the build with a message saying the icon "is not an icon" — the
+    // same failure this file's own header records for the old
+    // `/Icon: (Icon\w+)/` regex, and the reason the registry became data.
+    const exported = new Set([
+      ...iconsSrc.matchAll(/export\s+(?:function|const|class)\s+(Icon\w+)/g),
+    ].map((m) => m[1]));
+    // A scan that found nothing would make every assertion below vacuous.
+    assert.ok(exported.size > 20,
+      `expected the icon module's exports, found ${exported.size}`);
     for (const item of allItems().concat(NAV_TOP_LEVEL)) {
-      assert.match(iconsSrc, new RegExp(`export function ${item.icon}\\b`),
-        `${item.icon} is not an icon`);
+      assert.ok(exported.has(item.icon),
+        `${item.icon} is not exported by components/icons.js`);
     }
   });
 });
@@ -392,7 +405,44 @@ describe('the renderer honours what the registry declares', () => {
 
   test('⛔ NAV is still exported from Sidebar, where HeaderSearch imports it', () => {
     assert.match(sidebarSrc, /export \{ NAV \}/);
-    assert.match(searchSrc, /import \{ NAV \} from '\.\/Sidebar'/);
+    assert.match(searchSrc, /import \{ NAV(, glyph)? \} from '\.\/Sidebar'/);
+  });
+
+  // ⛔ THE TEST ABOVE ASSERTED THE IMPORT AND NOTHING ABOUT WHAT CROSSES IT,
+  // AND A CRASH SHIPPED THROUGH THE GAP. v2.216.0 moved the registry into
+  // lib/navRegistry.js and renamed each entry's key from `Icon` (a component)
+  // to `icon` (a string name). Sidebar was updated; HeaderSearch was not, and
+  // kept rendering `<p.Icon />` — `undefined` for all 18 NAV rows, and the 11
+  // SETTINGS_DESTINATIONS rows carried no icon field at all. React throws
+  // "Element type is invalid" on `createElement(undefined)`, and there is no
+  // error.js or global-error.js anywhere under app/, so the throw unmounted the
+  // ROOT: a blank "Application error" page, for typing two characters into the
+  // header search. 137 navigation tests passed with it live, because the only
+  // guard aimed at this asserted that an `import` statement existed.
+  //
+  // ⛔ SO THIS PINS THE PRODUCER/CONSUMER CONTRACT, NOT THE IMPORT: every row
+  // the palette can render must name a glyph that resolves to a real export.
+  test('⛔ every palette row names a glyph that RESOLVES — the import is not the contract', () => {
+    const exported = new Set(
+      [...iconsSrc.matchAll(/export\s+(?:function|const)\s+(Icon\w+)/g)].map((m) => m[1])
+    );
+    assert.ok(exported.size > 20, `expected the icon module, found ${exported.size} exports`);
+
+    const rows = [
+      ...NAV.map((n) => ({ what: `NAV ${n.label}`, icon: n.icon })),
+      // HeaderSearch builds one row per settings tab and gives them all the
+      // same glyph; assert the name it uses is real.
+      ...SETTINGS_TABS.map((t) => ({ what: `Settings › ${t.label}`, icon: 'IconSettings' })),
+    ];
+    const unresolvable = rows.filter((r) => !r.icon || !exported.has(r.icon));
+    assert.deepEqual(unresolvable, [],
+      'these palette rows would render React.createElement(undefined) and take the whole '
+      + 'page down: ' + unresolvable.map((r) => `${r.what} (${r.icon})`).join(', '));
+
+    // And the consumer must go through a resolver rather than reading a
+    // component off the row, which is the shape that broke.
+    assert.doesNotMatch(searchSrc, /<p\.Icon\b/,
+      'HeaderSearch must resolve icon NAMES via glyph(), not render p.Icon');
   });
 });
 

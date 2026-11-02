@@ -109,12 +109,31 @@ describe('a sortable header states the sort it actually performs', () => {
   it('⛔ THE COLUMN LABEL MATCHES THE KEY IT SORTS BY', () => {
     // The live bug: `Support` was wired to sortKey="site". The fleet would
     // reorder by site while the header said it had sorted by support expiry.
-    const pairs = [...PAGE_CODE.matchAll(/sortKey="([a-z_]+)"\s*\n?\s*label="([^"]+)"/g)]
-      .map((m) => ({ key: m[1], label: m[2] }));
+    // ⛔ MATCHED ON THE WHOLE ELEMENT, NOT ON PROP ORDER. This used to require
+    // `label` to follow `sortKey` immediately, so a future
+    // `<SortableTh sortKey="site" searchParams={…} label="Support" />` would
+    // produce NO pair at all and the EXPECTED check below would silently stop
+    // firing for that column — a guard written for exactly that bug, disarmed
+    // by reformatting. All six are covered either way today; the point is that
+    // they stay covered.
+    const elements = [...PAGE_CODE.matchAll(/<SortableTh\b[\s\S]*?\/>/g)].map((m) => m[0]);
+    assert.ok(elements.length > 0, 'found no SortableTh elements in the page');
+    const pairs = elements.map((el) => {
+      const k = el.match(/sortKey="([a-z_]+)"/);
+      const l = el.match(/label="([^"]+)"/);
+      assert.ok(k, `a SortableTh has no sortKey: ${el.slice(0, 80)}`);
+      assert.ok(l, `a SortableTh has no label: ${el.slice(0, 80)}`);
+      return { key: k[1], label: l[1] };
+    });
     const EXPECTED = {
       name: 'Device', vendor: 'Vendor', score: 'Score',
       rules: 'Rules', cve_count: 'CVEs', last_collected: 'Collected',
     };
+    // ⛔ EVERY EXPECTED COLUMN MUST ACTUALLY HAVE BEEN FOUND, or the loop below
+    // is vacuous over a list the regex failed to build.
+    for (const key of Object.keys(EXPECTED)) {
+      assert.ok(pairs.some((x) => x.key === key), `no SortableTh found for "${key}"`);
+    }
     for (const p of pairs) {
       assert.equal(p.label, EXPECTED[p.key],
         `${p.key} is labelled "${p.label}" — a header that names a different fact than it orders by `

@@ -46,7 +46,15 @@ const surfaces = () => [
 // scoping shipped; the assertion is that it never FALLS. Raising it as
 // surfaces are covered is the work, and lowering it is a regression that
 // silently re-exposes firewalls to a scoped account.
-const AWARE_FLOOR = 4;
+//
+// ⛔ IT SAT AT 4 WHILE THE REAL FIGURE WAS 6, AND A FLOOR TWO BELOW THE REAL
+// FIGURE IS A GUARD THAT FIRES LATE: two surfaces could have been demoted from
+// `aware` — re-exposing the whole fleet to a scoped account on each — without
+// failing a build, while CLAUDE.md stated the count may not fall. Raising it is
+// a CODE change, which is why it had not happened by documenting the gap.
+// `/conformance` and `/coverage` became aware after scoping shipped; they are
+// also named below, because a count alone cannot tell which six.
+const AWARE_FLOOR = 6;
 
 describe('⛔ every reachable surface is classified', () => {
   it('finds the routes and pages at all', () => {
@@ -93,15 +101,18 @@ describe('⛔ coverage may only move toward enforcement', () => {
       + 'deliberate, the floor moves in the same commit and the reason goes in the message.');
   });
 
-  it('the four surfaces scoping shipped with are still aware', () => {
-    // Named rather than counted: four OTHER surfaces going aware while these
+  it('every surface that is aware today is named, not just counted', () => {
+    // Named rather than counted: other surfaces going aware while these
     // regressed would satisfy the count and break the product's only
-    // scope-aware path.
+    // scope-aware path. The first four are what scoping shipped with; the last
+    // two were covered afterwards and are equally a regression to lose.
     for (const f of [
       'app/api/devices/route.js',
       'app/api/devices/[id]/route.js',
       'app/(dashboard)/devices/page.js',
       'app/(dashboard)/devices/[id]/page.js',
+      'app/(dashboard)/conformance/page.js',
+      'app/(dashboard)/coverage/page.js',
     ]) {
       assert.equal(isScopeAware(f), true, `${f} must narrow by device scope`);
     }

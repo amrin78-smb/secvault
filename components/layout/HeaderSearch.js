@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconSearch } from '../icons';
-import { NAV } from './Sidebar';
+import { NAV, glyph } from './Sidebar';
 import { SETTINGS_TABS } from '../../lib/settingsTabs';
 
 // ⛔ ONE SEARCH SURFACE, NOT TWO. The redesign called for a ⌘K command
@@ -96,7 +96,30 @@ const SETTINGS_DESTINATIONS = SETTINGS_TABS.map((t) => ({
   href: `/settings?tab=${t.key}`,
   label: `Settings \u203a ${t.label}`,
   keywords: SETTINGS_KEYWORDS[t.key] || [],
+  // ⛔ These eleven rows carried NO icon field at all, so they hit the same
+  // crash as the NAV rows below. They all live behind one destination, so they
+  // share its glyph rather than inventing eleven.
+  icon: 'IconSettings',
 }));
+
+/**
+ * The glyph for one palette row.
+ *
+ * ⛔ DEFINED AT MODULE TOP LEVEL, never inside another component: a component
+ * defined inside one remounts on every keystroke and loses the input's focus,
+ * which on a search box is the entire interaction.
+ *
+ * ⛔ IT RESOLVES A NAME, because the registry holds `icon` as a STRING. This
+ * rendered `<p.Icon />` until v2.223.0 — a leftover from before v2.216.0 moved
+ * the registry into lib/navRegistry.js and renamed the key — so every page
+ * result threw "Element type is invalid", and with no error.js under app/ the
+ * root unmounted and the operator got a blank "Application error" page for
+ * typing two characters into the header search.
+ */
+function PageGlyph({ icon }) {
+  const Icon = glyph(icon);
+  return Icon ? <Icon width={14} height={14} /> : null;
+}
 
 function matchPages(q) {
   const needle = q.trim().toLowerCase();
@@ -317,7 +340,7 @@ export default function HeaderSearch() {
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <p.Icon width={14} height={14} />
+                        <PageGlyph icon={p.icon} />
                         {p.label}
                       </span>
                     </button>

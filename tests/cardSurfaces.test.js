@@ -55,10 +55,53 @@ test('⛔ the flatten rule EXCLUDES [data-unmeasured], or the dashed border vani
   //
   // Asserted over EVERY matching rule, not just the one that exists today: a
   // second flatten rule added later is exactly how this would come back.
+  // ⛔ ANY BORDER DECLARATION THAT COULD NEUTRALISE THE EDGE, not the one
+  // spelling that ships today. The predicate used to be
+  // `border(-color)?: (transparent|none|0)`, which caught the live rule and
+  // MISSED every natural alternative. Measured against mutated bodies for the
+  // selector `.card .kpi-card-compact` with no exclusion:
+  //
+  //   CAUGHT   border-color: transparent;     (what ships)
+  //   CAUGHT   border: 0 none;
+  //   ESCAPED  border: 1px solid transparent; (the most natural way to write it)
+  //   ESCAPED  border-width: 0;
+  //   ESCAPED  border-left-color: transparent;
+  //   ESCAPED  border-style: solid;           (kills the DASH without a colour)
+  //
+  // CLAUDE.md records this guard as "verified by deleting the :not() and
+  // watching it go red" — true, and it only ever proved the one mutation that
+  // was tried. `border-style: solid` is the sharpest case: it removes the
+  // dashed edge from the other side without touching a colour at all.
+  const NEUTRALISING = /border(?:-(?:top|right|bottom|left))?(?:-(?:color|style|width))?\s*:\s*([^;}]+)/g;
+  const clearsTheEdge = (body) => {
+    for (const m of body.matchAll(NEUTRALISING)) {
+      const value = m[1].trim().toLowerCase();
+      // A rule that explicitly re-asserts the dash is not an offender.
+      if (/\bdashed\b/.test(value)) continue;
+      if (/\b(transparent|none)\b/.test(value)) return true;
+      // `0`, `0px`, `border-width: 0 0 0 0`, `border: 0 solid ...`
+      if (/(^|\s)0(px|em|rem)?(\s|$)/.test(value)) return true;
+      // Any explicit non-dashed style replaces the dash.
+      if (/\b(solid|dotted|double|groove|ridge|inset|outset|hidden)\b/.test(value)) return true;
+    }
+    return false;
+  };
+  // ⛔ THE CASCADE IS MODELLED, NOT GUESSED AT. The base `.kpi-card` and
+  // `.kpi-card-compact` rules legitimately set `border: 1px solid var(--border)`
+  // — that IS the default edge, and the dashed rule overrides it afterwards by
+  // source order. So only rules that come AFTER the dashed rule can take the
+  // dash away, and those are the ones this guard is about. (A first pass of this
+  // widening flagged the two base rules, which would have been a false finding
+  // reported as a defect.)
+  const dashedAt = ALL.findIndex((r) => /\[data-unmeasured\]/.test(r.selector));
+  assert.ok(dashedAt >= 0, 'the [data-unmeasured] rule has gone — the signal has no carrier');
+
   const offenders = ALL.filter(
-    (r) => /\.kpi-card(-compact)?/.test(r.selector)
-      && /border(-color)?\s*:\s*(transparent|none|0)/.test(r.body)
+    (r, i) => i > dashedAt
+      && /\.kpi-card(-compact)?/.test(r.selector)
+      && clearsTheEdge(r.body)
       && !/:not\(\[data-unmeasured\]\)/.test(r.selector)
+      && !/\[data-unmeasured\]/.test(r.selector)
   );
   assert.deepEqual(
     offenders.map((r) => r.selector),

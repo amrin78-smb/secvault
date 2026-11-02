@@ -91,7 +91,9 @@ export default async function ServerHealthWidgets() {
           return (
             <div key={d.volume} style={{ marginBottom: 'var(--s4)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{d.volume}</span>
+                {/* 500: public/fonts/ vendors mono 400 and 500 only, so 600 was a
+                    browser-synthesised bold. Same call .ev-close makes. */}
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{d.volume}</span>
                 <span style={{ fontSize: 'var(--text-sm)' }}>
                   {gb(d.freeBytes)} free of {gb(d.totalBytes)}
                 </span>

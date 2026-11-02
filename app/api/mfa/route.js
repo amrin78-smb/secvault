@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../auth/[...nextauth]/route';
+import { ownerOf, OWNER_STATES, providerLabel } from '../../../lib/sessionOwner';
 import { pool } from '../../../lib/db';
 import QRCode from 'qrcode';
 import * as mfa from '../../../lib/mfa';
@@ -21,27 +22,48 @@ export const dynamic = 'force-dynamic';
 // endpoint that resets someone else's second factor — the authorisation is
 // structural rather than a check that could be forgotten.
 
-function sessionUserId(session) {
-  // Local accounts have a UUID with a `users` row; LDAP gives the bare username
-  // and no row at all, so per-user storage cannot work for them. Callers check
-  // the SHAPE of the id rather than trusting the provider name.
-  const id = session && session.user && session.user.id;
-  return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
-}
+// ⛔ THE OWNER IS DECIDED BY PROVIDER, NEVER BY THE SHAPE OF THE ID, and this
+// route was the LAST PLACE IN THE PRODUCT still getting that wrong. It carried
+// `/^[0-9a-f-]{36}$/i` under a comment asserting the rule v2.205.0 replaced --
+// an Entra `oid` IS a 36-character GUID, so an Entra session was read as a
+// local account. `user_mfa.user_id` references `users(id)`, which an Entra
+// account has no row in, so enrolment was offered and could only ever end in a
+// foreign-key violation on a route with no try/catch and a panel with no
+// catch: a silently dead button. See lib/sessionOwner.js for the full account.
 
-const LDAP_UNSUPPORTED = {
-  error:
-    'MFA is only available for local accounts. Directory accounts authenticate against '
-    + 'your directory, which is where their MFA belongs.',
-};
+/**
+ * ⛔ TWO REFUSALS, NOT ONE, because they are different facts.
+ * NON_OWNING is a LIMITATION to explain and names the directory; UNKNOWN is a
+ * FAULT to report. Collapsing them tells someone whose session failed to read
+ * that their directory does not support MFA, which sends them to the wrong
+ * person.
+ */
+function unsupportedBody(owner) {
+  if (owner.state === OWNER_STATES.UNKNOWN) {
+    return {
+      error:
+        'The account behind this session could not be identified, so SecVault cannot show or '
+        + 'change its multi-factor settings. This is a fault, not a permission — sign out and '
+        + 'in again, and report it if it persists.',
+    };
+  }
+  return {
+    error:
+      `MFA is only available for local accounts. This session is authenticated through `
+      + `${providerLabel(owner.provider)}, which is where its MFA belongs.`,
+  };
+}
 
 /** Current MFA state for the signed-in user. Never includes the secret. */
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-  const userId = sessionUserId(session);
-  if (!userId) return NextResponse.json({ ...LDAP_UNSUPPORTED, supported: false }, { status: 200 });
+  const owner = ownerOf(session);
+  if (owner.state !== OWNER_STATES.OWNER) {
+    return NextResponse.json({ ...unsupportedBody(owner), supported: false }, { status: 200 });
+  }
+  const userId = owner.userId;
 
   const status = await mfa.getStatus(pool, userId);
   return NextResponse.json({ supported: true, ...status });
@@ -52,8 +74,15 @@ export async function POST() {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-  const userId = sessionUserId(session);
-  if (!userId) return NextResponse.json(LDAP_UNSUPPORTED, { status: 400 });
+  const owner = ownerOf(session);
+  if (owner.state !== OWNER_STATES.OWNER) {
+    // UNKNOWN is a fault (500); a directory account is a limitation (400).
+    return NextResponse.json(
+      unsupportedBody(owner),
+      { status: owner.state === OWNER_STATES.UNKNOWN ? 500 : 400 }
+    );
+  }
+  const userId = owner.userId;
 
   // ⛔ Refuse to re-issue over a CONFIRMED enrolment. Silently replacing a
   // working secret would break the authenticator the user is currently relying
@@ -91,8 +120,15 @@ export async function PUT(request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-  const userId = sessionUserId(session);
-  if (!userId) return NextResponse.json(LDAP_UNSUPPORTED, { status: 400 });
+  const owner = ownerOf(session);
+  if (owner.state !== OWNER_STATES.OWNER) {
+    // UNKNOWN is a fault (500); a directory account is a limitation (400).
+    return NextResponse.json(
+      unsupportedBody(owner),
+      { status: owner.state === OWNER_STATES.UNKNOWN ? 500 : 400 }
+    );
+  }
+  const userId = owner.userId;
 
   const body = await request.json().catch(() => ({}));
   const result = await mfa.confirmEnrolment(pool, userId, body && body.code);
@@ -125,8 +161,15 @@ export async function DELETE(request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-  const userId = sessionUserId(session);
-  if (!userId) return NextResponse.json(LDAP_UNSUPPORTED, { status: 400 });
+  const owner = ownerOf(session);
+  if (owner.state !== OWNER_STATES.OWNER) {
+    // UNKNOWN is a fault (500); a directory account is a limitation (400).
+    return NextResponse.json(
+      unsupportedBody(owner),
+      { status: owner.state === OWNER_STATES.UNKNOWN ? 500 : 400 }
+    );
+  }
+  const userId = owner.userId;
 
   const status = await mfa.getStatus(pool, userId);
 

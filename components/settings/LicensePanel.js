@@ -215,7 +215,13 @@ export default function LicensePanel() {
               less-certain identity as a certain one is the failed-read-as-a-fact
               rule applied to licensing. */}
           {info.serverIdWeak ? (
-            <div style={{ marginTop: 'var(--s3)', fontSize: 'var(--text-sm)', color: 'var(--sev-med)' }}>
+            /* ⛔ --tint-warn-fg, not the raw --sev-med ramp. globals.css states the
+               figure itself: --sev-med is 3.641:1 on --bg-card, which clears 1.4.11's
+               3:1 for a GRAPHIC and fails 1.4.3's 4.5:1 for TEXT; the paired fg form
+               is 5.801:1. This sentence is one a reader has to be able to read: it is
+               the weak-fingerprint caveat the block above calls the
+               failed-read-as-a-fact rule applied to licensing. */
+            <div style={{ marginTop: 'var(--s3)', fontSize: 'var(--text-sm)', color: 'var(--tint-warn-fg)' }}>
               This Server ID was derived from a fallback fingerprint because the machine&rsquo;s
               hardware identifier could not be read. It still works, but mention it when
               requesting a key.

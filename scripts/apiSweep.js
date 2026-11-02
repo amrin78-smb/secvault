@@ -340,6 +340,14 @@ const READ_CHECKS = [
   { path: '/api/credential-profiles', capability: 'manage_credential_profiles' },
   { path: '/api/cve/fleet' },
   { path: '/api/feeds/status' },
+  // ⛔ ADDED BECAUSE IT WAS DECLARED AND NEVER EXERCISED. /api/jobs went into
+  // API_ROUTES (which drives the anonymous 401 probe) and not into this table,
+  // so no authenticated request was ever made to it — and its one real
+  // contract, 503-on-a-failed-read rather than `{jobs: []}`, was pinned only by
+  // a regex over the route's own source text. Nothing asserts the relationship
+  // between the two tables, so a GET route can be half-declared like this
+  // silently.
+  { path: '/api/jobs', why: 'a failed read must be 503, never {jobs: []} — an empty list reads as "nothing ran"' },
   { path: '/api/ldap-mappings', capability: 'manage_users' },
   { path: '/api/license', sideEffect: true, why: 'open to every role — the banner needs it' },
   { path: '/api/logs/search?limit=5', capability: 'view_log_search', expect: [200, 504], why: '504 is the honest answer to a timed-out search, not an empty 200' },

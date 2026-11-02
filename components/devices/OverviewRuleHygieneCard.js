@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import NotMeasured from '../ui/NotMeasured';
 import RuleHygieneDonut from '../analysis/RuleHygieneDonut';
 
@@ -126,14 +127,13 @@ export default async function OverviewRuleHygieneCard({ deviceId }) {
           </Link>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
-            gap: 12,
-            marginBottom: 20,
-          }}
-        >
+        {/* ⛔ AN EXPLICIT COLUMN COUNT, NOT `auto-fit` — four tiles at
+            minmax(110px) with a 12px gap resolve to THREE columns for every
+            container width in [354px, 476px), orphaning "Expired" on a second
+            row. See the note in components/dashboard/CveSeveritySummary.js:
+            auto-fit cannot be tuned out of an orphan, because it does not know
+            how many tiles there are. */}
+        <KpiRow cols={4} style={{ marginBottom: 20 }}>
           <StatCard
             label="Total Rules"
             value={rulesCollected ? ruleStats.total : <NotMeasured reason={noRulesReason} />}
@@ -156,7 +156,7 @@ export default async function OverviewRuleHygieneCard({ deviceId }) {
               !rulesCollected ? 'var(--unmeasured)' : ruleStats.expired > 0 ? 'var(--red)' : 'var(--text-muted)'
             }
           />
-        </div>
+        </KpiRow>
 
         {rulesCollected ? (
           <RuleHygieneDonut categories={categories} total={totalFindings} />
