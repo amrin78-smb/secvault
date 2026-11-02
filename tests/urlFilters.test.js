@@ -281,3 +281,29 @@ describe('the detection window survives "Clear filters"', () => {
     assert.match(src, /param="dHours"/, 'but the control itself must still be rendered');
   });
 });
+
+describe('a column selection is not a filter either', () => {
+  // ⛔ THE SECOND INSTANCE OF THE SAME MISTAKE IN TWO RELEASES. `dHours`
+  // was the first; `cols` arrived with the column chooser and rendered as
+  // "cols: ha,vendor,rules ×" — a chip meaningless to a reader, which
+  // "Clear filters" would also have used to silently restore three columns
+  // the operator had deliberately hidden.
+  const defs = [{ key: 'vendor', label: 'Vendor' }, { key: 'risk', label: 'Risk' }];
+  const qs = 'vendor=fortinet&cols=ha,vendor,rules&sort=score';
+
+  test('it never renders as a chip', () => {
+    assert.deepEqual(activeFilterChips(qs, defs).map((c) => c.key), ['vendor']);
+  });
+
+  test('clearing filters KEEPS the columns and the sort', () => {
+    const cleared = clearedFilterQuery(qs);
+    assert.match(cleared, /cols=ha%2Cvendor%2Crules|cols=ha,vendor,rules/);
+    assert.match(cleared, /sort=score/);
+    assert.ok(!/vendor=fortinet/.test(cleared));
+  });
+
+  test('⛔ a selection alone does not make the page look filtered', () => {
+    assert.equal(hasActiveFilters('cols=ha&sort=score'), false,
+      'a "Clear filters" link over a table nobody filtered is a control that does nothing');
+  });
+});

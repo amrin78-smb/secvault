@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.221.2': [
+    'The new Columns choice was showing up among the applied filters as a meaningless chip, and "Clear filters" would have silently put back columns you had deliberately hidden.',
+    'This is the second control in two releases to make the same mistake — anything that changes what you can see of a row, rather than which rows match, is not a filter.',
+    'Both were found by looking at the rendered page rather than by a test; the rule is now pinned by one.',
+  ],
   '2.221.1': [
     'The new collection-freshness indicator in the header reported "collection unknown" on a fleet it could count perfectly. It was reading the counts under the wrong names — the one control whose job is to say when a figure cannot be trusted, getting its own figure wrong.',
     'Found by looking at the running page rather than by a test, which is also how the last two rounds of defects in this work were caught.',
