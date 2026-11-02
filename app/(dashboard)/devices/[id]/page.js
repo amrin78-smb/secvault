@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import DeviceContextHeader from '../../../../components/devices/DeviceContextHeader';
+import { loadDeviceContext } from '../../../../lib/deviceContext';
+import { visibleDeviceNav } from '../../../../lib/deviceNav';
 import { vendorLabel } from '../../../../components/devices/vendorMeta';
 import DeviceTrafficTab from '../../../../components/devices/DeviceTrafficTab';
 import { revalidatePath } from 'next/cache';
@@ -10,7 +13,6 @@ import { isAdmin, can, VIEW_LOG_SEARCH } from '../../../../lib/rbac';
 import { pool } from '../../../../lib/db';
 import Badge from '../../../../components/ui/Badge';
 import Button from '../../../../components/ui/Button';
-import StatusDot from '../../../../components/ui/StatusDot';
 import EmptyState from '../../../../components/ui/EmptyState';
 import Modal from '../../../../components/ui/Modal';
 import Table from '../../../../components/ui/Table';
@@ -99,9 +101,12 @@ async function enqueueDeleteAction(formData) {
 
 // ── Delete job rendering ─────────────────────────────────────────────────
 // Module-top-level plain functions, invoked as {fn(...)} rather than <Fn/>,
-// for the same reason tabLink() below is: CLAUDE.md's "NEVER define a React
-// component inside another React component" rule, kept safe against a future
-// refactor that starts rendering them as JSX tags.
+// for CLAUDE.md's "NEVER define a React component inside another React
+// component" rule, kept safe against a future refactor that starts rendering
+// them as JSX tags. (This used to cite tabLink() as the precedent; that helper
+// went with the device page's own tab row in v2.219.0, so the rule is now
+// stated directly rather than by reference to something that no longer
+// exists.)
 
 const LIVE_JOB_STATUSES = ['queued', 'running'];
 
@@ -314,7 +319,7 @@ function ListPills({ value }) {
 }
 
 // Plain functions returning JSX, called imperatively ({twoFactorBadge(...)}),
-// same "not a nested component" pattern as tabLink() above -- 3-state
+// same "not a nested component" pattern as deleteJobPanel() above -- 3-state
 // rendering (true/false/null → Enabled/Disabled/Unknown), never collapsing
 // an unmodeled fact (null) into a confident "Disabled", matching this app's
 // tri-state discipline used throughout (see CLAUDE.md's applicability.js
@@ -517,32 +522,6 @@ function formatSnmpUptime(seconds) {
   return `${mins}m`;
 }
 
-// Module-top-level so a future refactor toward client-side interactive tabs
-// can't accidentally turn this into a component defined inside a component
-// (see CLAUDE.md's "NEVER define a React component inside another React
-// component" rule). Currently invoked as a plain function call ({tabLink(...)}),
-// not a JSX tag, so it isn't a component today -- but this keeps it that way
-// even if a later change starts rendering it as <TabLink/>. Takes the
-// previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
-// on closure.
-function tabLink(deviceId, activeTab, key, label) {
-  const active = activeTab === key;
-  return (
-    <Link
-      href={`/devices/${deviceId}?tab=${key}`}
-      style={{
-        padding: '8px 12px',
-        fontSize: 'var(--text-base)',
-        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-        borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
-        textDecoration: 'none',
-      }}
-    >
-      {label}
-    </Link>
-  );
-}
-
 // Device Details grid. Extracted from eight identical inline copies so the
 // overflow fix below lives in ONE place rather than being reapplied by hand
 // the next time a field is added.
@@ -647,6 +626,20 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const tab = ['overview', 'cve', 'rules', 'config', 'admins', 'traffic', 'manage'].includes(searchParams?.tab)
     ? searchParams.tab
     : 'overview';
+  // ⛔ ONE EXTRA QUERY, SHARED BY SIX ROUTES. loadDeviceContext never throws
+  // and returns null on failure; the header falls back to the `device` row
+  // this page already has, so a failed aggregate costs the posture strip and
+  // not the page.
+  const deviceContext = await loadDeviceContext(pool, device.id);
+  const deviceNav = visibleDeviceNav({
+    deviceId: device.id,
+    pathname: `/devices/${device.id}`,
+    tab,
+    // ⛔ THE SAME PREDICATE THE ROUTE ENFORCES. A nav resolving its own
+    // session could disagree with the guard on the action behind it.
+    can: (cap) => (cap === 'manage_devices' ? canWrite : false),
+  });
+
   const confirmDelete = searchParams?.confirmDelete === '1';
   const deleteJobId = typeof searchParams?.deleteJob === 'string' ? searchParams.deleteJob : null;
   const deleteError = typeof searchParams?.deleteError === 'string' ? searchParams.deleteError : null;
@@ -710,35 +703,26 @@ export default async function DeviceDetailPage({ params, searchParams }) {
   const adminSummary =
     tab === 'admins' ? summarizeAdminAccounts(device.vendor, configRow ? configRow.config_parsed : null) : null;
 
-  const status =
-    device.last_connectivity_ok === true ? 'green' : device.last_connectivity_ok === false ? 'red' : 'grey';
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div>
-        <Link href="/devices" style={{ fontSize: 'var(--text-base)', color: 'var(--primary)', textDecoration: 'underline' }}>
-          ← Back to firewalls
-        </Link>
-      </div>
+      {/* ⛔ THE DEVICE'S OWN 7-TAB ROW IS GONE, REPLACED BY THE SHARED NAV.
+          It listed overview/cve/rules/config/admins/traffic/manage and knew
+          nothing about /rules, /changes, /vpn, /snmp or /analysis — five more
+          destinations about this same firewall, each reachable only from a
+          link somewhere else. lib/deviceNav.js holds all of them as data.
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <StatusDot status={status} />
-        <div className="page-title">{device.name}</div>
-        <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
-        {tabLink(device.id, tab, 'overview', 'Overview')}
-        {tabLink(device.id, tab, 'cve', 'CVE Posture')}
-        {tabLink(device.id, tab, 'rules', 'Rules')}
-        {tabLink(device.id, tab, 'config', 'Config Changes')}
-        {tabLink(device.id, tab, 'admins', 'Admins')}
-        {/* ⛔ Ungated, like every other read-only tab here. It renders already-
-            collected rollups and persists nothing, so the mutating-route rule
-            does not apply — see the RBAC section's note on non-mutating reads. */}
-        {tabLink(device.id, tab, 'traffic', 'Traffic')}
-        {canWrite && tabLink(device.id, tab, 'manage', 'Manage')}
-      </div>
+          ⛔ `?tab=rules` STILL RENDERS AND IS STILL LINKED TO FROM THE
+          OVERVIEW TILES, but the nav's Policy entry lands on
+          /devices/[id]/rules instead: that route is the same data with
+          filters, pagination and sort, and this tab is a ten-row sample of it.
+          Nothing was removed — every existing link and bookmark resolves
+          exactly as before, and activeDeviceNavKey() maps the sample onto
+          Policy so the nav never shows no active entry. */}
+      <DeviceContextHeader
+        context={deviceContext}
+        nav={deviceNav}
+        fallback={device}
+      />
 
       {/* ⛔ RENDERED ONLY WHEN SELECTED. Its six rollup queries are cheap
           individually and pointless on every other tab; the page already

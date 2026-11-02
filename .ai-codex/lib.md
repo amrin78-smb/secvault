@@ -3836,3 +3836,52 @@ allowed session, and trimming that would be the opposite error.
 deployed server — and the seeded tri-state lands exactly as designed (6 unmeasured / 1 measured-zero
 / 4 positive hit counts, one unreadable version with a NULL tuple, one device with nothing collected
 and a NULL `last_collected_at`).
+
+## `lib/deviceContext.js` — v2.219.0
+
+`deviceContextFacts(row, {now})` (pure) · `loadDeviceContext(pool, deviceId)` ·
+`collectionFreshness` · `postureFigure` · `deviceContextAgeInDays` ·
+`REACHABILITY` · `FRESH_AFTER_DAYS` (7, matching `coverageRegister`'s
+`STALE_AFTER_DAYS`).
+
+⛔ Every exported name is NAMESPACED. The first draft exported `figure`,
+`freshness` and `REACH`; `tests/importIntegrity.test.js` treats any lib/ export
+name a page mentions as a helper it must import, and `figure` appears as prose
+in 32 other files — the export turned a two-year-old JSX sentence in
+`ChangeOutcomeBoard.js` into a build failure in an untouched file.
+
+⛔ Reachability from poll health, never `last_connectivity_ok`. ⛔ Every posture
+figure tri-state with `measured` PASSED IN. ⛔ Findings need a ruleset AND a
+`device_risk_history` row. ⛔ Drift needs two config snapshots. ⛔ A future
+timestamp is `unknown`. ⛔ The loader never throws, returns null, and carries NO
+`active = true` filter.
+
+## `lib/deviceNav.js` — v2.219.0
+
+`DEVICE_NAV` (data) · `deviceNavHref` · `activeDeviceNavKey(pathname, tab,
+deviceId)` · `visibleDeviceNav({deviceId, pathname, tab, can})`.
+
+Ten destinations: Overview · Policy · Vulnerabilities · Compliance · Changes ·
+Logs · VPN · Metrics · Admins · Manage. ⛔ Path beats a stale tab param. ⛔
+Suffixes match on a segment boundary. ⛔ An unknown sub-route activates NOTHING.
+⛔ `?tab=rules` → Policy and `?tab=config` → Changes, so the two tabs the
+overview tiles link to never leave the nav with no active entry. ⛔ Manage is
+HIDDEN when no `can` predicate is supplied.
+
+## `lib/analysisTabs.js` — v2.219.0
+
+`ANALYSIS_GROUPS` (data) · `ANALYSIS_TABS` · `DEFAULT_ANALYSIS_TAB` ·
+`resolveAnalysisTab` · `groupForAnalysisTab` · `analysisTabRows(deviceId, tab,
+href?)`.
+
+Four groups over the fourteen existing leaves. ⛔ The group is DERIVED from the
+leaf, never stored in the URL — every `?tab=` value is unchanged. ⛔ The page's
+own fourteen-element validation array is gone; this is the one source. ⛔ A group
+links to its FIRST leaf. ⛔ The secondary row shows only the active group's
+leaves.
+
+## `lib/engines/deviceInventory.js` — `SORT_DIRECTION` added v2.219.0
+
+Maps each sort key to the ARIA token it actually sorts in, for `aria-sort` on
+`/devices`' column headers. ⛔ It has to be right rather than plausible: a
+screen reader announces it verbatim.

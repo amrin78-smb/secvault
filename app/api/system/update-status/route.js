@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.219.0': [
+    'Every page about a firewall now carries the firewall. A persistent header states the name, model, version, site and address, when the configuration was last collected and when it was last assessed, and what is outstanding on it \u2014 and it is the same header on the overview, the ruleset, the change history, VPN, metrics and rule hygiene. Those six pages previously shared nothing but a "Back to" link.',
+    'Those six pages are now navigable from each other. A firewall\u2019s destinations were split across two unrelated tab rows and four routes reachable only from a link somewhere else, so from the ruleset there was no way to reach the same device\u2019s compliance assessment or VPN sessions without going back to the device page first.',
+    'Rule hygiene\u2019s fourteen tabs became four tasks \u2014 Overview, Findings, Rules & Objects, Policy Simulation \u2014 with the views grouped underneath. Nothing was removed and every existing link still works: the fourteen tabs were named after the engines that produce them rather than the jobs an operator does.',
+    'The firewall list starts at the top of the page. Seven stat cards that wrapped into a ragged row and pushed the table most of the way down the screen are now one line of facts, with every figure and every caveat they carried preserved.',
+    'Sorting moved into the column headings, so the sort you pick and the column it applies to are the same thing. The firewall list also gained saved views: name a combination of filters and sort once and come back to it.',
+    'A count computed over firewalls that were never assessed now shows as "\u2014" rather than as 0. On a fleet where nothing has been assessed yet, "0 critical CVEs" was a confident answer drawn from no evidence at all.',
+  ],
   '2.218.0': [
     'The Overview now answers three questions in order instead of showing six equal numbers: what needs attention, how the fleet is doing, and whether these numbers can be trusted. Every figure that was there before is still there — it just sits under the question it answers.',
     'Added a "Can these numbers be trusted?" line showing how much of the fleet each figure actually covers: how many firewalls are reachable, how many have been assessed, and how many have been collected from recently. A firewall nothing has been pulled from and one whose last pull is weeks old are counted separately, because they need different fixes.',

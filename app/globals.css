@@ -3236,3 +3236,197 @@ tbody tr td { transition: background 0.12s ease; }
   font-size: var(--text-lg); line-height: 1; padding: 0 2px; flex: none;
 }
 .notice-dismiss:hover { color: var(--text-primary); }
+
+/* ── Persistent device context header (v2.219.0, Phase 3) ────────────────
+   ⛔ EVERY ROW IS SINGLE-LINE BY CONSTRUCTION, and that is the constraint the
+   whole component is designed around. Phase 3's purpose is getting content
+   above the fold; a context header that wrapped to six rows on a narrow
+   viewport would spend the space the change was made to recover. The
+   measurement strip and the nav therefore SCROLL horizontally rather than
+   wrap — a scrolling strip stays one row tall at every width, where a
+   wrapping one grows unpredictably and pushes the page content down by an
+   amount nobody can predict from the markup.
+   ⛔ Scrollbars are NOT hidden. A strip that scrolls with no indication that
+   it scrolls has facts an operator cannot discover. */
+.dev-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.dev-ctx-back {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  align-self: flex-start;
+}
+.dev-ctx-back:hover { color: var(--primary); text-decoration: underline; }
+.dev-ctx-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+.dev-ctx-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* ⛔ A REAL <h1>, and the only one on the page. The device name is what these
+   pages are about, and every per-device page previously opened with a
+   `.page-title` div plus a PageHeader whose title repeated the same name — two
+   headings competing, neither of them marked up as one. */
+.dev-ctx-name {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.2;
+}
+.dev-ctx-sub {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.dev-ctx-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+
+/* ⛔ ONE FACT STRIP, TWO USERS. The per-device context header and the fleet
+   inventory summary are the same pattern — a row of label/value pairs that
+   must stay one line tall — and they had no business being two stylesheets.
+   Both replaced a block of stat tiles: tiles put every figure at the same
+   weight and cost 180px, which on a page whose job is a TABLE is 180px spent
+   on not showing it. */
+.fact-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.fact { white-space: nowrap; text-decoration: none; color: inherit; }
+.fact strong { font-weight: 600; color: var(--text-primary); }
+.fact-label { color: var(--text-muted); }
+a.fact:hover .fact-label { color: var(--primary); }
+.fact-sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 var(--s1);
+}
+.dev-ctx-gaps {
+  font-size: var(--text-sm);
+  color: var(--tint-warn-fg);
+  line-height: 1.5;
+}
+
+/* ⛔ ONE TAB ROW PER DEVICE, and it replaces the two that did not know about
+   each other. `data-active` carries a 2px bottom rule rather than a filled
+   chip: this row sits directly under the identity line, and a filled active
+   tab there competes with the device name for the first thing read. */
+.dev-ctx-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.dev-ctx-tab {
+  padding: var(--s2) var(--s3);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.dev-ctx-tab:hover { color: var(--text-primary); background: var(--surface-subtle); }
+.dev-ctx-tab[data-active] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+.dev-ctx-tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* ── Two-level tab bar (v2.219.0, Phase 4) ───────────────────────────────
+   ⛔ THE TWO ROWS MUST NOT LOOK ALIKE. Drawn with the same treatment they
+   read as one wrapped row of twenty tabs, which is exactly the thing the
+   grouping replaced. The primary row owns the underline and the weight; the
+   secondary row is a quieter pill strip with no rule of its own. */
+.tab-rows { display: flex; flex-direction: column; gap: var(--s2); }
+.tab-rows-primary {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab-rows-tab {
+  padding: var(--s2) var(--s4);
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab-rows-tab:hover { color: var(--text-primary); background: var(--surface-subtle); }
+.tab-rows-tab[data-active] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+.tab-rows-secondary {
+  display: flex;
+  gap: var(--s1);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.tab-rows-leaf {
+  padding: var(--s1) var(--s3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tab-rows-leaf:hover { background: var(--surface-subtle); color: var(--text-primary); }
+/* ⛔ The active leaf is a filled chip, NOT another underline — an underline
+   here would be a second rule two rows apart, and the eye reads two parallel
+   rules as the boundary of a box that is not there. */
+.tab-rows-leaf[data-active] {
+  background: var(--tint-teal);
+  color: var(--tint-teal-fg);
+  font-weight: 600;
+}
+.tab-rows-tab:focus-visible,
+.tab-rows-leaf:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* ── Sortable column headers (v2.219.0, Phase 3) ─────────────────────────
+   ⛔ THE GLYPH IS DECORATION AND `aria-sort` IS THE ANSWER. The arrow is
+   aria-hidden; the <th>'s aria-sort attribute is what a screen reader
+   announces. Status by colour alone is forbidden here too — the active header
+   is separated by WEIGHT and the arrow, not by hue. */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+a.th-sort:hover { color: var(--primary); text-decoration: underline; }
+.th-sort[data-active] { color: var(--text-primary); font-weight: 700; }
+.th-sort-glyph { color: var(--primary); font-weight: 700; }
+a.th-sort:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}

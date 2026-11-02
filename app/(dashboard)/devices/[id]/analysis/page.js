@@ -7,6 +7,11 @@ import Table from '../../../../../components/ui/Table';
 import Badge from '../../../../../components/ui/Badge';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import StatCard from '../../../../../components/ui/StatCard';
+import DeviceContextHeader from '../../../../../components/devices/DeviceContextHeader';
+import TabRows from '../../../../../components/ui/TabRows';
+import { loadDeviceContext } from '../../../../../lib/deviceContext';
+import { visibleDeviceNav } from '../../../../../lib/deviceNav';
+import { resolveAnalysisTab, analysisTabRows } from '../../../../../lib/analysisTabs';
 import PageHeader from '../../../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../../../components/ui/Card';
 import SeverityBadge from '../../../../../components/analysis/SeverityBadge';
@@ -191,33 +196,6 @@ function ruleLabel(row) {
   return `${seq} ${row.rule_name || '(unnamed rule)'}`;
 }
 
-// Module-top-level so a future refactor toward client-side interactive tabs
-// can't accidentally turn this into a component defined inside a component
-// (see CLAUDE.md's "NEVER define a React component inside another React
-// component" rule). Currently invoked as a plain function call ({tabLink(...)}),
-// not a JSX tag, so it isn't a component today -- but this keeps it that way
-// even if a later change starts rendering it as <TabLink/>. Takes the
-// previously-closed-over `deviceId`/`activeTab` explicitly instead of relying
-// on closure.
-function tabLink(deviceId, activeTab, key, label) {
-  const active = activeTab === key;
-  return (
-    <Link
-      key={key}
-      href={`/devices/${deviceId}/analysis?tab=${key}`}
-      style={{
-        padding: '8px 12px',
-        fontSize: 'var(--text-base)',
-        color: active ? 'var(--primary)' : 'var(--text-secondary)',
-        borderBottom: active ? '2px solid var(--primary)' : '2px solid transparent',
-        textDecoration: 'none',
-      }}
-    >
-      {label}
-    </Link>
-  );
-}
-
 export default async function DeviceAnalysisPage({ params, searchParams }) {
   // Defense in depth only -- POST devices/[id]/analysis (Run Analysis) is
   // already server-side admin-only (lib/rbac.js). Hiding the button here
@@ -242,24 +220,12 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
     );
   }
 
-  const tab = [
-    'summary',
-    'rules',
-    'findings',
-    'cleanup',
-    'optimization',
-    'reorder',
-    'consolidation',
-    'risk',
-    'risky-rules',
-    'objects',
-    'tracking',
-    'reachability',
-    'access-path',
-    'relationships',
-  ].includes(searchParams?.tab)
-    ? searchParams.tab
-    : 'summary';
+  // ⛔ THE FOURTEEN-ELEMENT LITERAL THAT USED TO LIVE HERE IS GONE. It was a
+  // second copy of the tab list, maintained beside the fourteen <Link>s below,
+  // so adding a view meant editing two places and forgetting the second fell
+  // through to `summary` silently. lib/analysisTabs.js is the one source and
+  // the rows are derived from it.
+  const tab = resolveAnalysisTab(searchParams?.tab);
   const severityFilter = searchParams?.severity || '';
   const findingTypeFilter = searchParams?.finding_type || '';
 
@@ -274,16 +240,33 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
 
   const riskScore = computeRiskScoreFromCounts(severitySummary);
 
+  const tabRows = analysisTabRows(device.id, tab);
+
+  // ⛔ THE SHARED PER-DEVICE HEADER. This page used to open with a "← Back to
+  // <name>" link, a second "← Back to firewalls" link on its not-found path,
+  // and a PageHeader titled "Rule hygiene — <name>" — three different ways of
+  // saying which firewall, and no way to reach any of its other pages.
+  const deviceContext = await loadDeviceContext(pool, device.id);
+  const deviceNav = visibleDeviceNav({
+    deviceId: device.id,
+    pathname: `/devices/${device.id}/analysis`,
+    // ⛔ `canWrite` here is OPERATE (run an analysis), NOT manage_devices
+    // (change the device). The Manage tab needs the latter, so it is hidden
+    // rather than offered on the strength of a different capability — a UI
+    // looser than the route behind it is the one direction this product
+    // refuses.
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div>
-        <Link href={`/devices/${device.id}`} style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-          ← Back to {device.name}
-        </Link>
-      </div>
+      <DeviceContextHeader
+        context={deviceContext}
+        nav={deviceNav}
+        fallback={device}
+      />
 
       <PageHeader
-        title={`Rule hygiene — ${device.name}`}
+        title="Rule hygiene"
         actions={
           <>
             <Badge color={BAND_BADGE_COLOR[riskScore.band] || 'muted'}>
@@ -297,22 +280,18 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
         }
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, borderBottom: '1px solid var(--border)' }}>
-        {tabLink(device.id, tab, 'summary', 'Summary')}
-        {tabLink(device.id, tab, 'rules', `Security Rules ${ruleStats.total_rules}`)}
-        {tabLink(device.id, tab, 'findings', `Findings ${severitySummary.total}`)}
-        {tabLink(device.id, tab, 'cleanup', 'Cleanup')}
-        {tabLink(device.id, tab, 'optimization', 'Optimization')}
-        {tabLink(device.id, tab, 'reorder', 'Reorder')}
-        {tabLink(device.id, tab, 'consolidation', 'Consolidation')}
-        {tabLink(device.id, tab, 'risk', 'Risk')}
-        {tabLink(device.id, tab, 'risky-rules', 'Risky Rules')}
-        {tabLink(device.id, tab, 'objects', 'Objects')}
-        {tabLink(device.id, tab, 'tracking', 'Tracking')}
-        {tabLink(device.id, tab, 'reachability', 'Reachability')}
-        {tabLink(device.id, tab, 'access-path', 'Access Path')}
-        {tabLink(device.id, tab, 'relationships', 'Relationships')}
-      </div>
+      {/* ⛔ FOUR TASKS OVER FOURTEEN VIEWS. Every one of the fourteen is still
+          here and every `?tab=` value still resolves — the group is DERIVED
+          from the leaf rather than stored in the URL, so no bookmark, ticket
+          link or internal href needed rewriting. See lib/analysisTabs.js.
+
+          ⛔ THE TWO COUNTS THE OLD ROW CARRIED ("Security Rules 706",
+          "Findings 31") MOVED RATHER THAN DISAPPEARING: a count on a tab is
+          only readable while the tab is visible, and under a disclosure it
+          would vanish for anyone not already in that group. They are stated on
+          the leaf labels' own views and in the device context strip above,
+          which is on screen on every one of these pages. */}
+      <TabRows groups={tabRows.groups} leaves={tabRows.leaves} ariaLabel="Rule hygiene" />
 
       {tab === 'summary' && (
         <>

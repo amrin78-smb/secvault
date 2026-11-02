@@ -11,6 +11,9 @@ import Badge from '../../../../../components/ui/Badge';
 import Card, { CardBody, CardHeader, CardTitle } from '../../../../../components/ui/Card';
 import EmptyState from '../../../../../components/ui/EmptyState';
 import Table from '../../../../../components/ui/Table';
+import DeviceContextHeader from '../../../../../components/devices/DeviceContextHeader';
+import { loadDeviceContext } from '../../../../../lib/deviceContext';
+import { visibleDeviceNav } from '../../../../../lib/deviceNav';
 import PageHeader from '../../../../../components/ui/PageHeader';
 import DiffViewer, { DiffBody } from '../../../../../components/config/DiffViewer';
 import AcknowledgeButton from '../../../../../components/config/AcknowledgeButton';
@@ -366,15 +369,30 @@ export default async function DeviceChangesPage({ params, searchParams }) {
     }
   }
 
+  // ⛔ THE SAME HEADER AS EVERY OTHER PER-DEVICE PAGE. This route used to
+  // open with a "← Back to <name>" link and a title ending in the device
+  // name, which was the only thing tying the content to an asset — and it
+  // offered no way to reach any of this firewall's other pages.
+  const deviceContext = await loadDeviceContext(pool, device.id);
+  const deviceNav = visibleDeviceNav({
+    deviceId: device.id,
+    pathname: `/devices/${device.id}/changes`,
+    // ⛔ Manage is HIDDEN rather than shown-and-refused: this route does not
+    // resolve write capability, and a nav looser than the route behind it is
+    // the one direction this product refuses. visibleDeviceNav() hides a
+    // gated entry when no predicate is supplied, so omitting `can` is the
+    // safe default rather than an oversight.
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div>
-        <Link href={`/devices/${device.id}`} style={{ fontSize: 'var(--text-base)', color: 'var(--primary)' }}>
-          ← Back to {device.name}
-        </Link>
-      </div>
+      <DeviceContextHeader
+        context={deviceContext}
+        nav={deviceNav}
+        fallback={device}
+      />
 
-      <PageHeader title={device.name} subtitle="Configuration change tracking and config backups." />
+      <PageHeader title="Config changes" subtitle="Configuration change tracking and config backups." />
 
       <Card>
         <CardHeader>

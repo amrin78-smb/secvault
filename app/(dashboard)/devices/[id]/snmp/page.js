@@ -3,6 +3,9 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../../../../api/auth/[...nextauth]/route';
 import { isAdmin } from '../../../../../lib/rbac';
 import { pool } from '../../../../../lib/db';
+import DeviceContextHeader from '../../../../../components/devices/DeviceContextHeader';
+import { loadDeviceContext } from '../../../../../lib/deviceContext';
+import { visibleDeviceNav } from '../../../../../lib/deviceNav';
 import PageHeader from '../../../../../components/ui/PageHeader';
 import Badge from '../../../../../components/ui/Badge';
 import Card, { CardBody } from '../../../../../components/ui/Card';
@@ -134,16 +137,31 @@ export default async function DeviceSnmpPage({ params }) {
   const snmpDetected = configRow ? detectSnmpConfig(device.vendor, configRow.config_parsed) : null;
   const snmpDetectedLooksConfigured = snmpDetected ? looksConfigured(snmpDetected) : false;
 
+  // ⛔ THE SAME HEADER AS EVERY OTHER PER-DEVICE PAGE. This route used to
+  // open with a "← Back to <name>" link and a title ending in the device
+  // name, which was the only thing tying the content to an asset — and it
+  // offered no way to reach any of this firewall's other pages.
+  const deviceContext = await loadDeviceContext(pool, device.id);
+  const deviceNav = visibleDeviceNav({
+    deviceId: device.id,
+    pathname: `/devices/${device.id}/snmp`,
+    // ⛔ Manage is HIDDEN rather than shown-and-refused: this route does not
+    // resolve write capability, and a nav looser than the route behind it is
+    // the one direction this product refuses. visibleDeviceNav() hides a
+    // gated entry when no predicate is supplied, so omitting `can` is the
+    // safe default rather than an oversight.
+  });
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div>
-        <Link href={`/devices/${device.id}`} style={{ fontSize: 'var(--text-sm)', color: 'var(--primary)' }}>
-          ← Back to {device.name}
-        </Link>
-      </div>
+      <DeviceContextHeader
+        context={deviceContext}
+        nav={deviceNav}
+        fallback={device}
+      />
 
       <PageHeader
-        title={`SNMP Monitoring — ${device.name}`}
+        title="Metrics"
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Badge color="info" title={device.vendor}>{vendorLabel(device.vendor)}</Badge>

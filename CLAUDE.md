@@ -3262,6 +3262,143 @@ anywhere in this product. Rendering them backed by local component state would g
 control that forgets what they typed the moment they navigate, on the screen they use to decide
 what to do next. `tests/workQueueFilter.test.js` fails the build if one appears.
 
+### ⛔ A FIREWALL'S PAGES CARRY THE FIREWALL (v2.219.0)
+
+`lib/deviceContext.js` (pure facts + one loader), `lib/deviceNav.js` (the
+registry, as DATA) and `components/devices/DeviceContextHeader.js` (the
+renderer). Mounted by all six per-device routes: `/devices/[id]`, `/rules`,
+`/changes`, `/vpn`, `/snmp`, `/analysis`.
+
+⛔ **A FIREWALL'S DESTINATIONS WERE SPLIT ACROSS THREE NAVIGATIONS AND FOUR
+ORPHANS.** `/devices/[id]` had a 7-tab query-param row; `/analysis` had its own
+14-tab row; `/rules`, `/changes`, `/vpn` and `/snmp` had NO tab row at all and
+were reachable only from a link elsewhere, offering "← Back to <name>" as
+the only way out. So from the ruleset page there was no route to the same
+device's compliance assessment, its config history or its VPN sessions. The
+destinations existed; the navigation between them did not.
+
+⛔ **COMPLIANCE IS IN THE DEVICE NAV EVEN THOUGH IT LIVES UNDER
+`/compliance/[deviceId]`.** An operator asking "is this firewall compliant" is
+asking about THIS firewall; a nav organised by URL prefix would have omitted
+the one destination that answers it.
+
+⛔ **ACTIVITY IS DELIBERATELY NOT A DEVICE-LEVEL DESTINATION.** It is one of
+fourteen leaves inside `/analysis` (`?tab=tracking`), and promoting it to a peer
+of "Compliance" would have the nav claim it is a destination of the same weight.
+VPN, Metrics, Admins and Manage ARE in the nav, because dropping a real route to
+match a seven-item list would be removing a capability to simplify.
+
+⛔ **REACHABILITY IS POLL HEALTH, NEVER `devices.last_connectivity_ok`.** That
+column is written only by the manual "Test connectivity" button and showed
+TSR_EKC green while every scheduled poll had failed for 19 days. `/devices`
+already learned this; a header on six more pages must not reintroduce it on all
+of them. The manual result is still shown, labelled as what it is.
+
+⛔ **EVERY POSTURE FIGURE IS TRI-STATE AND `measured` IS PASSED IN, NEVER
+DERIVED FROM `n > 0`.** Deriving it makes every genuine zero indistinguishable
+from an absent measurement. Findings require BOTH a collected ruleset AND a
+completed analysis run (`device_risk_history`) — a device analysed and found
+clean holds zero finding rows, exactly like one never analysed. Drift requires
+TWO config snapshots, because a diff needs a predecessor. A future timestamp is
+`unknown`, not fresh: it is a clock disagreement, the same call `vpn_sessions`
+makes on a negative duration.
+
+⛔ **`loadDeviceContext` NEVER THROWS AND HAS NO `active = true` FILTER.** It is
+chrome on somebody else's page, so a failed aggregate costs the posture strip
+and not the ruleset they came to read; and a DEACTIVATED firewall's pages are
+still reachable, so filtering on `active` would make the header vanish on
+exactly the devices whose history somebody is most likely to be reading. It is
+its own query rather than `getDeviceRows` filtered, which would load the whole
+fleet with eleven lateral joins to describe one device, on six routes.
+
+⛔ **COVERAGE GAPS ARE NAMED, NEVER SUMMED.** Five different problems with five
+different first steps; "62% coverage" would cover all of them.
+
+### ⛔ FOUR TASKS, NOT FOURTEEN ENGINES (v2.219.0)
+
+`lib/analysisTabs.js` groups `/devices/[id]/analysis`'s fourteen views into
+**Overview / Findings / Rules & Objects / Policy Simulation**, rendered by
+`components/ui/TabRows.js`.
+
+⛔ **THE FOURTEEN WERE NOT FOURTEEN TASKS.** Cleanup, Optimization, Reorder and
+Consolidation are four finding-type filters over one findings table; Risk and
+Risky Rules are the same score at two grains; Reachability and Access Path are
+the same question at two resolutions. The row named the IMPLEMENTATION and left
+the operator to work out which of four tabs held what they came for.
+
+⛔ **THE GROUP IS DERIVED FROM THE LEAF, NEVER STORED IN THE URL.** Every
+`?tab=` value is unchanged, so no bookmark, no URL in a ticket and none of the
+internal links (the summary tiles link into `?tab=findings&finding_type=…`,
+the work queue links into `?tab=cleanup`) needed rewriting. The obvious
+alternative — `?tab=findings&sub=cleanup` — would have required a remap table,
+and a remap table is a thing that can disagree with itself. A derivation cannot.
+`tests/analysisTabs.test.js` pins all fourteen historical values and fails the
+build if a `sub`/`group`/`section`/`view` parameter ever appears.
+
+⛔ **THE PAGE'S OWN FOURTEEN-ELEMENT VALIDATION ARRAY IS GONE.** It was a second
+copy of the tab list maintained beside the fourteen `<Link>`s, so adding a view
+meant editing two places and forgetting the second fell through to `summary`
+silently.
+
+⛔ **THE TWO ROWS MUST NOT LOOK ALIKE AND NEITHER MAY WRAP.** Drawn with the
+same treatment they read as one wrapped row of twenty tabs — the thing the
+grouping replaced. The primary row owns the underline and the weight; the
+secondary row is a pill strip. Both scroll, because a wrapped tab row changes the
+page's height by an amount nothing in the markup predicts.
+
+⛔ **A TEST THAT PINNED THE OLD SOURCE SHAPE FAILED ON CORRECT CODE, FOR THE
+SECOND TIME IN THIS WORK.** `tests/consolidationTab.test.js` asserted
+`tabLink(device.id, tab, 'consolidation'` and the literal `'consolidation',` from
+the page's validation array — both source shape, neither the invariant. The same
+thing happened to the sidebar glyph guard in v2.216.0. Both now assert against
+the registry: the slug is a registered leaf, it belongs to exactly one group, and
+the page renders it.
+
+### ⛔ AN INVENTORY PAGE'S HEADLINE IS ITS TABLE (v2.219.0)
+
+`/devices` opened with seven `StatCard`s in a `repeat(auto-fit, minmax(180px,
+1fr))` grid. Measured at 1440 with the nav expanded it wrapped **6+1**,
+orphaning Config Drift, and the coverage notes under the two CVE tiles pushed
+the block to four text lines — so the table did not begin until roughly
+**y=760**, one visible row of firewalls on a 900px viewport, on the page whose
+entire job is listing them. It is now `components/devices/InventorySummaryStrip.js`:
+one scrolling row of facts.
+
+⛔ **A STRIP RATHER THAN "FOUR TILES INSTEAD OF SEVEN".** Tiles state "these are
+the page's headline figures", and on an inventory page they are not. The same
+seven numbers answer "what is wrong across the fleet", which is what `/work` and
+the Overview are for. Cutting to four would have discarded three real facts to
+keep a presentation that was wrong for this page.
+
+⛔ **NO FIGURE AND NO CAVEAT WAS DROPPED.** Each tile's sub-line was a QUALIFIER
+on its number. The ones that qualify a figure's TRUSTWORTHINESS are stated
+INLINE with a ⚠ glyph — a coverage caveat behind a hover is one most readers
+never meet — and the rest are on hover.
+
+⛔ **AND A ZERO OVER AN UNASSESSED FLEET IS AN EM-DASH.** On the mock fleet 0 of
+8 firewalls have a completed CVE assessment, so "0 Critical CVEs" and "0 Patch
+Now" were two confident zeroes computed from nothing. Both now render hueless
+with the reason on hover, gated on the SAME coverage test — stating the gap on
+only one of two sums invites the reader to treat the other as complete.
+
+⛔ **SORTING MOVED INTO THE COLUMN HEADINGS, AND `aria-sort` MUST STATE THE REAL
+DIRECTION.** There was a "Sort by: Name | Security Score | …" row whose five
+link names had to be matched by eye to five of the ten headings beneath them.
+`SORT_DIRECTION` in `lib/engines/deviceInventory.js` is exported for this and has
+to be RIGHT rather than plausible, because a screen reader announces it verbatim.
+⛔ **THERE IS NO DIRECTION TOGGLE**, which is unchanged behaviour: each key has
+one deliberate direction (worst score first, most rules first), and a toggle
+would let somebody sort the fleet BEST first. An active header is therefore
+plain text, not a link that appears to do something.
+
+⛔ **THE FIRST DRAFT WIRED `Support` TO THE `site` SORT KEY.** `site` is a real
+sort key and Support is a real column, so the fleet would have reordered by site
+while the header announced — on screen and to a screen reader — that it had
+sorted by support expiry. `tests/inventorySummary.test.js` now asserts every
+`sortKey` is a real engine key, has a declared direction, and carries the label
+that matches it. Support is not sortable: support state is three different facts
+with no single ordering, so that header stays plain rather than being faked.
+
 ### ⛔ HOW MANY SURFACES A PAGE MAY DRAW (v2.215.0)
 
 **Three in the content column, plus the header. Not seven.**

@@ -1074,3 +1074,41 @@ list while `result.summary` describes the WHOLE queue, and the all-clear is gate
 prepared to stand behind" over a thirty-item queue. "Filtered to nothing" has its own, differently
 worded empty state. ⛔ Nothing expands by default any more (three bands meant three expanded items
 on arrival).
+
+## DeviceContextHeader (`components/devices/DeviceContextHeader.js`) — v2.219.0
+
+The persistent per-device header, mounted by all six `/devices/[id]*` routes
+plus `/analysis`. Props: `context` (from `lib/deviceContext.js`'s
+`loadDeviceContext`), `nav` (from `lib/deviceNav.js`'s `visibleDeviceNav`),
+`fallback` (the plain devices row, used when the context load returned null),
+`actions`.
+
+Four single-line rows: breadcrumb, identity (`<h1>` + vendor badge + poll-health
+dot + model/version/site/address), the measurement strip (collected / assessed /
+patch-now / rules / findings / compliance / unreviewed changes), and the device
+nav. A gaps line appears only when there is something to say.
+
+⛔ An unmeasured figure is an em-dash with its reason on hover — never 0, never
+with a hue. ⛔ A hue is applied only to a MEASURED, NON-ZERO value. ⛔ It renders
+from `fallback` when `context` is null, because chrome that vanishes on a failed
+query takes the operator's sense of place with it. ⛔ Asset criticality is shown
+only above the column default (`medium`), or every firewall gets an identical
+chip.
+
+## InventorySummaryStrip (`components/devices/InventorySummaryStrip.js`) — v2.219.0
+
+Replaced `DeviceInventoryTiles.js` (DELETED). Seven fleet facts in one scrolling
+row above the `/devices` table. Prop: `tiles` (`computeTiles` output, unchanged).
+
+⛔ Each tile's sub-line survives: trustworthiness qualifiers inline with a ⚠
+glyph, the rest on hover. ⛔ Both CVE figures are gated on ONE coverage test so
+neither can look complete while the other does not. ⛔ `measured` is a parameter,
+never derived from `value > 0`.
+
+## TabRows (`components/ui/TabRows.js`) — v2.219.0
+
+Two-level tab bar. Props: `groups`, `leaves` (both from
+`lib/analysisTabs.js`'s `analysisTabRows`), `ariaLabel`. Two `<nav>` elements
+with different accessible names; `aria-current` in both rows. ⛔ The rows are
+deliberately styled differently and NEITHER WRAPS — drawn alike they read as one
+wrapped row of twenty tabs.

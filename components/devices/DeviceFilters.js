@@ -1,6 +1,7 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
+import SavedViews from '../ui/SavedViews';
 import FilterBar, { FilterSelect, FilterSearch, useFilterNav } from '../ui/FilterBar';
 
 // Devices-page filter bar. Client component only because it needs live input;
@@ -98,6 +99,14 @@ export default function DeviceFilters({ vendors, sites, activeCount, totalCount 
       <FilterSelect label="Status" param="status" value={params.get('status')} options={byKey('status').options} onChange={(k, v) => nav.set({ [k]: v })} />
       <FilterSelect label="Support" param="support" value={params.get('support')} options={byKey('support').options} onChange={(k, v) => nav.set({ [k]: v })} />
       <FilterSelect label="Site" param="site" value={params.get('site')} options={siteOptions} onChange={(k, v) => nav.set({ [k]: v })} />
+      {/* ⛔ SAVED VIEWS, which this table has wanted since the component was
+          written for /vpn and never got. Six filters plus a sort key is a
+          combination worth naming — "Fortinet, failing collectors" is a
+          morning routine, not a one-off — and the whole state is already in
+          the URL, which is the only reason this is a drop-in: SavedViews
+          stores the query string verbatim and restores it by navigating, so it
+          cannot silently drop a condition the way a re-parser could. */}
+      <SavedViews scope="devices" />
     </FilterBar>
   );
 }

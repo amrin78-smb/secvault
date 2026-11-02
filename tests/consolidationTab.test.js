@@ -30,6 +30,9 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const {
+  ANALYSIS_TABS, ANALYSIS_GROUPS, groupForAnalysisTab,
+} = require('../lib/analysisTabs');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -718,10 +721,23 @@ describe('the merged value is truncated visibly, never silently', () => {
 });
 
 describe('the tab is registered on the analysis page', () => {
-  it('the component is imported, the slug is accepted, and the tab link exists', () => {
+  // ⛔ ASSERTED AGAINST THE REGISTRY, NOT THE PAGE SOURCE. This used to match
+  // `'consolidation',` (the page's own fourteen-element validation array) and
+  // `tabLink(device.id, tab, 'consolidation'` (one of fourteen hand-written
+  // links). Both were SOURCE SHAPE, not the invariant — so when v2.219.0
+  // moved the tab list into lib/analysisTabs.js and grouped the row, this test
+  // failed on correct code while a genuinely missing tab would still have
+  // passed the `tab ===` check below. The invariant is: the slug is a
+  // registered leaf, it belongs to exactly one group, and the page renders it.
+  it('the slug is a registered leaf in exactly one group', () => {
+    assert.ok(ANALYSIS_TABS.includes('consolidation'), 'unreachable tab');
+    const owning = ANALYSIS_GROUPS.filter((g) => g.leaves.some((l) => l.tab === 'consolidation'));
+    assert.equal(owning.length, 1, 'a leaf in two groups has no single active state');
+    assert.equal(groupForAnalysisTab('consolidation'), owning[0].key);
+  });
+
+  it('the component is imported and the page renders it for its own slug', () => {
     assert.match(PAGE, /import ConsolidationTab from/);
-    assert.match(PAGE, /'consolidation',/);
-    assert.match(PAGE, /tabLink\(device\.id, tab, 'consolidation'/);
     assert.match(PAGE, /tab === 'consolidation' &&/);
   });
 

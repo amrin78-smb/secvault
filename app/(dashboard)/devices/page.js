@@ -21,10 +21,10 @@ import AnswerHeader from '../../../components/ui/AnswerHeader';
 import { buildDeviceInventoryAnswer } from '../../../lib/answers';
 import { deviceInventoryEvidence } from '../../../lib/evidence';
 import DeviceRowActions from '../../../components/devices/DeviceRowActions';
-import DeviceInventoryTiles from '../../../components/devices/DeviceInventoryTiles';
+import InventorySummaryStrip from '../../../components/devices/InventorySummaryStrip';
 import DeviceFilters from '../../../components/devices/DeviceFilters';
 import { SecurityScoreCell, SupportCell, HaCell, CveCell, PollHealthDot, PollHealthNote } from '../../../components/devices/DevicePostureCells';
-import { getDeviceInventory, computeTiles } from '../../../lib/engines/deviceInventory';
+import { getDeviceInventory, computeTiles, SORT_DIRECTION } from '../../../lib/engines/deviceInventory';
 
 export const dynamic = 'force-dynamic';
 
@@ -175,19 +175,49 @@ function buildDevicesHref(searchParams, overrides = {}) {
   return qs ? `/devices?${qs}` : '/devices';
 }
 
-function sortLink(activeSortKey, key, label, searchParams) {
-  const active = activeSortKey === key;
+// A sortable column header.
+//
+// ⛔ THE SORT CONTROLS MOVED OUT OF THEIR OWN ROW AND INTO THE TABLE HEAD.
+// There used to be a "Sort by: Name | Security Score | CVE Count | Rules |
+// Last Collected" line between the filter bar and the table — five link
+// names that had to be mentally matched to five of the ten column headings
+// directly beneath them, and a whole row of vertical space on a page whose
+// problem was that the table started below the fold.
+//
+// ⛔ `aria-sort` IS ON THE <th>, WHICH IS WHERE THE SPEC PUTS IT, and it
+// states the REAL direction from the engine's own SORT_DIRECTION map rather
+// than a guess. A header announcing "ascending" over a descending column is
+// worse than announcing nothing — WCAG 2.2's point is that the announcement
+// matches the data, not that the attribute is present.
+//
+// ⛔ THERE IS NO DIRECTION TOGGLE, and that is unchanged behaviour rather
+// than a gap: every key has one deliberate direction (worst score first, most
+// rules first). Clicking an active header is therefore a no-op, so it is
+// rendered as plain text rather than as a link that appears to do something.
+function SortableTh({ activeSortKey, sortKey, label, title, searchParams, width }) {
+  const active = activeSortKey === sortKey;
   return (
-    <Link
-      href={buildDevicesHref(searchParams, { sort: key, confirmDelete: null })}
-      style={{
-        fontWeight: active ? 600 : 400,
-        color: active ? 'var(--primary)' : 'var(--text-secondary)',
-        textDecoration: active ? 'underline' : 'none',
-      }}
+    <th
+      aria-sort={active ? SORT_DIRECTION[sortKey] || 'other' : 'none'}
+      title={title}
+      style={width ? { width } : undefined}
     >
-      {label}
-    </Link>
+      {active ? (
+        <span className="th-sort" data-active="">
+          {label}
+          <span aria-hidden="true" className="th-sort-glyph">
+            {SORT_DIRECTION[sortKey] === 'ascending' ? '\u2191' : '\u2193'}
+          </span>
+        </span>
+      ) : (
+        <Link
+          href={buildDevicesHref(searchParams, { sort: sortKey, confirmDelete: null })}
+          className="th-sort"
+        >
+          {label}
+        </Link>
+      )}
+    </th>
   );
 }
 
@@ -364,7 +394,13 @@ export default async function DevicesPage({ searchParams }) {
         </div>
       )}
 
-      <DeviceInventoryTiles tiles={tiles} />
+      {/* ⛔ SEVEN STAT TILES BECAME A ONE-ROW STRIP. The tiles wrapped 6+1 at
+          1440 and pushed the firewall table to roughly y=760 — one visible row
+          on a 900px viewport, on the page whose job is listing firewalls. No
+          figure was dropped; see InventorySummaryStrip.js for where each
+          tile's sub-line went and why the two CVE figures now render as
+          em-dashes over an unassessed fleet. */}
+      <InventorySummaryStrip tiles={tiles} />
 
       {blockedFrom && (
         <div style={{
@@ -388,15 +424,6 @@ export default async function DevicesPage({ searchParams }) {
         activeCount={devices.length}
         totalCount={allRows.length}
       />
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-base)', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--text-muted)' }}>Sort by:</span>
-        {sortLink(sortKey, 'name', 'Name', searchParams)}
-        {sortLink(sortKey, 'score', 'Security Score', searchParams)}
-        {sortLink(sortKey, 'cve_count', 'CVE Count', searchParams)}
-        {sortLink(sortKey, 'rules', 'Rules', searchParams)}
-        {sortLink(sortKey, 'last_collected', 'Last Collected', searchParams)}
-      </div>
 
       {devices.length === 0 ? (
         <EmptyState
@@ -430,19 +457,35 @@ export default async function DevicesPage({ searchParams }) {
           </colgroup>
           <thead>
             <tr>
-              <th>Device</th>
-              <th>Vendor</th>
-              <th title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Colour shows the rule-hygiene risk band.">
-                Score
-              </th>
+              <SortableTh activeSortKey={sortKey} sortKey="name" label="Device" searchParams={searchParams} />
+              <SortableTh activeSortKey={sortKey} sortKey="vendor" label="Vendor" searchParams={searchParams} />
+              <SortableTh
+                activeSortKey={sortKey}
+                sortKey="score"
+                label="Score"
+                title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Sorts worst first. Colour shows the rule-hygiene risk band."
+                searchParams={searchParams}
+              />
               <th>Version</th>
-              <th>Rules</th>
-              <th>CVEs</th>
+              <SortableTh activeSortKey={sortKey} sortKey="rules" label="Rules" searchParams={searchParams} />
+              <SortableTh activeSortKey={sortKey} sortKey="cve_count" label="CVEs" searchParams={searchParams} />
+              {/* ⛔ NOT SORTABLE, AND DELIBERATELY NOT FAKED. The engine has no
+                  `support` sort key — support state is three different facts
+                  (lapsed / expiring / unreadable) with no single ordering —
+                  so this header stays plain. The first draft of this change
+                  wired it to `site`, which is a real sort key: the fleet would
+                  have reordered by site while the header announced it had
+                  sorted by support, to a screen reader as well as on screen. */}
               <th title="Support contract expiry from collected licences. NOT vendor OS end-of-life, which SecVault does not collect.">
                 Support
               </th>
               <th>HA</th>
-              <th>Collected</th>
+              <SortableTh
+                activeSortKey={sortKey}
+                sortKey="last_collected"
+                label="Collected"
+                searchParams={searchParams}
+              />
               <th>Actions</th>
             </tr>
           </thead>
