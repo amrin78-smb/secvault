@@ -25,6 +25,8 @@ import InventorySummaryStrip from '../../../components/devices/InventorySummaryS
 import DeviceFilters from '../../../components/devices/DeviceFilters';
 import { SecurityScoreCell, SupportCell, HaCell, CveCell, PollHealthDot, PollHealthNote } from '../../../components/devices/DevicePostureCells';
 import { getDeviceInventory, computeTiles, SORT_DIRECTION } from '../../../lib/engines/deviceInventory';
+import { resolveColumns, priorityOf } from '../../../lib/tableColumns';
+import ColumnChooser from '../../../components/ui/ColumnChooser';
 
 export const dynamic = 'force-dynamic';
 
@@ -194,12 +196,13 @@ function buildDevicesHref(searchParams, overrides = {}) {
 // than a gap: every key has one deliberate direction (worst score first, most
 // rules first). Clicking an active header is therefore a no-op, so it is
 // rendered as plain text rather than as a link that appears to do something.
-function SortableTh({ activeSortKey, sortKey, label, title, searchParams, width }) {
+function SortableTh({ activeSortKey, sortKey, label, title, searchParams, width, priority }) {
   const active = activeSortKey === sortKey;
   return (
     <th
       aria-sort={active ? SORT_DIRECTION[sortKey] || 'other' : 'none'}
       title={title}
+      data-col-priority={priority}
       style={width ? { width } : undefined}
     >
       {active ? (
@@ -220,6 +223,29 @@ function SortableTh({ activeSortKey, sortKey, label, title, searchParams, width 
     </th>
   );
 }
+
+// The firewall table's columns.
+//
+// ⛔ `required` IS NOT A STYLE CHOICE. Device is how a row is identified at
+// all and Actions is how anything is done to it; a chooser able to hide both
+// is a way for an operator to break their own page and not know why.
+//
+// ⛔ `priority` DECIDES WHAT A NARROW VIEWPORT DROPS, and is deliberately
+// independent of position. Vendor sits second because that is where it reads
+// best and goes early because it is the least load-bearing; tying the two
+// would force a column to be unimportant in order to be late. 1 never drops.
+const DEVICE_COLUMNS = [
+  { key: 'name', label: 'Device', required: true, priority: 1, width: '16%' },
+  { key: 'vendor', label: 'Vendor', priority: 3, width: '9%' },
+  { key: 'score', label: 'Score', priority: 1, width: '11%' },
+  { key: 'version', label: 'Version', priority: 2, width: '11%' },
+  { key: 'rules', label: 'Rules', priority: 3, width: '7%' },
+  { key: 'cves', label: 'CVEs', priority: 1, width: '10%' },
+  { key: 'support', label: 'Support', priority: 2, width: '11%' },
+  { key: 'ha', label: 'HA', priority: 4, width: '8%' },
+  { key: 'collected', label: 'Collected', priority: 2, width: '10%' },
+  { key: 'actions', label: 'Actions', required: true, priority: 1, width: '7%' },
+];
 
 export default async function DevicesPage({ searchParams }) {
   // getDeviceInventory validates ?sort= against its own whitelist and returns
@@ -280,6 +306,15 @@ export default async function DevicesPage({ searchParams }) {
   const inventoryAnswer = buildDeviceInventoryAnswer(fleetTiles);
   const inventoryEvidence = deviceInventoryEvidence(fleetTiles);
 
+  // ⛔ FROM THE URL, so a column choice is linkable and — because /devices
+  // already has saved views, which store the query string verbatim — nameable
+  // for free. In localStorage it would be state a saved view silently does
+  // not capture, restoring the wrong table.
+  const { columns: deviceColumns } = resolveColumns(DEVICE_COLUMNS, searchParams?.cols);
+  const shownCol = new Set(deviceColumns.filter((c) => !c.hidden).map((c) => c.key));
+  const colPriority = Object.fromEntries(DEVICE_COLUMNS.map((c) => [c.key, String(priorityOf(c))]));
+  const show = (key) => shownCol.has(key);
+
   const confirmDeleteId = searchParams?.confirmDelete || null;
   const confirmDevice = confirmDeleteId ? devices.find((d) => d.id === confirmDeleteId) : null;
 
@@ -323,6 +358,17 @@ export default async function DevicesPage({ searchParams }) {
         title="Firewalls"
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* ⛔ IN THE HEADER'S ACTION ROW, NOT IN A ROW OF ITS OWN. The
+                first version gave it a line between the filter bar and the
+                table, and tests/inventorySummary.test.js caught it: that is
+                ~40px of the 190px Phase 3 recovered, spent on a control most
+                operators touch once. It is a page-level control and the page
+                already has a row for those.
+                ⛔ It is deliberately NOT in the filter bar either. A filter
+                changes WHICH ROWS match; this changes what you can see OF a
+                row, and sitting among the filters would invite the reading
+                that hiding a column narrows the result set. */}
+            <ColumnChooser basePath="/devices" defs={DEVICE_COLUMNS} />
             {/* ⛔ The count excludes senders already matched to a managed
                 device (HA peers), because presenting those as "devices to add"
                 is exactly how an operator ends up with duplicate firewalls.
@@ -443,32 +489,31 @@ export default async function DevicesPage({ searchParams }) {
               exactly one of 16 devices has a value, so the column was spending
               9% of the width rendering em-dashes. It stays searchable and
               filterable -- only the column is gone. */}
+          {/* ⛔ DRIVEN BY THE REGISTRY. Ten hand-written <col> widths beside
+              ten hand-written <th>s is two lists that must agree, and a
+              hidden column would otherwise leave its width behind — every
+              remaining column shifted, for a reason nothing on screen
+              explains. */}
           <colgroup>
-            <col style={{ width: '16%' }} /> {/* Device   */}
-            <col style={{ width: '9%' }} />  {/* Vendor   */}
-            <col style={{ width: '11%' }} /> {/* Score    */}
-            <col style={{ width: '11%' }} /> {/* Version  */}
-            <col style={{ width: '7%' }} />  {/* Rules    */}
-            <col style={{ width: '10%' }} /> {/* CVEs     */}
-            <col style={{ width: '11%' }} /> {/* Support  */}
-            <col style={{ width: '8%' }} />  {/* HA       */}
-            <col style={{ width: '10%' }} /> {/* Collected*/}
-            <col style={{ width: '7%' }} />  {/* Actions  */}
+            {deviceColumns.filter((c) => !c.hidden).map((c) => (
+              <col key={c.key} style={{ width: c.width }} data-col-priority={colPriority[c.key]} />
+            ))}
           </colgroup>
           <thead>
             <tr>
-              <SortableTh activeSortKey={sortKey} sortKey="name" label="Device" searchParams={searchParams} />
-              <SortableTh activeSortKey={sortKey} sortKey="vendor" label="Vendor" searchParams={searchParams} />
-              <SortableTh
+              {show('name') && <SortableTh activeSortKey={sortKey} sortKey="name" label="Device" searchParams={searchParams} priority={colPriority.name} />}
+              {show('vendor') && <SortableTh activeSortKey={sortKey} sortKey="vendor" label="Vendor" searchParams={searchParams} priority={colPriority.vendor} />}
+              {show('score') && <SortableTh
+                priority={colPriority.score}
                 activeSortKey={sortKey}
                 sortKey="score"
                 label="Score"
                 title="Security Score — composite of vulnerability posture, rule hygiene and compliance (higher is better). Sorts worst first. Colour shows the rule-hygiene risk band."
                 searchParams={searchParams}
-              />
-              <th>Version</th>
-              <SortableTh activeSortKey={sortKey} sortKey="rules" label="Rules" searchParams={searchParams} />
-              <SortableTh activeSortKey={sortKey} sortKey="cve_count" label="CVEs" searchParams={searchParams} />
+              />}
+              {show('version') && <th data-col-priority={colPriority.version}>Version</th>}
+              {show('rules') && <SortableTh activeSortKey={sortKey} sortKey="rules" label="Rules" searchParams={searchParams} priority={colPriority.rules} />}
+              {show('cves') && <SortableTh activeSortKey={sortKey} sortKey="cve_count" label="CVEs" searchParams={searchParams} priority={colPriority.cves} />}
               {/* ⛔ NOT SORTABLE, AND DELIBERATELY NOT FAKED. The engine has no
                   `support` sort key — support state is three different facts
                   (lapsed / expiring / unreadable) with no single ordering —
@@ -476,101 +521,127 @@ export default async function DevicesPage({ searchParams }) {
                   wired it to `site`, which is a real sort key: the fleet would
                   have reordered by site while the header announced it had
                   sorted by support, to a screen reader as well as on screen. */}
-              <th title="Support contract expiry from collected licences. NOT vendor OS end-of-life, which SecVault does not collect.">
-                Support
-              </th>
-              <th>HA</th>
-              <SortableTh
+              {show('support') && (
+                <th
+                  data-col-priority={colPriority.support}
+                  title="Support contract expiry from collected licences. NOT vendor OS end-of-life, which SecVault does not collect."
+                >
+                  Support
+                </th>
+              )}
+              {show('ha') && <th data-col-priority={colPriority.ha}>HA</th>}
+              {show('collected') && <SortableTh
+                priority={colPriority.collected}
                 activeSortKey={sortKey}
                 sortKey="last_collected"
                 label="Collected"
                 searchParams={searchParams}
-              />
-              <th>Actions</th>
+              />}
+              {show('actions') && <th data-col-priority={colPriority.actions}>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {devices.map((d) => (
               <tr key={d.id}>
-                <td>
-                  {/* ⛔ The dot is driven by POLL HEALTH, not by
-                      devices.last_connectivity_ok — that column is written only by
-                      the manual "Test connectivity" button, so it could be weeks
-                      stale and showed TSR_EKC green while every poll had failed
-                      for 19 days. */}
-                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <PollHealthDot band={d.pollBand} health={d.pollHealth} />
-                      <Link href={`/devices/${d.id}`} className="link-quiet">
-                        {d.name}
-                      </Link>
+                {show('name') && (
+                  <td data-col-priority={colPriority.name}>
+                    {/* ⛔ The dot is driven by POLL HEALTH, not by
+                        devices.last_connectivity_ok — that column is written only by
+                        the manual "Test connectivity" button, so it could be weeks
+                        stale and showed TSR_EKC green while every poll had failed
+                        for 19 days. */}
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <PollHealthDot band={d.pollBand} health={d.pollHealth} />
+                        <Link href={`/devices/${d.id}`} className="link-quiet">
+                          {d.name}
+                        </Link>
+                      </span>
+                      <PollHealthNote band={d.pollBand} health={d.pollHealth} />
                     </span>
-                    <PollHealthNote band={d.pollBand} health={d.pollHealth} />
-                  </span>
-                </td>
-                <td>
-                  <Badge color="info" title={vendorLabel(d.vendor)}>{vendorLabel(d.vendor, { short: true })}</Badge>
-                </td>
-                <td>
-                  <SecurityScoreCell
-                    score={d.securityScore}
-                    riskBand={d.riskBand}
-                    components={d.securityComponents}
-                  />
-                </td>
-                <td title={d.version_string || undefined}>{d.version_string || '—'}</td>
-                <td>
-                  {d.rule_count > 0 ? (
-                    <span title={`${d.enabled_rule_count} enabled`}>{d.rule_count.toLocaleString()}</span>
-                  ) : (
-                    <span style={{ color: 'var(--text-muted)' }}>—</span>
-                  )}
-                </td>
-                <td>
-                  {/* ⛔ All three coverage props matter, not just the counts.
-                      versionString separates "the matcher skipped this device"
-                      from a result; lastAssessedAt is the stamp
-                      versionMatcher.js writes only on a COMPLETED per-device
-                      match; assessmentCount is the corroborating evidence that
-                      covers both the not-yet-stamped fleet and devices holding
-                      only monitor-band rows (which this column does not show).
-                      Drop any of them and a zero silently goes back to meaning
-                      two different things. */}
-                  <CveCell
-                    patchNow={d.patch_now_count}
-                    scheduled={d.scheduled_count}
-                    versionString={d.version_string}
-                    lastAssessedAt={d.last_cve_assessed_at}
-                    assessmentCount={d.assessment_count}
-                  />
-                </td>
-                <td>
-                  <SupportCell
-                    expiredCount={d.expired_count}
-                    soonestFutureExpiry={d.soonest_future_expiry}
-                    unknownCount={d.unknown_expiry_count}
-                  />
-                </td>
-                <td>
-                  <HaCell
-                    enabled={d.ha_enabled}
-                    mode={d.ha_mode}
-                    localState={d.ha_local_state}
-                    peerStatus={d.ha_peer_status}
-                    versionCompatOk={d.ha_version_compat_ok}
-                    configSyncState={d.ha_config_sync_state}
-                    peerState={d.ha_peer_state}
-                    lastNonfunctionalReason={d.ha_last_nonfunctional_reason}
-                  />
-                </td>
-                <td title={formatDateTime(d.last_collected_at)}>{formatDateTime(d.last_collected_at)}</td>
-                <td>
-                  <DeviceRowActions
-                    deviceId={d.id}
-                    baseHref={buildDevicesHref(searchParams, { confirmDelete: null })}
-                    canWrite={canWrite}
-                  />
-                </td>
+                  </td>
+                )}
+                {show('vendor') && (
+                  <td data-col-priority={colPriority.vendor}>
+                    <Badge color="info" title={vendorLabel(d.vendor)}>{vendorLabel(d.vendor, { short: true })}</Badge>
+                  </td>
+                )}
+                {show('score') && (
+                  <td data-col-priority={colPriority.score}>
+                    <SecurityScoreCell
+                      score={d.securityScore}
+                      riskBand={d.riskBand}
+                      components={d.securityComponents}
+                    />
+                  </td>
+                )}
+                {show('version') && (
+                  <td data-col-priority={colPriority.version} title={d.version_string || undefined}>{d.version_string || '—'}</td>
+                )}
+                {show('rules') && (
+                  <td data-col-priority={colPriority.rules}>
+                    {d.rule_count > 0 ? (
+                      <span title={`${d.enabled_rule_count} enabled`}>{d.rule_count.toLocaleString()}</span>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    )}
+                  </td>
+                )}
+                {show('cves') && (
+                  <td data-col-priority={colPriority.cves}>
+                    {/* ⛔ All three coverage props matter, not just the counts.
+                        versionString separates "the matcher skipped this device"
+                        from a result; lastAssessedAt is the stamp
+                        versionMatcher.js writes only on a COMPLETED per-device
+                        match; assessmentCount is the corroborating evidence that
+                        covers both the not-yet-stamped fleet and devices holding
+                        only monitor-band rows (which this column does not show).
+                        Drop any of them and a zero silently goes back to meaning
+                        two different things. */}
+                    <CveCell
+                      patchNow={d.patch_now_count}
+                      scheduled={d.scheduled_count}
+                      versionString={d.version_string}
+                      lastAssessedAt={d.last_cve_assessed_at}
+                      assessmentCount={d.assessment_count}
+                    />
+                  </td>
+                )}
+                {show('support') && (
+                  <td data-col-priority={colPriority.support}>
+                    <SupportCell
+                      expiredCount={d.expired_count}
+                      soonestFutureExpiry={d.soonest_future_expiry}
+                      unknownCount={d.unknown_expiry_count}
+                    />
+                  </td>
+                )}
+                {show('ha') && (
+                  <td data-col-priority={colPriority.ha}>
+                    <HaCell
+                      enabled={d.ha_enabled}
+                      mode={d.ha_mode}
+                      localState={d.ha_local_state}
+                      peerStatus={d.ha_peer_status}
+                      versionCompatOk={d.ha_version_compat_ok}
+                      configSyncState={d.ha_config_sync_state}
+                      peerState={d.ha_peer_state}
+                      lastNonfunctionalReason={d.ha_last_nonfunctional_reason}
+                    />
+                  </td>
+                )}
+                {show('collected') && (
+                  <td data-col-priority={colPriority.collected} title={formatDateTime(d.last_collected_at)}>{formatDateTime(d.last_collected_at)}</td>
+                )}
+                {show('actions') && (
+                  <td data-col-priority={colPriority.actions}>
+                    <DeviceRowActions
+                      deviceId={d.id}
+                      baseHref={buildDevicesHref(searchParams, { confirmDelete: null })}
+                      canWrite={canWrite}
+                    />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

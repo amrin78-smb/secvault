@@ -3262,6 +3262,100 @@ anywhere in this product. Rendering them backed by local component state would g
 control that forgets what they typed the moment they navigate, on the screen they use to decide
 what to do next. `tests/workQueueFilter.test.js` fails the build if one appears.
 
+### ⛔ A GROUP LABEL IN A HORIZONTAL ROW READS AS A DISABLED TAB (v2.221.0)
+
+Settings' three groups were labels sitting inline in the tab row. The CSS
+comment asserted they "never read as a disabled tab". They did — reported by
+the user: *"seems like an unfinished non-clickable menu."*
+
+⛔ **THE CAUSE IS POSITIONAL, NOT STYLISTIC.** A label BEFORE items on one
+baseline is read as a PEER of them, whatever its size, tracking or colour: the
+eye groups by position first and by type treatment second. Above a vertical
+list the list's own left edge makes the hierarchy explicit and the same words
+read as a heading. **No amount of restyling fixes the horizontal case** —
+which is why settings UIs that group are vertical. Settings now uses a left
+rail (`.settings-rail`), and the group label is a real `<h2>` with the list
+`aria-labelledby` it.
+
+⛔ **IT ALSO REMOVED A WRAP.** Eleven tabs plus three labels wrapped into two
+ragged lines at narrow widths, and the second line carried no heading at all —
+the grouping silently stopped existing exactly where the row was hardest to
+read.
+
+⛔ **AND THE SETTINGS TAB IS NOW THE URL.** It was `useState('general')` plus a
+mount-only `?tab=` read, so a link INTO a tab worked only if you were not
+already on Settings — which the command palette made load-bearing the moment
+it started offering all eleven tabs. It also means Back works and a tab is
+linkable, matching `?tab=` on the device pages and `?vtab=` on VPN.
+
+### ⛔ THE JOB CENTRE IS ALLOWED BECAUSE THE JOB STATE IS REAL (v2.221.0)
+
+§9 permits one "only if real async job state exists". `background_jobs` has
+two real types (`device_collect`, `device_delete`), real statuses, progress
+counters, an error column and a reaper that marks an abandoned job **failed**
+rather than assuming it worked.
+
+⛔ **WHAT WAS MISSING WAS ANY WAY TO SEE A JOB YOU DID NOT JUST START.** The
+only reads were by job id or by device id, so a collect was visible on exactly
+the page that launched it; navigate away and it continued with nothing able to
+say how it ended — **including when it failed**. `listRecentJobs` + `GET
+/api/jobs` + the header panel close that.
+
+⛔ **ONE QUERY, LIVE FIRST.** Two queries can disagree: a job finishing between
+them appears in neither list, and "in neither" is a job that vanishes from the
+panel whose purpose is not losing track of it. ⛔ The device name is
+LEFT-joined — a finished DELETE is precisely the case where the device is gone.
+⛔ A failed read is **503, never `{jobs: []}`**. ⛔ The panel starts at `null`,
+not `[]`. ⛔ `/api/jobs` is classified **blocked** in the device-scope register:
+it lists device names fleet-wide, and default-deny means partial coverage
+degrades to less access.
+
+### ⛔ COLLECTION FRESHNESS IS NOT FEED FRESHNESS (v2.221.0)
+
+`lib/dataHealth.js` adds a second header indicator. The existing sync pill says
+whether the **advisory corpus** is current; this says whether SecVault has
+pulled from the **firewalls** recently. They fail independently and are fixed
+in different places, so they are never merged into one score.
+
+⛔ **IT RENDERS ONLY WHEN THERE IS SOMETHING TO SAY** — a permanent chip for
+correct behaviour teaches an operator to ignore the chip that matters. ⛔ An
+unreadable count is `unknown` and **hueless**, never `ok`: our failed read is
+not the customer's severity. ⛔ "Never collected" and "collected over N days
+ago" stay separate counts. ⛔ It is a **link** to Data health, not a
+`title`-only div like the pill beside it — which is unreachable by keyboard and
+invisible on touch.
+
+### ⛔ A COLUMN SELECTION BELONGS IN THE URL (v2.221.0)
+
+`lib/tableColumns.js` + `ColumnChooser`, adopted by `/devices`.
+
+⛔ **NOT localStorage**, although that is the theme/density/corners family.
+Three reasons, and the second decides it: the tables are server-rendered (a
+client value means a layout shift on every load); **`/devices` already has
+saved views, which store the query string verbatim** — in localStorage a
+column choice would be state a saved view silently does not capture, restoring
+the wrong table; and a URL is linkable.
+
+⛔ **THE PARAMETER NAMES WHAT IS HIDDEN, NOT WHAT IS SHOWN.** If it named the
+visible set, a column added later would be absent from every saved view and
+every pasted URL — silently. Naming the hidden set means a new column appears
+for everyone by default, the safe direction on a security product.
+
+⛔ **A REQUIRED COLUMN CANNOT BE HIDDEN**, and the guard is in the resolver
+rather than only the menu, because the URL can be typed. It is shown
+**disabled** in the menu rather than omitted.
+
+⛔ **PRIORITY IS NOT ORDER.** A column sits where it reads best and drops when
+it is least load-bearing. Priority 1 never drops. ⛔ This hides columns, which
+**DENSITY MAY NOT DO** — density changes row geometry only. The difference is
+that the alternative at 900px is not "all ten columns" but "ten columns you
+must scroll sideways to read", and the chooser brings any of them back
+deliberately.
+
+⛔ **THE HEADER AND THE BODY MUST BE GATED THE SAME NUMBER OF TIMES.** A gate on
+the `<th>` but not the `<td>` shifts every cell one column left — a table that
+is wrong rather than narrow. Pinned by a test.
+
 ### ⛔ THE PAGE YOU LAND ON IS NAMED THE SAME AS THE LINK YOU CLICKED (v2.220.0)
 
 Measured: **nine of seventeen** nav destinations opened with a title that did

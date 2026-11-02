@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardHeader, CardTitle, CardBody } from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
@@ -21,7 +22,7 @@ import NotificationsPanel from '../../../components/settings/NotificationsPanel'
 import AppearancePanel from '../../../components/settings/AppearancePanel';
 import pkg from '../../../package.json';
 import {
-  SETTINGS_TABS, visibleSettingsGroups, visibleSettingsTabs,
+  SETTINGS_TABS, visibleSettingsGroups, visibleSettingsTabs, resolveSettingsTab,
 } from '../../../lib/settingsTabs';
 
 // ⛔ THE TAB LIST MOVED TO lib/settingsTabs.js AND GREW A GROUPING. Ten
@@ -45,7 +46,27 @@ const ABOUT_ROWS = [
 ];
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('general');
+  // ⛔ THE URL IS THE TAB (v2.221.0). This was `useState('general')` plus a
+  // mount-only effect that read `?tab=` exactly once — which meant a link
+  // INTO a tab worked only if you were not already on Settings. The command
+  // palette now offers all eleven tabs as destinations, so navigating from
+  // /settings?tab=general to /settings?tab=users changed the address bar and
+  // nothing else: the palette would have looked broken on the one page it
+  // was just taught about.
+  //
+  // ⛔ IT ALSO MAKES BACK WORK. Tab state was client-only, so the browser's
+  // Back button left Settings entirely rather than returning to the previous
+  // tab, and a tab could not be linked to from anywhere. Reading the URL is
+  // what every other multi-view surface in this product already does
+  // (?tab= on the device pages, ?vtab= on VPN, ?view= on topology).
+  const urlParams = useSearchParams();
+  const activeTab = resolveSettingsTab(urlParams.get('tab'));
+  const router = useRouter();
+  const setActiveTab = useCallback((key) => {
+    // replace, not push: eleven tabs would otherwise fill the history with
+    // steps nobody wants to walk back through one at a time.
+    router.replace(`/settings?tab=${key}`, { scroll: false });
+  }, [router]);
 
   const [feedPollIntervalHours, setFeedPollIntervalHours] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -104,16 +125,6 @@ export default function SettingsPage() {
     };
   }, []);
 
-  // Deep-link convenience only, read once on mount — after this, tab
-  // switching is purely client-side state (matches the suite's own
-  // Settings tab pattern; see SETTINGS-STANDARDIZATION.md).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get('tab');
-    if (tab && SETTINGS_TABS.some((t) => t.key === tab)) {
-      setActiveTab(tab);
-    }
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,66 +207,53 @@ export default function SettingsPage() {
         <PageHeader title="Settings" subtitle="Manage app configuration, users, and updates." />
       </div>
 
-      <div
-        // ⛔ THE STICKY BAR MUST COVER THE SCROLLER'S OWN TOP PADDING.
-        // `.sv-content` is the scroll container and carries padding-top: 24px
-        // (--s5). `position: sticky; top: 0` pins to the PADDING EDGE, not the
-        // scrollport edge — so the bar settled 24px down and page content
-        // scrolled through the band above it in full view, between the licence
-        // banner and the tabs. Measured live: scroller top 139, tab bar top
-        // 163.
-        //
-        // ⛔ THE FIX IS A NEGATIVE `top`, NOT A NEGATIVE MARGIN. A negative
-        // margin-top was tried first and DOES NOT WORK: when an element is
-        // stuck, `top` positions its margin box against the containing block,
-        // so the margin is absorbed and the border box still settled at 163.
-        // Verified by probing document.elementFromPoint down the band on the
-        // running app — .card-body was still the topmost element at y=142-160
-        // with the margin version, and the tab bar only from 168.
-        //
-        // Pinning 24px HIGHER puts the bar's top edge flush with the scrollport
-        // (measured: 139), and its own 24px of padding keeps the buttons where
-        // they already sat. The band is then inside the bar, so nothing can
-        // scroll through it.
-        //
-        // ⛔ Both values resolve through --s5, so they cannot drift apart from
-        // each other. If `.sv-content`'s padding ever changes, this must change
-        // with it — a hardcoded 24 here would silently reopen the gap.
-        style={{
-          display: 'flex',
-          borderBottom: '1px solid var(--border)',
-          marginBottom: 8,
-          flexWrap: 'wrap',
-          position: 'sticky',
-          top: 'calc(-1 * var(--s5))',
-          zIndex: 20,
-          background: 'var(--bg-primary)',
-          paddingTop: 'var(--s5)',
-        }}
-      >
-        {/* ⛔ ONE ROW, GROUPED BY A LABEL RATHER THAN SPLIT INTO TWO ROWS.
-            A second tab row here would be the shape /analysis needed for
-            fourteen views across four TASKS; these ten are one list whose
-            entries differ by WHOSE setting they are, which a quiet heading
-            says without adding a level of navigation to cross. */}
-        {groups.map((g) => (
-          <div key={g.key} className="settings-group">
-            <span className="settings-group-label">{g.label}</span>
-            {g.tabs.map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                className="settings-tab"
-                data-active={effectiveTab === tab.key ? '' : undefined}
-                aria-current={effectiveTab === tab.key ? 'page' : undefined}
-                onClick={() => setActiveTab(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
+      {/* ⛔ A VERTICAL RAIL, NOT A GROUPED HORIZONTAL ROW — AND THE HORIZONTAL
+          VERSION'S OWN COMMENT CLAIMED IT "never reads as a disabled tab".
+          It did. Reported by the person using it: "seems like an unfinished
+          non-clickable menu."
+
+          ⛔ THE REASON IS STRUCTURAL, NOT A MATTER OF STYLING IT HARDER. A
+          label placed BEFORE items on one horizontal baseline is read as a
+          PEER of those items — the eye groups by position first and by type
+          treatment second, so "MY PREFERENCES" sitting to the left of
+          "Appearance" at the same height reads as a tab that happens to be
+          greyed out. The same label ABOVE a vertical list reads as a heading,
+          because the list's left edge makes the hierarchy explicit. That is
+          why essentially every settings UI with groups is vertical, and no
+          amount of tracking, size or colour fixes the horizontal case.
+
+          ⛔ IT ALSO FIXES A PROBLEM THE ROW ALREADY HAD. Eleven tabs plus
+          three labels is a long row; at narrow widths it wrapped into two
+          ragged lines whose second line had no heading at all. A rail has
+          room for every label at any width, and the panels it sits beside are
+          narrow by nature. */}
+      <div className="settings-layout">
+        <nav className="settings-rail" aria-label="Settings sections">
+          {groups.map((g) => (
+            <div key={g.key} className="settings-rail-group">
+              {/* ⛔ A REAL HEADING, not a styled <span>. A screen reader now
+                  announces the grouping that the eye gets from the indent. */}
+              <h2 className="settings-rail-label" id={`settings-group-${g.key}`}>{g.label}</h2>
+              <ul className="settings-rail-list" aria-labelledby={`settings-group-${g.key}`}>
+                {g.tabs.map((tab) => (
+                  <li key={tab.key}>
+                    <button
+                      type="button"
+                      className="settings-rail-item"
+                      data-active={effectiveTab === tab.key ? '' : undefined}
+                      aria-current={effectiveTab === tab.key ? 'page' : undefined}
+                      onClick={() => setActiveTab(tab.key)}
+                    >
+                      {tab.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        <div className="settings-panel">
 
       {/* ⛔ APPEARANCE ONLY NOW. This tab held Appearance (yours), Change
           password (yours) AND Feed Sync (the server's collection schedule,
@@ -488,6 +486,8 @@ export default function SettingsPage() {
           </Card>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 }

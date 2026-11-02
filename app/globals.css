@@ -3533,54 +3533,99 @@ a.th-sort:focus-visible {
   border-radius: var(--radius-pill);
 }
 
-/* ── Settings: grouped tab bar (v2.220.0, Phase 5) ───────────────────────
-   ⛔ ONE ROW WITH QUIET GROUP LABELS, not two tab rows. The two-level bar on
-   /devices/[id]/analysis exists because fourteen views split into four
-   TASKS, and choosing the task genuinely comes first. These ten tabs are one
-   list whose entries differ by WHOSE setting they are — a label says that
-   without adding a level of navigation to cross on the way to changing your
-   own password. */
-.settings-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
+/* ── Settings: a vertical rail (v2.221.0, Phase 6) ───────────────────────
+   ⛔ THE HORIZONTAL GROUPED ROW THIS REPLACES READ AS A ROW OF DISABLED TABS,
+   and its own comment here claimed it "never reads as a disabled tab". It
+   did — reported by the person using it as "an unfinished non-clickable
+   menu".
+
+   The cause is positional, not stylistic: a label BEFORE items on one
+   baseline is read as a peer of them, whatever its size, tracking or colour.
+   Above a vertical list, the list's own left edge makes the hierarchy
+   explicit and the same label reads as a heading. No amount of restyling
+   fixes the horizontal case, which is why settings UIs that group are
+   vertical.
+
+   ⛔ IT ALSO REMOVES A WRAP. Eleven tabs plus three labels wrapped into two
+   ragged lines at narrow widths, and the second line carried no heading at
+   all — so the grouping silently stopped existing exactly where the row was
+   hardest to read. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: var(--s6);
+  align-items: start;
 }
-/* ⛔ The group label is a LABEL, not a tab: no hover, no focus, not in the
-   tab order. It separates on size and tracking rather than on a rule, so it
-   never reads as a disabled tab. */
-.settings-group-label {
+/* ⛔ The rail collapses ABOVE the nav's own drawer breakpoint. Side by side
+   at 900px the panels are too narrow to hold a two-column form, so the rail
+   goes horizontal-scrolling across the top rather than squeezing content it
+   is only there to reach. */
+@media (max-width: 1080px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
+  .settings-rail {
+    position: static;
+    display: flex;
+    gap: var(--s5);
+    overflow-x: auto;
+    padding-bottom: var(--s2);
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-rail-group { min-width: max-content; }
+}
+
+.settings-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+  /* Follows the page down — the panels are long and the rail is how you
+     leave them. */
+  position: sticky;
+  top: var(--s3);
+}
+.settings-rail-group { display: flex; flex-direction: column; gap: var(--s1); }
+/* ⛔ A heading ABOVE its list, which is the whole fix. It keeps the quiet
+   treatment the horizontal version had; what changed is where it sits. */
+.settings-rail-label {
+  margin: 0 0 var(--s1);
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 0 var(--s3) 0 var(--s4);
-  white-space: nowrap;
+  padding: 0 var(--s3);
 }
-.settings-group:first-child .settings-group-label { padding-left: 0; }
-.settings-tab {
-  padding: var(--s2) var(--s4);
+.settings-rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+@media (max-width: 1080px) { .settings-rail-list { flex-direction: row; gap: var(--s1); } }
+.settings-rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--s2) var(--s3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
   font-size: var(--text-md);
   font-weight: 500;
   color: var(--text-secondary);
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   cursor: pointer;
   white-space: nowrap;
-  font-family: inherit;
 }
-.settings-tab:hover { color: var(--text-primary); background: var(--surface-subtle); }
-.settings-tab[data-active] {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
+.settings-rail-item:hover { background: var(--surface-subtle); color: var(--text-primary); }
+/* ⛔ A FILLED CHIP, NOT AN UNDERLINE. The rail is vertical, so an underline
+   would run along the bottom of one item and read as a separator between it
+   and the next. The fill is the same contrast-safe tint pair the analysis
+   leaf tabs use. */
+.settings-rail-item[data-active] {
+  background: var(--tint-teal);
+  color: var(--tint-teal-fg);
   font-weight: 600;
 }
-.settings-tab:focus-visible {
+.settings-rail-item:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
+.settings-panel { min-width: 0; }
 
 /* ⛔ A CAPTION, NOT A FIFTH TILE. Where a KPI row's denominator was competing
    with its findings as an equal card, it becomes a line of prose above the
@@ -3592,3 +3637,205 @@ a.th-sort:focus-visible {
   color: var(--text-secondary);
 }
 .kpi-row-caption strong { color: var(--text-primary); font-weight: 600; }
+
+/* ── Job centre (v2.221.0, Phase 6) ──────────────────────────────────────
+   ⛔ SHELL TOKENS, NOT THEME-FLIPPING ONES, FOR THE BUTTON. It sits on
+   --navy, which is dark in BOTH themes, so a flipping token would be a dark
+   colour on a dark bar in light mode — the trap this stylesheet's own
+   non-flipping-shell family exists for. The PANEL hangs below the bar on
+   --bg-card and uses ordinary flipping tokens, which is correct there. */
+.jobc { position: relative; display: flex; align-items: center; }
+.jobc-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--shell-fg);
+  cursor: pointer;
+}
+.jobc-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.jobc-btn:focus-visible { outline: 2px solid var(--shell-focus-ring); outline-offset: 2px; }
+/* ⛔ The badge is a COUNT, and the count is also in the button's aria-label —
+   status is never carried by colour or by a dot alone. */
+.jobc-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.jobc-panel {
+  position: absolute;
+  top: calc(100% + var(--s2));
+  right: 0;
+  z-index: 60;
+  width: 380px;
+  max-height: 440px;
+  overflow-y: auto;
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-md);
+}
+@media (max-width: 480px) { .jobc-panel { width: calc(100vw - var(--s5)); } }
+.jobc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+.jobc-stale { font-size: var(--text-xs); color: var(--tint-warn-fg); }
+.jobc-empty { margin: 0; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
+.jobc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.jobc-item { padding: var(--s2) 0; border-top: 1px solid var(--border-light); }
+.jobc-item:first-child { border-top: none; }
+.jobc-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
+.jobc-type { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+.jobc-status { font-size: var(--text-xs); font-weight: 600; white-space: nowrap; }
+.jobc-meta {
+  display: flex;
+  gap: var(--s3);
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.jobc-link { color: var(--primary); text-decoration: none; }
+.jobc-link:hover { text-decoration: underline; }
+/* ⛔ Full width and wrapping, never truncated. A collection error naming the
+   credential that failed is the entire reason somebody opened this. */
+.jobc-error {
+  margin: var(--s2) 0 0;
+  padding: var(--s2);
+  border-radius: var(--radius-sm);
+  background: var(--tint-danger);
+  color: var(--tint-danger-fg);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── Data-health pill (v2.221.0, Phase 6) ────────────────────────────────
+   ⛔ SHELL TOKENS. It sits on --navy, which is dark in BOTH themes, so the
+   flipping --tint-warn-fg would be a dark colour on a dark bar in light
+   mode. Its own non-flipping pair is defined here for the same reason
+   --shell-fg-bad exists.
+   ⛔ A LINK, so it is in the tab order and has a visible focus ring — the
+   sync pill beside it is a <div> whose explanation is `title`-only, which a
+   keyboard or touch user never sees. */
+.dh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(240, 200, 107, 0.4);
+  background: rgba(240, 200, 107, 0.14);
+  color: #f0c86b;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-decoration: none;
+  white-space: nowrap;
+  flex: none;
+}
+.dh-pill:hover { background: rgba(240, 200, 107, 0.22); }
+.dh-pill:focus-visible { outline: 2px solid var(--shell-focus-ring); outline-offset: 2px; }
+/* ⛔ HUELESS WHEN THE COUNT ITSELF COULD NOT BE READ. "We do not know how
+   fresh this is" is not a severity of the customer's, and amber here would
+   rank our own failed read on the same scale as their stale fleet. */
+.dh-pill[data-state="unknown"] {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--shell-fg);
+}
+/* The header is tight at narrow widths; the pill keeps its glyph and drops
+   its text rather than pushing the search field off the bar. */
+@media (max-width: 900px) { .dh-pill span:nth-child(2) { display: none; } }
+
+/* ── Column chooser (v2.221.0, §10) ──────────────────────────────────────
+   ⛔ The trigger STATES the hidden count. A table missing three columns
+   still looks like a table, so the operator's own earlier choice would
+   otherwise be indistinguishable from a product that never had them. */
+.colch { position: relative; display: inline-flex; }
+.colch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 6px var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.colch-btn:hover { border-color: var(--primary); color: var(--text-primary); }
+.colch-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.colch-count {
+  padding: 1px var(--s2);
+  border-radius: var(--radius-pill);
+  background: var(--tint-teal);
+  color: var(--tint-teal-fg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.colch-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-md);
+}
+.colch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.colch-row:hover { background: var(--surface-subtle); }
+.colch-row[data-required] { cursor: default; color: var(--text-secondary); }
+.colch-row[data-required]:hover { background: none; }
+.colch-req { margin-left: auto; font-size: var(--text-xs); color: var(--text-muted); }
+.colch-row input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ── Priority-based responsive columns (§10) ─────────────────────────────
+   ⛔ PRIORITY IS NOT ORDER. A column sits where it reads best and drops when
+   it is least load-bearing; tying the two would force a column to be
+   unimportant in order to be late. Priority 1 never drops.
+   ⛔ THIS HIDES COLUMNS, WHICH DENSITY MAY NOT DO. The density control is
+   explicitly forbidden from hiding a column — it changes row geometry only.
+   This is different in kind: the alternative at 900px is not "all ten
+   columns" but "ten columns the operator must scroll sideways to read", and
+   the chooser above lets them bring any of these back deliberately. */
+@media (max-width: 1200px) { [data-col-priority="4"] { display: none; } }
+@media (max-width: 1000px) { [data-col-priority="3"] { display: none; } }
+@media (max-width: 820px)  { [data-col-priority="2"] { display: none; } }

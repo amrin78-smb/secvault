@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.221.0': [
+    'Settings now has a list of sections down the left instead of group labels sitting in the tab row, where they read as greyed-out tabs you could not click. A heading above a list reads as a heading; the same words beside the items read as more items, and no amount of styling fixes that.',
+    'A new jobs button in the header shows what is running and how the last few things ended. Collections and deletions were only visible on the page that started them, so navigating away meant never finding out whether one failed — the error is now shown in full, wherever you are.',
+    'When firewalls have not been collected from recently, the header says so on every page and links to Data health. That caveat previously appeared on the Overview and nowhere else, while every other page showed figures derived from the same ageing data.',
+    'The command palette now finds Settings pages. Typing "password", "theme", "sso" or "certificate" went nowhere; each now takes you straight to the right section, and a Settings section can be linked to and reached with the browser Back button.',
+    'The firewall table gained a Columns control, and narrow screens now drop the least important columns first instead of forcing a sideways scroll. Your choice is part of the address, so it can be saved as a named view along with the filters and sort.',
+  ],
   '2.220.1': [
     'The page-render sweep that runs after every deploy was looking for the old name of the fleet rule-hygiene page and reporting it as blank. The page was fine; the check was out of date, and it is now looking for text that belongs to the page rather than to its heading.',
     'That check also kept its own copy of the sidebar\u2019s labels, which the renames in 2.220.0 made stale on the same day — so it was guarding against three labels that no longer exist and none of the three that do. It reads the real list now.',

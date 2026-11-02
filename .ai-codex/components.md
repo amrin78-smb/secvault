@@ -1138,3 +1138,23 @@ no client state, no `'use client'`.
 The fourth and last hand-rolled filter bar, now on the shared `FilterBar`. Gained
 chips, a count and Clear. ⛔ `dHours` stays a CONTROL and never a filter def, so
 Clear cannot reset the detection window.
+
+## JobCentre (`components/layout/JobCentre.js`) — v2.221.0
+
+Header panel listing recent background jobs. ⛔ Starts at `null`, not `[]`. ⛔ A
+failed refresh says so and keeps the last good list. ⛔ An unknown progress
+total is never rendered as 0. ⛔ A failed job's error is shown in full. ⛔ Polls
+fast only while something is live, on the server's own `live` count.
+
+## ColumnChooser (`components/ui/ColumnChooser.js`) — v2.221.0
+
+`<ColumnChooser basePath defs />`. Writes `cols` through `mergeFilterQuery`, so
+filters and sort survive. ⛔ Does NOT reset `page` — hiding a column changes no
+row. ⛔ A required column is shown disabled, never omitted. ⛔ The trigger states
+the hidden count, because a table missing columns still looks like a table.
+
+## Settings tab bar → vertical rail (`app/(dashboard)/settings/page.js`) — v2.221.0
+
+`.settings-rail`. The horizontal grouped row read as greyed-out tabs; a label
+before items on one baseline is a peer of them, and above a list it is a
+heading. Group labels are real `<h2>`s with `aria-labelledby` lists.

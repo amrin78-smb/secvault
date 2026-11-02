@@ -3914,3 +3914,33 @@ Feed Sync moved to Administration.
 
 The VPN detection window. "Clear filters" dropping it silently reset a 7-day
 investigation to 24 hours and changed every number on the page.
+
+## `lib/tableColumns.js` — v2.221.0
+
+`resolveColumns(defs, value)` · `toggleColumn` · `priorityOf`. The `cols` query
+parameter names the columns to HIDE. ⛔ In the URL, not localStorage: the tables
+are server-rendered, and /devices' saved views store the query string verbatim
+so a column choice becomes nameable for free. ⛔ Naming the hidden set means a
+column added later appears by default. ⛔ A `required` column cannot be hidden,
+guarded in the resolver because the URL can be typed. ⛔ `priority` (1–4, 1 never
+drops) is independent of display order.
+
+## `lib/dataHealth.js` — v2.221.0
+
+`describeCollectionHealth(counts)` (pure) · `getCollectionHealth(pool)`. The
+header's collection-freshness indicator. ⛔ A separate fact from the feed sync
+pill and never merged with it. ⛔ Renders nothing when healthy. ⛔ An unreadable
+count is `unknown`, never `ok`. ⛔ "Never collected" and "stale" stay separate
+counts. Never throws.
+
+## `lib/settingsTabs.js` — the page is URL-driven since v2.221.0
+
+`resolveSettingsTab` is now called on every render from `useSearchParams`,
+replacing a mount-only `?tab=` read that made a link into a tab work only from
+off the Settings page.
+
+## `lib/engines/backgroundJobs.js` — `listRecentJobs` added v2.221.0
+
+Recent jobs fleet-wide, newest first, live ones first, in ONE query. Backs
+`GET /api/jobs` and the header job panel. ⛔ The device name is LEFT-joined: a
+finished delete has no device.

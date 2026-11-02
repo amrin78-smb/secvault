@@ -125,7 +125,12 @@ describe('a sortable header states the sort it actually performs', () => {
   it('⛔ Support is NOT sortable and is not faked as such', () => {
     assert.equal(used.includes('site'), false,
       'site is a real sort key and Support is a real column; pairing them sorts by the wrong thing');
-    assert.match(PAGE_CODE, /<th title="Support contract expiry/);
+    // ⛔ The MARKUP moved (the cell is wrapped in the column gate now) but
+    // the invariant did not: Support renders a plain <th>, never a
+    // SortableTh. Asserted on the element rather than on its formatting.
+    assert.match(PAGE_CODE, /show\('support'\) && \(\s*<th/,
+      'Support must render a plain header, not a sortable one');
+    assert.match(PAGE_CODE, /title="Support contract expiry/);
   });
 
   it('⛔ aria-sort is on the <th> and is "none" when inactive', () => {

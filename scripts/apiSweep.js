@@ -257,6 +257,10 @@ const API_ROUTES = [
   { path: '/api/feeds/status', methods: ['GET'], capability: null },
   { path: '/api/feeds/sync', methods: ['POST'], capability: 'operate' },
   { path: '/api/health', methods: ['GET'], capability: null },
+  // ⛔ `capability: null` — authenticated but not gated, matching the route.
+  // It exposes a job type, a device name and a status, all of which any
+  // signed-in user already sees on the device page that started the job.
+  { path: '/api/jobs', methods: ['GET'], capability: null },
   { path: '/api/jobs/{id}', methods: ['GET'], capability: null },
   { path: '/api/ldap-mappings', methods: ['GET', 'POST', 'DELETE'], capability: 'manage_users' },
   { path: '/api/license', methods: ['GET', 'POST', 'DELETE'], capability: 'manage_license' },

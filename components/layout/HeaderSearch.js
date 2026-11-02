@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { IconSearch } from '../icons';
 import { NAV } from './Sidebar';
+import { SETTINGS_TABS } from '../../lib/settingsTabs';
 
 // ⛔ ONE SEARCH SURFACE, NOT TWO. The redesign called for a ⌘K command
 // palette, and the cheapest way to get one wrong is to add a second
@@ -28,7 +29,7 @@ const PAGE_KEYWORDS = {
   '/topology': ['map', 'network', 'path', 'route'],
   '/lifecycle': ['licences', 'licenses', 'support', 'expiry', 'ha', 'disk'],
   '/vulnerability': ['cve', 'cves', 'advisories', 'patch', 'vulnerability'],
-  '/exposure': ['attack surface', 'internet facing', 'exposed'],
+  '/exposure': ['attack surface', 'internet facing', 'internet exposure', 'exposed'],
   '/analysis': ['rule analysis', 'rules', 'hygiene', 'shadow', 'unused'],
   '/compliance': ['audit', 'pci', 'iso', 'cis', 'nist', 'benchmark'],
   '/vpn': ['vpn', 'remote access', 'tunnel', 'users', 'identity'],
@@ -61,13 +62,56 @@ const PAGE_KEYWORDS = {
     'office 365', 'microsoft 365', 'saas', 'intent'],
 };
 
+// ⛔ SETTINGS TABS ARE DESTINATIONS TOO (v2.221.0). Measured: "password",
+// "theme", "dark mode" and "sso" all answered NO RESULTS, and "users" matched
+// /vpn — because the palette only knew about the eleven NAV entries, and
+// Settings is eleven more destinations behind one of them. "Where do I change
+// my password" is exactly the question a command palette exists for.
+//
+// ⛔ DERIVED FROM lib/settingsTabs.js, never a second list. A copy would go
+// stale the first time a tab is renamed, and the palette would answer "no
+// results" for a tab that works — the failure mode NAV's own comment warns
+// about three lines up.
+//
+// ⛔ GATED TABS ARE INCLUDED, following the SAME decision NAV already records
+// for capability-gated pages: the palette aids discovery and the route itself
+// refuses. Excluding them would mean maintaining a capability check in a
+// client component that cannot be the boundary anyway.
+const SETTINGS_KEYWORDS = {
+  general: ['appearance', 'theme', 'dark mode', 'light mode', 'density', 'corners'],
+  security: ['password', 'change password', 'mfa', 'two-factor', '2fa', 'totp',
+    'authenticator', 'my account', 'session', 'timeout', 'idle'],
+  users: ['users', 'accounts', 'roles', 'rbac', 'permissions'],
+  signon: ['sso', 'single sign-on', 'entra', 'azure', 'ldap', 'directory', 'saml', 'oidc'],
+  profiles: ['credentials', 'credential profiles', 'secrets'],
+  notifications: ['notifications', 'slack', 'teams', 'email', 'webhook', 'alerting'],
+  certificate: ['certificate', 'tls', 'https', 'ssl', 'console address'],
+  feeds: ['feeds', 'feed sync', 'poll interval', 'nvd'],
+  updates: ['update', 'upgrade', 'version'],
+  subscription: ['subscription', 'licence', 'license', 'server id', 'renewal', 'trial'],
+  about: ['about', 'version'],
+};
+
+const SETTINGS_DESTINATIONS = SETTINGS_TABS.map((t) => ({
+  href: `/settings?tab=${t.key}`,
+  label: `Settings \u203a ${t.label}`,
+  keywords: SETTINGS_KEYWORDS[t.key] || [],
+}));
+
 function matchPages(q) {
   const needle = q.trim().toLowerCase();
   if (needle.length < 2) return [];
-  return NAV.filter(({ href, label }) => {
+  const pages = NAV.filter(({ href, label }) => {
     if (label.toLowerCase().includes(needle)) return true;
     return (PAGE_KEYWORDS[href] || []).some((k) => k.includes(needle));
-  }).slice(0, 5);
+  });
+  // ⛔ AFTER the pages, never interleaved. A tab inside Settings is a more
+  // specific answer than a top-level page, and burying "Vulnerabilities"
+  // under four settings tabs for the query "u" would make the palette worse
+  // at the thing it is already good at.
+  const settings = SETTINGS_DESTINATIONS.filter(({ label, keywords }) =>
+    label.toLowerCase().includes(needle) || keywords.some((k) => k.includes(needle)));
+  return [...pages, ...settings].slice(0, 6);
 }
 
 // Centered header search — debounced, "/" keyboard shortcut, hits

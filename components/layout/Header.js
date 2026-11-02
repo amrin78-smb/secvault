@@ -9,6 +9,9 @@ import HeaderSearch from './HeaderSearch';
 import NavDrawerToggle from './NavDrawerToggle';
 import ThemeToggle from './ThemeToggle';
 import NotificationBell from './NotificationBell';
+import Link from 'next/link';
+import JobCentre from './JobCentre';
+import { getCollectionHealth } from '../../lib/dataHealth';
 import UserMenu from './UserMenu';
 import { PRODUCT_NAME_PARTS, PRODUCT_TAGLINE } from '../../lib/branding';
 import BrandMark from '../ui/BrandMark';
@@ -146,6 +149,16 @@ export default async function Header({ session }) {
   }
   const tone = PILL_TONE[syncStatus.state] || PILL_TONE.none;
 
+  // ⛔ A SECOND, SEPARATELY-NAMED FACT — NOT FOLDED INTO THE PILL ABOVE.
+  // The sync pill says whether the ADVISORY CORPUS is current; this says
+  // whether SecVault has pulled from the FIREWALLS recently. They fail
+  // independently and are fixed in different places, so merging them would
+  // produce one figure covering two problems with two different first steps.
+  // It renders ONLY when there is something to say, so a healthy fleet sees
+  // nothing new. Measured on the mock fleet: 0 of 8 collected within 7 days,
+  // a caveat that until now appeared on the Overview and nowhere else.
+  const collection = await getCollectionHealth(pool);
+
   return (
     <header className="sv-topbar">
       {/* ⛔ FIRST IN THE HEADER, AND INVISIBLE ABOVE 1023px. Below that width
@@ -241,6 +254,28 @@ export default async function Header({ session }) {
           </span>
         </div>
 
+        {/* ⛔ A LINK, NOT A `title`-ONLY DIV. The sync pill beside it is a
+            <div> whose whole explanation lives in a `title` attribute —
+            unreachable by keyboard and unreadable on touch. An indicator that
+            says your numbers may be stale has to be actionable, so this one
+            is a real link to the page that explains which firewalls and why.
+            ⛔ It is ABSENT when collection is healthy: a permanent chip for
+            the system working correctly teaches an operator to ignore the
+            chip that matters. */}
+        {collection.label && (
+          <Link
+            href="/coverage"
+            className="dh-pill"
+            data-state={collection.state}
+            title={collection.title}
+          >
+            <span aria-hidden="true">⚠</span>
+            <span>{collection.label}</span>
+            <span className="sr-only"> — {collection.title}</span>
+          </Link>
+        )}
+
+        <JobCentre />
         <NotificationBell />
         <ThemeToggle />
         <UserMenu session={session} />

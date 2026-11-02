@@ -190,8 +190,26 @@ describe('resolution', () => {
   });
 
   it('⛔ the page resolves deep links through the registry, not a local copy', () => {
-    assert.match(PAGE, /SETTINGS_TABS\.some\(\(t\) => t\.key === tab\)/);
+    // ⛔ THE ASSERTION MOVED WITH THE MECHANISM. It used to match the
+    // mount-only effect's `SETTINGS_TABS.some(...)`; v2.221.0 made the URL
+    // the single source, so the registry is consulted through
+    // resolveSettingsTab() on every render instead of once on mount.
+    assert.match(PAGE, /resolveSettingsTab\(urlParams\.get\('tab'\)\)/);
     assert.equal(/const TABS = \[/.test(PAGE), false, 'a second copy of the tab list');
+  });
+
+  it('⛔ THE URL IS THE TAB, so a link into a tab works from Settings itself', () => {
+    // The mount-only effect meant navigating /settings?tab=general ->
+    // /settings?tab=users changed the address bar and nothing else. The
+    // command palette now offers all eleven tabs, so that is the one page
+    // where it would have looked broken.
+    assert.match(PAGE, /const urlParams = useSearchParams\(\)/);
+    assert.equal(
+      /useState\('general'\)/.test(PAGE), false,
+      'client-only tab state cannot be linked to and breaks the Back button'
+    );
+    assert.match(PAGE, /router\.replace\(`\/settings\?tab=\$\{key\}`/,
+      'a tab click must write the URL, or the URL and the view disagree');
   });
 
   it('⛔ the tab bar marks the active tab with aria-current, not colour alone', () => {
