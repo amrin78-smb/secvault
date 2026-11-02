@@ -3031,7 +3031,10 @@ tbody tr td { transition: background 0.12s ease; }
 }
 .wq-item > summary::-webkit-details-marker { display: none; }
 .wq-item > summary:hover { background: var(--surface-subtle); }
-.wq-item > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* ⛔ --primary for the reason given at .dev-ctx-tab:focus-visible: --focus-ring
+   is a 22% wash and this rule OVERRIDES the opaque global one. Written in
+   v2.218.0 with the same mistake, fixed here because it is the same work. */
+.wq-item > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
 /* The chevron is the only thing that moves. ⛔ Rotation only — no colour
    change, so the marker never competes with the severity badge beside it. */
@@ -3253,9 +3256,20 @@ tbody tr td { transition: background 0.12s ease; }
   flex-direction: column;
   gap: var(--s2);
 }
+/* ⛔ --text-secondary, NOT --text-muted, AND THAT IS A MEASUREMENT RATHER THAN
+   A PREFERENCE. Measured in the browser on staging: --text-muted on the light
+   canvas is 4.27:1, under WCAG 1.4.3's 4.5:1 for 14px/400 text. These three
+   are NEW surfaces, so putting them on a token that misses AA would be adding
+   failures to a known problem rather than inheriting it. The token itself is a
+   separate decision affecting ~40 existing call sites and is not changed here.
+   Measured after: 8.53:1 light / 11.07:1 dark.
+   ⛔ THE HIERARCHY SURVIVES because it was never only colour: the label is
+   400 against the value's 600, and secondary-against-primary is still a real
+   colour step (8.53 vs 17.66). That is exactly how .stat-label and .stat-sub
+   separate, per the design-system note above. */
 .dev-ctx-back {
   font-size: var(--text-sm);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-decoration: none;
   align-self: flex-start;
 }
@@ -3287,7 +3301,7 @@ tbody tr td { transition: background 0.12s ease; }
 }
 .dev-ctx-sub {
   font-size: var(--text-sm);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
 }
 .dev-ctx-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
@@ -3309,7 +3323,7 @@ tbody tr td { transition: background 0.12s ease; }
 }
 .fact { white-space: nowrap; text-decoration: none; color: inherit; }
 .fact strong { font-weight: 600; color: var(--text-primary); }
-.fact-label { color: var(--text-muted); }
+.fact-label { color: var(--text-secondary); }
 a.fact:hover .fact-label { color: var(--primary); }
 .fact-sep {
   flex: 0 0 1px;
@@ -3350,8 +3364,16 @@ a.fact:hover .fact-label { color: var(--primary); }
   border-bottom-color: var(--primary);
   font-weight: 600;
 }
+/* ⛔ --primary, NOT --focus-ring, AND THE DIFFERENCE IS A FAILING INDICATOR.
+   `--focus-ring` is rgba(10,143,163,0.22) — a 22% alpha wash. The product's
+   global rule rings every link and button with OPAQUE --primary; these rules
+   override that global, so using --focus-ring here made the indicator FAINTER
+   on the new surfaces than everywhere else, against WCAG 2.2's 1.4.11 (3:1 for
+   a focus indicator). The inset offset is kept and is the reason these rules
+   exist at all: these tabs sit flush against a 1px rule, so the global +2px
+   offset would paint the ring over the neighbouring tab. */
 .dev-ctx-tab:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
 
@@ -3407,7 +3429,7 @@ a.fact:hover .fact-label { color: var(--primary); }
 }
 .tab-rows-tab:focus-visible,
 .tab-rows-leaf:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--primary);
   outline-offset: -2px;
 }
 
@@ -3427,6 +3449,6 @@ a.th-sort:hover { color: var(--primary); text-decoration: underline; }
 .th-sort[data-active] { color: var(--text-primary); font-weight: 700; }
 .th-sort-glyph { color: var(--primary); font-weight: 700; }
 a.th-sort:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }

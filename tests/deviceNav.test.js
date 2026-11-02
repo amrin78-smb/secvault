@@ -12,6 +12,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { stripComments } = require('./stripComments');
 
 const {
   DEVICE_NAV, deviceNavHref, activeDeviceNavKey, visibleDeviceNav,
@@ -169,6 +170,70 @@ describe('capability gating', () => {
   it('⛔ only ONE entry is gated — the rest are read-only views', () => {
     const gated = DEVICE_NAV.filter((e) => e.requires);
     assert.deepEqual(gated.map((e) => e.key), ['manage']);
+  });
+});
+
+describe('the new surfaces clear WCAG AA in both themes', () => {
+  // ⛔ MEASURED IN A BROWSER ON STAGING, THEN PINNED HERE. --text-muted on
+  // the light canvas is 4.27:1, under 1.4.3's 4.5:1 for 14px/400 — so these
+  // three NEW surfaces sit on --text-secondary (8.53:1 light / 11.07:1 dark)
+  // rather than inheriting a known miss. The token itself is a separate
+  // decision across ~40 existing call sites and was deliberately NOT changed.
+  const CSS = stripComments(
+    fs.readFileSync(path.join(__dirname, '..', 'app', 'globals.css'), 'utf8')
+  );
+  const block = (sel) => {
+    const i = CSS.indexOf(`${sel} {`);
+    assert.ok(i > -1, `${sel} missing from the stylesheet`);
+    return CSS.slice(i, CSS.indexOf('}', i));
+  };
+
+  for (const sel of ['.dev-ctx-back', '.dev-ctx-sub']) {
+    it(`${sel} is not on --text-muted`, () => {
+      assert.equal(
+        /--text-muted/.test(block(sel)), false,
+        'measured 4.27:1 on the light canvas at 14px/400, under AA'
+      );
+      assert.match(block(sel), /--text-secondary/);
+    });
+  }
+
+  it('.fact-label is not on --text-muted', () => {
+    const i = CSS.indexOf('.fact-label {');
+    assert.ok(i > -1);
+    const rule = CSS.slice(i, CSS.indexOf('}', i) + 1);
+    assert.equal(/--text-muted/.test(rule), false);
+    assert.match(rule, /--text-secondary/);
+  });
+
+  it('⛔ A FOCUS RING ON THESE SURFACES IS OPAQUE --primary, NOT --focus-ring', () => {
+    // --focus-ring is rgba(10,143,163,0.22) — a 22% wash this stylesheet already
+    // records at 1.32:1 light / 1.97:1 dark. It is right as the box-shadow GLOW on
+    // an input, where the border-color is the real indicator; it is wrong as the
+    // whole indicator. These rules OVERRIDE the product's opaque global ring, so
+    // using it here made the new surfaces fainter than everything else.
+    //
+    // ⛔ NAMED EXEMPTIONS WITH A REASON EACH, the convention
+    // deviceScopeCoverage's TRANSITIVE_ALLOWED follows.
+    const EXEMPT = {
+      '.rpt-rail-item': 'pre-dates this work; reported, not changed (do not fix unrelated bugs)',
+      '.skip-link': 'the chip is off-screen until focused, so its APPEARANCE is the indicator',
+    };
+    const offenders = [];
+    for (const m of CSS.matchAll(/([^\n{}]+):focus(?:-visible)?[^{]*\{([^}]*)\}/g)) {
+      const [, sel, body] = m;
+      if (!/outline:[^;]*var\(--focus-ring\)/.test(body)) continue;
+      if (Object.keys(EXEMPT).some((e) => sel.includes(e))) continue;
+      offenders.push(sel.trim());
+    }
+    assert.deepEqual(offenders, [],
+      'these draw their whole focus indicator in a 22% wash: ' + offenders.join(', '));
+  });
+
+  it('⛔ the hierarchy does not rest on colour alone', () => {
+    // The label/value step is weight as well as colour, so the two stay
+    // distinguishable even where the colour difference is small.
+    assert.match(CSS, /\.fact strong \{ font-weight: 600;/);
   });
 });
 
