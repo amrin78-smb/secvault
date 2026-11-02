@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.219.1': [
+    'Three labels introduced in 2.219.0 were a shade too light to meet the accessibility contrast standard on a white background, measured in a browser rather than read off the stylesheet. They are darker now; the colour that made them read as labels rather than values is still there, carried by weight.',
+    'The keyboard focus outline on the new tab rows and column headings was drawn in a faint wash rather than the solid colour the rest of the product uses, so tabbing onto them was harder to see than tabbing onto anything else. Corrected, including the one place in 2.218.0 with the same mistake.',
+  ],
   '2.219.0': [
     'Every page about a firewall now carries the firewall. A persistent header states the name, model, version, site and address, when the configuration was last collected and when it was last assessed, and what is outstanding on it \u2014 and it is the same header on the overview, the ruleset, the change history, VPN, metrics and rule hygiene. Those six pages previously shared nothing but a "Back to" link.',
     'Those six pages are now navigable from each other. A firewall\u2019s destinations were split across two unrelated tab rows and four routes reachable only from a link somewhere else, so from the ruleset there was no way to reach the same device\u2019s compliance assessment or VPN sessions without going back to the device page first.',
