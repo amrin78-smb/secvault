@@ -160,6 +160,27 @@ describe('the collection-health indicator', () => {
       'a permanent chip for the system working correctly teaches an operator to ignore the chip that matters');
   });
 
+  it('⛔ IT READS BOTH KEY SHAPES — the raw row and the decorated headline', () => {
+    // getDeviceCounts() returns total / collected_fresh / never_collected;
+    // getFleetHeadline() decorates them. The first draft read only the
+    // decorated names off the RAW function, got undefined for all three, and
+    // rendered COLLECTION UNKNOWN on a fleet it could count — the indicator
+    // whose job is saying when a figure cannot be trusted, lying about itself.
+    const raw = describeCollectionHealth({ total: 8, collected_fresh: 0, never_collected: 1 });
+    const dec = describeCollectionHealth(counts({ devicesCollectedFresh: 0, devicesNeverCollected: 1 }));
+    assert.equal(raw.label, '0/8 CURRENT');
+    assert.equal(raw.label, dec.label);
+    assert.equal(raw.state, dec.state);
+  });
+
+  it('⛔ the header calls the CHEAP count, not the whole headline builder', () => {
+    const lib = read('lib/dataHealth.js');
+    assert.match(lib, /getDeviceCounts/);
+    assert.equal(/getFleetHeadline/.test(lib), false,
+      'the indicator renders on every page and must not pay for the security '
+      + 'score and compliance roll-up to learn four counts');
+  });
+
   it('⛔ AN UNREADABLE COUNT IS `unknown`, NEVER `ok`', () => {
     for (const bad of [null, {}, counts({ deviceCount: NaN }), counts({ devicesCollectedFresh: undefined })]) {
       assert.equal(describeCollectionHealth(bad).state, 'unknown');

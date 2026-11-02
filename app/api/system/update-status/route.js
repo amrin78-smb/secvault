@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.221.1': [
+    'The new collection-freshness indicator in the header reported "collection unknown" on a fleet it could count perfectly. It was reading the counts under the wrong names — the one control whose job is to say when a figure cannot be trusted, getting its own figure wrong.',
+    'Found by looking at the running page rather than by a test, which is also how the last two rounds of defects in this work were caught.',
+    'No other behaviour changed.',
+  ],
   '2.221.0': [
     'Settings now has a list of sections down the left instead of group labels sitting in the tab row, where they read as greyed-out tabs you could not click. A heading above a list reads as a heading; the same words beside the items read as more items, and no amount of styling fixes that.',
     'A new jobs button in the header shows what is running and how the last few things ended. Collections and deletions were only visible on the page that started them, so navigating away meant never finding out whether one failed — the error is now shown in full, wherever you are.',
