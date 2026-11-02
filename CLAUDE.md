@@ -18,6 +18,18 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
 - `.ai-codex/gotchas.md`        — footguns and redaction rules
 - `.ai-codex/compliance-pipeline.md` — audit-check seed -> evaluation -> score flow
 - `.ai-codex/roadmap.md`        — what is built, what is next, and what is deliberately deferred
+- `.ai-codex/syslog-forwarder-proposal.md` — ⛔ **PROPOSAL ONLY (not built). NOTHING IN IT EXISTS
+  YET**, and that phrase has now gone stale FOUR times in this very list (central CVE feed,
+  analytics, application view, Entra SSO), so treat this line as a liability until someone either
+  builds it or deletes it. Relaying ingested syslog to a third-party SIEM. ⛔ The one decision worth
+  reading before touching it: it forwards from the COLLECTOR'S SPOOL RECORDS, never from
+  `syslog_events` — `SYSLOG_RAW_MESSAGE=security` keeps the raw line for only 11% of rows, so a
+  database-sourced forwarder would ship OUR RECONSTRUCTION of 89% of the fleet's logs into the
+  customer's system of record, indistinguishable at the far end from what the device actually sent.
+  `archive.appendRecords()` is already a second consumer at exactly that point, for exactly that
+  reason. ⛔ Forwarding must NEVER gate spool deletion, or a third party's outage becomes our
+  ingest backlog and then our dropped datagrams. When a phase ships, correct the file's own status
+  line AND this one in the SAME commit
 - `.ai-codex/application-view-plan.md` — ⛔ **PHASE 1 BUILT (v2.124.0) AND PHASE 2 BUILT
   (v2.129.0)**; phases 3-4 proposed. This line said "PROPOSAL ONLY (not built)" while BOTH were
   live — the THIRD time that exact phrase has gone stale in THIS LIST, and it sat directly above
