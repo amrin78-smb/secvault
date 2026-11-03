@@ -250,7 +250,7 @@ export default function HeaderSearch() {
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', width: '100%', maxWidth: 440 }}>
+    <div ref={wrapRef} className="hdr-search" style={{ position: 'relative', width: '100%', maxWidth: 440 }}>
       <div
         style={{
           display: 'flex',

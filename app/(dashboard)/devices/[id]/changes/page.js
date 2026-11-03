@@ -394,7 +394,11 @@ export default async function DeviceChangesPage({ params, searchParams }) {
 
       {/* Titled for the nav entry that leads here ("Changes"); the detail is
           in the subtitle. See the note in ../rules/page.js. */}
-      <PageHeader title="Changes" subtitle="Configuration change tracking and config backups." />
+      <PageHeader
+        titleAs="h2"
+        title="Changes"
+        subtitle="Configuration change tracking and config backups."
+      />
 
       <Card>
         <CardHeader>

@@ -719,11 +719,21 @@ tbody tr:hover td { background: var(--bg-primary); }
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
+/* ⛔ margin: 0 IS LOAD-BEARING NOW THAT THIS IS A REAL HEADING. PageHeader
+   rendered a <div> for thirty pages; a heading element carries a UA
+   margin (0.67em on h1, 0.83em on h2) which would open a gap above and
+   below every page title and push the header's own 2px flex gap out of
+   the rhythm. The font-size and weight here already override the UA
+   defaults; margin was the one that did not, and the proof it was missing
+   is the hand-written `marginBottom: 0` on the CVE detail page's own h1,
+   which has carried this class — and this workaround — since before
+   PageHeader was a heading at all. */
 .page-title {
   font-size: var(--text-xl);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
+  margin: 0;
 }
 .page-subtitle {
   font-size: var(--text-base);
@@ -1793,14 +1803,35 @@ select.input {
 .sv-content-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; }
 .sv-content { padding: 24px 28px; background: var(--bg-primary); flex: 1; min-width: 0; overflow: auto; }
 
+/* ⛔ THE BAR OVERFLOWED AND .sv-shell IS `overflow: hidden`, SO IT CLIPPED —
+   AND WHAT FELL OFF WAS THE USER MENU. Measured content at rest: the drawer
+   toggle 38 + the brand 137 + a divider + the tagline + the search + a right
+   cluster that is `flex: none` and therefore cannot yield (sync pill ~110,
+   three 38px icon buttons, and a user-menu trigger ~159 wide because it prints
+   a name and a role). That right cluster is LAST in DOM order, so below about
+   950px the overflow pushed sign-out past the right edge with no scrollbar and
+   no way to reach it — on the one control a session has to be able to find.
+
+   Four parts, and only the first is a geometry change:
+   1. PADDING AND GAP TAPER CONTINUOUSLY, via clamp() rather than a
+      breakpoint. There is deliberately NO width media query on this bar:
+      tests/navLayout.test.js fails the build on one, because lib/navLayout.js
+      is meant to be the single definition of every shell width and a @media
+      here would also measure the viewport a scrollbar differently from the
+      innerWidth the script reads. clamp() needs no threshold at all.
+   2. THE BRAND GIVES WAY (`.sv-brand` / `.sv-wordmark` below).
+   3. The decorative and the duplicated are dropped in the DRAWER shape —
+      keyed on the attribute, which is the same single definition.
+   4. Nothing in the right cluster is made shrinkable: squeezing a row of
+      38px hit targets would trade a clipped control for an untappable one. */
 .sv-topbar {
   height: var(--header-height);
   min-height: var(--header-height);
   background: var(--navy);
   display: flex;
   align-items: center;
-  padding: 0 24px;
-  gap: 20px;
+  padding: 0 clamp(10px, 2vw, 24px);
+  gap: clamp(8px, 1.5vw, 20px);
   flex-shrink: 0;
   box-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.2);
   z-index: 100;
@@ -1829,12 +1860,128 @@ select.input {
   font-weight: 500;
   white-space: nowrap;
   min-width: 0;
-  flex-shrink: 1;
+  /* ⛔ 200, NOT 1. A shrink factor of 1 made this yield at the SAME RATE as
+     everything else, which is why the search field was reaching 0px while
+     this was still 228px wide. It is decoration beside an interactive
+     control, so it should empty almost completely before the field gives up
+     a pixel — see the note on .sv-topbar-left. */
+  flex-shrink: 200;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sv-topbar-left { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; }
+/* ⛔ THE SEARCH CLAIMS A FLOOR, AND WITHOUT ONE IT MEASURED 0px WIDE AT
+   1024px. The tagline two rules up says in its own comment that min-width:0
+   plus an ellipsis "lets the tagline give way instead of the search field,
+   which is the interactive control and therefore the one that must survive".
+   Measured on the live page at 1024: tagline 228px (ellipsised from 264) and
+   the search field 0px — the exact reverse. The comment was describing an
+   intent that the flex maths does not produce.
+
+   Why: `flex: 1` is `1 1 0%`, so the search's BASE size is nothing. Flexbox
+   hands out negative free space in proportion to shrink-factor x base, so a
+   zero-base item absorbs none of the shrink — but it also only gets width
+   from POSITIVE free space, and once the tagline's 264px base is counted
+   there is none left. The tagline shrinking does not release anything to a
+   grow-only sibling; it just stops the bar overflowing.
+
+   So the search gets a real base (240px, inside HeaderSearch's own 440 cap)
+   and the tagline is given a large shrink factor, which makes it the thing
+   that yields first — decoration before control, which is what was meant.
+   Measured after: 1024 -> search 232px, 1280 -> 240px, 1440 -> 344px. */
+.sv-topbar-left { display: flex; align-items: center; justify-content: center; flex: 1 1 240px; min-width: 0; }
 .sv-topbar-right { display: flex; align-items: center; gap: 10px; flex: none; }
+
+/* ⛔ THE BRAND YIELDS BEFORE THE SEARCH DOES, AND BOTH YIELD BEFORE THE
+   CONTROLS. A flex item defaults to min-width:auto and refuses to shrink below
+   its content, so the 137px brand block was as rigid as the buttons — the
+   exact mistake .sv-topbar-subtitle already carries a comment about, two
+   elements away. The mark keeps `flex: none` because it is the product
+   identity and a squashed logo is worse than a truncated word; the WORDMARK
+   ellipsises, which costs nothing a customer needs (the mark is beside it, and
+   the page title names where they are). */
+/* ⛔ NO `min-width: 0` HERE, AND THE FIRST VERSION OF THIS FIX HAD IT. The
+   mark carries `flex-shrink: 0` inline, so with the BOX allowed to collapse
+   below its own min-content the brand measured 0px wide at 390px and the
+   logo was painted OUTSIDE it, on top of the search and the controls — a
+   clipped header traded for an overlapping one. Leaving min-width at its
+   `auto` default floors the box at min-content, which is the mark plus the
+   gap, and the WORDMARK (min-width:0 below) is what actually absorbs the
+   shrink. Only measuring the live page showed this; the rule read correctly
+   and the stylesheet said what I meant. */
+.sv-brand { min-width: auto; }
+.sv-brand > svg { flex: none; }
+/* ⛔ THE ELLIPSIS ALONE DID NOT WORK AND THE MEASUREMENT IS WHY THIS IS A
+   THRESHOLD. `white-space: nowrap` makes the wordmark's MIN-CONTENT its full
+   text width, so the brand's `min-width: auto` floored the whole block at
+   127px at 390px and the bar still overflowed by 70. `min-width: 0` on the
+   span lets flexbox shrink it, but it does not change what the PARENT reports
+   as its own minimum — and dropping the parent to `min-width: 0` is what
+   painted the logo over the controls (see above). A text run that must not
+   wrap cannot be made to yield by degrees; it either fits or it goes.
+   Keyed on the widget, at a width, for the same reason `.hdr-search` is —
+   never on `.sv-brand`, which is shell layout. The ellipsis stays for the
+   band just above the threshold, where the glyph can still shave a few px. */
+.sv-wordmark { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Below this the bar cannot hold the wordmark AND a usable search field; the
+   mark beside it carries the identity, and it is the same mark on the login
+   page and the tab icon. */
+@media (max-width: 640px) { .sv-wordmark { display: none; } }
+
+/* ⛔ THE PILL'S OWN LAYOUT, MOVED OUT OF Header.js's INLINE STYLE so the
+   drawer-shape rule below can actually hide it. See the comment at the call
+   site: an inline `display` beats every selector, which is why the first
+   version of that rule was live and did nothing. */
+.sv-sync-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+/* ⛔ DROPPED IN THE DRAWER SHAPE (<1024px) — the three things that are either
+   decoration or a duplicate, never a capability:
+     .sv-topbar-subtitle  the tagline. The wordmark beside it names the
+                          product; its own comment already calls it decorative.
+     .sv-topbar-divider   a 1px rule between two things that are no longer
+                          side by side once the tagline has gone.
+     .um-ident            the name and role on the user-menu trigger. The
+                          panel it opens prints BOTH in its own header, so
+                          this is the only one of the three that is pure
+                          duplication — ~85px of it.
+   ⛔ AND THE SYNC PILL GOES WHOLE, NEVER LABEL-ONLY. Hiding just the words
+   would leave a 7px coloured dot as the only carrier of a four-state verdict,
+   i.e. status by colour alone, which §11 and WCAG 1.4.1 both forbid and which
+   this stylesheet refuses everywhere else (see the ⚠ glyph .dh-pill keeps when
+   its own label drops at 900px). It is the one header element whose entire
+   explanation lives in a `title` attribute, which a touch device cannot reach
+   anyway, so the drawer shape loses nothing it could already use — the state
+   is on Settings -> Feed Sync in words. ⛔ If this pill ever becomes a link
+   with a glyph, as .dh-pill is, revisit this rule in the SAME commit: the
+   reason to hide it is that it is unreachable, not that it is unimportant. */
+html[data-nav="drawer"] .sv-topbar-subtitle,
+html[data-nav="drawer"] .sv-topbar-divider,
+html[data-nav="drawer"] .sv-sync-pill,
+html[data-nav="drawer"] .um-ident { display: none; }
+
+/* ⛔ AND THE SEARCH GOES ONLY WHERE IT CANNOT BE A SEARCH. Measured: with
+   everything above collapsed the bar's irreducible content is ~381px (the
+   drawer toggle, the mark, and a right cluster of five controls that may not
+   shrink), so a field needs ~540px of viewport before it can be the ~160px
+   that is usable. Below that it renders as a sliver that reads as a broken
+   control, and ⌘K — the other way in — is not available on a touch keyboard
+   anyway. Above it the field keeps at least 180px, because the wordmark
+   yields first.
+
+   ⛔ A WIDTH QUERY HERE IS DELIBERATE AND IS NOT THE THING navLayout's guard
+   FORBIDS. That guard protects the RAIL breakpoints (1024/1280) from being
+   restated in CSS, where they would also measure the viewport a scrollbar
+   differently from the innerWidth the script reads; 540 is neither of those
+   numbers and cannot fork them. It is keyed on `.hdr-search` — the widget —
+   exactly as `.dh-pill` is at 900px and `.jobc-panel` at 480px, and NOT on
+   `.sv-topbar-left`, which is shell layout and belongs to the attribute. */
+@media (max-width: 540px) { .hdr-search { display: none; } }
 
 .sv-icon-btn {
   width: 38px; height: 38px;
@@ -1920,8 +2067,20 @@ html[data-nav="rail"] .sv-sidebar { width: var(--sidebar-width-collapsed); min-w
 /* The per-cluster caption that used to sit here is gone: a label with no
    disclosure is a caption, not a structure. .sv-nav-section below is the
    button that replaced it. */
-/* Settings sits at the bottom of the rail, away from the four questions. */
-.sv-nav-group-pinned { margin-top: auto; padding-top: var(--s3); }
+/* Settings sits at the bottom of the rail, away from the four questions.
+   ⛔ THE SELECTOR IS `+ .sv-nav-group-pinned` AND THAT IS THE WHOLE FIX. It
+   read `.sv-nav-group-pinned { margin-top: auto; }` — ONE class, 0,1,0 —
+   while `.sv-nav-group + .sv-nav-group` two lines above is 0,2,0 and matches
+   this element too, because the pinned group IS the last sibling of the seven.
+   Specificity beats source order, so `auto` lost to `var(--s3)` and the
+   declaration had never once applied: Settings sat flush under Reports with a
+   gap, never at the bottom, for every release since the rule was written. The
+   comment above it described the intended layout, which is why reading the
+   file did not reveal it — nothing is wrong with either rule in isolation, and
+   the bug lives in the relationship between them. (globals.css's own house
+   rule names this: watch the selector specificities, it is easy to write
+   classes that cancel each other out.) */
+.sv-nav-group + .sv-nav-group-pinned { margin-top: auto; padding-top: var(--s3); }
 /* Collapsed: no headings, so a hairline keeps the clusters legible. */
 html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group,
 html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group {
@@ -1929,6 +2088,14 @@ html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group {
   padding-top: var(--s1);
   border-top: 1px solid rgba(255,255,255,0.07);
 }
+/* ⛔ …AND AGAIN FOR THE ICON RAIL, which is 0,4,1 and would otherwise take the
+   pinned group straight back to --s1. Only `margin-top` is restated, so the
+   hairline and the tighter padding the rule above gives every collapsed
+   cluster still apply — Settings keeps its separator AND sits at the bottom.
+   Equal specificity to the rule it follows, so source order decides; keep it
+   below. */
+html[data-nav="wide"] .sv-sidebar.collapsed .sv-nav-group + .sv-nav-group-pinned,
+html[data-nav="rail"] .sv-sidebar .sv-nav-group + .sv-nav-group-pinned { margin-top: auto; }
 .sv-nav a {
   position: relative;
   display: flex;

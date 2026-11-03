@@ -95,7 +95,8 @@ Button  variant, className, children, ...props — styled button wrapper
 Card (+CardHeader, CardTitle, CardBody)  children, className, style — card container + sub-parts
 EmptyState  message — dashed-border placeholder box
 LoadingSpinner  size, className — spinning loader indicator
-PageHeader  title, subtitle, actions — page title/subtitle/actions row
+PageHeader  title, subtitle, actions, titleAs — page title/subtitle/actions row;
+            the title is a real <h1> (see below)
 StatusDot  status, className — colored status indicator dot
 Table  children, className, layout='fixed', minWidth, stickyHeader, maxHeight — bordered table wrapper (its own overflow-x:auto box, so callers never need to add one). Row geometry comes from --row-pad-y/--row-pad-x/--row-font, so every table follows the density switch automatically; ⛔ a cell that hardcodes its padding opts ITSELF out silently and sits at one height while the table around it changes. ⛔ `stickyHeader` REQUIRES `maxHeight` — position:sticky resolves against the nearest scrolling ancestor, so without a bounded height the page scrolls instead and the header sticks to a container that is fully on screen. They only work as a pair. `layout='auto'` (2.51.2) is ONLY for a table with no colgroup and no percentage widths, where 'fixed' would slice width into N equal columns and truncate every heading — pair it with `minWidth` so the table keeps its natural width and scrolls. ⛔ Never use 'auto' on a table with colgroup/percentage widths; CLAUDE.md requires 'fixed' there
 IconChip  icon, color, bg — small colored icon badge. ⛔ `color`/`bg` must be a MATCHED TINT PAIR (`var(--tint-danger-fg)` with `var(--tint-danger)`), not a raw status hue: a raw hue as a background does not adapt between themes. Every call site moved from literal hex+rgba to tokens in v2.87.0.
@@ -1064,6 +1065,24 @@ required a migration to adopt would not get adopted, and the product would keep 
 ⛔ `primary` is a separate prop rather than a convention about the first child of `actions`, because
 a convention cannot be enforced or tested. A page with two equally-weighted buttons keeps passing
 both through `actions`, which honestly says it has no single primary action.
+
+⛔ **THE TITLE IS A REAL HEADING (v2.223.1), AND FOR THIRTY PAGES IT WAS A `<div>`.** Every
+workspace opened with its name as styled text, so the console's document outline was empty above
+card level: a screen-reader user listing a page's headings got the widgets and never the page, and
+"jump to the main heading" had nothing to land on. Invisible by construction — the rendered pixels
+are identical either way, the same property that let the MFA field ship with `hidden=""` and fully
+visible. The fifth prop, **`titleAs`**, is the heading LEVEL and defaults to `h1`; only `h1`/`h2`/
+`h3` are accepted and anything else falls back to `h1`, never to a div.
+
+⛔ **THE FIVE PAGES THAT PASS `titleAs="h2"` DO SO BECAUSE THE FIREWALL IS THE SUBJECT.** The six
+per-device routes mount `DeviceContextHeader`, whose `<h1>` is the device name — globals.css calls
+it "a REAL <h1>, and the only one on the page", written when the device name and a PageHeader title
+last competed as headings. Five of those six also mount a PageHeader, so the honest outline is
+`h1 <device>` > `h2 <view>`. Defaulting to h1 and demoting those five by hand is the safe
+direction: a new page gets a correct h1 for free. ⛔ `/` is the one route with NO visible title (the
+Overview opens with its three questions by design) and carries an `sr-only` h1 whose text must
+match the sidebar label. `tests/pageHeading.test.js` pins all of it from both ends — a page with no
+heading source and a page with two are different defects with the same invisible symptom.
 
 ## Overview + work queue (v2.218.0)
 

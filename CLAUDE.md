@@ -3316,6 +3316,63 @@ ragged bottom edge is the correct outcome, not a defect to tidy away** —
 these cards answer unrelated questions and have genuinely different amounts
 to say, and equal heights were buying tidiness with empty space.
 
+### ⛔ EVERY PAGE HAS EXACTLY ONE h1, AND THE PAGE TITLE IS IT (v2.223.1)
+
+`PageHeader` rendered its title as `<div className="page-title">`, so the document outline of the
+whole console was empty above card level on **thirty pages**: a screen-reader user listing a
+page's headings got the widget names and never the page name, and "jump to the main heading" had
+nothing to land on. ⛔ **Invisible by construction** — the rendered pixels are identical either
+way, which is the same property that let the MFA field ship with `hidden=""` and fully visible,
+so only reading the MARKUP finds it.
+
+⛔ **`titleAs` DEFAULTS TO `h1` AND ONLY HEADING LEVELS ARE ACCEPTED**, falling back to `h1` rather
+than to a div — the default is the whole point, because thirty call sites pass nothing.
+
+⛔ **THE FIVE PER-DEVICE PAGES PASS `titleAs="h2"`, AND THAT IS NOT A STYLE CHOICE.** They mount
+`DeviceContextHeader`, whose `<h1>` is the FIREWALL'S NAME; globals.css calls it "a REAL <h1>, and
+the only one on the page", written when the device name and a PageHeader title last competed as
+headings. On those routes the firewall is the subject and "Policy"/"Changes"/"Metrics" is a
+section of it, so the outline is `h1 <device>` > `h2 <view>`. Defaulting to h1 and demoting those
+five by hand is the safe direction: a new page gets a correct h1 for free.
+
+⛔ **`/` IS THE ONE ROUTE WITH NO VISIBLE TITLE AND CARRIES AN `sr-only` h1.** v2.218.0
+deliberately opens the Overview with its three questions rather than a name, and
+`tests/pageTitles.test.js` already exempts the route for that reason — but a page with no h1 at
+all has no outline root, and this is where every session lands. The text must match the sidebar
+label. ⛔ `sr-only`, never `display: none`: a hidden heading is not in the accessibility tree
+either, which would be decorative markup that looks like a fix.
+
+⛔ `tests/pageHeading.test.js` pins BOTH ENDS — no heading source and two heading sources are
+different defects with the same invisible symptom, and a blanket `titleAs="h2"` would silence a
+one-ended guard while leaving every fleet page headless.
+
+### ⛔ THE HEADER CLIPPED ITS OWN SIGN-OUT BUTTON BELOW ~950px (v2.223.1)
+
+`.sv-shell` is `overflow: hidden` and `.sv-topbar-right` is `flex: none`, so once the bar's
+content exceeded the viewport the right-hand cluster — last in DOM order — was pushed off the
+edge with no scrollbar. Measured at 390px: **448px of overflow**, the account menu starting at
+x=838 on a 390px screen. Sign-out was unreachable, not merely ugly.
+
+⛔ **NO WIDTH MEDIA QUERY MAY TOUCH THE SHELL**, which `tests/navLayout.test.js` enforces:
+`lib/navLayout.js` is the single definition of 1024/1280 and a `@media` would also measure the
+viewport a scrollbar differently from the `innerWidth` the script reads. So the bar tapers with
+`clamp()` (no threshold at all) and the decorative/duplicated items are dropped on
+`html[data-nav="drawer"]`. ⛔ A WIDGET may still carry its own width query keyed on its own class
+— `.hdr-search` at 540, `.sv-wordmark` at 640, as `.dh-pill` already does at 900 — because those
+numbers are not the rail breakpoints and cannot fork them.
+
+⛔ **WHAT IS DROPPED IS DECORATION OR DUPLICATION, NEVER A CAPABILITY**: the tagline, the divider,
+the user-menu's name/role (both repeated inside the panel it opens), and the sync pill. ⛔ **The
+pill goes WHOLE, never label-only** — a 7px coloured dot as the sole carrier of a four-state
+verdict is status by colour alone. It is the one header element whose entire explanation lives in
+a `title`, which touch cannot reach, so the drawer shape loses nothing it could already use; if it
+ever becomes a link with a glyph like `.dh-pill`, revisit that in the SAME commit.
+
+⛔ **Measured after: 0px overflow at 390/640/1023/1024/1440, every control reachable, and the
+1440 bar pixel-identical to before.** The irreducible floor is ~381px — below that something must
+give, because five controls at 38px plus the drawer toggle cannot shrink without becoming
+untappable.
+
 ### ⛔ A GROUP LABEL IN A HORIZONTAL ROW READS AS A DISABLED TAB (v2.221.0)
 
 Settings' three groups were labels sitting inline in the tab row. The CSS

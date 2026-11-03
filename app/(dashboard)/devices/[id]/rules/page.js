@@ -213,6 +213,8 @@ export default async function DeviceRulesPage({ params, searchParams }) {
           tests/pageTitles.test.js now covers DEVICE_NAV so the pair cannot
           drift apart again. */}
       <PageHeader
+        /* the firewall name is this page's h1 — see PageHeader's own note */
+        titleAs="h2"
         title="Policy"
         subtitle="Firewall rules collected from this device."
         actions={

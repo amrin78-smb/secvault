@@ -206,6 +206,19 @@ export default async function DashboardPage({ searchParams }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* ⛔ THE ONE PAGE IN THE PRODUCT WITH NO VISIBLE TITLE, AND SO THE ONE
+          THAT NEEDS THIS. v2.218.0 deliberately opens the Overview with its
+          three questions rather than a name — "What needs attention" is a
+          better first line than "Overview" — and tests/pageTitles.test.js
+          exempts this route for exactly that reason. But a page with no h1 at
+          all has no outline root and no jump target: a screen-reader user
+          listing headings here got three section names and nothing saying
+          which page they were on, and this is the route every session lands on
+          first. `sr-only` gives the document its root without moving a pixel.
+          ⛔ The text must match the sidebar label for `/` — a page that
+          announces itself by a name the nav does not use is the defect
+          pageTitles.test.js exists to prevent, one layer down. */}
+      <h1 className="sr-only">Overview</h1>
       <AutoRefresh intervalMs={60000} />
 
       {/* Outside the tabs on purpose — fleet posture is never a tab away. */}

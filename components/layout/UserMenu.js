@@ -33,8 +33,16 @@ export default function UserMenu({ session }) {
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
+      {/* ⛔ AN EXPLICIT aria-label, BECAUSE THE NAME USED TO BE THE CHILDREN.
+          The ident block below is `display: none` in the drawer shape (see
+          globals.css: the header overflows below ~950px and the name and role
+          are repeated inside the panel this button opens), and display:none
+          removes a node from the accessibility tree as well as the page — so
+          without this the button's accessible name on a phone would collapse
+          to the single initial in the avatar. */}
       <button
         type="button"
+        aria-label={`Account menu — ${userName}`}
         onClick={() => setOpen((o) => !o)}
         style={{
           display: 'flex',
@@ -70,7 +78,7 @@ export default function UserMenu({ session }) {
         >
           {userInitial}
         </div>
-        <div style={{ textAlign: 'left' }}>
+        <div className="um-ident" style={{ textAlign: 'left' }}>
           <div style={{ color: '#fff', fontSize: 'var(--text-base)', fontWeight: 600, lineHeight: 1.2 }}>
             {userName.split(' ')[0]}
           </div>

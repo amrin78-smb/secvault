@@ -51,6 +51,59 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   server-driven pattern every other tabbed page in this app uses — deliberate, copied from
   netvault's own Settings page. Don't "fix" this to match the other pages.
 
+## ⛔ TWO CSS RULES CANCELLED EACH OTHER AND THE LOSER HAD NEVER APPLIED (found 2026-11-03)
+
+`.sv-nav-group-pinned { margin-top: auto; }` is what puts Settings at the bottom of the sidebar.
+Two lines above it sits `.sv-nav-group + .sv-nav-group { margin-top: var(--s3); }` — and the
+pinned group IS the last sibling of the seven, so both rules match it. **Specificity (0,2,0) beats
+(0,1,0) regardless of source order**, so `auto` lost and the declaration had never once applied:
+Settings sat flush under Reports with 173px of empty rail below it, in every release since the
+rule was written. Measured live: `margin-top` computed to `12px`, not `auto`.
+
+⛔ **READING THE FILE CANNOT FIND THIS.** Neither rule is wrong in isolation and the comment above
+the losing one correctly describes the layout that was intended — the bug lives only in the
+relationship between them. Fixed by matching the sibling selector (`.sv-nav-group +
+.sv-nav-group-pinned`), and again at (0,4,1) for the icon-rail rules, which restate only
+`margin-top` so the hairline and tighter padding survive.
+
+⛔ **The general rule, which globals.css already states and this broke anyway:** when adding a
+rule for a SPECIAL CASE of an element a more complex selector already matches, the special case
+needs to be at least as specific. Grep for other single-class rules that a `+`/`>` sibling
+selector also matches before trusting one.
+
+## ⛔ AN INLINE `display` BEATS EVERY SELECTOR — THIRD TIME IN THIS CODEBASE (found 2026-11-03)
+
+`html[data-nav="drawer"] .sv-sync-pill { display: none }` was live, correct, and did nothing: the
+pill carries `style={{ display: 'flex', ... }}` from Header.js, and an author inline style wins
+over any stylesheet rule. Measured: the rule applied, the pill still 120px wide, the header still
+clipping. The same shape has now cost three things:
+
+| | what was inline | what lost |
+|---|---|---|
+| v2.193.2 | `.login-field { display: flex }` (author rule) | the MFA field's `hidden=""` attribute — box fully visible with `hidden` in the served HTML |
+| v2.200.0 | `borderLeft` at three call sites | dropping the KPI colour bar in `globals.css` |
+| v2.223.1 | `display: 'flex'` on the sync pill | hiding it at narrow widths |
+
+⛔ **The split to keep:** inline is for values a stylesheet CANNOT know — here the tone colours,
+which come from `PILL_TONE` and depend on live sync state. Structure (`display`, `padding`,
+`gap`, `flex`, `border-radius`) belongs in the class, or the next rule written against it is dead
+on arrival. ⛔ And verify by MEASURING the element, never by confirming the rule exists.
+
+## ⛔ A FLEX ITEM WITH `flex: 1` (BASIS 0) CAN BE STARVED TO 0px BY A DECORATIVE SIBLING (2026-11-03)
+
+`.sv-topbar-left` (the global search) is `flex: 1`, i.e. `1 1 0%`. The tagline beside it is
+`flex-shrink: 1` with a content basis of 264px. Flexbox distributes NEGATIVE free space in
+proportion to shrink-factor x basis, so a zero-basis item absorbs none of the shrink — but it also
+only gains width from POSITIVE free space, and the tagline's basis consumes it all. Measured at
+1024px: tagline 228px, **search field 0px**. The tagline's own comment claimed the opposite
+("lets the tagline give way instead of the search field, which is the interactive control and
+therefore the one that must survive") — it described an intent the maths does not produce.
+
+⛔ A shrinking sibling does NOT release space to a grow-only one. Give the control that must
+survive a real `flex-basis` and the decoration a large `flex-shrink` (240px / 200 here). ⛔ And
+`min-width: 0` on a `white-space: nowrap` text run lets THAT item shrink but does not change what
+its PARENT reports as its own min-content, which is how a brand block floored a whole bar at 127px.
+
 ## The shell is dark in BOTH themes, so `--tint-*-fg` is wrong on it (2026-09-09)
 
 The header and sidebar use `--navy` in light mode and in dark mode. Everything else in the app sits

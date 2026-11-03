@@ -266,6 +266,8 @@ export default async function DeviceAnalysisPage({ params, searchParams }) {
       />
 
       <PageHeader
+        /* the firewall name is this page's h1 — see PageHeader's own note */
+        titleAs="h2"
         title="Rule hygiene"
         actions={
           <>

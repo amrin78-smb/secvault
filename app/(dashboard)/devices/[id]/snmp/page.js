@@ -161,6 +161,8 @@ export default async function DeviceSnmpPage({ params }) {
       />
 
       <PageHeader
+        /* the firewall name is this page's h1 — see PageHeader's own note */
+        titleAs="h2"
         title="Metrics"
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

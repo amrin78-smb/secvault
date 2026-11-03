@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.223.1': [
+    'Every page now announces its own name to a screen reader. The title at the top of each workspace was styled text rather than a heading, so a screen-reader user listing a page\u2019s headings got the names of the panels and never the name of the page \u2014 and "jump to the main heading" had nothing to jump to. On a firewall\u2019s pages the firewall\u2019s name is the heading and the view beneath it ("Policy", "Changes") now sits under it, which is the order they are actually read in.',
+    'On a narrow window or a phone the top bar ran off the right-hand edge and took the account menu with it, so there was no way to reach Sign Out. The bar now gives up the tagline, the wordmark and the feed pill as it narrows and keeps every control on screen.',
+    'The search box in the top bar could be squeezed to nothing on a smaller laptop screen while the decorative tagline beside it kept its full width. The tagline now yields first and the field keeps a usable size.',
+    'Settings now sits at the bottom of the sidebar, where it was always meant to. Two stylesheet rules were contradicting each other and the one that lost was the one that positions it, so it had been sitting directly under Reports with the rest of the rail empty below it.',
+    'No change to any measurement, any score, or what SecVault collects \u2014 this release is presentation and accessibility only.',
+  ],
   '2.223.0': [
     'Fixed a crash: typing into the header search (or Ctrl+K) and matching a page took the whole console down to a blank "Application error" screen. The page results were trying to draw an icon that had become a name rather than a picture, and there is no error boundary to contain that, so the failure reached the top of the app.',
     'A firewall\u2019s pages reported "Open findings 0" when every one of its findings was medium or informational \u2014 only critical and high were being counted, which is four of the thirteen kinds SecVault produces. The same firewall was shown as "medium risk" on the Firewalls list from the same data.',

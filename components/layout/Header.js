@@ -18,7 +18,7 @@ import BrandMark from '../ui/BrandMark';
 
 function SecVaultLogo() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div className="sv-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       {/* ⛔ --shell-accent, NOT --accent-teal (which IS --primary and FLIPS).
           FOURTH occurrence of the trap --shell-accent was created to end, one
           release after the token appeared: .sv-topbar is --navy, which does not
@@ -43,7 +43,13 @@ function SecVaultLogo() {
           pointed at Inter for months after the fonts were self-hosted, so the
           one word a customer reads first was set in a face used nowhere else
           in the product. A span cannot drift from the body face. */}
+      {/* ⛔ `whiteSpace: nowrap` WITH NO min-width WAS AN UNSHRINKABLE BITE out
+          of a bar that overflows below ~950px — the same defect the tagline
+          beside it already carries a sixteen-line comment about, on the
+          element directly above it. `.sv-wordmark` lets it ellipsise, so at
+          phone width the brand gives way and the CONTROLS survive. */}
       <span
+        className="sv-wordmark"
         style={{
           fontFamily: 'var(--font-sans)',
           fontSize: 22,
@@ -169,9 +175,13 @@ export default async function Header({ session }) {
           first paint and is not in the tab order at widths where it does
           nothing — see components/layout/NavDrawerToggle.js. */}
       <NavDrawerToggle />
-      <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-        <SecVaultLogo />
-      </div>
+      {/* ⛔ NO WRAPPER. This used to be <div style={{height:'100%'}}> around
+          SecVaultLogo, which made the WRAPPER the flex child of .sv-topbar —
+          so `.sv-brand { min-width: 0 }` on the inner div could never fire and
+          the brand stayed rigid however the stylesheet asked it to yield. The
+          height:100% it added was visually inert under the bar's own
+          align-items:center. */}
+      <SecVaultLogo />
 
       <div className="sv-topbar-divider" />
 
@@ -209,16 +219,23 @@ export default async function Header({ session }) {
             colour on a dark bar in light mode. There is no --shell-fg-warn, so
             `degraded` carries its amber in the DOT and the ring and keeps plain
             --shell-fg for the words. */}
+        {/* ⛔ THE LAYOUT IS IN THE STYLESHEET AND ONLY THE TONE IS INLINE, and
+            that split is load-bearing rather than tidiness. `display: 'flex'`
+            used to be inline here, so `html[data-nav="drawer"] .sv-sync-pill
+            { display: none }` could not win — an author inline style beats any
+            selector. Measured before this moved: the rule was live, the pill
+            was still 120px wide, and the header still clipped. It is the third
+            time this exact shape has cost something in this product: the MFA
+            code field shipped with `hidden=""` and fully visible because
+            `.login-field { display: flex }` beat the UA sheet, and the v2.200.0
+            KPI border could not be removed in CSS because three call sites set
+            it inline. ⛔ Tone colours stay inline because they are DATA — they
+            come from PILL_TONE and no stylesheet can know the sync state. */}
         <div
+          className="sv-sync-pill"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--s2)',
-            padding: '5px 12px',
             background: tone.bg,
-            borderRadius: 'var(--radius-pill)',
             border: `1px solid ${tone.ring}`,
-            flex: 'none',
           }}
           // The explanatory sentence getSyncPillStatus() already composes —
           // which feed, what shape of failure, and what it means for the CVE
