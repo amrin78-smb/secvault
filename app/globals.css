@@ -2240,33 +2240,26 @@ html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-alig
    A future section with three tiles would need its own step (3 -> 1, skipping
    2) rather than being added to this rule.
    ════════════════════════════════════════════════════════════════════ */
-.ov-section { display: flex; flex-direction: column; gap: var(--s2); }
-.ov-section + .ov-section { margin-top: var(--s4); }
-.ov-section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s3);
-  flex-wrap: wrap;
-}
-/* ⛔ A REAL HEADING LAYER, AND IT IS NOT THE 12px UPPERCASE LABEL TREATMENT
-   v2.215.0 had to go round the whole dashboard removing. These are the three
-   questions the page answers; rendered at --text-xs on --text-muted they would
-   be smaller and fainter than the tile labels beneath them, which is the
-   "label-as-heading" defect by another route. */
-.ov-section-title {
-  margin: 0;
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.ov-section-link {
+/* ⛔ .ov-section / -head / -title RETIRED IN v2.224.0 WITH THE STACK THEY
+   DREW. The Overview's two headline sections became one .ov-band (below) and
+   the trust section became one inline run, so nothing renders a page-scale
+   section heading here any more. The heading LAYER argument that used to sit
+   on .ov-section-title still holds and still applies -- it moved to
+   .ov-band-title, at group scale: a heading is never given the 12px uppercase
+   --text-muted LABEL treatment v2.215.0 spent a whole pass removing from this
+   dashboard, whatever size it is set at.
+
+   .ov-link survives both of them. It is the small forward link in a band head
+   and at the end of the trust run; it was called .ov-section-link until the
+   sections went, and a class named after a construct the page no longer has
+   is how the next reader concludes one is still there. */
+.ov-link {
   font-size: var(--text-sm);
   color: var(--primary);
   text-decoration: none;
   white-space: nowrap;
 }
-.ov-section-link:hover { text-decoration: underline; }
+.ov-link:hover { text-decoration: underline; }
 
 /* ⛔ .ov-grid RETIRED IN v2.220.0 — IT IS .kpi-row NOW. This block and the
    KPI-row block further down were the SAME RULE WRITTEN TWICE, including two
@@ -2276,6 +2269,110 @@ html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-alig
    costs even before the two copies drift. The Overview uses <KpiRow> like
    every other page. */
 
+/* ── The Overview headline band (v2.224.0) ───────────────────
+   ⛔ TWO GROUPS, A RULE BETWEEN THEM, replacing the two stacked .ov-section
+   blocks v2.218.0 introduced. That grouping was right and its COST was not:
+   measured at 1440x900, the answer sentence began at y=133 and the first
+   dashboard widget at y=711, so the headline spent 504px — 56% of the
+   viewport — and the tab bar sat below the fold on the one page every session
+   lands on. The page that exists to be read at a glance could not be.
+
+   ⛔ THE RULE IS THE GROUPING. The v2.218.0 note says of the single row it
+   replaced that it had "nothing on the page saying which of them was the
+   reason to still be reading"; a 1px divider says it in zero vertical pixels,
+   which two headings forty pixels apart could not. The headings stay as real
+   <h2>s at GROUP scale rather than page scale.
+
+   ⛔ THE BLOCKER WAS NEVER WIDTH, IT WAS `overflow-wrap: anywhere`, AND A
+   FIRST DRAFT OF THIS BLOCK GOT THAT WRONG IN BOTH DIRECTIONS. Six tiles
+   abreast rendered "Complianc/e Score" broken mid-word, which read as "the
+   tiles are too narrow", so the band was gated at a measured 1660px — the
+   width at which that one label stops wrapping at all. Then the stacked
+   fallback was measured properly and the premise collapsed: the comment
+   claimed one row saved nothing at 1440 ("167px against ~170px for two rows")
+   and the real stacked height is 244px. The single row was 77px SHORTER the
+   whole time, and the thing being optimised away was a wrapped label, not a
+   wrapped layout.
+
+   `anywhere` breaks inside a word even when the word would fit on the next
+   line. `break-word` breaks between words first and only splits a word that
+   cannot fit alone — which is what a two-word label wants. Probed live at
+   nine widths with that one property changed, there is NO mid-word break at
+   any of them, and the band is shorter side by side at every width:
+
+       vw 1600   one row 141px   stacked 229px
+       vw 1536   one row 141px   stacked 244px
+       vw 1440   one row 167px   stacked 244px
+       vw 1280   one row 183px   stacked 244px
+       vw 1100   one row 186px   stacked 305px
+
+   ⛔ SO THE GATE IS NOW ABOUT ROOM FOR TWO TILES, NOT ABOUT ONE LABEL. Below
+   900px the attention group's two tiles fall under ~120px each and the inner
+   <KpiRow>s have already taken their own steps; there the band stacks and the
+   rule turns horizontal. 900 is this component's own number — the same figure
+   .dh-pill uses, and deliberately NOT 1024 or 1280, which are
+   lib/navLayout.js's rail breakpoints. This stylesheet carries no copy of
+   those on purpose ("a third copy of a number in a third language", and a
+   media query measures the viewport a scrollbar differently from the script
+   that owns them). A widget may key a query on its own class at its own
+   number; it may not reuse a rail number.
+
+   ⛔ THE INNER COLUMN COUNTS ARE STILL <KpiRow>'s. The band decides only
+   whether the two groups sit side by side; how many columns each group takes,
+   and that every responsive step DIVIDES its tile count so no tile is ever
+   orphaned, stays in components/ui/KpiRow.js. Re-stating a column count here
+   would be the duplicate .ov-grid all over again. */
+.ov-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+}
+.ov-band-group { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+/* Stacked by default, so the rule is a horizontal divider between the groups. */
+.ov-band-rule { height: 1px; width: 100%; background: var(--border); }
+.ov-band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: 20px;
+}
+/* ⛔ --text-sm, NOT the --text-base the retired .ov-section-title used. These
+   label a GROUP inside a band, not a section of the page, and at page scale
+   they compete with the answer sentence above them for the first thing read.
+   They are still headings and still 600/--text-primary — the one thing a
+   heading may never be given here is the 12px uppercase --text-muted LABEL
+   treatment v2.215.0 spent a whole pass removing from this dashboard. */
+.ov-band-title { margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); }
+/* ⛔ SEE THE ⛔ ABOVE — THIS ONE LINE IS WHAT MADE THE BAND POSSIBLE. The
+   global .kpi-head-row rule uses `anywhere`, which is right for a tile that
+   might be handed an unbreakable string and wrong for every label in this
+   band. Scoped rather than changed globally: ~40 other call sites were sized
+   against `anywhere` and this change is not measured for them. */
+.ov-band .kpi-head-row .stat-label-compact,
+.ov-band .kpi-head-row .stat-label { overflow-wrap: break-word; }
+
+@media (min-width: 900px) {
+  /* ⛔ 2fr / 1px / 4fr, WEIGHTED BY TILE COUNT, so all six tiles come out the
+     same width. Equal tracks would render the 2-tile group at twice the tile
+     size of the 4-tile one and make the left half read as more important by
+     AREA — which it is, but it already says so by position, by its group
+     label and by the hue on its numbers. Saying it a fourth time in square
+     pixels costs the posture tiles the width they are short of. */
+  .ov-band { grid-template-columns: 2fr 1px 4fr; gap: var(--s5); }
+  /* ⛔ --s5 (24px) EITHER SIDE, NOT --s4. The rule is a 1px --border hairline
+     and every tile beside it is drawn with a 1px --border edge, so at a 16px
+     gutter the eye meets three identical vertical lines 16px apart and reads
+     them as one slightly-odd card boundary rather than as a divider. Sampled
+     from a 1440 screenshot: the rule renders #DDE3EB on a #F7F9FB ground, the
+     same pair as a card edge. What separates a divider from a border is the
+     SPACE around it, not the ink in it, so the gutter grew instead of the
+     line darkening — a hairline pushed off --border to carry more weight
+     would be a fourth neutral on a page the design system keeps to three. */
+  .ov-band-rule { width: 1px; height: auto; align-self: stretch; }
+}
+
 /* ── "Can these numbers be trusted?" ─────────────────────────────────
    ⛔ NOT TILES, AND NOT A PERCENTAGE. Everything above this is a measurement;
    this is a statement about how much of the fleet those measurements cover,
@@ -2283,7 +2380,39 @@ html[data-nav="rail"] .sv-sidebar .sv-version { padding: 6px 8px 14px; text-alig
    Rendered as tiles it would read as the seventh and eighth headline figures —
    the exact complaint the sections exist to answer. And a single "62%
    coverage" would be one number covering three different problems with three
-   different first steps, so each figure keeps its own denominator. */
+   different first steps, so each figure keeps its own denominator.
+
+   ⛔ ONE INLINE RUN SINCE v2.224.0, NOT A THIRD FULL-WIDTH SECTION. Given a
+   page-scale heading row of its own it carried the same weight as "What needs
+   attention" and cost 84px plus that row, on the landing page, to say
+   something only read once a number is doubted. The question is still an <h2>
+   and still in the outline — it reads as the inline lead-in to its own
+   answer. Every figure, every denominator and every ⚠ is unchanged. */
+.ov-trust-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2) var(--s4);
+}
+/* Inline, so it needs the list's own type size rather than a heading's; the
+   weight and --text-primary are what mark it as the question. */
+.ov-trust-q {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: none;
+}
+/* ⛔ `flex: 1 1 0`, NOT `1 1 auto`, AND THE DIFFERENCE WAS THREE STACKED
+   LINES. With an auto basis the list's min-content width exceeded what was
+   left beside the question, so the strip wrapped the whole <ul> onto its own
+   flex line and the link onto a third -- measured at 1440: h2 at y=465, list
+   at 495, link at 554, i.e. 111px for a run that is supposed to be shorter
+   than the 84px section it replaced. A zero basis lets the list take whatever
+   is left between the two flex:none ends and wrap INTERNALLY, so the strip is
+   as tall as the list and nothing else. */
+.ov-trust-strip .ov-trust { flex: 1 1 0; min-width: 0; }
+.ov-trust-strip .ov-link { flex: none; }
 .ov-trust {
   display: flex;
   flex-wrap: wrap;

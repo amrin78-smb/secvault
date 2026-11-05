@@ -3216,17 +3216,55 @@ together. If a fourth ever appears, it must be fixed in the same commit.
 `public/fonts/`, so the browser was synthesising or snapping to 700 — the number never rendered at
 the weight the rule asked for. It is 600 now, which is a real face.
 
-### ⛔ HOW MANY HEADLINE FIGURES, AND IN WHAT ORDER (v2.218.0)
+### ⛔ HOW MANY HEADLINE FIGURES, AND IN WHAT ORDER (v2.218.0, re-laid out v2.224.0)
 
 **Three questions, not six equal tiles.** The Overview opened with six headline figures in one
 `repeat(auto-fit, minmax(190px, 1fr))` grid — every one the same size and the same weight, so a
 firewall COUNT sat beside a patch-now count with nothing on the page saying which was the reason to
-still be reading. They are now grouped under the three questions an operator actually arrives with,
-in the order they ask them:
+still be reading. They are grouped under the three questions an operator actually arrives with, in
+the order they ask them:
 
 1. **What needs attention** — Critical Alerts, High Risks. Links to `/work`; it never acts here.
 2. **Fleet posture** — Security Score, Compliance Score, Devices, Total Rules.
 3. **Can these numbers be trusted?** — coverage, as a plain list. Links to `/coverage`.
+
+⛔ **THE THREE QUESTIONS ARE RIGHT; THREE STACKED FULL-WIDTH SECTIONS WERE NOT (v2.224.0).** The
+grouping was paid for in VERTICAL SPACE on the one page every session lands on. Measured at
+1440x900: the answer sentence began at y=133 and the first dashboard widget at **y=711** — the
+headline alone spent 504px, **56% of the viewport**, so the tab bar and every widget were below the
+fold on arrival. Reported by the user, who could not see their own dashboard without scrolling.
+1 and 2 are now GROUPS inside one `.ov-band`, side by side with a 1px rule between them, and 3 is
+one inline run. Re-measured: first widget at **y=574** (1440), **619** (1280), **638** (1024).
+⛔ All three are still real `<h2>`s — the document outline did not change, only the geometry.
+
+⛔ **THE BLOCKER LOOKED LIKE WIDTH AND WAS ONE CSS PROPERTY, AND THE FIRST DIAGNOSIS WAS A
+MEASUREMENT THAT WAS SIMPLY WRONG.** Six tiles abreast rendered `Complianc/e Score` split mid-word,
+so the band was first gated at a probed 1660px — the width where that one label stops wrapping —
+and the comment justified it with *"at 1440 one row is 167px against ~170px for two rows"*. The
+stacked band is **244px** at 1440. One row was **77px shorter the whole time**; what was being
+designed around was a wrapped LABEL, not a wrapped layout. `.kpi-head-row` sets
+`overflow-wrap: anywhere`, which splits a word that would have fitted on the next line;
+`break-word` does not. Scoped to the band, **no mid-word break at any of nine probed widths**, and
+one row beats the stack everywhere — 88px at 1600, 77px at 1440, 61px at 1280, 119px at 1100. The
+gate dropped from 1660 to **900**, where the attention group's two tiles stop having room.
+⛔ It is scoped, not global: ~40 other call sites were sized against `anywhere`.
+⛔ **A LAYOUT CONCLUSION DRAWN FROM A HEIGHT NOBODY MEASURED IS THIS FILE'S OWN failed-read-as-a-fact
+RULE AIMED AT A STYLESHEET** — probe the running page for both arms of a comparison, not one.
+
+⛔ **900 IS THE BAND'S OWN NUMBER AND MAY NEVER BECOME 1024 OR 1280.** Those are
+`lib/navLayout.js`'s rail breakpoints and `globals.css` carries no copy of either on purpose. A
+test asserts the band's query is neither.
+
+⛔ **2fr / 1px / 4fr, WEIGHTED BY TILE COUNT**, so all six tiles come out the same width. Equal
+tracks would draw the 2-tile group at twice the tile size of the 4-tile one and make the left half
+read as more important by AREA — which it is, but it already says so by position, by its group
+label and by the hue on its numbers.
+
+⛔ **A DIVIDER IS MADE OF SPACE, NOT INK.** The rule is 1px `--border`, the same pair every tile
+edge is drawn with (sampled: `#DDE3EB` on `#F7F9FB`), so at a 16px gutter the eye met three
+identical hairlines 16px apart and read them as one odd card boundary. The GUTTER grew to `--s5`
+rather than the line darkening: a hairline pushed off `--border` would be a fourth neutral on a
+page the design system holds to three.
 
 ⛔ **NOTHING WAS REMOVED.** All six figures survive with their evidence marks, their deltas and
 their coverage caveats. `tests/overviewSections.test.js` fails the build if a tile, a drawer or a
@@ -3240,9 +3278,19 @@ its tile count divides into, and the responsive steps divide too (**4 → 2 → 
 a four-tile section orphans its fourth on the way down). A future three-tile section needs its own
 step (3 → 1, skipping 2) rather than joining this rule.
 
-⛔ **THE TRUST SECTION IS NOT TILES AND NOT A PERCENTAGE.** Everything above it is a measurement;
-this is a QUALIFIER on those measurements. As tiles it would read as the seventh and eighth headline
-figures — the complaint the sections exist to answer. And "62% coverage" would be one number
+⛔ **THE TRUST RUN IS NOT TILES, NOT A PERCENTAGE, AND NO LONGER A SECTION.** Everything above it
+is a measurement; this is a QUALIFIER on those measurements. As tiles it would read as the seventh
+and eighth headline figures — the complaint the grouping exists to answer. ⛔ **And given a
+full-width heading row of its own it carried the same weight as "What needs attention"**, spending
+84px plus that row, on the landing page, to say something only read once a number is doubted. It is
+one inline run since v2.224.0 — the question is still an `<h2>`, reading as the lead-in to its own
+answer. ⛔ **It stays BELOW the band**, which is the opposite of the rule `PageHeader`'s `meta`
+follows, because the before-position is already taken: `AnswerHeader`'s `.answer-coverage` states
+what could not be measured directly under the sentence, and `lib/answers.js` forbids an all-clear
+while coverage is incomplete. This run is the DETAIL behind that line. ⛔ **`flex: 1 1 0` on the
+list, never `auto`** — with an auto basis the list's min-content width exceeded the space beside
+the question, so the strip wrapped the list onto its own line and the link onto a third: **111px
+for a run that exists to be shorter than the 84px section it replaced.** And "62% coverage" would be one number
 covering three different problems with three different first steps, so each figure keeps its own
 denominator and its own sentence. ⛔ **"Never collected from" and "last collected over N days ago"
 stay TWO counts**: the first is a credential or reachability problem, the second is a job that

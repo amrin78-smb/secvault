@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.0': [
+    'The Overview now fits on the screen you log in to. "What needs attention" and "Fleet posture" sat one above the other, each with its own full-width heading, so the headline block spent 504px \u2014 56% of a 900px window \u2014 before the tab bar, and every widget was below the fold on arrival. The two groups now sit side by side in one band with a divider between them: measured on the same screen, the first widget moved from 711px down the page to 574px.',
+    '"Can these numbers be trusted?" is still there and still carries every figure, every "of 16" denominator and every \u26a0 \u2014 it is now one line under the band instead of a third full-width section with its own heading.',
+    'Nothing was removed. All six headline figures keep their evidence drawer, their since-yesterday comparison and their coverage caveats, including the Security Score tile\u2019s note about firewalls left out of the score.',
+    'On a narrow window the two groups stack as before, and the divider becomes a horizontal line. The single row needs the width for six readable tiles and only takes it when the width is there.',
+    'No change to any measurement, any score, or what SecVault collects \u2014 this release is layout only.',
+  ],
   '2.223.1': [
     'Every page now announces its own name to a screen reader. The title at the top of each workspace was styled text rather than a heading, so a screen-reader user listing a page\u2019s headings got the names of the panels and never the name of the page \u2014 and "jump to the main heading" had nothing to jump to. On a firewall\u2019s pages the firewall\u2019s name is the heading and the view beneath it ("Policy", "Changes") now sits under it, which is the order they are actually read in.',
     'On a narrow window or a phone the top bar ran off the right-hand edge and took the account menu with it, so there was no way to reach Sign Out. The bar now gives up the tagline, the wordmark and the feed pill as it narrows and keeps every control on screen.',

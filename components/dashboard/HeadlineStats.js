@@ -188,36 +188,67 @@ export default async function HeadlineStats() {
         context={`Fleet of ${h.deviceCount} · ${h.devicesOnline} reachable`}
       />
 
-      {/* ⛔ THREE QUESTIONS, NOT SIX EQUAL TILES (v2.218.0). The Overview used
-          to open with six headline figures in one auto-fit grid, every one the
-          same size and the same weight — a firewall COUNT beside a patch-now
-          count, with nothing on the page saying which of them was the reason
-          to still be reading. And because the grid was `auto-fit`, the row
-          broke wherever the viewport happened to fall: at 1440 with the rail
-          expanded it rendered five across and orphaned the sixth, which reads
-          as a layout fault rather than as a group.
+      {/* ⛔ ONE BAND, TWO GROUPS, A RULE BETWEEN THEM (v2.224.0) — and this
+          REPLACES the three stacked sections v2.218.0 introduced, without
+          giving back what they bought.
 
-          The three headings are the questions an operator actually arrives
-          with, in the order they ask them. ⛔ Each section's grid carries an
-          EXPLICIT column count that its tile count divides into, so a section
-          can go four columns -> two -> one and never leave a tile alone on a
-          row. That is the whole fix for the orphan; `auto-fit` cannot express
-          it because it does not know how many tiles there are.
+          v2.218.0 was right that six identical tiles in one `auto-fit` row is
+          not a dashboard: a firewall COUNT sat beside a patch-now count with
+          nothing saying which was the reason to still be reading, and the row
+          orphaned its sixth tile at 1440. But it paid for the grouping in
+          VERTICAL SPACE, and the bill came due on the one page every session
+          lands on. Measured at 1440x900 before this change: the answer
+          sentence began at y=133 and the first widget row at **y=711** — the
+          headline block alone spent 504px, 56% of the viewport, so the tab bar
+          and every widget were below the fold on arrival. The page that exists
+          to be read at a glance could not be.
 
-          ⛔ NOTHING WAS REMOVED. All six figures are still here, with the same
-          evidence marks, the same deltas and the same coverage caveats. What
-          changed is that they now sit under the question each one answers. */}
+          ⛔ THE GROUPING IS KEPT AND THE STACK IS NOT. Two groups side by side
+          with a 1px rule between them says "these are two different kinds of
+          number" at least as plainly as two headings forty pixels apart did —
+          a divider is what the v2.218.0 row was actually missing. The headings
+          survive as real <h2>s (the document outline is unchanged) at group
+          scale rather than page scale.
 
-      <section className="ov-section" aria-labelledby="ov-attention">
-        <div className="ov-section-head">
-          <h2 className="ov-section-title" id="ov-attention">What needs attention</h2>
-          {/* ⛔ A LINK, AND IT GOES TO THE QUEUE RATHER THAN DOING ANYTHING
-              HERE. The Overview's job is to say what is wrong; /work is where
-              it gets worked, and duplicating the triage controls onto the
-              landing page would give the operator two places to do one job. */}
-          <a className="ov-section-link" href="/work">Open the work queue →</a>
-        </div>
-        <KpiRow cols={2}>
+          ⛔ AND THE ORPHAN CANNOT COME BACK. Each group still holds a <KpiRow>
+          with an EXPLICIT column count its tile count divides into, so the
+          band is 2 + 4 and never 5 + 1. `auto-fit` is still forbidden; it does
+          not know how many tiles there are, which is why no amount of tuning
+          ever fixed it.
+
+          ⛔ NOTHING WAS REMOVED. All six figures are here with the same
+          evidence marks, the same deltas and the same coverage caveats —
+          including the Security Score tile's right to WRAP when a real
+          unassessed-firewall caveat is present. A band that stayed one line
+          by dropping a caveat would be buying tidiness with honesty.
+
+          ⛔ THE THING THAT LOOKED LIKE "THE TILES ARE TOO NARROW" WAS ONE CSS
+          PROPERTY. Six abreast rendered "Complianc/e Score" split mid-word, so
+          a first draft gated the band at 1660px — the width where that label
+          stops wrapping at all — and justified it with a measurement that was
+          simply wrong ("at 1440 one row is 167px against ~170px for two"; the
+          stacked band is 244px there). The global `.kpi-head-row` rule uses
+          `overflow-wrap: anywhere`, which splits a word that would have fitted
+          on the next line; `break-word` does not. With that one line scoped to
+          the band there is no mid-word break at any width, and one row is
+          shorter than two at every width probed — 88px at 1600, 77px at 1440,
+          61px at 1280. The band now stacks only below 900px, where the
+          attention group's two tiles stop having room. The widths, the probe
+          and why that number may never be written as 1024 or 1280 are in
+          app/globals.css beside the rule. */}
+
+      <section className="ov-band" aria-label="Fleet headline figures">
+        <div className="ov-band-group" aria-labelledby="ov-attention">
+          <div className="ov-band-head">
+            <h2 className="ov-band-title" id="ov-attention">What needs attention</h2>
+            {/* ⛔ A LINK, AND IT GOES TO THE QUEUE RATHER THAN DOING ANYTHING
+                HERE. The Overview's job is to say what is wrong; /work is
+                where it gets worked, and duplicating the triage controls onto
+                the landing page would give the operator two places to do one
+                job. */}
+            <a className="ov-link" href="/work">Work queue →</a>
+          </div>
+          <KpiRow cols={2}>
         <StatCard
           compact
           layout="row"
@@ -256,14 +287,18 @@ export default async function HeadlineStats() {
           iconBg="var(--tint-warn)"
           delta={<DeltaBadge current={h.highRiskCount} previous={prev?.high_risk_count} goodDirection={GOOD.down} />}
         />
-        </KpiRow>
-      </section>
-
-      <section className="ov-section" aria-labelledby="ov-posture">
-        <div className="ov-section-head">
-          <h2 className="ov-section-title" id="ov-posture">Fleet posture</h2>
+          </KpiRow>
         </div>
-        <KpiRow cols={4}>
+
+        {/* The rule IS the grouping at this scale. aria-hidden because the two
+            <h2>s already carry the structure for anyone not looking at it. */}
+        <div className="ov-band-rule" aria-hidden="true" />
+
+        <div className="ov-band-group" aria-labelledby="ov-posture">
+          <div className="ov-band-head">
+            <h2 className="ov-band-title" id="ov-posture">Fleet posture</h2>
+          </div>
+          <KpiRow cols={4}>
         <StatCard
           compact
           layout="row"
@@ -343,7 +378,8 @@ export default async function HeadlineStats() {
           iconBg="var(--tint-info)"
           delta={<DeltaBadge current={h.rulesTotal} previous={prev?.rules_total} goodDirection={GOOD.down} />}
         />
-        </KpiRow>
+          </KpiRow>
+        </div>
       </section>
 
       {/* ⛔ THE THIRD QUESTION, AND IT IS DELIBERATELY NOT TILES. Everything
@@ -351,19 +387,37 @@ export default async function HeadlineStats() {
           fleet those measurements actually cover, which is a QUALIFIER on them
           rather than a seventh and eighth number competing with them. Rendered
           as tiles it would have read as more KPIs — the exact complaint the
-          sections above exist to answer — and it would have put "3 firewalls
+          band above exists to answer — and it would have put "3 firewalls
           never collected from" in the same visual language as a compliance
           score.
 
           ⛔ IT IS NOT A PERCENTAGE, FOR THE SAME REASON. "62% coverage" is one
           number covering three different problems with three different first
           steps. Each figure here keeps its own denominator and its own
-          sentence. */}
-      <section className="ov-section" aria-labelledby="ov-trust">
-        <div className="ov-section-head">
-          <h2 className="ov-section-title" id="ov-trust">Can these numbers be trusted?</h2>
-          <a className="ov-section-link" href="/coverage">Data coverage →</a>
-        </div>
+          sentence.
+
+          ⛔ IT IS ONE INLINE RUN NOW, NOT A THIRD SECTION (v2.224.0), AND THE
+          DEMOTION IS THE POINT. This is a qualifier on the figures above it;
+          given a full-width section heading of its own it carried the same
+          weight as "What needs attention", and the page then spent 84px — plus
+          its own heading row — telling an operator at a glance something that
+          is only ever read once they doubt a number. The question, every
+          figure, every denominator and the ⚠ marks are unchanged; what went is
+          the heading ROW, not the heading, which is still an <h2> and still in
+          the outline, now reading inline as the lead-in to its own answer.
+
+          ⛔ IT STAYS BELOW THE BAND RATHER THAN MOVING ABOVE IT, which is the
+          opposite of the rule PageHeader's `meta` follows ("a freshness note
+          placed after the numbers it qualifies has already been overtaken by
+          the reader"). The reason is that the qualifier ALREADY precedes them:
+          AnswerHeader's own `.answer-coverage` line states what could not be
+          measured, directly under the sentence, and lib/answers.js forbids an
+          all-clear while coverage is incomplete. So the before-position is
+          taken and this run is the DETAIL behind it — putting the detail above
+          the numbers too would push the thing the operator came for a further
+          56px down the page to repeat a caveat they have just read. */}
+      <section className="ov-trust-strip" aria-labelledby="ov-trust">
+        <h2 className="ov-trust-q" id="ov-trust">Can these numbers be trusted?</h2>
         <ul className="ov-trust">
           {trust.map((t) => (
             <li key={t.label} className="ov-trust-item" data-bad={t.bad ? 'true' : undefined}>
@@ -373,6 +427,7 @@ export default async function HeadlineStats() {
             </li>
           ))}
         </ul>
+        <a className="ov-link" href="/coverage">Data coverage →</a>
       </section>
     </>
   );
