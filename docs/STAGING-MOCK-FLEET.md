@@ -25,7 +25,8 @@ again in four commands.
 | PostgreSQL | **16.15**, service `postgresql-x64-16` Running, listening on 5432 |
 | `psql` | `C:\Program Files\PostgreSQL\16\bin\psql.exe` — ⛔ **NOT on PATH**, use the full path |
 | PG data dir | `C:\Program Files\PostgreSQL\16\data` — ⛔ on **C:**, see the retention warning below |
-| port 3010 | **free** |
+| port 3010 | ⛔ **TAKEN by another NocVault app since 2026-11-05** — the mock was moved to **3020** (v2.224.1). Nothing on this box may assume 3010. |
+| port 3020 | the mock console |
 | already running | `CertVault-App` + `CertVault-Engine` on **3014** — do not disturb |
 | free space | 292.9 GB of 475.7 GB on C: |
 
@@ -54,10 +55,10 @@ This ran end to end. What is actually there now:
 
 | | |
 |---|---|
-| path | `C:\Apps\SecVaultTest` (v2.196.0, commit `610db97`) |
+| path | `C:\Apps\SecVaultTest` (v2.224.1, commit `a409fae`) |
 | database | `secvault_mock`, owner `secvault_mock_user` |
 | services | `SecVaultTest-App` + `SecVaultTest-Collector`, **both `SERVICE_DEMAND_START`** so nothing comes back on reboot |
-| app | `http://192.168.31.10:3010` — `/api/health` answers **401** (working app, unauthenticated call) |
+| app | `http://192.168.31.10:3020` — `/api/health` answers **401** (working app, unauthenticated call). ⛔ **Moved off 3010 on 2026-11-05**, see the port note above |
 | syslog | udp/tcp **1514**; sender aliases `10.99.0.11` / `10.99.0.21` on the loopback pseudo-interface |
 | CertVault | **untouched** — both its services still Running on 3014, its database not opened |
 
@@ -159,10 +160,10 @@ $psql = 'C:\Program Files\PostgreSQL\16\bin\psql.exe'
 
 ```bash
 SERVER_IP=192.168.31.10
-APP_PORT=3010
+APP_PORT=3020
 DATABASE_URL=postgresql://secvault_mock_user:<generated>@127.0.0.1:5432/secvault_mock
 
-NEXTAUTH_URL=http://192.168.31.10:3010
+NEXTAUTH_URL=http://192.168.31.10:3020
 NEXTAUTH_SECRET=<generated>
 CREDENTIAL_KEY=<generated 32-byte hex>
 SESSION_IDLE_MINUTES=30
@@ -210,7 +211,7 @@ exercises only the path this product has never had a bug on.
 ```powershell
 $nssm = 'C:\Windows\System32\nssm.exe'
 & $nssm install SecVaultTest-App node
-& $nssm set SecVaultTest-App AppParameters "node_modules\next\dist\bin\next start -p 3010"
+& $nssm set SecVaultTest-App AppParameters "node_modules\next\dist\bin\next start -p 3020"
 & $nssm set SecVaultTest-App AppDirectory "C:\Apps\SecVaultTest"
 & $nssm set SecVaultTest-App AppEnvironmentExtra "NODE_ENV=production"
 sc.exe start SecVaultTest-App          # ⛔ sc.exe, never Start-Service
@@ -223,8 +224,34 @@ sc.exe start SecVaultTest-App          # ⛔ sc.exe, never Start-Service
 ⛔ **"Service Running" is not "app serving"** — NSSM restarts a crashing process, so verify:
 
 ```powershell
-(Invoke-WebRequest http://127.0.0.1:3010/api/health -UseBasicParsing).StatusCode
+(Invoke-WebRequest http://127.0.0.1:3020/api/health -UseBasicParsing).StatusCode
 ```
+
+### 5b. Moving the port (done 2026-11-05: 3010 -> 3020)
+
+Another NocVault app needed 3010 on this box, so the mock was moved. Three things, in one
+sitting — and the second is the one that is easy to miss:
+
+1. `.env.local`: `APP_PORT` **and** `NEXTAUTH_URL`. Use the installer's own editor rather than
+   hand-editing (`. installer\SecVault-Tls.ps1` then `Set-SecVaultEnvValue`), which does a line
+   edit and verifies every other key survived — `.env.local` holds `CREDENTIAL_KEY`.
+2. **The NSSM `AppParameters`**, which carries its own `-p <port>` and does not read `APP_PORT`.
+   Change only the env file and the service keeps serving the OLD port while every URL in the
+   product names the new one.
+3. An inbound firewall rule for the new port. ⛔ This mock has **no** SecVault firewall rule at
+   all (it was installed by hand, not by `Install-SecVault.ps1`), so nothing needed changing here
+   — a real install does.
+
+Then `npm run build` (the tree changed) and `sc.exe stop/start SecVaultTest-App`.
+
+⛔ **VERIFY BY OUTCOME, NEVER BY SERVICE STATE.** Measured after the move: 3010 FREE, 3020
+answering **401** on `/api/health` and **200** on `/login`, from loopback and from the dev box,
+CertVault still Running on 3014.
+
+⛔ **A port conflict does not always announce itself.** On the dev box a clash produced a process
+that printed its startup line and exited while the other app kept answering — `/api/auth/csrf`
+returned **426**, which is what being talked to by the wrong server looks like. Here `next start`
+on a taken port did fail loudly (`EADDRINUSE`), so both shapes exist and neither can be assumed.
 
 ### 6. Generate syslog
 
