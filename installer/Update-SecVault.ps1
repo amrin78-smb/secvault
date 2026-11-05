@@ -944,7 +944,11 @@ if ($buildSucceeded -and $migrateSucceeded) {
             # ⛔ next start CANNOT serve TLS -- there is no flag for it in any
             # version -- so the service entry point moves to server.js, which wraps
             # the same Next handler in https.createServer. Rollback is one command:
-            #   nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"
+            #   nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p <APP_PORT>"
+            # ⛔ <APP_PORT> IS THIS INSTALL'S OWN PORT, read from .env.local --
+            # not 3010, which is only the default. This line used to quote the
+            # literal, so an operator copying it onto a moved install would have
+            # silently returned the console to a port nothing is firewalled for.
             & $NssmExe set SecVault-App AppParameters 'server.js' | Out-Null
             # ⛔ ONE interpolated string, not 'a' + $b + 'c'. In COMMAND mode
             # PowerShell parses that as five positional arguments; Write-Log has a
@@ -1116,12 +1120,23 @@ if (-not $appStartSkipped) {
                 # nothing at all; writing that verbatim is what produced an
                 # AppParameters of "n" and a service that could not start. If the
                 # captured value does not look like the real entry point, fall
-                # back to the literal from CLAUDE.md. A rollback must be the one
+                # back to the documented entry point. A rollback must be the one
                 # path that cannot fail.
+                #
+                # ⛔ THE PORT IS INTERPOLATED, NEVER THE 3010 LITERAL. This read
+                # `-p 3010` hardcoded, so on any install that moved the console
+                # off the default (-AppPort / APP_PORT) this fallback would put
+                # SecVault-App back on 3010 while the NEXTAUTH_URL written ~40
+                # lines below -- which uses $port, resolved from APP_PORT -- named
+                # the real port. NextAuth would then issue its cookie for an
+                # origin the browser is not on and every sign-in would bounce
+                # silently back to the login page: EXACTLY the failure the
+                # NEXTAUTH_URL comment below exists to prevent, reintroduced by
+                # the line meant to be the safety net. $port is already in scope.
                 $restore = $script:previousAppParameters
                 if ([string]::IsNullOrWhiteSpace($restore) -or $restore.Length -lt 10 -or $restore -notmatch 'next') {
                     Write-Log "  [WARN] Captured entry point looked wrong ('$restore') -- restoring the documented default instead."
-                    $restore = 'node_modules\next\dist\bin\next start -p 3010'
+                    $restore = "node_modules\next\dist\bin\next start -p $port"
                 }
                 & $NssmExe set SecVault-App AppParameters $restore | Out-Null
                 Write-Log "  Entry point restored to: $restore"

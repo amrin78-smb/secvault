@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.1': [
+    'The console port is now followed everywhere instead of assumed. Install-SecVault.ps1 has always taken -AppPort and written APP_PORT, and SecVault resolves it at every startup \u2014 but three places still carried 3010 as a literal, so an installation moved off the default disagreed with itself.',
+    'The update script\u2019s rollback could move the console back to port 3010. It only runs when a safety check finds the recorded service entry point unreadable, but on a moved installation it would have restarted SecVault on the wrong port while writing the right one into the sign-in configuration \u2014 after which every sign-in would bounce back to the login page with no error shown.',
+    'Settings \u2192 About reported "Port 3010" on every installation, whatever port the console was actually reached on. It now reads the port from the address in your browser, and shows a dash rather than a guess if it cannot.',
+    'npm start and npm run dev now use this installation\u2019s configured port rather than a fixed 3010, so a hand-started console lands where the firewall rule and the bookmarks already point.',
+    'HTTPS_PORT is now documented in .env.local.example, including the warning that it moves the console without moving the health check or the firewall rule \u2014 APP_PORT remains the way to change the port.',
+    'No change to any measurement, any score, or what SecVault collects.',
+  ],
   '2.224.0': [
     'The Overview now fits on the screen you log in to. "What needs attention" and "Fleet posture" sat one above the other, each with its own full-width heading, so the headline block spent 504px \u2014 56% of a 900px window \u2014 before the tab bar, and every widget was below the fold on arrival. The two groups now sit side by side in one band with a divider between them: measured on the same screen, the first widget moved from 711px down the page to 574px.',
     '"Can these numbers be trusted?" is still there and still carries every figure, every "of 16" denominator and every \u26a0 \u2014 it is now one line under the band instead of a third full-width section with its own heading.',

@@ -37,13 +37,43 @@ import {
 // backed by a route that checks the same capability server-side; the list
 // exists so an Operator is not shown five doors that all refuse to open.
 
+// ⛔ THE PORT IS READ, NEVER ASSERTED. This row was the literal '3010', so
+// every installation that moved the console off the default -- which
+// Install-SecVault.ps1's -AppPort and APP_PORT have always supported, and
+// which lib/tlsConfig.js resolves at every startup -- was told in its own
+// About tab that it was on a port it was not on. A number nobody computed,
+// rendered beside four facts that are true, is this codebase's
+// failed-read-as-a-fact rule wearing a harmless-looking hat.
+//
+// ⛔ `window.location`, NOT AN API CALL. GET /api/system/console-url already
+// returns the resolved httpsPort, but it is gated on MANAGE_SETTINGS while the
+// About tab is open to EVERY role -- so an Operator would have been shown a
+// 403's worth of nothing, or worse, a stale default. The address bar is the one
+// source that needs no capability and cannot disagree with how the reader
+// actually reached this console. (SecVault serves its own TLS from server.js
+// with no reverse proxy in front -- see lib/rateLimit.js -- so the port the
+// browser used IS the port the server bound.)
+//
+// ⛔ AND IT RENDERS AS UNMEASURED UNTIL IT IS KNOWN, never as 3010. There is
+// no window during server render, and a default printed while waiting is the
+// same wrong fact this comment exists to remove.
 const ABOUT_ROWS = [
   ['Product', `${PRODUCT_NAME} — ${PRODUCT_TAGLINE}`],
   ['Version', `v${pkg.version}`],
-  ['Port', '3010'],
   ['Runtime', 'Node.js v20 · Next.js 14.2.35 · React 18.3'],
   ['Database', 'PostgreSQL 16'],
 ];
+
+/** The port this console was reached on, or null when it cannot be read. */
+function readConsolePort() {
+  if (typeof window === 'undefined' || !window.location) return null;
+  const { port, protocol } = window.location;
+  if (port) return port;
+  // An omitted port means the scheme's default, which is a real answer.
+  if (protocol === 'https:') return '443';
+  if (protocol === 'http:') return '80';
+  return null;
+}
 
 export default function SettingsPage() {
   // ⛔ THE URL IS THE TAB (v2.221.0). This was `useState('general')` plus a
@@ -67,6 +97,12 @@ export default function SettingsPage() {
     // steps nobody wants to walk back through one at a time.
     router.replace(`/settings?tab=${key}`, { scroll: false });
   }, [router]);
+
+  // Resolved after mount: there is no `window` during server render, and a
+  // placeholder default would be the very wrong fact readConsolePort() exists
+  // to stop printing. null renders as the unmeasured em-dash.
+  const [consolePort, setConsolePort] = useState(null);
+  useEffect(() => { setConsolePort(readConsolePort()); }, []);
 
   const [feedPollIntervalHours, setFeedPollIntervalHours] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -448,7 +484,10 @@ export default function SettingsPage() {
             <CardBody>
               <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <tbody>
-                  {ABOUT_ROWS.map(([label, value]) => (
+                  {[
+                    ...ABOUT_ROWS,
+                    ['Console port', consolePort],
+                  ].map(([label, value]) => (
                     <tr key={label} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td
                         style={{
@@ -464,10 +503,10 @@ export default function SettingsPage() {
                         style={{
                           padding: '10px 0',
                           fontSize: 'var(--text-base)',
-                          color: 'var(--text-primary)',
+                          color: value ? 'var(--text-primary)' : 'var(--unmeasured)',
                         }}
                       >
-                        {value}
+                        {value || <span title="Could not be read from this page's address.">—</span>}
                       </td>
                     </tr>
                   ))}

@@ -1,11 +1,11 @@
 {
   "name": "secvault",
-  "version": "2.224.0",
+  "version": "2.224.1",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3010",
+    "dev": "node scripts/nextPort.js dev",
     "build": "next build",
-    "start": "next start -p 3010",
+    "start": "node scripts/nextPort.js start",
     "migrate": "node lib/migrate.js",
     "test": "node scripts/runTests.js",
     "smoke": "node scripts/smoke.js",

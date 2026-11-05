@@ -93,7 +93,9 @@ Standalone on-premises **firewall security and management platform**.
 **SEPARATE PRODUCT** from the NocVault suite — own auth, own DB, own services, own server.
 Not a module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependency on any of them.
 
-- **Port:** 3010 (Next.js frontend + API routes)
+- **Port:** 3010 by DEFAULT, configurable (`-AppPort` / `APP_PORT`) â Next.js frontend + API
+  routes. Every port in this file is the default; `tests/appPortConfigurable.test.js` fails the
+  build if a surface that decides where the console listens hardcodes it again.
 - **Install path:** `C:\Apps\SecVault\`
 - **Repo:** `amrin78-smb/secvault` (private)
 - **DB:** `secvault` (PostgreSQL 16, user: `secvault_user`)
@@ -360,7 +362,12 @@ exit 1 in CommonJS), so it is a real gate for `lib/**` and `services/**` and wor
 ⛔ **`next start` CANNOT SERVE TLS** — there is no flag for it, in any version. So the
 `SecVault-App` service's NSSM `AppParameters` points at **`server.js`**, which wraps the same Next
 request handler in `https.createServer`. **Rollback is one command:**
-`nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p 3010"`.
+`nssm set SecVault-App AppParameters "node_modules\next\dist\bin\next start -p <APP_PORT>"`.
+â **`<APP_PORT>` IS THIS INSTALL'S OWN PORT, read from `.env.local`** â not 3010, which is
+only the default. Both this line and the same comment inside `Update-SecVault.ps1` used to quote
+the literal, and the updater's rollback FALLBACK used it in code (fixed v2.224.1): on an install
+moved off 3010 that put the service back on the default while writing the real port into
+`NEXTAUTH_URL`, i.e. the silent sign-in bounce the rollback's own comment exists to prevent.
 
 Three listeners, and the second is the non-obvious one:
 
@@ -2930,6 +2937,18 @@ Complete list of all `.env.local` variables. Every variable referenced in code m
 ```bash
 # Server
 SERVER_IP=
+# â THE CONSOLE PORT, AND IT IS CONFIGURABLE â 3010 is only the default.
+# `Install-SecVault.ps1 -AppPort` writes it, `lib/tlsConfig.js` resolves it at
+# every startup, and `Update-SecVault.ps1` reads it back out of `.env.local` for
+# BOTH its health probe and its page sweep. Moving it on an existing install
+# takes three things in one sitting: this key, NEXTAUTH_URL (scheme AND port
+# must match what the browser uses), and an inbound firewall rule for the new
+# port. Then `sc.exe stop/start SecVault-App`.
+# â A TAKEN PORT DOES NOT FAIL LOUDLY. Measured on the dev box: the process
+# printed its startup line and exited while the OTHER app kept answering, so
+# NSSM still reported Running and the API sweep reported
+# `/api/auth/csrf returned 426` â a 426 from a SecVault URL means you are
+# talking to the wrong server. Verify by `/api/health`, never by service state.
 APP_PORT=3010
 
 # Database
@@ -2968,6 +2987,15 @@ ENABLE_TLS=true
 TLS_CERT_PATH=                             # PEM. Blank + ENABLE_TLS=true => disabled, not failed
 TLS_KEY_PATH=                              # PEM private key; pairs with the cert
 HTTP_REDIRECT_PORT=3080                    # plain HTTP, redirect only
+# â READ BY `lib/tlsConfig.js` AND ABSENT FROM THIS LIST UNTIL v2.224.1,
+# against this section's own rule that every variable referenced in code must
+# be here. It WINS OVER `APP_PORT` for the HTTPS listener â and NOTHING ELSE
+# FOLLOWS IT: the installer's firewall rule, the updater's health probe and the
+# page sweep all still use APP_PORT, so setting this alone moves the console
+# while every check keeps looking at the old port and a healthy deploy reports
+# a dead console. Prefer changing APP_PORT. Listed because the code reads it,
+# not because it is the way to move the port.
+HTTPS_PORT=                                # blank = use APP_PORT (what every install does)
 
 # Credentials encryption (SEPARATE from NEXTAUTH_SECRET)
 CREDENTIAL_KEY=                            # 32-byte hex — generate at install
