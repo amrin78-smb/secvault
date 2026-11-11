@@ -105,7 +105,7 @@ Not a module of NetVault, LogVault, DDIVault, or SpanVault. No runtime dependenc
 | role | host | what it is |
 |---|---|---|
 | **dev** | `192.168.31.230` · `amrin-Latitude-5400` | **Linux.** Zorin OS 18.1 (Ubuntu 24.04 noble). Repos under `/home/amrin/development/Nocvault/`. Node 22 via nvm, PostgreSQL 16.15 local, `pwsh` 7.6, Playwright 1.63 + browsers, openssh-server, sshpass. |
-| **staging** | `192.168.31.10` · `LAPTOP-6PETB251` | Windows 11 Home, PostgreSQL 16.15, NSSM at `C:\Windows\System32\nssm.exe`. **Hosts CertVault only** (`C:\Apps\CertVault`, port 3014). DHCP, reservation pending. |
+| **staging** | `192.168.31.10` · `LAPTOP-6PETB251` | Windows 11 Home, PostgreSQL 16.15, NSSM at `C:\Windows\System32\nssm.exe`, PowerShell **5.1**, Node **24**. Hosts **six** apps: CertVault (3014), NetVault, LogVault, DDIVault, SpanVault, and **SecVault itself** (`C:\Apps\SecVault`, **3020**, since 2026-11-11). DHCP, reservation pending. |
 | **production** | `192.168.7.69` | The SecVault reference fleet server. **Reachable from dev ONLY over the VPN** (`tun0`, dev becomes `10.10.10.22`). With the VPN up: 3010 and 5432 both answer, `/api/health` returns 401. With it down: both are no-answer. |
 
 ⛔ **`192.168.31.230` WAS THE OLD WINDOWS STAGING MACHINE AND IS NOW THE LINUX DEV BOX.** That
@@ -136,8 +136,22 @@ or it reads as a permanent property — and a confident wrong mechanism is worse
 it sends the next session to fix the wrong thing. When a live check genuinely cannot run, say which
 precondition was missing, not that the thing is impossible.
 
-⛔ **SecVault IS NOT INSTALLED ON THE STAGING SERVER.** It hosts CertVault today. **Ask before
-installing anything there.**
+⛔ **SecVault IS NOW INSTALLED ON THE STAGING SERVER, AND THIS LINE SAID THE OPPOSITE.** It read
+"SecVault IS NOT INSTALLED... it hosts CertVault today", which was true until **2026-11-11**, when a
+genuine `Install-SecVault.ps1` run replaced the hand-built mock. `C:\Apps\SecVault`, console
+**https://192.168.31.10:3020**, HTTP redirect 3081, syslog 1514, services `SecVault-App` /
+`SecVault-Engine` / `SecVault-Collector`. **Ask before installing anything there** — that part
+stands, and it is now a six-app box.
+
+⛔ **EVERY INSTALLER DEFAULT PORT IS TAKEN ON THAT MACHINE**, which is why it is on 3020: 3010 is
+`api\server.js`, 3014 is CertVault, 3080 is the NetVault terminator, 514 is the LogVault collector.
+A second install there must pick free ports or it will fight a sibling app.
+
+⛔ **ITS POSTGRESQL IS SHARED BY ALL SIX APPS, AND THE INSTALLER RESETS THE SUPERUSER PASSWORD**
+(temporary trust window in `pg_hba.conf`, `ALTER USER postgres`, restore, restart the service). That
+restart briefly drops every one of them. Done deliberately on 2026-11-11 with the new value recorded
+in `C:\Users\Amrin\.certvault-staging-local-secrets.txt`. Plan for it before re-running the
+installer there.
 
 ⛔ **STAGING SSH IS KEY-ONLY** (password login refused):
 `ssh -i ~/.ssh/certvault_staging_ed25519 -o IdentitiesOnly=yes amrin78@192.168.31.10`. `amrin78` is
