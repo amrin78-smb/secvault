@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.5': [
+    'One test failed on Windows and passed on Linux, for a file nobody had changed. A check that reads a source file and looks for a pattern ending at a line break cannot match on a Windows copy, where lines end with two characters instead of one \u2014 so it reported the code as wrong when the code was fine.',
+    'Source files read for checking are now normalised first, the same way the installer-script checks already did it. Verified by converting a file to Windows line endings and watching the check fail without the fix and pass with it.',
+    'Found by running the test suite on a real Windows installation rather than only on the development machine.',
+    'No product code changed \u2014 this is the test suite only.',
+  ],
   '2.224.4': [
     'The fix shipped in 2.224.3 did not work, and the next deploy proved it. The page check was taught to accept the first-run screen, but the text it looked for was taken from the source rather than from the page actually sent \u2014 React writes an invisible boundary marker into the middle of "Welcome to SecVault" when it fills in the product name, so that phrase never appears in the delivered page at all.',
     'It now looks for a sentence that is not assembled from pieces, confirmed against a real captured response from a brand-new installation.',

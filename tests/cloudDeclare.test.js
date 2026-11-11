@@ -22,6 +22,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { readSource } = require('./readSource');
 const derive = require('../app/api/applications/from-cloud/derive');
 
 const {
@@ -31,7 +32,11 @@ const {
 
 const ROOT = path.join(__dirname, '..');
 const ROUTE_FILE = path.join(ROOT, 'app', 'api', 'applications', 'from-cloud', 'route.js');
-const ROUTE_SRC = fs.readFileSync(ROUTE_FILE, 'utf8');
+// ⛔ CRLF NORMALISED: every regex below anchors on `\n`, and a Windows
+// checkout stores this file with CRLF -- measured 151/151 on the staging
+// install, where `/...,\n/` returned null and failed one assertion for a
+// reason unrelated to the route. See tests/readSource.js.
+const ROUTE_SRC = readSource(ROUTE_FILE);
 
 // A catalogue IP row in the shape lib/feeds/cloudApps.loadCatalogue returns.
 const ipRow = (value, extra = {}) => ({
@@ -516,12 +521,10 @@ describe('⛔ POST /api/applications/from-cloud', () => {
 // ── The UI promise ─────────────────────────────────────────────────────────
 
 describe('⛔ the control states its effect before it is clicked', () => {
-  const DECLARE = fs.readFileSync(
-    path.join(ROOT, 'components', 'applications', 'DeclareCloudApp.js'), 'utf8'
-  );
-  const SECTION = fs.readFileSync(
-    path.join(ROOT, 'components', 'applications', 'CloudServices.js'), 'utf8'
-  );
+  // Same CRLF normalisation as ROUTE_SRC above: these are asserted with
+  // regexes too, and a Windows checkout would break them the same way.
+  const DECLARE = readSource(path.join(ROOT, 'components', 'applications', 'DeclareCloudApp.js'));
+  const SECTION = readSource(path.join(ROOT, 'components', 'applications', 'CloudServices.js'));
 
   it('the button label comes from the server-built plan, not from the click', () => {
     assert.match(DECLARE, /plan\.buttonLabel/);
