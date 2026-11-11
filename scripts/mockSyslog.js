@@ -372,8 +372,15 @@ async function run(opts) {
   if (!opts.dryRun) {
     if (opts.anySource) {
       const shared = dgram.createSocket('udp4');
-      socks.fortinet = shared;
-      socks.paloalto = shared;
+      // ⛔ DERIVED FROM `SENDERS`, NEVER LISTED AGAIN HERE. This branch used to
+      // assign `socks.fortinet` and `socks.paloalto` by hand, which was complete
+      // when it was written and silently stopped being so the moment cisco_asa,
+      // checkpoint and forcepoint were added to SENDERS above. The vendor mix
+      // below picks all five, so `socks[vendor]` was undefined for ~66% of lines
+      // and the run died with "Cannot read properties of undefined (reading
+      // 'send')" -- after printing a reassuring banner. A second list of vendors
+      // is a list that drifts; there is now only one.
+      for (const vendor of Object.keys(SENDERS)) { socks[vendor] = shared; }
       console.log('[mockSyslog] --any-source: sending from the default address. Events will NOT '
         + 'match a seeded device and will be stored with device_id NULL (correctly). '
         + 'Rule-hit correlation will produce nothing.');

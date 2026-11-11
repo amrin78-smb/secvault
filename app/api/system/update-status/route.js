@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.2': [
+    'The synthetic syslog generator crashed on two thirds of the traffic it was asked to send. scripts/mockSyslog.js has an --any-source mode for sending without binding a per-vendor source address; it wired up only Fortinet and Palo Alto, which was complete when it was written and silently stopped being so when Cisco ASA, Check Point and Forcepoint were added beside them. Those three had no socket, so the run printed a reassuring banner and then died with "Cannot read properties of undefined".',
+    'The vendor list is now derived from the one definition above it rather than written out a second time, so the same gap cannot reopen the next time a vendor is added.',
+    'Found by running a fresh installation end to end rather than by reading the file — the mode was never exercised, because every previous run bound real source addresses.',
+    'No change to the collector, the parsers, or anything that runs on a server: this is a test-data generator only.',
+  ],
   '2.224.1': [
     'The console port is now followed everywhere instead of assumed. Install-SecVault.ps1 has always taken -AppPort and written APP_PORT, and SecVault resolves it at every startup \u2014 but three places still carried 3010 as a literal, so an installation moved off the default disagreed with itself.',
     'The update script\u2019s rollback could move the console back to port 3010. It only runs when a safety check finds the recorded service entry point unreadable, but on a moved installation it would have restarted SecVault on the wrong port while writing the right one into the sign-in configuration \u2014 after which every sign-in would bounce back to the login page with no error shown.',
