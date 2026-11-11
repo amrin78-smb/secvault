@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.3': [
+    'The deploy-time page check failed on every brand-new installation, for a page that was working correctly. With no firewall added yet, the Overview deliberately shows a "Welcome to SecVault" first-run screen instead of the dashboard \u2014 so the check, which looks for "Security Score", concluded the page was blank and the update refused to report itself successful.',
+    'The check now recognises the first-run screen as a valid state for that page, and says so in its output rather than reporting a silent pass, so it is clear the populated dashboard was not the thing exercised.',
+    'A genuinely blank page is still caught, and the populated Overview must still render BOTH of its sections \u2014 the new allowance cannot be used to pass a half-rendered page. Pinned by five tests, mutation-verified.',
+    'Found by installing SecVault from scratch on a clean server and reading what the first deploy actually reported.',
+  ],
   '2.224.2': [
     'The synthetic syslog generator crashed on two thirds of the traffic it was asked to send. scripts/mockSyslog.js has an --any-source mode for sending without binding a per-vendor source address; it wired up only Fortinet and Palo Alto, which was complete when it was written and silently stopped being so when Cisco ASA, Check Point and Forcepoint were added beside them. Those three had no socket, so the run printed a reassuring banner and then died with "Cannot read properties of undefined".',
     'The vendor list is now derived from the one definition above it rather than written out a second time, so the same gap cannot reopen the next time a vendor is added.',

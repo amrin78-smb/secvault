@@ -335,3 +335,54 @@ describe('⛔ alsoMarkers is an AND, which is the point of it', () => {
     }
   });
 });
+
+// ⛔ A FRESH INSTALL RENDERS A DIFFERENT PAGE AT `/`, AND THE SWEEP FAILED ON
+// EVERY ONE OF THEM. With no firewall in the inventory `app/(dashboard)/page.js`
+// returns `FirstRun()` INSTEAD of the dashboard, deliberately, so a new install
+// reads as empty rather than broken. Neither `Security Score` nor the required
+// second section can exist in that state, so the sweep reported the blank-page
+// shape for a page working exactly as designed -- and `Update-SecVault.ps1`
+// then refused to call the deploy successful. Measured on a genuine fresh
+// install: 200, 48,746 bytes, welcome screen, zero markers.
+//
+// `altMarkers` is a SEPARATE COMPLETE page for the same route. The danger is
+// that it becomes a third way to pass the POPULATED page, so the blank-page
+// case is asserted from both sides below.
+describe('⛔ an alternative page state passes, without weakening the blank-page check', () => {
+  const firstRun = {
+    path: '/',
+    markers: ['Security Score'],
+    alsoMarkers: ['Ruleset overview'],
+    altMarkers: ['Welcome to SecVault'],
+  };
+
+  it('the first-run screen is a PASS, and is reported as the alternative state', () => {
+    const v = pageVerdict(firstRun, { status: 200, body: SHELL + 'Welcome to SecVault' });
+    assert.equal(v.ok, true);
+    assert.equal(v.altState, true);
+    assert.equal(v.marker, 'Welcome to SecVault');
+  });
+
+  it('a genuinely blank page STILL FAILS — altMarkers absent too', () => {
+    const v = pageVerdict(firstRun, { status: 200, body: SHELL });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /none of its content markers rendered/);
+  });
+
+  it('the populated page still needs BOTH sections — altMarkers cannot rescue a half-blank page', () => {
+    const v = pageVerdict(firstRun, { status: 200, body: SHELL + 'Security Score' });
+    assert.equal(v.ok, false);
+    assert.match(v.reason, /REQUIRED second section/);
+  });
+
+  it('a populated render is NOT flagged as the alternative state', () => {
+    const v = pageVerdict(firstRun, { status: 200, body: SHELL + 'Security Score' + 'Ruleset overview' });
+    assert.equal(v.ok, true);
+    assert.notEqual(v.altState, true);
+  });
+
+  it('a route with no altMarkers behaves exactly as before', () => {
+    const v = pageVerdict(route, { status: 200, body: SHELL });
+    assert.equal(v.ok, false);
+  });
+});

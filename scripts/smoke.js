@@ -102,7 +102,16 @@ const STATIC_ROUTES = [
   // …six widgets…)}` and none of the six contributed a marker, so an empty
   // body still went green. `Ruleset overview` is one of those widgets' own
   // CardTitles, and it is an AND so it cannot be satisfied by the chrome.
-  { path: '/', markers: ['Security Score'], alsoMarkers: ['Ruleset overview'] },
+  // ⛔ `altMarkers` BECAUSE A FRESH INSTALL RENDERS A DIFFERENT PAGE HERE, AND
+  // THIS CHECK FAILED ON EVERY ONE OF THEM. With no firewall in the inventory
+  // `app/(dashboard)/page.js` returns `FirstRun()` INSTEAD of the dashboard --
+  // deliberately, so a new install reads as empty rather than broken. Neither
+  // `Security Score` nor `Ruleset overview` can exist in that state, so the
+  // sweep reported the blank-page shape for a page working exactly as designed,
+  // and `Update-SecVault.ps1` then refused to report the deploy successful. A
+  // gate that cries wolf on every first deploy is one an operator learns to
+  // ignore. Measured on a genuine fresh install: 200, 48,746 bytes, welcome screen.
+  { path: '/', markers: ['Security Score'], alsoMarkers: ['Ruleset overview'], altMarkers: ['Welcome to SecVault'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
   // ⛔ `alsoMarkers`, NOT a second `markers` entry — this is the exact case the
   // AND exists for, and I got it wrong first: `markers` is an OR, so adding the
@@ -320,6 +329,17 @@ function pageVerdict(route, { status, location, body }) {
   }
   // ⛔ A SHELL IS NOT A PAGE. The layout (sidebar, header) renders even when the
   // page body throws or returns nothing, so byte length alone proves nothing.
+  // ⛔ AN ALTERNATIVE RENDER IS A PASS, AND IS REPORTED AS THE STATE IT IS.
+  // `altMarkers` is a SEPARATE COMPLETE page for the same route -- not a third
+  // way to satisfy `markers`. It is checked first and short-circuits, because
+  // the normal markers CANNOT be present in that state; folding it into the OR
+  // would instead make the populated page easier to pass, which is the exact
+  // mistake `alsoMarkers` exists to prevent. A genuinely blank page still has
+  // neither and still fails.
+  const alt = (route.altMarkers || []).find((m) => body.includes(m));
+  if (alt) {
+    return { path: route.path, ok: true, status: 200, bytes: body.length, marker: alt, altState: true };
+  }
   const hit = route.markers.find((m) => body.includes(m));
   if (!hit) {
     return fail(
@@ -422,7 +442,9 @@ async function main() {
   const bad = results.filter((r) => !r.ok);
   for (const r of results) {
     console.log(r.ok
-      ? `  ok    ${r.path}  (${r.bytes} bytes)`
+      // ⛔ AN ALTERNATIVE RENDER SAYS SO. A silent green over the first-run
+      // screen would hide that the dashboard itself was never exercised.
+      ? `  ok    ${r.path}  (${r.bytes} bytes)${r.altState ? ` [${r.marker}  — alternative page state; the populated view was NOT exercised]` : ''}`
       : `  FAIL  ${r.path}  ${r.reason}`);
   }
   const secs = ((Date.now() - started) / 1000).toFixed(1);
