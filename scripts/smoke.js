@@ -108,10 +108,17 @@ const STATIC_ROUTES = [
   // deliberately, so a new install reads as empty rather than broken. Neither
   // `Security Score` nor `Ruleset overview` can exist in that state, so the
   // sweep reported the blank-page shape for a page working exactly as designed,
+  // ⛔ AND THE MARKER IS A STATIC SENTENCE, NOT THE HEADING. The heading reads
+  // `Welcome to {PRODUCT_NAME}` in JSX, and React SERIALISES AN INTERPOLATION
+  // BOUNDARY AS `<!-- -->`: the bytes on the wire are `Welcome to <!-- -->SecVault`,
+  // so the obvious marker `Welcome to SecVault` can NEVER match. The first fix used
+  // it and the sweep still reported 24/25 -- a marker verified against the SOURCE
+  // instead of against the RESPONSE. Every marker here must be checked against real
+  // captured HTML; this one was.
   // and `Update-SecVault.ps1` then refused to report the deploy successful. A
   // gate that cries wolf on every first deploy is one an operator learns to
   // ignore. Measured on a genuine fresh install: 200, 48,746 bytes, welcome screen.
-  { path: '/', markers: ['Security Score'], alsoMarkers: ['Ruleset overview'], altMarkers: ['Welcome to SecVault'] },
+  { path: '/', markers: ['Security Score'], alsoMarkers: ['Ruleset overview'], altMarkers: ['No firewalls have been added yet, so there is nothing to report on.'] },
   { path: '/work', markers: ['Everything outstanding across the product, in the order worth doing it.'] },
   // ⛔ `alsoMarkers`, NOT a second `markers` entry — this is the exact case the
   // AND exists for, and I got it wrong first: `markers` is an OR, so adding the

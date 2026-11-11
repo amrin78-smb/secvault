@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.224.4': [
+    'The fix shipped in 2.224.3 did not work, and the next deploy proved it. The page check was taught to accept the first-run screen, but the text it looked for was taken from the source rather than from the page actually sent \u2014 React writes an invisible boundary marker into the middle of "Welcome to SecVault" when it fills in the product name, so that phrase never appears in the delivered page at all.',
+    'It now looks for a sentence that is not assembled from pieces, confirmed against a real captured response from a brand-new installation.',
+    'A test now rejects the broken phrase outright, so the same trap cannot be walked into again by anyone choosing a new marker.',
+  ],
   '2.224.3': [
     'The deploy-time page check failed on every brand-new installation, for a page that was working correctly. With no firewall added yet, the Overview deliberately shows a "Welcome to SecVault" first-run screen instead of the dashboard \u2014 so the check, which looks for "Security Score", concluded the page was blank and the update refused to report itself successful.',
     'The check now recognises the first-run screen as a valid state for that page, and says so in its output rather than reporting a silent pass, so it is clear the populated dashboard was not the thing exercised.',

@@ -353,14 +353,14 @@ describe('⛔ an alternative page state passes, without weakening the blank-page
     path: '/',
     markers: ['Security Score'],
     alsoMarkers: ['Ruleset overview'],
-    altMarkers: ['Welcome to SecVault'],
+    altMarkers: ['No firewalls have been added yet, so there is nothing to report on.'],
   };
 
   it('the first-run screen is a PASS, and is reported as the alternative state', () => {
-    const v = pageVerdict(firstRun, { status: 200, body: SHELL + 'Welcome to SecVault' });
+    const v = pageVerdict(firstRun, { status: 200, body: SHELL + 'No firewalls have been added yet, so there is nothing to report on.' });
     assert.equal(v.ok, true);
     assert.equal(v.altState, true);
-    assert.equal(v.marker, 'Welcome to SecVault');
+    assert.equal(v.marker, 'No firewalls have been added yet, so there is nothing to report on.');
   });
 
   it('a genuinely blank page STILL FAILS — altMarkers absent too', () => {
@@ -384,5 +384,33 @@ describe('⛔ an alternative page state passes, without weakening the blank-page
   it('a route with no altMarkers behaves exactly as before', () => {
     const v = pageVerdict(route, { status: 200, body: SHELL });
     assert.equal(v.ok, false);
+  });
+});
+
+// ⛔ REACT SERIALISES AN INTERPOLATION BOUNDARY AS `<!-- -->`, AND THAT COST A
+// WHOLE DEPLOY. FirstRun's heading is `Welcome to {PRODUCT_NAME}`, so the bytes
+// on the wire are `Welcome to <!-- -->SecVault` and the obvious marker
+// `Welcome to SecVault` matches NOTHING. The first fix shipped with exactly that
+// marker, the sweep still reported 24/25 on the fresh install, and the cause was
+// a marker verified against the SOURCE rather than against the RESPONSE.
+describe('⛔ a marker must match the RESPONSE, not the JSX', () => {
+  const REACT_SPLIT = 'Welcome to <!-- -->SecVault';
+  it('no marker anywhere assumes interpolated text is contiguous', () => {
+    for (const r of STATIC_ROUTES) {
+      for (const m of [...(r.markers || []), ...(r.alsoMarkers || []), ...(r.altMarkers || [])]) {
+        assert.ok(
+          !/^Welcome to SecVault$/.test(m),
+          `${r.path} uses "Welcome to SecVault", which React serialises as "${REACT_SPLIT}" and so can never match`
+        );
+      }
+    }
+  });
+  it('the real first-run body text is what is asserted, and it is static', () => {
+    const route = STATIC_ROUTES.find((r) => r.path === '/');
+    assert.ok(Array.isArray(route.altMarkers) && route.altMarkers.length > 0, '/ has no altMarkers');
+    for (const m of route.altMarkers) {
+      assert.ok(!m.includes('<!--'), 'a marker must be plain text, not a serialisation artefact');
+      assert.ok(m.length >= 20, 'the first-run marker must be specific enough not to collide');
+    }
   });
 });
