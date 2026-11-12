@@ -5,6 +5,7 @@ import { pool } from '../../../../lib/db';
 import { authOptions } from '../../auth/[...nextauth]/route';
 import { can, MANAGE_USERS, forbiddenResponse, ASSIGNABLE_ROLES, OPERATOR_ROLE, SUPER_ADMIN_ROLE, isAssignableRole } from '../../../../lib/rbac';
 import { isValidUuid } from '../../../../lib/apiUtils';
+import { scopeAssignmentRefusal } from '../../../../lib/deviceScope';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +90,67 @@ export async function PUT(request, { params }) {
       return NextResponse.json(
         { error: 'Cannot change role — this is the last remaining Super Admin account' },
         { status: 400 }
+      );
+    }
+  }
+
+  // ⛔ THE SAME LOCKOUT `scopeAssignmentRefusal` PREVENTS, REACHED FROM THE OTHER
+  // SIDE. That guard refuses SCOPING an account that already holds
+  // MANAGE_USERS, because /api/users/[id]/device-scope is itself a `blocked`
+  // surface — so a scoped holder is 403'd by middleware on the only endpoint
+  // that can undo it. Until 2026-11-13 it had exactly ONE call site (the scope
+  // route), and PROMOTING an already-scoped account into MANAGE_USERS reached
+  // the identical end state with nothing consulted: scope an operator to two
+  // firewalls, promote them to super_admin, and both calls are accepted.
+  //
+  // ⛔ IT HIDES BECAUSE THE COMMON PROMOTION IS SAFE. `admin` does not hold
+  // MANAGE_USERS and is scopable by design, so only the super_admin promotion
+  // trips it — and if that account is then the last Super Admin, recovery is a
+  // direct database edit. Exactly what the last-super_admin guard above exists
+  // to prevent, and the same authority.
+  //
+  // ⛔ A FAILED SCOPE READ REFUSES THE PROMOTION. `loadScopeForUser` returning
+  // `unknown` means we do not know whether this account carries scope rows, and
+  // proceeding on "probably none" is how the lockout happens. Refusing costs a
+  // retry; guessing costs a database edit.
+  if (nextRole !== undefined) {
+    let scopedDeviceIds;
+    try {
+      // ⛔ A COUNT, NOT THE IDS, AND THAT IS DELIBERATE TWICE OVER. The guard
+      // reads only the LENGTH, and the refusal sentence quotes only a number —
+      // so the identities are not needed. Selecting `device_id` here instead
+      // put this route into the device-data register (`DEVICE_RE` in
+      // tests/deviceScopeCoverage.test.js matches the column name), which
+      // would have forced it from `no-device-data` to `blocked`. That is not a
+      // free reclassification: `/api/users/[id]` is the route by which a
+      // legacy already-scoped Super Admin can demote itself to `admin` — a
+      // role that IS scopable — and blocking it would remove that recovery
+      // while adding no protection, because a scoped account can never hold
+      // `manage_users` to reach this route in the first place.
+      const held = await pool.query(
+        'SELECT count(*)::int AS scoped FROM user_device_scopes WHERE user_id = $1',
+        [params.id]
+      );
+      const scopedCount = held.rows.length ? held.rows[0].scoped : 0;
+      scopedDeviceIds = new Array(scopedCount).fill(1);
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error: 'Could not read this account’s device scope, so the role change was not applied. '
+            + 'An account that can manage users may not be restricted to specific firewalls, and '
+            + 'without that read we cannot tell whether this one is. Try again.',
+        },
+        { status: 503 }
+      );
+    }
+    const lockout = scopeAssignmentRefusal(nextRole, scopedDeviceIds);
+    if (lockout) {
+      return NextResponse.json(
+        {
+          error: `${lockout} This account is currently restricted to ${scopedDeviceIds.length} `
+            + 'firewall(s); clear its device scope first.',
+        },
+        { status: 409 }
       );
     }
   }

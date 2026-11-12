@@ -537,3 +537,59 @@ describe('⛔ every blocked surface compiles to a pattern that can actually fire
     assert.equal(surfaceToPattern('lib/engines/ruleAnalysis.js'), null);
   });
 });
+
+// ⛔ `scopeAssignmentRefusal` MUST BE CALLED FROM BOTH SIDES (added 2026-11-13).
+//
+// The guard refuses SCOPING an account that already holds `manage_users`,
+// because `/api/users/[id]/device-scope` is itself a `blocked` surface — so a
+// scoped holder is 403'd by middleware on the only endpoint that can undo it,
+// from every account able to reach it, and recovery is a direct database edit.
+//
+// ⛔ IT HAD EXACTLY ONE CALL SITE AND THE OTHER DIRECTION WAS OPEN. Promoting an
+// ALREADY-SCOPED account into `manage_users` reaches the identical end state:
+// scope an operator to two firewalls, then promote them to super_admin, and
+// both calls were accepted. Found by the 2026-11-13 authorisation sweep, which
+// executed the sequence against the real code.
+//
+// ⛔ IT HIDES BECAUSE THE COMMON PROMOTION IS SAFE: `admin` does not hold
+// `manage_users` and is scopable by design, so only the super_admin promotion
+// trips it — which is also the one where the account may be the last Super
+// Admin.
+//
+// This asserts the WIRING, which is the only thing a source check can see here:
+// the behaviour of the guard itself is pinned by the cases above. It follows the
+// precedent of the delete-path assertion — a guard with one call site and two
+// ways in is a guard that cannot fire on one of them.
+describe('⛔ both ways into manage_users consult scopeAssignmentRefusal', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+
+  it('the device-scope route calls it (scoping an account that can manage users)', () => {
+    assert.match(
+      read('app/api/users/[id]/device-scope/route.js'),
+      /scopeAssignmentRefusal\(/,
+      'the scope route must refuse scoping a manage_users account'
+    );
+  });
+
+  it('the role-change route calls it (promoting an already-scoped account)', () => {
+    const src = read('app/api/users/[id]/route.js');
+    assert.match(
+      src,
+      /scopeAssignmentRefusal\(/,
+      'PUT /api/users/[id] must refuse a promotion into manage_users while the account '
+      + 'still carries device-scope rows — otherwise the lockout the guard exists to '
+      + 'prevent is reachable from the role side'
+    );
+    // ⛔ And it must read the account's EXISTING rows to decide. Calling the
+    // guard with an empty list would satisfy the assertion above while always
+    // returning null — a guard that cannot fire, behind a test that cannot see it.
+    assert.match(
+      src,
+      /FROM user_device_scopes WHERE user_id = \$1/,
+      'the role-change path must read the target account’s existing scope rows; the guard '
+      + 'returns null for an empty list, so passing one would make it permanently inert'
+    );
+  });
+});

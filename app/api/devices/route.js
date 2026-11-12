@@ -6,7 +6,9 @@ import { getProfilePlaintext, createProfile } from '../../../lib/credentialProfi
 import { isValidUuid } from '../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '../auth/[...nextauth]/route';
-import { isAdmin, forbiddenResponse } from '../../../lib/rbac';
+import {
+  isAdmin, can, forbiddenResponse, MANAGE_CREDENTIAL_PROFILES,
+} from '../../../lib/rbac';
 import { licenceBlockForNewDevice } from '../../../lib/productLicenseData';
 import {
   VENDOR_META,
@@ -232,17 +234,43 @@ export async function POST(request) {
     let warning;
     const trimmedProfileName = typeof save_as_profile_name === 'string' ? save_as_profile_name.trim() : '';
     if (trimmedProfileName && credPlaintext && !usedExistingProfile) {
-      try {
-        const dupe = await pool.query('SELECT id FROM credential_profiles WHERE name = $1', [
-          trimmedProfileName,
-        ]);
-        if (dupe.rows.length > 0) {
-          warning = `Device saved, but a credential profile named "${trimmedProfileName}" already exists — not overwritten.`;
-        } else {
-          await createProfile({ name: trimmedProfileName, credentialType: credType, plaintext: credPlaintext }, pool);
+      // ⛔ `manage_credential_profiles` IS CHECKED HERE, NOT AT THE TOP OF THE
+      // HANDLER, BECAUSE THIS BRANCH EXERCISES A DIFFERENT AUTHORITY FROM THE
+      // REST OF THE ROUTE. The handler is gated on MANAGE_DEVICES, which
+      // `admin` holds — correct for adding or editing a firewall. But
+      // `save_as_profile_name` writes a row into `credential_profiles`, the
+      // SHARED library whose four direct surfaces are ALL gated on
+      // MANAGE_CREDENTIAL_PROFILES (super_admin only), and lib/rbac.js states
+      // that capability deliberately covers CREATE as well as update and
+      // delete — "editing a credential profile lets you replace and therefore
+      // control its stored secret". So this was a side door: an `admin` could
+      // create a library profile it is denied any direct route to, selectable
+      // by `credential_profile_id` on every later device call, listed in the
+      // Super Admin's own panel as if curated there, and surviving the
+      // device's deletion. Found by the 2026-11-13 authorisation sweep.
+      //
+      // ⛔ IT REFUSES THE PROFILE, NOT THE DEVICE. The device write has already
+      // succeeded and `admin` was fully entitled to it; failing the whole
+      // request would deny a capability they hold in order to protect one they
+      // do not. That is the same call the duplicate-name and error paths below
+      // already make — surface a `warning`, never throw.
+      if (!can(session, MANAGE_CREDENTIAL_PROFILES)) {
+        warning = 'Device saved, but the credential profile was NOT created: writing to the '
+          + 'shared credential library needs the Manage Credential Profiles capability, which '
+          + 'only a Super Admin holds. The credential is stored on this device either way.';
+      } else {
+        try {
+          const dupe = await pool.query('SELECT id FROM credential_profiles WHERE name = $1', [
+            trimmedProfileName,
+          ]);
+          if (dupe.rows.length > 0) {
+            warning = `Device saved, but a credential profile named "${trimmedProfileName}" already exists — not overwritten.`;
+          } else {
+            await createProfile({ name: trimmedProfileName, credentialType: credType, plaintext: credPlaintext }, pool);
+          }
+        } catch (err) {
+          warning = `Device saved, but the credential profile could not be saved: ${err.message}`;
         }
-      } catch (err) {
-        warning = `Device saved, but the credential profile could not be saved: ${err.message}`;
       }
     }
 
