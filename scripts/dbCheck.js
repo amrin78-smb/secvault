@@ -1134,6 +1134,16 @@ const REGISTRY = [
   { mod: 'lib/engines/reportScheduleData.js', fn: 'listDeliveries', args: () => [NO_SUCH_UUID], spec: RAW },
   { mod: 'lib/engines/reportScheduleData.js', fn: 'resolveDueSchedules', args: (c) => [c.now], spec: RAW },
 
+  // ── capacity / bandwidth trend ──────────────────────────────────────
+  // ⛔ ONE of its three statements is an UNBOUNDED probe for whether a device has
+  // EVER held byte rows, and it has to be: deciding `bytes_not_summable` inside the
+  // lookback window asserted a PERMANENT vendor limitation about a firewall whose
+  // byte history was merely older than the window. That is the statement whose
+  // failure would be invisible — it would silently reclassify a clearable coverage
+  // gap as a property of the vendor.
+  { mod: 'lib/engines/capacityForecastData.js', fn: 'getCapacityForecasts', args: (c) => [{ now: c.now }], spec: { object: ['devices', 'summary', 'failures'] } },
+  { mod: 'lib/engines/capacityForecastData.js', fn: 'getDeviceCapacityForecast', args: (c) => [NO_SUCH_UUID, { now: c.now }], spec: { object: ['device', 'devices', 'summary', 'failures'] } },
+
   // ── licences / lifecycle ────────────────────────────────────────────────
   { mod: 'lib/reports/fleetLifecycle.js', fn: 'buildFleetLifecycleData', args: () => [{}], spec: { object: ['devices', 'sectionErrors'] } },
 

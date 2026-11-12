@@ -180,6 +180,64 @@ collection) time and reports `evaluationLagHours` / `evaluatedAgainstOldConfig`.
 row whatever its age and stamps `now()`. Full rationale and the live measurements:
 `.ai-codex/compliance-pipeline.md`.
 
+## lib/engines/capacityForecast.js + capacityForecastData.js (v2.225.0)
+
+Per-device daily traffic volume, trend, and a projection ONLY where the trend separates from the
+device's own variation. PURE engine + pool-first plumbing (3 statements). Read-time; **no schema
+change, no cron job**. Rendered by `/capacity`, labelled **"Bandwidth trend"**.
+
+Method: **Theil–Sen** for magnitude, **Mann–Kendall** for direction, **Sen's interval** (from MK's
+`Var(S)`) for uncertainty — chosen so the interval excludes zero EXACTLY when MK rejects, which means
+the engine cannot print a direction its own interval contradicts (asserted by a test).
+
+⛔ **THE 13-DAY GATE IS DERIVED.** `minObservationsFor(0.9) = 20` slopes must sit beneath the
+interval's lower order statistic `M1 = (N − z√Var(S))/2`, solved for the smallest n: n=12 → 18 ✗,
+n=13 → 22 ✓. ⛔ It counts **DAYS, not PAIRS** — 20 pairwise slopes are reached at n=7, so counting
+pairs would arm the model at a week while appearing to satisfy a 20-observation gate.
+
+⛔ **THE CONTROL WAS MEASURED, NOT INHERITED.** Each device's own daily values shuffled (trend
+destroyed, distribution kept), 40 reps: fires 4.1–6.1% at every window length, so MK's nominal 5%
+holds on this data and no inflation factor is warranted. ⛔ **A robust percentile band was tried and
+REFUSED**: the 10th–90th of pairwise slopes straddles zero on ALL TEN forecastable devices — a
+detector that cannot fire anywhere on the fleet it was measured against.
+
+⛔ **A DAY IS AN OBSERVATION ONLY WITH 24 BYTE-BEARING HOURS.** Partials are counted and excluded;
+missing days are absent, never zero. Measured cost of getting it wrong: counting partials flips
+TFM-RN's trend SIGN (+0.0141 → −0.0625 GB/day), because one 3-hour day holds 13.3 GB against a
+~180 GB typical day. This is also what stops a deploy gap reading as a traffic drop.
+
+⛔ **TWO "CANNOT FORECAST" REASONS, NEVER SUMMED**: `bytes_not_summable` (PERMANENT — the vendor's
+counters are cumulative; 5 devices, all Fortinet) and `no_log_coverage` (CLEARABLE; 1 device). A test
+asserts no combined total exists. ⛔ And `bytes_not_summable` is decided from an **UNBOUNDED** probe,
+not inside the lookback window — deciding it inside the window asserted a permanent vendor
+limitation about a firewall whose byte history was merely older than the window.
+
+⛔ `FORECAST_CLAIM` is pinned against `will` / `guaranteed` / `exactly` across **every string the
+engine can emit**, with a meta-assertion that the harvester actually found strings so the scan
+cannot pass by matching nothing. Pinned by `tests/capacityForecast.test.js` (95 cases, 23 mutations
+— 22 red; the one that survived did so correctly, because `round()` already refuses non-finite
+values, and the test now asserts both halves of that doubled protection rather than mistaking one
+for the whole).
+
+## lib/reports/customReport.js + customReportData.js (v2.225.0)
+
+A named, saved selection of 9 sections over 6 datasets, each dataset being the shipped report's own
+`buildXData`/`gather…` — nothing is recomputed. Pure half holds the section registry, validation,
+capability ranking and the renderer (pdfkit required lazily).
+
+⛔ **CAVEATS ARE RENDERED BY THE FRAMEWORK, NOT THE SECTION.** Each entry declares `caveats(data)`
+and `validateRegistry()` refuses a section without one; a `caveats()` that THROWS yields an explicit
+"read this section as unqualified", never `[]` — an empty array means "nothing to qualify", the
+opposite claim. A user-chosen layout must not be able to strip the sentence that makes a figure
+honest.
+⛔ **`CUSTOM_REPORT_CAPABILITY` is ONE constant shared with the catalogue entry** so they cannot
+drift; `requiredCapability()` returns the strictest section's and an UNRANKED value wins
+(`Infinity`), so a typo escalates rather than slips; `assertCapabilityFloor()` refuses to render by
+name if a section exceeds the declared capability.
+⛔ **A withdrawn section is named three times and never dropped**; all-withdrawn throws before a
+byte is buffered. A section id is CODE, so a saved report can outlive it.
+Pinned by `tests/customReport.test.js` (56 cases, 12 mutations verified).
+
 ## lib/engines/reportSchedule.js + reportScheduleData.js (v2.225.0)
 
 Scheduled delivery of any entry in `lib/reports/catalogue.js`. `reportSchedule.js` is PURE with

@@ -1045,6 +1045,42 @@ permanently consuming that slot.
 `'YYYY-MM'` monthly. A timestamp would make every retry a new slot and the unique index would then
 guarantee nothing.
 
+### custom_reports
+```
+id          UUID PK DEFAULT gen_random_uuid()
+name        TEXT NOT NULL     -- CHECK (btrim(name) <> '')
+subtitle    TEXT
+sections    TEXT[] NOT NULL   -- CHECK (cardinality(sections) >= 1)
+created_by  TEXT              -- provenance only, NOT ownership
+created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Added v2.225.0. A named, saved SELECTION OF SECTIONS that already exist in shipped reports.
+Unique index on `lower(btrim(name))`.
+
+⛔ **`cardinality`, NOT `array_length`.** `array_length('{}', 1)` is **NULL**, and `NULL >= 1`
+SATISFIES a CHECK — so an `array_length` guard would have admitted the empty selection it was
+written to refuse. Proven live: the empty insert is now rejected by
+`custom_reports_sections_chk`.
+
+⛔ **`TEXT[]`, not `jsonb`.** The selection is ORDERED and homogeneous, and `jsonb` does not preserve
+key order and cannot be compared with `JSON.stringify` (see the jsonb note in CLAUDE.md) — a
+has-this-changed check against a jsonb column needs `lib/canonicalJson.js`. An array sidesteps all
+of it.
+
+⛔ **IT STORES SECTION IDS, NEVER RENDERED CONTENT AND NEVER SQL.** A stored document goes stale and
+is then read as fact; a stored query is the query builder this feature explicitly refuses to be.
+
+⛔ **NO `device_id` COLUMN, AND THAT IS A DELIBERATE OMISSION.** `ON DELETE SET NULL` would silently
+widen a report from ONE firewall to the WHOLE FLEET the day that firewall is retired — the
+`user_device_scopes`-emptying trap with a PDF on the end — and `CASCADE` would delete an operator's
+definition as a side effect of retiring unrelated hardware.
+
+⛔ **INSTALLATION-WIDE, NOT PER-USER**, so there is no `user_id`: it is a template for an audit
+artefact that leaves the building, and two people holding different definitions under one name means
+one title and two documents with no way for the cover page to say whose. Mutation is
+`manage_settings`; reading and downloading stay `operate`.
+
 ---
 
 ## Known schema debt

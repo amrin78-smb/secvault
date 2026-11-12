@@ -495,6 +495,17 @@ original (the two may live in different directories). Response gained `tlsEnable
 cannot turn TLS on by itself, and the message says so rather than promising a restart will work.
 Both verbs gated on `manage_settings`.
 
+## GET, POST /api/custom-reports  ·  GET, PUT, DELETE /api/custom-reports/[id]  (v2.225.0)
+
+`auth` `db` `force-dynamic`. CRUD over `custom_reports`. ⛔ **READ is `operate`, MUTATION is
+`manage_settings`** — an administrator defines the template, every role may use it. ⛔ Save enforces
+`can(session, requiredCapability(sections))` as well, so **you cannot store a report you could not
+download**. ⛔ An EMPTY selection is refused here AND by a database CHECK. The document itself is
+served by the existing catalogue route (`/api/reports/custom-report/pdf?id=<definition id>`) rather
+than a second download endpoint, so the capability check lives in one place. Both classified
+**`blocked`** in `lib/deviceScopeCoverage.js`: `customReportData` transitively reaches every
+device's rulesets and assessments.
+
 ## GET, POST /api/reports/schedules  ·  GET, PUT, DELETE /api/reports/schedules/[id]  (v2.225.0)
 
 `auth` `db` `force-dynamic`. CRUD over `report_schedules` — scheduled delivery of any catalogued

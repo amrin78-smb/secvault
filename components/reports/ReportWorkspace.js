@@ -6,6 +6,7 @@ import IconChip from '../ui/IconChip';
 import Badge from '../ui/Badge';
 import DownloadButton from '../ui/DownloadButton';
 import ReportSchedulesPanel from './ReportSchedulesPanel';
+import CustomReportBuilder from './CustomReportBuilder';
 import {
   IconActivity,
   IconTrendingUp,
@@ -18,6 +19,7 @@ import {
   IconLifecycle,
   IconClock,
   IconUser,
+  IconGrid,
 } from '../icons';
 
 // The Reports page: a catalogue rail on the left, the selected report on the
@@ -67,6 +69,7 @@ const GLYPHS = {
   IconLifecycle,
   IconClock,
   IconUser,
+  IconGrid,
 };
 
 // ⛔ A `datetime-local` VALUE HAS NO TIMEZONE, AND THE WIRE FORMAT MUST.
@@ -103,6 +106,28 @@ const SCOPE_LABEL = {
   entity: 'From a record',
 };
 
+// ⛔ WHERE AN ENTITY-SCOPED REPORT ACTUALLY COMES FROM, PER REPORT. This used to
+// be one hardcoded paragraph in the panel, which was correct while the Rule
+// Change Request was the only entity-scoped entry and wrong the moment a second
+// one existed: a custom report is produced from a saved definition, not from a
+// change request, and that paragraph would have sent its reader to the wrong
+// tab. An unknown id falls back to a GENERIC sentence rather than to either
+// report's own, because a confidently wrong instruction is worse than a vague
+// one.
+const ENTITY_HINTS = {
+  'rule-change-request':
+    'This one is produced from a specific record rather than from this page. Open the change '
+    + 'request itself — under a firewall\'s Analysis → Cleanup tab — and export it there, so the '
+    + 'document is always tied to the request it describes.',
+  'custom-report':
+    'This one is produced from a definition you save. Build or edit one in the Custom reports '
+    + 'panel below, where every saved report has its own download.',
+};
+
+const GENERIC_ENTITY_HINT =
+  'This one is produced from a specific record rather than from this page. Open the record it '
+  + 'describes and export it there, so the document is always tied to that record.';
+
 function glyphOf(name) {
   return GLYPHS[name] || IconReport;
 }
@@ -123,6 +148,14 @@ export default function ReportWorkspace({
   schedulesOk = true,
   channels = [],
   channelsOk = true,
+  // ⛔ Custom reports are SAVED DEFINITIONS, not a catalogue entry's
+  // parameters, so they arrive as their own list. `canManageCustom` is passed
+  // in rather than inferred so this UI gate can never be LOOSER than
+  // /api/custom-reports, which enforces manage_settings itself.
+  customReports = [],
+  customReportsOk = true,
+  customSections = [],
+  canManageCustom = false,
 }) {
   const [selectedId, setSelectedId] = useState(reports[0]?.id || null);
   const [deviceId, setDeviceId] = useState('');
@@ -383,10 +416,7 @@ export default function ReportWorkspace({
                     maxWidth: '78ch',
                   }}
                 >
-                  This one is produced from a specific record rather than from this page. Open
-                  the change request itself — under a firewall&rsquo;s <strong>Analysis &rarr;
-                  Cleanup</strong> tab — and export it there, so the document is always tied to
-                  the request it describes.
+                  {ENTITY_HINTS[report.id] || GENERIC_ENTITY_HINT}
                 </div>
               ) : (
                 <>
@@ -562,6 +592,17 @@ export default function ReportWorkspace({
         catalogue — so putting it in the right-hand pane would make a
         fleet-wide table look like a property of whichever report the rail
         happens to be on. */}
+    {/* ⛔ BELOW THE CATALOGUE AND FULL WIDTH, for the same reason the schedules
+        panel is: these definitions are not a property of whichever report the
+        rail happens to be on. Rendered for EVERY session, because downloading
+        one is gated on the catalogue entry's own capability — only the
+        create/edit/delete controls are administrative. */}
+    <CustomReportBuilder
+      reports={customReports}
+      reportsOk={customReportsOk}
+      sections={customSections}
+      canManage={canManageCustom}
+    />
     {canSchedule ? (
       <ReportSchedulesPanel
         reports={reports}

@@ -306,6 +306,13 @@ GRANT SELECT ON TABLE report_schedules TO nocvault_readonly;
 GRANT SELECT ON TABLE report_delivery_log TO claude_readonly;
 GRANT SELECT ON TABLE report_delivery_log TO nocvault_readonly;
 
+-- Custom reports (v2.226.0). A name, an optional subtitle and an ordered array
+-- of SECTION IDS -- all of which are code identifiers, not data from a device
+-- and not a query. No secret and no personal data, so it is granted read-only
+-- for diagnostics like its neighbours above.
+GRANT SELECT ON TABLE custom_reports TO claude_readonly;
+GRANT SELECT ON TABLE custom_reports TO nocvault_readonly;
+
 -- ⛔ Drop the readonly password out of the session. It was set with
 -- is_local=false so it would survive to the DO block above; without this it
 -- would stay readable via current_setting() for the rest of the connection.

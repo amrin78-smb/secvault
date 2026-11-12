@@ -280,6 +280,13 @@ const API_ROUTES = [
   // view. Recording it here is what stops the gate being quietly relaxed later.
   { path: '/api/reports/schedules', methods: ['GET', 'POST'], capability: 'manage_settings' },
   { path: '/api/reports/schedules/{id}', methods: ['GET', 'PUT', 'DELETE'], capability: 'manage_settings' },
+  // ⛔ GET is `operate` — the CATALOGUE floor, so every role can download what an
+  // administrator defined — while POST/PUT/DELETE are `manage_settings`, because a
+  // custom report is an installation-wide template for an artefact that leaves the
+  // building, not a personal filter like a saved view. The sweep's `capability` is the
+  // floor it expects an unauthorised caller to be refused against.
+  { path: '/api/custom-reports', methods: ['GET', 'POST'], capability: 'operate' },
+  { path: '/api/custom-reports/{id}', methods: ['GET', 'PUT', 'DELETE'], capability: 'operate' },
   { path: '/api/rule-change-requests/{id}', methods: ['GET', 'PATCH'], capability: 'operate' },
   { path: '/api/rule-change-requests/{id}/export', methods: ['GET'], capability: null },
   { path: '/api/saved-views', methods: ['GET', 'POST'], capability: null },

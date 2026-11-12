@@ -1749,6 +1749,91 @@ CREATE INDEX IF NOT EXISTS idx_report_delivery_log_schedule
   ON report_delivery_log (schedule_id, started_at DESC);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Custom reports (v2.226.0) — a SAVED SELECTION OF SECTIONS
+-- ─────────────────────────────────────────────────────────────────────────
+-- A custom report is a named, ordered selection of sections that ALREADY EXIST
+-- in a shipped report, rendered through the same pdfkit chassis and downloaded
+-- through the same route. lib/reports/customReport.js holds the section
+-- registry; lib/reports/customReportData.js is the plumbing.
+--
+-- ⛔ SECTION IDS ONLY. NEVER RENDERED CONTENT, AND NEVER SQL. A stored document
+-- goes stale and is then read as a current measurement — the defect the whole
+-- product is built to refuse, and the reason segmentation and application
+-- intent store no verdict either. A stored QUERY would make this a query
+-- builder, which would produce documents whose numbers no engine stands behind;
+-- every figure in this product is supposed to carry an engine and a
+-- measurement, and a predicate an operator typed carries neither.
+--
+-- ⛔ A SECTION ID IS CODE, like a lib/reports/catalogue.js report id, so it is
+-- TEXT and not an FK — there is no table of sections to point at. A saved
+-- report can therefore outlive a section, exactly as report_schedules.report_id
+-- can outlive a report, and the consequence is handled the same way: a
+-- withdrawn section is a NAMED, VISIBLE failure on the cover, in place of the
+-- section itself and in the closing gaps list, never a silently shorter
+-- document. A document that quietly loses a section is indistinguishable from
+-- one that was never asked for it.
+--
+-- ⛔ TEXT[] AND NOT jsonb, BECAUSE ORDER IS THE DOCUMENT'S ORDER. CLAUDE.md
+-- records that jsonb does not preserve object key order; array order it does
+-- keep, but a TEXT[] is typed, ordered, and cannot be mistaken for a nested
+-- structure that a later session might start comparing with JSON.stringify.
+--
+-- ⛔ INSTALLATION-WIDE, NOT PER-USER, AND THAT IS A DELIBERATE DEPARTURE FROM
+-- saved_views. A saved view is one person's filter: it changes no shared
+-- meaning and is ungated for that reason. A custom report is a TEMPLATE FOR AN
+-- AUDIT ARTEFACT that leaves the building. If two people can hold different
+-- definitions under the name "Quarterly Board Pack", the same title means two
+-- different documents and the cover page cannot say whose version it is —
+-- which is the mislabelled-artefact failure this product refuses everywhere
+-- else. So there is NO user_id: the row belongs to the installation, and
+-- `created_by` is provenance rather than ownership. Mutation is gated on
+-- manage_settings (the same call the report SCHEDULES route makes, one surface
+-- over); DOWNLOADING stays on the catalogue entry's own capability, so every
+-- role can still use what an administrator defined.
+--
+-- ⛔ NO device_id COLUMN, AND THE REASON IS A TRAP THIS CODEBASE HAS ALREADY
+-- PAID FOR. A nullable device_id would have to be ON DELETE SET NULL to keep
+-- device deletion working, and that silently WIDENS a report from one firewall
+-- to the whole fleet the day that firewall is retired — the
+-- user_device_scopes-emptying failure with a PDF on the end of it. ON DELETE
+-- CASCADE is no better: it would delete the operator's saved definition
+-- because an unrelated firewall was removed. Custom reports are fleet-scoped,
+-- and a per-firewall document is what the shipped reports' own optionalDevice
+-- filter is for.
+CREATE TABLE IF NOT EXISTS custom_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  -- Optional second line on the cover. NULL, never '' — an absent subtitle and
+  -- an empty one are the same fact and only one of them should be storable.
+  subtitle TEXT,
+  -- lib/reports/customReport.js section ids, IN THE ORDER THEY RENDER.
+  sections TEXT[] NOT NULL,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- ⛔ AN EMPTY SELECTION IS REFUSED BY THE DATABASE AS WELL AS BY THE API,
+  -- the same doubling config retention uses for its delete protections. A
+  -- zero-section PDF is a document that looks like a report and says nothing,
+  -- and somebody would file it.
+  --
+  -- ⛔ cardinality(), NOT array_length(). array_length('{}', 1) is NULL, and
+  -- `NULL >= 1` is NULL, which a CHECK treats as SATISFIED — so the obvious
+  -- spelling of this constraint is a guard that cannot fire. cardinality('{}')
+  -- is 0 and fails.
+  CONSTRAINT custom_reports_sections_chk CHECK (cardinality(sections) >= 1),
+  CONSTRAINT custom_reports_name_chk CHECK (btrim(name) <> '')
+);
+-- ⛔ ONE NAME, ONE DOCUMENT, CASE-INSENSITIVELY. Two definitions called "Board
+-- Pack" and "board pack" produce two different PDFs under one spoken name, and
+-- an auditor holding both has no way to tell which is which. Enforced on
+-- lower(name) rather than with a _normalised column because nothing needs to
+-- read the normalised form back (the ldap_role_mappings split exists because
+-- its panel displays the operator's own spelling AND matches on the
+-- normalisation; here the operator's own spelling is the only form shown).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_custom_reports_name
+  ON custom_reports (lower(btrim(name)));
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device lifecycle & health (added 2026-08-03)
 -- ─────────────────────────────────────────────────────────────────────────
 -- Four latest-snapshot tables (DELETE + reinsert per device on every successful

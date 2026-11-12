@@ -6,6 +6,8 @@ import { visibleReports, clientSafe, reportById } from '../../../lib/reports/cat
 import { getReportStats, tilesFor } from '../../../lib/reports/reportStats';
 import { listSchedules } from '../../../lib/engines/reportScheduleData';
 import { describeSchedule } from '../../../lib/engines/reportSchedule';
+import { listCustomReports } from '../../../lib/reports/customReportData';
+import { clientSafeSections } from '../../../lib/reports/customReport';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -106,13 +108,30 @@ async function reportSchedules() {
   }
 }
 
+// ⛔ NOT AN EMPTY LIST PRESENTED AS "none are defined". That is a claim about
+// this installation, and the panel may only make it when the query that would
+// have listed them actually ran — the same call the schedules and device reads
+// above make.
+async function customReports() {
+  try {
+    return { rows: await listCustomReports(pool), ok: true };
+  } catch (_err) {
+    return { rows: [], ok: false };
+  }
+}
+
 export default async function ReportsPage() {
   const session = await getServerSession(authOptions);
   const caps = capabilitiesOf(session);
   // ⛔ STRICTER THAN DOWNLOADING, deliberately — see the comment on
   // app/api/reports/schedules/route.js. This is DISCOVERY only; that route
   // enforces the same capability itself, so typing the URL gains nothing.
-  const canSchedule = can(session, MANAGE_SETTINGS);
+  // ⛔ ONE CAPABILITY, TWO SURFACES, ONE READ. Scheduling a report and defining
+  // a custom one are both manage_settings: both write installation-wide
+  // configuration that produces documents for other people. Naming it once
+  // stops the two drifting apart in this file.
+  const canManageSettings = can(session, MANAGE_SETTINGS);
+  const canSchedule = canManageSettings;
 
   // ⛔ Both reads are independent and neither gates the other, so they run
   // together — a page that costs two serial round trips to show five static
@@ -120,11 +139,16 @@ export default async function ReportsPage() {
   //
   // ⛔ The two scheduling reads are only issued for a session that may actually
   // see the panel — an operator pays nothing for a surface they cannot use.
-  const [devices, stats, channels, schedules] = await Promise.all([
+  const [devices, stats, channels, schedules, custom] = await Promise.all([
     activeDevices(),
     getReportStats(pool),
     canSchedule ? emailChannels() : Promise.resolve({ rows: [], ok: true }),
     canSchedule ? reportSchedules() : Promise.resolve({ rows: [], ok: true }),
+    // ⛔ Read for EVERY session, unlike the two scheduling reads: downloading a
+    // custom report is gated on the catalogue entry's own capability, so an
+    // operator can use a definition they cannot edit. Only the create/edit
+    // controls are administrative, and `canSchedule` above is what gates those.
+    customReports(),
   ]);
 
   // ⛔ clientSafe() at the boundary. A catalogue entry carries a lazy `builder`
@@ -174,6 +198,18 @@ export default async function ReportsPage() {
           schedulesOk={schedules.ok}
           channels={channels.rows}
           channelsOk={channels.ok}
+          customReports={custom.rows}
+          customReportsOk={custom.ok}
+          // ⛔ The SECTION REGISTRY is serialised here, at the boundary. Each
+          // entry carries `render` and `caveats` FUNCTIONS, and React refuses a
+          // function across it — which in a production build is a bare digest
+          // on an empty page, exactly how /reports shipped blank in v2.120.0.
+          customSections={clientSafeSections(caps)}
+          // ⛔ The SAME capability /api/custom-reports enforces for its
+          // mutating verbs. Passing a different one here would hide a control
+          // whose route would have accepted the call, which CLAUDE.md names as
+          // worse than no gate.
+          canManageCustom={canManageSettings}
         />
       )}
     </div>

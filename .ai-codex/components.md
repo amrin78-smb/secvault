@@ -826,6 +826,28 @@ truncated caps each get their own banner, both hueless: the source did not find 
 failed to answer. ⛔ Imports SEVERITY_BADGE_COLOR from analysis/severityRamp — a local map here
 reintroduced `medium: info` (blue) and tests/designSystemRamp caught it.
 
+## components/capacity/BandwidthTrendBoard.js (+ formatRate.js, v2.225.0)
+
+`/capacity`'s table: per-device median daily volume, trend rate with its interval, growth over the
+window it was measured in, and a projection only where one is warranted. A SERVER component — no
+client JS. `formatRate.js` is CommonJS so `npm test` can require it.
+⛔ **NO CHART, DELIBERATELY.** A sparkline per row would invite the reader to trace a direction in
+exactly the eight of ten series the engine refuses to assert one for. The condition for revisiting
+is recorded in the component: plot the FITTED INTERVAL, not the raw daily series.
+⛔ **THE TWO "CANNOT FORECAST" REASONS ARE TWO LABELLED HATCHED BLOCKS, EACH NAMING ITS FIREWALLS**
+— deliberately not tiles, because four tiles would have meant folding them into one count, and a
+permanent vendor limitation and a clearable collection gap have different first steps.
+⛔ **No severity token anywhere in the markup** (asserted): a gap in OUR evidence is not a severity
+of the customer's. Unmeasured carries `data-unmeasured` for the dashed border.
+⛔ Verified by RENDERING it with the real production fleet through `react-dom/server` — 19 outcome
+assertions — because `next build` never renders a `force-dynamic` page, so "it compiled" is not
+"it renders" (the v2.120.0 precedent).
+
+## components/reports/CustomReportBuilder.js (v2.225.0)
+
+Section picker and saved-definition list on `/reports`. Shows a withdrawn section as a red panel
+rather than omitting it. Gated to match the API on every verb, never stricter.
+
 ## components/reports/ReportSchedulesPanel.js (v2.225.0)
 
 The schedule list and editor on `/reports`, beside the download workspace. Imports

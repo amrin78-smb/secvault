@@ -326,6 +326,23 @@ whose changes were all uneventful.
 Smoke marker unchanged: the page's marker is still `Configuration Changes` (`scripts/smoke.js`), i.e.
 **the sweep does not yet assert that this board rendered.** Worth adding when it gets its version.
 
+## app/(dashboard)/capacity/page.js  -> `/capacity`  (v2.225.0)
+
+Nav label and `PageHeader` title are both **"Bandwidth trend"** (in BOTH header branches, since
+`tests/pageTitles.test.js` checks a page's second branch too — a page whose NAME depends on whether
+the fleet has data is its own defect). Roadmap Tier 2 "capacity planning", and the label is
+deliberately narrower than that: **8 of the 10 forecastable firewalls report no detectable trend**,
+so a page promising planning would be promising what the data usually cannot support.
+
+Server component, no client JS, no API route. Reads `lib/engines/capacityForecastData.js` and
+renders `components/capacity/BandwidthTrendBoard.js`.
+
+⛔ Classified **`blocked`** in `lib/deviceScopeCoverage.js` even though the page passes
+`scope.deviceIds` and handles `SCOPE_STATES.UNKNOWN` in code. Promoting it to `aware` means raising
+`AWARE_FLOOR` 6 → 7 **and naming it in the same commit**, which is a deliberate verification step,
+not a classification choice — and default-deny means partial coverage must degrade to LESS access.
+Worth doing; not done here.
+
 ## app/(dashboard)/reports/page.js  -> `/reports`  (v2.120.0, rebuilt v2.121.0)
 
 `server` — `ReportsPage` — the report catalogue. Lists via `visibleReports(caps).map(clientSafe)`

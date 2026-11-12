@@ -4289,6 +4289,80 @@ none of these carry Critical-Rules-level footguns.
   asking), and absolute `from`/`to` range params (two fixed timestamps never move, so a weekly
   delivery would mail the same week for ever under a cover page claiming "the last 7 days"). The
   panel STATES both instead of rendering a control that cannot work.
+- **Custom report builder** (`lib/reports/customReport.js` pure + `customReportData.js`,
+  `custom_reports`, `/reports`, v2.225.0): a NAMED, SAVED SELECTION OF SECTIONS that already exist
+  in shipped reports, rendered through the same pdfkit pipeline and served by the existing
+  catalogue-resolved download route. 9 sections over 6 datasets, and each section's dataset IS that
+  report's own `buildXData`/`gather…` — nothing is recomputed.
+  ⛔ **IT IS NOT A QUERY BUILDER AND MUST NOT BECOME ONE.** Arbitrary predicates over the schema
+  would produce documents whose numbers no engine stands behind, and every figure in this product is
+  supposed to carry an engine and a measurement.
+  ⛔ **A SECTION'S CAVEATS TRAVEL WITH IT, STRUCTURALLY.** Each entry declares `caveats(data)` and
+  the FRAMEWORK renders them unconditionally — a section cannot omit them, and `validateRegistry()`
+  refuses a section that lacks the function. A `caveats()` that THROWS yields an explicit "read this
+  section as unqualified", never `[]`: an empty array means "nothing to qualify", which is the
+  opposite claim. This is the whole reason the feature is safe — a user-chosen layout must not be
+  able to strip the sentence that makes a figure honest.
+  ⛔ **A WITHDRAWN SECTION IS NAMED THREE TIMES AND NEVER DROPPED** (cover accounting, in place
+  keeping its number, and the closing gaps), because a section id is CODE and a saved report can
+  outlive it. All sections withdrawn throws BEFORE a byte is buffered — no cover page over nothing.
+  An empty selection is refused at the API and in the database (`CHECK (cardinality(sections) >= 1)`
+  — ⛔ `cardinality`, NOT `array_length`, because `array_length('{}',1)` is NULL and `NULL >= 1`
+  SATISFIES a CHECK).
+  ⛔ **INSTALLATION-WIDE, NOT PER-USER.** It is a template for an audit artefact that leaves the
+  building: two people holding different definitions under the name "Quarterly Board Pack" means one
+  title and two documents, and the cover page cannot say whose. Mutation is `manage_settings`;
+  READING and DOWNLOADING stay `operate`, so every role can use what an administrator defined. The
+  opposite call from saved views, which are a private filter changing no shared meaning.
+  ⛔ **CAPABILITY IS THE STRICTEST SECTION'S, AND IT FAILS CLOSED.** `CUSTOM_REPORT_CAPABILITY` is
+  ONE constant shared by the registry and the catalogue entry so they cannot drift;
+  `requiredCapability()` ranks and an UNRANKED capability wins (`Infinity`), so a typo escalates
+  rather than slips; `assertCapabilityFloor()` refuses to render by name if any section exceeds the
+  entry's declared capability; and save enforces the same, so you cannot store what you could not
+  download. **No registered section is identity-bearing today** — adding a VPN or log section
+  without raising the floor fails the build.
+  ⛔ **IT IS NOT SCHEDULABLE, AND NO PARALLEL SCHEDULER WAS BUILT.** Its scope is `entity` (it is
+  produced from a stored record), `validateSchedule` already refuses entity scope by name, and
+  `ReportSchedulesPanel` already filters it out — so there is no fake control. Making it schedulable
+  requires `report_schedules` to carry a RECORD ID, which `params` cannot express because that is a
+  static `choices` allow-list. That is a deliberate follow-up, not an oversight.
+- **Bandwidth trend** (`lib/engines/capacityForecast.js` pure + `capacityForecastData.js`,
+  `/capacity`, v2.225.0 — roadmap Tier 2 "capacity planning"): per-device daily traffic volume, the
+  trend across the measured window, and a projection ONLY where the trend can be separated from the
+  device's own day-to-day variation. Read-time, **no schema change and no cron job** — a stored
+  forecast goes stale and is then read as fact.
+  ⛔ **LABELLED "Bandwidth trend", NOT "Capacity planning", AND THE LABEL IS THE HONEST ONE.**
+  Measured on the live fleet: **8 of the 10 forecastable firewalls report `no_detectable_trend`**.
+  The slope and the growth figure are still shown; only the PROJECTION is withheld. A nav label is a
+  promise the page has to keep.
+  ⛔ **ONLY `bytes_summable` VENDORS, AND THAT IS 10 OF 16 DEVICES.** Measured: every device with
+  byte history is `paloalto`; **zero Fortinet**, because FortiOS reports CUMULATIVE counters that
+  must not be summed. ⛔ **The 6 that cannot be forecast are TWO reasons kept apart** —
+  `bytes_not_summable` (5, PERMANENT, a property of the vendor) and `no_log_coverage` (1, CLEARABLE,
+  a collection gap) — with separate states, sentences, counts and named device lists, and a test
+  asserting no combined "6 unavailable" total exists. They send an operator to different places.
+  ⛔ **THE MINIMUM-HISTORY GATE IS DERIVED, NOT PICKED: 13 DAYS.** Theil–Sen for magnitude,
+  Mann–Kendall for direction, Sen's interval for uncertainty — so the interval excludes zero exactly
+  when MK rejects, and the engine cannot print a direction its own interval contradicts. The gate
+  solves `minObservationsFor(0.9) = 20` slopes beneath the interval's lower order statistic for the
+  smallest n: n=12 gives 18 ✗, **n=13 gives 22 ✓**. ⛔ It counts DAYS, not PAIRS — 20 pairwise slopes
+  are reached at n=7, so counting pairs would arm the model at a week while appearing to satisfy a
+  20-observation gate.
+  ⛔ **THE FALSE-POSITIVE RATE WAS MEASURED, NOT INHERITED FROM MK's NOMINAL 5%.** Each device's own
+  daily values shuffled (trend destroyed, distribution kept), 40 reps: the control fires 4.1–6.1%
+  at every window length, so no inflation factor is warranted — the same instinct as A6's harness,
+  which exists because a robust estimator was already falsified once on this data.
+  ⛔ **A ROBUST BAND WAS TRIED AND REFUSED**: the 10th–90th percentile of pairwise slopes straddles
+  zero on ALL TEN forecastable firewalls, i.e. a detector that cannot fire on any device in the
+  fleet it was measured against, while looking careful.
+  ⛔ **A DAY COUNTS ONLY WITH 24 BYTE-BEARING HOURS.** Partials are counted and EXCLUDED, missing
+  days are absent rather than zero, and the slope is fitted on real day indices. Measured cost of
+  getting this wrong: counting partials flips TFM-RN's trend SIGN (+0.0141 → −0.0625 GB/day) because
+  one 3-hour day holds 13.3 GB against a ~180 GB typical day. ⛔ This is also why a deploy gap
+  cannot read as a traffic drop.
+  ⛔ **NO CHART, DELIBERATELY.** A sparkline per row would invite the reader to trace a direction in
+  exactly the eight series the engine refuses to assert one for. The condition for revisiting it is
+  recorded in the component: plot the fitted interval, not the raw daily series.
 - **Rule cleanup loop** (`lib/engines/ruleChangeRequests.js`, `/devices/[id]/analysis?tab=cleanup`,
   v2.93.0): select evidence-backed `unused`/`redundant`/`shadow` rules → a change request → CSV/PDF
   for whoever edits the firewall → **SecVault verifies against the re-collected ruleset whether they

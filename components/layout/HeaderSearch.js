@@ -51,6 +51,14 @@ const PAGE_KEYWORDS = {
   '/conformance': ['conformance', 'odd one out', 'drift', 'deviation', 'outlier',
     'consistency', 'peers'],
   '/reports': ['report', 'reports', 'pdf', 'export', 'download', 'audit report'],
+  // ⛔ 'capacity' and 'forecast' are here even though the page is LABELLED
+  // 'Bandwidth trend', for the same reason this map keeps the product's former
+  // vocabulary: somebody looking for capacity planning will type 'capacity', and a
+  // palette that answers 'no results' to the words a user actually has in their head
+  // is worse than none. The LABEL stays honest about what the page delivers; the
+  // keywords stay generous about how it is looked for.
+  '/capacity': ['capacity', 'bandwidth', 'trend', 'forecast', 'traffic volume',
+    'growth', 'throughput', 'capacity planning', 'bytes'],
   // ⛔ BOTH ENTRIES SURVIVE THE SIDEBAR MERGE (2026-09-29). These two now share
   // ONE rendered nav entry, labelled "Intent" — but matchPages() filters over
   // NAV, so if the Applications item had been deleted rather than marked
