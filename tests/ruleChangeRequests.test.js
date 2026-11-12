@@ -295,7 +295,17 @@ function verifyPool({ lastRulesAt, items, liveRules, fail }) {
   });
 }
 
-const ITEM = { id: 'item-1', rule_id_vendor: 'R1', submitted_at: SUBMITTED_AT };
+// ⛔ `request_type` is on the fixture because it is NOT NULL DEFAULT
+// 'rule_deletion' in schema.sql — a real row always carries it. It is also the
+// field that decides whether the absence test below may run at all: a
+// modification's rule is present either way, so it is classified rather than
+// measured (see the request-type suite at the end of this file).
+const ITEM = {
+  id: 'item-1',
+  rule_id_vendor: 'R1',
+  submitted_at: SUBMITTED_AT,
+  request_type: 'rule_deletion',
+};
 
 describe('verifyRequestsForDevice', () => {
   it('reports UNVERIFIABLE, not removed, when no rules pull has ever succeeded', async () => {
@@ -403,7 +413,14 @@ describe('verifyRequestsForDevice', () => {
   it('does no work and reports nothing when there are no outstanding items', async () => {
     const pool = verifyPool({ lastRulesAt: '2026-09-02T03:00:00Z', items: [], liveRules: [] });
     const r = await verifyRequestsForDevice(pool, 'dev-1');
-    assert.deepEqual(r, { checked: 0, removed: 0, stillPresent: 0, unverifiable: 0, error: null });
+    assert.deepEqual(r, {
+      checked: 0,
+      removed: 0,
+      stillPresent: 0,
+      unverifiable: 0,
+      notSupported: 0,
+      error: null,
+    });
     assert.equal(sqlOf(pool, /UPDATE rule_change_request/i).length, 0);
   });
 });

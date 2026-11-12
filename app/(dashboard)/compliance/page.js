@@ -9,13 +9,20 @@ import { summariseFreshness, complianceFreshness } from '../../../lib/engines/co
 import StaleConfigBanner from '../../../components/compliance/StaleConfigBanner';
 import {
   COVERAGE_CLAIM,
+  DEVICE_COVERAGE_CLAIM,
   buildStandardCoverage,
   coverageEvidence,
+  buildDeviceCoverageSet,
 } from '../../../lib/engines/complianceCoverage';
 import Badge from '../../../components/ui/Badge';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
-import ComplianceMatrix, { STANDARDS, STANDARD_META } from '../../../components/compliance/ComplianceMatrix';
+import ComplianceMatrix, {
+  STANDARDS,
+  STANDARD_META,
+  DeviceCoverageStrip,
+  coveragePips as sharedCoveragePips,
+} from '../../../components/compliance/ComplianceMatrix';
 import StandardCard from '../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../components/compliance/ZoneClassificationBanner';
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
@@ -114,6 +121,70 @@ async function getCheckLibraryCoverage(dbPool, vendors) {
   }
 }
 
+// ⛔ THE DENOMINATOR BEHIND EVERY PER-FIREWALL PERCENTAGE, WHICH VARIES BY
+// VENDOR AND HAD NO READER ANYWHERE.
+//
+// getCheckLibraryCoverage() above keys on the STANDARD. Nothing keyed on the
+// DEVICE, so the Compare-firewalls table printed forty bare percentages whose
+// bases differ by a factor of nearly three: what can be asked of one firewall
+// is 28, 24, 20, 19 or 13 checks depending only on which vendor it is, and the
+// least-covered vendors came out top of the table. The measurement, both
+// readings of it and the banding it drove are recorded beside
+// DEVICE_GRADE_THIN_MAX in lib/engines/complianceCoverage.js — read it there
+// rather than trusting a copy here, because the library grows.
+//
+// ⛔ ONE EXTRA QUERY OVER `audit_checks` (tens of rows — do not write the count
+// here, it grows), and it answers for every vendor in
+// scope at once rather than once per device. ⛔ A FAILED READ RETURNS null,
+// never a zeroed map: "0 checks apply to this firewall" is a claim, and a false
+// one that would grade every row `none` and read as a fleet nobody can audit.
+async function getLibraryApplicableByVendor(dbPool, vendors) {
+  const scope = Array.from(new Set((Array.isArray(vendors) ? vendors : []).filter(Boolean)));
+  if (scope.length === 0) return null;
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT v.vendor AS vendor,
+              count(*) FILTER (WHERE ac.vendor IS NULL OR ac.vendor = v.vendor)::int AS applicable,
+              (SELECT count(*)::int FROM audit_checks) AS library_total
+       FROM unnest($1::text[]) AS v(vendor), audit_checks ac
+       GROUP BY v.vendor`,
+      [scope]
+    );
+    if (rows.length === 0) return null;
+    const byVendor = {};
+    let libraryTotal = null;
+    for (const r of rows) {
+      if (typeof r.vendor !== 'string' || !Number.isFinite(Number(r.applicable))) continue;
+      byVendor[r.vendor] = Number(r.applicable);
+      if (Number.isFinite(Number(r.library_total))) libraryTotal = Number(r.library_total);
+    }
+    if (libraryTotal === null) return null;
+    return { libraryTotal, byVendor };
+  } catch (err) {
+    console.warn('[compliance] per-vendor applicable read failed, per-firewall coverage will report as unread:', err.message);
+    return null;
+  }
+}
+
+// ⛔ DISTINCT CHECKS, NOT FINDING ROWS — AND AT DEVICE GRAIN THE TWO COINCIDE,
+// WHICH IS WHAT MAKES THE MISTAKE INVISIBLE. One device holds at most one
+// finding per check (verified live: finding_rows === distinct_checks on all 8
+// mock firewalls), so a row count looks right here. The per-standard tallies
+// above count the SAME check once per standard it carries, so summing those
+// five buckets would give 26 for a Check Point against 10 applicable checks.
+// This accumulates the device-wide set directly off the findings, keyed on the
+// check slug, so no per-standard figure can leak into it.
+function deviceCheckSets(devices) {
+  const counts = {};
+  for (const d of devices) {
+    counts[d.deviceId] = {
+      evaluatedChecks: d.checks ? d.checks.evaluated.size : null,
+      answeredChecks: d.checks ? d.checks.answered.size : null,
+    };
+  }
+  return counts;
+}
+
 // Turns whatever getCheckLibraryCoverage() returned (possibly null) plus the
 // per-standard tallies this page already has into one coverage statement per
 // standard. Pure assembly — the judgement lives in lib/engines/complianceCoverage.js
@@ -208,8 +279,16 @@ async function getFleetCompliance(dbPool) {
         lastRunAt: null,
         configCollectedAt: row.config_collected_at || null,
         standards: emptyStandardCounts(),
+        // The device-wide distinct-check sets, accumulated in this same pass —
+        // no second query. See deviceCheckSets() above for why these are sets
+        // and not a sum of the per-standard buckets.
+        checks: { evaluated: new Set(), answered: new Set() },
       };
       byId.set(row.device_id, device);
+    }
+    if (row.check_slug) {
+      device.checks.evaluated.add(row.check_slug);
+      if (row.status && row.status !== 'na') device.checks.answered.add(row.check_slug);
     }
     if (row.detected_at && (!device.lastRunAt || new Date(row.detected_at) > new Date(device.lastRunAt))) {
       device.lastRunAt = row.detected_at;
@@ -406,32 +485,20 @@ function aggregateCheckSets(findings) {
 // bad news, and it is neither. Nothing new is invented: --unmeasured, --hatch
 // and the violet EvidenceMark are the three marks this product already uses for
 // exactly this statement.
+//
+// ⛔ ONE DEFINITION, IMPORTED. This was a local copy, and the per-firewall
+// coverage column added later needed the same meter — two renderers for one
+// statement is two sets of dimensions and two chances for one of them to pick
+// up a hue. The shared one lives beside the matrix that also uses it.
 function coveragePips(coverage) {
-  const pips = [];
-  for (let i = 0; i < coverage.pipTotal; i += 1) {
-    const on = i < coverage.pips;
-    pips.push(
-      <span
-        key={i}
-        style={{
-          width: 13,
-          height: 8,
-          flex: 'none',
-          borderRadius: 3,
-          border: '1px solid var(--border)',
-          background: on ? 'var(--unmeasured)' : 'var(--surface-subtle)',
-          backgroundImage: on ? 'none' : 'var(--hatch)',
-        }}
-      />
-    );
-  }
+  // The 4px nudge aligns the meter with the first line of the text beside it
+  // under `alignItems: flex-start`; it is this caller's layout, not the meter's.
   return (
-    <span
-      aria-hidden="true"
-      title={`${coverage.gradeLabel}: ${coverage.answeredChecks === null ? 'an unknown number of' : coverage.answeredChecks} SecVault checks behind this figure`}
-      style={{ display: 'inline-flex', gap: 3, alignItems: 'center', marginTop: 4 }}
-    >
-      {pips}
+    <span style={{ display: 'inline-flex', marginTop: 4 }}>
+      {sharedCoveragePips(
+        coverage,
+        `${coverage.gradeLabel}: ${coverage.answeredChecks === null ? 'an unknown number of' : coverage.answeredChecks} SecVault checks behind this figure`
+      )}
     </span>
   );
 }
@@ -485,6 +552,18 @@ function coverageLegend(coverageByStandard) {
         </div>
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--s3)' }}>
           {COVERAGE_CLAIM}
+        </div>
+        {/* ⛔ THE SECOND DENOMINATOR, AND IT IS THE ONE THE GRID VARIES BY.
+            The five column bases are a property of the LIBRARY and are the same
+            on every row; the number of checks a given firewall could answer is
+            a property of its VENDOR and differs by nearly threefold across this
+            fleet. Stating only the first would leave the comparison this table
+            invites still unqualified. */}
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 'var(--s3)' }}>
+          {DEVICE_COVERAGE_CLAIM}
+          {' '}
+          The <b style={{ color: 'var(--unmeasured)' }}>Checks behind</b> column states that number
+          per firewall.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--s3)' }}>
           {STANDARDS.map((s) => {
@@ -554,6 +633,31 @@ export default async function CompliancePage({ searchParams }) {
       scope: 'fleet',
       deviceCount: devices.length,
     });
+
+    // ⛔ The per-FIREWALL denominator for every cell in the grid below. Built
+    // from the per-vendor applicable counts plus the distinct-check sets the
+    // fleet query already accumulated; an unreadable library leaves every row
+    // reporting itself as unread rather than as "no checks apply".
+    const applicableByVendor = await getLibraryApplicableByVendor(pool, fleet.vendors);
+    const perDeviceChecks = deviceCheckSets(devices);
+    const coverageByDevice = buildDeviceCoverageSet(
+      devices,
+      (id) => {
+        const device = devices.find((d) => d.deviceId === id);
+        const sets = perDeviceChecks[id] || {};
+        return {
+          vendorLabel: device && device.vendor ? vendorLabel(device.vendor) : null,
+          libraryTotal: applicableByVendor ? applicableByVendor.libraryTotal : null,
+          applicable:
+            applicableByVendor && device && device.vendor
+              && Object.prototype.hasOwnProperty.call(applicableByVendor.byVendor, device.vendor)
+              ? applicableByVendor.byVendor[device.vendor]
+              : null,
+          evaluatedChecks: sets.evaluatedChecks === undefined ? null : sets.evaluatedChecks,
+          answeredChecks: sets.answeredChecks === undefined ? null : sets.answeredChecks,
+        };
+      }
+    );
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
@@ -582,7 +686,7 @@ export default async function CompliancePage({ searchParams }) {
         {viewToggle(view)}
         {coverageLegend(fleetCoverage)}
         {freshnessBanner(devices)}
-        <ComplianceMatrix devices={devices} />
+        <ComplianceMatrix devices={devices} coverageByDevice={coverageByDevice} />
       </div>
     );
   }
@@ -651,6 +755,39 @@ export default async function CompliancePage({ searchParams }) {
     },
     { pass: 0, fail: 0, warning: 0, na: 0 }
   );
+  // ⛔ THE WHOLE-FIREWALL DENOMINATOR, beside the five per-standard ones.
+  // `scorePctFromCounts` is the SAME function the per-standard tallies use and
+  // the same figure buildDeviceComplianceAnswer already prints in words — this
+  // computes no new arithmetic, it states what the existing one rests on.
+  // ⛔ The device-wide gradeable count is counted off `findings` as a SET of
+  // check slugs, never as the sum of the five per-standard buckets: a check
+  // carries several standards, so that sum is 26 for a firewall with 10
+  // applicable checks.
+  const deviceEvaluated = new Set();
+  const deviceAnswered = new Set();
+  for (const f of findings) {
+    if (!f.checkSlug) continue;
+    deviceEvaluated.add(f.checkSlug);
+    if (f.status && f.status !== 'na') deviceAnswered.add(f.checkSlug);
+  }
+  const applicableByVendor = await getLibraryApplicableByVendor(pool, [selected.vendor]);
+  const deviceCoverage = buildDeviceCoverageSet(
+    [{ deviceId: selected.id, deviceName: selected.name, vendor: selected.vendor }],
+    () => ({
+      vendorLabel: vendorLabel(selected.vendor),
+      libraryTotal: applicableByVendor ? applicableByVendor.libraryTotal : null,
+      applicable:
+        applicableByVendor
+          && Object.prototype.hasOwnProperty.call(applicableByVendor.byVendor, selected.vendor)
+          ? applicableByVendor.byVendor[selected.vendor]
+          : null,
+      evaluatedChecks: deviceEvaluated.size,
+      answeredChecks: deviceAnswered.size,
+      findings: statusCounts,
+      scorePct: scorePctFromCounts(statusCounts),
+    })
+  )[selected.id];
+
   const complianceAnswer = buildDeviceComplianceAnswer(statusCounts, selected.name);
   const selectedConfigAt = await getLatestConfigCollectedAt(pool, selected.id);
   const complianceEvidence = deviceComplianceEvidence(statusCounts, selected.name);
@@ -708,6 +845,11 @@ export default async function CompliancePage({ searchParams }) {
       />
 
       {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={selected.id} />}
+
+      {/* ⛔ ABOVE the donuts, not under them: how many checks this firewall
+          could be asked at all qualifies all five percentages below, and the
+          figure may never be read before its basis. */}
+      <DeviceCoverageStrip coverage={deviceCoverage} />
 
       {zones.length > 0 && (
         <Card>

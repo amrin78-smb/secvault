@@ -74,6 +74,10 @@ const {
 const { storeVpnTunnels } = require('../lib/engines/vpnTunnels');
 const { runNotificationDispatch } = require('../lib/engines/notificationDispatch');
 const { dispatchMonthlyReport, reportingPeriod } = require('../lib/engines/complianceReport');
+const {
+  runReportScheduleJob,
+  formatScheduleSummary,
+} = require('../lib/engines/reportScheduleData');
 const { recordConnectivity } = require('../lib/engines/connectivityHistory');
 const { isCapabilityUnavailable } = require('../lib/adapters/interface');
 const { runLogHitCorrelation } = require('../lib/engines/logHit');
@@ -1244,6 +1248,40 @@ async function runComplianceReportJob() {
   }
 }
 
+// ⛔ A SWEEP, NOT A TIMER. Every report schedule has its own frequency, its own
+// server-local hour and its own weekday/day-of-month, and NONE of that is a
+// cron expression: report_schedules carries no next_run_at by design (see
+// lib/schema.sql), so this job asks lib/engines/reportSchedule.js's dueState()
+// which slots have arrived and which the delivery log says are already done.
+// One hourly tick is enough because the finest grain an operator can configure
+// is an hour.
+//
+// ⛔ A LOST TICK COSTS LATENCY, NEVER A DELIVERY, and that is the whole payoff
+// of deriving due-ness instead of storing it. node-cron loses a tick whose
+// second passes while the event loop is busy — which is how four days of fleet
+// snapshots were permanently lost — but a missed sweep here leaves the slot
+// still unrecorded in report_delivery_log, so the next hour's sweep delivers
+// it. The report is late and the engine log says so; nothing is dropped.
+//
+// ⛔ IT NEVER THROWS. Per-schedule failures come back in the summary, exactly
+// as runConfigRetention() does: one schedule naming a withdrawn report must not
+// stop every other schedule from being delivered.
+async function runReportScheduleSweep() {
+  const start = Date.now();
+  logger.info('Job [report-schedule] starting.');
+  const summary = await runReportScheduleJob(pool, { logger });
+  const durationMs = Date.now() - start;
+  logger.info(`Job [report-schedule] finished in ${durationMs}ms — ${formatScheduleSummary(summary)}.`);
+  // ⛔ EVERY PROBLEM IS LOGGED INDIVIDUALLY, not reduced to a count. The two
+  // that matter most are invisible in a tally: a schedule whose report no
+  // longer exists, and one whose last delivery could not be READ (skipped
+  // rather than re-sent — see dueState's comment). A guard nobody can see is a
+  // guard that cannot fire.
+  for (const err of summary.errors) {
+    logger.error(`Job [report-schedule] ${err}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Background job queue (background_jobs) — the on-demand work that used to run
 // on the HTTP request path
@@ -1783,6 +1821,35 @@ async function scheduleJobs() {
     runTrackedJob(runComplianceReportJob, 'compliance-report');
   });
 
+  // Hourly at :05.
+  //
+  // ⛔ WHY HOURLY AND NOT DAILY. The finest grain report_schedules exposes is
+  // an hour, so a daily tick could not honour a 14:00 schedule at all. Each
+  // sweep asks dueState() what has arrived; nothing is stored about when the
+  // next one is.
+  //
+  // ⛔ WHY MINUTE :05, CHECKED AGAINST EVERY OTHER SCHEDULE IN THIS FILE RATHER
+  // THAN THE `*/n` ONES ONLY — that narrower check is exactly how the snapshot
+  // catch-up came to share :37 with [snmp-poll]'s computed 7,22,37,52. Occupied
+  // minutes on the shipped defaults are 0 (feed-sync, config-pull, vpn-poll,
+  // notifications, compliance-report), 7/22/37/52 (snmp-poll), 15/30/45
+  // (notifications, vpn-poll, snapshot-retention, config-retention), 20
+  // (log-hit), 35 (device-discovery), 41 (dashboard-snapshot catch-up) and
+  // 10 of hour 1 (dashboard-snapshot). :05 is free in every hour.
+  //
+  // ⛔ AND :05 FALLS INSIDE rule-version-pull's 00:00-00:16 WINDOW ONCE A DAY,
+  // WHICH IS ACCEPTED HERE AND WOULD NOT BE FOR A SNAPSHOT. A lost snapshot
+  // tick loses a day of history for ever; a lost sweep loses nothing, because
+  // the slot stays unrecorded in report_delivery_log and 01:05 delivers it. The
+  // only cost is that a schedule set to hour 0 can arrive an hour late on a day
+  // the collection pass runs long — stated rather than hidden, and the reason
+  // the DEFAULT hour in the panel is 06:00.
+  logger.info('Scheduling [report-schedule] with cron "5 * * * *" (hourly, server-local zone).');
+  const reportScheduleTask = cron.schedule('5 * * * *', () => {
+    if (shuttingDown) return;
+    runTrackedJob(runReportScheduleSweep, 'report-schedule');
+  });
+
   scheduledTasks = [
     discoveryTask,
     logHitTask,
@@ -1796,6 +1863,7 @@ async function scheduleJobs() {
     configRetentionTask,
     notificationsTask,
     complianceReportTask,
+    reportScheduleTask,
   ];
 }
 
@@ -1862,6 +1930,14 @@ async function main() {
   // 'success' row already exists this period, same as every other job's
   // immediate-on-startup run.
   await runTrackedJob(runComplianceReportJob, 'compliance-report');
+  // ⛔ SAFE ON EVERY STARTUP, AND THIS SERVICE RESTARTS ON EVERY DEPLOY. The
+  // partial unique index on report_delivery_log (schedule_id, period) WHERE
+  // status = 'success' is what makes it safe: a slot already delivered is read
+  // back as delivered and skipped instantly. Without the startup run, a deploy
+  // landing at 06:04 would push a 06:00 schedule to 07:05 for no reason.
+  // runReportScheduleJob's own in-flight flag refuses an overlap with the first
+  // cron tick before anything is sent.
+  await runTrackedJob(runReportScheduleSweep, 'report-schedule');
 
   await scheduleJobs();
 

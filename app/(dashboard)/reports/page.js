@@ -1,9 +1,11 @@
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../api/auth/[...nextauth]/route';
 import { pool } from '../../../lib/db';
-import { capabilitiesOf } from '../../../lib/rbac';
-import { visibleReports, clientSafe } from '../../../lib/reports/catalogue';
+import { capabilitiesOf, can, MANAGE_SETTINGS } from '../../../lib/rbac';
+import { visibleReports, clientSafe, reportById } from '../../../lib/reports/catalogue';
 import { getReportStats, tilesFor } from '../../../lib/reports/reportStats';
+import { listSchedules } from '../../../lib/engines/reportScheduleData';
+import { describeSchedule } from '../../../lib/engines/reportSchedule';
 import PageHeader from '../../../components/ui/PageHeader';
 import Card, { CardBody } from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -54,14 +56,76 @@ async function activeDevices() {
   }
 }
 
+// ⛔ EMAIL CHANNELS ONLY, and the picker is honest about a DISABLED one rather
+// than hiding it. A report is delivered as a PDF attachment, which only an
+// email channel can carry — lib/notify.js's webhook senders never read
+// `message.attachments` at all — so offering a Slack channel here would queue a
+// delivery that can never succeed. The same gate NotificationsPanel.js already
+// applies to the `compliance_report` alert type.
+//
+// ⛔ Metadata only. `encrypted_data`/`iv` never leave lib/notificationChannels.js
+// except through its two server-side decryption helpers, and nothing on a page
+// needs them.
+async function emailChannels() {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, enabled
+         FROM notification_channels
+        WHERE channel_type = 'email'
+        ORDER BY name ASC`
+    );
+    return { rows, ok: true };
+  } catch (_err) {
+    // ⛔ THE FAILURE TRAVELS WITH IT, same as the device picker below. An empty
+    // list makes the panel say "add an email channel first" — a confident claim
+    // about the customer's configuration, produced by a query that failed.
+    return { rows: [], ok: false };
+  }
+}
+
+async function reportSchedules() {
+  try {
+    const rows = await listSchedules(pool);
+    // The report's display name and its sentence travel with each row so the
+    // panel needs no second copy of the catalogue, and no copy of
+    // describeSchedule. A report_id the catalogue no longer carries resolves to
+    // null and the panel says so — a real state, since the catalogue is code.
+    return {
+      rows: rows.map((row) => ({
+        ...row,
+        report_name: (reportById(row.report_id) || {}).name || null,
+        description: describeSchedule(row),
+      })),
+      ok: true,
+    };
+  } catch (_err) {
+    // ⛔ NOT AN EMPTY LIST PRESENTED AS "nothing is scheduled". That would
+    // invite an operator to create a duplicate of a schedule that is still
+    // delivering every month.
+    return { rows: [], ok: false };
+  }
+}
+
 export default async function ReportsPage() {
   const session = await getServerSession(authOptions);
   const caps = capabilitiesOf(session);
+  // ⛔ STRICTER THAN DOWNLOADING, deliberately — see the comment on
+  // app/api/reports/schedules/route.js. This is DISCOVERY only; that route
+  // enforces the same capability itself, so typing the URL gains nothing.
+  const canSchedule = can(session, MANAGE_SETTINGS);
 
   // ⛔ Both reads are independent and neither gates the other, so they run
   // together — a page that costs two serial round trips to show five static
   // descriptions would have been slower than the document it offers.
-  const [devices, stats] = await Promise.all([activeDevices(), getReportStats(pool)]);
+  //
+  // ⛔ The two scheduling reads are only issued for a session that may actually
+  // see the panel — an operator pays nothing for a surface they cannot use.
+  const [devices, stats, channels, schedules] = await Promise.all([
+    activeDevices(),
+    getReportStats(pool),
+    canSchedule ? emailChannels() : Promise.resolve({ rows: [], ok: true }),
+    canSchedule ? reportSchedules() : Promise.resolve({ rows: [], ok: true }),
+  ]);
 
   // ⛔ clientSafe() at the boundary. A catalogue entry carries a lazy `builder`
   // function so the registry stays cheap to require; React refuses to send a
@@ -105,6 +169,11 @@ export default async function ReportsPage() {
           devices={devices.rows}
           devicesOk={devices.ok}
           statsOk={statsOk}
+          canSchedule={canSchedule}
+          schedules={schedules.rows}
+          schedulesOk={schedules.ok}
+          channels={channels.rows}
+          channelsOk={channels.ok}
         />
       )}
     </div>

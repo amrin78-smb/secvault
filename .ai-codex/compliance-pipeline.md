@@ -23,7 +23,7 @@ own header comment tracks per-check field-path groundedness against real parser 
 Fortinet config sections a given check's path actually depends on) — that reasoning doesn't fit a
 `.sql` row.
 
-**Current count: 45 checks** (`grep -c "checkId:" lib/auditChecksSeed.js` — recount directly if you
+**Current count: 74 checks** (v2.225.0; was 45. Vendor-scoped fortinet 18 / paloalto 14 / checkpoint 10 / forcepoint 10 / sangfor 9 / cisco_asa 3, plus 10 vendor-null. ⛔ **Only 44 are GRADEABLE** — 27 of the 29 added in v2.225.0 are `not_evaluable_from_config`; gradeable by vendor is fortinet 17 / paloalto 13 / cisco_asa 2 / checkpoint 1 / forcepoint 1 / sangfor 0 / null 10.) (`grep -c "checkId:" lib/auditChecksSeed.js` — recount directly if you
 touch this file, it has been miscounted more than once before). Predicate-type breakdown as of this
 writing: `config_key_exists` (12), `feature_enabled` (8), `rule_scan` (8),
 `not_evaluable_from_config` (7), `config_value_matches` (5), `ruleset_property` (3),
@@ -167,7 +167,7 @@ with no qualifier. Freshness is graded on the EVIDENCE, never the audit, and mov
   `no_external_to_internal_access` (added the same day as the other two, per `configAuditor.js`'s
   own header comment), confirmed by `auditChecksSeed.js`'s actual `ruleset_property` count of 3.
   **Corrected in CLAUDE.md in the same pass that created this file.**
-- The "45 checks" count CLAUDE.md states matches a direct recount (`grep -c "checkId:"
+- The "74 checks" count CLAUDE.md states matches a direct recount (`grep -c "checkId:"
   lib/auditChecksSeed.js` = 45) — `.ai-codex/lib.md`'s own "Contradictions vs CLAUDE.md" note
   claiming CLAUDE.md still said "44" was itself stale; corrected in the same pass.
 
@@ -199,14 +199,22 @@ scoped to ONE framework. `standard` is one of `PCI_DSS` / `ISO_27001` / `CIS_V8`
 (`STANDARD_KEYS`, exported). Absent / null / `''` = the unchanged fleet-wide report.
 
 ⛔ **THIS IS A CHANGE OF DENOMINATOR, NOT A FILTER OVER THE FLEET.** `audit_checks.standards` is a
-`TEXT[]` and most checks carry several — live: 45 checks, mapping to CIS_V8 44 / ISO_27001 35 /
-PCI_DSS 21 / SANS 12 / NIST 7, summing to 119. So a PCI score and an overall score are BOTH correct
-and answer different questions. Printed in two documents with no explanation they read as a bug in
-one of them, and the reader cannot tell which. `standardCoverage(pool, standard)` supplies the
-sentence the scoped report prints under its heading ("21 of 45 checks … carry a PCI DSS mapping …
-not comparable with the overall compliance score"). ⛔ It returns **null** on a read failure, never
-`{mapped: 0}` — "0 of 45 checks map to PCI DSS" is a claim, and a false one; the report then prints
-a shorter caveat rather than the score bare.
+`TEXT[]` and most checks carry several — live (v2.225.0): **74 checks**, mapping to CIS_V8 73 /
+ISO_27001 64 / PCI_DSS 28 / SANS 21 / NIST 11, summing to 197. So a PCI score and an overall score
+are BOTH correct and answer different questions. Printed in two documents with no explanation they
+read as a bug in one of them, and the reader cannot tell which. `standardCoverage(pool, standard)`
+supplies the sentence the scoped report prints under its heading ("28 of 74 checks … carry a PCI DSS
+mapping … not comparable with the overall compliance score"). ⛔ It returns **null** on a read
+failure, never `{mapped: 0}` — "0 of 74 checks map to PCI DSS" is a claim, and a false one; the
+report then prints a shorter caveat rather than the score bare.
+
+⛔ **AND `mapped` IS NOT `gradeable` — THE GAP WIDENED SHARPLY IN v2.225.0.** 28 checks carrying a
+PCI DSS mapping does not mean 28 of them can be ANSWERED: 30 of the 74 are
+`not_evaluable_from_config`, so the library is 74 mapped / **44 gradeable**. The 29 rows added for
+`checkpoint` / `sangfor` / `forcepoint` are 27 `na` and 2 gradeable, deliberately — those adapters
+collect management-plane identity, not hardening settings, and a predicate on an uncollected path
+returns `'no'`, i.e. a confident FAIL against the device for SecVault's own gap. Do not read a
+rising check count as rising coverage.
 
 ⛔ **An unknown standard THROWS** (`resolveStandard`), it does not widen to the fleet. Two independent
 gates: the route allow-lists against the catalogue's own declared `choices`, then the engine refuses
@@ -243,7 +251,7 @@ Two additions that change what the page SAYS without changing what it COMPUTES.
 
 **Coverage** (`lib/engines/complianceCoverage.js`, pure). A per-standard percentage is the share of
 SecVault's own mapped checks that pass — nothing more — and the page, the tabs and the PDF now all
-say so. Live library: 45 checks, mapped CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 / NIST 7.
+say so. Live library: 74 checks, mapped CIS_V8 73 / ISO_27001 64 / PCI_DSS 28 / SANS 21 / NIST 11.
 The NIST figure rested on seven questions (six on a given device), which is why this was raised as
 the one place the product overclaimed. ⛔ No framework requirement total is invented; `COVERAGE_CLAIM`
 is the refusal and a test rejects hedged numbers. ⛔ Grade on distinct checks, never finding rows.

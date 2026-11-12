@@ -358,6 +358,82 @@ the `EXIT` trap would never run, leaving a pass file behind on every invocation.
 escape itself is NOT what was being defended against: whoever runs the script already has a shell
 as that user. What must not happen is a credential they do not otherwise hold being handed over.
 
+## ⛔ "ABSENT" AND "UNRECOGNISED" ARE OPPOSITE INSTRUCTIONS FOR A NEW ENUM COLUMN (v2.225.0)
+
+`rule_change_requests.request_type` was added with `DEFAULT 'rule_deletion'`, and
+`verificationSupport()` has to decide what an unexpected value means. The two unexpected values pull
+in opposite directions and collapsing them is a live hazard:
+
+- **ABSENT / NULL => treat as `rule_deletion`.** That is the column's own DEFAULT, what
+  `createRequest` produces when no type is passed, and — the case that matters — what any SELECT or
+  test stub that was written before the column existed yields. Deletion is the only verifiable kind,
+  so this keeps verification working.
+- **An UNRECOGNISED STRING => `not_supported`.** A type nobody has taught the verifier about must
+  not be verified by the deletion rule, which would assert ABSENCE as the test for a change that
+  does not remove anything.
+
+⛔ **Failing closed on BOTH would have been the wrong call, which is the unusual part.** This
+codebase defaults to fail-closed, but `not_supported` is TERMINAL — `verified_at` stays NULL and
+nothing re-examines the item — so treating an absent value as `not_supported` would have silently
+killed rule-deletion verification fleet-wide the first time a query forgot the new column, with the
+feature still rendering and nothing erroring. The same shape as the `ldap_role_mappings`
+"no mappings configured" vs "no mapping matched" split, and as `hubDelivered` gating the NVD skip on
+a VERIFIED corpus rather than on configuration: the question is never "fail open or closed", it is
+"which of these two facts is this, and do they send a reader to different places".
+
+⛔ **And `not_supported` is never folded into `unverifiable`.** `unverifiable` = no successful pull
+since submission (SecVault's collection gap; it clears itself). `not_supported` = this product
+cannot confirm this KIND of change (a capability gap; it never clears). Collapsing them reports a
+capability gap as an outage, and an operator would wait for a collection that was never going to
+help.
+
+## ⛔ A CONVENIENCE DEFAULT HID A PRODUCTION CREDENTIAL IN GIT FOR THE SECOND TIME (found 2026-11-12)
+
+`scripts/dbCheck.js` declared
+
+```js
+const READONLY_URL = process.env.DBCHECK_URL
+  || 'postgresql://claude_readonly:<the real password>@192.168.7.69:5432/secvault';
+```
+
+i.e. the reference deployment's readonly password, committed to the repository and readable by
+anyone with a checkout or a copy of the distribution folder (which is itself a credential — it
+carries `secvault_deploy`).
+
+⛔ **THIS IS THE SAME DEFECT CLAUDE.md RECORDS AS FIXED IN `lib/schema-grants.sql` ON 2026-10-16**
+("it used to carry a hardcoded literal, so every installation in the field was created with the
+same password and that password was in git"), surviving in a second file that the fix never looked
+at. The role name was right there in both files; one `grep claude_readonly` would have found it.
+That is why the rule is "never hardcode a credential", not "fix the one you remember".
+
+⛔ **THE DEFAULT IS WHAT HID IT, NOT THE STRING.** Because `npm run dbcheck` worked with no
+argument, nobody ever had to supply a credential, so nobody ever had occasion to notice one was
+baked in. A secret with no friction around it is a secret nobody audits. ⛔ **And the default aimed
+the sweep at PRODUCTION**, so `npm run dbcheck` typed idly on a dev box ran 100+ read functions
+against the live fleet.
+
+⛔ **REMOVING THE DEFAULT IS NOT ENOUGH ON ITS OWN.** `new Pool({ connectionString: null })` is NOT
+an error in `pg`: libpq falls back to `PGHOST`/`PGUSER`/`PGDATABASE` and then to the OS user against
+loopback, which on the dev box resolves to a role that can WRITE. So an unset `DBCHECK_URL` would
+have silently run the whole sweep as an owner-privileged role, and guard 1 (the read-only role
+assertion) would have been asked to catch a connection it should never have been handed. The null is
+therefore **REFUSED** explicitly, exiting 2 ("could not connect"), which is what it is.
+
+Fixed v2.225.0: `process.env.DBCHECK_URL || null` plus the refusal, and `scripts/dbcheckUrl.sh`
+builds the URL from `~/.secvault-local-secrets.json` reusing `devdb.sh`'s guards (mode 600/400
+checked BEFORE the file is parsed, a copy inside the repo refused, `python3 -I`) and adding one of
+its own: **it refuses a target not marked `readonly`**, so a write credential is never even
+assembled. ⛔ It prints to stdout to be captured into an ENVIRONMENT variable and must never be
+passed in argv — the same `/proc/<pid>/cmdline` reasoning as the entry above.
+
+⛔ **`tests/noHardcodedCredentials.test.js` now fails the build on any inline database credential**
+under `lib/`, `app/`, `services/`, `scripts/` or `installer/`, and separately pins this exact
+regression (the declaration must be `process.env.DBCHECK_URL || null`, with the refusal wired).
+Both ends, because a class scan alone passes the day the default returns in a shape the regex
+misses, and a named assertion alone passes the day a credential appears somewhere else. The guard
+reports the offending file, line and password LENGTH — never the value, so a failing build does not
+reprint the secret into CI output.
+
 ## ⛔ THE BACKUP'S FALLBACK DIRECTORY IS INSIDE THE GIT TREE (found in review, 2026-10-19)
 
 `Backup-SecVault.ps1` derives its destination from `SYSLOG_ARCHIVE_DIR`; when that yields no

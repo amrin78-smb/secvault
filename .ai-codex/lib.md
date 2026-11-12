@@ -180,6 +180,37 @@ collection) time and reports `evaluationLagHours` / `evaluatedAgainstOldConfig`.
 row whatever its age and stamps `now()`. Full rationale and the live measurements:
 `.ai-codex/compliance-pipeline.md`.
 
+## lib/engines/reportSchedule.js + reportScheduleData.js (v2.225.0)
+
+Scheduled delivery of any entry in `lib/reports/catalogue.js`. `reportSchedule.js` is PURE with
+**zero requires**, so the client panel can import `describeSchedule` directly (the
+`lib/licenceBanner.js` contract). `reportScheduleData.js` takes `pool` first.
+
+Pure: `FREQUENCIES`, `DAY_NAMES`, `DUE_REASONS`, `MAX_DAY_OF_MONTH`, `periodKeyFor`, `dueState`,
+`describeSchedule`, `validateSchedule`.
+Pool: `listSchedules`, `getSchedule`, `createSchedule`, `updateSchedule`, `deleteSchedule`,
+`resolveDueSchedules`, `runReportScheduleJob`, plus `evaluateSchedules` (one shared loader so the job
+can report EVERY skip reason, not only the due ones), `listDeliveries`, `recipientCount`,
+`formatScheduleSummary`.
+
+⛔ **NO STORED `next_run_at`** — `dueState(schedule, now, lastSuccessPeriod)` derives it, and
+`period` is the firing SLOT (`YYYY-MM-DD` / `YYYY-Www` / `YYYY-MM`), never a timestamp. See
+`.ai-codex/schema.md`.
+⛔ **An UNREADABLE last-delivery SKIPS rather than delivering**, and the skip goes into
+`summary.errors`: a late report is fixed by the next tick, a duplicated audit PDF cannot be unsent.
+A guard that only skipped, without the error, would be a silently stuck schedule.
+⛔ **`runReportScheduleJob` NEVER THROWS** — per-schedule failures are returned in the summary, like
+`runConfigRetention()`, so one bad schedule cannot stop the others.
+⛔ **ISO week arithmetic is its own trap**: the week-numbering YEAR is not the calendar year at a
+year boundary, and ISO day position is not `Date#getDay()` (Sunday is 0 there and 7 in ISO). Both
+were caught by mutation rather than by review.
+⛔ **A withdrawn `report_id` writes a NAMED error row**, never a silent skip. Pinned by
+`tests/reportSchedule.test.js` (52 assertions, 10 mutations verified). ⛔ One guard the author wrote
+was FAKE and the mutation exposed it: a `hasOwnProperty` test wrapped the history read with a
+comment calling it *the* guard, but an absent property is `undefined` either way, so the mutation
+changed nothing and the test stayed green — a guard that cannot fire, behind a test that could not
+see it. Removed, and the invariant is asserted where it actually lives.
+
 ## lib/engines/complianceCoverage.js (v2.163.0)
 
 PURE, no pool. `COVERAGE_CLAIM`, `GRADES`, `GRADE_*`, `gradeFor`, `buildStandardCoverage`,
@@ -193,6 +224,22 @@ pair, so 7 checks produce 91 rows on this fleet). ⛔ `unknown` (read failed) is
 (nothing ran). Pinned by `tests/complianceCoverage.test.js` (48 cases, 19 mutations verified — two
 survived the first pass and both were real test gaps: an unreachable fallback branch, and a
 `libraryCoverage()` that fabricated a library size on a failed read).
+
+**Device grain, added v2.225.0**: `DEVICE_COVERAGE_CLAIM`, `deviceGradeFor`,
+`DEVICE_GRADE_THIN_MAX` (**13**) / `DEVICE_GRADE_BROAD_MIN` (20, aliased to the standard one),
+`buildDeviceCoverage`, `buildDeviceCoverageSet`, `deviceCoverageEvidence`. Same contract: pure,
+every figure supplied by the caller, `scorePct` carried through verbatim.
+⛔ **`gradeFor` is UNTOUCHED and the two grains are separate functions** that disagree on exactly
+8-13 — reusing the standard bands would have graded a 9-check firewall `moderate`, which is the
+defect this was built to fix. ⛔ `DEVICE_GRADE_THIN_MAX = 13` is `cisco_asa`'s full applicable count
+(3 vendor + 10 shared), the lowest ceiling any supported vendor has, so a device at or below it
+cannot have been broadly measured by construction — the derivation, not the number, is what survives
+a library resize. ⛔ A distinct-check count exceeding `applicable` is `inconsistent` -> grade
+`unknown` -> `—`, never a printed impossible number. Pinned by
+`tests/complianceDeviceCoverage.test.js` (63 cases incl. react-dom/server renders, 14 mutations
+verified — one ESCAPED first time because the hueless assertion counted `var(--unmeasured)`
+occurrences that the count text also carries, so green pips passed; rewritten to isolate each cell
+and assert the ABSENCE of every severity token).
 
 ## lib/engines/complianceExceptions.js (v2.163.0)
 
@@ -2545,6 +2592,29 @@ this ever degrades into an export button the feature has lost its reason to exis
 Exports: `getCleanupCandidates`, `createRequest`, `submitRequest`, `abandonRequest`,
 `verifyRequestsForDevice`, `listRequests`, `getRequest`, plus `REMOVABLE_FINDING_TYPES` /
 `VALID_STATUS`.
+
+**Added v2.225.0** (approval + non-deletion request types): `APPROVAL_STATES`, `REQUEST_TYPES`,
+`DELETION_TYPE`, `VERIFICATION_NOT_SUPPORTED`, `OPERATOR_REQUEST_FINDING`, `isDeletionType`,
+`normaliseRequestType`, `verificationSupport`, `submissionBlock`, `approveRequest`,
+`rejectRequest`.
+
+- `submissionBlock(state)` is PURE and is the single definition of "may this be submitted". The
+  route reads it for its message and the client imports it to disable the button, so there is no
+  second copy of the gate — but it is **not** the guarantee: that is
+  `WHERE status='draft' AND approval_state IN ('not_required','approved')` on the UPDATE, and a test
+  pins the two against each other. An unrecognised state refuses.
+- `approveRequest` / `rejectRequest` write the approval columns **only**. ⛔ An approval can never
+  produce a `verified` — see the Rule cleanup loop bullet in CLAUDE.md. Self-approval is refused in
+  JS and again in the SQL, fails closed on an unknown identity, and surfaces as **409** because the
+  caller does hold the capability.
+- `normaliseRequestType` is deliberately **not** called `resolveRequestType`: the existing
+  "no transition marks a request done by hand" guard bans any export matching
+  `/complete|markDone|resolve/i`, and that guard is worth more than the nicer name.
+- `verificationSupport(type)` returns whether this product can confirm a change of that kind.
+  ⛔ **ABSENT/NULL means DELETION** (the column's DEFAULT, and what a projection that omitted the
+  column yields); an **unrecognised string** means `not_supported`. Opposite instructions:
+  `not_supported` is terminal, so failing closed on an absent value would silently stop verification
+  fleet-wide.
 
 - `REMOVABLE_FINDING_TYPES` = `unused` | `redundant` | `shadow`. Deliberately **not** every finding
   type: `overly_permissive` means "tighten this", not "delete it", and putting it in a deletion

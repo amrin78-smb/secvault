@@ -12,7 +12,12 @@ import StaleConfigBanner from '../../../../components/compliance/StaleConfigBann
 import StandardCard from '../../../../components/compliance/StandardCard';
 import ZoneClassificationBanner from '../../../../components/compliance/ZoneClassificationBanner';
 import ExceptionsPanel from '../../../../components/compliance/ExceptionsPanel';
-import { STANDARDS, STANDARD_META } from '../../../../components/compliance/ComplianceMatrix';
+import {
+  STANDARDS,
+  STANDARD_META,
+  DeviceCoverageStrip,
+} from '../../../../components/compliance/ComplianceMatrix';
+import { buildDeviceCoverage } from '../../../../lib/engines/complianceCoverage';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import { vendorLabel } from '../../../../components/devices/vendorMeta';
 import { getExceptionView } from '../../../../lib/engines/complianceExceptions';
@@ -84,6 +89,41 @@ async function getLatestConfigCollectedAt(dbPool, deviceId) {
     [deviceId]
   );
   return rows.length ? rows[0].collected_at : null;
+}
+
+// ⛔ THE DENOMINATOR BEHIND THIS FIREWALL'S FIVE PERCENTAGES, AND IT HAD NO
+// READER ON THIS PAGE AT ALL.
+//
+// This page rendered five StandardCard donuts and said nothing about how many
+// checks any of them rested on, while that number varies by VENDOR: measured on
+// the six-vendor mock fleet, what can be asked of one firewall is 28, 24, 20,
+// 19 or 13 checks depending only on what it is, so a Check Point's 78% on nine
+// gradeable checks rendered exactly like a Fortinet's 78% on twenty-five would
+// have. The vendor SecVault covers least scores highest. ⛔ The measurement and
+// the banding it drove live beside DEVICE_GRADE_THIN_MAX in
+// lib/engines/complianceCoverage.js; do not copy the numbers here.
+//
+// ⛔ A FAILED READ RETURNS null, never a zeroed map. "0 checks apply to this
+// firewall" is a claim, and a false one — the same call
+// getCheckLibraryCoverage() makes on the fleet page.
+async function getApplicableCheckCount(dbPool, vendor) {
+  if (!vendor) return null;
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT count(*)::int AS applicable,
+              (SELECT count(*)::int FROM audit_checks) AS library_total
+       FROM audit_checks WHERE vendor IS NULL OR vendor = $1`,
+      [vendor]
+    );
+    if (rows.length === 0) return null;
+    const applicable = Number(rows[0].applicable);
+    const libraryTotal = Number(rows[0].library_total);
+    if (!Number.isFinite(applicable) || !Number.isFinite(libraryTotal)) return null;
+    return { applicable, libraryTotal };
+  } catch (err) {
+    console.warn(`[compliance/${vendor}] applicable check count read failed, coverage will report as unread:`, err.message);
+    return null;
+  }
 }
 
 async function getFindings(dbPool, deviceId) {
@@ -244,6 +284,37 @@ export default async function DeviceCompliancePage({ params }) {
     { evidenceAt: configCollectedAt, evaluatedAt: lastRunAt }, new Date()
   );
 
+  // ⛔ WHAT THE FIVE CARDS BELOW REST ON.
+  // ⛔ The gradeable count is a SET of check slugs, never the sum of the five
+  // per-standard buckets aggregateStandards() builds: a check carries several
+  // standards, so summing them gives 26 for a firewall with 10 applicable
+  // checks. On ONE device a finding row and a check coincide, which is exactly
+  // what makes that mistake invisible — hence the set.
+  // ⛔ `scorePctFromCounts` is the SAME function the per-standard tallies use.
+  // Nothing here computes a new score; it states what the existing ones rest on.
+  const deviceEvaluated = new Set();
+  const deviceAnswered = new Set();
+  const statusCounts = { pass: 0, fail: 0, warning: 0, na: 0 };
+  for (const f of findings) {
+    if (Object.prototype.hasOwnProperty.call(statusCounts, f.status)) statusCounts[f.status] += 1;
+    if (!f.checkSlug) continue;
+    deviceEvaluated.add(f.checkSlug);
+    if (f.status && f.status !== 'na') deviceAnswered.add(f.checkSlug);
+  }
+  const library = await getApplicableCheckCount(pool, device.vendor);
+  const deviceCoverage = buildDeviceCoverage({
+    deviceId: device.id,
+    deviceName: device.name,
+    vendor: device.vendor,
+    vendorLabel: vendorLabel(device.vendor),
+    libraryTotal: library ? library.libraryTotal : null,
+    applicable: library ? library.applicable : null,
+    evaluatedChecks: deviceEvaluated.size,
+    answeredChecks: deviceAnswered.size,
+    findings: statusCounts,
+    scorePct: scorePctFromCounts(statusCounts),
+  });
+
   // Derived from the already-fetched `findings` array -- no new query needed.
   // Feeds each StandardCard's "Failed Checks" quick-list, linking straight
   // to the per-check detail page (a REAL page navigation) -- see that
@@ -306,6 +377,11 @@ export default async function DeviceCompliancePage({ params }) {
       <StaleConfigBanner freshness={freshness} device={device} />
 
       {zoneCheckIsNa && <ZoneClassificationBanner standards={zoneCheck.standards} deviceId={device.id} />}
+
+      {/* ⛔ ABOVE the donuts, not under them: how many checks this firewall
+          could be asked at all qualifies all five percentages below, and the
+          figure may never be read before its basis. */}
+      <DeviceCoverageStrip coverage={deviceCoverage} />
 
       {zones.length > 0 && (
         <Card>

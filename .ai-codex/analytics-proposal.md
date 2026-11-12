@@ -38,7 +38,7 @@ because the next unreleased item will need it.
 | A3 | **Log-derived rule usage** — a second evidence source for `hit_count` | 1 | M | no | ✅ v2.189.0 |
 | A4 | **Object & rule consolidation** — exact set algebra, needs no hit counts | 2 | M | no | ✅ v2.190.0 |
 | A5 | **Fleet conformance / odd-one-out** — discovers checks the 45-check library lacks | 2 | M | no | ✅ v2.190.0 |
-| A6 | Seasonal baselines — **NOT a new item**, it is `roadmap.md` Tier 1 #2. See §A6 for why it cannot arm yet | — | — | — | [ ] |
+| A6 | Seasonal baselines + anomaly detectors — **BUILT v2.196.0**. 2 detectors measured and shipped (`device_silent`, `denied_spike`), 2 measured and REFUSED (`total-events spike`, `vpn auth burst`); re-measured 2026-11-12 on 63 days, both still refused. See §A6 | — | — | — | [x] |
 | A7 | **Change → outcome correlation** — the most differentiating; it built its OWN control rather than waiting on A6 | 3 | M–L | no | ✅ v2.191.0 |
 | A8 | **Remediation velocity (survival)** — its honest output is an indictment, and that is the point | 3 | S | no | ✅ v2.192.0 |
 | A9 | **VPN behavioural profiles** — 608 users, 38 days; gate PER USER, and only 34% of users have a usable baseline | 3 | M | no | [ ] |
@@ -600,7 +600,10 @@ carried it — corrected 2026-09-28. A stale "unreleased" costs the same as a st
 ⛔ **AND IT DID NOT WAIT FOR A6.** The proposal below says this "requires A6's variance estimate,
 which is why this is Tier 3". It does require a variance estimate — and it BUILDS ITS OWN, per
 device, from the same daily series, rather than depending on a seasonal model that still cannot
-arm. The dependency stated below did not hold; A6 remains unbuilt and was never a blocker.
+arm. The dependency stated below did not hold, and A6 was never a blocker.
+⛔ **CORRECTED 2026-11-12: this sentence said "A6 remains unbuilt", which stopped being
+true at v2.196.0** — 28 versions earlier. A7 building its own per-device variance estimate
+is still the right call and is unaffected; only the clause about A6's state was wrong.
 
 ⛔ **THE CONTROL IS THE FEATURE.** "Did this change actually change anything?" is only answerable
 after ORDINARY day-to-day variation on the same device has been measured — without a control every

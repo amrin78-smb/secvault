@@ -1,11 +1,23 @@
 # SecVault Roadmap
 
-Living document. **Built-state reviewed 2026-09-22** (v2.162.0). The COMPLETENESS BACKLOG is the
-first section below — start there. The measured FLEET FIGURES
-below are from **2026-09-09** (15 active devices, ~74M syslog events/day) unless a line restates
-them, and the FWA feature comparison that motivated this product is from the same date.
+Living document. **Built-state PARTIALLY reviewed 2026-11-12** (v2.225.0): the A6 / threshold-alerting
+claims and the "How to choose" section were corrected, and **nothing else in this file was
+re-verified.** The previous full review was **2026-09-22** (v2.162.0), i.e. ~60 versions back, so
+treat every other ✅/[ ] here as a claim about a commit rather than a measurement. The measured
+FLEET FIGURES below are from **2026-09-09** (15 active devices, ~74M syslog events/day) unless a
+line restates them, and the FWA feature comparison that motivated this product is from the same
+date.
 
-⛔ **THIS FILE WENT 24 VERSIONS STALE (v2.124.0 -> v2.148.0) AND SAID SO NOWHERE.** It carried
+⛔ **AND IT WENT STALE AGAIN, BY 28 VERSIONS, IN THREE PLACES AT ONCE.** A6 shipped in v2.196.0;
+this file said it was unbuilt in its analytics paragraph, described Tier 1 item 2 as missing in its
+own section, and — the expensive one — **recommended building it** under "How to choose", which is
+the section a session acts on directly. ⛔ **The cost was not a wasted rebuild this time, it was a
+false claim to a customer**: a competitor-comparison deck was generated off this file and listed
+threshold/anomaly alerting as something Firewall Analyzer had and SecVault did not. A stale roadmap
+does not merely waste a conversation; it can be quoted outward. Found 2026-11-12 while re-measuring
+the two refused A6 candidates.
+
+⛔ **THIS FILE ALSO WENT 24 VERSIONS STALE (v2.124.0 -> v2.148.0) AND SAID SO NOWHERE.** It carried
 "Still open, unchanged: Phase 2" for a phase shipped in v2.129.0, and described RBAC as
 "admin/viewer only" nineteen versions after `viewer` was retired. That is the exact failure its own
 header warns about one paragraph down, in the file written to prevent it. Two lessons, both now
@@ -57,7 +69,7 @@ fewer claims, better verified.**
 | # | Item | Why | Done |
 |---|---|---|:--:|
 | 7 | **Change-request → ticketing (ServiceNow / Jira / webhook)** | The VERIFY half is the moat; the REQUEST half is a CSV someone emails. The product proves a change happened but cannot participate in how it gets approved. | [ ] |
-| 8 | **Scheduled report delivery** | Phase 2 of the reporting plan, deliberately deferred by the user 2026-09-21 ("not that important now"). Same work as the long-standing Phase C note below. | [ ] |
+| 8 | **Scheduled report delivery** | ✅ **BUILT v2.225.0** — `report_schedules` / `report_delivery_log`, any catalogued report, daily/weekly/monthly to a named email channel. Deferred by the user 2026-09-21 ("not that important now"); picked up 2026-11-12. ⛔ No `next_run_at`: due-ness is derived each tick. | [x] |
 | 9 | **One fleet-wide SMTP relay** | SMTP is fully built (`lib/notify.js`, nodemailer, send-test route) but configured PER EMAIL CHANNEL, so there is no page labelled SMTP and it reads as missing. A single relay configured once and reused would match the expectation. | [ ] |
 
 ### P4 — sweep leftovers, each a one-sitting fix
@@ -121,10 +133,14 @@ covering them.** Every one was verified against the source on the date raised.
 | 24 | **`versionComparator.parseVersion` returns FABRICATED ZEROS for a version it cannot read**, and says nothing. `parseVersion('fortinet', 'nope')` is `[0,0,…]`, which every conceivable target compares "at or above" — this codebase's most-repeated bug living in a version parser. ⛔ **`upgradePlan.branchOf` and its sibling ARE guarded** (a no-digit test plus an every-component-is-finite test, added 2026-09-27 after a KEV row with `fixed_in: 'Not applicable'` was reported as CLEARED and excluded from `unplannable`). ⛔ **THE REMAINING CALL SITES HAVE NOT BEEN AUDITED**: `lib/engines/versionMatcher.js` (3 sites), `lib/feeds/nvd.js`, `lib/feeds/paloalto.js`, and every adapter's `version_tuple` (`checkpoint/parser.js`, `cisco_asa/index.js`, `fortinet/parser.js`, `fortinet/ssh.js`, `paloalto/parser.js`, `paloalto/ssh.js`, `sangfor/index.js`). The right fix is probably at the source — return `null` for unreadable input and make every caller say what it does about that — but that is a breaking change across a matcher on the CVE path, so measure before moving it. | [ ] |
 | 25 | **`tests/fixedVersionFromRanges.test.js` still pins EXACT SOURCE TEXT rather than behaviour.** Its section 3 slices `lib/feeds/fortinet.js` around `affected_version_ranges = CASE` and regex-matches the wording of the downgrade guard, so a harmless rename or reformat disarms it silently — a guard that cannot fire, which is the defect this repo names most often. ⛔ Its section 4 (the `cveHub` half) was ALREADY converted after the old four-regex version was demonstrated inert against a real disagreement, and `tests/fixBoundary.test.js` owns that behaviour — so the pattern to follow already exists in the same file. Convert section 3 the same way. | [ ] |
 
-⛔ **A6 and A9 remain UNBUILT** and are tracked in the table below — A6 is not a new item at all
-(it is Tier 1 #2; re-measured 2026-09-28 it crosses the 3-week hour-of-week gate on **2026-09-29**
-and arms with no code change). **A8 SHIPPED in v2.192.0** and A7 in v2.191.0. Do not read the ✅
-rows there as progress on A6 or A9.
+⛔ **A6 SHIPPED IN v2.196.0 AND THIS PARAGRAPH SAID IT HAD NOT, FOR 28 VERSIONS.** It read "A6 and
+A9 remain UNBUILT" and predicted A6 would "arm with no code change" on 2026-09-29 — a prediction
+this file then never came back to check. What actually happened is better than the prediction:
+`lib/engines/anomalyDetections.js` + `anomalyDetectionsData.js` + `seasonalBaseline.js` ship **two
+measured detectors** (`device_silent`, `denied_spike`) wired into `notificationDispatch.js`, and
+**two candidates measured and REFUSED** (`total-events spike`, `vpn auth burst`). **A9 remains
+genuinely unbuilt.** **A8 SHIPPED in v2.192.0** and A7 in v2.191.0. Do not read the ✅ rows there as
+progress on A9.
 
 ### New analytics, measured 2026-09-25 — tracked in `analytics-proposal.md`
 
@@ -256,11 +272,18 @@ Deliberately NOT built: any manual "mark as done" control. A request becomes `ve
 the re-collected ruleset says the rules are gone. A tick box would have reduced this to the
 export button FWA already has.
 
-### 2. Threshold and anomaly alerting
+### 2. Threshold and anomaly alerting — ✅ **BUILT v2.196.0** (two detectors; two refused)
+⛔ **THIS SECTION DESCRIBED THIS AS UNBUILT FOR 28 VERSIONS, AND A CUSTOMER-FACING DECK WAS BUILT
+OFF IT** that listed threshold/anomaly alerting as a competitor advantage SecVault lacked. It is
+not. That is the concrete cost of a stale roadmap: not a wasted rebuild, a false claim to a
+customer.
+
 **Why.** A security product that cannot say "denied traffic from this country just tripled" is
-missing table stakes, and FWA has had it for a decade. The dispatch half already exists
-(`notification_channels`, `notificationDispatch.js`, four alert types) — what is missing is any
-alert driven by a *measurement* rather than a state change.
+missing table stakes, and FWA has had it for a decade. The dispatch half already existed
+(`notification_channels`, `notificationDispatch.js`, four alert types); what was missing was any
+alert driven by a *measurement* rather than a state change. **That is now built** —
+`ANOMALY_ALERT_TYPES` is spread into `notificationDispatch.js`'s `ALERT_TYPES`, so an anomaly
+reaches a Slack/Teams/email/webhook channel like any other alert.
 
 Candidates the rollups already support, at no new collection cost: denied-traffic spike per
 device/country, new attacker source, threat-severity escalation, VPN auth-failure burst (the
@@ -269,12 +292,27 @@ credential spraying found on 2026-09-08 would have fired this), collector ingest
 ⛔ Thresholds must be explicit and per-rule, never a magic "anomaly score" — see CLAUDE.md's
 rejection of a composite `log_hit` definition for the same reason.
 
-⛔ **IT CANNOT ARM YET — BUT IT IS DAYS AWAY. RE-MEASURED 2026-09-28**, `syslog_rollup_hourly`
-spans **481 distinct hours = 2.86 weeks, 2.9 observations per hour-of-week bucket** (was 405 hours
-/ 2.4 weeks on 2026-09-25). Collection started 2026-09-08, so a 168-bucket hour-of-week model
-crosses the ≥3-week gate on **2026-09-29**. Build it GATED, reporting `insufficient_baseline` with
-the baseline it needed beside the one that exists — the pattern the six VPN detections already use,
-hatched and hueless, never a green all-clear. It then arms itself with no code change.
+⛔ **THE "3-WEEK GATE" PREDICTION BELOW WAS WRONG, AND `seasonalBaseline.js` FIXED THE REASON.**
+This paragraph said A6 would arm on **2026-09-29** once `syslog_rollup_hourly` crossed three weeks,
+giving "2.9 observations per hour-of-week bucket". Three observations cannot support a tail
+threshold at all: the arming gate is OBSERVATIONS PER BUCKET, not weeks elapsed, and it is
+`minObservationsFor(q) = ceil(2 / (1 - q))` — ~20 for q=0.90, so a 168-bucket hour-of-week model
+needed **~14 weeks**, not three. A week-counting gate would have armed a model whose highest usable
+quantile was **0.74**, i.e. a 26% false-positive rate by construction. The shipped detectors use
+**hour-of-day** grain (24 buckets) for exactly that reason, and a thin bucket reports
+`insufficient_baseline` — hatched and hueless, never a green all-clear.
+
+⛔ **RE-MEASURED 2026-11-12 ON 65.3 DAYS (2.3x the October history). BOTH REFUSED CANDIDATES STILL
+REFUSE.** `total-events spike` reaches 4.21 alerts/day at q=0.95 persist=3, still over the 3/day
+bar, and q=0.975 / q=0.99 **cannot be armed at all** on 63 days — they need 80 and 200 observations
+per bucket, i.e. 80 and 200 days, reached on **2026-11-27** and **2027-03-27**. `vpn auth burst`
+prints as "viable" at 2.89 alerts/day and **must not be registered on that line**: 47.6% of buckets
+fired against the ~10% a q=0.90 can produce by construction (worse than October's 33%), because the
+series is TRENDING — mean failures per device-hour went 135 → 225 → 403 → 513 across five weeks,
+driven by a real and growing external credential-stuffing campaign. A static baseline learns the
+attack it exists to report. That candidate needs a trend-aware instrument, which is a new method
+and needs its own harness run. Full detail and the re-measure dates are in
+`lib/engines/anomalyDetections.js`'s own header.
 
 ⛔ **"MEDIAN + MAD, NEVER MEAN + σ" IS NO LONGER TAKEN ON TRUST — A7 FALSIFIED IT ON THIS DATA.**
 A7 ran exactly that method (Iglewicz–Hoaglin's modified Z-score at its own standard 3.5) over the
@@ -289,14 +327,17 @@ data.** `lib/engines/changeOutcome.js` already exports `buildBaseline`, `median`
 `BAND_QUANTILE` for exactly that reuse. Either way the baseline is an input to a NAMED threshold,
 never a composite anomaly score.
 
-### 3. Report library and scheduling
+### 3. Report library and scheduling — ✅ **BUILT v2.225.0**
 **Why.** FWA's real stickiness is not any single report; it is that a manager receives one every
-Monday without asking. SecVault has the renderer (`pdfkit`, `complianceReport.js`) and a monthly
+Monday without asking. SecVault had the renderer (`pdfkit`, `complianceReport.js`) and a monthly
 scheduler, for exactly one report.
 
-Generalise to: a report type registry, a schedule per report, a recipient list per schedule.
-First three worth having — fleet security posture, rule hygiene / cleanup candidates, traffic and
-top talkers.
+The registry asked for here ALREADY EXISTED as `lib/reports/catalogue.js` (11 report types), whose
+own header anticipated this work. What landed is the other two thirds: a schedule per report and a
+recipient list per schedule, the latter reusing `notification_channels` rather than storing a second
+copy of an address list. ⛔ The monthly compliance job was deliberately NOT ported onto it — it has
+its own log table, index and alert type live on deployed servers, and rewriting it would risk a
+double-send or a silent stop on the one report customers already receive.
 
 ⛔ Reuse `compliance_report_log`'s pattern: a partial unique index enforcing one success per
 period, because the job runs both on cron and at every service start.
@@ -307,7 +348,7 @@ period, because the job runs both on cron and at every service start.
 
 | FWA capability | SecVault today | Work |
 |---|---|---|
-| **Change management workflow** (request → approve → implement → verify) | **Half done v2.93.0.** Request → implement → verify exists for RULE REMOVALS (`rule_change_requests`, verified against the re-collected ruleset). Any other kind of change is still detected after the fact by `config_diffs` only | Small–medium. Remaining: an approval step, and requests for changes that are not deletions. ⛔ Do NOT generalise the verifier by pointing it at `config_diffs` — that was the original plan and it is wrong: a config diff cannot prove a specific rule by vendor ID is gone on every vendor, which is why v2.93.0 verifies against `firewall_rules` instead |
+| **Change management workflow** (request → approve → implement → verify) | ✅ **COMPLETED v2.225.0.** Request → implement → verify shipped v2.93.0 for RULE REMOVALS; v2.225.0 added the **approval step** (`approval_state`, gated on `manage_devices`, self-approval refused in JS and SQL with a 409) and **non-deletion request types** (`rule_modification`, `rule_addition`, `object_change`) | Done. ⛔ **The verifier was NOT generalised, and that remains the right call**: a modification or addition is present either way, so absence cannot test it — those types stop at `outcome='not_supported'`, which is NEVER folded into `unverifiable` (one is a capability gap that never clears, the other a collection gap that clears itself). Pointing it at `config_diffs` is still refused: a config diff cannot prove a specific rule by vendor ID is gone on every vendor. ⛔ Approval can never produce a `verified` — `approveRequest` writes the three approval columns and nothing else |
 | **Capacity planning / bandwidth forecast** | Rollups hold the history; no trend projection | Medium. ⛔ Only for vendors where `bytes_summable` is true — FortiOS cumulative counters are already excluded and must stay excluded |
 | **Custom report builder** | Fixed reports only | Large. Defer until the report registry above exists |
 | **Multi-tenancy / site scoping** | `devices.site` exists and is **empty on 14 of 15 devices** | Small technically, but pointless until sites are actually populated. Blocked on data, not code |
@@ -420,12 +461,24 @@ an external customer is real.
 
 ## How to choose
 
-If the next session has one day: **Tier 3 item 1** (snapshot backfill), then start Tier 1 item 2
-(threshold alerting) — the dispatch infrastructure already exists, so it is mostly rule definition.
+⛔ **THIS SECTION RECOMMENDED BUILDING SOMETHING THAT ALREADY SHIPPED, TWICE, FOR 28 VERSIONS.**
+Both paragraphs below pointed the next session at "Tier 1 item 2 (threshold alerting) — dispatch
+already exists, so it is mostly rule definition". It was built in **v2.196.0**. A "how to choose"
+section is the one part of a roadmap a session acts on directly, so a stale recommendation here is
+strictly more expensive than a stale status row elsewhere.
 
-~~If it has a week: **Tier 1 item 1**.~~ Done v2.93.0. The next largest is **Tier 1 item 2**
-(threshold alerting) — dispatch already exists, so it is mostly rule definition — then **item 3**
-(report library), which item 1’s export now gives a second report type to generalise from.
+~~If the next session has one day: **Tier 3 item 1** (snapshot backfill), then start Tier 1 item 2
+(threshold alerting).~~ Item 2 done v2.196.0.
+
+~~If it has a week: **Tier 1 item 1**.~~ Done v2.93.0.
+
+**Current state, 2026-11-12.** Tier 1 item 1 (rule cleanup loop) done v2.93.0; item 2 (threshold
+alerting) done v2.196.0; **item 3 (report library and scheduling) is in progress in v2.225.0** —
+`report_schedules` / `report_delivery_log` plus a schedule per report over
+`lib/reports/catalogue.js`, which is the registry item 3 asks for and which already exists.
+⛔ **Before picking anything from this file, check the claim against the code.** This document was
+reviewed at v2.162.0 and the repository is far past it; every ✅/[ ] here is a claim about a commit,
+not a measurement, and three separate A6 statements in this file were wrong by 28 versions.
 
 ## ⛔ `advisories.cve_id` is UNIQUE with ONE vendor — a CVE can be squatted (raised 2026-09-10)
 
@@ -573,7 +626,7 @@ until now — which is how this file went 24 versions stale the first time.
 |---|---|---|
 | 0 | Remove the dead FWA import scripts | done |
 | 1 | Report chassis + catalogue hardening | done |
-| 2 | **Scheduled report delivery** | DEFERRED by the user 2026-09-21 ("not that important now") — see the Phase C note below, it is the same work |
+| 2 | **Scheduled report delivery** | ✅ **BUILT v2.225.0.** Was deferred by the user 2026-09-21 ("not that important now") |
 | 3 | Traffic Activity report, arbitrary window | v2.156.0; charts and the web/application section v2.157.0 |
 | 4 | **Rule Risk by Traffic** — the fusion report | v2.158.0 |
 
@@ -741,11 +794,29 @@ posture. But `coverageEvidence()` is keyed **per STANDARD, never per DEVICE**: t
 this axis.
 
 **Two separate pieces of work, and they are not the same:**
-- **(a) Surface the denominator per device.** The cheaper half and the honest one: carry the
-  gradeable count beside the per-device score the way the per-standard card already does. Does not
-  change the arithmetic, which CLAUDE.md requires be documented before any change.
-- **(b) Write vendor-scoped checks for the three vendors that have none.** The real fix. Until
-  then those devices are thinly assessed, and (a) is what stops that reading as "clean".
+- **(a) Surface the denominator per device.** ✅ **BUILT v2.225.0** — `buildDeviceCoverage()` /
+  `buildDeviceCoverageSet()` / `deviceCoverageEvidence()`, on `/compliance` (both views) and
+  `/compliance/[deviceId]`, which carried no coverage statement at all before. The arithmetic is
+  unchanged and still pinned by its own untouched test. ⛔ **The device bands had to be SEPARATE
+  from the standard ones, which was not foreseen here**: `gradeFor(9)` is `moderate`, so reusing them
+  would have graded these three firewalls "moderately evidenced" — the defect wearing the fix's
+  clothes. `DEVICE_GRADE_THIN_MAX` is **13**, derived as `cisco_asa`'s full applicable count (the
+  lowest ceiling any supported vendor has), so a device at or below it cannot have been broadly
+  measured by construction.
+- **(b) Write vendor-scoped checks for the three vendors that have none.** ◨ **ATTEMPTED v2.225.0,
+  AND THE HONEST RESULT IS THAT IT IS NOT POSSIBLE FROM WHAT WE COLLECT.** The library went 45 → 74;
+  of the 29 rows added, **27 are `not_evaluable_from_config`** and only **2 are gradeable** (one
+  `admin_access_from_zone` each for checkpoint and forcepoint; **sangfor has zero**). The blocker is
+  COLLECTION, not curation: Sangfor's parser extracts hostname, version, interface names and an
+  unverified `ssl_vpn.enabled` and nothing else; Check Point returns `{gateway, api_versions,
+  administrators}` — management-plane objects, and the adapter itself records that Gaia OS settings
+  have no management-API surface; Forcepoint returns an SMC engine identity element. ⛔ **A predicate
+  on an uncollected path returns `'no'`, a confident FAIL against the customer's firewall for our
+  own blind spot**, so the honest shape is `na` with an operator-readable reason. **Not one of the
+  29 rows produced a `fail` on any device.** So (a) is still what stops a thin denominator reading
+  as clean, and this row's real remedy has moved to COLLECTING more config — which needs a live
+  device for each vendor, the same blocker as the syslog parsers in §2 below. ⛔ **Do not re-read
+  "74 checks" as coverage**: mapped is 74, gradeable is 44.
 
 ### 2. SYSLOG FOR FOUR VENDORS IS BLOCKED ON EVIDENCE, NOT EFFORT
 

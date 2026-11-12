@@ -969,6 +969,82 @@ shared code path both the scheduled job and `POST /api/compliance/report/generat
 the report (if every matching channel's send fails, this logs `'error'` with
 `recipient_count=0` instead, specifically so the unique index doesn't block a same-month retry).
 
+### report_schedules
+```
+id            UUID PK DEFAULT gen_random_uuid()
+report_id     TEXT NOT NULL              -- lib/reports/catalogue.js entry id
+params        JSONB NOT NULL DEFAULT '{}'
+device_id     UUID REFERENCES devices(id) ON DELETE CASCADE   -- NULL = fleet scope
+frequency     TEXT NOT NULL              -- 'daily' | 'weekly' | 'monthly'
+hour          SMALLINT NOT NULL DEFAULT 6                     -- SERVER-LOCAL, 0-23
+day_of_week   SMALLINT                   -- weekly only, 0=Sunday..6=Saturday
+day_of_month  SMALLINT                   -- monthly only, 1-28
+channel_id    UUID NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE
+enabled       BOOLEAN NOT NULL DEFAULT TRUE
+created_by    TEXT
+created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+```
+Added v2.225.0. Generalises `compliance_report_log`'s monthly job to EVERY report in
+`lib/reports/catalogue.js`. ⛔ **The compliance job is deliberately left alone** — it has its own
+log table, its own partial unique index and its own `compliance_report` alert type, all live on
+deployed servers; rewriting it to route through here would risk a double-send or a silent stop on
+the one report customers already receive, for no new capability.
+
+⛔ **THERE IS NO `next_run_at` COLUMN, AND THAT IS THE CENTRAL DECISION.** A stored next-run
+timestamp is a verdict about the future: it goes stale the moment the schedule is edited, the clock
+shifts or a deploy restarts the engine mid-tick, and a scheduler trusting a stale one either
+double-sends or silently stops. Due-ness is DERIVED at every tick from the schedule definition plus
+the last SUCCESSFUL delivery period, both of which are facts. Same rule as segmentation's "no stored
+verdict column" and read-time config drift.
+
+⛔ **`report_id` IS A CATALOGUE ID, NOT AN FK**, because the catalogue is code. A schedule naming a
+report that no longer exists is therefore possible, and resolves to a NAMED FAILURE in
+`report_delivery_log` rather than a silent skip — a schedule that stops producing anything with
+nothing saying why is indistinguishable from one that was never due.
+
+⛔ **Delivery targets a named `notification_channels` row, never an address list on this table.**
+SMTP config, secret storage and the readonly-grant exclusion all already live there. It must be an
+EMAIL channel: Slack and webhook channels cannot carry a PDF attachment, so the route refuses one
+rather than queueing a delivery that can never succeed — the same gate `NotificationsPanel.js`
+already applies to `compliance_report`.
+
+⛔ **`hour` IS SERVER-LOCAL**, matching every fixed-HH:MM cron job in `services/engine-worker.js`,
+which CLAUDE.md records as running in the server's own zone rather than UTC. Storing this in UTC
+beside jobs that are not would drift by the offset with nothing looking broken.
+
+⛔ **`day_of_month` IS CAPPED AT 28 BY A CHECK, not 31**: a schedule set to the 30th would silently
+never fire in February — a schedule that looks configured and is not. ⛔ And
+`report_schedules_grain_chk` requires the grain field the frequency NEEDS and forbids the one that
+is meaningless for it, **in the database rather than only the route**, because a weekly schedule
+with a NULL `day_of_week` has no defined firing day: it would either never fire or fire every day,
+and which one depends on how the resolver happens to be written. Indexes:
+`idx_report_schedules_enabled` on `(enabled, frequency)`, plus `channel_id` and `device_id`.
+
+### report_delivery_log
+```
+id              UUID PK DEFAULT gen_random_uuid()
+schedule_id     UUID NOT NULL REFERENCES report_schedules(id) ON DELETE CASCADE
+period          TEXT NOT NULL    -- the FIRING SLOT, not a timestamp
+status          TEXT NOT NULL    -- 'success' | 'error'
+recipient_count INTEGER NOT NULL DEFAULT 0
+byte_count      INTEGER
+error           TEXT
+started_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+finished_at     TIMESTAMPTZ
+```
+Added v2.225.0. ⛔ **The partial unique index `idx_report_delivery_log_slot_success` on
+`(schedule_id, period) WHERE status='success'` is the double-send guarantee**, copied deliberately
+from `idx_compliance_report_log_period_success` for the identical reason: the dispatch job runs on a
+cron tick AND once at every engine startup, and `SecVault-Engine` restarts on every deploy, so a
+deploy landing near a tick is a real double-send window without a hard constraint. Unlimited
+`'error'` rows may accumulate so a transient SMTP failure is retried on the next tick rather than
+permanently consuming that slot.
+
+⛔ **`period` IS THE FIRING SLOT**: `'YYYY-MM-DD'` daily, `'YYYY-Www'` (ISO week) weekly,
+`'YYYY-MM'` monthly. A timestamp would make every retry a new slot and the unique index would then
+guarantee nothing.
+
 ---
 
 ## Known schema debt
@@ -1230,6 +1306,45 @@ yet" must not carry a timestamp that reads as "we looked at this time".
 re-collected ruleset no longer contains the rules. If a manual-completion path is ever added, the
 feature has degraded into an export button and has lost the only thing it does that ManageEngine
 Firewall Analyzer cannot.
+
+#### Approval step and non-deletion request types (v2.225.0)
+
+New on `rule_change_requests`: `approval_state` (`not_required`|`pending`|`approved`|`rejected`,
+CHECK-constrained), `approved_by`, `approved_at`, `rejected_reason`, and `request_type`
+(`rule_deletion`|`rule_modification`|`rule_addition`|`object_change`, CHECK-constrained). New on
+`rule_change_request_items`: `requested_change` (TEXT, NULL on a deletion request, where the ask IS
+the absence).
+
+⛔ **APPROVAL GATES SUBMISSION AND CAN NEVER PRODUCE A `verified`.** This is the whole safety
+property and it is the paragraph above restated at a new column: `verified` is MEASURED — a later
+`firewall_rules` pull no longer contains the rules. An approval is a human saying "go ahead and make
+this change"; it is not evidence the change was made. The moment an approval can advance a request
+past `submitted`, this product loses the one claim its competition cannot make.
+
+⛔ **`not_required` IS THE DEFAULT, AND THAT ASYMMETRY IS DELIBERATE.** Every request on every
+deployed server was raised and submitted before an approval step existed, so defaulting to `pending`
+would retroactively mark the entire existing history as awaiting an approval nobody can give, for
+changes that already happened. Same call `ldap_role_mappings` makes between "no mappings configured"
+and "no mapping matched": an absent value means the feature was never switched on, not that the
+check failed. Requiring approval is an explicit per-request choice, never a silent upgrade.
+
+⛔ **THE VERIFIER IS NOT GENERALISED BY `request_type`.** Deletion is verified by ABSENCE from the
+re-collected ruleset — a complete, checkable claim. A modification or an addition is NOT verifiable
+that way: the rule is present either way and the real question is whether its CONTENT matches what
+was asked for. Those types therefore reach `submitted` and stop, carrying an explicit
+`not_supported` verification state — which is a distinct fact from `unverifiable`. `unverifiable`
+means "no successful pull since submission" (SecVault's collection gap); `not_supported` means "this
+product cannot verify this KIND of change" (a capability gap). Collapsing them would report a
+capability gap as a collection gap. ⛔ `.ai-codex/roadmap.md` explicitly REFUSES the obvious
+shortcut of pointing the existing verifier at `config_diffs` to cover them.
+
+⛔ **`approved_by` comes from the SESSION, never the request body** — the same rule
+`compliance_exceptions.accepted_by` follows.
+
+⛔ **`rejected_reason` is kept separate from both `note` and `abandon_reason`.** `note` is the
+INSTRUCTION for whoever edits the firewall; `abandon_reason` is why the request was dropped; a
+rejected request may well be re-raised with a better justification. Collapsing the three would lose
+which of them actually happened.
 
 ### devices.last_rules_collected_at (v2.93.0)
 

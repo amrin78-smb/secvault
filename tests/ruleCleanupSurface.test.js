@@ -204,10 +204,39 @@ describe('a request is never completed by hand', () => {
     }
   });
 
-  it('the PATCH route accepts submit and abandon and nothing else', () => {
-    assert.match(ITEM_ROUTE, /action !== 'submit' && action !== 'abandon'/);
+  // ⛔ RENAMED IN v2.225.0, BECAUSE THE OLD NAME BECAME A FALSE CLAIM. It read
+  // "accepts submit and abandon and nothing else" while the route had grown
+  // `approve` and `reject`, and it kept PASSING because it matched the first two
+  // clauses of a longer `&&` chain as a SUBSTRING. So the assertion was still
+  // true and the sentence describing it was not -- a reader of this file would
+  // have concluded the closed set was two actions. A test name is read far more
+  // often than a test body, and this repo has twice shipped a defect behind a
+  // guard that pinned source SHAPE rather than OUTCOME.
+  //
+  // ⛔ THE CLOSED SET IS AUTHORITATIVELY PINNED IN tests/ruleChangeApproval.js
+  // (behaviourally, by driving the route). What is asserted here is only what
+  // this file is for: that the surface wires the four handlers and that
+  // verification is NOT reachable over HTTP.
+  it('the PATCH route wires exactly the four known actions, and verification is not one of them', () => {
+    for (const action of ['submit', 'abandon', 'approve', 'reject']) {
+      assert.match(
+        ITEM_ROUTE,
+        new RegExp(`action !== '${action}'`),
+        `${action} must be named in the route's closed action check`
+      );
+    }
     assert.match(ITEM_ROUTE, /submitRequest/);
     assert.match(ITEM_ROUTE, /abandonRequest/);
+    assert.match(ITEM_ROUTE, /approveRequest/);
+    assert.match(ITEM_ROUTE, /rejectRequest/);
+    // ⛔ An action the route does NOT handle must still be refused. Asserted as
+    // the shape of a closed check rather than an allow-list match, so adding a
+    // fifth action without extending the check cannot pass silently.
+    assert.ok(
+      /action !== 'submit' && action !== 'abandon' && action !== 'approve' && action !== 'reject'/
+        .test(ITEM_ROUTE),
+      'the action check must be a closed && chain over exactly the handled actions'
+    );
     assert.ok(
       !/verifyRequestsForDevice/.test(ITEM_ROUTE) && !/verifyRequestsForDevice/.test(DEVICE_ROUTE),
       'verification belongs to the collection run, not to an HTTP request'

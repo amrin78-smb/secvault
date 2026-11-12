@@ -141,6 +141,47 @@ describe('gradeFor — how many checks the figure rests on', () => {
 
 // ── the figures ───────────────────────────────────────────────────────────
 
+describe('⛔ the STANDARD-grain bands are untouched by the device-grain ones', () => {
+  // v2.163.0's bands were chosen against a 45-check library at STANDARD grain
+  // and the live mappings grade on them exactly: NIST 7 thin · SANS 12 moderate
+  // · PCI DSS 16 moderate · ISO 27001 30 broad · CIS v8 36 broad. A per-DEVICE
+  // denominator was added later with its own, WIDER thin band (a firewall's
+  // ceiling is its vendor's applicable count — 10 for checkpoint, 28 for
+  // fortinet). These guards exist so that work cannot have moved these.
+  const { deviceGradeFor, DEVICE_GRADE_THIN_MAX } = require('../lib/engines/complianceCoverage');
+
+  it('gradeFor still bands at 7 and 20', () => {
+    assert.equal(GRADE_THIN_MAX, 7);
+    assert.equal(GRADE_BROAD_MIN, 20);
+    assert.equal(gradeFor(7), 'thin');
+    assert.equal(gradeFor(8), 'moderate');
+    assert.equal(gradeFor(19), 'moderate');
+    assert.equal(gradeFor(20), 'broad');
+  });
+
+  it('⛔ the two grains are SEPARATE functions and disagree where it matters', () => {
+    // 8-13 checks: moderate evidence for one standard, thin evidence for a
+    // whole firewall. Collapsing them into one function would silently restore
+    // "78% on 9 gradeable checks reads as moderately evidenced".
+    assert.notEqual(gradeFor, deviceGradeFor, 'one function cannot hold two bands');
+    assert.ok(DEVICE_GRADE_THIN_MAX > GRADE_THIN_MAX);
+    const disagree = [];
+    for (let n = 1; n <= 30; n += 1) {
+      if (gradeFor(n) !== deviceGradeFor(n)) disagree.push(n);
+    }
+    assert.deepEqual(disagree, [8, 9, 10, 11, 12, 13],
+      'exactly the counts between the two thin ceilings');
+  });
+
+  it('⛔ neither grain is reachable through the other’s constant', () => {
+    // A future "simplification" that pointed deviceGradeFor at GRADE_THIN_MAX
+    // would pass every band test above and reintroduce the whole defect.
+    assert.equal(gradeFor(GRADE_THIN_MAX), 'thin');
+    assert.equal(deviceGradeFor(GRADE_THIN_MAX + 1), 'thin',
+      'a firewall assessed on 8 checks is thinly measured, whatever one standard would say');
+  });
+});
+
 describe('buildStandardCoverage — what is known is stated', () => {
   it('reproduces the live NIST case that motivated all of this', () => {
     const c = live('NIST');

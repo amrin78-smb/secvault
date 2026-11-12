@@ -272,6 +272,14 @@ const API_ROUTES = [
   { path: '/api/notification-channels/{id}/test', methods: ['POST'], capability: 'manage_settings' },
   { path: '/api/notifications/summary', methods: ['GET'], capability: null },
   { path: '/api/reports/{id}/pdf', methods: ['GET'], capability: 'operate' },
+  // ⛔ manage_settings, DELIBERATELY STRICTER THAN THE DOWNLOAD ABOVE, and the
+  // GET is gated too. A schedule mails a fleet-wide security document to an
+  // address list on a cadence, to people who may hold no SecVault account —
+  // installation-wide outbound configuration, the same posture
+  // /api/notification-channels carries, not a personal bookmark like a saved
+  // view. Recording it here is what stops the gate being quietly relaxed later.
+  { path: '/api/reports/schedules', methods: ['GET', 'POST'], capability: 'manage_settings' },
+  { path: '/api/reports/schedules/{id}', methods: ['GET', 'PUT', 'DELETE'], capability: 'manage_settings' },
   { path: '/api/rule-change-requests/{id}', methods: ['GET', 'PATCH'], capability: 'operate' },
   { path: '/api/rule-change-requests/{id}/export', methods: ['GET'], capability: null },
   { path: '/api/saved-views', methods: ['GET', 'POST'], capability: null },

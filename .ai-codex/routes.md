@@ -495,6 +495,22 @@ original (the two may live in different directories). Response gained `tlsEnable
 cannot turn TLS on by itself, and the message says so rather than promising a restart will work.
 Both verbs gated on `manage_settings`.
 
+## GET, POST /api/reports/schedules  ·  GET, PUT, DELETE /api/reports/schedules/[id]  (v2.225.0)
+
+`auth` `db` `force-dynamic`. CRUD over `report_schedules` — scheduled delivery of any catalogued
+report. ⛔ **`manage_settings` on EVERY verb INCLUDING GET**, which is stricter than the ungated
+compliance GETs beside it: a schedule names the recipients of fleet-wide security documents, so it
+is installation configuration, not a personal bookmark like a saved view. ⛔ **The catalogue is the
+allow-list**: `report_id` must resolve through `lib/reports/catalogue.js`, and `params` are validated
+against that entry's own declared `choices`, so nothing unvalidated reaches a builder — the same
+two-gate pattern the compliance PDF route uses. ⛔ `scope`/`optionalDevice` are validated too (a
+device-scoped report with no `device_id` is refused, and a fleet-only report with one). ⛔ The
+channel must be an **email** channel — Slack and webhook cannot carry a PDF attachment, so the route
+refuses one rather than queueing a delivery that can never succeed. ⛔ An `entity`-scoped report and
+absolute `from`/`to` range params are REFUSED by shape, not worked around — see CLAUDE.md's
+"Scheduled report delivery". Both classified **`blocked`** in `lib/deviceScopeCoverage.js`: a
+schedule may carry a `device_id` and the listing resolves device names fleet-wide.
+
 ## GET /api/reports/[id]/pdf  (v2.120.0, params v2.121.0)
 
 `auth` `db`. The one download endpoint for every catalogued report. Resolves `params.id` through

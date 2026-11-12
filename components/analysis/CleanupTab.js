@@ -1,4 +1,7 @@
+import { getServerSession } from 'next-auth/next';
 import { pool } from '../../lib/db';
+import { authOptions } from '../../app/api/auth/[...nextauth]/route';
+import { can, MANAGE_DEVICES } from '../../lib/rbac';
 import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
 import {
   getCleanupCandidates,
@@ -21,7 +24,10 @@ import SeverityBadge from './SeverityBadge';
 import FindingTypeBadge from './FindingTypeBadge';
 import AcknowledgeControl from './AcknowledgeControl';
 import { UsageGradeBadge } from './UsageGrade';
-import RuleChangeRequests, { CleanupRequestPanel } from './RuleChangeRequests';
+import RuleChangeRequests, {
+  CleanupRequestPanel,
+  ChangeRequestComposer,
+} from './RuleChangeRequests';
 
 // Cleanup tab (Rule Analysis Dashboard Phase 2): unused / redundant /
 // overly_permissive / correlation / generalization findings, with a per-row
@@ -500,6 +506,24 @@ function RemovalCell({ state, reason }) {
 }
 
 export default async function CleanupTab({ deviceId, canWrite = false, searchParams }) {
+  // ⛔ RESOLVED HERE RATHER THAN TAKEN AS A PROP, because `canWrite` is OPERATE
+  // and approving is NOT. The analysis page passes one capability down to every
+  // tab; this tab needs a second one, and the page that mounts it is not part
+  // of this change. Same pattern components/vulnerability/AdvisoriesTab.js
+  // already uses.
+  //
+  // ⛔ APPROVING IS `manage_devices`, NOT `operate`, and the argument is in
+  // app/api/rule-change-requests/[id]/route.js's header: `operate` already
+  // means "raise a rule change request", so gating approval on it would let
+  // every account that can raise one approve it — a control that gates nothing
+  // while still looking like a control. The UI gate is EQUAL to the route's,
+  // never stricter.
+  const session = await getServerSession(authOptions);
+  const canApprove = can(session, MANAGE_DEVICES);
+  // ⛔ Used only to explain the self-approval refusal the SERVER enforces. It is
+  // never the thing that enforces it.
+  const viewerName = (session && session.user && session.user.name) || null;
+
   const findings = await getCleanupFindings(pool, deviceId);
   const { eligible, withheld } = await getCleanupCandidates(pool, deviceId);
 
@@ -574,7 +598,19 @@ export default async function CleanupTab({ deviceId, canWrite = false, searchPar
         <CandidateTable candidates={candidates} canWrite={canWrite} impacts={impacts} />
       </CleanupRequestPanel>
 
-      <RuleChangeRequests requests={requests} canWrite={canWrite} loadError={requestsError} />
+      {/* ⛔ BELOW the evidence-backed deletion panel and behind a disclosure,
+          deliberately. A deletion proposal here is MEASURED; this form is an
+          operator's instruction that SecVault cannot verify, and giving the two
+          equal weight would invite the unmeasured path by default. */}
+      <ChangeRequestComposer deviceId={deviceId} canWrite={canWrite} />
+
+      <RuleChangeRequests
+        requests={requests}
+        canWrite={canWrite}
+        canApprove={canApprove}
+        viewerName={viewerName}
+        loadError={requestsError}
+      />
 
       <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--text-primary)' }}>
         All cleanup findings

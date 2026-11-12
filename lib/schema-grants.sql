@@ -296,6 +296,16 @@ GRANT SELECT ON TABLE cloud_app_ranges TO nocvault_readonly;
 GRANT SELECT ON TABLE user_device_scopes TO claude_readonly;
 GRANT SELECT ON TABLE user_device_scopes TO nocvault_readonly;
 
+-- Scheduled report delivery (v2.225.0). report_schedules holds no secret: the
+-- recipients and the SMTP credential both live on notification_channels, which
+-- is EXCLUDED from these grants exactly like device_credentials. What is here
+-- is a report id, a firing time and a channel id, so it is granted read-only
+-- for diagnostics like every other table in this file.
+GRANT SELECT ON TABLE report_schedules TO claude_readonly;
+GRANT SELECT ON TABLE report_schedules TO nocvault_readonly;
+GRANT SELECT ON TABLE report_delivery_log TO claude_readonly;
+GRANT SELECT ON TABLE report_delivery_log TO nocvault_readonly;
+
 -- ⛔ Drop the readonly password out of the session. It was set with
 -- is_local=false so it would survive to the DO block above; without this it
 -- would stay readable via current_setting() for the rest of the connection.

@@ -616,6 +616,35 @@ inside another React component" rule were found.
 
 ## components/analysis/RuleChangeRequests.js (added 2026-09-09, v2.93.0)
 
+**v2.225.0** adds the approval controls and the non-deletion composer. New exports:
+`ChangeRequestComposer` (the three non-deletion kinds, behind a disclosure, stating up front that
+SecVault cannot verify them) and a `CannotVerify` mark.
+⛔ **`CannotVerify` is hueless like `NotMeasured` but LABELLED APART FROM IT.** `unverifiable` is
+SecVault's collection gap and clears itself on the next pull; `not_supported` is a capability this
+product does not have and never clears. Drawing them identically would tell an operator to wait for
+a collection that was never going to help.
+⛔ **Approve renders DISABLED with the reason, never hidden** — including the self-approval refusal,
+whose text is the API's own. A UI gate must never be stricter than the route it fronts, or the
+operator concludes the product is broken rather than that they lack access.
+⛔ It imports `submissionBlock` from the engine rather than keeping a second copy of the gate.
+
+## components/compliance/DeviceCoverageStrip + coveragePips (in ComplianceMatrix.js, v2.225.0)
+
+The per-device gradeable count beside every per-device score — a "Checks behind" column in the table
+view (`N of M`, a hueless pip meter, the grade phrase, an evidence mark) and a strip above the donuts
+on the cards view and on `/compliance/[deviceId]`, which previously carried NO coverage statement at
+all.
+⛔ **COUNTS AND A HUELESS GRADE, NEVER A RIVAL PERCENTAGE** — the rule `compliance_exceptions`
+already follows, and a test walks every firewall asserting the only `%` on the row is the headline
+score.
+⛔ **The pips carry no severity token.** A gap in OUR evidence is not a severity of the customer's,
+so they are `--unmeasured`/`--hatch` only. ⛔ The test for that ESCAPED its first mutation: it counted
+`var(--unmeasured)` occurrences, which the count TEXT also carries, so repainting the pips `--green`
+passed. Rewritten to isolate each coverage cell and the meter and assert the ABSENCE of every
+severity token — the "assert the outcome, not the mechanism" rule, learned again.
+⛔ The page's local duplicate pip renderer was DELETED in favour of this shared one; two copies of a
+meter is how the two views start disagreeing about the same firewall.
+
 `'use client'`. The surface of the rule-cleanup loop (roadmap Tier 1 item 1). Three exports:
 
 - **`WithheldNotice({ withheld })`** — ⛔ the load-bearing one. `getCleanupCandidates` returns
@@ -796,6 +825,17 @@ First item per band opens by default so the depth is discoverable.
 truncated caps each get their own banner, both hueless: the source did not find a problem, it
 failed to answer. ⛔ Imports SEVERITY_BADGE_COLOR from analysis/severityRamp — a local map here
 reintroduced `medium: info` (blue) and tests/designSystemRamp caught it.
+
+## components/reports/ReportSchedulesPanel.js (v2.225.0)
+
+The schedule list and editor on `/reports`, beside the download workspace. Imports
+`describeSchedule` from the zero-require pure engine rather than re-wording a cadence client-side.
+⛔ **It STATES what cannot be scheduled instead of rendering a control that cannot work**: an
+`entity`-scoped report (no column names the record) and absolute `from`/`to` range params (two fixed
+timestamps never move, so a weekly delivery would mail the same week for ever under a cover page
+claiming "the last 7 days"). ⛔ A **disabled channel** renders with a ⚠ rather than producing an
+hourly error row — visibility without noise. ⛔ `manage_settings` gates the panel, matching the route
+on every verb including GET, so the UI is never stricter than the API.
 
 ## components/reports/ReportWorkspace.js (added 2026-09-15, v2.121.0)
 

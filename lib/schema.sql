@@ -1624,6 +1624,131 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_report_log_period_success
 CREATE INDEX IF NOT EXISTS idx_compliance_report_log_period ON compliance_report_log(period);
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- Scheduled report delivery (v2.225.0)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Generalises the monthly compliance report above to EVERY report in
+-- lib/reports/catalogue.js. The compliance job is deliberately left alone:
+-- it has its own log table, its own partial unique index and its own
+-- `compliance_report` alert type, all of which are live on deployed servers.
+-- Rewriting it to route through here would risk a double-send or a silent
+-- stop on the one report customers already receive, for no new capability.
+--
+-- ⛔ NO `next_run_at` COLUMN, AND THAT IS THE CENTRAL DECISION. A stored
+-- next-run timestamp is a verdict about the future that goes stale the moment
+-- the schedule is edited, the clock changes or a deploy restarts the engine
+-- mid-tick -- and a scheduler that trusts a stale one either double-sends or
+-- silently stops. Due-ness is DERIVED at every tick from the schedule
+-- definition plus the last SUCCESSFUL delivery period, which are both facts.
+-- Same rule as segmentation's "no stored verdict column" and the config-drift
+-- read-time computation.
+--
+-- ⛔ DELIVERY IS A NAMED notification_channels ROW, never an address list on
+-- this table. SMTP configuration, secret storage and the readonly-grant
+-- exclusion all already live there, and a second copy of a recipient list is
+-- a second thing to keep in step. The channel must be an EMAIL channel: a
+-- Slack or webhook channel cannot carry a PDF attachment, and the route
+-- refuses one rather than queueing a delivery that can never succeed (the
+-- same gate NotificationsPanel.js already applies to `compliance_report`).
+--
+-- ⛔ `report_id` IS A CATALOGUE ID, NOT AN FK, because the catalogue is code.
+-- A schedule naming a report that no longer exists is therefore possible, and
+-- it resolves to a NAMED FAILURE in report_delivery_log rather than being
+-- silently skipped -- a schedule that stops producing anything with nothing
+-- saying why is indistinguishable from one that was never due.
+CREATE TABLE IF NOT EXISTS report_schedules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- lib/reports/catalogue.js entry id, e.g. 'executive-summary'.
+  report_id TEXT NOT NULL,
+  -- The catalogue entry's declared params (e.g. {"standard":"PCI_DSS"}).
+  -- Validated against that entry's own `choices` allow-list before insert:
+  -- the catalogue is the allow-list, exactly as the download route treats it.
+  params JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- NULL = fleet scope. Set only for a report whose catalogue entry declares
+  -- `scope: 'device'` or `optionalDevice: true`.
+  --
+  -- ⛔ ON DELETE CASCADE is correct here and is NOT the user_device_scopes
+  -- trap: zero schedule rows means "nothing is scheduled", which is the same
+  -- thing before and after a deletion. It widens no access and changes no
+  -- other row's meaning.
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+  -- 'daily' | 'weekly' | 'monthly'
+  frequency TEXT NOT NULL,
+  -- Server-local hour, 0-23. ⛔ SERVER-LOCAL, matching every fixed-HH:MM cron
+  -- job in services/engine-worker.js -- which CLAUDE.md records as running in
+  -- the server's own zone, not UTC. A schedule stored in UTC beside jobs that
+  -- are not would drift by the offset and nothing would look broken.
+  hour SMALLINT NOT NULL DEFAULT 6,
+  -- weekly only: 0=Sunday .. 6=Saturday. NULL otherwise.
+  day_of_week SMALLINT,
+  -- monthly only: 1-28. ⛔ CAPPED AT 28, not 31: a schedule set to the 30th
+  -- would silently never fire in February, which is a schedule that looks
+  -- configured and is not.
+  day_of_month SMALLINT,
+  channel_id UUID NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+  -- ⛔ Disabled is a real state, not a deletion. An operator pausing a weekly
+  -- report wants it back with its recipients and params intact.
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT report_schedules_frequency_chk
+    CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+  CONSTRAINT report_schedules_hour_chk CHECK (hour BETWEEN 0 AND 23),
+  CONSTRAINT report_schedules_dow_chk
+    CHECK (day_of_week IS NULL OR day_of_week BETWEEN 0 AND 6),
+  CONSTRAINT report_schedules_dom_chk
+    CHECK (day_of_month IS NULL OR day_of_month BETWEEN 1 AND 28),
+  -- ⛔ The grain field REQUIRED by the frequency must be present, and the one
+  -- that is meaningless for it must be absent. Expressed in the DATABASE and
+  -- not only in the route, because a weekly schedule with a NULL day_of_week
+  -- has no defined firing day at all: it would either never fire or fire every
+  -- day, and which one depends on how the resolver happens to be written.
+  CONSTRAINT report_schedules_grain_chk CHECK (
+    (frequency = 'daily'   AND day_of_week IS NULL     AND day_of_month IS NULL)
+    OR (frequency = 'weekly'  AND day_of_week IS NOT NULL AND day_of_month IS NULL)
+    OR (frequency = 'monthly' AND day_of_week IS NULL     AND day_of_month IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_report_schedules_enabled
+  ON report_schedules (enabled, frequency);
+CREATE INDEX IF NOT EXISTS idx_report_schedules_channel
+  ON report_schedules (channel_id);
+CREATE INDEX IF NOT EXISTS idx_report_schedules_device
+  ON report_schedules (device_id);
+
+-- One row per delivery ATTEMPT, and the period key is what makes a schedule
+-- idempotent.
+--
+-- ⛔ THE PARTIAL UNIQUE INDEX IS THE DOUBLE-SEND GUARANTEE, copied deliberately
+-- from idx_compliance_report_log_period_success above and for the identical
+-- reason: the dispatch job runs on a cron tick AND once at every engine
+-- startup, and SecVault-Engine restarts on every deploy. Only ONE 'success'
+-- row can exist per (schedule, period); unlimited 'error' rows may accumulate,
+-- so a transient SMTP failure is retried on the next tick rather than
+-- permanently consuming that period.
+--
+-- ⛔ `period` IS THE FIRING SLOT, NOT A TIMESTAMP: 'YYYY-MM-DD' for daily,
+-- 'YYYY-Www' (ISO week) for weekly, 'YYYY-MM' for monthly. A timestamp would
+-- make every retry a new slot and the unique index would guarantee nothing.
+CREATE TABLE IF NOT EXISTS report_delivery_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_id UUID NOT NULL REFERENCES report_schedules(id) ON DELETE CASCADE,
+  period TEXT NOT NULL,
+  -- 'success' | 'error'
+  status TEXT NOT NULL,
+  recipient_count INTEGER NOT NULL DEFAULT 0,
+  byte_count INTEGER,
+  error TEXT,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at TIMESTAMPTZ,
+  CONSTRAINT report_delivery_log_status_chk CHECK (status IN ('success', 'error'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_delivery_log_slot_success
+  ON report_delivery_log (schedule_id, period) WHERE status = 'success';
+CREATE INDEX IF NOT EXISTS idx_report_delivery_log_schedule
+  ON report_delivery_log (schedule_id, started_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Device lifecycle & health (added 2026-08-03)
 -- ─────────────────────────────────────────────────────────────────────────
 -- Four latest-snapshot tables (DELETE + reinsert per device on every successful
@@ -2607,6 +2732,79 @@ CREATE TABLE IF NOT EXISTS rule_change_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_rcr_device ON rule_change_requests (device_id, created_at DESC);
 
+-- ── Approval step and non-deletion request types (v2.225.0) ──────────────
+--
+-- ⛔ APPROVAL GATES SUBMISSION. IT CAN NEVER PRODUCE A `verified`. The whole
+-- value of this feature is that `verified` is MEASURED -- a later
+-- firewall_rules pull no longer contains the rules -- and the table's own
+-- comment above says there is no 'done' an operator can set by hand. An
+-- approval is a human saying "go ahead and make this change"; it is not
+-- evidence the change was made. If anyone ever lets an approval advance a
+-- request past `submitted`, this product stops being able to make the one
+-- claim its competition cannot.
+--
+-- ⛔ `not_required` IS THE DEFAULT, AND THAT ASYMMETRY IS DELIBERATE. Every
+-- request on every deployed server today was raised and submitted with no
+-- approval step in existence, so defaulting to `pending` would retroactively
+-- mark the entire existing history as awaiting an approval nobody can give
+-- for changes that already happened. Same call ldap_role_mappings makes
+-- between "no mappings configured" and "no mapping matched": an empty/absent
+-- value means the feature was never switched on, not that the check failed.
+-- Requiring approval is an explicit per-request choice (or a future
+-- installation setting), never a silent upgrade.
+ALTER TABLE rule_change_requests
+  ADD COLUMN IF NOT EXISTS approval_state TEXT NOT NULL DEFAULT 'not_required';
+ALTER TABLE rule_change_requests ADD COLUMN IF NOT EXISTS approved_by TEXT;
+ALTER TABLE rule_change_requests ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+-- Why an approver said no. Kept separate from both `note` (the INSTRUCTION for
+-- whoever edits the firewall) and `abandon_reason` (why the request was
+-- dropped) -- a rejected request may well be re-raised with a better
+-- justification, and collapsing the three would lose which of them happened.
+ALTER TABLE rule_change_requests ADD COLUMN IF NOT EXISTS rejected_reason TEXT;
+-- ⛔ CHECK added separately from the column so this is re-runnable on a server
+-- that already has the column: ADD CONSTRAINT has no IF NOT EXISTS, so it is
+-- guarded by a catalogue lookup. An invalid state must not be storable --
+-- `approval_state` decides whether a change request can be submitted at all.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'rule_change_requests_approval_state_chk'
+  ) THEN
+    ALTER TABLE rule_change_requests
+      ADD CONSTRAINT rule_change_requests_approval_state_chk
+      CHECK (approval_state IN ('not_required', 'pending', 'approved', 'rejected'));
+  END IF;
+END $$;
+
+-- What KIND of change is being asked for.
+--
+-- ⛔ DEFAULT 'rule_deletion' NAMES THE EXISTING BEHAVIOUR RATHER THAN CHANGING
+-- IT. Every row that exists today is a deletion request, because that is the
+-- only kind the engine could build; stamping them as such is a label on a
+-- fact, not a migration.
+--
+-- ⛔ AND THE VERIFIER IS NOT GENERALISED BY THIS COLUMN. Deletion is verified
+-- by ABSENCE from the re-collected ruleset, which is a complete and checkable
+-- claim. A modification or an addition is NOT verifiable that way -- the rule
+-- is present either way and the question is whether its CONTENT matches what
+-- was asked for. Those types therefore reach `submitted` and stop there,
+-- carrying `verification: 'not_supported'` rather than a plausible verdict.
+-- Pointing the existing verifier at config_diffs to cover them is explicitly
+-- refused in .ai-codex/roadmap.md.
+ALTER TABLE rule_change_requests
+  ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'rule_deletion';
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'rule_change_requests_request_type_chk'
+  ) THEN
+    ALTER TABLE rule_change_requests
+      ADD CONSTRAINT rule_change_requests_request_type_chk
+      CHECK (request_type IN ('rule_deletion', 'rule_modification', 'rule_addition', 'object_change'));
+  END IF;
+END $$;
+
+
 -- One row per rule in the request.
 --
 -- ⛔ THE EVIDENCE IS SNAPSHOT AT REQUEST TIME, not read back later. A rule
@@ -2637,6 +2835,11 @@ CREATE TABLE IF NOT EXISTS rule_change_request_items (
   UNIQUE (request_id, rule_id_vendor)
 );
 CREATE INDEX IF NOT EXISTS idx_rcri_request ON rule_change_request_items (request_id);
+
+-- For a non-deletion request: what the operator is asking for, in their own
+-- words, per item. NULL on a deletion request, where the ask is the absence.
+ALTER TABLE rule_change_request_items
+  ADD COLUMN IF NOT EXISTS requested_change TEXT;
 
 -- ⛔ Verification needs to know a RULES pull succeeded, which
 -- devices.last_collected_at cannot tell it: that column is stamped when ANY

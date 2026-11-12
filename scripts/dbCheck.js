@@ -136,8 +136,8 @@
 // failure shapes a live run never produces.
 //
 // Usage:
-//   npm run dbcheck
-//   DBCHECK_URL=postgresql://user:pass@host:5432/secvault npm run dbcheck
+//   DBCHECK_URL=... npm run dbcheck        ⛔ DBCHECK_URL IS REQUIRED
+//   (there is deliberately no default -- see READONLY_URL below)
 //   npm run dbcheck -- --only=feedStatus     (one substring, name or module)
 //   npm run dbcheck -- --no-raw              (skip the syslog_events readers)
 //   npm run dbcheck -- --schema-only
@@ -159,8 +159,33 @@ const REPO = path.join(__dirname, '..');
 // ⛔ NOT `lib/db.js`. That singleton is built from DATABASE_URL, i.e. the
 // read-WRITE application role. This tool connects as the readonly role on
 // purpose, so it must build its own pool.
-const READONLY_URL = process.env.DBCHECK_URL
-  || 'postgresql://claude_readonly:ClaudeRead%402026%21@192.168.7.69:5432/secvault';
+// ⛔ REQUIRED, WITH NO DEFAULT -- AND THIS LINE USED TO CARRY A LIVE
+// CREDENTIAL. It fell back to a literal
+// `postgresql://claude_readonly:<password>@192.168.7.69:5432/secvault`, i.e.
+// the reference deployment's readonly password, committed to a PRIVATE BUT
+// SHARED repository and reachable by anyone holding the distribution folder.
+//
+// ⛔ THIS IS THE SAME DEFECT CLAUDE.md RECORDS AS FIXED IN
+// `lib/schema-grants.sql` ON 2026-10-16 -- "it used to carry a hardcoded
+// literal, so every installation in the field was created with the same
+// password and that password was in git" -- surviving in a second file that
+// the fix never looked at. One grep for the role name would have found it,
+// which is why the rule is "never hardcode a credential", not "fix the one
+// you remember".
+//
+// ⛔ A CONVENIENCE DEFAULT IS WHAT MADE IT DANGEROUS, not the string alone.
+// Because `npm run dbcheck` worked with no argument, nobody ever had to supply
+// a credential, so nobody ever noticed one was baked in -- and the default
+// aimed the sweep at PRODUCTION, so a casual run on a dev box hit the live
+// fleet. There is now no default: the repo already has one blessed way to hold
+// this credential (`~/.secvault-local-secrets.json`, mode 0600, outside the
+// working tree, read by `scripts/devdb.sh`) and this tool must use it too.
+//
+//   DBCHECK_URL="$(scripts/dbcheckUrl.sh production)" npm run dbcheck
+//
+// or export DBCHECK_URL yourself. Never pass it in argv -- /proc/<pid>/cmdline
+// is world-readable, which is the whole reason `devdb.sh` uses a PGPASSFILE.
+const READONLY_URL = process.env.DBCHECK_URL || null;
 
 // A hard ceiling under every query, applied by the server, so no bug in the
 // window arithmetic below can turn into a long scan against a live ingest.
@@ -1094,6 +1119,21 @@ const REGISTRY = [
   // each source, so harvestSwallowedErrors is what actually reads the verdict.
   { mod: 'lib/engines/workQueueData.js', fn: 'gatherWorkQueue', args: () => [], spec: { object: ['items', 'sources'] } },
 
+  // ── scheduled report delivery ───────────────────────────────────────────
+  //
+  // ⛔ ONLY THE READ HALF IS REGISTERED, and that is a limit of this gate
+  // rather than a judgement about the writes. createSchedule/updateSchedule/
+  // deleteSchedule and runReportScheduleJob all INSERT or UPDATE, and
+  // dbCheck's role cannot write (and its statement guard would refuse them
+  // anyway). What IS covered is the query due-ness is derived from — the
+  // LATERAL join onto report_delivery_log that resolveDueSchedules depends on
+  // — which is the one statement whose failure would be invisible: an
+  // unreadable delivery history makes every schedule skip, silently, for ever.
+  { mod: 'lib/engines/reportScheduleData.js', fn: 'listSchedules', args: () => [{}], spec: RAW },
+  { mod: 'lib/engines/reportScheduleData.js', fn: 'getSchedule', args: () => [NO_SUCH_UUID], spec: { nullable: true, object: [] } },
+  { mod: 'lib/engines/reportScheduleData.js', fn: 'listDeliveries', args: () => [NO_SUCH_UUID], spec: RAW },
+  { mod: 'lib/engines/reportScheduleData.js', fn: 'resolveDueSchedules', args: (c) => [c.now], spec: RAW },
+
   // ── licences / lifecycle ────────────────────────────────────────────────
   { mod: 'lib/reports/fleetLifecycle.js', fn: 'buildFleetLifecycleData', args: () => [{}], spec: { object: ['devices', 'sectionErrors'] } },
 
@@ -1333,6 +1373,22 @@ async function main(argv) {
     for (const e of REGISTRY) console.log(`${entryName(e)}   (${e.mod})`);
     console.log(`\n${REGISTRY.length} registered read functions.`);
     return 0;
+  }
+
+  // ⛔ REFUSED, NOT DEFAULTED. `new Pool({ connectionString: null })` is NOT an
+  // error in `pg`: libpq falls back to PGHOST/PGUSER/PGDATABASE and then to the
+  // OS user against localhost. On the dev box that resolves to a role which can
+  // WRITE, so a missing DBCHECK_URL would silently run 100+ functions as an
+  // owner-privileged role instead of failing -- and guard 1 below would be
+  // asked to catch a connection it should never have been handed. Exit 2 is
+  // "could not connect", which is exactly what this is.
+  if (!READONLY_URL) {
+    console.error('[dbcheck] DBCHECK_URL is not set, and there is deliberately no default.');
+    console.error('[dbcheck] It must name a role that can write NOTHING (claude_readonly).');
+    console.error('[dbcheck] The credential belongs in ~/.secvault-local-secrets.json (mode 0600,');
+    console.error('[dbcheck] outside the repository) -- the same file scripts/devdb.sh reads.');
+    console.error('[dbcheck] Nothing was checked.');
+    return 2;
   }
 
   const { Pool } = require(path.join(REPO, 'node_modules', 'pg'));

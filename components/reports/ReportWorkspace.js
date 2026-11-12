@@ -5,6 +5,7 @@ import Card, { CardBody } from '../ui/Card';
 import IconChip from '../ui/IconChip';
 import Badge from '../ui/Badge';
 import DownloadButton from '../ui/DownloadButton';
+import ReportSchedulesPanel from './ReportSchedulesPanel';
 import {
   IconActivity,
   IconTrendingUp,
@@ -106,7 +107,23 @@ function glyphOf(name) {
   return GLYPHS[name] || IconReport;
 }
 
-export default function ReportWorkspace({ reports, devices, devicesOk = true, statsOk = true }) {
+export default function ReportWorkspace({
+  reports,
+  devices,
+  devicesOk = true,
+  statsOk = true,
+  // ⛔ SCHEDULING IS A SEPARATE CAPABILITY FROM DOWNLOADING, and the page
+  // decides. Reading a report is gated on the catalogue entry's own capability
+  // (`operate` for most of them); setting up a recurring email of fleet-wide
+  // security documents to an address list is manage_settings, which is what
+  // /api/reports/schedules enforces. `canSchedule` is passed in rather than
+  // inferred from the data so this UI gate can never be LOOSER than that route.
+  canSchedule = false,
+  schedules = [],
+  schedulesOk = true,
+  channels = [],
+  channelsOk = true,
+}) {
   const [selectedId, setSelectedId] = useState(reports[0]?.id || null);
   const [deviceId, setDeviceId] = useState('');
   // ⛔ Declared parameters, keyed by parameter key. Held in ONE object rather
@@ -179,6 +196,7 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
   // bytes are actually in hand, which is a measurement rather than a guess.
 
   return (
+    <>
     <div className="rpt-workspace">
       <nav className="rpt-rail" aria-label="Report catalogue">
         {reports.map((r) => {
@@ -539,6 +557,22 @@ export default function ReportWorkspace({ reports, devices, devicesOk = true, st
         </CardBody>
       </Card>
     </div>
+    {/* ⛔ BELOW THE CATALOGUE, NOT INSIDE IT, AND FULL WIDTH. The panel is not
+        about the SELECTED report — it lists every schedule across the whole
+        catalogue — so putting it in the right-hand pane would make a
+        fleet-wide table look like a property of whichever report the rail
+        happens to be on. */}
+    {canSchedule ? (
+      <ReportSchedulesPanel
+        reports={reports}
+        devices={devices}
+        channels={channels}
+        channelsOk={channelsOk}
+        schedules={schedules}
+        schedulesOk={schedulesOk}
+      />
+    ) : null}
+    </>
   );
 }
 

@@ -64,8 +64,21 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   no local AI: **A1** upgrade planner (v2.187.0), **A2** blind-spot register (v2.188.0), **A3**
   log-derived rule usage (v2.189.0), **A4** rule/object consolidation + **A5** fleet conformance
   (v2.190.0), **A7** change outcome (v2.191.0), **A8** remediation velocity (v2.192.0).
-  ⛔ **A6 and A9 remain unbuilt** — this line said A8 did too, for four versions after it
-  shipped, which is the same drift twice over in one paragraph. Its tracking table
+  ⛔ **A6 IS BUILT (v2.196.0) AND THIS LINE SAID IT WAS NOT, FOR 28 VERSIONS — THE FIFTH TIME THAT
+  CLAIM HAS GONE STALE IN THIS LIST, IN A SENTENCE THAT ALREADY RECORDED THE OTHER FOUR.** It read
+  "A6 and A9 remain unbuilt" while `lib/engines/anomalyDetections.js` +
+  `anomalyDetectionsData.js` + `seasonalBaseline.js` had been live since v2.196.0, with both
+  detectors' alert types spread into `notificationDispatch.js`'s `ALERT_TYPES` via
+  `ANOMALY_ALERT_TYPES`. ⛔ The cost is not cosmetic: a session reading only this line would rebuild
+  a shipped alerting engine, and a deck built off it told a customer a competitor was ahead on
+  threshold alerting when it is not. **A6** seasonal baselines + anomaly detectors (v2.196.0) —
+  TWO detectors measured and shipped (`device_silent`, `denied_spike`), TWO measured and REFUSED
+  (`total-events spike`, `vpn auth burst`); a detector cannot register without a measured alert rate
+  and sensitivity (`assertRegisteredDetector()`), and `scripts/a6Harness.js` is what produces them.
+  ⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
+  and both are still refused, for reasons now recorded with dates in that file's own header.
+  ⛔ **A9 remains genuinely unbuilt** — this line said A8 did too, for four versions after it
+  shipped, which is the same drift three times over in one paragraph. Its tracking table
   carries each item's state and the SQL to re-measure; `.ai-codex/roadmap.md` is the living plan
 
 ### Maintaining the index — MANDATORY
@@ -987,14 +1000,18 @@ drift without updating this file first.
 
 Reuses `applicability.js`'s predicate evaluator (`evaluatePredicate`/`hasUsableConfig`) — compliance checks and CVE-applicability conditions both "evaluate a predicate against `device_configs.config_parsed`," for different purposes. `evaluatePredicate()` only returns `yes`/`no`/`unknown` — a compliance check needs a fourth state (`pass`/`fail`/`warning`/`na`), and different checks need **opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `yes`=PASS; `admin_access_from_zone` on the WAN zone wants `yes`=FAIL). Resolved via each check's `pass_when: 'yes'|'no'`: predicate `unknown` → `warning`; result `=== pass_when` → `pass`, else `fail`; no usable config at all → `na`; **`pass_when` missing or not exactly `yes`/`no`** → `warning`, never a silent default polarity (a curated-data bug, not a device problem).
 
-A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **45 checks** — recount via `grep -c "checkId:"` if you touch that file, it has drifted before.
+A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **74 checks** (v2.225.0, was 45) — recount via `grep -c "checkId:"` if you touch that file, it has drifted before. Vendor-scoped: `fortinet` 18 / `paloalto` 14 / `checkpoint` 10 / `forcepoint` 10 / `sangfor` 9 / `cisco_asa` 3, plus 10 vendor-null. ⛔ **TOTAL IS NOT GRADEABLE.** Of the 29 added in v2.225.0, **27 are `not_evaluable_from_config`** — gradeable by vendor is `fortinet` 17 / `paloalto` 13 / `cisco_asa` 2 / `checkpoint` **1** / `forcepoint` **1** / `sangfor` **0**, plus the 10 vendor-null. A bigger library did not make those three vendors measurable; it made the gap VISIBLE and named, which is the honest outcome and the one `na` exists for.
 
 `scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
 
 ### ⛔ A PER-STANDARD SCORE IS A SHARE OF **OUR OWN** CHECKS (v2.163.0)
 
 `/compliance` printed **"NIST 42%"** as if it were that framework's posture. Measured on the live
-fleet: the library is **45 checks**, mapped CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 /
+fleet: the library was **45 checks** then (**74** since v2.225.0, mapped CIS_V8 73 / ISO_27001 64 /
+PCI_DSS 28 / SANS 21 / NIST 11 — but ⛔ **the per-standard GRADEABLE counts on the reference fleet
+are unchanged**, because 27 of the 29 added rows are `not_evaluable_from_config` and the only two
+gradeable ones are scoped to `checkpoint` and `forcepoint`, neither of which is deployed there),
+mapped CIS_V8 44 / ISO_27001 35 / PCI_DSS 21 / SANS 12 /
 **NIST 7** — and of NIST's seven, three are vendor-scoped and four are generic firewall hygiene
 (`rule-no-any-any-allow`, `rule-logging-enabled-on-rules`, `rule-has-explicit-deny-all`,
 `rule-no-external-to-internal-access`) wearing a framework's name. On HRIS the figure was **17%
@@ -1017,6 +1034,49 @@ never on finding rows — grading on rows would make a 7-check standard look bro
 ⛔ **THE SCORE ARITHMETIC IS UNCHANGED** and `scorePct` is carried through verbatim, pinned by a
 test. This changed PRESENTATION only. `unknown` (the coverage read failed) is a distinct state from
 `none` (nothing ran).
+
+### ⛔ A PER-DEVICE SCORE IS A SHARE OF THE CHECKS THAT VENDOR HAS (v2.225.0)
+
+v2.163.0 fixed this axis for a STANDARD and left it open for a DEVICE: `coverageEvidence()` was
+keyed per standard only, while `scorePct` is computed from bare per-device counts. Measured on the
+mock fleet (all six vendors): **a Check Point scoring 78% on 9 gradeable checks rendered identically
+to a Fortinet's 78% on 25, and ranked ABOVE a Palo Alto's 38% on 21** — the vendor the library covers
+least came out best. `buildDeviceCoverage()` / `buildDeviceCoverageSet()` / `deviceCoverageEvidence()`
+carry the gradeable count and a grade beside every per-device score, on `/compliance` (both views)
+and `/compliance/[deviceId]`, which previously carried no coverage statement at all.
+
+⛔ **THE SCORE ARITHMETIC IS AGAIN UNCHANGED.** `scorePct` is the pre-existing function, reused, and
+the engine never recomputes it; `tests/complianceScoreFormula.test.js` is unmodified and still pins
+it. PRESENTATION only, exactly as v2.163.0 was.
+
+⛔ **THE BANDS ARE SEPARATE FROM THE STANDARD-GRAIN ONES, AND THAT WAS MEASURED, NOT ASSUMED.**
+`gradeFor(9)` is `moderate`, so reusing the standard bands would have graded the three
+least-measured firewalls on the fleet "moderately evidenced" — **the defect wearing the fix's
+clothes**. `DEVICE_GRADE_THIN_MAX` is therefore **13**, which is not a taste: it is `cisco_asa`'s
+FULL applicable count (3 vendor checks + 10 shared), i.e. the most the library can ever put to a
+firewall of the vendor it covers least, so a device at or below it cannot have been broadly measured
+by construction. That derivation survived the library going 45 → 74 checks, which is why the REASON
+is recorded rather than the number.
+
+⛔ **`broad` STAYS AT 20 AND IS DELIBERATELY UNREACHABLE FOR TWO VENDORS.** Raising it to 25 would
+make a fully assessed Palo Alto (ceiling 24) permanently `moderate`. At 20, `cisco_asa` (ceiling 13)
+can never read better than `thin` and `sangfor` (19) never better than `moderate` — **honest, not a
+bug**: the library genuinely covers them least, and lowering the threshold to flatter them would
+re-admit the 9-check firewall grading moderate. A test pins both ceilings against the LIVE seed, so
+expanding a vendor's coverage fails the build and forces the bands to be re-derived deliberately.
+
+⛔ **AN ABSOLUTE COUNT, NEVER A RATIO.** The ratio favours the thin firewall (9/10 beats 21/24),
+which is precisely the reading being prevented, and a test proves the ratio inverts while the grades
+do not.
+
+⛔ **TWO UNITS, STILL KEPT APART — AND HARDER HERE.** On a single device the finding ROWS and the
+distinct CHECKS coincide, so the two only diverge on aggregation; a distinct-check count exceeding
+`applicable` is reported `inconsistent` → grade `unknown` → cell `—`, and the impossible number is
+never printed. It degrades toward unknown, never toward a grade.
+
+⛔ **COUNTS AND A HUELESS GRADE, NEVER A RIVAL PERCENTAGE** — the same rule
+`compliance_exceptions` follows. A test walks every firewall asserting the only `%` printed is the
+headline score.
 
 ### ⛔ Compliance exceptions — accepted risk that CANNOT move the score (v2.163.0)
 
@@ -1916,10 +1976,17 @@ route would have accepted the call, the operator concludes the product is broken
 they lack access. `/alerts`, `/compliance/[deviceId]`, `/devices/[id]/analysis` and
 `/vulnerability` therefore gate on `OPERATE`, matching their routes.
 
-Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated **with two
-documented exceptions, both about personal data rather than mutation**: `/api/logs/search`
+Applied to every mutating (POST/PUT/DELETE/PATCH) route; GET routes are never gated **with THREE
+documented exceptions** — two about personal data rather than mutation: `/api/logs/search`
 (`view_log_search` — raw syslog carries usernames, internal addresses and URLs) and the VPN
-identity tabs (`view_identity`). ⛔ The VPN guard is TWO-PART: `visibleVpnTabs()` hides the tab so
+identity tabs (`view_identity`); and ⛔ **the third, added v2.225.0, is about CONFIGURATION rather
+than data**: `GET /api/reports/schedules` and `GET /api/reports/schedules/[id]` are gated on
+`manage_settings`, the same as their mutating verbs. A schedule names the recipients of fleet-wide
+security documents, so reading the list discloses who receives the estate's posture and on what
+cadence — that is installation configuration, not a personal bookmark like a saved view. ⛔ This
+sentence said "two documented exceptions" while a third was live; if a fourth is ever added, correct
+this count in the SAME commit, because a reader checking whether a GET may be gated will stop at the
+number. ⛔ The VPN guard is TWO-PART: `visibleVpnTabs()` hides the tab so
 it cannot be discovered, AND `app/(dashboard)/vpn/page.js` refuses to render an identity tab body
 however the URL was reached. A hidden tab whose URL still works is decoration, not a boundary. **A non-mutating POST that only computes over already-collected data and persists nothing is treated like a GET, not gated** — e.g. `POST /api/devices/[id]/access-path` (query-only, no DB write) — the "mutating" test is about persistence, not HTTP verb; don't read the rule as "every POST needs isAdmin." **The JWT's role is re-validated on every token use, not just at sign-in** — `jwt()` re-queries `SELECT role FROM users WHERE id=$1` for local-provider tokens, failing closed on a DB error, so a role change/demotion takes effect immediately rather than waiting for a stale JWT to expire.
 
@@ -2607,6 +2674,7 @@ Runs as `SecVault-Engine` NSSM service. CommonJS only (not ES modules).
 | Outbound alerting (`notification-dispatch`) | 5-59 min | `NOTIFICATIONS_POLL_INTERVAL_MINUTES` |
 | `log_hit` correlation (`log-hit`) | Hourly, fixed `20 * * * *` | `LOG_HIT_LOOKBACK_DAYS` |
 | Compliance report (`compliance-report`) | Monthly, fixed `0 6 1 * *` | (not configurable) |
+| Scheduled report delivery (`report-schedule`) | Hourly, fixed `5 * * * *`, plus once at startup | per-row in `report_schedules` |
 
 ### ⛔ A DAILY CRON TICK IS ONE BLOCKED SECOND FROM LOSING A DAY (fixed 2026-10-19)
 
@@ -4192,6 +4260,35 @@ none of these carry Critical-Rules-level footguns.
   calendar month via a **partial unique index** (`WHERE status='success'`), not just app logic — the job
   runs both on cron and once at every service startup, so a real DB constraint is what prevents a
   double-send if a deploy lands near the monthly tick; failed attempts don't block a retry.
+- **Scheduled report delivery** (`lib/engines/reportSchedule.js` pure + `reportScheduleData.js`,
+  `report_schedules` / `report_delivery_log`, `/reports`, `report-schedule` job, v2.225.0):
+  generalises the monthly compliance report to EVERY entry in `lib/reports/catalogue.js` — daily,
+  weekly or monthly, to a named email `notification_channels` row, `manage_settings` on every verb
+  **including GET** (a schedule names recipients for fleet-wide security data; that is installation
+  configuration, not a personal bookmark).
+  ⛔ **The monthly compliance job is deliberately NOT rewritten to route through it.** It has its own
+  log table, its own partial unique index and its own `compliance_report` alert type, all live on
+  deployed servers; porting it would risk a double-send or a silent stop on the one report customers
+  already receive, for no new capability.
+  ⛔ **THERE IS NO `next_run_at`, AND THAT IS THE CENTRAL DECISION** — see `.ai-codex/schema.md`.
+  Due-ness is DERIVED every tick from the definition plus the last SUCCESSFUL period, both facts; a
+  stored next-run goes stale on an edit, a clock change or a mid-tick restart and then either
+  double-sends or silently stops. ⛔ It is also what makes the hourly tick's one daily collision with
+  `rule-version-pull` harmless: a lost sweep costs latency, never a delivery, because the slot simply
+  stays unrecorded and the next hour delivers it. A `next_run_at` would have consumed it.
+  ⛔ **An UNREADABLE last-delivery SKIPS, and the asymmetry is the argument**: a late report is fixed
+  by the next healthy tick; a duplicated audit PDF cannot be unsent. The skip is pushed into the
+  summary's `errors` and logged per schedule, so it can never become a silently stuck schedule.
+  ⛔ **A withdrawn `report_id` is a NAMED FAILURE in `report_delivery_log`, never a silent skip** —
+  `report_id` is a catalogue id and the catalogue is code, so a schedule can outlive its report, and
+  one that stops producing anything with nothing saying why is indistinguishable from one never due.
+  ⛔ **Only the CURRENT period is ever delivered**; a missed month is not back-filled, because last
+  month's document built from today's data under last month's slot is a mislabelled artefact.
+  ⛔ **Refused rather than half-supported**: an `entity`-scoped report (produced from one record, with
+  no column to name it — "whichever is newest" is a document whose subject changes with nobody
+  asking), and absolute `from`/`to` range params (two fixed timestamps never move, so a weekly
+  delivery would mail the same week for ever under a cover page claiming "the last 7 days"). The
+  panel STATES both instead of rendering a control that cannot work.
 - **Rule cleanup loop** (`lib/engines/ruleChangeRequests.js`, `/devices/[id]/analysis?tab=cleanup`,
   v2.93.0): select evidence-backed `unused`/`redundant`/`shadow` rules → a change request → CSV/PDF
   for whoever edits the firewall → **SecVault verifies against the re-collected ruleset whether they
@@ -4206,6 +4303,40 @@ none of these carry Critical-Rules-level footguns.
   than `submitted_at`; without that, a device whose rule collection is failing would report every
   requested rule as removed, turning a collection outage into a fabricated cleanup. Full detail:
   `.ai-codex/lib.md` + `schema.md`.
+  ⛔ **APPROVAL AND NON-DELETION REQUEST TYPES (v2.225.0), AND NEITHER WEAKENS THE SENTENCE ABOVE.**
+  `approval_state` (`not_required`|`pending`|`approved`|`rejected`) is a SECOND AXIS beside
+  `status`, never a status: `approveRequest()` writes `approval_state`, `approved_by` and
+  `approved_at` **and nothing else**, so an approval can never produce a `verified`. Approval gates
+  SUBMISSION, and it is refused in TWO places that a test pins against each other — the pure
+  `submissionBlock()` the route and UI both read, and the
+  `WHERE status='draft' AND approval_state IN ('not_required','approved')` that is the actual
+  guarantee. An unrecognised state refuses. ⛔ **`not_required` is the default** because every
+  request on every deployed server predates this feature; defaulting to `pending` would mark the
+  whole existing history as awaiting an approval nobody can give for changes already made — the
+  same asymmetry `ldapRoles.js` draws between "no mappings configured" and "no mapping matched".
+  ⛔ **Approve/reject are gated on `manage_devices`, NOT `operate`** — `operate` means "raise and
+  verify", and raising changes no device, so gating approval there would let every account that can
+  raise a request approve it: a control that gates nothing while still reading as one on screen and
+  in the exported PDF. **Self-approval is refused server-side**, doubled in JS and in the SQL
+  (`created_by IS NOT NULL AND lower(created_by) <> lower($2)`), fails closed when either identity
+  is unknown, and answers **409, not 403** — the caller holds the capability; this is a conflict
+  about this resource. The UI renders Approve DISABLED with that exact reason, never hidden, so the
+  gate is not stricter than the API.
+  ⛔ **`request_type` DOES NOT GENERALISE THE VERIFIER.** Deletion is verified by ABSENCE from the
+  re-collected ruleset — a complete, checkable claim. A modification or addition is present either
+  way and the question is whether its CONTENT matches the ask, which this product cannot answer, so
+  those reach `submitted` and stop at `outcome='not_supported'` with `verified_at` NULL, counted in
+  its own `notSupported` field. ⛔ **`not_supported` is NEVER folded into `unverifiable`**: one is
+  SecVault's collection gap that clears itself on the next pull, the other is a capability this
+  product does not have. ⛔ **Do NOT point the verifier at `config_diffs`** to cover them — refused
+  in `.ai-codex/roadmap.md`. ⛔ **An ABSENT/NULL `request_type` is a DELETION** (the column's own
+  DEFAULT, and what a projection that forgot the column yields) while an UNRECOGNISED STRING is
+  `not_supported`; those are opposite instructions and must not be collapsed, because
+  `not_supported` is terminal and failing closed on an absent value would silently kill verification
+  fleet-wide. ⛔ A `rule_addition` has no rule to key on, so its `rule_id_vendor` is the requester's
+  own LABEL, stamped `evidence.subjectKind = 'proposed_rule_label'` so nothing can read it as a
+  vendor id, and its `hit_count_at_request` is NULL — never a fabricated 0. The hit-count refusal
+  still applies to deletions and only to deletions.
 - **VPN Summary**: per-device active session count + trend chart, `VPN_POLL_INTERVAL_MINUTES`. Live-polling and per-vendor gaps (Sangfor/Check Point) are tracked in `.ai-codex/connectors.md`'s cross-vendor table, not here.
 - **Network Object Catalog**: per-device address/service/group objects from adapter `getObjects()`; the standalone analysis-tab `ObjectsTab` view is flagged unused/duplicate in `components.md` — check before extending.
 - **Device Admins tab** (`lib/engines/adminAccountSummary.js` — the FIREWALL's own local admins, NOT SecVault's own users below): per-vendor coverage in `.ai-codex/connectors.md`.
@@ -4329,6 +4460,36 @@ statement guard that inspects every query before it leaves the process. The thir
 `resolveInstallDate` begins with a READ verb and INSERTs, so the name guard passes it.
 ⛔ It exits non-zero when `schema.sql` declares something the live database lacks, which is the
 `CREATE TABLE IF NOT EXISTS` trap in `.ai-codex/gotchas.md` made visible.
+
+⛔ **`DBCHECK_URL` IS REQUIRED AND HAS NO DEFAULT — IT USED TO CARRY A PRODUCTION CREDENTIAL IN
+GIT (fixed v2.225.0).** `scripts/dbCheck.js`'s `READONLY_URL` fell back to a literal
+`postgresql://claude_readonly:<password>@192.168.7.69:5432/secvault`, i.e. the reference
+deployment's readonly password, committed to the repository and readable by anyone holding a
+checkout or the distribution folder (which is itself a credential — see the installer section).
+⛔ **This is the SAME defect this file records as fixed in `lib/schema-grants.sql` on 2026-10-16**
+("it used to carry a hardcoded literal, so every installation in the field was created with the
+same password and that password was in git"), surviving in a second file that fix never looked at.
+⛔ **The convenience default is what hid it, not the string.** Because `npm run dbcheck` worked
+with no argument, nobody ever had to supply a credential, so nobody ever noticed one was baked in —
+and the default aimed the sweep at PRODUCTION, so a casual run on any dev box hit the live fleet.
+There is now no default: `process.env.DBCHECK_URL || null`, and a null is **REFUSED** rather than
+passed to `pg` — `new Pool({ connectionString: null })` is not an error, libpq falls back to
+`PGHOST`/`PGUSER` and then the OS user against loopback, which on the dev box is a role that can
+WRITE, so an unset variable would have run 100+ functions as an owner-privileged role while guard 1
+was asked to catch a connection it should never have been handed.
+⛔ **`scripts/dbcheckUrl.sh` is the blessed way to supply it**, reusing `devdb.sh`'s guards (mode
+600/400 enforced BEFORE the file is parsed, a copy inside the repo refused, `python3 -I`) and adding
+one of its own: it **REFUSES a target not marked `readonly`**, so a write credential is never even
+assembled. Pass it through the ENVIRONMENT, never argv — `/proc/<pid>/cmdline` is world-readable:
+```bash
+DBCHECK_URL="$(scripts/dbcheckUrl.sh production)" npm run dbcheck
+```
+⛔ `tests/noHardcodedCredentials.test.js` now fails the build on any inline database credential
+anywhere under `lib/`, `app/`, `services/`, `scripts/` or `installer/`, AND pins this specific
+regression by asserting the declaration is exactly `process.env.DBCHECK_URL || null` with the
+null-refusal wired. A class scan alone would pass the day someone reintroduces the default in a
+shape the regex misses; a named assertion alone would pass the day a credential appears elsewhere —
+the same both-ends reasoning `tests/deviceScopeCoverage.test.js` applies to its floor and its names.
 
 ⛔ **NEITHER COVERS A MUTATING ROUTE.** `apisweep` refuses any verb outside a two-entry allow-list
 because it runs against the production fleet, and `dbcheck`'s role cannot write. Every
