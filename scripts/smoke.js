@@ -153,6 +153,13 @@ const STATIC_ROUTES = [
   // case-sensitive includes() either, so the marker was narrower still.)
   // BOARD_PURPOSE is printed unconditionally above the tiles.
   { path: '/conformance', markers: ['A cohort is one vendor collected one way', 'Conformance could not be shown'] },
+  // ⛔ THE MARKER IS THE SUBTITLE, NOT THE TITLE. 'Bandwidth trend' is this
+  // page's nav LABEL, and the sidebar renders every label into every page from
+  // the shared layout — so a title marker is satisfied by a working shell around
+  // a dead page, which is the exact failure this sweep exists to catch. The
+  // subtitle renders in all three branches (unscoped, scoped, and the
+  // scope-unknown refusal), and the refusal heading is OR'd beside it.
+  { path: '/capacity', markers: ['where the measured trend reaches', 'The bandwidth trend could not be shown'] },
   // ⛔ 'Log search is not available' USED TO SIT HERE AND NOTHING RENDERED IT
   // (found 2026-09-27 by tests/smokeHarness.test.js's new source check). The
   // capability-refusal branch draws `components/ui/NoAccess.js`, whose wording is

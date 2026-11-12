@@ -414,3 +414,46 @@ describe('⛔ a marker must match the RESPONSE, not the JSX', () => {
     }
   });
 });
+
+// ⛔ EVERY NAV DESTINATION MUST BE IN THE SMOKE TABLE (added v2.225.0).
+//
+// `npm run smoke` is the ONLY gate that loads a page: every dashboard route is
+// `force-dynamic`, so `next build` never renders one, and nothing in `npm test`
+// does either. That is how v2.120.0 shipped a BLANK `/reports` past 2,399
+// passing tests and a clean build — a function prop handed from a server
+// component to a client one, which React refuses to serialise, and a production
+// build withholds the message.
+//
+// ⛔ SO A PAGE THAT IS NOT IN THE TABLE IS A PAGE NOTHING RENDERS BEFORE A
+// CUSTOMER DOES. `/capacity` shipped that way in this very version: the table
+// held 25 routes, the deploy reported a cheerful "25/25 pages rendered", and
+// the one brand-new page was not among them. A count cannot notice an absence,
+// which is why this asserts the SET.
+describe('⛔ the smoke table covers every nav destination', () => {
+  it('no sidebar destination is missing from scripts/smoke.js', () => {
+    const { NAV_SECTIONS, SETTINGS_ITEM } = require('../lib/navRegistry');
+    const src = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, '..', 'scripts', 'smoke.js'), 'utf8'
+    );
+
+    const destinations = [];
+    for (const section of NAV_SECTIONS) {
+      for (const item of (section.items || [])) destinations.push(item.href);
+    }
+    destinations.push(SETTINGS_ITEM.href);
+
+    const escape = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const missing = destinations.filter(
+      (href) => !new RegExp(`path: '${escape(href)}'`).test(src)
+    );
+
+    assert.deepStrictEqual(
+      missing,
+      [],
+      'These sidebar destinations are not swept, so nothing renders them before a '
+      + 'customer does. Add each to the route table in scripts/smoke.js with a CONTENT '
+      + 'marker — ⛔ never a nav label, which the shared layout renders into every page:\n  '
+      + missing.join('\n  ')
+    );
+  });
+});
