@@ -619,6 +619,11 @@ async function runVpnSessionPollJob() {
     let vpnHistoryUpserted = 0;
     let vpnHistoryEnded = 0;
     let vpnUnsessionizable = 0;
+    // ⛔ Devices whose IPSec tunnel pull RAN and could not be read. Counted
+    // for the same reason as `vpnUnsessionizable` above: the rows were left
+    // alone rather than deleted, which is correct, and a correct skip that
+    // nothing reports is a snapshot that stops advancing in silence.
+    let vpnTunnelsNotMeasured = 0;
 
     for (const device of devices) {
       if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
@@ -693,10 +698,24 @@ async function runVpnSessionPollJob() {
         // tunnel-pull failure (a different command, may have its own access
         // requirements) never fails the session poll above. Only a successful
         // pull writes; [] legitimately clears (no tunnels).
+        //
+        // ⛔ AND `null` IS A THIRD ANSWER (2026-11-13): the pull ran and its
+        // result could not be read, so `storeVpnTunnels()` SKIPS the delete and
+        // the device keeps its last-known rows, which then age into `stale` in
+        // `vpnTunnelHealth`. It is LOGGED here rather than passed over, because
+        // the whole point of the tri-state is that a gap in our own measurement
+        // is visible — an un-logged skip is a device whose tunnel snapshot
+        // silently stops advancing while nothing reports a fault.
         if (typeof adapter.getVpnTunnels === 'function') {
           try {
             const tunnels = await adapter.getVpnTunnels();
-            await storeVpnTunnels(device.id, tunnels, pool);
+            const tunResult = await storeVpnTunnels(device.id, tunnels, pool);
+            if (tunResult && tunResult.measured === false) {
+              vpnTunnelsNotMeasured += 1;
+              logger.warn(
+                `Job [vpn-session-poll] IPSec tunnel pull for device ${device.id} (${device.name || 'unnamed'}, vendor=${device.vendor}) returned NOT MEASURED — the adapter could not read its own answer. The stored tunnel rows were left untouched rather than deleted; see the [${device.vendor}] warning above for the reason.`
+              );
+            }
           } catch (tunErr) {
             logger.warn(
               `Job [vpn-session-poll] IPSec tunnel pull failed for device ${device.id} (${device.name || 'unnamed'}): ${tunErr.message}`
@@ -744,7 +763,7 @@ async function runVpnSessionPollJob() {
 
     const durationMs = Date.now() - start;
     logger.info(
-      `Job [vpn-session-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no VPN capability) ${skipped}, ${devices.length} active device(s) total; history: ${vpnHistoryUpserted} session(s) upserted, ${vpnHistoryEnded} ended, ${vpnUnsessionizable} not sessionizable (no usable login_time — connected, but absent from history).`
+      `Job [vpn-session-poll] finished in ${durationMs}ms — polled ${polled}, skipped (no VPN capability) ${skipped}, ${devices.length} active device(s) total; history: ${vpnHistoryUpserted} session(s) upserted, ${vpnHistoryEnded} ended, ${vpnUnsessionizable} not sessionizable (no usable login_time — connected, but absent from history); IPSec tunnels: ${vpnTunnelsNotMeasured} device(s) NOT MEASURED (existing rows kept, not deleted).`
     );
   } catch (err) {
     const durationMs = Date.now() - start;

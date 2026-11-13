@@ -267,3 +267,92 @@ describe('the sizing guide states measurements, not estimates', () => {
     assert.match(doc, /What a restore does not bring back/i);
   });
 });
+
+describe('⛔ the backup directory is locked down before a secret is written into it', () => {
+  // ⛔ THIS DIRECTORY HOLDS CREDENTIAL_KEY BESIDE THE CIPHERTEXT IT DECRYPTS.
+  // Measured on the reference deployment 2026-11-13: E:\SecVaultBackup carried
+  // an inherited `BUILTIN\Users:(I)(OI)(CI)(RX)` over 14 .env copies and 28
+  // .pem files, so any non-admin local account could read CREDENTIAL_KEY,
+  // PG_ADMIN_PASSWORD and the console's TLS private key. The script's own
+  // header had said "ACL it" since v2.133.0 with no code behind it — a
+  // documented requirement reading as though it were handled, which is what
+  // kept anyone from checking. That is the whole reason this is a test.
+
+  it('restricts the directory to SYSTEM and Administrators', () => {
+    assert.match(backupCode, /icacls\.exe/);
+    assert.match(backupCode, /NT AUTHORITY\\SYSTEM:\(OI\)\(CI\)F/);
+    assert.match(backupCode, /BUILTIN\\Administrators:\(OI\)\(CI\)F/);
+  });
+
+  it('⛔ breaks inheritance, which is the part that actually does the work', () => {
+    // Every offending ACE was INHERITED. Granting rights without
+    // `/inheritance:r` changes nothing at all, so a "fix" that drops this flag
+    // would pass a grant-only assertion while leaving the directory readable.
+    assert.match(backupCode, /'\/inheritance:r'/);
+  });
+
+  it('⛔ runs on EVERY backup, not only when the directory is created', () => {
+    // Every deployed server already HAS the directory, so a lockdown nested
+    // inside the `New-Item` branch would reach fresh installs ONLY and repair
+    // no installation in the field — the `CREATE TABLE IF NOT EXISTS` trap
+    // CLAUDE.md records, where the diff looks correct and the defect survives
+    // on every machine that matters.
+    //
+    // ⛔ THE CHECK IS BRACE DEPTH, NOT PROXIMITY. The first version of this
+    // test asserted only that a newline separated the two — which nesting
+    // satisfies too, so it passed against a lockdown moved inside the branch.
+    // A guard that cannot fire, in the test written to stop exactly that.
+    const guard = backupCode.indexOf('if (-not (Test-Path $BackupDir))');
+    const acl = backupCode.indexOf("'/inheritance:r'");
+    assert.ok(guard >= 0, 'the directory-creation guard moved');
+    assert.ok(acl > guard, 'the lockdown is gone, or runs before the directory exists');
+    const between = backupCode.slice(guard, acl);
+    let depth = 0;
+    for (const ch of between) {
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+    }
+    assert.equal(
+      depth, 0,
+      'the lockdown sits ' + depth + ' block(s) deep relative to the directory-creation '
+      + 'guard, so it only runs on a fresh install and no deployed server is ever repaired',
+    );
+  });
+
+  it('⛔ runs BEFORE the dump and before the key copy, never after', () => {
+    // The exposure is created by WRITING the key here, so the window has to be
+    // shut first. Locking down at the end leaves the secrets readable for as
+    // long as pg_dump takes (~9 minutes on the reference fleet), every night.
+    const acl = backupCode.indexOf('/inheritance:r');
+    const dump = backupCode.indexOf('$PgDump @dumpArgs');
+    const keyCopy = backupCode.indexOf('$envCopy');
+    assert.ok(dump >= 0 && keyCopy >= 0, 'the dump or the key copy moved');
+    assert.ok(acl < dump, 'the lockdown runs after pg_dump has already written the dump');
+    assert.ok(acl < keyCopy, 'the lockdown runs after CREDENTIAL_KEY has already been copied');
+  });
+
+  it('⛔ VERIFIES the resulting ACL rather than trusting the exit code', () => {
+    // A zero exit says icacls RAN. The only fact that matters is whether a
+    // non-admin principal can still read the directory — the same correction
+    // the CREDENTIAL_KEY copy already carries.
+    assert.match(backupCode, /\$aclCheck\s*=\s*Invoke-Native/);
+    assert.match(backupCode, /BUILTIN\\\\Users\|/);
+  });
+
+  it('⛔ warns and keeps going, but cannot report success', () => {
+    // Refusing would trade a conditional read exposure for a CERTAIN loss of
+    // recoverability. So it follows Update-SecVault.ps1's page-sweep
+    // precedent: non-fatal, but it clears the completion flag, so the closing
+    // banner cannot say "complete" and the scheduled task shows non-zero.
+    assert.match(backupCode, /if \(-not \$dirSecured\) \{\s*\n\s*\$backupComplete = \$false/);
+    // And the failure is a [FAIL], not a [WARN] — it is the same severity as a
+    // dump that cannot restore credentials, because the consequence is that
+    // the key is readable by anyone with a local account.
+    // ⛔ BOTH failure paths are asserted. Pinning only the flag's message
+    // PASSED while the icacls line itself was downgraded to a [WARN]: two
+    // failure paths, one assertion, and the weaker half unguarded.
+    assert.match(backup, /\[FAIL\][^\n]*Could not restrict \$BackupDir/);
+    assert.match(backup, /\[FAIL\][^\n]*STILL grants a non-admin principal/);
+    assert.match(backup, /\[FAIL\][^\n]*could not be restricted to SYSTEM and Administrators/);
+  });
+});

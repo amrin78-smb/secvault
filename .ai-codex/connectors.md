@@ -778,11 +778,29 @@ overlapping fleet-wide runs previously produced intermittent failures in both jo
 **Optional `getVpnTunnels()`** (IPSec site-to-site tunnel status → `vpn_ipsec_tunnels`, added 2026-07-31,
 a SEPARATE method + command from `getVpnSessionSummary`; engine-worker calls it in its own try/catch so a
 tunnel-pull failure never fails the session poll). Shape `{name, peer, status, ike_version, bytes_in,
-bytes_out, raw}`, `[]` = no tunnels (legit). Implemented for **paloalto** (`show vpn ipsec-sa`, both
+bytes_out, raw}`. ⛔ **THE ANSWER IS TRI-STATE SINCE 2026-11-13**: an ARRAY is a measurement (`[]` = genuinely no tunnels up, and clearing the rows is correct), `null`/`undefined` is NOT MEASURED and `storeVpnTunnels()` SKIPS the delete, and any other shape THROWS. Implemented for **paloalto** (`show vpn ipsec-sa`, both
 transports — SSH `sshParser.parseIpsecTunnels` tabular dedupe, XML `parser.normalizeIpsecTunnels`),
 **fortinet** (`diagnose vpn tunnel list` SSH `cliParser.parseIpsecTunnelList` + `/api/v2/monitor/vpn/ipsec`
 REST, VDOM-aware), **cisco_asa** (`show vpn-sessiondb l2l` → `parser.parseVpnSessiondbL2l`). All doc-derived,
-`[Vendor Debug]`-logged on first use, best-effort ([] on parse doubt). Not implemented for forcepoint/
+`[Vendor Debug]`-logged on first use, best-effort. ⛔ **AND "BEST-EFFORT" USED TO MEAN `[]` ON PARSE
+DOUBT, WHICH DELETED THE DEVICE'S TUNNELS.** All **five** implementations degraded a parse/normalization
+failure to an empty array, `storeVpnTunnels()` read that as a measured zero, and `topology.js`'s
+`buildVpnEdges()` then drew the firewall with NO TUNNELS AT ALL — a confident wrong answer rather
+than a gap, from a vendor shape the normalizer did not expect. Each now returns `null` with a named
+`[Vendor]` warning, so the last-known rows are kept and age into `stale` via
+`vpnTunnelHealth.classifyFreshness()` (120 min). That is also what already happened when the pull
+THREW, so a parse failure and a transport failure finally behave alike.
+⛔ **Fortinet additionally refused its own PARTIAL VDOM result.** The multi-VDOM loop returned the
+tunnels of whichever VDOMs answered whenever at least one did, so one VDOM's monitor failing deleted
+that VDOM's tunnels and reported the rest as the device's complete set — the defect CLAUDE.md
+already names for `getRules()` ("collect every VDOM or fail"), in a second method that rule never
+looked at. It returns `null` now; the pre-existing every-VDOM-failed branch still THROWS, because
+that is a transport failure rather than an unreadable answer.
+⛔ **What is NOT fixed, stated rather than implied:** `cisco_asa`'s `parseVpnSessiondbL2l()` fails
+closed to `[]` INTERNALLY, so CLI output it cannot make sense of still arrives as an empty array and
+is stored as a measured zero. Tightening that needs live `show vpn-sessiondb l2l` output to verify
+against (no ASA on the reference fleet reports tunnels), and guessing the shapes it should refuse is
+the "documentation lies" trap. Not implemented for forcepoint/
 checkpoint/sangfor (same no-endpoint findings as their `getVpnSessionSummary` column). Also 2026-07-31:
 `vpnSummary.summarizePaloAlto` now surfaces GlobalProtect **gateway/portal names** (config inventory,
 `extractEntryNames`, both transports) instead of only the opaque found-at path.

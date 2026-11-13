@@ -1184,7 +1184,20 @@ the second reuses the first UNCHANGED as its per-hop evaluator:
    (sorted by name) whose address parses cleanly, editable before submitting. **VPN-tunnel-peer
    edges** (added 2026-08-03): a SECOND, independent edge type (`type:'vpn'`, dashed) alongside the
    original shared-subnet edges (`type:'subnet'`, solid) — `buildVpnEdges()` matches each device's
-   already-collected `vpn_ipsec_tunnels.peer` (the `getVpnTunnels()` adapter capability, scheduled
+   already-collected `vpn_ipsec_tunnels.peer` (the `getVpnTunnels()` adapter capability — ⛔ whose
+   answer is **TRI-STATE since v2.225.3**: an ARRAY is a measurement (`[]` = genuinely no tunnels up,
+   and `storeVpnTunnels()` clears the rows), `null`/`undefined` is NOT MEASURED and the DELETE is
+   SKIPPED, any other shape THROWS. It was `Array.isArray(tunnels) ? tunnels : []`, so every
+   unreadable answer became a WIPE — all **five** implementations (both Fortinet transports are separate
+   files, and `fortinet/ssh.js` — the one carrying tunnels on the live fleet — was the one a
+   hardcoded four-file test missed) degraded a parse failure to an empty list, and
+   `undefined` is what a method returns when it falls off its own end, so one unexpected vendor shape
+   deleted a firewall's whole tunnel set and `buildVpnEdges()` below then drew it with no tunnels at
+   all. Keeping the rows lets `vpnTunnelHealth.classifyFreshness()` report the snapshot `stale` and
+   collapse every status to `unmeasured`, which is what ALREADY happened when the pull THREW — the
+   inconsistency between a parse failure and a transport failure was the defect. ⛔ Fortinet also
+   refused its own PARTIAL VDOM result, which is the rule this file already states for `getRules()`
+   ("collect every VDOM or fail") in a second method that rule never looked at — scheduled
    independently of the rule-version-pull job — see Feed Sources/Engine Worker) against every OTHER
    device's own interface IPs. Exists because several Fortinet branches use UNNUMBERED IPsec tunnel
    interfaces (`ip: 0.0.0.0`, confirmed live) — invisible to the subnet-overlap mechanism even
@@ -2821,6 +2834,25 @@ authentication errors that read as though the firewalls changed their passwords.
 **compares the two keys and ABORTS on a mismatch** (`-SkipKeyCheck` to override deliberately).
 ⛔ The consequence is that the backup directory is as sensitive as the database — it holds the
 encryption key beside the encrypted credentials. ACL it.
+
+⛔ **AND "ACL IT" WAS A DOCUMENTED REQUIREMENT WITH NO CODE BEHIND IT FOR ITS WHOLE LIFE — NOW
+FIXED (v2.225.3).** The sentence above shipped with v2.133.0 and nothing ever did it. Measured on the
+reference deployment 2026-11-13: `E:\SecVaultBackup` carried `BUILTIN\Users:(I)(OI)(CI)(RX)`
+INHERITED from the volume root, across **14 `.env` copies and 28 `.pem` files** — so any non-admin
+local account could read `CREDENTIAL_KEY` (which decrypts every row of `device_credentials`, i.e. the
+whole fleet's firewall passwords), `PG_ADMIN_PASSWORD` (the cluster superuser, shared with five
+sibling apps) and the console's TLS private key. ⛔ **The sentence reading as though it were handled
+is exactly what kept anyone from checking** — a requirement in prose cannot fail a build, which is
+this repo's guard-that-cannot-fire pattern aimed at its own worst secret. `Backup-SecVault.ps1` now
+runs `icacls /inheritance:r` granting only SYSTEM and Administrators `(OI)(CI)F`, **on every backup
+rather than only at creation** (every deployed server already HAS the directory, so a create-time fix
+would reach fresh installs only — the `CREATE TABLE IF NOT EXISTS` trap), **before the dump** (the
+exposure is created by writing the key there), and it VERIFIES the resulting ACL rather than trusting
+icacls' exit code. ⛔ It WARNS and continues rather than refusing, because skipping the backup trades
+a conditional read exposure for a CERTAIN loss of recoverability — but it clears `$backupComplete`,
+so the closing banner cannot report success and the scheduled task shows non-zero. Pinned by
+`tests/backupScripts.test.js` (brace-depth assertion for the unconditional property, ordering
+assertions against the dump and the key copy; six mutations verified).
 
 ⛔ **A BACKUP VERIFIES ITSELF WHILE A GOOD COPY STILL EXISTS.** Free space is checked before the
 dump (a dump that fills its volume leaves a TRUNCATED file that looks complete); the finished

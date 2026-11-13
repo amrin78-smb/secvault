@@ -261,6 +261,72 @@ if (-not $BackupDir) {
 if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null }
 Write-Log "  Target   : $BackupDir"
 
+# ── Lock the directory down BEFORE a secret is written into it ───────────
+#
+# ⛔ THIS DIRECTORY HOLDS `CREDENTIAL_KEY` BESIDE THE CIPHERTEXT IT DECRYPTS,
+# AND IT WAS WORLD-READABLE ON THE REFERENCE DEPLOYMENT FOR ITS WHOLE LIFE.
+# Measured 2026-11-13 on `E:\SecVaultBackup`: `BUILTIN\Users:(I)(OI)(CI)(RX)`
+# inherited from the volume root, across 14 `.env` copies and 28 `.pem` files --
+# so any non-admin local account could read CREDENTIAL_KEY (which decrypts every
+# row of `device_credentials`, i.e. the whole fleet's firewall passwords),
+# PG_ADMIN_PASSWORD (the cluster superuser, shared with five sibling apps) and
+# the console's TLS private key. ⛔ This script's own header has said "ACL it"
+# since v2.133.0 and nothing ever did: a documented requirement with no code
+# behind it is this repo's guard-that-cannot-fire pattern aimed at its worst
+# secret, and the sentence reading as though it were handled is what kept
+# anyone from checking.
+#
+# ⛔ IT RUNS ON EVERY BACKUP, NOT ONLY WHEN THE DIRECTORY IS CREATED. Every
+# deployed server already has the directory, so a create-time fix would reach
+# FRESH INSTALLS ONLY -- exactly the `CREATE TABLE IF NOT EXISTS` trap CLAUDE.md
+# records, where the diff looks correct and no installation in the field is ever
+# repaired. icacls is idempotent, so the healthy case is one cheap call.
+#
+# ⛔ BEFORE THE DUMP, NOT AFTER. The exposure is created by WRITING the key
+# here, so the window has to be shut first; locking down at the end would leave
+# the secrets readable for however long pg_dump takes (~9 minutes on the
+# reference fleet) every single night.
+#
+# ⛔ `/inheritance:r` IS WHAT DOES THE WORK, NOT THE GRANTS. Every offending
+# ACE was INHERITED (`(I)`), so granting rights without breaking inheritance
+# changes nothing at all. `(OI)(CI)F` then reaches the sets already on disk as
+# well as future ones -- verified on production 2026-11-13: 0 of 56 files still
+# grant a non-admin principal. ⛔ The scheduled task runs as SYSTEM, which keeps
+# full control, so nothing the backup could do before is lost; `Restore`-side
+# access is unaffected because a restore is run elevated.
+#
+# ⛔ IT WARNS AND KEEPS GOING; IT DOES NOT REFUSE. Skipping the backup would
+# trade a conditional read exposure for a CERTAIN loss of recoverability, and a
+# restore without this key comes back unable to reach one firewall (see the
+# header). So it follows the page-sweep precedent in `Update-SecVault.ps1`:
+# non-fatal, but it clears `$backupComplete`, so the closing banner cannot
+# report success over a set whose secrets are exposed and the scheduled task
+# shows a non-zero result.
+$aclArgs = @(
+    $BackupDir, '/inheritance:r',
+    '/grant:r', 'NT AUTHORITY\SYSTEM:(OI)(CI)F',
+    '/grant:r', 'BUILTIN\Administrators:(OI)(CI)F'
+)
+$dirSecured = $false
+$aclOut = Invoke-Native { & icacls.exe @aclArgs 2>&1 }
+$aclExit = $LASTEXITCODE
+if ($aclExit -ne 0) {
+    Write-Log "  [FAIL] Could not restrict $BackupDir (icacls exit $aclExit): $($aclOut -join ' ')"
+} else {
+    # ⛔ VERIFIED, NOT ASSUMED -- the same correction the CREDENTIAL_KEY copy
+    # further down already carries. A zero exit says icacls RAN, not that the
+    # resulting ACL is what was asked for, and the only fact that matters here
+    # is whether a non-admin principal can still read this directory.
+    $aclCheck = Invoke-Native { & icacls.exe $BackupDir 2>&1 }
+    $aclText = ($aclCheck -join ' ')
+    if ($aclText -match 'BUILTIN\\Users|\bEveryone\b|Authenticated Users|\bINTERACTIVE\b') {
+        Write-Log "  [FAIL] $BackupDir STILL grants a non-admin principal after lockdown: $aclText"
+    } else {
+        $dirSecured = $true
+        Write-Log '  Restricted to SYSTEM and Administrators, inheritance broken. CREDENTIAL_KEY, PG_ADMIN_PASSWORD and the TLS private key are all written here.'
+    }
+}
+
 # ── Refuse to start without room ────────────────────────────────────────────
 #
 # A dump that fills the volume it is written to leaves a TRUNCATED FILE THAT
@@ -495,6 +561,10 @@ if ($canVerifyContents) {
 }
 
 $backupComplete = $true
+if (-not $dirSecured) {
+    $backupComplete = $false
+    Write-Log '  [FAIL] The backup directory could not be restricted to SYSTEM and Administrators (see above). This set carries CREDENTIAL_KEY, PG_ADMIN_PASSWORD and the TLS private key where a non-admin local account may be able to read them.'
+}
 if ($verifyFailures.Count -gt 0) {
     $backupComplete = $false
     Write-Log '  [FAIL] THIS DUMP IS READABLE BUT NOT COMPLETE:'

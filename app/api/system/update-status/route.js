@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.225.3': [
+    'Security: the nightly backup directory is now locked to administrators and the system account, and this release also corrected it on the live server. The backup holds the key that decrypts every stored firewall credential, the database superuser password and the console\u2019s TLS private key \u2014 and the directory had inherited read access for every local user account on the machine, across all fourteen retained backup sets. Nothing in the product had ever set permissions on it, although the requirement had been written down since the backup feature shipped.',
+    'The backup now sets those permissions on every run rather than only when it first creates the directory \u2014 servers already running had the directory, so a first-time-only fix would never have reached any of them \u2014 and it does so before writing anything secret, then checks the result instead of assuming it worked. If the permissions cannot be set the backup still runs, because a missing backup is worse, but it reports a failure rather than finishing quietly.',
+    'Fixed: an unreadable VPN tunnel reading could delete a firewall\u2019s recorded tunnels. When a firewall returned tunnel output the product could not interpret, that was stored as \u201cthis firewall has no tunnels\u201d \u2014 so the real tunnels were removed and the firewall then appeared unconnected on the fleet map, with nothing reporting a problem. The three possible answers are now kept apart: tunnels found, genuinely none, and could not be read. The last one leaves the existing records alone, marks them as ageing, and names the firewall in the engine log.',
+    'Related: on a firewall split into several virtual domains, one domain failing to answer used to store the remaining domains\u2019 tunnels as the complete picture, deleting the tunnels of the domain that did not answer. A partial reading is now treated as \u201ccould not be read\u201d.',
+    'A reading that genuinely finds no tunnels still clears them, which is the correct behaviour when a tunnel has come down \u2014 that half is unchanged.',
+  ],
   '2.225.2': [
     'Fixed a display fault on the new Bandwidth trend page: the dashed outline that means "this number could not be measured" was on the wrong tiles. It appeared on a figure that was measured, and was missing from figures that had been withheld — so the page said the opposite of the truth about its own numbers. The dashed outline now follows the withheld value.',
     'No figure changed; this is how the page marks what it does and does not know.',

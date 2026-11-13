@@ -1001,6 +1001,14 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 ## lib/engines/vpnTunnels.js
 
 `storeVpnTunnels(deviceId, tunnels, pool)` / `getVpnTunnels(deviceId, pool)` — same live-snapshot DELETE+reinsert + read pattern as vpnSessions.js, for `vpn_ipsec_tunnels`. Tunnel shape: `{name, peer, status, ike_version, bytes_in, bytes_out, raw}`. Fed by the adapters' optional `getVpnTunnels()` (PAN-OS `show vpn ipsec-sa`, Fortinet `diagnose vpn tunnel list`, Cisco `show vpn-sessiondb l2l`), stored by the engine-worker VPN poll in its own try/catch (a tunnel-pull failure never fails the session poll). Added 2026-07-31.
+⛔ **`tunnels` IS TRI-STATE AND THE RETURN IS `{count, measured}` (2026-11-13).** An array is a
+measurement — `[]` means the device genuinely has none and the rows ARE cleared; `null`/`undefined`
+means NOT MEASURED and the DELETE is SKIPPED (returns `{count: null, measured: false}` BEFORE the
+transaction opens, so no path leaves a delete without its reinsert); any other shape throws a
+`TypeError`. It was `Array.isArray(tunnels) ? tunnels : []`, which turned every unreadable answer —
+including the `undefined` a method returns when it falls off its own end — into a wipe. The
+engine-worker reads `measured` back, logs the device and counts it into the job summary, because a
+correct skip that nothing reports is a snapshot that silently stops advancing.
 
 ## lib/engines/dashboardSnapshot.js
 
