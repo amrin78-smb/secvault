@@ -221,7 +221,7 @@ export default function TlsPanel() {
               <Row label="Issued by">
                 {c.issuer}{' '}
                 {c.selfSigned && (
-                  <Badge color="warn" title="Browsers will warn until this certificate is trusted">
+                  <Badge color="warning" title="Browsers will warn until this certificate is trusted">
                     self-signed
                   </Badge>
                 )}
@@ -238,7 +238,7 @@ export default function TlsPanel() {
                 {c.expired
                   ? <Badge color="danger">expired</Badge>
                   : expiringSoon
-                    ? <Badge color="warn">{c.daysRemaining} days left</Badge>
+                    ? <Badge color="warning">{c.daysRemaining} days left</Badge>
                     : <span style={{ color: 'var(--text-muted)' }}>({c.daysRemaining} days left)</span>}
               </Row>
               <Row label="Served on">

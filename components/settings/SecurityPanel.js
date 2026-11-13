@@ -128,7 +128,7 @@ export default function SecurityPanel() {
           {status.enabled
             ? <Badge color="success">Active</Badge>
             : <Badge color="muted">Off</Badge>}
-          {status.required && <Badge color="warn">Required by an administrator</Badge>}
+          {status.required && <Badge color="warning">Required by an administrator</Badge>}
         </CardTitle>
       </CardHeader>
 

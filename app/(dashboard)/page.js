@@ -190,7 +190,25 @@ export default async function DashboardPage({ searchParams }) {
   // count query on a populated install and never hides real data.
   const firstRun = await FirstRun();
   if (firstRun) {
-    return <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>{firstRun}</div>;
+    // ⛔ THE h1 TRAVELS WITH THE EARLY RETURN. This branch used to return
+    // before reaching the `sr-only` h1 thirty lines below, so on EVERY FRESHLY
+    // INSTALLED SecVault the landing page had no h1 at all and its first
+    // heading was FirstRun's own `<h2>` — no outline root, no jump target and
+    // a skipped level, in the state every new customer sees first and while a
+    // screen-reader user is orienting themselves in an unfamiliar product.
+    // The comment beside that h1 describes this exact condition as the reason
+    // it exists; the code contradicted it in precisely the state it is about.
+    //
+    // ⛔ `tests/pageHeading.test.js` COULD NOT SEE IT. It is a source scan —
+    // `if (/<h1[\s>]/.test(src)) continue;` — and the literal IS in the file,
+    // just on a branch this one never reaches. The project's own "verify the
+    // outcome, not the mechanism" rule, failing on the file that documents it.
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <h1 className="sr-only">Overview</h1>
+        {firstRun}
+      </div>
+    );
   }
 
   const feedSyncs = await getLastFeedSync(pool);

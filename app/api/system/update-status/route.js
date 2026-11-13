@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.225.5': [
+    'Fixed: a firewall whose collector is measured as Degraded showed the same grey dot as one that has never been polled at all. The dot was asked for a colour name the component does not know, and it quietly fell back to the neutral that means \u201cnothing observed\u201d \u2014 so a real, measured problem looked like missing data on the firewall list and on all six per-firewall pages.',
+    'Fixed, same cause: a certificate within 30 days of expiry, and an account with multi-factor required but not switched on, both showed a plain grey chip instead of an amber one. A check now fails the build if any badge is given a colour name that does not exist.',
+    'Accessibility: the keyboard focus outline on the search box of every filter bar was white on a near-white background \u2014 effectively invisible. A rule written for the dark header bar was not limited to it. The \u201cSkip to content\u201d link, which is the very first thing a keyboard user reaches on every page, and the report catalogue list had the same problem from a different cause.',
+    'Accessibility: the subtitle under every page title was too faint against the page background to meet the contrast standard. The stylesheet already recorded that exact measurement for the line above it, and only that line had been fixed. 27 pages are affected.',
+    'Fixed: on a brand-new installation the home page had no main heading at all, because the welcome screen returned before the heading was reached. Screen-reader users had nothing telling them which page they were on, in the state every new installation starts in.',
+  ],
   '2.225.4': [
     'Fixed: one unreadable byte in a single log message could make the collector re-insert the rest of a batch hundreds of times. A NUL byte, which the database cannot store in text, was reaching the insert because the raw-message field bypassed every other value check \u2014 and a rejected batch is retried whole, so records that had already been stored were stored again on every retry. Such a byte is now removed and counted, and an oversized traffic-byte count is recorded as \u201cnot measured\u201d rather than rejected.',
     'Fixed: a scheduled job whose moment passed while the server was busy was skipped entirely rather than run late. This had already cost four days of fleet history that cannot be reconstructed. The daily housekeeping jobs and the monthly compliance report now run as soon as the server is free again \u2014 deliberately not the frequent jobs, where running twice would be worse than running late.',

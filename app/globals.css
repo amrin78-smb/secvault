@@ -735,9 +735,16 @@ tbody tr:hover td { background: var(--bg-primary); }
   letter-spacing: -0.3px;
   margin: 0;
 }
+/* ⛔ `--text-secondary`, NOT `--text-muted`. Four lines above, `.page-eyebrow`
+   carries this exact measurement — "--text-muted measures 4.27:1 on
+   --bg-primary, under WCAG 1.4.3's 4.5:1" — and only that selector was
+   fixed. `.page-subtitle` sits in the same `PageHeader`, on the same ground,
+   and **27 of 36 pages pass a subtitle**, so the recorded failure stayed live
+   on 27 pages next to the note describing it. `--text-secondary` is 8.53:1
+   there. Light theme only; dark already passed. */
 .page-subtitle {
   font-size: var(--text-base);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -2750,9 +2757,19 @@ html[data-nav="drawer"] .sv-nav-trigger { display: flex; }
 }
 .skip-link:focus {
   top: var(--s3);
-  /* --focus-ring, not --shell-focus-ring: this chip sits on --bg-card, which
-     DOES flip, so the flipping token is the correct one here. */
-  outline: 2px solid var(--focus-ring);
+  /* ⛔ `--primary`, NOT `--focus-ring`. The old comment reasoned only about
+     THEME FLIPPING — "this chip sits on --bg-card, which DOES flip, so the
+     flipping token is the correct one here" — and never about contrast.
+     `--focus-ring` is `rgba(10,143,163,0.22)`, a 22%-alpha wash that composites
+     to a measured **1.30:1** against WCAG 1.4.11's 3:1. This is the FIRST TAB
+     STOP on every authenticated page, so the one control a keyboard user
+     reaches before anything else had a ring they cannot see, while every other
+     focusable on the page gets 4.30-8.19:1.
+     ⛔ The old comment's premise was also wrong about the ground:
+     `outline-offset: 2px` draws the ring OUTSIDE the chip, on `--bg-primary`,
+     not on the `--bg-card` it named. `--primary` flips too, so the
+     theme-flipping half of the reasoning still holds. */
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 /* The target is a <main tabIndex={-1}>; it must not draw a ring of its own
@@ -2901,7 +2918,20 @@ body[data-readonly="true"] .btn-danger {
    always stop #0. It sits on the navy bar, so the ring is white rather than
    --primary (which would be near-invisible on navy). !important is required to
    beat the element's own inline style. */
-input[type='search']:focus-visible,
+/* ⛔ SCOPED TO THE SHELL. The first selector used to be a bare
+   `input[type='search']:focus-visible`, which matches ANY search input
+   anywhere — and `FilterBar`'s SearchFilter is the only other one in the
+   repo, sitting on `--bg-primary` (#F7F9FB). So the white ring written for the
+   navy bar was painted on a near-white canvas at a measured **1.05:1**, i.e.
+   no visible focus indicator at all, on the primary search control of
+   /devices, /work, /alerts, /exposure and /vpn. The `<select>` beside it kept
+   a correct 4.30:1 `--primary` ring, so a keyboard user watched the indicator
+   vanish on one control and reappear on the next.
+   ⛔ The comment above scoped the REASONING to the header ("it sits on the
+   navy bar") while the selector did not, and `!important` meant the leak beat
+   `.input:focus-visible`'s correct ring. Measured after: 11.87:1 on the header
+   input (unchanged), `--primary` at 4.30:1 on the filter bar. */
+.sv-topbar input[type='search']:focus-visible,
 .sv-topbar input:focus-visible {
   outline: 2px solid rgba(255, 255, 255, 0.9) !important;
   outline-offset: 2px;
@@ -3421,7 +3451,10 @@ tbody tr td { transition: background 0.12s ease; }
   transition: border-color 120ms ease, background 120ms ease;
 }
 .rpt-rail-item:hover { border-color: var(--primary); background: var(--surface-subtle); }
-.rpt-rail-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* --primary, not --focus-ring: the latter is a 22%-alpha wash measuring 1.30:1.
+   Same correction as .skip-link above; every stylesheet neighbour here already
+   uses --primary. */
+.rpt-rail-item:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .rpt-rail-item { transition: none; } }
 
 /* ⛔ The selected state is carried by the LEFT BAR and the background, not by

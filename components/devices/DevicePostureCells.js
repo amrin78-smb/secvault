@@ -320,7 +320,14 @@ const SOURCE_LABEL = {
 const POLL_TONE = {
   healthy: { color: 'green', label: 'Healthy' },
   flaky: { color: 'green', label: 'Mostly healthy' },
-  degraded: { color: 'yellow', label: 'Degraded' },
+  // ⛔ `amber`, NOT `yellow`. StatusDot's map is keyed green/amber/red/grey
+  // and resolves an unknown key with `|| STATUS_COLOR.grey` — so `yellow`
+  // rendered the SAME dot as `unknown` below, collapsing a MEASURED
+  // "Degraded" into "no polls recorded at all" in the one cell that
+  // reports fleet reachability, on /devices and all six per-device pages.
+  // This codebase's signature measured-vs-not-measured collapse, caused by
+  // a token name where a semantic name belongs.
+  degraded: { color: 'amber', label: 'Degraded' },
   failing: { color: 'red', label: 'Failing' },
   unknown: { color: 'grey', label: 'Not observed' },
 };
