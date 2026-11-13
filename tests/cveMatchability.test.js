@@ -262,11 +262,11 @@ describe('configAuditor: a skipped O(n^2) pass is `na`, never `pass`', () => {
   };
 
   it('still passes when the pass RAN and found nothing', () => {
-    assert.equal(evaluateRuleScanCheck(check, {}, []).status, 'pass');
+    assert.equal(evaluateRuleScanCheck(check, {}, [], true).status, 'pass');
   });
 
   it('still fails when the pass ran and matched rules', () => {
-    const out = evaluateRuleScanCheck(check, { shadow: ['r1', 'r2'] }, []);
+    const out = evaluateRuleScanCheck(check, { shadow: ['r1', 'r2'] }, [], true);
     assert.equal(out.status, 'fail');
     assert.deepEqual(out.matchedRuleIds, ['r1', 'r2']);
   });
@@ -275,7 +275,7 @@ describe('configAuditor: a skipped O(n^2) pass is `na`, never `pass`', () => {
     // SecVault's own O(n^2) cap is a fact about SECVAULT, so it leaves the score denominator
     // entirely. A `pass` would credit the device for an analysis nobody performed; a `warning`
     // would penalise it for our limitation. Both are wrong in opposite directions.
-    const out = evaluateRuleScanCheck(check, {}, PAIRWISE_FINDING_TYPES);
+    const out = evaluateRuleScanCheck(check, {}, PAIRWISE_FINDING_TYPES, true);
     assert.equal(out.status, 'na');
     assert.deepEqual(out.matchedRuleIds, []);
     assert.match(out.detail, /NOT MEASURED/);
@@ -287,7 +287,7 @@ describe('configAuditor: a skipped O(n^2) pass is `na`, never `pass`', () => {
       name: 'No redundant rules',
       predicate_config: { predicate_type: 'rule_scan', finding_types: ['redundant', 'any_any'] },
     };
-    assert.equal(evaluateRuleScanCheck(both, {}, ['redundant']).status, 'na');
+    assert.equal(evaluateRuleScanCheck(both, {}, ['redundant'], true).status, 'na');
   });
 
   it('leaves checks on non-pairwise finding types untouched', () => {
@@ -296,16 +296,18 @@ describe('configAuditor: a skipped O(n^2) pass is `na`, never `pass`', () => {
       name: 'No any-any allow rules',
       predicate_config: { predicate_type: 'rule_scan', finding_types: ['any_any'] },
     };
-    assert.equal(evaluateRuleScanCheck(anyAny, {}, PAIRWISE_FINDING_TYPES).status, 'pass');
+    assert.equal(evaluateRuleScanCheck(anyAny, {}, PAIRWISE_FINDING_TYPES, true).status, 'pass');
   });
 
   it('keeps the curated-data guard ahead of everything (empty finding_types -> warning)', () => {
     const broken = { check_id: 'x', name: 'x', predicate_config: { predicate_type: 'rule_scan' } };
-    assert.equal(evaluateRuleScanCheck(broken, {}, PAIRWISE_FINDING_TYPES).status, 'warning');
+    assert.equal(evaluateRuleScanCheck(broken, {}, PAIRWISE_FINDING_TYPES, true).status, 'warning');
   });
 
   it('is unchanged for callers that pass no skipped list at all', () => {
-    assert.equal(evaluateRuleScanCheck(check, {}).status, 'pass');
+    // The run state is a SEPARATE input (roadmap row 27) and is supplied here so this stays a
+    // test about the skipped list, which is what it is named for.
+    assert.equal(evaluateRuleScanCheck(check, {}, undefined, true).status, 'pass');
   });
 });
 

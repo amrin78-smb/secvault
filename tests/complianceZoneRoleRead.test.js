@@ -84,9 +84,9 @@ describe('⛔ an UNREADABLE zone map and an UNCLASSIFIED device are different fa
   it('a classified device still answers normally', () => {
     // The other half: a guard that returns `na` for everything also passes
     // every test above.
-    const clean = evaluateRulesetPropertyCheck(CHECK, RULES, ZONES, {});
+    const clean = evaluateRulesetPropertyCheck(CHECK, RULES, ZONES, {}, true);
     assert.equal(clean.status, 'pass');
-    const dirty = evaluateRulesetPropertyCheck(CHECK, RULES, ZONES, { external_exposure: ['r1'] });
+    const dirty = evaluateRulesetPropertyCheck(CHECK, RULES, ZONES, { external_exposure: ['r1'] }, true);
     assert.equal(dirty.status, 'fail');
     assert.deepEqual(dirty.matchedRuleIds, ['r1']);
   });

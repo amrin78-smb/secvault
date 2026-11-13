@@ -883,6 +883,36 @@ without updating this file first.
 | `checkpoint` | `R81.20 Take 41` | `[81, 20, 41, 0]` (R stripped, Take = 3rd segment) |
 | `sangfor` | `8.0.85` | `[8, 0, 85]` (plain dot-split) |
 
+⛔ **`parseVersion` RETURNS A FABRICATED ZERO FOR A VERSION IT CANNOT READ, AND IT IS LEFT THAT WAY
+ON PURPOSE (v2.226.0).** `parseVersion('fortinet','nope')` is `[0,0,0,0]`, which every conceivable
+target compares "at or above" — this codebase's signature bug living in a version parser on the CVE
+path. Changing the function to return `null` is a breaking change across `versionMatcher.js`,
+`feeds/nvd.js`, `feeds/paloalto.js` and every adapter's `version_tuple`, so what exists instead is
+an ADDITIVE **`parseVersionReadable()` / `isVersionReadable()`**, built from the SAME parsers (all
+five funnel through `parseForcepointVersion`'s single `Number.isNaN`) rather than a second regex
+that could disagree with the thing that actually parses. ⛔ It does `console.warn`, so it is not
+literally silent — but a log line is not a contract and the RETURN VALUE is what callers act on.
+
+⛔ **`isInRange` IS THE ONE CONVERTED CALL SITE, BECAUSE IT IS WHERE A FABRICATED ZERO BECOMES A
+VULNERABILITY VERDICT.** An unreadable bound is now IGNORED rather than compared, which is this
+file's own Critical Rule — *widen an uncertain bound, never narrow it*. **The two bounds failed in
+OPPOSITE directions and only one was dangerous:** an unreadable MIN never excluded anything, while
+an unreadable MAX excluded EVERY real version, so a live CVE read **NOT AFFECTED**. (The min-side
+check is therefore an equivalent mutant today — measured, no test can make it fire — kept for
+symmetry and recorded as such rather than presented as a working guard.)
+
+⛔ **A RANGE WITH NO READABLE BOUND DECIDES NOTHING AND IS COUNTED.** Widening both bounds would
+leave no constraint at all and flag every device of that vendor — which would break the very
+property this file relies on when it keeps Check Point's legacy CPE strings ("version matching
+makes them incapable of producing a false finding"). So such a range returns false AND
+`versionMatcher.isUnassessableAdvisory` counts the advisory as one that could not be evaluated, via
+the per-device unassessable count the matcher already reports. Measured 2026-11-13: **7 live
+advisories qualify, all `checkpoint`, every one carrying a legacy CPE PRODUCT NAME in both version
+fields** (`vsx_ng_with_application_intelligence`, `gold`, `ng`, `next_generation`), all with 0
+assessments because no Check Point firewall is deployed. 0 ranges have the mixed
+readable-min/unreadable-max shape, so **zero live assessments changed** — seven silent
+not-affecteds became counted gaps. Remaining call sites are tracked in `.ai-codex/roadmap.md`.
+
 ### Priority Decision Tree (strict order — do not reorder)
 
 ```
@@ -1161,7 +1191,28 @@ in the score's denominator:
 - **`na` = a fact about SECVAULT.** The question cannot be asked of this device at all — nothing
   the operator could change on the firewall would make it answerable. It is dropped from the
   denominator. Sources: no usable config at all, `ruleset_property` with no ruleset collected,
-  and — since 2026-08-25 — **`predicate_type: 'not_evaluable_from_config'`**.
+  — since 2026-08-25 — **`predicate_type: 'not_evaluable_from_config'`**, and — since
+  **v2.226.0** — **no COMPLETED RULE ANALYSIS RUN behind a check that reads
+  `rule_analysis_results`**.
+
+⛔ **THE LAST ONE WAS NINE FREE PASSES, AND THE GUARD THAT PRECEDED IT NAMED THE BUG AND FIXED
+ONLY HALF OF IT.** 8 `rule_scan` checks plus `rule-no-external-to-internal-access` decide from
+`rule_analysis_results`, where ZERO ROWS has two causes — the pass ran and found nothing, or the
+pass never ran. The 2026-09-09 guard wrote that sentence out and then tested only the O(n²) SIZE
+CAP, so the WHOLE-RUN case stayed open at every ruleset size and a firewall whose ruleset was
+collected but never analysed scored **pass** on all nine. **8 of the 9 are `vendor: null`**, i.e.
+they apply to every firewall of every vendor, and only **10** vendor-null checks are gradeable at
+all — so a never-analysed Sangfor (0 gradeable vendor checks) could not score below 80%. The same
+shape as v2.94.0's OKF(F2) at 100/100, in the engine that writes the audit PDF.
+⛔ **THE SIGNAL CANNOT BE `rule_analysis_results` ITSELF** — its zero-row state IS the ambiguity.
+It is `device_risk_history`, one row per completed run, which is the signal `lib/deviceContext.js`
+already uses to decide whether a device's posture figures were measured. One definition, not a
+second opinion. ⛔ THREE states: ran / never / unreadable, and an unreadable one is `na` with its
+OWN sentence ("could not determine", a SecVault fault) rather than the actionable one ("run an
+analysis"). An omitted argument is `na`, never a pass. ⛔ The guard applies to the **ZERO case
+only** — a present finding is a MEASUREMENT and still `fail`s, whatever the run state says — and
+it sits AFTER the curated-data branch, so an empty `finding_types` list stays visible as a
+`warning` on a fleet that has never been analysed.
 
 `not_evaluable_from_config` used to land on `evaluatePredicate()`'s `default: return 'unknown'`
 and so became a `warning`. That was the wrong bucket. These checks are declared unanswerable BY
@@ -1193,6 +1244,21 @@ the second reuses the first UNCHANGED as its per-hop evaluator:
    (flagged `hasCaveat:true`, not skipped past). No rule decides → `verdict:'unspecified'`, **never
    `'deny'`** — no default/implicit-policy data exists anywhere in this codebase, for any vendor.
    Single-device, config-only — has no idea what any other firewall does.
+   ⛔ **AN UN-EXPANDED GROUP IS `unresolved`, NOT AN EMPTY ONE (v2.226.0).** The group branch had
+   THREE exits and flagged none, so a definitive exclusion was built from an object nobody read:
+   a true CYCLE (correct to skip — its members were already accumulated on the first visit, and
+   the in-code comment justified the branch for that case alone), `MAX_GROUP_DEPTH` (members exist
+   and were never expanded), and a `members` list that was never enumerated. The last two now
+   report `unresolvedNames`. ⛔ **AND SO DOES AN EMPTY ARRAY, BECAUSE THE DISTINCTION IS DESTROYED
+   UPSTREAM**: all six parsers build a group row with an array either way, so `[]` arrives meaning
+   both "enumerated empty" and "never read", and the safe side is the one `exposure.js` names
+   ("under-reporting exposure is the more dangerous error"). Recovering the real answer needs a
+   change in the six PARSERS — live-verified vendor code, so its own piece of work, tracked in
+   `.ai-codex/roadmap.md`. ⛔ This is the resolver `topology.js`, `exposure.js`,
+   `applicationView.js` and `applicationRetire.js` all reuse UNCHANGED, so a wrong tri-state here
+   is wrong in four engines at once — and the identical fix had already been made one file over in
+   `ruleConsolidation`'s `dimensionOverlap` ("a zero-range non-wildcard extent is `unknown`, NOT
+   `no`") and was never applied here.
 
 2. **Fleet-wide multi-hop Path Query** (`/topology?view=query`, the default view) —
    `lib/engines/topology.js` adds ONE orchestration layer on top: infers which devices are adjacent
@@ -1317,6 +1383,44 @@ deliberate follow-up, not an oversight.
 **Command syntax was verified per-command against live devices and there is NO general rule** —
 licences need the nested form while `show interface all` needs the value form, and each was
 rejected live in the other shape. See `connectors.md` entry 11 before touching any of it.
+
+### ⛔ A whole-config READ FAILURE must never be stored as a mass deletion (v2.226.0)
+
+`detectAndStoreDiff` diffed the two newest `device_configs` rows with **no test of whether the
+NEWER one is usable**, and `diffConfigs` treats a truncated or partially-parsed tree as a
+legitimate config — so every section absent from a short snapshot came out as `removed`.
+**Measured on production:** TSR_EKM, 2026-08-06 10:26 — `0 added, 142 removed` across six
+unrelated top-level sections (ssl_vpn 65, fortiguard 45, snmp 12, log_syslogd 10, ntp 8,
+autoupdate 2) — then `142 added, 0 removed` with an identical breakdown **54 minutes later**.
+Nothing changed on the device. The operator was shown "somebody wiped the SSL-VPN, FortiGuard,
+SNMP, NTP and syslog configuration of this firewall", and the false change also drove a CVE
+re-match, an `auto` backup row and the `config_diff` outbound alert.
+
+⛔ **THE LESSON HAD ALREADY BEEN LEARNED AND APPLIED TO ONE SUBTREE.**
+`preserveSystemInfoOnReadFailure` and `cleanupSystemInfoReadFailureDiffs` cover `system_info` and
+nothing else; `isSystemInfoPath` cannot touch any of those 142 rows.
+
+⛔ **THE THRESHOLD IS DERIVED, NOT PICKED.** Across the whole retained history on the reference
+fleet — **259 consecutive snapshot pairs, 16 firewalls, both vendors — ZERO pairs lose a top-level
+section** (`max_sections_lost` is 0 for every device; Palo Alto carries 7–8 top-level keys,
+Fortinet 12–13, and the sets are stable). So ONE wholly-vanished section is already outside
+everything this fleet has ever done, and the guard needs no magic number beyond "any".
+
+⛔ **IT SUPPRESSES THE DIFF AND NEVER DELETES THE SNAPSHOT** — the short row is still evidence
+that a collection returned something at time T, and retention's protections still apply to it.
+⛔ **AND THE SUPPRESSION IS REPORTED, NEVER SILENT**: `{suppressed, suppressedReason,
+lostSections}`, pushed into `collectAndStore`'s `result.errors`. A guard that quietly swallowed
+diffs would be indistinguishable from a device that stopped changing — this file's own
+failed-read-as-a-fact rule aimed at its own fix. The reason NAMES the sections and says
+truncation-or-scope, never "deleted".
+⛔ **The asymmetry is the whole argument:** a SUPPRESSED diff is recovered by the next pull against
+a good snapshot; a FABRICATED one has already fired an alert and cannot be unsent. Same call
+`reportSchedule.js` makes about a late vs a duplicated report.
+⛔ **The upstream cause is UNCONFIRMED and is deliberately not named.** Truncation is likeliest
+(Fortinet's `looksLikeConfig` is `/^\s*config\s+\S+/im`, so ONE `config <word>` line anywhere
+passes), but a VDOM-scoped pull or an access-profile change gives the same shape, and the source
+snapshots are long past `CONFIG_RETENTION_DAYS`. The guard is keyed on the SHAPE of the result,
+which holds whichever cause it was.
 
 ### Baseline config drift
 
@@ -4328,6 +4432,20 @@ none of these carry Critical-Rules-level footguns.
   `compliance_report`, routes the monthly fleet compliance PDF (see below) — `email`-only, gated in
   `NotificationsPanel.js` (a Slack/webhook channel opted into it would just be silently skipped by the
   job forever, with no error surfaced).
+- ⛔ **`POST /api/compliance/report/generate` IS `manage_settings`, NOT `operate` (v2.226.0), and
+  its own comment called it "admin-gated" while it was open to every role.** `operate` means
+  acknowledge findings, run analyses and collections, raise and verify rule change requests — all
+  of which act INSIDE the product. This one MAILS a fleet-wide compliance PDF to a recipient list
+  only `manage_settings` can read or configure, and this file gates `GET /api/reports/schedules` on
+  exactly that capability for exactly that reason. **If merely READING the recipient list needs
+  `manage_settings`, triggering a SEND to it cannot need less.** It also settles the slot question
+  without a schema change: a manual run CONSUMES the calendar month (the partial unique index
+  allows one success per month), which is a coherent trade when the person pressing it configured
+  the recipients and the cadence, and was not when it was anyone with a login. Splitting the slot
+  into scheduled-vs-manual was REFUSED — it means a column plus a rebuilt partial unique index on a
+  live table, so that recipients could get the audit PDF twice, and a late report is fixed by the
+  next tick while a duplicated audit PDF cannot be unsent. No UI calls the route, so nothing on
+  screen became stricter than its API.
 - **Compliance Reports** (`/compliance` download link, admin `Settings` → `Notifications` for the
   monthly email list): a fleet-wide PDF (fleet summary + per-device scores + a fail/warning findings
   appendix across PCI DSS/ISO 27001/CIS v8/NIST/SANS) — on-demand via `GET /api/compliance/report/pdf`

@@ -984,7 +984,8 @@ Added 2026-08-01. CommonJS, no DB access — pure dispatch, callers pass an alre
 `diffConfigs(oldParsed, newParsed, vendor?)` -> `{added, removed, modified}` (pure) — deep recursive diff of two parsed config trees; applies vendor-specific volatile-path filtering + defense-in-depth secret redaction; caps at 500 entries. Arrays are aligned by VALUE not position: all-primitive arrays via LCS (`diffPrimitiveArrayLCS`), all-object arrays sharing a unique `@_name`/`name` key via identity alignment (`diffObjectArrayByIdentity`, added 2026-07-31 — kills the Palo Alto XML/API rulebase shift cascade); everything else falls back to positional. Forward-only, no backfill for existing rows.
 `summarizeDiff(diff)` -> `string` — human one-liner (`"N added, M removed — e.g. path1, path2"`), with sanitized/truncated example paths.
 `isEmptyDiff(diff)` -> `boolean` — true if added/removed/modified are all empty.
-`detectAndStoreDiff(deviceId, pool, vendor?)` -> `Promise<{changed: boolean, diffId: string|null, summary: string|null}>` — diffs the 2 latest `device_configs` snapshots and inserts a `config_diffs` row if changed.
+`detectAndStoreDiff(deviceId, pool, vendor?)` -> `Promise<{changed, diffId, summary, suppressed, suppressedReason?, lostSections?}>` — diffs the 2 latest `device_configs` snapshots and inserts a `config_diffs` row if changed. ⛔ **REFUSES TO RECORD A MASS DELETION IT CANNOT BELIEVE (v2.226.0, roadmap row 37).** It used to diff the two newest rows with NO test of whether the NEWER one is usable, and `diffConfigs` treats a truncated tree as a legitimate config — measured on production, TSR_EKM 2026-08-06 produced `0 added, 142 removed` across six unrelated top-level sections and then `142 added, 0 removed` **54 minutes later**, with nothing changed on the device; the operator was told the firewall's SSL-VPN, FortiGuard, SNMP, NTP and syslog config had been wiped, and it drove a CVE re-match, an `auto` backup and the `config_diff` alert. Two branches, two sentences: an unusable newest snapshot (via `hasUsableConfig`, imported not re-implemented) and `lostTopLevelSections`. ⛔ **The suppression is REPORTED** — `collectAndStore` pushes `suppressedReason` into `result.errors`, because a guard that swallowed diffs silently would be indistinguishable from a device that stopped changing. ⛔ It suppresses the DIFF, never the snapshot. `tests/configDiffReadFailure.test.js` (13 cases, 7 mutations verified).
+`lostTopLevelSections(oldParsed, newParsed)` -> `string[]` (pure, v2.226.0) — top-level sections present in the old parsed config and wholly absent from the new one, sorted; `[]` when either side is not a real object (that case has its own branch and its own sentence). ⛔ **The threshold is DERIVED: across the whole retained history on the reference fleet — 259 consecutive snapshot pairs, 16 firewalls, both vendors — ZERO pairs lose a top-level section**, so one vanished section is already outside everything this fleet has ever done.
 `createBackup(deviceId, label, pool)` -> `Promise<{backupId: string|null}>` — copies latest `config_raw` into `config_backups` (`label` ∈ auto/manual/pre-change).
 `filterDiffForCurrentRules(diff, vendor)` -> `object` — re-applies current volatile-path filter + secret redaction to an already-computed diff object; also DECOMPOSES a whole registered-volatile-subtree-root entry (`content-preview`/`system_info` captured as one object) back through `diffValue` so the current per-leaf allowlist applies (drops content-preview entirely, keeps only system_info's allowlisted fields) — added 2026-07-31 to clean historical whole-block noise rows the leaf-only filter missed. [SENSITIVE] (secret-redaction pass over stored config diffs)
 `cleanupVolatileConfigDiffs(pool)` -> `Promise<{checked, deleted, updated}>` — retroactive migration: deletes/updates existing `config_diffs` rows per current noise/secret rules. [SENSITIVE]
@@ -1546,8 +1547,19 @@ EVEN WHEN a branch move clears more. `branchOf` takes TWO components — FortiOS
 ⛔ **THREE BUGS THE TESTS AND THE DATA AGENT FOUND, NOT THE AUTHOR.**
 (a) `parseVersion(vendor, 'nope')` returns FABRICATED ZEROS, so `branchOf` produced the branch
 `"0.0"` and two unreadable versions were in-branch with each other — guarded by requiring a digit.
-⛔ That is a property of `versionComparator.parseVersion` itself and OTHER CALL SITES INHERIT IT;
-not audited.
+⛔ That is a property of `versionComparator.parseVersion` itself and OTHER CALL SITES INHERIT IT.
+⛔ **PARTIALLY ADDRESSED v2.226.0 (roadmap row 24), and `parseVersion` is UNCHANGED on purpose.**
+`parseVersionReadable(vendor, str)` -> `{tuple, readable, badSegments}` and
+`isVersionReadable(vendor, str)` -> `boolean` are additive, and are built from the SAME parsers
+(all five funnel through `parseForcepointVersion`'s single `Number.isNaN`) rather than a second
+regex. ONE call site converted — `isInRange`, where a fabricated zero becomes a vulnerability
+verdict: an unreadable bound is IGNORED rather than compared (CLAUDE.md's "widen an uncertain
+bound, never narrow it"), an unreadable safe-checkpoint is skipped, and a range with NO readable
+bound decides nothing and is COUNTED by `versionMatcher.isUnassessableAdvisory`. Measured: **7 live
+advisories qualify, all `checkpoint` legacy CPE product names, all with 0 assessments**; 0 ranges
+have the mixed readable-min/unreadable-max shape, so zero live assessments changed.
+⛔ **STILL NOT AUDITED**: `versionMatcher`'s other 2 sites, `feeds/nvd.js`, `feeds/paloalto.js` and
+every adapter's `version_tuple` — tracked as roadmap row 51.
 (b) `rankPlans` threw on a non-array.
 (c) With no running version every target fell into `crossBranch` and the recommendation became
 `cross_branch_only` — a branch move for a device whose current version is UNKNOWN, contradicting the
@@ -1915,8 +1927,9 @@ One query gathers real columns/aggregates; posture is derived in JS so it reuses
 
 `runComplianceAuditForDevice(deviceId, pool)` -> `Promise<{findings: object[]}>` — loads device+config+applicable `audit_checks`+rule findings+zone roles, evaluates every check (config-predicate / rule_scan / ruleset_property), DELETE+reinsert `audit_findings` in one transaction.
 `evaluateCheck(check, configParsed)` -> `{status: 'pass'|'fail'|'warning'|'na', detail: string}` — evaluates a config-predicate check via `applicability.evaluatePredicate` + `pass_when` polarity. ⛔ Short-circuits `predicate_type: 'not_evaluable_from_config'` to `na` FIRST, before the `pass_when` guard (those checks carry a placeholder `pass_when` that is never consulted). `na` is excluded from the score denominator; the finding is still written and shown with its `reason`.
-`evaluateRuleScanCheck(check, ruleFindingsByType)` -> `{status: 'pass'|'fail'|'warning', detail, matchedRuleIds: string[]}` — checks whether any rule carries one of the check's target Phase-5 finding types.
-`evaluateRulesetPropertyCheck(check, rules, zoneRoleMap?, ruleFindingsByType?)` -> `{status: 'pass'|'fail'|'warning'|'na', detail, matchedRuleIds?}` — evaluates `has_explicit_deny_all`/`blocks_icmp`/`no_external_to_internal_access` against a device's live rule set.
+`evaluateRuleScanCheck(check, ruleFindingsByType, skippedFindingTypes?, analysisRan?)` -> `{status: 'pass'|'fail'|'warning'|'na', detail, matchedRuleIds: string[]}` — checks whether any rule carries one of the check's target Phase-5 finding types.
+`evaluateRulesetPropertyCheck(check, rules, zoneRoleMap?, ruleFindingsByType?, analysisRan?)` -> `{status: 'pass'|'fail'|'warning'|'na', detail, matchedRuleIds?}` — evaluates `has_explicit_deny_all`/`blocks_icmp`/`no_external_to_internal_access` against a device's live rule set.
+`analysisRanState(v)` -> `'ran'|'never'|'unknown'` / `ruleScanNoRunDetail(check, runState)` -> `string` / `loadAnalysisRunState(deviceId, pool)` -> `Promise<boolean|null>` (v2.226.0, roadmap row 27) — ⛔ **9 checks returned `pass` on a device whose rule analysis had never run**: 8 `rule_scan` plus `rule-no-external-to-internal-access`, which also decides entirely from `ruleFindingsByType`. Zero `rule_analysis_results` rows means either "ran and found nothing" or "never ran", and the 2026-09-09 guard wrote that sentence out then tested only the O(n²) size cap. ⛔ **8 of the 9 are `vendor: null`** and only 10 vendor-null checks are gradeable, so a never-analysed Sangfor could not score below 80%. ⛔ The signal is `device_risk_history` (one row per completed run — what `lib/deviceContext.js` already uses), NEVER `rule_analysis_results`, whose zero-row state IS the ambiguity. ⛔ A failed read is `null` -> `'unknown'` -> `na` with its OWN sentence; an OMITTED argument is also `na`, never a pass. ⛔ The guard applies to the **ZERO case only** — a present finding is a measurement and still `fail`s — and sits AFTER the curated-data branch so a broken check definition stays visible. ⛔ `Number(null)` is 0 and 0 is finite, so the loader refuses an absent count explicitly rather than reading it as "no run". Live: 0 of 16 firewalls affected today; this is the fresh-install and newly-onboarded case. `tests/complianceAnalysisRun.test.js` (23 cases, 8 mutations verified).
 `statusFromResult(result, passWhen)` -> `'pass'|'fail'|'warning'` — maps a tri-state predicate result + polarity to a compliance status.
 
 ## lib/engines/notificationDispatch.js
@@ -1956,6 +1969,7 @@ caller loads a device's `firewall_rules` + `network_objects` once and passes bot
 `resolveAddressField(fieldValues, addressObjectsByName)` -> `{ranges: {start,end}[], unresolvedFqdns: string[], unresolvedNames: string[], isAny: boolean}` — literal IP/CIDR/range first, else object lookup + recursive group expansion; an FQDN value or an unmatched name never silently becomes a non-match.
 `resolveServiceField(fieldValues, serviceObjectsByName)` -> `{protocols: {proto, portStart:number|null, portEnd:number|null}[], unresolvedNames: string[], isAny: boolean}` — ⛔ object-name lookup MUST come first, literal-parse fallback second (opposite order from `resolveAddressField`) — a bare object name like `"HTTPS"` is shape-indistinguishable from a bare protocol keyword like `"icmp"`; parsing the raw entry first would silently misread the object name as a protocol literal.
 `matchesAddress(resolved, queryIpUint32)` / `matchesService(resolved, queryProto?, queryPort?)` -> `'match'|'no-match'|'unresolved'` — tri-state; an unresolved object is never coerced to `'no-match'`.
+`groupExpansionBlock(obj, visited, depth)` -> `null|'cycle'|'depth'|'not_enumerated'` (v2.226.0) / `groupUnresolvedLabel(name, block)` -> `string|null` / `MAX_GROUP_DEPTH` (50) — ⛔ **the group branch had THREE exits and flagged NONE, so a definitive exclusion was built from an object nobody read.** A true CYCLE still returns no caveat (its members were already accumulated on the first visit, so nothing is lost — the only case the original in-code comment justified); `depth` and `not_enumerated` now push `unresolvedNames`. ⛔ **An EMPTY `members` array counts as `not_enumerated` too**, because all six parsers build a group row with an array either way, so `[]` arrives meaning both "enumerated empty" and "never read" — the safe side is the one `exposure.js` names. ⛔ Reproduced before the fix: Access Path returning `verdict: deny, hasCaveat: false` for traffic a rule permits; `/applications` flipping a violation to `unspecified` with `unverified: false`; `applicationRetire`'s "only this application claims it" property defeated with zero taints. Live cost of the fix: **2 empty address groups on the fleet, 0 referencing rules**. Shared by both the address and the service branch so they cannot diverge. `tests/objectGroupResolution.test.js` (13 cases, 7 mutations verified).
 `queryAccessPath(rules, objects, {srcIp, dstIp, protocol?, port?})` -> `{verdict, matchedRule, hasCaveat, walk}` — walks enabled rules in `sequence_number` order; the FIRST rule not definitively excluded (none of src/dst/service resolved `'no-match'`) decides — including a rule whose match involved an `'unresolved'` object, which still wins but sets `hasCaveat:true` rather than being skipped past. No rule decides -> `verdict:'unspecified'`, NEVER `'deny'` — no default/implicit-policy data exists anywhere in this codebase. `walk` includes every excluded rule that was still partially relevant (at least one dimension not `'no-match'`), for audit transparency.
 
 Deliberately single-device, config-only — was true unconditionally until `topology.js` (below,
@@ -2531,6 +2545,34 @@ Consumers: `rollups.js` (all rollups), `trafficStats.js`, `threatStats.js`, `eve
 `logHit.js`/`exposureQuery.js` keep their own literal list DELIBERATELY — they read the rollup's
 pre-classified `allowed`/`public_source` booleans instead, and must test `IS TRUE`, never `= true`,
 so the rollup's NULL-for-unclassifiable can never escalate a CVE.
+
+## `lib/engines/exposure.js` — an UNRESOLVABLE source cannot exclude a rule (v2.226.0, roadmap row 42)
+
+`buildExposurePaths` paths now carry **`sourceResolved: boolean`** beside `directionVerified`, and
+`scoreExposure` has a THIRD source branch.
+
+⛔ **IT WAS DROPPING RULES AND NOT EVEN COUNTING THEM.** `sourceHasPublic` was true only via
+`isAny` or a RESOLVED non-private range, so a source made of object names that resolve to nothing
+yields `ranges: []` with `unresolvedNames` populated — `matchesAddress`'s own `'unresolved'`
+state — and was `continue`d exactly like a rule proven internal-only. "We could not resolve it"
+recorded as "not internet-facing", which is the direction THIS FILE calls the worse one.
+⛔ And `unresolvedRules++` sat AFTER that `continue`, so the counter that exists to disclose the
+gap could never see the rules it dropped. It is incremented FIRST now.
+
+⛔ **THE PATH IS REPORTED AND FLAGGED, NOT SCORED.** Same contract `directionVerified: false`
+already had — "an unverified path is still REPORTED, under-reporting exposure is the more
+dangerous direction, but it must not claim to be confirmed". `scoreExposure` adds **no points** for
+an unresolved source: not knowing is not evidence, the same call this engine already makes for an
+unmeasured observation. A third branch rather than the existing `else`, which asserts "restricted to
+specific ranges, but still includes public space" — a claim about an extent nobody could read.
+⛔ **The UI caveat is SEPARATE from "direction unverified"**: one is missing zone data, the other
+missing network objects, and they send an operator to different places.
+⛔ Measured: **0 live paths change today** — 39 enabled allow rules fleet-wide have a fully
+unresolvable source (PAKFood 21, TSR_EKC 10, TSR-TL 8, all three with no `network_objects` rows at
+all), and the only inbound-or-unverified one is TSR_EKC, which has 0 `device_interfaces` rows and so
+produces no paths regardless. It bites the first time an inbound rule on an object-less device meets
+a collected public interface. `tests/exposureUnresolvedSource.test.js` (11 cases, 6 mutations
+verified).
 
 ## `lib/engines/exposure.js` — direction gating (added 2026-09-09)
 

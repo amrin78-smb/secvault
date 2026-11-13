@@ -311,7 +311,9 @@ describe('configAuditor: rule_scan separates a curated-data problem from a cover
   it('passes when the device has rules but none carry the scanned finding types', () => {
     const { status, matchedRuleIds } = evaluateRuleScanCheck(
       checkWith({ finding_types: ['any_any', 'overly_permissive'] }),
-      { unused: ['rule-9'] }
+      { unused: ['rule-9'] },
+      [],
+      true // a run COMPLETED -- without this, zero findings means nothing was measured
     );
     assert.equal(status, 'pass', 'every rule_scan check is "this bad pattern should not exist".');
     assert.deepEqual(matchedRuleIds, []);
@@ -320,7 +322,9 @@ describe('configAuditor: rule_scan separates a curated-data problem from a cover
   it('fails and reports each offending rule ONCE when one rule carries two scanned types', () => {
     const { status, matchedRuleIds } = evaluateRuleScanCheck(
       checkWith({ finding_types: ['any_any', 'overly_permissive'] }),
-      { any_any: ['rule-1', 'rule-2'], overly_permissive: ['rule-2', 'rule-3'] }
+      { any_any: ['rule-1', 'rule-2'], overly_permissive: ['rule-2', 'rule-3'] },
+      [],
+      true
     );
     assert.equal(status, 'fail');
     assert.deepEqual(matchedRuleIds, ['rule-1', 'rule-2', 'rule-3'], 'rule-2 must not be double-counted');
@@ -368,7 +372,8 @@ describe('configAuditor: ruleset_property separates a curated-data problem from 
       checkWith({ property: 'no_external_to_internal_access' }),
       [ruleWith({ src_zones: ['wan'], dst_zones: ['lan'] })],
       { wan: 'external', lan: 'internal' },
-      {}
+      {},
+      true
     );
     assert.equal(status, 'pass');
   });
@@ -378,7 +383,8 @@ describe('configAuditor: ruleset_property separates a curated-data problem from 
       checkWith({ property: 'no_external_to_internal_access' }),
       [ruleWith({ src_zones: ['wan'], dst_zones: ['lan'] })],
       { wan: 'external', lan: 'internal' },
-      { external_exposure: ['rule-7'] }
+      { external_exposure: ['rule-7'] },
+      true
     );
     assert.equal(status, 'fail');
     assert.deepEqual(matchedRuleIds, ['rule-7']);
@@ -466,7 +472,7 @@ describe('configAuditor: the evaluators never throw on malformed curated data', 
 
   it('evaluateRuleScanCheck survives a missing/garbage findings map', () => {
     for (const map of [undefined, null, {}, { any_any: null }]) {
-      const out = evaluateRuleScanCheck(checkWith({ finding_types: ['any_any'] }), map || {});
+      const out = evaluateRuleScanCheck(checkWith({ finding_types: ['any_any'] }), map || {}, [], true);
       assert.ok(['pass', 'fail', 'warning'].includes(out.status));
     }
   });

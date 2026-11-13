@@ -548,6 +548,29 @@ export default async function ExposurePage({ searchParams }) {
                                 direction unverified
                               </div>
                             ) : null}
+                            {/* ⛔ A SEPARATE caveat, not a shared one. "direction
+                                unverified" means no zone data was collected;
+                                this means the rule's own source objects could
+                                not be resolved. Different gaps, different first
+                                steps — collapsing them into one label would
+                                send an operator to the wrong place. */}
+                            {p.sourceResolved === false ? (
+                              <div
+                                style={{
+                                  fontSize: 'var(--text-xs)',
+                                  color: 'var(--yellow)',
+                                  marginTop: 4,
+                                }}
+                                title={
+                                  "This rule's source is object names SecVault could not resolve "
+                                  + 'to addresses, so it cannot confirm the source side is '
+                                  + 'public. The path is listed rather than dropped, and scores '
+                                  + 'nothing for the source.'
+                                }
+                              >
+                                source unresolved
+                              </div>
+                            ) : null}
                           </td>
                           <td style={{ ...CELL, whiteSpace: 'nowrap' }}>
                             {observationBadge(p.observation)}
