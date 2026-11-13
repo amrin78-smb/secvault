@@ -2522,7 +2522,10 @@ today, so a test pins it against a synthetic one.
 of them — so a new route is a deliberate decision, never a default. It also re-derives the
 device-touching set from SOURCE, catching a file that grew a device query after being classified
 `no-device-data`. The aware count has a FLOOR that may not fall. Shipped at 4 aware / 71 blocked /
-39 no-device-data; measured 2026-11-02 at **6 aware / 91 blocked / 25 no-device-data**.
+39 no-device-data; measured 2026-11-02 at 6 aware / 91 blocked / 25 no-device-data, and
+**re-measured 2026-11-14 at 6 aware / 99 blocked / 26 no-device-data** (131 surfaces) — the aware
+count held while the product grew, which is the number that matters, but note the other two move
+on their own every time a surface is added.
 ⛔ **THE FLOOR IS NOW THE REAL FIGURE (6), AND FOR THREE RELEASES IT WAS NOT.** `AWARE_FLOOR` in
 `tests/deviceScopeCoverage.test.js` sat at the SHIPPED 4 while the real count was 6, so this very
 paragraph claimed the count may never fall while two surfaces could be demoted without failing a
@@ -3376,10 +3379,17 @@ plaintext secrets in the database.
 ⛔ **The FIRST update after this change still runs everything** (empty ledger) and is slow; the one
 after it is fast.
 
-⛔ Unexplained, left gated but flagged: `backfillPaloAltoVersionRanges` reported `cleaned up 302` on
-EVERY run and 351 advisory rows share one `updated_at` — it was rewriting rows to identical values,
-which also explains 18.6% dead tuples on `advisories`. Stored ranges look correct. First place to
-look if advisory version matching ever regresses.
+⛔ **RESOLVED, AND THIS PARAGRAPH SAID OTHERWISE UNTIL 2026-11-14.** It read "Unexplained, left
+gated but flagged: `backfillPaloAltoVersionRanges` reported `cleaned up 302` on EVERY run … it was
+rewriting rows to identical values, which also explains 18.6% dead tuples on `advisories`." It no
+longer does either. TWO independent fixes landed and neither updated this sentence: the
+already-clean guard moved off `JSON.stringify` to `jsonEquivalent()` (v2.116.1 — the jsonb
+key-order trap recorded two sections above), and the repair itself went behind the backfill
+ledger at revision 2, so it runs ONCE per install rather than every deploy. ⛔ Verified against
+production's own deploy log on 2026-11-14 (`update-20261113-222055.log`): `palo-alto-version-ranges:
+already done (rev 2) — skipped`, with no `cleaned up` line anywhere in the run. Stored ranges look
+correct and this remains a sensible first place to look if advisory version matching ever
+regresses — but it is no longer doing anything on a deploy.
 
 ### ⛔ jsonb DOES NOT PRESERVE KEY ORDER — never compare it with JSON.stringify
 
@@ -3623,7 +3633,15 @@ SYSLOG_SPOOL_DIR=                          # durable spool, fsync'd before the D
 SYSLOG_DETAIL_RETENTION_DAYS=30            # per-host/app/blocked-dst rollups (high cardinality)
 SYSLOG_ARCHIVE_ENABLED=true                # compressed raw-log archive (FWA storage model)
 SYSLOG_ARCHIVE_DIR=                        # blank = <install dir>archive
-SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ~500 GB at 8.4 GB/day measured.
+SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ⛔ 8.4 GB/day was an EXTRAPOLATION FROM A PARTIAL
+                                           # DAY and is wrong. Re-measured on production
+                                           # 2026-11-14: E:\SecVaultArchive holds 211.32 GB in 46
+                                           # files => ~4.7 GB/day averaged, ~5.5 GB/day on recent
+                                           # complete days. At the box's real 45-day retention
+                                           # that is ~210 GB, not ~500. ⛔ docs/SIZING-AND-BACKUP.md
+                                           # still says 8.4 and DERIVES three figures from it
+                                           # (~380 GB, "add ~35%", "Provision 1.5 TB") -- fixing
+                                           # the rate means re-deriving all three.
                                            # ⛔ The reference deployment actually runs 45, set
                                            # explicitly in its own .env.local. This 60 is the CODE
                                            # default, which that box never uses -- see gotchas.md

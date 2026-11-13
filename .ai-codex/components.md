@@ -544,13 +544,13 @@ MAX_WINDOW_HOURS; offering a value it silently clamps would show "30 days" and h
 The narrowing itself is PURE in `lib/vpnDetectionFilters.js`, not in the component.
 
 ActiveVpnUsersTable  sessions, basePath, searchParams, page, query — ⛔ NO LONGER a client component (2026-09-08). Its search box and page number were useState, which AutoRefresh's router.refresh() silently reset mid-read; both now live in the URL (?vpnq= via a plain GET form, ?page=). Filtering runs over the FULL set before the window and the header states "filtered to N of M", so a filtered count is never mistaken for the connected count.
-IpsecTunnelsTable  rows, basePath, searchParams, page — paginated on ?tunnelPage=. The up / down / status-not-reported tally is computed over the full set, not the visible page. ⛔ "status not reported" is its own bucket: a tunnel whose state the device did not send is not a tunnel that is down.
+IpsecTunnelsTable  tunnels, basePath, searchParams, page — ⛔ **the prop is `tunnels`; this line said `rows` until 2026-11-14** (`rows` is an internal local in the component, and the sole call site passes `tunnels=`, so nothing was broken — but an index that names the wrong prop is how the next call site gets written wrong). Paginated on ?tunnelPage=. The up / down / status-not-reported tally is computed over the full set, not the visible page. ⛔ "status not reported" is its own bucket: a tunnel whose state the device did not send is not a tunnel that is down.
 VpnSyslogActivity  searchParams, page — log-observed VPN activity, the only VPN source covering Palo Alto. Replaced a raw-line dump with a 7-column event table (time with the ~ tz-assumed caveat, severity, event, user, source, firewall, raw line behind a collapsed <details>), paginated on ?evPage= with SQL LIMIT/OFFSET.
 ⛔ PAN-OS carries NO action on GLOBALPROTECT rows, so the Event column is legitimately empty for Palo Alto — it renders an em-dash with a hover explaining why, never a fabricated outcome. tunnel-down/logout are coloured MUTED, not danger: a normal session close is not a failure.
 ⛔ It must tolerate a NULL message: syslog_events.message became nullable on 2026-09-08 (parsed traffic keeps its raw line in the compressed archive), and the previous code called message.slice() unconditionally and threw on any archived row.
 
 (c) VpnSessionTrendChart  points — active VPN session-count trend line chart
-(c) ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Data/Client) from vpn_active_sessions; Data column = ↓in/↑out bytes (Fortinet/Cisco). CLIENT component (2.38.1): search box (filters user/IP/client) + 25-per-page pagination for busy firewalls (100s of users). Added 2026-07-31.
+(c) ActiveVpnUsersTable  sessions — live per-user VPN session table (User/Tunnel/Source IP/Assigned IP/Login Time/Duration/Data/Client) from vpn_active_sessions; Data column = ↓in/↑out bytes (Fortinet/Cisco). ⛔ **SERVER component since 2026-09-08 — this line said "CLIENT component (2.38.1)" until 2026-11-14 and CONTRADICTED the fuller entry above it**, which records why the useState search box and page number had to move into the URL (AutoRefresh's router.refresh() silently reset them mid-read). Added 2026-07-31.
 IpsecTunnelsTable  tunnels — live IPSec site-to-site tunnel table (Tunnel/Peer/Status/IKE/Data) from vpn_ipsec_tunnels; up/down status badge, server-safe. Added 2026-07-31.
 
 ## compliance/
@@ -1155,11 +1155,15 @@ heading source and a page with two are different defects with the same invisible
 
 ## Overview + work queue (v2.218.0)
 
-**HeadlineStats** renders THREE SECTIONS, not six equal tiles: *What needs attention* (Critical
+**HeadlineStats** answers THREE QUESTIONS, not six equal tiles — but ⛔ **it renders TWO
+`<section>` elements, not three** (corrected 2026-11-14; this entry said "THREE SECTIONS" and a
+session counting elements would not find a third): *What needs attention* (Critical
 Alerts, High Risks, → `/work`), *Fleet posture* (Security, Compliance, Devices, Total Rules), and
 *Can these numbers be trusted?* (coverage, → `/coverage`). ⛔ Nothing was removed — all six figures
 keep their evidence marks, deltas and coverage caveats, and `tests/overviewSections.test.js` fails
-the build if one disappears in a future layout change. ⛔ `.ov-grid[data-cols=N]` with an EXPLICIT
+the build if one disappears in a future layout change. ⛔ **`.ov-grid` IS RETIRED — the component uses `<KpiRow cols={2}>` / `cols={4}`**
+(corrected 2026-11-14; `tests/overviewSections.test.js` asserts `!/ov-grid/`, so following this
+entry as written would FAIL THE BUILD). What survives is the rule it encoded: an EXPLICIT
 column count, never `auto-fit`: measured at 1440 with the rail expanded the old grid rendered five
 across and orphaned the sixth. The responsive steps divide too (4 → 2 → 1, never through 3). ⛔ The
 trust section is a LIST, not tiles, and never a single percentage — see CLAUDE.md for why.
