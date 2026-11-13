@@ -1058,6 +1058,11 @@ const REGISTRY = [
   // ── compliance ──────────────────────────────────────────────────────────
   { mod: 'lib/engines/complianceReport.js', fn: 'buildReportData', args: () => [{}], spec: { object: ['perDevice', 'fleet'] } },
   { mod: 'lib/engines/complianceReport.js', fn: 'standardCoverage', args: () => ['PCI_DSS'], spec: { object: ['total', 'mapped'] } },
+  // ⛔ FOUR READS IN ONE CALL, AND THE PAGE RENDERS NOTHING WITHOUT THE FIRST
+  // THREE. gatherControls THROWS on the library, findings or vendor-scope
+  // read rather than returning an empty library, so this entry is the only
+  // thing that puts that SQL in front of the real schema before a deploy does.
+  { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControls', args: (c) => [{ now: c.now }], spec: { object: ['controls', 'summary', 'scope'] } },
 
   // ── CVE ─────────────────────────────────────────────────────────────────
   { mod: 'lib/engines/advisoryCuration.js', fn: 'getCurationWorklist', args: () => [], spec: {} },

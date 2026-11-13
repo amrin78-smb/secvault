@@ -24,6 +24,7 @@ import ComplianceMatrix, {
   coveragePips as sharedCoveragePips,
 } from '../../../components/compliance/ComplianceMatrix';
 import StandardCard from '../../../components/compliance/StandardCard';
+import ComplianceTabs from '../../../components/compliance/ComplianceTabs';
 import ZoneClassificationBanner from '../../../components/compliance/ZoneClassificationBanner';
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
 import { vendorLabel } from '../../../components/devices/vendorMeta';
@@ -475,8 +476,8 @@ function aggregateCheckSets(findings) {
 //
 // ⛔ Plain functions returning JSX, called imperatively, at module top level —
 // never components defined inside a component (CLAUDE.md's React rule), the
-// same pattern viewToggle() above and ComplianceMatrix's scoreChip() already
-// use.
+// same pattern ComplianceMatrix's scoreChip() and ControlsTable's
+// firewallCell() already use.
 
 // The strength meter: how many checks the percentage rests on, in the product's
 // existing HUELESS vocabulary. Filled pips are --unmeasured and empty ones are
@@ -594,30 +595,12 @@ function coverageLegend(coverageByStandard) {
   );
 }
 
-// Plain function returning JSX (not a nested component -- CLAUDE.md's
-// critical React rule), matching the tabLink()/scoreChip() "helper called
-// imperatively" pattern already used elsewhere in this codebase.
-function viewToggle(active) {
-  const tabStyle = (key) => ({
-    padding: '6px 14px',
-    fontSize: 'var(--text-sm)',
-    fontWeight: 600,
-    borderRadius: 'var(--radius-sm)',
-    textDecoration: 'none',
-    color: active === key ? '#fff' : 'var(--text-secondary)',
-    background: active === key ? 'var(--primary)' : 'transparent',
-  });
-  return (
-    <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'var(--bg-primary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-      <Link href="/compliance?view=cards" style={tabStyle('cards')}>
-        Cards
-      </Link>
-      <Link href="/compliance?view=table" style={tabStyle('table')}>
-        Compare firewalls
-      </Link>
-    </div>
-  );
-}
+// ⛔ THE VIEW TOGGLE MOVED TO components/compliance/ComplianceTabs.js (v2.227.0)
+// because the third view — Controls — is a ROUTE rather than a `?view=` on
+// this page, and so has to render the same strip from its own file. Left as a
+// private helper here the two copies would have drifted the first time a tab
+// was added, and this page would have gone on being the only one that knew its
+// own siblings existed.
 
 export default async function CompliancePage({ searchParams }) {
   const view = searchParams?.view === 'table' ? 'table' : 'cards';
@@ -662,7 +645,7 @@ export default async function CompliancePage({ searchParams }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
           title="Compliance"
-          subtitle="Compare PCI DSS, ISO 27001, CIS v8, NIST, and SANS scores across every active device. Switch to Cards to see one firewall's full donut breakdown."
+          subtitle="Compare PCI DSS, ISO 27001, CIS v8, NIST, and SANS scores across every active device. Switch to Cards to see one firewall's full donut breakdown, or Controls to read the library across the fleet."
           actions={
             <span style={{ display: 'flex', gap: 8 }}>
               <DownloadButton
@@ -683,7 +666,7 @@ export default async function CompliancePage({ searchParams }) {
             </span>
           }
         />
-        {viewToggle(view)}
+        <ComplianceTabs active={view} />
         {coverageLegend(fleetCoverage)}
         {freshnessBanner(devices)}
         <ComplianceMatrix devices={devices} coverageByDevice={coverageByDevice} />
@@ -701,9 +684,9 @@ export default async function CompliancePage({ searchParams }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
           title="Compliance"
-          subtitle="View one firewall's PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture, or switch to Compare firewalls for a fleet-wide table."
+          subtitle="View one firewall's PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture, or switch to Compare firewalls for a fleet-wide table and Controls for the check library."
         />
-        {viewToggle(view)}
+        <ComplianceTabs active={view} />
         <EmptyState message="No active devices — add a device first." />
       </div>
     );
@@ -835,7 +818,7 @@ export default async function CompliancePage({ searchParams }) {
 
       <AnswerHeader answer={complianceAnswer} evidence={complianceEvidence} />
 
-      {viewToggle(view)}
+      <ComplianceTabs active={view} />
 
       <DeviceSelect devices={activeDevices} selectedId={selected.id} />
 

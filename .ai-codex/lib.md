@@ -299,6 +299,40 @@ verified — one ESCAPED first time because the hueless assertion counted `var(-
 occurrences that the count text also carries, so green pips passed; rewritten to isolate each cell
 and assert the ABSENCE of every severity token).
 
+## lib/engines/complianceControls.js + complianceControlsData.js (v2.227.0)
+
+The check library read on the CHECK axis instead of the device axis — the data behind
+`/compliance/controls`. Pure engine + pool-taking loader, the same split
+`segmentation`/`segmentationData` uses.
+
+⛔ **A CONTROL HAS NO SINGLE FLEET-WIDE STATUS.** `audit_findings` rows are (device, check)
+PAIRS, so one control is failing on four firewalls and passing on eleven at the same time.
+`buildControl()` therefore returns a DISTRIBUTION plus a roll-up state, and every number it
+emits is a count of FIREWALLS. `summariseControls()` keeps `failingControls` (checks) and
+`failingPairs` (answers) as separately named fields for the same reason v2.163.0 keeps the
+standard-grain units apart.
+
+⛔ **SEVEN STATES, AND THE FOUR NON-FAILURES ARE NOT INTERCHANGEABLE**: `failing` /
+`warning` / `not_measured` (applicable and unanswered — CLEARABLE) / `partial` ("passing
+where measured" — passing everywhere it was asked, and not asked everywhere) / `clean` /
+`not_evaluable` (`predicate_type: 'not_evaluable_from_config'` — PERMANENT) /
+`not_applicable`. `partial` is the state the view exists to surface: a control passing on 3
+of 16 applicable firewalls is not a green tick. All four non-failure states are toned
+`unmeasured` and carry NO hue.
+
+⛔ **A MEASUREMENT OUTRANKS A DECLARATION** — `fail`/`warning` are tested before
+`not_evaluable_from_config`. ⛔ **A duplicated (device, check) pair collapses to the WORST
+status**, never the first. ⛔ **An unrecognised `audit_findings.status` is counted as
+`unreadable`** (that column has no CHECK constraint) and can never produce `clean`.
+⛔ **An unreadable applicable count leaves `notEvaluatedDeviceCount` null**, which blocks
+`clean` — completeness we cannot prove is not claimed.
+
+`gatherControls(pool)` THROWS on the library, findings or vendor-scope read rather than
+returning an empty library: `[]` here renders in green as "no control is failing". The
+EXCEPTIONS read alone fails soft, to `null` (never `0`), and reuses `exceptionState()` in JS
+rather than re-expressing "is this live" as a second SQL predicate. Registered in
+`scripts/dbCheck.js`. `tests/complianceControls.test.js`, 36 cases, 10/10 mutations killed.
+
 ## lib/engines/complianceExceptions.js (v2.163.0)
 
 Pool-taking storage plus PURE state helpers: `exceptionState`, `describeException(s)`,

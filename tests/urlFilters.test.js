@@ -328,6 +328,11 @@ describe('⛔ every parameter an adopting page reads is a declared filter or a d
     { page: 'app/(dashboard)/alerts/page.js',   defs: 'components/alerts/AlertsFilters.js' },
     { page: 'app/(dashboard)/exposure/page.js', defs: 'components/exposure/ExposureFilters.js' },
     { page: 'app/(dashboard)/work/page.js',     defs: 'components/work/WorkQueueFilters.js' },
+    // ⛔ ADDED WITH THE PAGE ITSELF (v2.227.0). This list is hand-maintained,
+    // so a fifth FilterBar page that forgets to join it is covered by
+    // NOTHING — the guard reports four green pages and says nothing about
+    // the one that was just written.
+    { page: 'app/(dashboard)/compliance/controls/page.js', defs: 'components/compliance/ControlsFilters.js' },
   ];
 
   const read = (rel) => stripComments(

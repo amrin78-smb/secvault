@@ -11,6 +11,28 @@ config/rules, resolves to a four-state finding, and rolls up into a compliance s
 
 ---
 
+## Reading the output: TWO AXES OVER ONE TABLE (v2.227.0)
+
+`audit_findings` rows are **(device, check) PAIRS**, and the product now reads them both ways.
+Everything in the stages below is the DEVICE axis — one firewall, its 74 answers, a
+`scorePct`. `/compliance/controls` (`lib/engines/complianceControls.js`) is the CHECK axis —
+one control, the firewalls behind it.
+
+⛔ **Neither axis may borrow the other's unit.** A fleet "29 failed" is twenty-nine PAIRS; a
+control-grain "3 failing" is three CHECKS. They are different numbers over the same rows, and
+a headline mixing them does not even reconcile against the library total. CLAUDE.md's
+"A CONTROL HAS NO SINGLE FLEET-WIDE STATUS" section is the contract.
+
+⛔ **The check axis adds a state the device axis cannot express**: `partial` — passing on
+every firewall SecVault could ask, and not asked on all of them. Per device that distinction
+does not exist (a device either answered or did not); across the fleet it is the difference
+between a clean control and one measured on a fifth of the estate.
+
+⛔ **No score is computed on the check axis.** `scorePct` stays the single compliance
+percentage; the controls view publishes counts and a state only.
+
+---
+
 ## Stage-by-stage flow
 
 ### 1. SEED — curated check library, not a `.sql` seed file

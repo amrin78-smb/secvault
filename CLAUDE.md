@@ -1139,6 +1139,68 @@ never printed. It degrades toward unknown, never toward a grade.
 `compliance_exceptions` follows. A test walks every firewall asserting the only `%` printed is the
 headline score.
 
+### ⛔ A CONTROL HAS NO SINGLE FLEET-WIDE STATUS (`/compliance/controls`, v2.227.0)
+
+`lib/engines/complianceControls.js` (pure) + `complianceControlsData.js` (the four reads).
+The check library read on the CHECK axis — "which control is failing on the most firewalls?" —
+which no surface in this product could answer, although `audit_findings` has always held it.
+Every other compliance view is DEVICE-FIRST: pick a firewall, read its 74 answers.
+
+⛔ **THE UNIT IS THE WHOLE DANGER, AND IT IS THIS FILE'S OWN "TWO UNITS, KEPT APART" RULE ONE
+GRAIN DOWN.** `audit_findings` rows are (device, check) PAIRS, so `rule-no-any-any-allow` is
+failing on four firewalls and passing on eleven SIMULTANEOUSLY. A headline reading "74 checks:
+45 passed, 29 failed" silently picks one answer per check and discards the rest — and the two
+units do not even reconcile, because 45+29+6 counts PAIRS while 74 counts CHECKS. So every
+figure on this page is a count of FIREWALLS, named as one, and `summariseControls` emits
+`failingControls` and `failingPairs` as separate fields. `CONTROL_CLAIM` states the unit and a
+test pins it.
+
+⛔ **SEVEN STATES, BECAUSE THE FOUR WAYS OF NOT FAILING SEND AN OPERATOR TO FOUR DIFFERENT
+PLACES**: `failing` / `warning` / `not_measured` (applies here, nothing has answered —
+CLEARABLE) / `partial` / `clean` / `not_evaluable` (`predicate_type:
+'not_evaluable_from_config'` — PERMANENT, nothing on a firewall makes it answerable) /
+`not_applicable`. The clearable and the permanent gap are never summed, the same call
+`capacityForecast.js` makes between `no_log_coverage` and `bytes_not_summable`.
+
+⛔ **`partial` — "PASSING WHERE MEASURED" — IS THE STATE THIS VIEW EXISTS TO SURFACE.** A
+control passing on 3 of 16 applicable firewalls is not a green tick, and in every other
+compliance surface it is indistinguishable from one. `clean` therefore requires
+`notEvaluated === 0` AND `unreadable === 0`; anything less is `partial`, toned `unmeasured`
+and hatched. ⛔ **All four non-failure states carry NO HUE** — a gap in OUR reach is not a
+severity of the customer's — and the gap is printed on FAILING rows too ("3 of 8 failing ·
+5 never asked"), because the five unasked firewalls are where the next failure comes from.
+
+⛔ **A MEASUREMENT OUTRANKS A DECLARATION**: `fail`/`warning` are tested BEFORE
+`not_evaluable_from_config`, the rule v2.226.0's rule-scan guard already follows.
+⛔ **A duplicated (device, check) pair collapses to the WORST status**, never the first —
+`audit_findings` carries no `UNIQUE(device_id, check_id)`. ⛔ **An unrecognised
+`audit_findings.status` is counted as `unreadable` and can never yield `clean`** (that column
+has no CHECK constraint). ⛔ **An unreadable applicable count leaves the gap `null`**, which
+also blocks `clean`: completeness nobody could prove is not claimed.
+
+⛔ **NO PERCENTAGE ANYWHERE ON THE PAGE.** `scorePct` is the one compliance figure this
+product publishes; a per-control "69% compliant" over a different denominator would sit on the
+same screen disagreeing with it — what `compliance_exceptions` is barred from creating, for
+the same reason. Counts of firewalls, and a state.
+
+⛔ **`gatherControls` THROWS rather than returning an empty library.** `[]` renders in green
+as "no control is failing". Only the EXCEPTIONS read fails soft, to `null` and never `0`, and
+it classifies rows with `exceptionState()` in JS rather than re-expressing "is this live" as a
+second SQL predicate that would drift from the device panel's answer at the 30-day boundary.
+
+⛔ **THE SUMMARY IS COMPUTED BEFORE THE FILTER**, and the two empty states are WORDED apart,
+not merely gated apart — `/work`'s rule. ⛔ **An unrecognised filter value matches NOTHING and
+is named on screen**, never dropped.
+
+⛔ **IT IS NOT IN THE SIDEBAR, AND THE NAV MODEL DECIDED THAT RATHER THAN TASTE.** A second
+top-level leaf under `/compliance/...` makes `isActive` match BOTH entries by prefix, so two
+sections light at once — caught by `tests/navigation.test.js` on the first run. It is reached
+from the `ComplianceTabs` strip exactly as "Compare firewalls" is. **When fleet-wide
+Exceptions becomes a route, promote Compliance from a leaf to a group over Dashboard /
+Controls / Exceptions in the SAME commit** — the refusal recorded in `lib/navRegistry.js` was
+written when four of six candidate children were not routes, and stops applying the moment
+three of three are.
+
 ### ⛔ Compliance exceptions — accepted risk that CANNOT move the score (v2.163.0)
 
 `compliance_exceptions` + `lib/engines/complianceExceptions.js` + `/api/compliance/[deviceId]/exceptions`.

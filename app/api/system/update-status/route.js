@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.227.0': [
+    'New: Compliance \u2192 Controls \u2014 the check library read across the whole fleet, answering \u201cwhich control is failing on the most firewalls?\u201d. Every compliance screen until now started from a firewall and listed its answers; nothing could start from a control. Each row carries its frameworks, its severity, how many firewalls fail it, and the names of those firewalls one click away.',
+    'A control is no longer reported as simply passed or failed. The same control can be failing on four firewalls and passing on eleven, and both are true, so every figure on the page is a count of FIREWALLS rather than a single verdict.',
+    'New: a control passing only on the firewalls SecVault was able to ask is now shown as \u201cPassing where measured\u201d rather than as passing. On the reference data six controls are in that state \u2014 previously indistinguishable from a clean result.',
+    'New, in the same vein: \u201cNever measured\u201d (applies to your firewalls, and none has answered it yet) and \u201cNot evaluable from config\u201d (cannot be answered from a configuration snapshot at all) are counted and shown separately. The first clears itself at the next collection; the second never will, so they are never added together.',
+    'A failing control also states how many applicable firewalls were never asked, because those are where the next failure comes from. Filtering the list never changes the figures at the top of the page, and a filter that matches nothing says so rather than reading as an all-clear.',
+  ],
   '2.226.0': [
     'Fixed: nine compliance checks reported a PASS on a firewall whose rule analysis had never run \u2014 so a newly added firewall, or a brand-new installation, scored points for an inspection nobody had performed, and its compliance score went UP. Eight of the nine apply to every make of firewall. They now report \u201ccould not be evaluated\u201d and leave the score out of it, with a message saying to run an analysis.',
     'Fixed: a firewall rule that names an address group SecVault could not read was being treated as a definite answer rather than an unknown one. The access-path tool could report traffic as blocked when a rule permits it, and an application\u2019s policy gap could be reported as closed. Any group whose membership could not be expanded is now reported as unverified, naming the group.',

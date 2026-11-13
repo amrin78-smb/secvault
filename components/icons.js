@@ -354,3 +354,24 @@ export function IconOddOneOut(p) {
     </svg>
   );
 }
+
+// Compliance controls — the check library read across the fleet. A clipboard
+// with a tick: the LIBRARY (the board) plus the answer (the tick), which is
+// what the page is.
+//
+// ⛔ A NEW GLYPH, because every nav entry must keep a DISTINCT one and that,
+// not colour, is the per-item wayfinding cue. The three near neighbours were
+// all taken and all read wrong here: IconChecklist is the Work queue,
+// IconSearch is Compliance itself, and IconDocument is Log search. At 16px the
+// clipboard's top tab is what separates this from IconDocument's folded
+// corner. Hand-rolled in the existing Feather-compatible convention — the
+// standing rule bans an icon LIBRARY, not a ten-line path.
+export function IconClipboardCheck(p) {
+  return (
+    <svg {...base(p)}>
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <polyline points="9 13 11 15 15 11" />
+    </svg>
+  );
+}
