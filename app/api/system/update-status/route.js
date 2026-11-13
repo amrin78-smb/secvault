@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.2': [
+    'Fixed: every date on the new compliance trend was one day early \u2014 including both ends of the caption under the chart. The fleet\u2019s history runs 19 July to 13 November; the chart said 18 July to 12 November.',
+    'The cause: a date column in PostgreSQL carries no time and no timezone, and it was being converted using UTC on a server that runs seven hours ahead \u2014 which lands on the previous day every time. Dates are now read exactly as the database stored them.',
+    'This also means the nights SecVault has no reading for are named correctly. They were being reported one day out, which on a compliance record is not a cosmetic difference.',
+    'No stored data was affected: the readings themselves were always right, only the day printed against them was wrong.',
+  ],
   '2.228.1': [
     'Fixed: the pre-deploy database sweep reported two FAILURES that were faults in the sweep\u2019s own declarations rather than in the queries it checks. A gate that cries wolf gets waived, so the declarations were corrected.',
     'Fixed, and this was the one that mattered: the sweep checked the new control page by asking for a control that cannot exist. The reader stops as soon as it finds no such control, so two of its three queries \u2014 the ones behind the per-firewall answer table \u2014 were never put in front of the real database at all, while the entry reported itself as covering them.',

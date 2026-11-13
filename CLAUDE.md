@@ -1173,6 +1173,37 @@ tests found it.
 ⛔ **A DELTA NEEDS TWO READABLE ENDPOINTS**, else null and never 0. ⛔ **The Y axis is pinned
 `[0,100]`**, never auto-fit, which would draw a 71→73 fortnight as a dramatic climb.
 
+⛔ **A pg `DATE` MUST BE FORMATTED FROM LOCAL PARTS, NEVER `toISOString()` — AND THIS REPO HAD
+ALREADY LEARNED THAT ONE FILE OVER (fixed v2.228.2).** `node-postgres` parses a `date` column
+(no time, no zone) into a JS Date at **LOCAL MIDNIGHT**, so on the reference deployment
+(Asia/Bangkok, UTC+7) `2026-11-13` arrives as `2026-11-12T17:00:00Z` and the UTC date part is
+**2026-11-12**. `isoDay` did exactly that, so EVERY day on the chart, and both ends of its
+caption, were a day early — measured against production: all 100 snapshots, `2026-07-19 →
+2026-11-13` printed as `2026-07-18 → 2026-11-12`, and the four permanently lost cron days named
+as 10-10/-11/-12/-14 rather than 10-11/-12/-13/-15.
+⛔ **LOCAL IS THE RIGHT ANSWER, not merely the opposite mistake**: the nightly job writes
+`CURRENT_DATE`, which PostgreSQL evaluates in the server's local zone, and `node-cron` fires it
+in that same zone — this file's own daily-tick section says the tick and the date agree precisely
+because both are local. UTC formatting was the single step in that chain that disagreed.
+⛔ **`lib/reports/executiveSummary.js` ALREADY CARRIED THE DIAGNOSIS, THE REASON AND THE FIX**
+(`localDay()`, with a comment naming this deployment's UTC+7 shift), and the trend engine
+re-made the mistake anyway. The two implementations are deliberately NOT yet shared — `fmtDay`
+carries string handling that differs from `isoDay`'s, and unifying them would change the audit
+PDF's date path for no fault of its own — so **a third reader of a `DATE` column must reuse one
+of them rather than write a third.** The five true `DATE` columns are
+`fleet_dashboard_snapshots.snapshot_date`, `device_licenses.expires_at`/`issued_at`,
+`advisories.epss_score_date` and `vendor_recommended_releases.as_of_date`; the other four were
+checked and no renderer formats them this way.
+⛔ **49 PASSING TESTS SAID NOTHING ABOUT IT**, because every one fed `isoDay` a plain
+`'YYYY-MM-DD'` STRING, which takes an early branch and never reaches the Date path — the guard
+was in the same function, five lines above the line that walked into the trap.
+⛔ **AND AN IN-PROCESS TEST COULD NOT CATCH IT EITHER**: under a UTC host local midnight IS UTC
+midnight, so the broken code is correct there. ⛔ **A NEGATIVE OFFSET CANNOT EXPOSE IT** — local
+midnight in UTC-5 is 05:00Z on the same day — so a suite built from UTC and a US zone passes on
+the broken code. `tests/complianceTrendZone.test.js` forces the zone per child process and
+includes `Asia/Bangkok` and `Pacific/Kiritimati` (UTC+14); mutation-verified, and the mutation
+goes red in exactly those two.
+
 ### ⛔ One control, every firewall's answer (`/compliance/controls/[slug]`, v2.227.0)
 
 ⛔ **A FIREWALL THE CONTROL APPLIES TO WITH NO FINDING ROW IS LISTED AS "NEVER ANSWERED",
