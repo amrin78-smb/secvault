@@ -272,7 +272,18 @@ export default function ControlsTable({ controls }) {
           <tr key={c.slug}>
             <td style={WRAP_CELL}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontWeight: 600 }}>{c.name}</span>
+                  {/* ⛔ The NAME is the link, not the slug. The slug below is
+                      the stable identifier an operator quotes in a ticket and
+                      must stay selectable as plain text. `encodeURIComponent`
+                      because `check_id` is curated TEXT, not a UUID — a future
+                      id with a slash in it would otherwise build a URL
+                      pointing somewhere else entirely. */}
+                  <Link
+                    href={`/compliance/controls/${encodeURIComponent(c.slug)}`}
+                    style={{ fontWeight: 600 }}
+                  >
+                    {c.name}
+                  </Link>
                 <code style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{c.slug}</code>
                 {/* ⛔ TWO SEPARATE THINGS WERE WRONG HERE AND ONLY ONE WAS
                     VISIBLE. `app/globals.css` sets `white-space: nowrap` on

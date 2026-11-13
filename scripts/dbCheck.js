@@ -1063,6 +1063,11 @@ const REGISTRY = [
   // read rather than returning an empty library, so this entry is the only
   // thing that puts that SQL in front of the real schema before a deploy does.
   { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControls', args: (c) => [{ now: c.now }], spec: { object: ['controls', 'summary', 'scope'] } },
+  // ⛔ A SLUG THAT CANNOT EXIST, ON PURPOSE. dbcheck's job is to put the SQL in
+  // front of the real schema, not to find a row — and pinning a real check id
+  // here would make this entry fail the day the seed library drops it, which
+  // reads as schema drift and is not.
+  { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControlDetail', args: (c) => ['__dbcheck_no_such_control__', { now: c.now }], spec: RAW },
   // ⛔ THE EXCEPTIONS ENGINE WAS IN THIS REGISTRY NOWHERE AT ALL until v2.227.0,
   // because the completeness guard only insists on `lib/engines/*Data.js` and
   // this one keeps its storage in the engine file. `listFleetExceptions`

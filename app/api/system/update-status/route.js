@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.0': [
+    'New: a compliance trend on Compliance \u2192 Scores. SecVault has recorded the fleet\u2019s compliance score, and each framework\u2019s, every night for as long as the table has existed \u2014 and nothing ever drew it. The chart shows the whole history with a per-framework change figure beside it.',
+    'Days SecVault has no reading for leave a GAP in the line rather than dropping to zero, and the two reasons are counted separately: a night the job never ran, and a night it ran but nothing could be graded. They are different problems with different fixes, so they are never added together.',
+    'New: each control now has its own page \u2014 what it checks, how to fix it, and every firewall\u2019s answer to it. The remediation guidance was previously reachable only by opening a firewall and then a finding. A firewall the control applies to but has never been asked is listed as \u201cnever answered\u201d, never as passing.',
+    'New: a \u201cTop failing controls\u201d panel on Compliance \u2192 Scores, ranked by how many firewalls fail each one, linking through to the full list. It will not show a clean result unless every control in the library was actually evaluated on every firewall it applies to.',
+    'Fixed: four panels across the product were discarding their own heading. \u201cRemediation velocity could not be measured\u201d, \u201cNo checks are seeded\u201d and two others were being passed to a component that quietly ignored them, so those panels rendered as a bare grey line that read as \u201cnothing to report\u201d. A check now fails the build if it happens again.',
+  ],
   '2.227.0': [
     'New: Compliance is now a section with three pages \u2014 Scores, Controls and Exceptions \u2014 instead of a single entry. The first page is unchanged apart from its name, and every existing link and bookmark still works.',
     'New: Controls \u2014 the check library read across the whole fleet, answering \u201cwhich control is failing on the most firewalls?\u201d. Every compliance screen until now started from a firewall and listed its answers; nothing could start from a control. Each row carries its frameworks, its severity, how many firewalls fail it, and the names of those firewalls one click away.',

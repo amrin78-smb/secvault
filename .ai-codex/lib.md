@@ -299,6 +299,39 @@ verified — one ESCAPED first time because the hueless assertion counted `var(-
 occurrences that the count text also carries, so green pips passed; rewritten to isolate each cell
 and assert the ABSENCE of every severity token).
 
+## lib/engines/complianceTrend.js (v2.227.0)
+
+The compliance history, charted for the first time. `fleet_dashboard_snapshots` has carried
+`compliance_overall_score` AND `compliance_by_standard` nightly since the table existed, and
+nothing read it as a SERIES — `ComplianceScoreWidget` reads it `LIMIT 1`. PURE; the chart is
+`components/compliance/ComplianceTrendChart.js`.
+
+⛔ **FOUR DAY-STATES, NOT TWO, AND BOTH ABSENCES BREAK THE LINE**: `measured` (a finite 0-100),
+`unmeasurable` (a row exists, score is NULL — the job ran, nothing was gradeable),
+`not_recorded` (NO ROW for that date — the four lost cron days CLAUDE.md records) and
+`unreadable` (a value that is not a usable percentage). An absent date is emitted as its own
+point so a categorical axis cannot stand the two surviving snapshots side by side and draw a
+straight line across the hole. ⛔ **Interior only** — days before the first snapshot are never
+padded, because "the job had not started" is not "the job was down".
+
+⛔ **THE TWO GAP CAUSES ARE NEVER SUMMED** and a test fails on a field named like a combined
+total: a lost nightly tick is an ENGINE problem and "nothing gradeable" is a COVERAGE problem,
+with different first steps. Same call `capacityForecast.js` makes refusing to add
+`bytes_not_summable` to `no_log_coverage`.
+
+⛔ **A DELTA NEEDS TWO READABLE ENDPOINTS** — fewer than two reports null, never 0, which reads
+as "no change". ⛔ **The Y axis is pinned `[0,100]`**, never recharts' auto-fit, which would
+draw a 71→73 fortnight as a dramatic climb. ⛔ **`MAX_SPAN_DAYS` (400)** truncates from the OLD
+end and reports it, so one stray ancient `snapshot_date` cannot generate ~20k absent points.
+⛔ **No six-hue series palette** — the severity ramp is a risk claim and violet is
+evidence-only, so all six sit in one cool family separated by DASH PATTERN, with the exact
+numbers in a table beneath.
+
+⛔ **A BUG ITS OWN TESTS FOUND: `readScore([])` returned a MEASURED 0%.** `Number([])` is 0,
+finite and in range, so an empty array would have plotted as a confident 0% compliance. Fixed
+with a type check before the coercion. `tests/complianceTrend.test.js`, 49 cases, 8/8 mutations
+killed.
+
 ## lib/engines/complianceControls.js + complianceControlsData.js (v2.227.0)
 
 The check library read on the CHECK axis instead of the device axis — the data behind

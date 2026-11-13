@@ -1139,6 +1139,87 @@ never printed. It degrades toward unknown, never toward a grade.
 `compliance_exceptions` follows. A test walks every firewall asserting the only `%` printed is the
 headline score.
 
+### ⛔ The compliance history was written nightly and never read (v2.227.0)
+
+`lib/engines/complianceTrend.js` + `components/compliance/ComplianceTrendChart.js`, on
+`/compliance?view=table`.
+
+⛔ **THE DATA WAS ALWAYS THERE.** `fleet_dashboard_snapshots` carries
+`compliance_overall_score` and `compliance_by_standard` and has been written every night since
+the table existed. `ComplianceScoreWidget` reads it `LIMIT 1` — today's number — and nothing in
+the product ever read it as a SERIES. A per-standard compliance history had been accumulating
+and discarding itself on screen.
+
+⛔ **FOUR DAY-STATES, AND BOTH KINDS OF ABSENCE BREAK THE LINE.** `measured` /
+`unmeasurable` (a row exists, the score is NULL — the job ran and nothing was gradeable) /
+`not_recorded` (NO ROW for that date — the four permanently lost cron days this file records
+under the daily-tick section) / `unreadable`. An absent date is emitted as its own point, so a
+categorical axis cannot stand the two surviving snapshots side by side and draw a straight line
+across the hole — which would read as "no change over those days" on exactly the days the
+engine was down. ⛔ **`connectNulls={false}` is load-bearing** and pinned by a test.
+
+⛔ **THE TWO GAP CAUSES ARE NEVER SUMMED.** A lost nightly tick is an ENGINE fault; "nothing
+gradeable" is a COVERAGE fault; they have different first steps, so the caption says "4 days
+never recorded · 2 days nothing gradeable" and a test fails on any field named like a combined
+total. Same call `capacityForecast.js` makes between `no_log_coverage` and
+`bytes_not_summable`.
+
+⛔ **A NULL SCORE IS NEVER PLOTTED AS 0.** The column is nullable by design and the schema says
+so; a null drawn as zero is a catastrophic fall to 0% compliance on a day the fleet was merely
+unmeasurable. ⛔ **`readScore([])` RETURNED A MEASURED 0% IN THE FIRST DRAFT** — `Number([])` is
+0, finite and in range — which would have plotted an empty array as a confident zero. Its own
+tests found it.
+
+⛔ **A DELTA NEEDS TWO READABLE ENDPOINTS**, else null and never 0. ⛔ **The Y axis is pinned
+`[0,100]`**, never auto-fit, which would draw a 71→73 fortnight as a dramatic climb.
+
+### ⛔ One control, every firewall's answer (`/compliance/controls/[slug]`, v2.227.0)
+
+⛔ **A FIREWALL THE CONTROL APPLIES TO WITH NO FINDING ROW IS LISTED AS "NEVER ANSWERED",
+never omitted and never as passing.** That row is the reason the page exists: `remediation_guidance`
+was previously reachable only by opening a device and then a finding, so the question "which
+firewalls has this control actually been put to?" had no surface at all. An absent measurement
+is not a result.
+
+⛔ **THE ROLL-UP IS `buildControl`'s, BYTE FOR BYTE**, and the findings query carries NO vendor
+filter, mirroring `FINDINGS_SQL` — so the detail page and the Controls table can never report
+different failure counts. A finding on an OUT-OF-SCOPE firewall is still shown and flagged,
+because the roll-up counts it and dropping the row would leave the page claiming a failure with
+no failing firewall in the list.
+
+⛔ **AN UNKNOWN SLUG IS AN EmptyState NAMING THE LIBRARY GAP, NOT A 404.** A check can be
+removed from the seed library while exceptions and links to it remain, so a link that worked
+last month can legitimately land here — and that is a statement about SecVault's curated
+library, not about the fleet.
+
+### ⛔ `EmptyState` silently swallowed `title` for its whole life (fixed v2.227.0)
+
+`components/ui/EmptyState.js` destructured `message` alone while FOUR call sites passed a
+`title`. React does not warn about a prop a component ignores, `node --check` is a no-op on
+JSX, and nothing rendered the panel — so the headings were dropped with no error anywhere.
+
+⛔ **THE WORST OF THE FOUR WAS "Remediation velocity could not be measured"** — a statement
+that SecVault FAILED TO READ something, which vanished and left a bare grey paragraph reading
+as "nothing to report". This codebase's signature bug, produced not by any engine but by a prop
+name nobody implemented.
+
+⛔ **A GUARD SHIPPED WITH THE FIX, NOT FOUR EDITED CALL SITES.** Four independent authors
+reached for `title`; the component was wrong. `tests/emptyState.test.js` scans every call site
+and fails the build on a prop the component does not destructure, so the next `icon=` or
+`action=` is a build failure instead of a silent omission. ⛔ It asserts the prop is RENDERED,
+not merely destructured — the same defect one layer in.
+
+⛔ **THE TITLE IS NOT A HEADING ELEMENT.** The panel mounts inside cards, inside tabs and
+directly under a page's own `<h1>`, so an `<h2>` here would inject an outline entry whose LEVEL
+depends on where the panel happens to be used.
+
+⛔ **AND THE GUARD'S FIRST DRAFT FAILED ON CORRECT CODE, TWICE, IN BOTH CLASSIC WAYS.** It read
+the component's own comment EXPLAINING why it must not emit an `<h2>` as the thing it forbids
+(the `notificationChannels.js` prose trap), and a flat `/(\w+)\s*=/` over a JSX tag read
+`statusFilter === 'all'` INSIDE a `message={...}` expression as a prop named `statusFilter`.
+Comments are stripped and the prop scan is brace-depth aware; both fixes are themselves pinned,
+because a guard that cries wolf gets waived and the check stops happening.
+
 ### ⛔ Compliance is a nav GROUP, and the refusal it replaced was retired on schedule (v2.227.0)
 
 `/compliance` (**Scores**) · `/compliance/controls` (**Controls**) · `/compliance/exceptions`

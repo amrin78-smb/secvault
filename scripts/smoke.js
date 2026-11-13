@@ -216,6 +216,11 @@ const STATIC_ROUTES = [
   // failure this sweep exists to catch.
   { path: '/compliance/controls', markers: ['measured across the whole fleet', 'No checks are seeded'] },
   { path: '/compliance/exceptions', markers: ['formally accepted', 'No risk has been formally accepted'] },
+  // ⛔ A REAL SLUG FROM THE SEED LIBRARY, and the markers are the detail
+  // page's own section headings — never the control's NAME, which the list
+  // page also renders, and never a nav label, which the shell renders into
+  // every page.
+  { path: '/compliance/controls/rule-no-any-any-allow', markers: ['What this control checks', 'is in the compliance library'] },
   { path: '/settings', markers: ['Manage app configuration, users, and updates.'] },
   // ⛔ SWEPT SEPARATELY, because `/vulnerability` alone only loads the DEFAULT
   // tab (`posture`) — so `advisories` and `upgrade` were never rendered by any

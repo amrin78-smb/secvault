@@ -25,6 +25,9 @@ import ComplianceMatrix, {
 } from '../../../components/compliance/ComplianceMatrix';
 import StandardCard from '../../../components/compliance/StandardCard';
 import ComplianceTabs from '../../../components/compliance/ComplianceTabs';
+import ComplianceTrendChart from '../../../components/compliance/ComplianceTrendChart';
+import TopFailingControls from '../../../components/compliance/TopFailingControls';
+import { gatherControls } from '../../../lib/engines/complianceControlsData';
 import ZoneClassificationBanner from '../../../components/compliance/ZoneClassificationBanner';
 import DeviceSelect from '../../../components/compliance/DeviceSelect';
 import { vendorLabel } from '../../../components/devices/vendorMeta';
@@ -602,6 +605,38 @@ function coverageLegend(coverageByStandard) {
 // was added, and this page would have gone on being the only one that knew its
 // own siblings existed.
 
+/**
+ * The compliance history, for the trend.
+ *
+ * ⛔ `compliance_overall_score` IS NULLABLE AND NULL IS NOT ZERO — the column's
+ * own schema comment says so. Rows are handed to the engine RAW; nothing here
+ * coerces, fills or interpolates, because a null plotted as 0 draws a
+ * catastrophic fall to 0% compliance on a day when the fleet was merely
+ * unmeasurable.
+ *
+ * ⛔ IT RETURNS null ON A FAILED READ, NEVER `[]`. An empty array means "the
+ * nightly job has never written a row", which the chart states as its own
+ * condition; a database error rendered as that sentence would send somebody to
+ * look at a cron job that is working fine.
+ *
+ * ⛔ NO DATE FLOOR IN THE SQL. The engine caps the span itself
+ * (`MAX_SPAN_DAYS`) and reports the truncation, so a `WHERE snapshot_date >`
+ * here would silently hide history instead of disclosing that it was cut.
+ */
+async function getComplianceHistory(dbPool) {
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT snapshot_date, compliance_overall_score, compliance_by_standard
+         FROM fleet_dashboard_snapshots
+        ORDER BY snapshot_date ASC`
+    );
+    return rows;
+  } catch (err) {
+    console.warn('[compliance] trend history read failed:', err.message);
+    return null;
+  }
+}
+
 export default async function CompliancePage({ searchParams }) {
   const view = searchParams?.view === 'table' ? 'table' : 'cards';
 
@@ -641,6 +676,16 @@ export default async function CompliancePage({ searchParams }) {
         };
       }
     );
+    // ⛔ BOTH EXTRAS ARE ON THE FLEET VIEW ONLY. The cards view answers for ONE
+    // firewall; a fleet trend and a fleet-wide failing-control list beside a
+    // single device's donuts would read as that device's, which is the
+    // per-row/per-device attribution error CLAUDE.md records against
+    // OverviewExposureCard.
+    const history = await getComplianceHistory(pool);
+    // ⛔ The SAME gather the Controls page uses, so the teaser and the page it
+    // links into can never report different numbers. One read, two renderings.
+    const controlsForTeaser = await gatherControls(pool);
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
@@ -670,7 +715,19 @@ export default async function CompliancePage({ searchParams }) {
         <ComplianceTabs active={view} />
         {coverageLegend(fleetCoverage)}
         {freshnessBanner(devices)}
+        {/* ⛔ TREND BEFORE THE MATRIX: how the fleet is MOVING, then the
+            per-firewall detail behind it. `fleet_dashboard_snapshots` has
+            carried a per-standard history since the table existed and nothing
+            has ever charted it — ComplianceScoreWidget reads it `LIMIT 1`. */}
+        <ComplianceTrendChart rows={history} />
         <ComplianceMatrix devices={devices} coverageByDevice={coverageByDevice} />
+        {/* ⛔ AFTER the matrix, because it is the bridge OUT of this page: the
+            matrix says which firewalls are weak, this says which CONTROLS are,
+            and the two answer different questions over the same findings. */}
+        <TopFailingControls
+          controls={controlsForTeaser.controls}
+          summary={controlsForTeaser.summary}
+        />
       </div>
     );
   }
