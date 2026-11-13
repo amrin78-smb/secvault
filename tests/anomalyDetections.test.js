@@ -359,3 +359,118 @@ describe('⛔ the toggle gates DISPATCH, and both registries must agree', () => 
     assert.match(src, /has no fetcher in OPEN_ITEM_FETCHERS/);
   });
 });
+
+// ─── the registered alert rate must be re-testable (roadmap row 28, 2026-11-14) ───
+//
+// ⛔ WHAT THIS SECTION IS FOR. `assertRegisteredDetector` only ever checked
+// that `alertsPerDay`, `measuredOn` and `method` EXIST, so a rate measured on
+// one afternoon in October stayed authoritative while the fleet moved. Measured
+// against production on 2026-11-14: `device_silent` fired 17 times in 28 days
+// against a registered 0.074/day (8.2x, p=9.6e-11), and `denied_spike` fired
+// TWICE where 28 were expected (p=2.9e-10) — a drift nobody had even filed,
+// because nothing re-measured. The point of these tests is that the meta-check
+// REPORTS and never disarms.
+describe('anomaly detectors: rate drift is re-tested, not asserted once', () => {
+  const NOW = new Date('2026-11-14T00:00:00Z');
+
+  it('catches the measured production drift (device_silent, 17 in 28 days)', () => {
+    const r = a.rateDrift('device_silent', 17, 28, NOW);
+    assert.equal(r.state, a.RATE_STATES.DRIFTED_HIGH);
+    assert.ok(r.ratio > 8 && r.ratio < 8.5, `ratio should be ~8.2, got ${r.ratio}`);
+    assert.ok(r.p < 1e-9, `should be decisive, p=${r.p}`);
+  });
+
+  // ⛔ THE DANGEROUS DIRECTION. A detector registered as firing daily that
+  // produces nothing is indistinguishable from a healthy fleet — this
+  // codebase's signature bug in detector form — so it must be a REPORTED
+  // state, not silence.
+  it('catches a detector that has gone quiet (denied_spike, 0 where 28 expected)', () => {
+    const r = a.rateDrift('denied_spike', 0, 28, NOW);
+    assert.equal(r.state, a.RATE_STATES.DRIFTED_LOW);
+    assert.ok(r.p < 1e-9);
+  });
+
+  // ⛔ A RATIO THRESHOLD WOULD FAIL HERE, which is the whole reason the test is
+  // a Poisson tail: 2 against an expected 2.07 is agreement, but so is 0, and
+  // so is 5 — the registered rate came from a count of TWO and cannot support
+  // a tighter claim than that.
+  it('does not cry drift on counts the registered rate can explain', () => {
+    for (const n of [0, 1, 2, 3, 4, 5]) {
+      const r = a.rateDrift('device_silent', n, 28, NOW);
+      assert.equal(r.state, a.RATE_STATES.INDISTINGUISHABLE,
+        `count ${n} over 28 days should not read as drift (expected 2.07)`);
+    }
+  });
+
+  // ⛔ `indistinguishable`, NEVER `consistent`. Observing 0 against an expected
+  // 2.07 is p=0.126 and settles nothing; reporting it as agreement would be a
+  // failed measurement recorded as a fact.
+  it('names the agreement state so it cannot be read as proof', () => {
+    assert.equal(a.RATE_STATES.INDISTINGUISHABLE, 'indistinguishable');
+    assert.ok(!Object.values(a.RATE_STATES).includes('consistent'));
+  });
+
+  it('is unmeasurable rather than wrong on a bad input', () => {
+    assert.equal(a.rateDrift('no_such_detector', 5, 28, NOW).state, a.RATE_STATES.UNMEASURABLE);
+    assert.equal(a.rateDrift('device_silent', 5, 0, NOW).state, a.RATE_STATES.UNMEASURABLE);
+    assert.equal(a.rateDrift('device_silent', null, 28, NOW).state, a.RATE_STATES.UNMEASURABLE);
+    assert.equal(a.rateDrift('device_silent', -1, 28, NOW).state, a.RATE_STATES.UNMEASURABLE);
+  });
+
+  // ⛔ THE BOUND IS EXPLICIT BECAUSE EXCEEDING IT FABRICATES AGREEMENT.
+  // exp(-lambda) underflows to 0 above ~745, which makes the cumulative sum 0
+  // and turns `atLeast` into a confident 1 — "not surprising" produced by an
+  // arithmetic failure rather than by evidence.
+  it('refuses a lambda it cannot compute instead of returning a confident 1', () => {
+    assert.equal(a.poissonAtLeast(5, a.MAX_LAMBDA + 1), null);
+    assert.equal(a.poissonAtMost(5, a.MAX_LAMBDA + 1), null);
+    assert.ok(a.poissonAtLeast(5, 10) !== null);
+  });
+
+  it('poisson tails agree with known values', () => {
+    // P(X=0 | 2.072) = e^-2.072
+    assert.ok(Math.abs(a.poissonAtMost(0, 2.072) - Math.exp(-2.072)) < 1e-12);
+    assert.equal(a.poissonAtLeast(0, 2.072), 1);
+    assert.ok(Math.abs(a.poissonAtMost(50, 2.072) - 1) < 1e-9);
+  });
+
+  // ⛔ THE AGE IS A FACT BESIDE THE VERDICT, NEVER MIXED INTO IT. 90 days is a
+  // review cadence and a judgement; the tail test is the evidence, and folding
+  // a date into a statistical state would let one masquerade as the other.
+  it('reports measurement age separately from the statistical verdict', () => {
+    const r = a.rateDrift('device_silent', 17, 28, NOW);
+    assert.equal(r.measuredOn, '2026-10-06');
+    assert.equal(r.measurementAgeDays, 39);
+    assert.equal(r.reviewOverdue, false);
+    const later = a.rateDrift('device_silent', 17, 28, new Date('2027-06-01T00:00:00Z'));
+    assert.equal(later.reviewOverdue, true);
+    // the verdict itself must not have moved because the clock did
+    assert.equal(later.state, r.state);
+  });
+
+  // ⛔ THIS CASE EXISTS BECAUSE THE FIRST DRAFT OF THE TEST ABOVE MISSED A
+  // MUTATION. Seeding the state from `reviewOverdue` passed all 35 tests: the
+  // age assertion used a DRIFTED count, and the drift branch overwrites the
+  // seed, so the contamination was invisible on exactly the input chosen to
+  // check for it. The property only has teeth on a count the registered rate
+  // CAN explain — where nothing later overrides the seed.
+  it('an overdue measurement does not become a statistical verdict', () => {
+    const overdue = new Date('2027-06-01T00:00:00Z');
+    const r = a.rateDrift('device_silent', 2, 28, overdue);
+    assert.equal(r.reviewOverdue, true, 'precondition: the measurement must be overdue');
+    assert.equal(r.state, a.RATE_STATES.INDISTINGUISHABLE,
+      'an old measurement is a review fact, not evidence of drift — the tail test is the evidence');
+    assert.equal(r.p, null);
+  });
+
+  // ⛔ REPORTS, NEVER REFUSES. A meta-check that could disarm a detector would
+  // be the guard-that-cannot-fire pattern aimed at the alerting engine itself,
+  // and this product's rule is that monitoring runs in every state.
+  it('every registered detector still has evidence and nothing throws on drift', () => {
+    for (const key of Object.keys(a.EVIDENCE)) {
+      assert.doesNotThrow(() => a.assertRegisteredDetector(key));
+      assert.doesNotThrow(() => a.rateDrift(key, 9999, 28, NOW));
+      assert.equal(a.rateDrift(key, 9999, 28, NOW).state, a.RATE_STATES.DRIFTED_HIGH);
+    }
+  });
+});

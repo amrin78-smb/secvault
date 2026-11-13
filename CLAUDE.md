@@ -75,6 +75,20 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   TWO detectors measured and shipped (`device_silent`, `denied_spike`), TWO measured and REFUSED
   (`total-events spike`, `vpn auth burst`); a detector cannot register without a measured alert rate
   and sensitivity (`assertRegisteredDetector()`), and `scripts/a6Harness.js` is what produces them.
+  ⛔ **BUT A REGISTERED RATE IS A CLAIM ABOUT ONE AFTERNOON, AND NOTHING RE-TESTED IT UNTIL
+  v2.228.4.** `assertRegisteredDetector()` only ever checked that `alertsPerDay`, `measuredOn` and
+  `method` EXIST, so a rate measured on 2026-10-06 stayed authoritative while the fleet moved
+  underneath it. `rateDrift()` now compares each detector's OBSERVED count against its registered
+  rate on every run, and found BOTH shipped detectors wrong, in OPPOSITE directions: `device_silent`
+  at **17 alerts in 28 days against a registered 0.074/day (8.2x, p=9.6e-11)** and `denied_spike`
+  **drifted LOW — 2 where 28 were expected (p=2.9e-10)**, i.e. a detector registered as firing
+  daily that had nearly stopped and which nothing had noticed. ⛔ **A POISSON TAIL ON THE COUNT,
+  never a ratio threshold**: 0.074/day came from TWO observed runs, so a 2x "deviation" is noise
+  and counts 0-5 over 28 days all correctly read `indistinguishable`. ⛔ **IT REPORTS AND NEVER
+  REFUSES** — disarming a detector for failing a meta-check is the guard-that-cannot-fire pattern
+  aimed at the alerting engine itself, and monitoring runs in every state here. ⛔ The measurement
+  AGE is a separate fact (`reviewOverdue`, 90 days, a stated cadence rather than a derivation) and
+  must never contaminate the statistical verdict.
   ⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
   and both are still refused, for reasons now recorded with dates in that file's own header.
   ⛔ **A9 remains genuinely unbuilt** — this line said A8 did too, for four versions after it
@@ -434,6 +448,17 @@ disagrees with the transport, a trailing path, a query/fragment, and embedded cr
 which produces a callback URL that fails sign-in with no visible error. A missing scheme is caught
 BEFORE `new URL()`, which otherwise parses `host:3010` as a protocol and reports the hostname as an
 unsupported one.
+
+⛔ **AND EVERY ONE OF THOSE GUARDS RAN ON A HOST `new URL()` MAY HAVE REWRITTEN (fixed v2.228.4).**
+`IPV4_RE`/`isIpv4` and `HOST_RE` were applied to `parsed.hostname`, so the typed text never reached
+a check: `http://192.168.010.1:3010` was ACCEPTED and saved as **`192.168.8.1`**, because a leading
+zero makes WHATWG read the octet as OCTAL. Confirmed by calling the real validator, which returned
+`{ok:true, url:'http://192.168.8.1:3010'}` with no warning naming the change — on the field that
+becomes `NEXTAUTH_URL` and that the lockout guard below resolves. ⛔ **A better `IPV4_RE` is NOT the
+fix**: the same rewrite arrives by octal, all-octal, bare decimal (`3232235777`, which `HOST_RE`
+accepts because it is all alphanumerics), short form, hex and IDN punycode. `typedHostOf()` extracts
+the host from the RAW string with no URL parse and ANY disagreement is refused, naming both
+addresses; case is the one allowed difference, since lowercasing changes no destination.
 
 ⛔ **THE LOCKOUT GUARD.** A host that resolves somewhere other than this server needs explicit
 confirmation (HTTP 409 + `needsConfirmation`), because that typo is the one way to make the console

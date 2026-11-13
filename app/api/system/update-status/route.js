@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.4': [
+    'Fixed: the console address field accepted an address and then saved a DIFFERENT one. Typing 192.168.010.1 stored 192.168.8.1 \u2014 a leading zero makes the browser\u2019s URL parser read that part of the address as octal \u2014 with nothing on screen saying it had changed. This is the address sign-in is built from, so a wrong value locks you out of the console you would use to correct it. Any address that would be silently rewritten is now refused and both versions are shown.',
+    'Fixed: the two traffic anomaly detectors each carry a measured \u201chow often should this alert\u201d figure, and nothing ever re-checked it. Both were wrong, in opposite directions: the \u201cfirewall stopped logging\u201d detector is firing about eight times more often than recorded, and the \u201cdenied traffic above normal\u201d detector had almost stopped firing \u2014 two alerts where twenty-eight were expected.',
+    'A detector that has quietly stopped looks exactly like a healthy network, so both directions are now reported on every run, with the comparison stated as a probability rather than a ratio \u2014 the original figure came from only two observations and cannot support a tighter claim.',
+    'Detection itself is unchanged by this check. It reports and never switches a detector off: a self-test that could disable alerting would be worse than the drift it reports.',
+    'Security: two database dumps left on the reference server in 2026 September were readable by any local user account, in a folder outside every backup policy. Access is now restricted to administrators, verified file by file.',
+  ],
   '2.228.3': [
     'Fixed in the release checks, not the product: the page-render sweep that runs on every deploy was not opening the compliance table view at all \u2014 the one page that carries the new trend chart and the top-failing-controls panel. It reported \u201c37/37 pages rendered\u201d while never loading either of them.',
     'That is the same gap this check had in v2.225.0, when a page missing from its list meant \u201c25/25 pages\u201d said nothing was wrong. The view is now swept on every deploy, and both sections must be present or the deploy reports a failure.',

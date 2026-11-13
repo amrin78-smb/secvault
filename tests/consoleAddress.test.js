@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { validateConsoleUrl, hostPointsHere } = require('../lib/consoleUrl');
+const { validateConsoleUrl, hostPointsHere, typedHostOf } = require('../lib/consoleUrl');
 const { parseEnv, setEnvValue } = require('../lib/envFile');
 
 describe('⛔ the scheme must follow the transport', () => {
@@ -343,3 +343,77 @@ describe('⛔ .env.local holds every secret the product has', () => {
     assert.equal(fs.readFileSync(file, 'utf8'), original,
       'nothing may be written when the outcome is ambiguous');
   });});
+
+// ─── the host must be the one that was TYPED (roadmap row 14, fixed 2026-11-14) ───
+//
+// ⛔ WHY THIS IS A SECTION AND NOT A CASE. `new URL()` rewrites a host
+// silently, and every guard in consoleUrl.js ran on the REWRITTEN value — so
+// `http://192.168.010.1:3010` was accepted and stored as `192.168.8.1`,
+// because a leading zero makes WHATWG read the octet as OCTAL. The field
+// becomes NEXTAUTH_URL and the lockout guard resolves whatever is stored, so
+// saving a different address than the one typed, with no error, is the worst
+// outcome available in that file.
+//
+// ⛔ THE REFUSAL IS NOT A BETTER IPv4 REGEX, so these cases are not variations
+// on one shape: octal, all-octal, bare decimal, short form, hex and punycode
+// each reach a different address by a different route, and the bare decimal
+// (`3232235777`) is the one that shows why enumerating them fails — it is all
+// alphanumerics, so `HOST_RE` accepts it happily.
+describe('consoleUrl: a silently rewritten host is refused', () => {
+  const REWRITTEN = [
+    ['octal octet', 'http://192.168.010.1:3010', '192.168.8.1'],
+    ['every octet octal', 'http://0300.0250.0.1:3010', '192.168.0.1'],
+    ['bare decimal', 'http://3232235777:3010', '192.168.1.1'],
+    ['short form', 'http://192.168.1:3010', '192.168.0.1'],
+    ['hex octet', 'http://192.168.0x01.1:3010', null],
+    ['non-ASCII name', 'http://m\u00fcnchen.local:3010', 'xn--mnchen-3ya.local'],
+  ];
+
+  for (const [label, input, becomes] of REWRITTEN) {
+    it(`refuses ${label} (${input})`, () => {
+      const r = validateConsoleUrl(input, { tlsActive: false });
+      assert.equal(r.ok, false, `${input} was ACCEPTED and would have been saved as ${r.url}`);
+      // ⛔ The message must name BOTH addresses. "Not a valid hostname" would
+      // be a lie here — it IS valid, it is simply not the one asked for, and
+      // an operator told their own typing is invalid will retype it verbatim.
+      assert.match(r.error, /was read as/);
+      if (becomes) assert.ok(r.error.includes(becomes), `error should name the rewritten host ${becomes}`);
+    });
+  }
+
+  // ⛔ THE OTHER END. A refusal that also rejected ordinary addresses would be
+  // discovered as "I cannot set the console address" and waived.
+  const ACCEPTED = [
+    ['an IPv4 literal', 'http://192.168.7.69:3010', 'http://192.168.7.69:3010', false],
+    ['a hostname with a port', 'https://secvault.example.com:3010', 'https://secvault.example.com:3010', true],
+    ['no port', 'https://secvault.example.com', 'https://secvault.example.com', true],
+    ['an IPv4 with no port', 'http://192.168.7.69', 'http://192.168.7.69', false],
+  ];
+  for (const [label, input, expected, tls] of ACCEPTED) {
+    it(`still accepts ${label}`, () => {
+      const r = validateConsoleUrl(input, { tlsActive: tls });
+      assert.equal(r.ok, true, `${input} was refused: ${r.error}`);
+      assert.equal(r.url, expected);
+    });
+  }
+
+  // ⛔ CASE IS THE ONE ALLOWED DIFFERENCE. Hostnames are case-insensitive, so
+  // lowercasing changes no destination; refusing it would reject a correct
+  // address for a cosmetic reason.
+  it('allows case normalisation, which changes no destination', () => {
+    const r = validateConsoleUrl('https://SECVAULT.EXAMPLE.COM:3010', { tlsActive: true });
+    assert.equal(r.ok, true, `uppercase host was refused: ${r.error}`);
+    assert.equal(r.url, 'https://secvault.example.com:3010');
+  });
+
+  // ⛔ The typed host is extracted WITHOUT a URL parse, because parsing is the
+  // thing under test — deriving the comparison value from it would compare the
+  // parser with itself.
+  it('typedHostOf reads the host without parsing, userinfo and port stripped', () => {
+    assert.equal(typedHostOf('http://192.168.010.1:3010'), '192.168.010.1');
+    assert.equal(typedHostOf('https://user:pw@host.example:3010/x?y#z'), 'host.example');
+    assert.equal(typedHostOf('http://[::1]:3010'), '[::1]');
+    assert.equal(typedHostOf('http://host.example'), 'host.example');
+    assert.equal(typedHostOf('no-scheme-here'), '');
+  });
+});
