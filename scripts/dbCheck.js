@@ -684,6 +684,21 @@ function checkShape(value, spec) {
     return { problems, unverified };
   }
 
+  // ⛔ A NUMBER IS A LEGITIMATE RETURN SHAPE AND THE CHECKER COULD NOT EXPRESS
+  // ONE, which is the SAME gap the Map branch above records, met again in
+  // v2.228.0 by `countFleetFailingChecks`. It was declared `array`, so the
+  // sweep reported a FAILURE caused by the DECLARATION while its SQL was
+  // fine -- and a gate that cries wolf gets waived, which is how the check
+  // stops happening. `nullable` matters more here than anywhere: that
+  // function returns null, NEVER 0, when the count cannot be read, and 0
+  // would read as "nothing is failing" on a fleet that is.
+  if (s.number) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      problems.push(`returned ${typeof value}, but callers use it as a number`);
+    }
+    return { problems, unverified };
+  }
+
   if (s.array) {
     if (!Array.isArray(value)) {
       problems.push(`returned ${typeof value}, but callers iterate it as an array`);
@@ -1063,11 +1078,15 @@ const REGISTRY = [
   // read rather than returning an empty library, so this entry is the only
   // thing that puts that SQL in front of the real schema before a deploy does.
   { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControls', args: (c) => [{ now: c.now }], spec: { object: ['controls', 'summary', 'scope'] } },
-  // ⛔ A SLUG THAT CANNOT EXIST, ON PURPOSE. dbcheck's job is to put the SQL in
-  // front of the real schema, not to find a row — and pinning a real check id
-  // here would make this entry fail the day the seed library drops it, which
-  // reads as schema drift and is not.
-  { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControlDetail', args: (c) => ['__dbcheck_no_such_control__', { now: c.now }], spec: RAW },
+  // ⛔ A REAL, DISCOVERED SLUG — AND THE ENTRY THAT PRECEDED IT VERIFIED ONE
+  // STATEMENT OF THREE. It passed `'__dbcheck_no_such_control__'` on the
+  // reasoning that dbcheck "puts the SQL in front of the real schema, not
+  // finds a row"; but the reader returns at `if (!row)`, so CONTROL_FINDINGS_SQL
+  // and CONTROL_DEVICES_SQL — the two that back the page's device table —
+  // never reached the schema at all. `ctx.controlSlug` is discovered per run
+  // (see discoverContext), so it cannot rot when the seed library changes,
+  // and `needsControl` reports BLOCKED rather than quietly half-running.
+  { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControlDetail', args: (c) => [c.controlSlug, { now: c.now }], needsControl: true, spec: { object: ['found', 'slug', 'control', 'devices', 'neverAnsweredCount', 'applicableDeviceCount'] } },
   // ⛔ THE EXCEPTIONS ENGINE WAS IN THIS REGISTRY NOWHERE AT ALL until v2.227.0,
   // because the completeness guard only insists on `lib/engines/*Data.js` and
   // this one keeps its storage in the engine file. `listFleetExceptions`
@@ -1075,7 +1094,9 @@ const REGISTRY = [
   // two LEFT JOINs the per-device page uses — so registering it closes the gap
   // for both.
   { mod: 'lib/engines/complianceExceptions.js', fn: 'listFleetExceptions', args: () => [], spec: RAW },
-  { mod: 'lib/engines/complianceExceptions.js', fn: 'countFleetFailingChecks', args: () => [], spec: RAW },
+  // ⛔ A COUNT, NOT A LIST — and `nullable`, because this function returns
+  // null and never 0 when the count cannot be read.
+  { mod: 'lib/engines/complianceExceptions.js', fn: 'countFleetFailingChecks', args: () => [], spec: { number: true, nullable: true } },
 
   // ── CVE ─────────────────────────────────────────────────────────────────
   { mod: 'lib/engines/advisoryCuration.js', fn: 'getCurationWorklist', args: () => [], spec: {} },
@@ -1339,12 +1360,34 @@ async function discoverContext(pool, now) {
     if (rows[0]) { deviceId = rows[0].id; deviceName = rows[0].name; }
   } catch { /* reported below as a blocked per-device group, never silently */ }
 
+  // ⛔ A REAL CHECK SLUG, DISCOVERED THE SAME WAY AND FOR THE SAME REASON.
+  // `gatherControlDetail` was registered with a deliberately IMPOSSIBLE slug,
+  // reasoning that dbcheck's job is "to put the SQL in front of the real
+  // schema, not to find a row". The function returns at `if (!row)`, so with
+  // no row TWO of its THREE statements never ran -- the entry failed at
+  // precisely the job it claimed. The original worry (a pinned id rotting
+  // when the seed library drops that check) is real and is answered the way
+  // the device above answers it: discover it, never pin it.
+  let controlSlug = null;
+  try {
+    const { rows } = await pool.query(
+      `SELECT ac.check_id AS slug, count(af.id)::int AS findings
+         FROM audit_checks ac
+         LEFT JOIN audit_findings af ON af.check_id = ac.id
+        GROUP BY ac.check_id
+        ORDER BY findings DESC, ac.check_id
+        LIMIT 1`
+    );
+    if (rows[0]) controlSlug = rows[0].slug;
+  } catch { /* reported as a blocked entry, never silently */ }
+
   const to = now;
   return {
     now,
     deviceId,
     deviceName,
     deviceIds,
+    controlSlug,
     // A 3-hour window for the hourly rollups: a 20-minute one can contain zero
     // `bucket_hour` buckets, which would leave every row shape unverified.
     window: { from: new Date(to.getTime() - 3 * 3600 * 1000), to, clamped: false },
@@ -1364,6 +1407,21 @@ async function runEntry(entry, makeGuarded, ctx) {
       ms: 0,
       state: 'blocked',
       reason: 'no active device could be discovered, so this per-device query was NOT run',
+      notes: [],
+      statements: 0,
+    };
+  }
+
+  // ⛔ BLOCKED, NEVER A PARTIAL RUN REPORTED AS A PASS. With no slug the
+  // reader returns after its first statement, so reporting `ok` would claim
+  // three statements were verified when one was -- a failed read recorded as
+  // a measurement, in the sweep that exists to catch exactly that.
+  if (entry.needsControl && !ctx.controlSlug) {
+    return {
+      name,
+      ms: 0,
+      state: 'blocked',
+      reason: 'no check could be discovered in audit_checks, so this control query was NOT run',
       notes: [],
       statements: 0,
     };

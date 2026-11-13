@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.1': [
+    'Fixed: the pre-deploy database sweep reported two FAILURES that were faults in the sweep\u2019s own declarations rather than in the queries it checks. A gate that cries wolf gets waived, so the declarations were corrected.',
+    'Fixed, and this was the one that mattered: the sweep checked the new control page by asking for a control that cannot exist. The reader stops as soon as it finds no such control, so two of its three queries \u2014 the ones behind the per-firewall answer table \u2014 were never put in front of the real database at all, while the entry reported itself as covering them.',
+    'The sweep now picks a real control out of the library each time it runs, rather than a fixed one that would rot whenever the library changes, and reports the check as NOT RUN if the library is empty instead of quietly checking a third of it.',
+  ],
   '2.228.0': [
     'New: a compliance trend on Compliance \u2192 Scores. SecVault has recorded the fleet\u2019s compliance score, and each framework\u2019s, every night for as long as the table has existed \u2014 and nothing ever drew it. The chart shows the whole history with a per-framework change figure beside it.',
     'Days SecVault has no reading for leave a GAP in the line rather than dropping to zero, and the two reasons are counted separately: a night the job never ran, and a night it ran but nothing could be graded. They are different problems with different fixes, so they are never added together.',
