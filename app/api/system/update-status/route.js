@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.3': [
+    'Fixed in the release checks, not the product: the page-render sweep that runs on every deploy was not opening the compliance table view at all \u2014 the one page that carries the new trend chart and the top-failing-controls panel. It reported \u201c37/37 pages rendered\u201d while never loading either of them.',
+    'That is the same gap this check had in v2.225.0, when a page missing from its list meant \u201c25/25 pages\u201d said nothing was wrong. The view is now swept on every deploy, and both sections must be present or the deploy reports a failure.',
+    'Verified directly against the live console first: both sections render, and the chart\u2019s caption now reads the dates the database actually holds.',
+  ],
   '2.228.2': [
     'Fixed: every date on the new compliance trend was one day early \u2014 including both ends of the caption under the chart. The fleet\u2019s history runs 19 July to 13 November; the chart said 18 July to 12 November.',
     'The cause: a date column in PostgreSQL carries no time and no timezone, and it was being converted using UTC on a server that runs seven hours ahead \u2014 which lands on the previous day every time. Dates are now read exactly as the database stored them.',

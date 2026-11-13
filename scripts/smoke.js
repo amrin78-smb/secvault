@@ -209,6 +209,26 @@ const STATIC_ROUTES = [
   // it on the first run after the rename, which is the harness working.
   { path: '/analysis', markers: ['Rule findings across every active firewall'] },
   { path: '/compliance', markers: ['Compare PCI DSS', 'No active devices', 'PCI DSS'] },
+  // ⛔ `?view=table` IS A SEPARATE ENTRY BECAUSE IT IS A SEPARATE PAGE'S WORTH
+  // OF CONTENT, AND FOR THREE RELEASES NOTHING SWEPT IT. `/compliance` above
+  // renders the CARDS view; the compliance trend and the top-failing-controls
+  // teaser mount only on the TABLE view, so "37/37 pages rendered" was true
+  // and said nothing about either of them. That is this harness's own
+  // v2.225.0 lesson repeating — "/capacity was not in the smoke table, and
+  // 25/25 pages said nothing was wrong" — one query parameter further in.
+  //
+  // ⛔ THE MARKER IS `TREND_CLAIM`, WHICH BOTH RENDER PATHS EMIT (the chart
+  // prints it above an unavailable-reason panel as well as above a drawn
+  // chart), so it cannot depend on the fleet having gradeable history — the
+  // rule that caught a guessed marker in v2.228.0.
+  // ⛔ `alsoMarkers` IS AN AND: the teaser is a SECOND independent section,
+  // and with `markers` being an OR, listing it there would let either one
+  // alone pass for both.
+  {
+    path: '/compliance?view=table',
+    markers: ['a history of readings, not a continuous measurement'],
+    alsoMarkers: ['Top failing controls'],
+  },
   // ⛔ THE MARKERS ARE PAGE PROSE, NEVER THE NAV LABEL. "Controls" and
   // "Exceptions" are both sidebar entries since v2.227.0, and the sidebar
   // renders every label into every page — so either word as a marker would be
