@@ -1,6 +1,6 @@
 {
   "name": "secvault",
-  "version": "2.225.1",
+  "version": "2.225.2",
   "private": true,
   "scripts": {
     "dev": "node scripts/nextPort.js dev",

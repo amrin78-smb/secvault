@@ -339,9 +339,20 @@ export default function BandwidthTrendBoard({
   const incomplete = Array.isArray(failures) && failures.length > 0;
   // ⛔ WITHHELD WHILE INCOMPLETE. A floor printed as a total is worse than no
   // number, because the reader cannot tell the difference.
-  const count = (v) => (incomplete
-    ? <NotMeasured reason={INCOMPLETE_COUNT_REASON} />
-    : v);
+  //
+  // ⛔ AND THE DASHED BORDER MUST FOLLOW THE WITHHELD VALUE, WHICH IT DID NOT.
+  // `StatCard` dashes a tile only when `color === 'var(--unmeasured)'` exactly,
+  // and this helper used to swap the VALUE for an em-dash without touching the
+  // colour — so a withheld tile kept a SOLID border while the one tile that
+  // hardcoded `--unmeasured` stayed dashed even when its number was real.
+  // Rendered, that was exactly backwards: dashed when measured, solid when
+  // withheld. v2.200.0 added that border precisely because grey text alone was
+  // measured as insufficient (`--unmeasured` and `--text-muted` are four hex
+  // digits apart), so carrying the wrong bit is worse than carrying none.
+  // Found by the 2026-11-13 UI sweep, which rendered both arms.
+  const tile = (v) => (incomplete
+    ? { value: <NotMeasured reason={INCOMPLETE_COUNT_REASON} />, color: 'var(--unmeasured)' }
+    : { value: v });
 
   const notSummable = summary.bytesNotSummableDevices || [];
   const noCoverage = summary.noLogCoverageDevices || [];
@@ -357,23 +368,26 @@ export default function BandwidthTrendBoard({
       <KpiRow cols={3} style={{ marginBottom: 'var(--s4)' }}>
         <StatCard
           label="Firewalls a trend can be measured on"
-          value={count(summary.measurable ?? 0)}
+          {...tile(summary.measurable ?? 0)}
           sub={summary.devices
             ? `of ${summary.devices} active`
             : undefined}
         />
         <StatCard
           label="Direction resolvable"
-          value={count(summary.projected ?? 0)}
+          {...tile(summary.projected ?? 0)}
           sub={horizonDays ? `projected ${horizonDays} days ahead` : undefined}
         />
         <StatCard
           label="No trend resolvable"
-          value={count(summary.noDetectableTrend ?? 0)}
-          // ⛔ --unmeasured is what makes StatCard dash the tile's border. Grey
-          // text alone was measured as insufficient (v2.200.0): --unmeasured
-          // and --text-muted are four hex digits apart.
-          color="var(--unmeasured)"
+          // ⛔ NO PERMANENT `--unmeasured` HERE ANY MORE, AND THAT IS THE FIX.
+          // This count IS measured — the sub-line says so in words — so dashing
+          // its border claimed the opposite of the sentence underneath it. The
+          // dash now appears only when the number is genuinely withheld, via
+          // `tile()`. What the eight means is carried by the label and the
+          // sub-line, which is where a qualifier belongs; a hueless border is
+          // reserved for "we could not measure this".
+          {...tile(summary.noDetectableTrend ?? 0)}
           sub="measured, and the direction could not be separated from the variation"
         />
       </KpiRow>

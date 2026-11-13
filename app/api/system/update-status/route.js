@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.225.2': [
+    'Fixed a display fault on the new Bandwidth trend page: the dashed outline that means "this number could not be measured" was on the wrong tiles. It appeared on a figure that was measured, and was missing from figures that had been withheld — so the page said the opposite of the truth about its own numbers. The dashed outline now follows the withheld value.',
+    'No figure changed; this is how the page marks what it does and does not know.',
+    'Also recorded this release\u2019s review findings in the internal backlog so they are not lost, each with the measurement behind it.',
+  ],
   '2.225.1': [
     'Security: two permission boundaries could be crossed from an unguarded direction, and both are closed. An Administrator could add an entry to the shared credential library by saving a credential while adding or editing a firewall — a library only a Super Admin is supposed to be able to change. Adding and editing firewalls still works exactly as before; only the shared-library entry is now refused, with the reason stated, and the credential is still stored on the firewall either way.',
     'Second: an account could be given access to only some firewalls and then promoted to Super Admin. That combination is already refused in the other order, because an account restricted to specific firewalls cannot reach the page that removes its own restriction — so the promotion left it unable to undo it, and unable to manage anyone else. The promotion is now refused with an explanation, and if the restriction cannot be read the promotion is refused rather than guessed at.',
