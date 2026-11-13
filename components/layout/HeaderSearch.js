@@ -31,7 +31,13 @@ const PAGE_KEYWORDS = {
   '/vulnerability': ['cve', 'cves', 'advisories', 'patch', 'vulnerability'],
   '/exposure': ['attack surface', 'internet facing', 'internet exposure', 'exposed'],
   '/analysis': ['rule analysis', 'rules', 'hygiene', 'shadow', 'unused'],
-  '/compliance': ['audit', 'pci', 'iso', 'cis', 'nist', 'benchmark'],
+  '/compliance': ['audit', 'pci', 'iso', 'cis', 'nist', 'benchmark', 'compliance', 'scores'],
+  // ⛔ 'checks' and 'controls' BOTH, because the library is called a check
+  // library in the code and a control in every framework an auditor arrives
+  // from — and PAGE_KEYWORDS exists so the palette answers the vocabulary
+  // people actually type, not ours.
+  '/compliance/controls': ['controls', 'checks', 'check library', 'failing', 'gaps', 'benchmark'],
+  '/compliance/exceptions': ['exceptions', 'accepted risk', 'risk acceptance', 'waiver', 'compensating control', 'expiry'],
   '/vpn': ['vpn', 'remote access', 'tunnel', 'users', 'identity'],
   '/settings': ['config', 'preferences', 'admin', 'notifications', 'appearance'],
   // Four pages shipped without keywords and were reachable only by typing their

@@ -333,6 +333,32 @@ EXCEPTIONS read alone fails soft, to `null` (never `0`), and reuses `exceptionSt
 rather than re-expressing "is this live" as a second SQL predicate. Registered in
 `scripts/dbCheck.js`. `tests/complianceControls.test.js`, 36 cases, 10/10 mutations killed.
 
+## lib/engines/complianceExceptions.js — fleet reads (v2.227.0)
+
+`listFleetExceptions(pool)` and `countFleetFailingChecks(pool)` back
+`/compliance/exceptions`. The JUDGEMENT is unchanged — `describeExceptions` and
+`summariseExceptions` are reused verbatim — so the fleet page and the device panel can never
+disagree about whether an acceptance is live.
+
+⛔ `listFleetExceptions` **appends** `JOIN devices d ON d.id = ce.device_id AND d.active = true`
+to the shared `EXCEPTION_SELECT` rather than restating it. A second copy would drift, and the
+first thing to diverge would be the LEFT-ness of the two existing joins — at which point a
+withdrawn check or a never-audited device silently drops an operator's decision off the fleet
+page while it still shows on the device page. ⛔ The inner join is also what excludes a
+DEACTIVATED firewall: counting its acceptances would report risk accepted on machines nobody
+manages. ⛔ The device NAME is fetched separately so the column list stays byte-identical.
+
+⛔ `countFleetFailingChecks` counts (firewall, check) PAIRS, not DISTINCT checks — the unit
+`covers` uses, so `unaccepted = failing - covering` subtracts like for like. ⛔ It returns
+**null**, never 0, on an unreadable count (`Number(null)` is 0 and 0 is finite), and
+`summariseExceptions` already suppresses `unaccepted` entirely on a null rather than claiming
+full cover.
+
+Registered in `scripts/dbCheck.js` — the exceptions engine was in that registry **nowhere at
+all** before v2.227.0, because the completeness guard only insists on `lib/engines/*Data.js`
+and this one keeps its storage in the engine file. `tests/complianceFleetExceptions.test.js`,
+13 cases, 5/5 mutations killed.
+
 ## lib/engines/complianceExceptions.js (v2.163.0)
 
 Pool-taking storage plus PURE state helpers: `exceptionState`, `describeException(s)`,

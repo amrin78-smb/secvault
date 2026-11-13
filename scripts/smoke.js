@@ -209,6 +209,13 @@ const STATIC_ROUTES = [
   // it on the first run after the rename, which is the harness working.
   { path: '/analysis', markers: ['Rule findings across every active firewall'] },
   { path: '/compliance', markers: ['Compare PCI DSS', 'No active devices', 'PCI DSS'] },
+  // ⛔ THE MARKERS ARE PAGE PROSE, NEVER THE NAV LABEL. "Controls" and
+  // "Exceptions" are both sidebar entries since v2.227.0, and the sidebar
+  // renders every label into every page — so either word as a marker would be
+  // satisfied by a working shell around a dead page, which is the exact
+  // failure this sweep exists to catch.
+  { path: '/compliance/controls', markers: ['measured across the whole fleet', 'No checks are seeded'] },
+  { path: '/compliance/exceptions', markers: ['formally accepted', 'No risk has been formally accepted'] },
   { path: '/settings', markers: ['Manage app configuration, users, and updates.'] },
   // ⛔ SWEPT SEPARATELY, because `/vulnerability` alone only loads the DEFAULT
   // tab (`posture`) — so `advisories` and `upgrade` were never rendered by any

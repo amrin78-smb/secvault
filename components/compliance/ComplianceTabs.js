@@ -13,13 +13,18 @@ import Link from 'next/link';
 //   Cards            — one firewall's full posture
 //   Compare firewalls— every firewall against every standard
 //   Controls         — every CHECK against the whole fleet
-// The third is the only one keyed on the check rather than the device, which
-// is why it is a separate route with its own engine rather than a view toggle
-// over the same query.
+//   Exceptions       — every accepted RISK against the whole fleet
+// The last two are keyed on something other than the device, which is why they
+// are separate routes with their own engines rather than view toggles over the
+// same query. ⛔ The first two share one route and one `?view=`; the last two
+// have their own. The strip deliberately hides that split, because it is an
+// implementation detail and all four are the same kind of destination to a
+// reader.
 const TABS = [
   { key: 'cards', href: '/compliance?view=cards', label: 'Cards' },
   { key: 'table', href: '/compliance?view=table', label: 'Compare firewalls' },
   { key: 'controls', href: '/compliance/controls', label: 'Controls' },
+  { key: 'exceptions', href: '/compliance/exceptions', label: 'Exceptions' },
 ];
 
 export default function ComplianceTabs({ active }) {

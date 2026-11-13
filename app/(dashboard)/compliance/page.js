@@ -644,7 +644,8 @@ export default async function CompliancePage({ searchParams }) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
-          title="Compliance"
+          eyebrow="Compliance"
+          title="Scores"
           subtitle="Compare PCI DSS, ISO 27001, CIS v8, NIST, and SANS scores across every active device. Switch to Cards to see one firewall's full donut breakdown, or Controls to read the library across the fleet."
           actions={
             <span style={{ display: 'flex', gap: 8 }}>
@@ -683,7 +684,8 @@ export default async function CompliancePage({ searchParams }) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <PageHeader
-          title="Compliance"
+          eyebrow="Compliance"
+          title="Scores"
           subtitle="View one firewall's PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture, or switch to Compare firewalls for a fleet-wide table and Controls for the check library."
         />
         <ComplianceTabs active={view} />
@@ -802,7 +804,8 @@ export default async function CompliancePage({ searchParams }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PageHeader
-        title="Compliance"
+        eyebrow="Compliance"
+        title="Scores"
         subtitle={
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span>Per-firewall PCI DSS, ISO 27001, CIS v8, NIST, and SANS posture.</span>

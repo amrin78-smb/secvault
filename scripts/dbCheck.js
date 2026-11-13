@@ -1063,6 +1063,14 @@ const REGISTRY = [
   // read rather than returning an empty library, so this entry is the only
   // thing that puts that SQL in front of the real schema before a deploy does.
   { mod: 'lib/engines/complianceControlsData.js', fn: 'gatherControls', args: (c) => [{ now: c.now }], spec: { object: ['controls', 'summary', 'scope'] } },
+  // ⛔ THE EXCEPTIONS ENGINE WAS IN THIS REGISTRY NOWHERE AT ALL until v2.227.0,
+  // because the completeness guard only insists on `lib/engines/*Data.js` and
+  // this one keeps its storage in the engine file. `listFleetExceptions`
+  // exercises the SHARED `EXCEPTION_SELECT` — the same column list and the same
+  // two LEFT JOINs the per-device page uses — so registering it closes the gap
+  // for both.
+  { mod: 'lib/engines/complianceExceptions.js', fn: 'listFleetExceptions', args: () => [], spec: RAW },
+  { mod: 'lib/engines/complianceExceptions.js', fn: 'countFleetFailingChecks', args: () => [], spec: RAW },
 
   // ── CVE ─────────────────────────────────────────────────────────────────
   { mod: 'lib/engines/advisoryCuration.js', fn: 'getCurationWorklist', args: () => [], spec: {} },

@@ -1139,6 +1139,74 @@ never printed. It degrades toward unknown, never toward a grade.
 `compliance_exceptions` follows. A test walks every firewall asserting the only `%` printed is the
 headline score.
 
+### ⛔ Compliance is a nav GROUP, and the refusal it replaced was retired on schedule (v2.227.0)
+
+`/compliance` (**Scores**) · `/compliance/controls` (**Controls**) · `/compliance/exceptions`
+(**Exceptions**).
+
+⛔ **THE CONDITION FOR THIS WAS WRITTEN DOWN BEFORE IT WAS MET, AND THAT IS THE POINT.**
+`lib/navRegistry.js` carried a refusal: a Compliance group would have held ONE real
+destination and two entries that could not be opened — the framework comparison was a
+`?view=` and exceptions were a panel inside a device's assessment — and "a disclosure
+containing one real destination and two entries that cannot be opened is a menu that lies
+about what the product does". The refusal named the thing that would make it stop applying,
+so when all three became routes it was retired **in the same commit that made the third one
+real**, rather than being left to rot into a sentence describing a product that no longer
+exists. The five stale "PROPOSAL ONLY" entries at the top of this file are what happens
+otherwise.
+
+⛔ **THE LANDING PAGE WAS RENAMED "Scores", AND ONLY THE LABEL AND THE h1 MOVED.** A child
+sharing its group's own label reads as a duplicate row rather than a destination (the Work
+queue shape — group "Work queue" over leaf "Queue" — one level down). The HREF did not move,
+so every bookmark, ticket link and already-sent notification still resolves.
+`tests/pageTitles.test.js` requires the label and the page's h1 to match byte for byte, which
+is what forced both halves into one commit.
+
+⛔ **A SECOND TOP-LEVEL LEAF UNDER `/compliance/...` IS NOT AN OPTION, AND THE NAV MODEL SAID
+SO BEFORE A HUMAN DID.** `isActive` matches by PREFIX, so `/compliance` and
+`/compliance/controls` as sibling leaves both light up and the sidebar claims you are in two
+places at once — `tests/navigation.test.js`'s "exactly one section is active" caught it on the
+first run. Controls shipped off-nav for one release for exactly that reason. The fix was never
+a flag; it was the shape.
+
+⛔ **`IconClock` FOR EXCEPTIONS IS SEMANTIC.** The defining property of an exception here is
+its MANDATORY EXPIRY, evaluated at read time. It is also distinct from every other item glyph,
+which is what the icon-rail shape depends on.
+
+⛔ **THE BREADCRUMB IS `PageHeader`'s EXISTING `eyebrow`, NOT A NEW COMPONENT.** It renders
+above the h1, so the "exactly one h1 per page" rule is untouched — a breadcrumb built out of
+headings would break the document outline it exists to clarify. It earns its place at drawer
+width, where the sidebar carrying the same hierarchy is behind a toggle.
+
+### ⛔ A fleet-wide exceptions register (`/compliance/exceptions`, v2.227.0)
+
+`compliance_exceptions` has been complete since v2.163.0 — four states, a mandatory expiry
+evaluated at READ time, an owner, a compensating control — and an exception was visible ONLY
+on the device it sat on. "Two acceptances have lapsed somewhere on this fleet" was a real,
+dated, actionable fact that cost sixteen page loads to discover. The JUDGEMENT is reused
+unchanged (`describeExceptions`/`summariseExceptions`), so the fleet page and the device panel
+can never disagree about whether an acceptance is live.
+
+⛔ **AN EMPTY REGISTER IS NOT AN ALL-CLEAR AND IS WORDED SO IT CANNOT READ AS ONE.** Zero
+exceptions over a fleet with failing checks means nobody has accepted anything — a statement
+about the PAPERWORK, not about the firewalls — and the failing count is printed beside it.
+⛔ **`ok` is unreachable in that sentence at all**: a live exception is accepted risk, not
+resolved risk, which is the same reason an exception may not move the score.
+
+⛔ **COUNTS, NEVER A SECOND PERCENTAGE** — the rule `complianceExceptions.js` already carried,
+now also enforced on a page where a "compliance including accepted risk" figure would be an
+easy and fatal addition.
+
+⛔ **THE THREE STALE-COVER CASES ARE SURFACED, NOT TIDIED AWAY**: an acceptance over a check
+that has started passing (withdraw it), one over a check not evaluated on that firewall at all
+(it covers nothing measurable), and one whose expiry cannot be read (falls CLOSED to lapsed so
+it can never count as cover, but says the date is unknown rather than inventing one).
+
+⛔ **NO CREATE BUTTON HERE, AND THAT IS A REFUSAL.** An exception may only be recorded against
+a check ACTUALLY FAILING on a specific device — otherwise someone could pre-accept a future
+failure — so the form stays where that list exists. A fleet-wide button would have to ask for
+a firewall first and would then be the device page with extra steps.
+
 ### ⛔ A CONTROL HAS NO SINGLE FLEET-WIDE STATUS (`/compliance/controls`, v2.227.0)
 
 `lib/engines/complianceControls.js` (pure) + `complianceControlsData.js` (the four reads).

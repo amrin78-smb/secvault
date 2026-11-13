@@ -62,7 +62,14 @@ export default async function ComplianceControlsPage({ searchParams }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* ⛔ THE BREADCRUMB USES PageHeader's EXISTING `eyebrow`, not a new
+          component. It renders ABOVE the h1, which is where a breadcrumb
+          belongs, and it keeps the "exactly one h1 per page" rule intact — a
+          breadcrumb built out of headings would break the document outline it
+          is meant to clarify. It earns its place on a narrow viewport, where
+          the sidebar carrying the same hierarchy is behind a drawer. */}
       <PageHeader
+        eyebrow={<Link href="/compliance">Compliance</Link>}
         title="Controls"
         subtitle="Every check in the library, measured across the whole fleet. A control is failing if any firewall fails it — the firewall counts beside each one are the split behind that."
       />
@@ -124,7 +131,7 @@ export default async function ComplianceControlsPage({ searchParams }) {
         </p>
       )}
 
-      <ControlsFilters options={options} shown={shown.length} total={controls.length} />
+      <ControlsFilters options={options} counts={summary.byStatus} shown={shown.length} total={controls.length} />
 
       {unknown.length > 0 && (
         // ⛔ AN UNRECOGNISED FILTER VALUE IS NAMED. It matches nothing by

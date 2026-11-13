@@ -32,7 +32,7 @@ const STANDARD_LABEL = {
 
 const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-export default function ControlsFilters({ options, shown, total }) {
+export default function ControlsFilters({ options, counts, shown, total }) {
   const nav = useFilterNav('/compliance/controls');
   const params = useSearchParams();
   // Every control is driven by the URL — the page is a server component that
@@ -46,7 +46,20 @@ export default function ControlsFilters({ options, shown, total }) {
     ...values.map((v) => ({ value: v, label: (labels && labels[v]) || titleCase(v) })),
   ];
 
-  const statusOpts = opt(options.statuses, STATE_LABELS);
+  // ⛔ THE COUNT IS PART OF THE LABEL, NOT A SECOND CONTROL. The reviewed mock
+  // put these on tabs; a tab strip beside a select is two affordances for one
+  // filter, and FilterBar's chips and "Clear filters" only know about the
+  // select. Carrying the count in the option text gives the same information
+  // with one control. ⛔ The counts come from the UNFILTERED summary, so
+  // narrowing the table never changes them — a count that moved with the
+  // filter would be the page agreeing with itself about a smaller world.
+  const withCount = {};
+  for (const k of Object.keys(STATE_LABELS)) {
+    const n = counts && Object.prototype.hasOwnProperty.call(counts, k) ? counts[k] : null;
+    withCount[k] = n === null ? STATE_LABELS[k] : `${STATE_LABELS[k]} (${n})`;
+  }
+  const statusOpts = opt(options.statuses, withCount);
+  if (Number.isFinite(total)) statusOpts[0] = { value: '', label: `All (${total})` };
   const standardOpts = opt(options.standards, STANDARD_LABEL);
   const sevOpts = opt(options.severities);
 
