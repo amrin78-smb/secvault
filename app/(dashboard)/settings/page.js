@@ -110,6 +110,11 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [generalStatus, setGeneralStatus] = useState('');
   const [passwordStatus, setPasswordStatus] = useState('');
+  // ⛔ STARTS null, NEVER `{supported: true}`. An optimistic default renders
+  // the form for one paint on a directory account and then yanks it away, and
+  // a failed read would leave it rendered for good — the same call
+  // SecurityPanel makes, and the same reason the MFA code field starts hidden.
+  const [passwordSupport, setPasswordSupport] = useState(null);
 
   // Admin-only gate for the Feed Sync Save button and the Updates tab.
   // This page is (and stays) a plain 'use client' component with no
@@ -176,6 +181,27 @@ export default function SettingsPage() {
         if (!cancelled) setLoading(false);
       }
     }
+
+    // Whether this session's account can change its own password HERE. There
+    // is no SessionProvider in this app, so a client component cannot read
+    // `session.user.provider` — the server has to say. Same shape as the MFA
+    // panel's `supported` flag, from the same `ownerOf()` verdict.
+    async function loadPasswordSupport() {
+      try {
+        const res = await fetch('/api/settings/password');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setPasswordSupport(data);
+      } catch (_err) {
+        // ⛔ LEAVE IT null. Falling back to "supported" would show a form that
+        // cannot work; falling back to "unsupported" would tell a local user
+        // their password is managed somewhere it is not. Neither is a
+        // measurement, so neither is claimed — the card renders nothing but
+        // its title until the answer arrives.
+      }
+    }
+
+    loadPasswordSupport();
 
     loadSettings();
 
@@ -312,6 +338,32 @@ export default function SettingsPage() {
                 <CardTitle>Change Your Password</CardTitle>
               </CardHeader>
               <CardBody>
+                {/* ⛔ A DIRECTORY ACCOUNT IS TOLD SO, RATHER THAN SHOWN A FORM
+                    THAT CANNOT WORK. An Entra or LDAP session has no `users`
+                    row, so its password lives in the directory — and this card
+                    rendered a full, enabled form beside the MFA panel, which
+                    on the SAME screen correctly says "MFA is only available
+                    for local accounts". The operator could type both fields
+                    and press Update before learning the control was never
+                    theirs, and the API's answer then named neither the
+                    provider nor where to go.
+                    ⛔ NOT HIDDEN: a missing control with no explanation reads
+                    as a broken page, which is the reasoning SecurityPanel
+                    already states for the identical case one card above.
+                    ⛔ WHILE THE ANSWER IS UNKNOWN (null) NEITHER IS SHOWN. The
+                    form would be a control that may not work and the sentence
+                    would be a claim we have not measured. */}
+                {passwordSupport === null && (
+                  <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                    Checking how this account signs in&hellip;
+                  </p>
+                )}
+                {passwordSupport && passwordSupport.supported === false && (
+                  <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    {passwordSupport.error}
+                  </p>
+                )}
+                {passwordSupport && passwordSupport.supported === true && (
                 <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div className="form-field">
                     <label htmlFor="current_password">Current password</label>
@@ -348,6 +400,7 @@ export default function SettingsPage() {
                     Update Password
                   </Button>
                 </form>
+                )}
               </CardBody>
             </Card>
           {/* ⛔ SHOWN TO EVERY ROLE, EDITABLE ONLY WITH manage_settings. Every

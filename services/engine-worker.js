@@ -172,13 +172,30 @@ async function getFeedPollIntervalHours() {
     const { rows } = await pool.query('SELECT value FROM settings WHERE key = $1', [
       'feed_poll_interval_hours',
     ]);
-    if (rows.length > 0 && rows[0].value !== null && rows[0].value !== undefined) {
-      const parsed = parseInt(rows[0].value, 10);
+    // ⛔ AN EMPTY STRING IS UNSET, NOT INVALID, AND IT WAS LOGGING A WARNING
+    // ON EVERY ENGINE START. `''` is neither null nor undefined, so a blank row
+    // entered the validation branch, `parseInt('', 10)` gave NaN, and the job
+    // warned that the value "is not a valid integer between 1 and 24". The
+    // reference deployment holds exactly that — `settings.feed_poll_interval_hours`
+    // is empty today — so the warning has fired on every one of ~8 restarts in
+    // the last 31 days for a setting that is simply not configured.
+    //
+    // ⛔ THAT IS THE PATTERN THIS CODEBASE NAMES MOST OFTEN IN ITS OWN UI
+    // RULES: "a permanent warning chip for the system working correctly teaches
+    // an operator to ignore the chip that matters". It also made a genuine
+    // typo'd interval indistinguishable from the ordinary unconfigured state.
+    // The WRITE side was already fixed (the settings route now rejects a blank
+    // and its comment names this very warning); nothing cleaned up the row
+    // already stored, and the reader still could not tell the two apart.
+    const raw = rows.length > 0 ? rows[0].value : null;
+    const configured = raw !== null && raw !== undefined && String(raw).trim() !== '';
+    if (configured) {
+      const parsed = parseInt(raw, 10);
       if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 24) {
         return parsed;
       }
       logger.warn(
-        `settings.feed_poll_interval_hours value "${rows[0].value}" is not a valid integer between 1 and 24 — falling back to ${fallback}.`
+        `settings.feed_poll_interval_hours value "${raw}" is not a valid integer between 1 and 24 — falling back to ${fallback}.`
       );
     }
   } catch (err) {
@@ -1209,11 +1226,51 @@ async function runDashboardSnapshotIfMissing() {
 // lib/schema.sql's table comments for the dedup design). Decoupled from
 // rule-version-pull/feed-sync-and-match (unrelated cadences: 24h/on-demand
 // vs 6h) rather than hooked inline into either — a slow/dead webhook must
-// never stall real data collection. Same "no in-flight guard needed"
-// reasoning as runDashboardSnapshotJob/runSnapshotRetentionJob: this job
-// never opens a per-device SSH/REST/SNMP session, so it can't contend for a
-// device connection.
+// never stall real data collection.
+//
+// ⛔ IT NOW HAS AN IN-FLIGHT GUARD, AND THE REASONING THAT SAID IT DID NOT
+// NEED ONE ANSWERED THE WRONG QUESTION. This comment used to read: 'Same "no
+// in-flight guard needed" reasoning as runDashboardSnapshotJob/
+// runSnapshotRetentionJob: this job never opens a per-device SSH/REST/SNMP
+// session, so it can't contend for a device connection.' True, and device
+// contention is not why this job needs a guard: it is the only scheduled job
+// that makes unbounded outbound calls to THIRD PARTIES, and its "have we
+// already notified?" decision is a check-then-act that straddles those calls.
+// `runNotificationDispatch` reads `notification_dispatch_log` for an uncleared
+// row, `continue`s if it finds one, THEN sends to every target channel, THEN
+// upserts. Nothing claims the item before the sends, so two overlapping passes
+// both read zero and both send — and the second's insert resolves through
+// `ON CONFLICT DO UPDATE` with no error, so the duplicate leaves no trace and
+// the job still reports `dispatched N, errors 0`.
+//
+// ⛔ ON A SECURITY PRODUCT A DUPLICATE ALERT IS THE FAILURE THAT GOT AN ALERT
+// TYPE DELETED: `new_finding` was pulled from the Alerts feed on 2026-07-20 on
+// direct user feedback about noise. `report-schedule`, which is the same shape,
+// already carries a `passInFlight` flag in its own engine module.
+//
+// ⛔ A SKIPPED TICK IS LOGGED, NOT SILENT — otherwise a pass that wedged would
+// disable outbound alerting for ever with nothing saying so, which is strictly
+// worse than the duplicate this prevents. The next tick is 15 minutes away.
+//
+// ⛔ THE OUTBOUND TIMEOUT WAS CHECKED AND IS FINE, recorded here so it is not
+// re-investigated: `lib/notify.js` passes `timeout: 8000` to **node-fetch
+// 2.7.0**, which honours it (measured: `request-timeout` fires at the bound).
+// That is NOT true of node's global `fetch`, which ignores the option
+// entirely — so if this ever migrates to global fetch or undici, the bound
+// must become `AbortSignal.timeout(...)` IN THE SAME COMMIT or every send
+// silently reverts to undici's ~300s defaults.
+let notificationDispatchInFlight = false;
+
 async function runNotificationDispatchJob() {
+  if (notificationDispatchInFlight) {
+    logger.warn(
+      'Job [notification-dispatch] SKIPPED: the previous pass is still running. Overlapping '
+      + 'passes would both read an un-notified item and both send it, because the dedup check '
+      + 'happens before the outbound calls. The next tick retries.'
+    );
+    return;
+  }
+  notificationDispatchInFlight = true;
   const start = Date.now();
   logger.info('Job [notification-dispatch] starting.');
   try {
@@ -1225,6 +1282,14 @@ async function runNotificationDispatchJob() {
   } catch (err) {
     const durationMs = Date.now() - start;
     logger.error(`Job [notification-dispatch] failed after ${durationMs}ms: ${err.stack || err.message}`);
+  } finally {
+    // ⛔ `finally`, NOT THE END OF THE `try`. Clearing it on the success path
+    // only would mean one throw disables outbound alerting for the lifetime of
+    // the service — a guard that turns a recoverable error into a permanent,
+    // silent loss of alerting, which is far worse than the duplicate it exists
+    // to prevent. The `catch` above already swallows the error, so without this
+    // the flag would also never clear on a caught failure.
+    notificationDispatchInFlight = false;
   }
 }
 
@@ -1721,11 +1786,38 @@ async function scheduleJobs() {
   // (00:30) and [config-retention] (00:45). It is also STRICTLY BETTER than
   // 00:10 on the merits: a snapshot taken mid-collection measured a fleet
   // half-updated by that night's own pull.
+  // ⛔ `recoverMissedExecutions` — AND CLAUDE.md SAYS THIS LOSS IS UNAVOIDABLE.
+  // It is not. node-cron 3.0.3's scheduler already computes
+  // `missedExecutions = floor(elapsedMs / 1000)` and loops back over the
+  // skipped seconds; it fires them only when `(i === 0 || this.autorecover)`,
+  // and `autorecover` comes from this option, which defaults to FALSE. The
+  // option appeared NOWHERE in this repo — not in the code, the tests,
+  // CLAUDE.md or gotchas.md — so every fixed single-tick job has been one
+  // blocked second from losing its only chance that day, which is exactly what
+  // cost four unrecoverable fleet-snapshot days (2026-10-11, -12, -13, -15).
+  // Reproduced both ways against the vendored library: blocking the event loop
+  // across the matching second gives `default fired=0, recover fired=1`.
+  //
+  // ⛔ ENABLED ONLY ON THE FIXED DAILY/MONTHLY SINGLE-TICK JOBS, AND THE SCOPE
+  // IS THE SAFETY ARGUMENT. Recovery re-fires a tick as soon as the loop frees
+  // up, so it is only safe where a double run is harmless: the snapshot upserts
+  // on its own UNIQUE constraint, both retention passes are idempotent, and
+  // `[compliance-report]` is protected by a partial unique index on one success
+  // per calendar month. It is deliberately NOT enabled on the minute-scale
+  // schedules — above all `[notification-dispatch]`, which has no self-overlap
+  // guard, so recovery there could mail a duplicate alert.
+  //
+  // ⛔ IT DOES NOT BACKFILL ACROSS A RESTART (`start()` resets the scheduler's
+  // own clock), so it is not a substitute for the 01:10 move or the guarded
+  // `41 2-23` catch-up pass — it closes the blocked-event-loop case those two
+  // could not, which is the case that was actually measured.
+  const RECOVER_MISSED = { recoverMissedExecutions: true };
+
   logger.info('Scheduling [dashboard-snapshot] with cron "10 1 * * *" (daily).');
   const dashboardSnapshotTask = cron.schedule('10 1 * * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runDashboardSnapshotJob, 'dashboard-snapshot');
-  });
+  }, RECOVER_MISSED);
 
   // ⛔ AND MOVING THE TIME IS NOT THE FIX, ONLY HALF OF IT. Any single-tick
   // daily job is one blocked second away from losing a day permanently, and a
@@ -1773,7 +1865,7 @@ async function scheduleJobs() {
   const snapshotRetentionTask = cron.schedule('30 0 * * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runSnapshotRetentionJob, 'snapshot-retention');
-  });
+  }, RECOVER_MISSED);
 
   // 00:45 UTC — same daily housekeeping band as the two jobs above, offset
   // again so no two tick on the same second. Deliberately AFTER
@@ -1785,7 +1877,7 @@ async function scheduleJobs() {
   const configRetentionTask = cron.schedule('45 0 * * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runConfigRetentionJob, 'config-retention');
-  });
+  }, RECOVER_MISSED);
 
   const notificationsPollIntervalMinutes = getNotificationsPollIntervalMinutes();
   const notificationsCronExpr = buildMinutelyCron(notificationsPollIntervalMinutes);
@@ -1838,7 +1930,7 @@ async function scheduleJobs() {
   const complianceReportTask = cron.schedule('0 6 1 * *', () => {
     if (shuttingDown) return;
     runTrackedJob(runComplianceReportJob, 'compliance-report');
-  });
+  }, RECOVER_MISSED);
 
   // Hourly at :05.
   //

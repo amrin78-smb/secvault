@@ -210,6 +210,45 @@ let flushing = false;
 let shuttingDown = false;
 let deviceByIp = new Map();   // source_ip -> device_id, refreshed periodically
 let spoolCorrupt = 0;     // spool records skipped for an unreadable timestamp
+// ⛔ AN UNREADABLE SPOOL DIRECTORY USED TO READ AS AN EMPTY ONE. Three
+// separate readdir calls swallowed their error and returned a value meaning
+// "nothing there" — `drainBacklog` empty totals, `rearmFailedSpool` 0, and
+// `countReadyFiles`/`countFailedFiles` 0 — with no log line anywhere. Because
+// `syslog_ingest_stats.spool_backlog` is `INTEGER NOT NULL DEFAULT 0` there is
+// no NULL to mean "unknown" either, so a permission change or a remounted
+// volume was recorded as a CONFIRMED empty backlog while the whole retry
+// mechanism was dead: the failed-read-as-a-fact rule, in the collector's only
+// durable health record.
+//
+// ⛔ The loud path does not cover this. `writeSpool`'s `ensureSpoolDir()`
+// throws, but only on a cycle that actually has a batch to write — and
+// `drainBacklog` is called UNCONDITIONALLY precisely because "the backlog is
+// exactly the state where live traffic may have stopped", which is the quiet
+// case the silent catch defeats.
+//
+// Counted and reported rather than thrown: a spool directory that cannot be
+// listed must not take down a collector that is still receiving and still
+// writing, but it must never again look like a clean, empty queue.
+let spoolUnreadable = 0;
+// Last-reported values for the rewrite counters, so the line below prints only
+// when one of them actually moves.
+let lastTruncated = 0;
+let lastNulStripped = 0;
+let lastSpoolCorrupt = 0;
+
+function noteSpoolUnreadable(where, err) {
+  spoolUnreadable += 1;
+  // Rate-limited to the first occurrence and then every 100th, because this
+  // runs every flush: a condition that persists must not bury the log it is
+  // trying to appear in.
+  if (spoolUnreadable === 1 || spoolUnreadable % 100 === 0) {
+    log(
+      `ERROR spool directory could not be listed in ${where} (${spoolUnreadable}x): ` +
+      `${err && err.message ? err.message : err}. Stranded spool files are NOT being ` +
+      'retried and the reported backlog is NOT a measurement.'
+    );
+  }
+}
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] [collector] ${msg}`);
@@ -418,7 +457,8 @@ function rearmFailedSpool() {
   let names;
   try {
     names = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.failed')).sort();
-  } catch (_e) {
+  } catch (err) {
+    noteSpoolUnreadable('rearmFailedSpool', err);
     return 0;
   }
   if (names.length === 0) return 0;
@@ -526,6 +566,45 @@ async function doFlush() {
       );
     }
 
+    // ⛔ THREE COUNTERS THAT WERE WRITTEN AND NEVER READ. `truncationCount()`
+    // was exported with a docstring saying it exists "so the collector can
+    // report it rather than have it happen unobserved", and had NO caller
+    // anywhere in the repo; `spoolCorrupt` was incremented and never logged;
+    // the NUL counter is new. All three are silent rewrites of stored data, and
+    // a truncated `rule_name` is the one that costs most: Phase 8b joins it
+    // back to `firewall_rules`, so it either fails to correlate or collides
+    // with a different rule sharing the prefix, which lands in
+    // `ruleHitCorrelation`'s measured-zero vs no-coverage distinction and from
+    // there in `unused` findings and rule-deletion recommendations.
+    //
+    // ⛔ Reported only when NON-ZERO. A permanent line reading "0 truncated"
+    // every cycle is how an operator learns to skip this part of the log — the
+    // same reason a feed's `skipped` chip is muted rather than amber. Totals
+    // are since process start, so this is a growing figure, not a per-cycle
+    // one, and it is labelled as such.
+    //
+    // ⛔ REPORTED ON CHANGE, which is what makes it both quiet and complete:
+    // a cycle that rewrote nothing prints nothing, and no rewrite can pass
+    // unreported because any increase trips the comparison. A cadence gate
+    // (every Nth cycle, or every GB like the archive line below) would have
+    // dropped a one-off rewrite that happened between two ticks — and a single
+    // truncated `rule_name` is exactly the case worth seeing.
+    const truncated = store.truncationCount();
+    const nulled = store.nulStrippedCount();
+    if (truncated !== lastTruncated || nulled !== lastNulStripped
+        || spoolCorrupt !== lastSpoolCorrupt) {
+      const rewrites = [];
+      if (truncated > 0) rewrites.push(`${truncated} field(s) truncated`);
+      if (nulled > 0) rewrites.push(`${nulled} NUL byte(s) stripped`);
+      if (spoolCorrupt > 0) {
+        rewrites.push(`${spoolCorrupt} spool record(s) skipped (unreadable timestamp)`);
+      }
+      log(`rewrites  : since start - ${rewrites.join(', ')}`);
+      lastTruncated = truncated;
+      lastNulStripped = nulled;
+      lastSpoolCorrupt = spoolCorrupt;
+    }
+
     // Report the archive's REAL ratio periodically rather than trusting the
     // measured 10.8x forever — it moves with the traffic mix, and this is the
     // number the retention sizing depends on.
@@ -586,7 +665,8 @@ async function doFlush() {
 function countReadyFiles() {
   try {
     return fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).length;
-  } catch (_e) {
+  } catch (err) {
+    noteSpoolUnreadable('countReadyFiles', err);
     return 0;
   }
 }
@@ -594,7 +674,8 @@ function countReadyFiles() {
 function countFailedFiles() {
   try {
     return fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.failed')).length;
-  } catch (_e) {
+  } catch (err) {
+    noteSpoolUnreadable('countFailedFiles', err);
     return 0;
   }
 }
@@ -640,7 +721,8 @@ async function drainBacklog(currentFile) {
   let files;
   try {
     files = fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).sort();
-  } catch (_e) {
+  } catch (err) {
+    noteSpoolUnreadable('drainBacklog', err);
     return totals;
   }
   const current = currentFile ? path.basename(currentFile) : null;

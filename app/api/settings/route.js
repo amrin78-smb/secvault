@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { ownerOf, ownerRefusal, OWNER_STATES } from '../../../lib/sessionOwner';
 import bcrypt from 'bcryptjs';
 import { getServerSession } from 'next-auth/next';
 import { pool } from '../../../lib/db';
@@ -99,16 +100,52 @@ export async function PUT(request) {
       );
     }
 
+    // ⛔ REFUSED ON THE PROVIDER, BEFORE THE USERNAME LOOKUP. A directory
+    // account has no `users` row, so its password lives in the directory and
+    // there is nothing local to change — but this used to be discovered by
+    // LOOKING THE NAME UP and finding nothing, which is a different question
+    // and gets a different answer when the names collide: an Entra user whose
+    // `session.user.name` matches an unrelated LOCAL username found THAT
+    // user's row and was bcrypt-compared against THEIR hash, so the refusal
+    // read "Current password is incorrect" — a wrong and alarming answer to a
+    // question that should never have been asked. (Not a way in: they would
+    // still need the local account's real password.)
+    //
+    // ⛔ IT USES THE SAME `ownerOf()` THE MFA ROUTE USES, so the two features
+    // cannot disagree about what "a local account" means, and the sentence is
+    // built by the shared `ownerRefusal()` so they cannot disagree about how
+    // to say it either. MFA named the provider and said where it belongs;
+    // this named neither.
+    const owner = ownerOf(session);
+    if (owner.state !== OWNER_STATES.OWNER) {
+      return NextResponse.json(
+        {
+          error: ownerRefusal(owner, {
+            feature: 'Password changes',
+            subject: 'password',
+            belongs: 'where its password is managed',
+          }),
+        },
+        { status: 400 }
+      );
+    }
+
+    // ⛔ BY ID, NOT BY NAME. `ownerOf` has already established this is a local
+    // account with a UUID, and the id is what `users` is keyed on — looking up
+    // by the display name is what made the collision above reachable.
     const userResult = await pool.query(
-      'SELECT id, password_hash FROM users WHERE username = $1',
-      [session.user.name]
+      'SELECT id, password_hash FROM users WHERE id = $1',
+      [owner.userId]
     );
     const storedUser = userResult.rows[0];
     if (!storedUser) {
-      // LDAP-bound sessions have no row in `users` — their password lives
-      // in LDAP/AD, not here, so there is nothing local to change.
+      // A local session whose row has gone is a FAILED READ, not a statement
+      // about the provider, so it must not borrow the directory sentence.
       return NextResponse.json(
-        { error: 'Password changes are only available for local accounts' },
+        {
+          error: 'The account for this session no longer exists, so its password cannot be '
+            + 'changed. Sign out and in again, and report it if it persists.',
+        },
         { status: 400 }
       );
     }

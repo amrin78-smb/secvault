@@ -779,6 +779,37 @@ the compliance PDF was ported from SpanVault.
 **MFA is unavailable for LDAP accounts** — they have no `users` row to attach a secret to, and
 their MFA belongs in the directory.
 
+⛔ **AND SO IS CHANGING YOUR OWN PASSWORD — BUT THE PASSWORD CARD RENDERED A WORKING FORM ANYWAY
+UNTIL v2.225.4.** Reported by a user on their own Entra-authenticated console: Settings → My
+account showed "MFA is only available for local accounts. This session is authenticated through
+Microsoft Entra ID" and, in the very next card, a full, enabled **Change Your Password** form. A
+directory account has no `users` row, so there is no local hash to change; the operator could type
+both fields and press Update before finding out, and the API's answer then named neither the
+provider nor where the password actually lives.
+
+⛔ **THE API WAS REFUSING FOR THE WRONG REASON, WHICH IS WHY THE MESSAGE WAS WRONG.** It looked the
+account up with `SELECT ... FROM users WHERE username = $1` and treated "no row" as "not local".
+Those are different questions, and they diverge on a NAME COLLISION: an Entra user whose
+`session.user.name` matched an unrelated LOCAL username found THAT user's row and was
+bcrypt-compared against THEIR hash, so the refusal came back as **"Current password is
+incorrect"**. Not a way in — they would still need the real password — but a wrong and alarming
+answer to a question that should never have been asked. It now refuses on `ownerOf(session)`
+BEFORE any lookup, and looks the row up by **id**.
+
+⛔ **ONE DEFINITION FOR BOTH FEATURES.** `lib/sessionOwner.js` already owned "can this session hold
+per-user rows"; it now also owns the SENTENCE (`ownerRefusal()`), so MFA and password cannot drift
+apart in either the verdict or the wording. An unidentifiable session keeps its own distinct
+answer — "could not be identified … this is a fault, not a permission" — and must never borrow the
+directory sentence, because the two send an operator to different places.
+
+⛔ **THE PANEL ASKS THE SERVER, BECAUSE IT CANNOT ASK THE SESSION.** There is no NextAuth
+`SessionProvider` mounted in this app, so a client component has no `session.user.provider`;
+`GET /api/settings/password` returns `{supported, error}` from the same `ownerOf()`, exactly as the
+MFA panel reads `supported` off `GET /api/mfa`. ⛔ The form renders only on an explicit
+`supported === true` — never on "not false" — and while the answer is unknown the card shows
+neither the form nor the sentence, because one would be a control that may not work and the other
+a claim nobody measured.
+
 ---
 
 ## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch
@@ -2724,6 +2755,31 @@ Two halves, and the second is the one that matters:
    when the day has no row — `ON CONFLICT (snapshot_date) DO NOTHING`, against the table's own
    UNIQUE constraint. It can never overwrite a recorded day, so the 01:10 reading stays that day's
    reading, and a catch-up row is an honest later reading of the same day rather than a hole.
+
+⛔ **AND THE LOSS WAS NEVER UNAVOIDABLE — node-cron HAS A RECOVERY OPTION AND NOTHING EVER SET IT
+(v2.225.3).** This section, and `engine-worker.js`'s own comments, state the exposure as a property
+of the library: "a tick whose second passes while the event loop is busy is **not deferred, it is
+lost**". The library disagrees. node-cron 3.0.3's scheduler already computes
+`missedExecutions = floor(elapsedMs / 1000)` and loops back over the skipped seconds; it fires them
+only when `(i === 0 || this.autorecover)`, and `autorecover` comes from `recoverMissedExecutions`,
+which **defaults to false**. That option appeared NOWHERE in this repository — not in the code, the
+tests, this file or `gotchas.md` — so the root cause of four permanently lost snapshot days was a
+one-option opt-in, and three sessions reasoned about scheduling around a constraint that did not
+exist. Reproduced both ways against the vendored library: blocking the event loop across the
+matching second gives `default fired=0, recoverMissedExecutions fired=1`.
+
+⛔ **IT IS ENABLED ON FOUR JOBS ONLY, AND THE SCOPE IS THE SAFETY ARGUMENT.** Recovery re-fires a
+tick as soon as the loop frees up, so it is only safe where a double run is harmless:
+`[dashboard-snapshot]` (upserts on its own UNIQUE constraint), `[snapshot-retention]` and
+`[config-retention]` (idempotent), and `[compliance-report]` (a partial unique index already allows
+one success per calendar month). It is deliberately NOT enabled on the minute-scale schedules —
+above all `[notification-dispatch]`, whose dedup decision is a check-then-act straddling its
+outbound calls, so a recovered tick there could mail a duplicate alert. (That job gained an
+in-flight guard in the same release, for the same reason.)
+
+⛔ **IT DOES NOT BACKFILL ACROSS A RESTART** (`start()` resets the scheduler's own clock), so it
+replaces neither the 01:10 move nor the guarded catch-up pass. It closes the blocked-event-loop
+case those two could not — which is the case that was actually measured.
 
 `tests/engineSchedules.test.js` pins the RELATIONS, not the numbers: the daily tick may not land
 inside the collection window, the catch-up must run more often than daily, it must call the

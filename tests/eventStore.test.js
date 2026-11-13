@@ -172,3 +172,120 @@ describe('eventStore: flattenRow', () => {
     assert.equal(row[COLUMNS.indexOf('message')], 'raw line');
   });
 });
+
+describe('⛔ a value PostgreSQL cannot store must yield a storable one, never a dropped batch', () => {
+  // The coercion block's own contract note says a mis-parsed field "must yield
+  // NULL, not a dropped batch". Two values broke it, and the cost is not one
+  // chunk: insertEvents() catches per 500-row chunk and reports only an
+  // aggregate, processSpoolFile() keeps the whole spool file whenever any chunk
+  // failed, and the next retry re-inserts EVERY chunk including the ones that
+  // already committed — every flush (2s) until both 5 attempts AND 30 minutes
+  // have passed, i.e. ~900 replays, plus a duplicate archive member each time.
+  // So a deterministically-bad value amplifies instead of being skipped.
+
+  const { nulStrippedCount, truncationCount } = require('../lib/syslog/eventStore');
+
+  const base = () => ({
+    receivedAt: new Date('2026-11-13T00:00:00Z'),
+    eventAt: null,
+    sourceIp: '10.0.0.1',
+    deviceId: null,
+    message: 'ordinary line',
+  });
+
+  describe('a NUL byte', () => {
+    it('⛔ is stripped from the raw message, which BYPASSED every coercion', () => {
+      // flattenRow's last field was `String(e.message)` with no coercion at
+      // all, and `message` is the field carrying arbitrary bytes off the wire —
+      // so this was the live trigger path, not a hypothetical one.
+      const e = { ...base(), message: 'threat\u0000name=evil' };
+      const row = flattenRow(e);
+      const stored = row[COLUMNS.indexOf('message')];
+      assert.equal(stored.includes('\u0000'), false, 'a NUL reached the message column');
+      assert.equal(stored, 'threatname=evil');
+    });
+
+    it('is stripped from an ordinary text field too', () => {
+      const e = { ...base(), ruleName: 'allow\u0000web' };
+      const row = flattenRow(e);
+      assert.equal(row[COLUMNS.indexOf('rule_name')], 'allowweb');
+    });
+
+    it('⛔ does NOT discard the whole line — the message must survive', () => {
+      // Deliberately unlike the other coercions, which return null. A NUL is a
+      // transport artefact, and the archive is the only other copy of the raw
+      // line for ~89% of traffic, so nulling a forensic log line over one
+      // unstorable byte would be the worse answer.
+      const e = { ...base(), message: '\u0000' + 'a'.repeat(50) };
+      const row = flattenRow(e);
+      assert.equal(row[COLUMNS.indexOf('message')], 'a'.repeat(50));
+    });
+
+    it('leaves a value with no NUL byte completely untouched', () => {
+      const e = { ...base(), message: 'clean', ruleName: 'allow-web' };
+      const row = flattenRow(e);
+      assert.equal(row[COLUMNS.indexOf('message')], 'clean');
+      assert.equal(row[COLUMNS.indexOf('rule_name')], 'allow-web');
+    });
+
+    it('⛔ is COUNTED, so a silent rewrite is still reported', () => {
+      const before = nulStrippedCount();
+      flattenRow({ ...base(), message: 'x\u0000y' });
+      assert.ok(nulStrippedCount() > before, 'the NUL strip was not counted');
+    });
+
+    it('⛔ is stripped BEFORE the length cap, so the cap bounds what is stored', () => {
+      // ⛔ THE FIXTURE HAS TO EXCEED THE CAP ONLY BEFORE STRIPPING, or the two
+      // orders give the same answer and the test proves nothing. My first
+      // version used 30 characters plus 2 NULs — 32 total, which is not over
+      // the 32-char cap either way, so it PASSED against a deliberately
+      // reversed implementation. vendor is capped at 32: 32 real characters
+      // plus 2 NULs is 34 before stripping and 32 after, so stripping first
+      // truncates nothing while capping first both truncates (losing 2 real
+      // characters) and leaves the value one short of the cap.
+      const before = truncationCount();
+      const row = flattenRow({ ...base(), vendor: 'a'.repeat(32) + '\u0000\u0000' });
+      assert.equal(row[COLUMNS.indexOf('vendor')], 'a'.repeat(32));
+      assert.equal(truncationCount(), before, 'the cap was applied to the pre-strip length');
+    });
+  });
+
+  describe('a number wider than its column', () => {
+    it('⛔ yields NULL rather than a value BIGINT rejects', () => {
+      // bytes_sent/bytes_received are BIGINT. 1e20 is finite, so the old
+      // Number.isFinite check passed it, node-pg stringified it, and
+      // PostgreSQL refused it — aborting the chunk.
+      const row = flattenRow({ ...base(), bytesSent: 1e20, bytesReceived: '99999999999999999999' });
+      assert.equal(row[COLUMNS.indexOf('bytes_sent')], null);
+      assert.equal(row[COLUMNS.indexOf('bytes_received')], null);
+    });
+
+    it('rejects the negative end too', () => {
+      assert.equal(flattenRow({ ...base(), bytesSent: -1e20 })[COLUMNS.indexOf('bytes_sent')], null);
+    });
+
+    it('⛔ still accepts the largest value this fleet actually reports', () => {
+      // Measured on production 2026-11-13: max(bytes_sent) ~1.36e12, about six
+      // orders of magnitude inside the ceiling. A bound that clipped real
+      // traffic would be worse than the defect.
+      const row = flattenRow({ ...base(), bytesSent: 1360083707167 });
+      assert.equal(row[COLUMNS.indexOf('bytes_sent')], 1360083707167);
+    });
+
+    it('accepts an ordinary small count unchanged', () => {
+      assert.equal(flattenRow({ ...base(), bytesSent: 0 })[COLUMNS.indexOf('bytes_sent')], 0);
+      assert.equal(flattenRow({ ...base(), bytesSent: '4096' })[COLUMNS.indexOf('bytes_sent')], 4096);
+    });
+
+    it('⛔ the ceiling is compared as BigInt, because Number(BIGINT_MAX) rounds UP', () => {
+      // 2^63-1 is not representable as a double: Number(9223372036854775807n)
+      // is 9223372036854775808, so a plain `t > Number(max)` comparison would
+      // ADMIT a value one past the real ceiling that PostgreSQL rejects.
+      assert.equal(
+        flattenRow({ ...base(), bytesSent: 9223372036854775808 })[COLUMNS.indexOf('bytes_sent')],
+        null,
+        '2^63 was admitted; the comparison fell back to float arithmetic',
+      );
+    });
+  });
+});

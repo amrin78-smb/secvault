@@ -293,6 +293,11 @@ const API_ROUTES = [
   { path: '/api/saved-views/{id}', methods: ['DELETE'], capability: null },
   { path: '/api/search', methods: ['GET'], capability: null },
   { path: '/api/segmentation', methods: ['GET', 'POST', 'DELETE'], capability: 'operate' },
+  // Reports whether THIS session's account can change its own password here.
+  // Open to any signed-in user for the same reason GET /api/mfa is: it answers a
+  // question about the caller's OWN session and discloses nothing else. Changing
+  // your own password has never been a capability.
+  { path: '/api/settings/password', methods: ['GET'], capability: null },
   { path: '/api/settings', methods: ['GET', 'PUT'], capability: 'manage_settings' },
   { path: '/api/system/console-url', methods: ['GET', 'PUT'], capability: 'manage_settings' },
   // ⛔ manage_users, NOT manage_settings: whoever sets the tenant decides which
