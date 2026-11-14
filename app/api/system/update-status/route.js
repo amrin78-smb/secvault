@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.9': [
+    'Documentation: the capacity-planning figures were wrong in three documents and five further numbers had been calculated from them. The compressed log archive was listed at about 8.4 GB a day; measured on the reference server it is about 5.5 GiB a day, so the 45-day archive is ~245 GiB rather than ~380, and the \u201cadd ~35% for the archive\u201d rule of thumb is ~20%.',
+    'The fleet\u2019s own event rate was also understated by 27% \u2014 810 events a second rather than 638 \u2014 re-measured across 14 days and all 24 hours. That is the figure a reader scales their own estimate against, so it mattered more than the archive numbers, which were over-cautious and never under-provisioned anyone.',
+    'The headline recommendation does NOT change: 1.5 TB still covers a fleet this size, now with about 45% headroom rather than 15%. But turning on full raw-message retention needs ~2.4 TiB, which no longer fits that figure \u2014 stated plainly where the setting is described.',
+    'The sizing table now marks every figure as either measured (with the date it was taken) or calculated from one, because the undated mixture is what let three numbers go stale together without anyone being able to tell which had an expiry date.',
+    'A new build-time check verifies the table against its own arithmetic. The old document contradicted itself on a single screen \u2014 the stated events per day did not match the stated gigabytes per day \u2014 and that needed no measurement to notice, so it now fails the build.',
+  ],
   '2.228.8': [
     'Fixed: the notification bell\u2019s rows could only be opened with a mouse. Each row is a link to the alert it names, but it was built as a plain clickable area with no keyboard route in, on every page of the console \u2014 so a keyboard or screen-reader user could see an alert and had no way to open it. They are now ordinary links, which also means they can be opened in a new tab.',
     'Fixed: the \u201cyour session is about to expire\u201d dialog declared itself as a modal \u2014 which tells assistive software to ignore the rest of the page \u2014 but never moved the keyboard there. \u201cStay signed in\u201d was unreachable while the countdown ran. The focus handling the other dialogs in the product already had is now shared with it rather than copied, so the two cannot drift apart.',

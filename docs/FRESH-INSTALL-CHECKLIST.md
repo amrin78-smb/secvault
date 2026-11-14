@@ -255,8 +255,8 @@ Keys to review on a fresh install (each is documented in place in `.env.local.ex
 | Key | Default | Why review it |
 |---|---|---|
 | `SYSLOG_RETENTION_DAYS` | `30` | Sized for the reference fleet on a 2 TB volume. See 0.1/0.2. |
-| `SYSLOG_ARCHIVE_DIR` | *(blank)* | Blank = `C:\Apps\SecVault\archive` — a **second** claim on the system volume, ~8.4 GB/day at the reference rate. Set it to a data volume now; moving it later strands the existing archive. |
-| `SYSLOG_ARCHIVE_RETENTION_DAYS` | `60` | ≈500 GB at the reference rate. Note the reference deployment itself runs **45**, set in its own `.env.local` — `60` is running nowhere today. |
+| `SYSLOG_ARCHIVE_DIR` | *(blank)* | Blank = `C:\Apps\SecVault\archive` — a **second** claim on the system volume, **~5.5 GiB/day** at the reference rate (measured 2026-11-14; this said ~8.4 GB, an extrapolation from a partial day). Set it to a data volume now; moving it later strands the existing archive. |
+| `SYSLOG_ARCHIVE_RETENTION_DAYS` | `60` | **≈330 GiB** at the reference rate (60 × 5.5; this said ≈500 GB, derived from the superseded 8.4). Note the reference deployment itself runs **45** — ≈245 GiB — set in its own `.env.local`, so `60` is running nowhere today. |
 | `SYSLOG_SPOOL_DIR` | *(set by `-SpoolDir`)* | Constantly rewritten. Keep it off the OS disk if you can. |
 | `SNMP_POLL_INTERVAL_MINUTES` | `15` | ⛔ `15` is a **divisor** of `VPN_POLL_INTERVAL_MINUTES=30`, so the two cron jobs fire together at `:00`/`:30` and the metric poll defers. Half your metric ticks are lost, reported only as an INFO line in `engine.log`. Set it to a non-divisor (e.g. `14`) if you want the stated cadence. |
 

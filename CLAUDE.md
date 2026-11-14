@@ -1778,10 +1778,25 @@ the same partition, either side of the `SYSLOG_RAW_MESSAGE=security` deploy:
 new number — it holds pre-change and post-change rows. Sizing off it over-states the footprint
 by ~2.7x. Measure a window that starts after the deploy, or read the per-hour breakdown.
 
-Projection at the observed rate (~74M events/day, from an afternoon-to-night curve peaking at
-5.3M/hour): **~31 GB/day, ~920 GB for the 30-day window**, plus the compressed archive at
-~8.4 GB/day. ⛔ This is an EXTRAPOLATION FROM A PARTIAL DAY — the collector had not yet run a
-full 24h when it was taken. Re-measure over a complete day before treating it as capacity fact.
+⛔ **RE-MEASURED 2026-11-14 OVER 14 DAYS AND ALL 24 HOURS, AND THE OLD PROJECTION IS SUPERSEDED.**
+The fleet runs **810 events/sec, 70.0M events/day** (`syslog_rollup_hourly`), which at 415 bytes a
+row is **~27 GiB/day and ~810 GiB for the 30-day window**, plus the compressed archive at a
+**measured ~5.5 GiB/day** (`E:\SecVaultArchive`, 211.32 GB in 46 files).
+
+⛔ **THE FIGURES THIS REPLACED WERE AN EXTRAPOLATION FROM A PARTIAL DAY, AND ITS OWN WARNING SAID SO
+FOR TWO MONTHS WITHOUT ANYONE RE-MEASURING**: "~74M events/day … ~31 GB/day, ~920 GB … archive at
+~8.4 GB/day", taken on 2026-09-16 when the collector had run for eight days. The events/day guess
+was good (74M against 70.0M measured, 6% high); **the archive rate was 54% high**, and
+`docs/SIZING-AND-BACKUP.md` had derived FIVE figures from it. ⛔ **A warning that a number is
+provisional does not expire on its own** — it has to be someone's job to go back, which is why the
+replacement above carries its measurement date and window in the sentence rather than beside it.
+
+⛔ **AND THE TWO DOCUMENTS DISAGREED WITH EACH OTHER AND WITH THEMSELVES.** This paragraph said 74M
+events/day while `SIZING-AND-BACKUP.md` said 55.2M two lines above a raw cost of ~31 GB/day — and
+31 GiB/day at 415 bytes IS 80.2M events/day, so that document contradicted itself on one screen and
+could have been caught with no new measurement at all. Full before/after table and the direction of
+each error are in that file; the archive errors were over-cautious (nobody was under-provisioned),
+the fleet rate was understated, which is the direction that matters.
 
 ⛔ **This only fits because PostgreSQL lives on `E:`.** The data directory is
 `E:PostgreSQLdata` (2 TB volume, 1,629 GB free at time of writing) and the archive is
@@ -3767,12 +3782,19 @@ SYSLOG_ARCHIVE_DIR=                        # blank = <install dir>archive
 SYSLOG_ARCHIVE_RETENTION_DAYS=60           # ⛔ 8.4 GB/day was an EXTRAPOLATION FROM A PARTIAL
                                            # DAY and is wrong. Re-measured on production
                                            # 2026-11-14: E:\SecVaultArchive holds 211.32 GB in 46
-                                           # files => ~4.7 GB/day averaged, ~5.5 GB/day on recent
-                                           # complete days. At the box's real 45-day retention
-                                           # that is ~210 GB, not ~500. ⛔ docs/SIZING-AND-BACKUP.md
-                                           # still says 8.4 and DERIVES three figures from it
-                                           # (~380 GB, "add ~35%", "Provision 1.5 TB") -- fixing
-                                           # the rate means re-deriving all three.
+                                           # files => ~4.7 GiB/day averaged, ~5.5 GiB/day on recent
+                                           # complete days. ⛔ FIVE figures were derived from the
+                                           # bad rate and all five are now corrected in
+                                           # docs/SIZING-AND-BACKUP.md and
+                                           # docs/FRESH-INSTALL-CHECKLIST.md (45-day archive
+                                           # ~245 GiB not ~380; 60-day ~330 GiB not ~500; "add
+                                           # ~20%" not ~35%; ~23% of total footprint not ~35%;
+                                           # =all projection ~2.4 TiB not ~2.7 TB). "Provision
+                                           # 1.5 TB" SURVIVES, now with ~45% headroom.
+                                           # ⛔ At this box's real 45-day retention the archive is
+                                           # ~245 GiB -- note the earlier "~210 GB" in this comment
+                                           # used the WINDOW average (4.7) where provisioning wants
+                                           # the RECENT rate (5.5).
                                            # ⛔ The reference deployment actually runs 45, set
                                            # explicitly in its own .env.local. This 60 is the CODE
                                            # default, which that box never uses -- see gotchas.md

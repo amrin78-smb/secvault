@@ -31,7 +31,7 @@ second**, which the customer's existing collector can tell you, or measure for a
 
 | | measured | grows with | recomputable? |
 |---|--:|---|---|
-| Raw syslog (`syslog_events_*`) | **197 GB** | events/sec × retention days | n/a — expires at 30 days |
+| Raw syslog (`syslog_events_*`) | **197 GB** (measured 2026-09-16, ⛔ EIGHT days of ingest, not thirty) | events/sec × retention days | n/a — expires at 30 days |
 | Syslog rollups | 1.9 GB | events/sec × time, **forever** | ⛔ no |
 | Everything else (system of record) | 902 MB | devices × config churn | ⛔ no |
 
@@ -40,30 +40,79 @@ both the disk sizing and the backup design.
 
 ### Disk — the numbers to plan against
 
-Fleet total: **55.2M events/day**, ~638/sec.
+⛔ **MEASURED AND DERIVED ARE MARKED SEPARATELY, because this section did not distinguish them and
+the undated mixture is what let three figures go stale together.** A measured figure was read off
+the reference deployment on the date given. A derived figure is arithmetic on a measured one, and
+is only as good as its input.
 
-| quantity | measured |
-|---|--:|
-| Row cost, heap + index | **~415 bytes** (340 heap + 75 index) |
-| Raw syslog per day | **~31 GB** |
-| Raw syslog, 30-day window | **~920 GB** |
-| Compressed archive per day | ~8.4 GB |
-| Compressed archive, 45-day retention | ~380 GB |
-| System of record | ~900 MB, growing slowly |
+Fleet total, **re-measured 2026-11-14 over 14 days and all 24 hours** (`syslog_rollup_hourly`):
+**810 events/sec, 70.0M events/day.**
 
-**Rule of thumb:** `events/sec × 86,400 × 415 bytes × SYSLOG_RETENTION_DAYS`, then add ~35% for
-the compressed archive if `SYSLOG_ARCHIVE_ENABLED=true`.
+| quantity | value | kind |
+|---|--:|---|
+| Fleet rate | **810/sec · 70.0M/day** | measured 2026-11-14, 14 days |
+| Row cost, heap + index | **~415 bytes** (340 heap + 75 index) | measured 2026-09-16 |
+| Raw syslog per day | **~27 GiB** | derived: 70.0M × 415 B |
+| Raw syslog, 30-day window | **~810 GiB** | derived |
+| Compressed archive per day | **~5.5 GiB** | measured 2026-11-14 |
+| Compressed archive, 45-day retention | **~245 GiB** | derived |
+| Syslog rollups (permanent) | 1.9 GB | measured 2026-09-16 — ⛔ grows forever, re-measure |
+| System of record | ~900 MB, growing slowly | measured 2026-09-16 |
 
-At 638 events/sec that is ~920 GB of live database plus ~380 GB of archive. **Provision 1.5 TB
-for a fleet this size**, and scale it linearly with events/sec.
+**Rule of thumb:** `events/sec × 86,400 × 415 bytes × SYSLOG_RETENTION_DAYS`, then add **~20%**
+for the compressed archive if `SYSLOG_ARCHIVE_ENABLED=true`.
+
+At 810 events/sec that is ~810 GiB of live database plus ~245 GiB of archive, about **1.05 TiB**
+all told. **Provision 1.5 TB for a fleet this size** — unchanged, and now with ~45% headroom
+rather than the ~15% the old figures implied. Scale linearly with events/sec.
+
+### ⛔ What was wrong here until 2026-11-14, and in which direction
+
+Three of the figures above were wrong at once, and the directions differ — which is the part worth
+reading before trusting any sizing document, including this one.
+
+| figure | was | is | direction |
+|---|--:|--:|---|
+| Fleet rate | 638/sec · 55.2M/day | **810/sec · 70.0M/day** | **understated 27%** |
+| Archive per day | ~8.4 GB | **~5.5 GiB** | overstated 54% |
+| Archive, 45 days | ~380 GB | **~245 GiB** | overstated 54% |
+| Archive share of raw | "add ~35%" | **~20%** | overstated |
+
+⛔ **THE ARCHIVE ERROR WAS OVER-CAUTIOUS AND THE RATE ERROR WAS NOT.** An archive figure 54% too
+high means nobody was ever under-provisioned by it — it asked for disk that was not needed. The
+**fleet rate** is the dangerous one: it is the reference number a reader scales their own estimate
+against, and it was 27% low. Anyone sizing from *their own* events/sec was unaffected, which is why
+the rule of thumb is stated in those terms and not in firewalls.
+
+⛔ **AND THIS SECTION CONTRADICTED ITSELF, WHICH IS HOW IT SHOULD HAVE BEEN CAUGHT WITHOUT ANY NEW
+MEASUREMENT.** It stated 55.2M events/day two lines above a raw cost of ~31 GB/day. At 415 bytes a
+row, 31 GiB/day **is 80.2M events/day** — so the two numbers on one screen could not both be true,
+whatever the fleet was really doing. The GB figures were derived from a rate ~15% above what is
+measured now; the stated events/day was from somewhere else entirely.
+
+⛔ **8.4 GB/day WAS AN EXTRAPOLATION FROM A PARTIAL DAY, AND SO WAS THE 920 GB RAW WINDOW.** The
+collector started 2026-09-08 and these were taken on 2026-09-16, so the 197 GB of raw syslog
+measured then was **eight days of ingest, not thirty** — the 30-day window has never been observed
+on this deployment at all. The header above says nothing here is estimated from a datasheet, which
+is true and was read as "every number was measured directly". Hence the `kind` column.
+
+⛔ **FOUR FIGURES COULD NOT BE RE-MEASURED ON 2026-11-14** because the VPN to the reference
+deployment was down when this was written: the live database size, the raw-partition total, the
+rollup total and bytes/row. They keep their 2026-09-16 dates above rather than being restated as
+current. ⛔ **Bytes/row is the one that matters most** — every derived figure here multiplies by it,
+it is a property of `SYSLOG_RAW_MESSAGE=security` and the schema rather than of the fleet, and
+nothing has changed either since. Re-measure it when the link is up, and if it has moved, every
+derived row above moves with it.
 
 ### ⛔ The row cost above is only true because of `SYSLOG_RAW_MESSAGE=security`
 
 That setting drops the raw log line for ordinary allowed traffic (~89% of rows) and keeps it for
 threat / VPN / UTM / denied events. It is what took a row from ~1,000 bytes to ~340.
 
-Set `SYSLOG_RAW_MESSAGE=all` and **the raw window roughly triples** — ~2.7 TB at this fleet's
-rate. Do that deliberately or not at all.
+Set `SYSLOG_RAW_MESSAGE=all` and **the raw window roughly triples** — ~2.4 TiB at this fleet's
+measured rate (3 × 810 GiB), which no longer fits the 1.5 TB this document tells you to
+provision. ⛔ This said ~2.7 TB, tripled off the superseded 920 GB window. Do that deliberately
+or not at all, and re-provision first.
 
 ### ⛔ PostgreSQL must not live on the system volume
 
@@ -79,7 +128,9 @@ directory before raising `SYSLOG_RETENTION_DAYS`.**
 
 1. `SYSLOG_RETENTION_DAYS` — linear, and the rollups keep answering historical questions after
    the raw rows are gone.
-2. `SYSLOG_ARCHIVE_RETENTION_DAYS` — ~35% of total footprint.
+2. `SYSLOG_ARCHIVE_RETENTION_DAYS` — **~23% of total footprint** (245 of ~1,060 GiB). ⛔ This
+   said ~35%, a FOURTH figure derived from the old 8.4 GB/day archive rate; cutting the archive
+   window therefore buys about two thirds of what this list used to promise.
 3. `SYSLOG_RAW_MESSAGE=security` — already the default; confirm it has not been raised to `all`.
 4. Stop forwarding ordinary allow traffic from the busiest firewalls. Three Palo Altos are 65% of
    this fleet's volume.
@@ -102,7 +153,8 @@ shrink the files — both take an `ACCESS EXCLUSIVE` lock, so neither is in any 
 advisories, CVE assessments, compliance findings, config snapshots and backups, rule-analysis
 results, VPN session history, all syslog **rollups**, settings, users, the subscription key.
 
-**Not backed up:** `syslog_events` **rows**. 197 GB of the 199 GB database, all of which SecVault
+**Not backed up:** `syslog_events` **rows**. 197 GB of the 199 GB database as measured 2026-09-16
+(a full 30-day window would be ~810 GiB of ~815 — the same 99%, which is the point), all of which SecVault
 deletes within 30 days anyway.
 
 ⛔ **The exclusion is `--exclude-table-data`, not `--exclude-table`.** The dump still carries the
