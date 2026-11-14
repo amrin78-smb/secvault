@@ -89,7 +89,33 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   aimed at the alerting engine itself, and monitoring runs in every state here. ⛔ The measurement
   AGE is a separate fact (`reviewOverdue`, 90 days, a stated cadence rather than a derivation) and
   must never contaminate the statistical verdict.
-  ⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
+  ⛔ **A RUN THAT SPANS THE WINDOW'S LEFT EDGE HAS NO KNOWN START, AND REPORTING THE EDGE AS ONE WAS
+THREE BUGS AT ONCE (fixed v2.228.10).** `loadReportingGrid` generates hours from `now() - N days`,
+so index 0 ADVANCES EVERY HOUR. With `startAt` clamped to it: **`hours` shrank by one every hour**,
+so a silence that was not ending rendered as one getting better — and that figure is the only number
+the alert carries; the dispatcher's **natural_key churned**, so reconcile cleared the previous key as
+RESOLVED and raised the next as fresh, ~24 false pairs a day; and `startAt` was reported as a
+measured start when the true start is outside the evidence entirely. ⛔ **It needs no unusual
+condition, only TIME** — every silence run crosses the 28-day boundary eventually and churns for its
+own duration while it does, so the roadmap's "latent" was wrong: it is deferred by exactly the window
+length. ⛔ **`detectSpike` had it too** (`run.startIndex === 0`), which nobody had noticed; a fix
+applied to one of two detectors is a defect waiting to be rediscovered. ⛔ **A SENTINEL, NOT A GUESSED
+START**: a truncated run keys on `start-before-window`, with no timestamp of any kind, since the bug
+WAS a key built from a moving boundary. The sentence says **AT LEAST N hours … began before
+SecVault's evidence window**, and the finding carries `truncated` + `hoursAreLowerBound` so no
+consumer can render either as exact.
+
+⛔ **AND THE DETECTOR GOES SILENT WHEN THE SILENCE BECOMES TOTAL — STILL OPEN, roadmap row 59.** A
+device dark for LONGER than the window hits `detectSilence`'s `NO_DATA` branch and
+`gatherAnomalies`' `if (r.state !== MEASURED) continue`, so 27 days dark raises an alert and 29 days
+dark raises nothing. The branch is right for the case it was written for — "a device that has NEVER
+reported is NOT silent, it is uncollected" — and its predicate is "did not report IN THIS WINDOW",
+which collapses *never started* with *stopped, maximally*. ⛔ The device is NOT invisible
+(`coverageRegister.js` says "This firewall sends no syslog to SecVault"), so what is lost is the
+OUTBOUND path; the two surfaces disagree about the same firewall. The fix is one unbounded
+`MAX(bucket_hour)` on the permanent rollups, and the key already exists.
+
+⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
   and both are still refused, for reasons now recorded with dates in that file's own header.
   ⛔ **A9 remains genuinely unbuilt** — this line said A8 did too, for four versions after it
   shipped, which is the same drift three times over in one paragraph. Its tracking table

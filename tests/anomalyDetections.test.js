@@ -474,3 +474,119 @@ describe('anomaly detectors: rate drift is re-tested, not asserted once', () => 
     }
   });
 });
+
+// ── ⛔ A RUN THAT SPANS THE WINDOW'S LEFT EDGE (roadmap row 29) ───────────
+//
+// `loadReportingGrid` generates hours from `now() - N days`, so index 0 of the
+// grid ADVANCES EVERY HOUR. A silence run that really began earlier has its
+// `startAt` clamped to that moving edge, and three things followed:
+//
+//   1. the dispatcher's natural_key changed every hour, so each tick cleared
+//      the previous key as RESOLVED and raised the next as a fresh alert —
+//      ~24 false resolve/renotify pairs a day;
+//   2. `hours` SHRANK by one every hour, so a silence that is not ending
+//      looked like one that was getting better;
+//   3. `startAt` was reported as a start time nobody measured.
+//
+// ⛔ It is not a rare condition, it is a DEFERRED one: every run crosses the
+// 28-day boundary eventually and churns for its own duration while it does.
+const anomalyData = require('../lib/engines/anomalyDetectionsData');
+
+// One grid, with an explicit reported/silent pattern. `shift` drops leading
+// hours, which is exactly what the advancing window does to the same fleet.
+function gridFrom(pattern, shift = 0) {
+  return pattern.slice(shift).map((reported, i) => ({
+    at: new Date(Date.UTC(2026, 9, 1, shift + i)),
+    reported: reported === 1,
+  }));
+}
+
+describe('⛔ a silence run truncated by the evidence window', () => {
+  // silent for the first 6 hours of the window, then reporting — i.e. a run
+  // that began before we were looking.
+  const PATTERN = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
+
+  it('is marked truncated, because its start is outside the evidence', () => {
+    const { runs } = a.detectSilence(gridFrom(PATTERN));
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].truncated, true);
+    assert.equal(runs[0].hours, 6);
+  });
+
+  it('a run wholly inside the window is NOT truncated', () => {
+    const { runs } = a.detectSilence(gridFrom([1, 1, 0, 0, 0, 1, 1]));
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].truncated, false, 'this start WAS observed and must be keyed on');
+  });
+
+  it('⛔ THE KEY SURVIVES AN ADVANCING WINDOW — the churn itself', () => {
+    // The same fleet, the same silence, judged an hour apart. Before the fix
+    // these two keys differed, so the dispatcher resolved one and raised the
+    // other every single hour.
+    const keyAt = (shift) => {
+      const { runs } = a.detectSilence(gridFrom(PATTERN, shift));
+      assert.equal(runs.length, 1, `shift ${shift} should still see the run`);
+      return {
+        key: anomalyData.naturalKey('anomaly_device_silent', 'dev-1', runs[0].startAt, runs[0].truncated),
+        startAt: runs[0].startAt.toISOString(),
+        hours: runs[0].hours,
+      };
+    };
+    const t0 = keyAt(0);
+    const t1 = keyAt(1);
+    const t2 = keyAt(2);
+
+    // The inputs really do move — otherwise this test proves nothing.
+    assert.notEqual(t0.startAt, t1.startAt, 'the window edge must advance for this to be a test');
+    assert.ok(t1.hours < t0.hours, 'and the observed length really does shrink');
+
+    // The key does not.
+    assert.equal(t0.key, t1.key);
+    assert.equal(t1.key, t2.key);
+    assert.match(t0.key, /start-before-window$/);
+    // ⛔ And it carries no timestamp at all — the defect was a key built from a
+    // boundary that moves, so a key containing any instant is suspect.
+    assert.doesNotMatch(t0.key, /\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('a run inside the window still keys on its real start, and two runs differ', () => {
+    const { runs } = a.detectSilence(gridFrom([1, 0, 0, 1, 1, 0, 0, 0, 1]));
+    assert.equal(runs.length, 2);
+    const keys = runs.map((r) => anomalyData.naturalKey('anomaly_device_silent', 'dev-1', r.startAt, r.truncated));
+    assert.notEqual(keys[0], keys[1], 'two separate events must be two alerts');
+    for (const k of keys) assert.match(k, /\d{4}-\d{2}-\d{2}T/, 'an observed start IS the key');
+  });
+
+  it('⛔ the sentence says AT LEAST, because `hours` is a lower bound', () => {
+    const { runs } = a.detectSilence(gridFrom(PATTERN));
+    const truncated = a.describeSilence(runs[0], 'TFM-RN');
+    assert.match(truncated, /AT LEAST 6 hours/);
+    assert.match(truncated, /began before/i);
+    // Said plainly it would under-state a silence that may have lasted weeks,
+    // and it is the only number the operator gets.
+    assert.doesNotMatch(truncated, /for 6 consecutive hours/);
+
+    const whole = a.detectSilence(gridFrom([1, 1, 0, 0, 0, 1])).runs[0];
+    assert.match(a.describeSilence(whole, 'TFM-RN'), /for 3 consecutive hours/);
+    assert.doesNotMatch(a.describeSilence(whole, 'TFM-RN'), /AT LEAST/);
+  });
+
+  it('the denied-spike detector marks truncation too, in the same shape', () => {
+    // ⛔ The identical defect lived in BOTH run builders. A fix applied to one
+    // of two detectors is a defect waiting to be rediscovered.
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'lib', 'engines', 'anomalyDetections.js'), 'utf8'
+    );
+    assert.match(src, /truncated: run\.startIndex === 0/, 'detectSpike must mark it');
+    assert.match(src, /truncated: start === 0/, 'detectSilence must mark it');
+  });
+
+  it('a finding carries the flag, so no consumer can read `hours` as exact', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'lib', 'engines', 'anomalyDetectionsData.js'), 'utf8'
+    );
+    // Both findings — silence and spike.
+    assert.equal((src.match(/hoursAreLowerBound: !!run\.truncated/g) || []).length, 2);
+    assert.equal((src.match(/run\.startAt, run\.truncated\)/g) || []).length, 2);
+  });
+});

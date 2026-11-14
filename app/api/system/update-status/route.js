@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.10': [
+    'Fixed: a firewall that stopped sending syslog before SecVault\u2019s 28-day evidence window began was reported with a silence that got SHORTER every hour. The start of the outage was being taken from the edge of the window, which moves forward hourly, so an outage that was not ending looked like one that was improving \u2014 and that duration is the only number the alert gives you.',
+    'The same cause also made the alert repeat: every hour the outage was given a new identity, so the previous one was marked resolved and a fresh alert raised \u2014 about 24 false pairs a day for as long as the outage straddled the boundary. It affected the denied-traffic detector in exactly the same way.',
+    'An outage of this kind now reports \u201cat least N hours, beginning before SecVault\u2019s evidence window\u201d and keeps one stable identity, so it notifies once. The duration is explicitly marked as a lower bound rather than presented as exact.',
+    'This was described as a latent problem. It is not \u2014 it is a delayed one: every outage ever detected reaches the 28-day boundary eventually, and repeats for its own length when it does.',
+    'Known and not yet addressed: a firewall silent for longer than the whole window still produces no alert at all, because the detector cannot tell that case apart from one that never reported. It is visible on the Data health page meanwhile, and the fix is recorded.',
+  ],
   '2.228.9': [
     'Documentation: the capacity-planning figures were wrong in three documents and five further numbers had been calculated from them. The compressed log archive was listed at about 8.4 GB a day; measured on the reference server it is about 5.5 GiB a day, so the 45-day archive is ~245 GiB rather than ~380, and the \u201cadd ~35% for the archive\u201d rule of thumb is ~20%.',
     'The fleet\u2019s own event rate was also understated by 27% \u2014 810 events a second rather than 638 \u2014 re-measured across 14 days and all 24 hours. That is the figure a reader scales their own estimate against, so it mattered more than the archive numbers, which were over-cautious and never under-provisioned anyone.',
