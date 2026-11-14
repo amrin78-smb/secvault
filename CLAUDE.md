@@ -3393,9 +3393,32 @@ and the console down**: a half-started system on purpose, because the half that 
 later is the half that keeps running. It is the same trade this product makes when a broken
 certificate degrades to HTTP and when collection runs in every licence state.
 
-⛔ **Deploy at night.** The hourly ingest curve spans 381/sec (05:00) to 1,280/sec (08:00), so the
-SAME deploy costs **3.4× more** in the morning than before dawn — a bigger lever than reducing the
-number of deploys. Two night deploys cost less than one daytime deploy.
+⛔ **Deploy OUTSIDE 07:00-17:00. It is a PLATEAU, NOT A TROUGH, and reading it as a trough cost
+real deferrals.** The rule here used to be "deploy at night", justified by two anchor points
+(381/sec at 05:00, 1,280/sec at 08:00, so 3.4×). The ratio was right and the SHAPE was never
+measured, so two sessions read "at night" as "wait for pre-dawn" and deferred deploys by hours to
+save almost nothing. Measured 2026-11-14 over 14 days, all 24 hours, from
+`syslog_rollup_hourly` (avg events/sec, server-local):
+
+| hour | /sec | | hour | /sec | | hour | /sec |
+|---|---:|---|---|---:|---|---|---:|
+| 00 | 461 | | 08 | **1,349** | | 16 | 1,253 |
+| 01 | 477 | | 09 | 1,290 | | 17 | 1,040 |
+| 02 | 479 | | 10 | 1,297 | | 18 | 658 |
+| 03 | 457 | | 11 | 1,247 | | 19 | 553 |
+| 04 | 409 | | 12 | 1,017 | | 20 | 478 |
+| 05 | **386** | | 13 | 1,326 | | 21 | 445 |
+| 06 | 426 | | 14 | 1,285 | | 22 | 458 |
+| 07 | 917 | | 15 | 1,280 | | 23 | 458 |
+
+⛔ **THE WHOLE 18:00-06:00 BAND IS WITHIN 1.2-1.7× OF THE 05:00 FLOOR** (445-658/sec against 386),
+while 07:00-17:00 is **2.4-3.5×** it. So the decision is binary — inside or outside working hours —
+and there is no useful gain from holding a ready deploy at 20:00 to catch 05:00: at the measured
+~145s collector gap that is ~69,000 events against ~56,000, a saving of ~13,000 for an eight-hour
+wait, which is worth less than shipping a security fix sooner. The 3.4× claim survives intact for
+the hours it was really about. ⛔ Note 07:00 (917/sec) is already half-way up the ramp, so the
+morning boundary is 06:00, not 07:00; and the real peak hour is **08:00**, not the 15:00 the old
+1,280 figure actually came from. Two night deploys still cost less than one daytime deploy.
 
 ⛔ **THE UPDATER UPDATES ITSELF, SO A FIX TO IT LANDS ONE DEPLOY LATE.** Step 3's `git pull`
 replaces `Update-SecVault.ps1` while that very script is running — and PowerShell parsed the OLD
