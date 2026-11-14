@@ -27,6 +27,7 @@
 // is decorative. After that, they stop clicking the ones that do work.
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import useFocusTrap from './useFocusTrap';
 import { isRenderableEvidence } from '../../lib/evidence';
 
 const EvidenceContext = createContext(null);
@@ -52,6 +53,11 @@ export function EvidenceProvider({ children }) {
     // ⛔ Return focus to whatever opened the drawer. Without this, closing with
     // Escape drops keyboard focus to <body> and a keyboard user restarts their
     // traversal of the page from the top.
+    // ⛔ THIS IS THE ONLY FOCUS RESTORE, AND IT STAYS HERE. The provider is what
+    // knows WHICH mark opened the drawer — the panel cannot, because the same
+    // panel serves every mark on every page. The trap in EvidenceDrawer is armed
+    // with `confineOnly` for exactly that reason; see the comment there before
+    // moving any of this into the panel.
     const el = openerRef.current;
     openerRef.current = null;
     if (el && typeof el.focus === 'function') el.focus();
@@ -123,12 +129,36 @@ function Section({ title, children }) {
 
 function EvidenceDrawer({ payload, onClose }) {
   const closeRef = useRef(null);
+  const open = !!payload;
+
+  // ⛔ CONFINE-ONLY, AND THE OTHER THREE MECHANISMS STAY WHERE THEY ARE.
+  // `aria-modal` below promises assistive technology that the page behind this
+  // panel is inert. Three of the four things that make that promise true were
+  // already here — Escape closes (the provider's keydown effect), focus moves to
+  // the close button on open (the effect below), focus returns to the mark that
+  // opened it on close (`close()`'s `openerRef`) — and only Tab CONFINEMENT was
+  // missing, so Tab walked straight out of a dialog that had declared the rest
+  // of the page unreachable.
+  //
+  // ⛔ THE FULL HOOK WAS THE WRONG FIX. Its restore reads
+  // `document.activeElement` at arm time; the provider's reads `openerRef`. Both
+  // would have fired on close and which one won would depend on effect-cleanup
+  // order — judgeable only with the drawer open in a browser, and silently wrong
+  // the day React changes that order. `confineOnly` adds the missing mechanism
+  // and touches neither focus nor Escape, so there is nothing to race.
+  //
+  // ⛔ `active: open` IS THE SAME `open` THAT DRIVES `aria-hidden` AND `inert`
+  // BELOW, AND THAT MATTERS MORE THAN THE CONFINEMENT ITSELF. This drawer is
+  // never unmounted — it is pushed off-screen with a transform — so a trap armed
+  // on the closed panel would swallow Tab for every page in the product, which is
+  // a far worse defect than the one being fixed. One flag, four readers (the
+  // trap, `data-open`, `aria-hidden`, `inert`): there is no second expression
+  // that can disagree with it.
+  const panelRef = useFocusTrap({ active: open, confineOnly: true });
 
   useEffect(() => {
     if (payload && closeRef.current) closeRef.current.focus();
   }, [payload]);
-
-  const open = !!payload;
 
   return (
     <>
@@ -139,6 +169,7 @@ function EvidenceDrawer({ payload, onClose }) {
         aria-hidden="true"
       />
       <aside
+        ref={panelRef}
         className="ev-drawer"
         data-open={open ? '1' : undefined}
         role="dialog"
@@ -169,7 +200,29 @@ function EvidenceDrawer({ payload, onClose }) {
               {payload.claim && <p className="ev-claim">{payload.claim}</p>}
             </div>
 
-            <div className="ev-body">
+            {/* ⛔ FOCUSABLE BECAUSE IT SCROLLS, AND THE TAB TRAP IS WHAT MADE
+                THAT NON-OPTIONAL. `.ev-body` is the drawer's scroll container
+                (app/globals.css: `flex: 1; min-height: 0; overflow-y: auto`)
+                and the close button sits OUTSIDE it, in `.ev-head`. So with
+                focus where the provider puts it, the browser has no scrollable
+                ancestor to act on. Measured in Chromium against the real
+                stylesheet, 2,268px of content in a 398px viewport: PageDown and
+                ArrowDown both left `scrollTop` at 0. 1,870px of evidence —
+                including "What could not be measured", which is the entire point
+                of this drawer — was unreachable by keyboard.
+                ⛔ That was true before the Tab trap and the trap is what makes it
+                intolerable: previously a keyboard user could at least Tab out of
+                the dialog, so the fix for "focus escapes a dialog claiming to be
+                modal" would otherwise have shipped as "pinned in front of
+                content you cannot read". A `tabindex` here is also what puts the
+                body INTO the confinement cycle, so Tab moves Close <-> detail.
+                Re-measured with it: scrollTop 0 -> 348 on one PageDown. */}
+            <div
+              className="ev-body"
+              tabIndex={0}
+              role="region"
+              aria-label="Evidence detail"
+            >
               <Section title="How it was computed">
                 <pre className="ev-formula">{payload.formula}</pre>
               </Section>

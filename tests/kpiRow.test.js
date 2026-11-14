@@ -187,3 +187,148 @@ describe('⛔ no adopting page exceeds four primary indicators', () => {
     assert.match(life, /Licence data could not be collected from/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE FIVE BOARDS ADOPTED IN v2.228.12, AND WHY THEY ARE NOT UNDER THE
+// `cols <= 4` RULE ABOVE
+// ─────────────────────────────────────────────────────────────────────────
+//
+// That rule is about a PAGE's primary indicator row — "four primary indicators
+// maximum, and three pages were at five", where the fifth tile was a sum, a
+// denominator or a coverage figure masquerading as a peer. These five rows are
+// a different thing: each is the COMPLETE ENUMERATION of a closed set the
+// engine defines, so there is no fifth tile to demote. ChangeOutcomeBoard shows
+// one tile per verdict in VERDICT_ORDER; RiskyRulesTab one per risk band;
+// ConformanceBoard and ConsolidationTab one per figure in a fixed array
+// literal; VpnDetections one per headline figure. Dropping one would drop a
+// state, not a restatement.
+//
+// ⛔ WHAT THEY WERE BEFORE. All five hand-rolled `repeat(auto-fit,
+// minmax(Npx, 1fr))`, which is the shape KpiRow was built to delete.
+// Re-measured 2026-11-14: five of the roadmap row's six reproduced;
+// components/dashboard/DeviceStatusSummary.js is PREMISE WRONG — it is
+// `repeat(3, 1fr)`, explicit since v2.10.0, and was never auto-fit.
+//
+// ⛔ THE WORST ONE WAS ChangeOutcomeBoard. Six tiles under auto-fit strand the
+// SIXTH at any width that fits five, and the sixth is `indistinguishable`
+// (rank 3, "Within normal variation") — the measured-and-unremarkable verdict
+// that file's own header ranks LAST precisely so it is not prominent. The
+// layout gave it a row to itself.
+describe('⛔ the boards that stopped hand-rolling auto-fit (v2.228.12)', () => {
+  // rel -> [declared cols, the const the row maps over]
+  const BOARDS = {
+    'components/analysis/ChangeOutcomeBoard.js': [6, 'VERDICT_ORDER'],
+    'components/analysis/ConformanceBoard.js': [5, 'tiles'],
+    'components/analysis/ConsolidationTab.js': [5, 'figures'],
+    'components/analysis/RiskyRulesTab.js': [5, 'BAND_ORDER'],
+    'components/vpn/VpnDetections.js': [4, 'headline.figures'],
+  };
+
+  for (const [rel, [cols, mapped]] of Object.entries(BOARDS)) {
+    it(`${rel} declares cols={${cols}} and hand-rolls no auto-fit grid`, () => {
+      const src = stripComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+      assert.equal(
+        /auto-fit/.test(src), false,
+        `${rel} still carries a repeat(auto-fit, minmax(...)) grid. auto-fit cannot be `
+        + 'fixed by tuning the minmax: it does not know how many tiles there are, so any '
+        + 'width that fits n-1 orphans the nth, and an orphaned tile reads as a layout '
+        + 'fault rather than as a group'
+      );
+      assert.match(src, /import KpiRow from '[./]*ui\/KpiRow';/, `${rel} does not import KpiRow`);
+      const found = [...src.matchAll(/<KpiRow cols=\{(\d)\}>/g)].map((m) => Number(m[1]));
+      // ⛔ THE "COULD NOT MEASURE THIS" CASE. A row this guard cannot find is
+      // not a pass: the scan would report clean over a file it never read,
+      // which is the guard-that-cannot-fire pattern this suite exists against.
+      assert.ok(
+        found.length > 0,
+        `${rel}: no <KpiRow cols={n}> was found at all, so nothing here was measured — `
+        + 'either the row was removed or it is spelled in a way this scan cannot see'
+      );
+      assert.ok(found.includes(cols), `${rel} declares ${found.join(',')}, expected ${cols}`);
+    });
+
+    it(`${rel} renders exactly ${cols} tiles, with no conditional tile`, () => {
+      const src = stripComments(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
+      const open = src.indexOf(`<KpiRow cols={${cols}}>`);
+      assert.notEqual(open, -1, `${rel}: could not locate the cols={${cols}} row`);
+      const close = src.indexOf('</KpiRow>', open);
+      assert.notEqual(close, -1, `${rel}: the KpiRow is never closed`);
+      const body = src.slice(open, close);
+      // Every one of these rows is ONE <StatCard> inside a .map(), so the
+      // declared count has to match the mapped array's length, not the number
+      // of StatCard elements in the source.
+      assert.equal(
+        (body.match(/<StatCard/g) || []).length, 1,
+        `${rel}: expected a single mapped <StatCard>; a literal list of tiles would have `
+        + 'to be counted instead'
+      );
+      assert.ok(
+        body.includes(`${mapped}.map(`),
+        `${rel}: the row no longer maps ${mapped}, so cols={${cols}} may no longer match it`
+      );
+      assert.equal(
+        /&& <StatCard|\? <StatCard/.test(body), false,
+        `${rel}: a conditional tile changes the column count with the data — correct in `
+        + 'development and ragged in production'
+      );
+    });
+  }
+
+  // ⛔ A DECLARED COUNT IS ONLY HONEST IF THE ARRAY IS FIXED. KpiRow does not
+  // count its own children by design, so `cols` is a claim about the engine.
+  // These three arrays are literals in files this suite can read; the count is
+  // derived from the SOURCE, never hardcoded here, so growing one fails the
+  // build rather than silently stranding a tile.
+  it('⛔ the fixed-length arrays behind cols are still the length declared', () => {
+    const lens = {};
+
+    const co = stripComments(fs.readFileSync(
+      path.join(ROOT, 'components/analysis/ChangeOutcomeBoard.js'), 'utf8'));
+    // VERDICT_ORDER is Object.keys(VERDICT_WEIGHT) minus `unknown`.
+    const weightStart = co.indexOf('const VERDICT_WEIGHT = {');
+    assert.notEqual(weightStart, -1, 'VERDICT_WEIGHT is gone; cols={6} describes nothing');
+    let depth = 0;
+    let weightEnd = -1;
+    for (let i = co.indexOf('{', weightStart); i < co.length; i += 1) {
+      if (co[i] === '{') depth += 1;
+      else if (co[i] === '}') { depth -= 1; if (depth === 0) { weightEnd = i; break; } }
+    }
+    const weightBody = co.slice(weightStart, weightEnd);
+    const keys = [...weightBody.matchAll(/^ {2}([a-z_]+): \{/gm)].map((m) => m[1]);
+    lens['ChangeOutcomeBoard VERDICT_ORDER'] = keys.filter((k) => k !== 'unknown').length;
+
+    const rr = stripComments(fs.readFileSync(
+      path.join(ROOT, 'components/analysis/RiskyRulesTab.js'), 'utf8'));
+    const bandLine = rr.match(/const BAND_ORDER = \[([^\]]*)\]/);
+    assert.ok(bandLine, 'BAND_ORDER is no longer an array literal');
+    lens['RiskyRulesTab BAND_ORDER'] = bandLine[1].split(',').filter((s) => s.trim()).length;
+
+    const vd = stripComments(fs.readFileSync(
+      path.join(ROOT, 'lib/engines/vpnDetections.js'), 'utf8'));
+    const figStart = vd.indexOf('figures: [');
+    assert.notEqual(figStart, -1, 'the engine no longer builds a figures array');
+    // ⛔ BRACKET-MATCHED, NOT A NEARBY LANDMARK. The first draft sliced to
+    // `indexOf('usernamesIsFloor', figStart)` — a name that occurs BEFORE
+    // `figures: [` as well, so the slice ended three characters in and the
+    // count came back 3 for a four-element array. The test caught it, which is
+    // the only reason this comment exists rather than a wrong number in the
+    // expectation. Same defect mediaBlock() above records: index arithmetic
+    // over a landmark instead of parsing the scope.
+    let fd = 0;
+    let figEnd = -1;
+    for (let i = vd.indexOf('[', figStart); i < vd.length; i += 1) {
+      if (vd[i] === '[') fd += 1;
+      else if (vd[i] === ']') { fd -= 1; if (fd === 0) { figEnd = i; break; } }
+    }
+    assert.notEqual(figEnd, -1, 'the figures array literal is unbalanced');
+    lens['vpnDetections figures'] = [...vd.slice(figStart, figEnd)
+      .matchAll(/^ {8}key: '/gm)].length;
+
+    assert.deepEqual(lens, {
+      'ChangeOutcomeBoard VERDICT_ORDER': 6,
+      'RiskyRulesTab BAND_ORDER': 5,
+      'vpnDetections figures': 4,
+    }, 'a declared cols no longer matches the set it enumerates — move the cols AND the '
+      + 'responsive steps deliberately, in the same commit, rather than letting a tile strand');
+  });
+});

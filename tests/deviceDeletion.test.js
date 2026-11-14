@@ -536,3 +536,66 @@ describe('progress reporting stays honest', () => {
     assert.ok(seen.some((p) => p.total === 40));
   });
 });
+
+// ── ⛔ THE BATCH CAP WAS 336x TOO SMALL (roadmap row 39) ──────────────────
+//
+// `maxBatchesPerTable` was 5,000, and its own comment justified it as
+// "Generous: 3.35M events / 20k = 168 iterations" — 3.35M being the busiest
+// device when that was written on 2026-09-09. Measured on production
+// 2026-11-15 over `syslog_rollup_hourly`: TUM(TUTH1) holds **1,127,384,476**
+// events, i.e. **56,370 batches** at that batch size, with ITC-SK (1.008B),
+// SMT (935M) and OKF(F2) (509M) in the same class. So `unlinkSyslogEvents`
+// THREW on four live firewalls after completing 8.9% of the work — a correct
+// guard reporting an incorrect bound, which is the hardest kind of wrong to
+// notice, because the message reads like a deliberate refusal.
+describe('⛔ the unlink cap is sized against the measured fleet', () => {
+  const { DEFAULTS } = require('../lib/engines/deviceDeletion');
+
+  // The measurement this is derived from, named so the derivation can be redone
+  // rather than guessed at when the fleet grows again.
+  const BUSIEST_EVENTS = 1127384476;
+
+  it('covers the busiest measured device with headroom', () => {
+    const needed = Math.ceil(BUSIEST_EVENTS / DEFAULTS.eventBatchSize);
+    assert.ok(
+      DEFAULTS.maxBatchesPerTable >= needed,
+      `cap ${DEFAULTS.maxBatchesPerTable} cannot finish the busiest measured device, which needs `
+      + `${needed} batches of ${DEFAULTS.eventBatchSize}. Re-derive it against a fresh measurement `
+      + 'rather than raising it to whatever makes this pass.'
+    );
+    assert.ok(
+      DEFAULTS.maxBatchesPerTable >= needed * 2,
+      'and with at least 2x headroom, so ordinary fleet growth does not trip it again'
+    );
+  });
+
+  it('⛔ is still a BACKSTOP, not an unbounded loop', () => {
+    // A cap that can never fire is as useless as one that always does. The
+    // thing that stops a progressing loop is the short-batch early return;
+    // this only catches a loop that is not progressing at all.
+    assert.ok(Number.isFinite(DEFAULTS.maxBatchesPerTable));
+    assert.ok(DEFAULTS.maxBatchesPerTable < 10 * Math.ceil(BUSIEST_EVENTS / DEFAULTS.eventBatchSize),
+      'an absurdly large cap stops being a backstop');
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'lib', 'engines', 'deviceDeletion.js'), 'utf8');
+    assert.match(src, /if \(n < batchSize\) return updated;/,
+      'the short-batch early return is what actually ends a healthy loop');
+  });
+
+  it('⛔ the pause is unchanged, because the trade could not be measured', () => {
+    // Raising eventBatchSize or lowering eventPauseMs would shorten the ~3.1
+    // hours this takes on the busiest device, and both trade directly against
+    // the collector's disk — the pause exists so its inserts and the rollup
+    // sweep get the disk to themselves. That trade cannot be measured without
+    // rewriting a billion live rows, so it was recorded rather than guessed.
+    assert.equal(DEFAULTS.eventPauseMs, 200);
+    assert.equal(DEFAULTS.eventBatchSize, 20000);
+  });
+
+  it('the derivation is written down, not just the number', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'lib', 'engines', 'deviceDeletion.js'), 'utf8');
+    assert.match(src, /1,127,384,476/, 'the measurement the cap rests on must be stated');
+    assert.match(src, /56,370 batches/, 'and the arithmetic that turns it into a cap');
+  });
+});

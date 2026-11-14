@@ -2,6 +2,7 @@ import { pool } from '../../lib/db';
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import EmptyState from '../ui/EmptyState';
 import Pagination from '../ui/Pagination';
 import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/pagination';
@@ -148,7 +149,13 @@ export default async function RiskyRulesTab({ deviceId, searchParams }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+      {/* ⛔ `cols={5}` IS DECLARED and BAND_ORDER is a fixed five-element
+          literal, so the count cannot drift with the data. Nothing divides
+          five: KpiRow drops straight to one column rather than the ragged 3+2
+          the old `repeat(auto-fit, minmax(160px, 1fr))` produced, which
+          orphaned `low` — the quietest band — on its own row at any width that
+          fitted four. The bands, their order and their hues are untouched. */}
+      <KpiRow cols={5}>
         {BAND_ORDER.map((band) => (
           <StatCard
             key={band}
@@ -157,7 +164,7 @@ export default async function RiskyRulesTab({ deviceId, searchParams }) {
             color={BAND_FILL[band]}
           />
         ))}
-      </div>
+      </KpiRow>
 
       <p style={{ fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}>
         {riskyCount} Risky Rule{riskyCount === 1 ? '' : 's'} of Total: {totalRules}

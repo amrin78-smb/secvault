@@ -803,3 +803,225 @@ test('the contrast-safe ramp counterparts are readable as plain text, BOTH theme
     }
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE RETIRED BRAND HEX, REPO-WIDE (v2.228.12)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// tests/loginPage.test.js has asserted `doesNotMatch(src, /#C8102E|200,16,46/)`
+// since v2.87.0 — but its scope is THE LOGIN PAGE, so the literal survived
+// everywhere else with the rule written down AND a test for it in the repo.
+//
+// Found 2026-11-14: components/layout/UserMenu.js:76 drew the account avatar
+// with `background: 'var(--primary)'` (teal) and
+// `boxShadow: '0 2px 6px rgba(200,16,46,0.4)'` — #C8102E, the shared-suite red
+// --primary USED to be. The fill was migrated and the shadow tuned to the old
+// hue was not, so a teal circle sat in a red halo on every authenticated page.
+// A narrow guard is what let a half-done migration through: the one file it
+// watched was clean.
+const RETIRED_BRAND = /#C8102E|\b200\s*,\s*16\s*,\s*46\b/i;
+
+test('⛔ the RETIRED suite red #C8102E appears nowhere in live source, repo-wide', () => {
+  const { stripComments } = require('./stripComments');
+  const offenders = [];
+
+  for (const file of sourceFiles()) {
+    const code = stripComments(fs.readFileSync(file, 'utf8'), { keepLines: true });
+    const m = RETIRED_BRAND.exec(code);
+    if (m) {
+      offenders.push(`${path.relative(REPO, file)}:${code.slice(0, m.index).split('\n').length}  ${m[0]}`);
+    }
+  }
+
+  // ⛔ THE STYLESHEET TOO, with CSS comments stripped. globals.css names the
+  // hex TWICE in prose — "Before this rewrite --primary was #C8102E" and "AND
+  // THE OLD BRAND PANEL GLOWED SUITE RED (rgba(200,16,46,.14))" — which is the
+  // prose-read-as-code trap this file's own stripCssComments note records. The
+  // history must stay readable; only live declarations are forbidden.
+  const css = read('app/globals.css');
+  const cm = RETIRED_BRAND.exec(css);
+  if (cm) offenders.push(`app/globals.css  ${cm[0]}`);
+
+  assert.deepEqual(
+    offenders, [],
+    'v2.87.0 moved --primary off the shared suite red precisely so red could mean '
+    + 'DANGER and nothing else. A surviving #C8102E / rgba(200,16,46,…) spends the '
+    + "product's one risk hue on decoration, and is usually half a migration: the "
+    + 'element was moved to var(--primary) and a shadow, glow or wash tuned to the old '
+    + 'value was left behind:\n  ' + offenders.join('\n  ')
+  );
+});
+
+// ⛔ MEASURING SOMETHING. The scan above is worth nothing if the pattern cannot
+// match or the file list is empty, and both have happened to guards in this
+// suite. It is proved against a synthetic string and a real file count.
+test('the retired-hex scan can actually fire', () => {
+  assert.ok(sourceFiles().length > 100, 'the repo-wide file list came back short');
+  assert.match("boxShadow: '0 2px 6px rgba(200,16,46,0.4)'", RETIRED_BRAND);
+  assert.match('color: #c8102e;', RETIRED_BRAND);
+  // ⛔ AND IT MUST NOT FIRE ON A LOOK-ALIKE. `rgba(200,160,46)` and a
+  // 200px/16px/46px geometry triple are not the brand hex; a guard that cries
+  // wolf gets waived and the check stops happening.
+  assert.doesNotMatch('rgba(200,160,46,0.4)', RETIRED_BRAND);
+  assert.doesNotMatch('padding: 200px 16px 46px', RETIRED_BRAND);
+  assert.doesNotMatch('rgba(1200,16,460,0.4)', RETIRED_BRAND);
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE BRAND HUE IS NOT A POINT ON ANY SCORE RAMP (v2.228.12)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// `--accent-teal: var(--primary)` in globals.css — measured byte-identical in
+// both themes (#098294 light, #22C1D6 dark). --primary is the token reserved
+// for "this is interactive", so a score drawn in it reads as a link.
+//
+// components/dashboard/ComplianceStandardsBreakdown.js declared its own
+// four-band ramp returning `var(--accent-teal)` for 75-89, i.e. a standard
+// scoring 82% was drawn in exactly the colour of the "Compare devices" link at
+// the bottom of the same card. It also disagreed with the CANONICAL banding
+// beside it: app/(dashboard)/page.js renders ComplianceScoreWidget and that
+// component as SIBLINGS in one `dashboard-widget-grid`, both listing the same
+// five STANDARDS with a per-standard percentage, so 55% was a RED badge in one
+// and a YELLOW bar in the other on one screen.
+test('--accent-teal really is --primary, in both themes', () => {
+  const { light, dark } = tokens();
+  for (const [theme, t] of [['light', light], ['dark', dark]]) {
+    assert.equal(
+      t['--accent-teal'], 'var(--primary)',
+      `--accent-teal no longer aliases --primary in ${theme}; if it has become its own `
+      + 'hue, the tests below reason about the wrong thing'
+    );
+  }
+});
+
+test('⛔ no score-band helper returns the brand hue, and none redeclares the bands', () => {
+  const { stripComments } = require('./stripComments');
+  const BRAND = /var\(--(?:primary|primary-dark|primary-light|accent-teal)\)/;
+  const offenders = [];
+  const localBands = [];
+
+  for (const file of sourceFiles()) {
+    const rel = path.relative(REPO, file);
+    // The canonical definition itself, and the login page's own brand styling.
+    if (rel === 'components/compliance/ComplianceMatrix.js') continue;
+    const code = stripComments(fs.readFileSync(file, 'utf8'), { keepLines: true });
+    // A score-band helper is a function whose body is a ladder of percentage
+    // comparisons returning colours. Match the ladder, not a function name.
+    const re = /if\s*\(\s*(?:pct|score|scorePct|percent)\b[^)]*[<>]=?\s*\d+\s*\)\s*return\s*([^;]+);/g;
+    let m;
+    while ((m = re.exec(code)) !== null) {
+      const line = code.slice(0, m.index).split('\n').length;
+      localBands.push(`${rel}:${line}`);
+      if (BRAND.test(m[1])) offenders.push(`${rel}:${line}  ${BRAND.exec(m[1])[0]}`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders, [],
+    'a score band resolves to the BRAND hue. --accent-teal IS var(--primary), the token '
+    + 'reserved for "this is interactive" — CLAUDE.md\'s "Colour means RISK" exists so red '
+    + 'is danger and teal is affordance. A percentage is neither:\n  ' + offenders.join('\n  ')
+  );
+
+  // ⛔ AND THE "WE COULD NOT MEASURE THIS" CASE. If the ladder pattern matches
+  // nothing at all, the assertion above passed over an empty set — a guard that
+  // cannot fire, which is exactly how the teal survived. There must still be at
+  // least one real percentage ladder in the repo for this scan to be reading
+  // anything; if every one is gone, re-derive the pattern rather than enjoying
+  // the green tick.
+  assert.ok(
+    localBands.length > 0,
+    'the percentage-ladder pattern matched NOTHING repo-wide, so this scan measured '
+    + 'nothing. Either every score-band helper has been removed or they are now spelled '
+    + 'in a way this pattern cannot see — re-derive it before trusting the result above'
+  );
+});
+
+test('⛔ ComplianceStandardsBreakdown uses ComplianceMatrix\'s bands, not its own', () => {
+  const { stripComments } = require('./stripComments');
+  const rel = 'components/dashboard/ComplianceStandardsBreakdown.js';
+  const src = stripComments(fs.readFileSync(path.join(REPO, rel), 'utf8'), { keepLines: true });
+
+  assert.match(
+    src, /import \{[^}]*\bscoreColor\b[^}]*\bSCORE_COLOR_VAR\b[^}]*\} from '\.\.\/compliance\/ComplianceMatrix'/,
+    `${rel} no longer imports the canonical banding. ComplianceMatrix exports scoreColor `
+    + '"so the per-device page can reuse the same bands instead of re-deriving the cut '
+    + 'points a second time" — and that file\'s header already records what a local copy '
+    + 'of its OTHER export (STANDARDS) cost'
+  );
+  assert.equal(
+    /if\s*\(\s*pct\s*>=?\s*\d+\s*\)\s*return/.test(src), false,
+    `${rel} has reintroduced a local percentage ladder. It sits in the same `
+    + 'dashboard-widget-grid as ComplianceScoreWidget, listing the same five standards, '
+    + 'so two ladders put two colours on one number side by side'
+  );
+
+  // ⛔ A FILL AND A LABEL HAVE DIFFERENT CONTRAST FLOORS, and `toneFor` was
+  // used for both: the 16px/700 percentage AND the bar fill. 16px bold is NOT
+  // large text (the 1.4.3 exemption starts at 18.66px bold), and --yellow
+  // measures 3.64:1 on --bg-card in the DEFAULT light theme.
+  assert.match(src, /function barFillFor\(/, `${rel}: the bar fill no longer has its own helper`);
+  assert.match(src, /function textToneFor\(/, `${rel}: the label no longer has its own helper`);
+  const textMap = objectLiteral(src, 'SCORE_TEXT_COLOR');
+  const { light, dark } = tokens();
+  for (const [band, value] of Object.entries(textMap)) {
+    assert.ok(
+      !/var\(--(?:green|yellow|red|orange|sev-)/.test(value),
+      `SCORE_TEXT_COLOR.${band} = "${value}" is a RAW ramp hue on 16px bold text`
+    );
+    for (const [theme, t] of [['light', light], ['dark', dark]]) {
+      const hex = surfaceHex(t, value.replace(/^var\(|\)$/g, '')) || t[value.replace(/^var\(|\)$/g, '')];
+      const ratio = contrast(hex, surfaceHex(t, '--bg-card'));
+      assert.ok(
+        ratio >= 4.5,
+        `SCORE_TEXT_COLOR.${band} (${value} = ${hex}) is ${ratio.toFixed(2)}:1 on --bg-card `
+        + `in ${theme} theme, below WCAG 1.4.3's 4.5:1`
+      );
+    }
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE EVIDENCE AXIS BORROWS NO SEVERITY HUE (v2.228.12)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// CLAUDE.md: "Severity answers 'how bad is this'; evidence answers 'how well do
+// we know it' … the proof affordance may not borrow from the severity ramp at
+// all." VpnDetections' STATUS_BADGE.measured was `color: 'success'` — badge
+// green, the ramp's own good end — on a chip that says only that SecVault had
+// enough baseline to LOOK. detectionCard() renders it immediately LEFT of
+// `<Badge color="danger">N findings</Badge>`, so a credential-spray panel
+// opened with a green chip the eye reads first.
+//
+// ⛔ VIOLET WAS REFUSED. --evidence/.ev-* belong to the evidence axis and
+// CLAUDE.md then says "Nothing else in the app is violet"; a `purple` Badge
+// here would be that second violet thing, and this chip opens no drawer.
+test('⛔ no detection STATUS badge wears a severity hue — measured included', () => {
+  const src = read('components/vpn/VpnDetections.js');
+  const map = objectLiteral(src, 'STATUS_BADGE');
+  const SEVERITY_VARIANTS = new Set(['success', 'danger', 'warning', 'info', 'orange']);
+  for (const [status, entry] of Object.entries(map)) {
+    assert.equal(
+      SEVERITY_VARIANTS.has(entry.color), false,
+      `STATUS_BADGE.${status} = "${entry.color}" paints the EVIDENCE axis with the `
+      + 'severity ramp. Being able to measure something is neither good news nor bad '
+      + 'news; it is a statement about our reach, and a green chip beside a red findings '
+      + 'count is read as an all-clear'
+    );
+    // Violet is reserved for .ev-*/EvidenceMark and nothing else may claim it.
+    assert.notEqual(
+      entry.color, 'purple',
+      `STATUS_BADGE.${status} took violet, which CLAUDE.md reserves for the .ev-* `
+      + 'evidence mark alone — a second violet thing stops the mark being learnable'
+    );
+  }
+  // ⛔ THE "WE COULD NOT MEASURE THIS" STATES ARE STILL PRESENT AND STILL
+  // DISTINGUISHABLE BY WORDS. Hueless is correct; indistinguishable is not, and
+  // with every chip now muted the LABEL is the only thing separating them.
+  const labels = Object.values(map).map((e) => e.label);
+  assert.equal(new Set(labels).size, labels.length,
+    'two detection statuses now share a label AND a hue, so they are indistinguishable');
+  assert.ok(map.insufficient_baseline && map.no_data,
+    'the two gap states are gone; "we have never seen this" and "this user has never '
+    + 'done this" are separate code paths and must stay separately labelled');
+});

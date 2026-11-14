@@ -66,8 +66,18 @@ function Empty({ children }) {
 // getThreatCoverage() answers it from syslog_rollup_hourly, which the SAME
 // sweep writes in the SAME transaction — so a bucket there proves the hour
 // was aggregated, and a zero over an aggregated hour is a real measurement.
-function ThreatEmpty({ coverage, measured }) {
-  if (coverage && coverage.evaluable) {
+// ⛔ EXPORTED FOR THE TEST THAT PINS THE DEFENSIVE BRANCH, and that is not a
+// convenience. The dangerous input is an ABSENT or MALFORMED coverage object —
+// a caller that forgot the read, which is exactly the defect being fixed here —
+// and no widget can be made to produce one, so the only way to assert the
+// OUTCOME for it is to render this component directly. A guard whose "default
+// it to fine" arm nothing exercises is where that default survives review.
+export function ThreatEmpty({ coverage, measured }) {
+  // ⛔ `=== true`, not merely truthy. getThreatCoverage() returns a real
+  // boolean, so this costs nothing — and a malformed object carrying
+  // `evaluable: 'yes'` is a shape nobody measured, which must fail to the gap
+  // rather than to the calm sentence.
+  if (coverage && coverage.evaluable === true) {
     return (
       <Empty>
         {measured}
@@ -85,6 +95,43 @@ function ThreatEmpty({ coverage, measured }) {
       Not measured — no syslog has been aggregated for this window yet, so this is
       <strong> not</strong> a report of zero threats. It fills in once the collector&rsquo;s
       next rollup sweep completes.
+    </div>
+  );
+}
+
+// The same distinction for the per-device table's closing sentence, where the
+// subject is the WHOLE FLEET rather than one widget's list.
+//
+// ⛔ "No device reported any threat events in this window" is the single most
+// reassuring sentence this product can print, and over an unswept rollup it is
+// not a measurement at all — it is the shape of the absent aggregation. The
+// evaluable branch says it; the unevaluable branch says the dashes above are
+// absent measurements and names what fills them in.
+//
+// ⛔ Defined at module top level, not inside DeviceThreatTable — CLAUDE.md's
+// first React rule. It takes `coverage` rather than reading it, so a caller
+// that forgot the read cannot get the calm sentence by default: an absent or
+// malformed coverage object falls to the unevaluable branch.
+export function FleetThreatEmptyNote({ coverage }) {
+  // ⛔ `=== true`, for the same reason as ThreatEmpty above.
+  const evaluable = Boolean(coverage) && coverage.evaluable === true;
+  if (!evaluable) {
+    return (
+      <div style={{ marginTop: 'var(--s2)', fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
+        Not measured — no syslog has been aggregated for this window yet, so every dash above is an
+        absent measurement rather than a report of zero threats, and this is
+        <strong> not</strong> an all-clear for the fleet. It fills in once the collector&rsquo;s next
+        rollup sweep completes.
+      </div>
+    );
+  }
+  const partial = coverage.aggregatedHours < coverage.windowHours;
+  return (
+    <div style={{ marginTop: 'var(--s2)', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+      No device reported any threat events in this window
+      {partial
+        ? `, across the ${coverage.aggregatedHours} of ${coverage.windowHours} hours threat aggregation currently covers.`
+        : '.'}
     </div>
   );
 }
@@ -222,10 +269,19 @@ export async function TopThreatsWidget() {
       </CardHeader>
       <CardBody>
         {rows.length === 0 ? (
-          <Empty>
-            No named threats in the last 24 hours. Signature names come from the
-            firewall&apos;s own IPS, antivirus and URL-filtering engines.
-          </Empty>
+          /* ⛔ THIS WIDGET AWAITED `coverage` AND NEVER READ IT, so it was the
+             one of the four that asserted calm from a read it did not consult:
+             its three siblings rendered <ThreatEmpty coverage={...}/> while
+             this one printed a flat "No named threats in the last 24 hours."
+             over the identical empty rollup. threatStats.js's own comment names
+             that exact shape as what getThreatCoverage() exists to prevent. */
+          <ThreatEmpty
+            coverage={coverage}
+            measured={
+              'No named threats in the last 24 hours. Signature names come from the '
+              + 'firewall’s own IPS, antivirus and URL-filtering engines.'
+            }
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {rows.map((r) => (
@@ -323,7 +379,17 @@ export async function ThreatSeverityWidget() {
 }
 
 export async function DeviceThreatTable() {
-  const rows = await getDeviceThreatSummary(pool, 24);
+  // ⛔ THIS TABLE IS THE CASE threatStats.js DELEGATED AND NOBODY PICKED UP.
+  // getDeviceThreatSummary()'s own comment says of its coalesce(...,0): "the
+  // 'we have no coverage' case is carried separately by the widget, not by a
+  // NULL here." This widget never fetched coverage at all, so over an
+  // unpopulated rollup every device rendered a dash and the caption closed
+  // with "No device reported any threat events in this window." — a
+  // fleet-wide all-clear produced by an aggregation that had not run.
+  const [rows, coverage] = await Promise.all([
+    getDeviceThreatSummary(pool, 24),
+    getThreatCoverage(pool, 24),
+  ]);
   const anyThreat = rows.some((r) => r.threatEvents > 0);
 
   return (
@@ -374,8 +440,8 @@ export async function DeviceThreatTable() {
               threat events (including URL filtering) and Fortinet web-category blocks.
               Not counted: sandbox submissions, informational SSL anomalies, and traffic a
               profile explicitly allowed.
-              {anyThreat ? '' : ' No device reported any threat events in this window.'}
             </div>
+            {anyThreat ? null : <FleetThreatEmptyNote coverage={coverage} />}
           </>
         )}
       </CardBody>

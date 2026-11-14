@@ -2989,6 +2989,17 @@ CREATE TABLE IF NOT EXISTS background_jobs (
   started_at       TIMESTAMPTZ,
   finished_at      TIMESTAMPTZ
 );
+-- ⛔ WHEN THE JOB LAST SAID IT WAS ALIVE, which is a different question from
+-- when it started, and the reaper was asking the wrong one. `reapStaleJobs`
+-- keyed on `started_at`, so a job that is working perfectly well and reporting
+-- progress every batch was declared failed at 30 minutes regardless. NULL
+-- means it has not reported yet, and the reaper falls back to `started_at` for
+-- exactly that case -- never defaulted to now(), which would make an abandoned
+-- job look alive for ever.
+-- ⛔ Added as its own ALTER because `CREATE TABLE IF NOT EXISTS` guards
+-- CREATION only: on every already-deployed server the table exists and the
+-- column would otherwise never appear. See CLAUDE.md's Database rules.
+ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS progress_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_background_jobs_pending
   ON background_jobs (created_at) WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_background_jobs_device

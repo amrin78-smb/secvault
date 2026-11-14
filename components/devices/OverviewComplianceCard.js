@@ -3,7 +3,9 @@ import { pool } from '../../lib/db';
 import Card, { CardBody } from '../ui/Card';
 import EmptyState from '../ui/EmptyState';
 import StandardDonut from '../compliance/StandardDonut';
-import { STANDARDS, STANDARD_META } from '../compliance/ComplianceMatrix';
+import { STANDARDS, STANDARD_META, DeviceCoverageStrip } from '../compliance/ComplianceMatrix';
+import { buildDeviceCoverage } from '../../lib/engines/complianceCoverage';
+import { vendorLabel } from './vendorMeta';
 
 // Overview-tab card: a CONDENSED version of the already-built per-device
 // Compliance page (app/(dashboard)/compliance/[deviceId]/page.js) — same
@@ -71,6 +73,89 @@ async function getFindings(dbPool, deviceId) {
   }));
 }
 
+// ⛔ THE DENOMINATOR BEHIND THIS CARD'S SIX DONUTS, AND IT HAD NO READER HERE
+// AT ALL — WHILE THE PAGE ONE CLICK AWAY HAS CARRIED IT SINCE v2.225.0.
+//
+// This card drew a 96px blended donut plus six per-standard donuts and said
+// nothing about how many checks any of them rest on, although that number is a
+// property of the VENDOR rather than of the firewall. Measured on the
+// secvault_mock fleet (74-check library, 2026-11-15): MOCK-SANGFOR-Branch-06
+// scores on 9 gradeable checks of 19 applicable and is the HIGHEST-scoring
+// firewall on the fleet, while MOCK-CP-Perimeter-04 and MOCK-FP-DC-07 score on
+// 10 of 20 — the three vendors the library covers least. Opening this tab gave
+// a bare percentage; clicking "View full report" gave the SAME assessment WITH
+// a "thin" grade and "9 of 19" beside it, so the two screens disagreed about
+// what the number was worth.
+//
+// ⛔ NOTHING IS RECOMPUTED AND NO SECOND GRADING SCALE IS INVENTED. The
+// judgement is buildDeviceCoverage()'s, byte for byte the call
+// app/(dashboard)/compliance/[deviceId]/page.js makes, so this card and that
+// page can never report a different basis for the same firewall. The bands,
+// the absolute-count rule and the inconsistent -> `unknown` degrade live beside
+// DEVICE_GRADE_THIN_MAX in lib/engines/complianceCoverage.js; do not copy the
+// numbers here.
+//
+// ⛔ A FAILED READ RETURNS null, never a zeroed map. "0 checks apply to this
+// firewall" is a claim, and a false one — the strip then reports the basis as
+// unread rather than as zero.
+async function getApplicableCheckCount(dbPool, vendor) {
+  if (!vendor) return null;
+  try {
+    const { rows } = await dbPool.query(
+      `SELECT count(*)::int AS applicable,
+              (SELECT count(*)::int FROM audit_checks) AS library_total
+       FROM audit_checks WHERE vendor IS NULL OR vendor = $1`,
+      [vendor]
+    );
+    if (rows.length === 0) return null;
+    const applicable = Number(rows[0].applicable);
+    const libraryTotal = Number(rows[0].library_total);
+    if (!Number.isFinite(applicable) || !Number.isFinite(libraryTotal)) return null;
+    return { applicable, libraryTotal };
+  } catch (err) {
+    console.warn(
+      `[overview-compliance/${vendor}] applicable check count read failed, coverage will report as unread:`,
+      err.message
+    );
+    return null;
+  }
+}
+
+// The vendor is what decides the denominator, so it has to be read. ⛔ A failed
+// read returns null and the coverage strip says the basis could not be
+// established — it must never fall back to a vendor, because the applicable
+// count of the WRONG vendor is a confident number that cannot be right.
+async function getDeviceVendor(dbPool, deviceId) {
+  try {
+    const { rows } = await dbPool.query('SELECT name, vendor FROM devices WHERE id = $1', [deviceId]);
+    return rows[0] || null;
+  } catch (err) {
+    console.warn(
+      `[overview-compliance/${deviceId}] device read failed, coverage will report as unread:`,
+      err.message
+    );
+    return null;
+  }
+}
+
+// ⛔ DISTINCT CHECKS, NEVER THE PER-STANDARD ROWS SUMMED. `audit_checks.standards`
+// is an ARRAY, so aggregateStandards() above counts one check once per standard
+// it is mapped to — summing those five tallies gives 26 for a firewall with 20
+// applicable checks. buildDeviceCoverage() catches that shape and degrades to
+// `unknown`; the point of computing it here is not to hand it that at all.
+function deviceCheckCounts(findings) {
+  const evaluated = new Set();
+  const answered = new Set();
+  const statusCounts = { pass: 0, fail: 0, warning: 0, na: 0 };
+  for (const f of findings) {
+    if (Object.prototype.hasOwnProperty.call(statusCounts, f.status)) statusCounts[f.status] += 1;
+    if (!f.checkSlug) continue;
+    evaluated.add(f.checkSlug);
+    if (f.status && f.status !== 'na') answered.add(f.checkSlug);
+  }
+  return { evaluated: evaluated.size, answered: answered.size, statusCounts };
+}
+
 // Same zone-dependent check slug as the full Compliance page's own
 // ZONE_DEPENDENT_CHECK_SLUG constant. This condensed card shows a small
 // inline note instead of the full ZoneClassificationBanner (no room for a
@@ -96,7 +181,10 @@ function aggregateStandards(findings) {
 }
 
 export default async function OverviewComplianceCard({ deviceId }) {
-  const findings = await getFindings(pool, deviceId);
+  const [findings, device] = await Promise.all([
+    getFindings(pool, deviceId),
+    getDeviceVendor(pool, deviceId),
+  ]);
   const standards = aggregateStandards(findings);
 
   const neverAudited = STANDARDS.every((s) => standards[s.key].total === 0);
@@ -104,11 +192,46 @@ export default async function OverviewComplianceCard({ deviceId }) {
   const zoneCheck = findings.find((f) => f.checkSlug === ZONE_DEPENDENT_CHECK_SLUG);
   const zoneCheckIsNa = Boolean(zoneCheck) && zoneCheck.status === 'na';
 
+  const counts = deviceCheckCounts(findings);
+  const library = await getApplicableCheckCount(pool, device ? device.vendor : null);
+  // ⛔ `scorePct` IS THE FIGURE ACTUALLY ON THIS CARD — the blended average, not
+  // the device-wide pass/(pass+fail+warning) the per-device page qualifies.
+  // Measured on secvault_mock: those two disagree by 9 points on
+  // MOCK-SANGFOR-Branch-06 (blend 87%, device-wide 78%), so handing the strip
+  // the device-wide figure would put a SECOND, different percentage on the same
+  // screen as the donut — the one thing CLAUDE.md forbids a coverage statement
+  // from doing. Passing the figure that is on screen makes the strip restate
+  // ONE number with its denominator instead. ⛔ null exactly when `overall` is
+  // null, which is exactly when nothing is gradeable — the state the engine
+  // reads a null `scorePct` as.
+  const deviceCoverage = buildDeviceCoverage({
+    deviceId,
+    deviceName: device ? device.name : null,
+    vendor: device ? device.vendor : null,
+    vendorLabel: device && device.vendor ? vendorLabel(device.vendor) : null,
+    libraryTotal: library ? library.libraryTotal : null,
+    applicable: library ? library.applicable : null,
+    evaluatedChecks: counts.evaluated,
+    answeredChecks: counts.answered,
+    findings: counts.statusCounts,
+    scorePct: overall ? overall.scorePct : null,
+  });
+
   return (
     <Card>
       <CardBody>
         <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16 }}>
           Compliance Overview
+        </div>
+
+        {/* ⛔ ABOVE the donuts, not under them, and in BOTH branches: how many
+            checks this firewall could be asked at all qualifies every
+            percentage below, and the figure may never be read before its
+            basis. In the never-audited branch it is the more informative of
+            the two lines — the EmptyState says no audit has run, this says how
+            many checks there would be to run. */}
+        <div style={{ marginBottom: 16 }}>
+          <DeviceCoverageStrip coverage={deviceCoverage} />
         </div>
 
         {neverAudited ? (

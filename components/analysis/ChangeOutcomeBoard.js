@@ -75,6 +75,7 @@
 import Card, { CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import Disclosure from '../ui/Disclosure';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
@@ -908,13 +909,18 @@ export default function ChangeOutcomeBoard({
         <>
           <Headline summary={summary} />
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-              gap: 'var(--s4)',
-            }}
-          >
+          {/* ⛔ `cols={6}` AND THE ORPHAN IT REPLACED WAS THE QUIETEST TILE,
+              WHICH IS THIS FILE'S OWN RULE BROKEN BY ITS OWN LAYOUT.
+              VERDICT_ORDER is six (VERDICT_WEIGHT minus `unknown`) sorted by
+              rank, so `indistinguishable` — rank 3, "Within normal variation",
+              the measured-and-unremarkable state the ranking above
+              deliberately puts LAST — is the sixth. Under
+              `repeat(auto-fit, minmax(170px, 1fr))` any width that fits five
+              stranded it alone on a second row, i.e. gave the one verdict that
+              must not be prominent a whole row to itself. KpiRow's 6 -> 3 ->
+              2 -> 1 steps all divide six, so it can never be orphaned at any
+              width. The order and the hues are untouched. */}
+          <KpiRow cols={6}>
             {VERDICT_ORDER.map((verdict) => {
               const weight = verdictWeight(verdict);
               return (
@@ -930,7 +936,7 @@ export default function ChangeOutcomeBoard({
                 />
               );
             })}
-          </div>
+          </KpiRow>
 
           <LimitsPanel summary={summary} incomplete={incomplete} />
 

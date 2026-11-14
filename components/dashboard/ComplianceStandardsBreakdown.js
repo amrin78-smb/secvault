@@ -1,7 +1,11 @@
 import Link from 'next/link';
 import { pool } from '../../lib/db';
 import Card, { CardHeader, CardTitle, CardBody } from '../ui/Card';
-import { STANDARDS } from '../compliance/ComplianceMatrix';
+import NotMeasured from '../ui/NotMeasured';
+// ⛔ scoreColor AND SCORE_COLOR_VAR COME FROM HERE, exactly as STANDARDS does.
+// See the ⛔ block above SCORE_TEXT_COLOR for what a local copy of the banding
+// cost on this card's own screen.
+import { STANDARDS, scoreColor, SCORE_COLOR_VAR } from '../compliance/ComplianceMatrix';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,18 +26,78 @@ export const dynamic = 'force-dynamic';
 // audited yet" as "you fail every control", which is the failed-read-as-a-
 // measurement class CLAUDE.md now names as a Critical Rule.
 
+// ⛔ ONE SENTENCE, read by the number AND the hatched bar below it. They each
+// had their own copy of this before; two copies of a reason drift and then the
+// row explains its own absence two different ways.
+const UNMEASURABLE_REASON =
+  'No check for this standard produced a pass, fail or warning on any active device — '
+  + 'nothing measurable to score.';
+
 function scorePctFrom(counts) {
   const denom = counts.pass + counts.fail + counts.warning;
   if (denom <= 0) return null;
   return Math.round((100 * counts.pass) / denom);
 }
 
-function toneFor(pct) {
-  if (pct === null) return 'var(--text-muted)';
-  if (pct >= 90) return 'var(--green)';
-  if (pct >= 75) return 'var(--accent-teal)';
-  if (pct >= 50) return 'var(--yellow)';
-  return 'var(--red)';
+// ── ⛔ THE BANDS ARE ComplianceMatrix's, NOT THIS FILE'S ───────────────────
+//
+// This file declared its own four-band ramp — `>=90 green / >=75 accent-teal /
+// >=50 yellow / else red` — and it was wrong twice over (fixed v2.228.12).
+//
+// ⛔ (1) THE MIDDLE BAND WAS THE BRAND HUE. `--accent-teal: var(--primary)` in
+// app/globals.css, byte-identical in both themes (measured: #098294 light,
+// #22C1D6 dark). --primary is the token reserved for "this is interactive", so
+// the ramp read green -> brand-teal -> amber -> red and a standard scoring 82%
+// was drawn in exactly the colour of the "Compare devices" link at the bottom
+// of this same card. CLAUDE.md's "Colour means RISK" exists for that: red is
+// danger, teal is affordance, and a score is neither.
+//
+// ⛔ (2) THE CUT POINTS DISAGREED WITH THE WIDGET BESIDE IT, ON ONE SCREEN.
+// `scoreColor` in components/compliance/ComplianceMatrix.js is the canonical
+// banding — `>80 success / >=60 warning / else danger`, null -> muted — and it
+// is exported specifically "so the per-device page can reuse the same bands
+// instead of re-deriving the cut points a second time". ComplianceMatrix, the
+// StandardDonut, the compliance PDF, the print page AND
+// ComplianceScoreWidget all use it. app/(dashboard)/page.js renders
+// ComplianceScoreWidget and this component as SIBLINGS in one
+// `dashboard-widget-grid`, both listing the SAME five STANDARDS with a
+// per-standard percentage. So a standard at 55% was a RED badge in the widget
+// (55 < 60) and a YELLOW bar here, and one at 85% was GREEN there and BRAND
+// TEAL here — the same number, two colours, side by side.
+//
+// ⛔ THIS FILE'S OWN HEADER ALREADY NAMED THE DEFECT ONE FUNCTION UP: "STANDARDS
+// is imported from ComplianceMatrix, never redeclared. A local copy is how the
+// matrix ended up with 7 <col> elements for 8 columns." The score banding was a
+// local copy of the same module's other export.
+//
+// ⛔ TWO FUNCTIONS, BECAUSE A FILL AND A LABEL HAVE DIFFERENT CONTRAST FLOORS.
+// `toneFor` was used for BOTH the 16px/700 percentage and the bar fill. WCAG
+// 1.4.11 asks 3:1 of a graphic and 1.4.3 asks 4.5:1 of text, and 16px bold is
+// NOT large text (the exemption starts at 18.66px bold). Measured against
+// --bg-card in the DEFAULT light theme: --yellow is **3.64:1** — so every
+// standard in the middle band printed its number below the minimum. The raw
+// ramp stays on the bar; the number takes the --tint-*-fg counterpart, which is
+// the same remap StatCard's TEXT_SAFE_VALUE and severityRamp's
+// SEVERITY_TEXT_COLOR already apply for exactly this reason.
+const SCORE_TEXT_COLOR = {
+  success: 'var(--tint-success-fg)',
+  warning: 'var(--tint-warn-fg)',
+  danger: 'var(--tint-danger-fg)',
+  // ⛔ --unmeasured, NOT --text-muted. A standard with nothing gradeable is the
+  // NotMeasured vocabulary's own case, and --text-muted is the CAPTION token —
+  // the sub-line under this very number uses it, so an unmeasurable score and
+  // its own caption would have been the same colour.
+  muted: 'var(--unmeasured)',
+};
+
+/** Bar fill: a decorative graphic, so the raw ramp hue at WCAG 1.4.11's 3:1. */
+function barFillFor(pct) {
+  return SCORE_COLOR_VAR[scoreColor(pct)] || SCORE_COLOR_VAR.muted;
+}
+
+/** The percentage LABEL: text, so the contrast-safe counterpart at 4.5:1. */
+function textToneFor(pct) {
+  return SCORE_TEXT_COLOR[scoreColor(pct)] || SCORE_TEXT_COLOR.muted;
 }
 
 async function getPerStandard(dbPool) {
@@ -107,11 +171,19 @@ export default async function ComplianceStandardsBreakdown() {
                       fontSize: 'var(--text-base)',
                       fontWeight: 700,
                       fontVariantNumeric: 'tabular-nums',
-                      color: toneFor(s.scorePct),
+                      color: textToneFor(s.scorePct),
                     }}
                   >
-                    {/* Em-dash, never 0 — see this file's header. */}
-                    {s.scorePct === null ? '—' : `${s.scorePct}%`}
+                    {/* ⛔ Em-dash, never 0 — see this file's header. Rendered
+                        through NotMeasured so it carries the SAME reason the
+                        hatched bar below already had, on hover and to a screen
+                        reader; a bare em-dash left the number the one part of
+                        this row that could not say why it was absent. */}
+                    {s.scorePct === null ? (
+                      <NotMeasured reason={UNMEASURABLE_REASON} />
+                    ) : (
+                      `${s.scorePct}%`
+                    )}
                   </span>
                 </div>
                 {/* ⛔ FAILED READ RENDERED AS A VALUE. The number above already
@@ -126,7 +198,7 @@ export default async function ComplianceStandardsBreakdown() {
                     as a real category with a muted colour. */}
                 {s.scorePct === null ? (
                   <div
-                    title="No check for this standard produced a pass, fail or warning on any active device — nothing measurable to score."
+                    title={UNMEASURABLE_REASON}
                     style={{
                       height: 6,
                       borderRadius: 'var(--radius-pill)',
@@ -150,7 +222,7 @@ export default async function ComplianceStandardsBreakdown() {
                       style={{
                         width: `${s.scorePct}%`,
                         height: '100%',
-                        background: toneFor(s.scorePct),
+                        background: barFillFor(s.scorePct),
                       }}
                     />
                   </div>

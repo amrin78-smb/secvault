@@ -5,6 +5,7 @@ import { resolvePage, paginateArray, DEFAULT_PAGE_SIZE } from '../../lib/paginat
 import Table from '../ui/Table';
 import Pagination from '../ui/Pagination';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import NotMeasured from '../ui/NotMeasured';
 import Disclosure from '../ui/Disclosure';
 import { WRAP_CELL } from '../ui/tableStyles';
@@ -533,7 +534,13 @@ function ClaimPanel() {
 
 function FigureGrid({ figures }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 'var(--s4)' }}>
+    // ⛔ `cols={5}` IS DECLARED. headlineFigures() is a fixed five-element array
+    // literal with no conditional entry, which is the only shape a declared
+    // count can honestly describe. Nothing divides five, so KpiRow drops to one
+    // column rather than a ragged 3+2; the `auto-fit` grid this replaced
+    // orphaned the fifth — "Groups with a check that could not be determined",
+    // the hueless unmeasured tile — at any width that fitted four.
+    <KpiRow cols={5}>
       {figures.map((f) => (
         <StatCard
           key={f.key}
@@ -548,9 +555,17 @@ function FigureGrid({ figures }) {
           sub={f.note}
           color={f.unmeasured ? 'var(--unmeasured)' : 'var(--border)'}
           textColor={f.unmeasured ? 'var(--unmeasured)' : undefined}
+          // ⛔ TWO UNMEASURED CAUSES, AND THE COLOUR ONLY EVER CARRIED ONE.
+          // `f.unmeasured` is a standing DECLARATION about the figure (the
+          // undetermined-groups count is always a gap in what SecVault could
+          // resolve), which the `color` above already armed. `value === null`
+          // is a RUNTIME read failure — it renders the NotMeasured em-dash
+          // right above, yet left `color` on --border, so a figure that could
+          // not be computed sat in a solid-bordered tile. Either cause dashes.
+          unmeasured={Boolean(f.unmeasured) || f.value === null}
         />
       ))}
-    </div>
+    </KpiRow>
   );
 }
 

@@ -92,6 +92,34 @@ export default function StatCard({
   // top-right corner is taken in both layouts (IconChip in stack, the NUMBER in
   // row), so the bottom-right corner is where it goes.
   evidence,
+  // ⛔ "WAS THIS MEASURED" IS NOT "WHAT COLOUR IS THE NUMBER", AND INFERRING ONE
+  // FROM THE OTHER LOST THE SIGNAL ON EVERY CALLER THAT DID NOT HAPPEN TO SPELL
+  // IT AS A HUE (added v2.228.12). The dashed border below was armed ONLY by
+  // `color === 'var(--unmeasured)'` — i.e. the fact was encoded in a colour
+  // string, so a caller that stated it any other way got a tile that looked
+  // measured. Two did, both already rendering a NotMeasured em-dash AS THEIR VALUE:
+  //
+  //   components/analysis/ConformanceBoard.js  passes `textColor` and no `color`
+  //   components/vpn/VpnDetections.js          passes NEITHER
+  //
+  // So the em-dash said "not measured" and the tile around it said "measured
+  // and unremarkable" — on the one component v2.200.0 added the dashed border
+  // to because grey alone was judged insufficient (--unmeasured and
+  // --text-muted are four hex digits apart).
+  //
+  // ⛔ THE TWO FACTS GENUINELY DIVERGE, WHICH IS WHY A PROP AND NOT A THIRD
+  // COLOUR CONVENTION. ConformanceBoard's "Firewalls not compared" tile is
+  // toned --unmeasured because it COUNTS unmeasured firewalls; the count itself
+  // is measured, and dashing that tile would claim SecVault could not read it.
+  // Its real unmeasured case is `value === null`, a different condition
+  // entirely. No colour string can carry both readings.
+  //
+  // ⛔ ADDITIVE AND THE INFERENCE IS KEPT. ~40 call sites rely on
+  // `color: 'var(--unmeasured)'` arming this (ConsolidationTab.js passes
+  // exactly that, deliberately), so removing it would silently unarm them all —
+  // trading two missing borders for forty. Explicit `false` still wins, so a
+  // caller that tones a number hueless for a MEASURED value can say so.
+  unmeasured: unmeasuredProp,
 }) {
   const cardClass = compact ? 'kpi-card-compact' : 'kpi-card';
   // ⛔ THE TILE BORDER IS NEUTRAL ON ALL FOUR SIDES (v2.200.0) and `color` no
@@ -109,7 +137,14 @@ export default function StatCard({
   // `.kpi-card[data-unmeasured]` in app/globals.css for why neutralising this
   // edge would otherwise have made "we could not measure this" look identical
   // to "we measured this and it was unremarkable".
-  const unmeasured = color === 'var(--unmeasured)' ? '' : undefined;
+  //
+  // ⛔ EXPLICIT WINS, INCLUDING AN EXPLICIT `false`. `undefined` means the
+  // caller said nothing and the legacy colour inference decides; `false` means
+  // the caller stated this value IS measured and must not be dashed even though
+  // its number is toned hueless.
+  const unmeasured = (
+    unmeasuredProp === undefined ? color === 'var(--unmeasured)' : Boolean(unmeasuredProp)
+  ) ? '' : undefined;
   const valueClass = compact ? 'stat-value-compact' : 'stat-value';
   const labelClass = compact ? 'stat-label-compact' : 'stat-label';
   const subClass = compact ? 'stat-sub-compact' : 'stat-sub';

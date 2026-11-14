@@ -73,7 +73,19 @@ export default function UserMenu({ session }) {
             fontWeight: 700,
             fontSize: 'var(--text-base)',
             flexShrink: 0,
-            boxShadow: '0 2px 6px rgba(200,16,46,0.4)',
+            // ⛔ A HALF-DONE MIGRATION: THE FILL MOVED TO --primary AND THE
+            // SHADOW TUNED TO THE OLD HUE DID NOT (fixed v2.228.12). This read
+            // `rgba(200,16,46,0.4)` — #C8102E, the RETIRED shared-suite red
+            // that --primary was before v2.87.0 pulled red back to danger only.
+            // So a teal circle sat in a red halo on every authenticated page,
+            // spending the product's one risk hue on an avatar.
+            //
+            // ⛔ NOT re-tinted to teal: the shell is dark in both themes and a
+            // brand-hue glow under a brand-hue disc is decoration the palette
+            // does not need. A neutral drop shadow lifts the disc off the bar
+            // without claiming anything, and carries no theme-flipping token
+            // onto a non-flipping ground.
+            boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
           }}
         >
           {userInitial}

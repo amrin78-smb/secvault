@@ -2319,3 +2319,16 @@ escaped it that way were found by hand. (Its FIRST draft failed the same way for
 it searched for `/\*[\s\S]*?\*/` while the files contain `\/\*[\s\S]*?\*\/`, both indices were -1, and
 it PASSED over all eleven known offenders.) If you add a source-scanning test, REQUIRE THE SHARED
 HELPER — matching a signature is not how this gets enforced reliably.
+
+## ⛔ A test must not use a LIVE DATA VALUE as its exemplar of a gap (2026-11-15)
+
+`tests/vpnDetections.test.js` pinned "an unrecognised country code is kept verbatim" with
+`normalisedCountryList(['KZ']) === ['KZ']` and a comment reading **"KZ is live today"** — i.e. it
+used the BUG as the fixture for the contract. `KZ` was unmapped only because
+`lib/syslog/vpnAuthStats.js`'s ISO map was incomplete (230,935 events filed as `KZ` splitting from
+909 as `Kazakhstan`), so mapping it broke a test whose INVARIANT was never wrong.
+
+Pick a value that cannot become valid. `ZZ`, `QQ` and `XK` are unassigned in ISO 3166-1, so the
+assertion outlives the fix it is meant to survive. The same instinct applies to any "this is the
+unhandled case" fixture: if the codebase could reasonably start handling it, it is the wrong
+exemplar.

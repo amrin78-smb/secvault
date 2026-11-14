@@ -6,6 +6,7 @@ import { SEVERITY_FILL, SEVERITY_TEXT_COLOR, SEVERITY_LABEL } from '../analysis/
 import { timeAgo, absoluteUtc } from '../../lib/formatDisplay';
 import { buildDetectionLogHref } from '../../lib/vpnDetectionLinks';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import DeltaBadge, { GOOD } from '../ui/DeltaBadge';
 import DownloadButton from '../ui/DownloadButton';
 import VpnThreatFilters from './VpnThreatFilters';
@@ -132,8 +133,34 @@ const REASON_TEXT = {
     'no hour-of-day profile exists yet, so no hour can be called unusual',
 };
 
+// ⛔ THE EVIDENCE AXIS CARRIES NO SEVERITY HUE, AND `measured` WAS GREEN
+// (fixed v2.228.12). CLAUDE.md: "Severity answers 'how bad is this'; evidence
+// answers 'how well do we know it' … the proof affordance may not borrow from
+// the severity ramp at all." `color: 'success'` is badge-green, i.e. --sev-ok —
+// the ramp's own good end — on a chip that says only that SecVault had enough
+// baseline to LOOK.
+//
+// ⛔ THE COST IS POSITIONAL, WHICH IS WHY IT MATTERED. detectionCard() renders
+// this chip and then, immediately to its right, `<Badge color="danger">N
+// findings</Badge>`. So a credential-spray panel opened with a GREEN chip
+// followed by a red count, and the green is read first. Nothing about being
+// able to measure a spray is good news.
+//
+// ⛔ VIOLET WAS CONSIDERED AND REFUSED. CLAUDE.md gives --evidence/.ev-* to the
+// evidence axis and then says "Nothing else in the app is violet — the moment a
+// second thing uses it, the mark stops being learnable at a glance". A
+// second violet thing is exactly what a `purple` Badge here would be, and this
+// chip is not an EvidenceMark and opens no drawer.
+//
+// ⛔ ALL THREE ARE NOW HUELESS, AND THEY STAY DISTINGUISHABLE BY THE TWO THINGS
+// THAT WERE ALREADY DOING THE WORK: the LABEL (three different sentences) and
+// the PANEL (a gated detection renders hatched, hueless, per this file's own
+// header). The hue was never the carrier — `insufficient_baseline` and
+// `no_data` already shared `muted`, so the chip only ever had two appearances
+// for three states, and the one it spent a colour on was the one that needed
+// it least.
 const STATUS_BADGE = {
-  measured: { color: 'success', label: 'Measured' },
+  measured: { color: 'muted', label: 'Measured' },
   insufficient_baseline: { color: 'muted', label: 'Insufficient baseline' },
   no_data: { color: 'muted', label: 'No data' },
 };
@@ -705,15 +732,16 @@ function headlineDelta(f) {
 function headlineStrip(headline) {
   if (!headline || !Array.isArray(headline.figures)) return null;
   return (
-    // Same grid HeadlineStats uses for the dashboard's tile row — auto-fit so
-    // four tiles reflow to two and then one without a breakpoint.
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
-        gap: 'var(--s3)',
-      }}
-    >
+    // ⛔ `cols={4}` IS DECLARED, AND THE COMMENT THIS REPLACED WAS THE WHOLE
+    // ARGUMENT FOR auto-fit STATED AS A BENEFIT. It read "auto-fit so four tiles
+    // reflow to two and then one without a breakpoint" — but auto-fit does not
+    // know there are four, so the reflow it actually produces is whatever the
+    // minmax happens to yield at that width, including 3+1. KpiRow's declared
+    // 4 -> 2 -> 1 steps all divide four, which is the property the comment was
+    // claiming and auto-fit could not deliver. lib/engines/vpnDetections.js
+    // builds `figures` as a fixed four-element literal, so a declared count is
+    // honest here.
+    <KpiRow cols={4}>
       {headline.figures.map((f) => (
         <StatCard
           key={f.key}
@@ -729,9 +757,18 @@ function headlineStrip(headline) {
               : undefined
           }
           delta={headlineDelta(f)}
+          // ⛔ THIS SITE PASSED NEITHER `color` NOR `textColor`, so the tile
+          // could not possibly dash: StatCard's only signal was
+          // `color === 'var(--unmeasured)'`. headlineValue() right above
+          // already renders a NotMeasured em-dash for the same condition, so
+          // em-dash said "not measured" inside a tile drawn exactly like the
+          // three measured ones beside it — the one reading v2.200.0 added the
+          // dashed border to prevent. The condition is headlineValue()'s own,
+          // so the border and the value cannot disagree.
+          unmeasured={f.current === null || f.current === undefined}
         />
       ))}
-    </div>
+    </KpiRow>
   );
 }
 

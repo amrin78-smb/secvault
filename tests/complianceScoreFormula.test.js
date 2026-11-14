@@ -22,7 +22,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { summaryFromPerDevice, STANDARD_KEYS } = require('../lib/engines/complianceReport');
+const {
+  summaryFromPerDevice, STANDARD_KEYS, OVERALL_KEY,
+} = require('../lib/engines/complianceReport');
 
 // The form used by dashboardSnapshot.js and by both compliance pages — the
 // canonical one, because it is what an operator reads on screen.
@@ -32,6 +34,15 @@ function deviceWith(counts) {
   const standards = {};
   for (const k of STANDARD_KEYS) standards[k] = { pass: 0, fail: 0, warning: 0, na: 0 };
   standards.PCI_DSS = counts;
+  // ⛔ THE PAIR-UNIT TALLY THE REAL BUILDER NOW PRODUCES (v2.228.12). Every
+  // finding in this fixture maps to exactly ONE standard, so counting once and
+  // counting per standard give identical numbers here — which is what keeps
+  // this file's job (do all the copies of the formula agree?) unchanged.
+  // ⛔ It is set DELIBERATELY rather than defaulted inside
+  // summaryFromPerDevice: an absent tally there yields `overall: null`, and
+  // falling back to the per-standard sum would silently answer in the OTHER
+  // UNIT — the thing v2.228.12 exists to stop.
+  standards[OVERALL_KEY] = counts;
   return { standards };
 }
 

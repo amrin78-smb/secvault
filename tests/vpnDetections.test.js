@@ -891,8 +891,17 @@ describe('⛔ one country vocabulary across all six detections', () => {
     assert.deepEqual(normalisedCountryList(['CH', 'Switzerland', 'DE']),
       ['Germany', 'Switzerland']);
     // ⛔ An unrecognised code is kept, never dropped and never guessed at — the
-    // rule lib/syslog/vpnAuthStats.js's own map documents. KZ is live today.
-    assert.deepEqual(normalisedCountryList(['KZ']), ['KZ']);
+    // rule lib/syslog/vpnAuthStats.js's own map documents.
+    // ⛔ THE EXEMPLAR WAS `KZ` AND THE COMMENT SAID "KZ is live today" — i.e.
+    // this test used the BUG as the fixture for the contract. KZ was unmapped
+    // only because the map was incomplete (230,935 events as 'KZ' splitting
+    // from 909 as 'Kazakhstan'), so mapping it in v2.228.12 broke a test whose
+    // INVARIANT was never wrong. `ZZ`, `QQ` and `XK` are unassigned in
+    // ISO 3166-1, so they cannot become valid and the assertion outlives the
+    // fix it is meant to survive.
+    assert.deepEqual(normalisedCountryList(['ZZ']), ['ZZ']);
+    assert.deepEqual(normalisedCountryList(['KZ']), ['Kazakhstan'],
+      'and a code that IS mapped must fold, which is what the old exemplar hid');
     for (const bad of [null, undefined, 5, 'CH', {}]) {
       assert.deepEqual(normalisedCountryList(bad), []);
     }

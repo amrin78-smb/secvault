@@ -63,6 +63,7 @@ import Link from 'next/link';
 import Card, { CardBody } from '../ui/Card';
 import Table from '../ui/Table';
 import StatCard from '../ui/StatCard';
+import KpiRow from '../ui/KpiRow';
 import Disclosure from '../ui/Disclosure';
 import EmptyState from '../ui/EmptyState';
 import NotMeasured from '../ui/NotMeasured';
@@ -1065,13 +1066,15 @@ export default function ConformanceBoard({ cohorts, summary, failures, generated
           a set of counts that already looked complete. */}
       <FailuresBanner failures={failures} />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-          gap: 'var(--s4)',
-        }}
-      >
+      {/* ⛔ `cols={5}` IS DECLARED, NOT COUNTED, AND statTiles() IS STRUCTURALLY
+          FIVE — a fixed array literal with no conditional entry, which is what
+          makes a declared count honest here. Five is the awkward one: nothing
+          divides it, so KpiRow drops it straight to one column rather than a
+          ragged 3+2 (see its header). It replaced
+          `repeat(auto-fit, minmax(160px, 1fr))`, which cannot be fixed by
+          tuning the minmax because auto-fit does not know how many tiles there
+          are — any width that fits four orphans the fifth. */}
+      <KpiRow cols={5}>
         {tiles.map((tile) => (
           <StatCard
             key={tile.key}
@@ -1079,9 +1082,19 @@ export default function ConformanceBoard({ cohorts, summary, failures, generated
             value={statValue(tile.value, tile.reason)}
             sub={tile.sub}
             textColor={TONE[tile.tone] || TONE.quiet}
+            // ⛔ KEYED ON `value === null`, NEVER ON `tone === 'unmeasured'`.
+            // Those are different facts and they diverge on two of these five
+            // tiles: "Firewalls not compared" is TONED unmeasured because it
+            // COUNTS firewalls nothing could be said about, and that count is
+            // itself a measurement. Dashing it would claim SecVault could not
+            // read the number it is printing. `null` is what reportableCount()
+            // returns when the board is incomplete, and it is the same
+            // condition statValue() turns into the NotMeasured em-dash
+            // above — so the border and the value can never disagree.
+            unmeasured={tile.value === null}
           />
         ))}
-      </div>
+      </KpiRow>
 
       <UnreportablePanel rows={unreportable} />
 

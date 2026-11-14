@@ -52,6 +52,27 @@ function stubDoc() {
     fillColor(c) { this._fill = c; return this; },
     fontSize() { return this; },
     font() { return this; },
+    // ⛔ ADDED v2.228.12, AND THE FAILURE THAT FORCED IT IS WORTH RECORDING.
+    // The chart helpers now RESERVE SPACE FOR THEIR CAPTION, so they measure
+    // it — `captionHeight()` calls `doc.fontSize(...).font(...)
+    // .currentLineHeight()`. This stub had neither method, so five tests here
+    // died with `currentLineHeight is not a function`: not a behaviour
+    // regression, a FIXTURE that does not model the object it stands in for.
+    // ⛔ `captionHeight` deliberately does NOT tolerate a doc that cannot
+    // measure — guessing a height would fabricate exactly the number the
+    // caption exists to qualify — so the fix belongs here, not behind a
+    // defensive branch in the helper that real pdfkit could never take.
+    // ⛔ THESE ARE APPROXIMATIONS AND NO GEOMETRY ASSERTION MAY BE READ OFF
+    // THEM. The stub ignores fontSize, so both answers are the real 7.5pt
+    // caption metrics against pdfkit 0.18.0 and nothing else; the same values
+    // tests/reportCharts.test.js uses, which asserts page positions against a
+    // REAL PDFDocument because that is the only thing that knows font metrics.
+    currentLineHeight() { return 8.67; },
+    heightOfString(str, opts) {
+      const width = (opts && opts.width) || 515;
+      const perLine = Math.max(1, Math.floor(width / 3.5)); // ~3.5px/char at 7.5pt
+      return Math.max(1, Math.ceil(String(str == null ? '' : str).length / perLine)) * 8.67;
+    },
     text(t) { calls.push({ op: 'text', text: String(t), color: this._fill }); return this; },
   };
   return { doc, calls };

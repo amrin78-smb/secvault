@@ -19,8 +19,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  generateReportPdf, buildReportData, summaryFromPerDevice, fleetForStandard, STANDARD_KEYS,
-} = require('../lib/engines/complianceReport');
+  generateReportPdf, buildReportData, summaryFromPerDevice, fleetForStandard, STANDARD_KEYS, OVERALL_KEY } = require('../lib/engines/complianceReport');
 // The shared extractor — pdfkit compresses its content streams, so a plain
 // regex over the buffer finds nothing. Same helper the standard-scope tests use.
 const { contentStreams } = require('../lib/reports/pdfCompare');
@@ -175,10 +174,16 @@ describe('the numbers are that firewall own, not the fleet ones', () => {
   });
 
   it('summaryFromPerDevice reproduces the fleet formula, including its overall', async () => {
-    // The product-wide `overall` sums the PER-STANDARD counts, so a check
-    // mapped to three frameworks contributes to three of them. Recomputing it
-    // over distinct findings here would print a different number under the
-    // same word on one report out of eleven.
+    // ⛔ THIS TEST PINNED THE OLD DEFINITION OF `overall` AND WAS UPDATED
+    // DELIBERATELY IN v2.228.12, not patched to pass. It asserted 67 —
+    // "(3+1) pass of (4+2) measurable, SUMMED PER STANDARD" — and its comment
+    // argued that recomputing over distinct findings "would print a different
+    // number under the same word on one report out of eleven". That argument
+    // was right and its conclusion flipped when `computeFleetComplianceScores`
+    // started counting each finding ONCE: continuing to sum per standard here
+    // is now what makes the number change meaning with its scope.
+    // ⛔ The per-standard assertions below are UNCHANGED, because the expansion
+    // is correct by construction there.
     const perDevice = [{
       standards: {
         PCI_DSS: { pass: 3, fail: 1, warning: 0, na: 0 },
@@ -186,6 +191,11 @@ describe('the numbers are that firewall own, not the fleet ones', () => {
         CIS_V8: { pass: 0, fail: 0, warning: 0, na: 2 },
         NIST: { pass: 0, fail: 0, warning: 0, na: 0 },
         SANS: { pass: 0, fail: 0, warning: 0, na: 0 },
+        // The pair-unit tally the real builder now emits: four distinct
+        // findings, one of which is `na`. Three pass, one fails, two are na —
+        // deliberately NOT the per-standard sum, so the two units are visibly
+        // different numbers in this fixture rather than coincidentally equal.
+        [OVERALL_KEY]: { pass: 3, fail: 1, warning: 0, na: 2 },
       },
     }];
     const s = summaryFromPerDevice(perDevice);
@@ -193,7 +203,9 @@ describe('the numbers are that firewall own, not the fleet ones', () => {
     assert.equal(s.byStandard.ISO_27001, 50);
     assert.equal(s.byStandard.CIS_V8, null, 'na only is not a zero');
     assert.equal(s.byStandard.NIST, null, 'nothing measured is not a zero');
-    assert.equal(s.overall, 67, '(3+1) pass of (4+2) measurable, summed per standard');
+    assert.equal(s.overall, 75, '3 pass of 4 measurable — each finding ONCE, na excluded');
+    assert.deepEqual(s.overallCounts, { pass: 3, fail: 1, warning: 0, na: 2 });
+    assert.notEqual(s.overall, 67, 'the standard-expanded figure must no longer be produced');
     assert.deepEqual(s.byStandardCounts.PCI_DSS, { pass: 3, fail: 1, warning: 0 });
   });
 
@@ -209,6 +221,10 @@ describe('the numbers are that firewall own, not the fleet ones', () => {
         CIS_V8: { pass: 0, fail: 0, warning: 0, na: 0 },
         NIST: { pass: 0, fail: 0, warning: 0, na: 0 },
         SANS: { pass: 0, fail: 0, warning: 0, na: 0 },
+        // Every finding here maps to PCI_DSS alone, so the pair tally is the
+        // same eight rows — which is what keeps this test about `na` and the
+        // denominator rather than about the unit change.
+        [OVERALL_KEY]: { pass: 3, fail: 1, warning: 0, na: 4 },
       },
     }];
     assert.equal(fleetForStandard(perDevice, 'PCI_DSS').scorePct, 75);

@@ -23,6 +23,28 @@ const { stripComments } = require('./stripComments');
 const REPO = path.join(__dirname, '..');
 const SKIP = new Set(['node_modules', '.next', '.git', 'tests', 'installer', 'public', 'docs', '.playwright-mcp']);
 
+// ⛔ THE TRAP IS LOADED AND RUN, NOT ONLY READ — AND A FAILED LOAD IS A VISIBLE
+// SKIP, NEVER A PASS. `components/ui/useFocusTrap.js` is an ES module in a
+// package with no `"type"`, so loading it from this CommonJS test relies on
+// Node's module-syntax detection (default since 22.7) plus `require(esm)`
+// (default since 22.12). The dev box runs Node 22 and that is where the suite
+// runs; the production server runs Node 20 and does not run tests. Rather than
+// assert a Node-20 behaviour nobody here could measure, the load is attempted
+// and the REASON is printed when it fails — the `tests/psScripts.js` contract:
+// "could not measure here" is visible, where a silent green tick over an unrun
+// check is the guard-that-cannot-fire pattern.
+let TRAP = null;
+let TRAP_SKIP = null;
+try {
+  // eslint-disable-next-line global-require, import/no-dynamic-require
+  TRAP = require(path.join(REPO, 'components/ui/useFocusTrap.js'));
+} catch (err) {
+  TRAP_SKIP = `could not load components/ui/useFocusTrap.js here (${err.code || err.name}: `
+    + `${String(err.message).split('\n')[0]}) — needs Node >= 22.12 for require() of an ES `
+    + `module; this process is ${process.version}. NOT a pass: the behavioural trap tests did `
+    + 'not run.';
+}
+
 function sourceFiles() {
   const out = [];
   (function walk(dir) {
@@ -50,18 +72,17 @@ describe('aria-modal is a promise, and it needs a focus trap to be true', () => 
   // saves the session, was unreachable while the countdown ran.
   //
   // ⛔ NAMED EXEMPTIONS WITH A REASON EACH, never a silent skip.
+  //
+  // ⛔ components/ui/Evidence.js WAS EXEMPT HERE AND NO LONGER IS (roadmap row
+  // 58, fixed). It had 3 of the 4 mechanisms, all of them in the
+  // EvidenceProvider rather than the panel, and was missing only Tab
+  // confinement — so Tab walked out of the product's most-used dialog while
+  // `aria-modal` claimed the page behind it was inert. It now calls the shared
+  // hook in `confineOnly` mode, which adds the one missing mechanism without
+  // introducing a second focus restore to race the provider's.
   const EXEMPT = Object.freeze({
     'components/ui/useFocusTrap.js':
       'it IS the trap; it names aria-modal in its own contract',
-    'components/ui/Evidence.js':
-      'PARTIAL AND RECORDED, not waived — roadmap row 58. It has 3 of the 4 '
-      + 'mechanisms (Escape, focus-in to the close button, restore to the opener) '
-      + 'and is missing only Tab CONFINEMENT. The other three live in the '
-      + 'EvidenceProvider rather than the panel, deliberately, because the '
-      + 'provider owns open/close state and the opener identity across pages — so '
-      + 'dropping the panel-level hook in would leave two focus restores racing '
-      + 'each other, which cannot be judged without rendering the drawer. Fixing '
-      + 'it is its own piece of work, with the drawer open in a browser.',
   });
 
   it('⛔ every dialog declaring aria-modal uses the ONE shared focus trap', () => {
@@ -90,16 +111,340 @@ describe('aria-modal is a promise, and it needs a focus trap to be true', () => 
     );
   });
 
-  it('the shared trap still implements all four mechanisms', () => {
-    // ⛔ A BEHAVIOURAL FLOOR ON THE HOOK ITSELF. Every dialog in the product now
-    // delegates to it, so if the trap quietly lost its Tab branch the guard
-    // above would stay green over a fleet of dialogs that no longer trap.
+  it('the hook arms NOTHING while the dialog is unreachable', () => {
+    // ⛔ THE SHARPEST HAZARD IN THE Evidence.js FIX, and the one thing here that
+    // only the React layer can answer — so it is pinned on the source, and
+    // stated as a source pin. The evidence drawer is NEVER UNMOUNTED: it is
+    // pushed off-screen with a transform and marked aria-hidden/inert. A trap
+    // armed on that closed panel would swallow Tab for the whole page on all 30
+    // dashboard pages — strictly worse than the missing confinement it fixes.
+    // `Modal` and `IdleTimeout` return null when shut and so cannot reach this,
+    // which is exactly why nothing caught it before the drawer became a caller.
     const src = readStripped(path.join(REPO, 'components/ui/useFocusTrap.js'));
-    assert.match(src, /document\.activeElement/, 'must remember what had focus');
-    assert.match(src, /\.focus\(\)/, 'must move focus into the panel');
-    assert.match(src, /'Tab'/, 'must confine Tab');
-    assert.match(src, /previouslyFocusedRef\.current\?\.focus/, 'must restore focus on close');
-    assert.match(src, /onEscape\?\.\(\)/, 'Escape must be opt-in, not assumed');
+    assert.match(
+      src, /if\s*\(\s*!active\s*\)\s*return/,
+      'useFocusTrap must bail out of its effect when the dialog is not active, '
+      + 'or a mounted-but-hidden panel traps Tab for the entire page'
+    );
+  });
+
+  it('⛔ the full four mechanisms stay the DEFAULT for every other dialog', () => {
+    // A call-site pin, because `confineOnly` is a claim that the other three
+    // mechanisms live somewhere else — true of the evidence drawer, false of
+    // these two, and `aria-modal` is a lie without them. Behavioural proof that
+    // the default really does all four is in the harness below; this is what
+    // stops a caller opting out of it.
+    for (const f of ['components/ui/Modal.js', 'components/layout/IdleTimeout.js']) {
+      const src = readStripped(path.join(REPO, f));
+      assert.ok(
+        !/confineOnly/.test(src),
+        `${f} must take the DEFAULT focus trap: it implements none of the other `
+        + 'three mechanisms itself, so confinement alone would leave aria-modal '
+        + 'promising an inert page with focus still outside the dialog'
+      );
+    }
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ⛔ THE TRAP IS EXERCISED, NOT READ. What stood here was five regexes over the
+// hook's own source (`/document\.activeElement/`, `/'Tab'/`, …) — the shape of
+// guard that has already been satisfied by a MENTION twice in this file's own
+// history, once with the import deleted. The hook's four mechanisms are plain
+// DOM work; React only decides WHEN they are armed. So the imperative half is
+// `installFocusTrap(getPanel, {win, doc})` and these tests drive it against a
+// stand-in document: real code, real key events, asserted OUTCOMES.
+//
+// ⛔ What the stand-in deliberately does NOT model: `querySelectorAll` returns
+// the children it was given and ignores the selector, because the selector is
+// not what is under test here — it is exported data and asserted as data below.
+// Everything else (which node ends up focused, how many times, whether the
+// event was swallowed, whether a listener survives release) is real.
+function makeDom() {
+  const doc = { activeElement: null };
+  const keydown = [];
+  const win = {
+    addEventListener(type, fn) { if (type === 'keydown') keydown.push(fn); },
+    removeEventListener(type, fn) {
+      const i = keydown.indexOf(fn);
+      if (type === 'keydown' && i >= 0) keydown.splice(i, 1);
+    },
+  };
+  const node = (name) => {
+    const n = {
+      name,
+      focusCount: 0,
+      focus() { n.focusCount += 1; doc.activeElement = n; },
+    };
+    return n;
+  };
+  const panel = (children) => {
+    const p = {
+      name: 'panel',
+      focusCount: 0,
+      focus() { p.focusCount += 1; doc.activeElement = p; },
+      querySelectorAll: () => children.slice(),
+    };
+    return p;
+  };
+  const press = (key, { shiftKey = false } = {}) => {
+    const e = {
+      key,
+      shiftKey,
+      prevented: false,
+      preventDefault() { e.prevented = true; },
+    };
+    for (const fn of keydown.slice()) fn(e);
+    return e;
+  };
+  return { doc, win, node, panel, press, listeners: () => keydown.length };
+}
+
+describe('the shared focus trap, run against a stand-in document', () => {
+  const skip = TRAP_SKIP ? { skip: TRAP_SKIP } : {};
+
+  // A dialog with three focusables and an opener outside it, which is the shape
+  // every caller has: Modal's forms, IdleTimeout's two buttons, the evidence
+  // drawer's close button.
+  function arm(opts) {
+    const dom = makeDom();
+    const opener = dom.node('opener');
+    const first = dom.node('first');
+    const middle = dom.node('middle');
+    const last = dom.node('last');
+    const panel = dom.panel([first, middle, last]);
+    dom.doc.activeElement = opener;
+    opener.focusCount = 0;
+    const release = TRAP.installFocusTrap(() => panel, { win: dom.win, doc: dom.doc, ...opts });
+    return { dom, opener, first, middle, last, panel, release };
+  }
+
+  describe('the default — all four mechanisms, which is what aria-modal promises', () => {
+    it('moves focus INTO the panel, and remembers what had it', skip, () => {
+      const t = arm({});
+      assert.equal(t.dom.doc.activeElement, t.first, 'focus must land on the first focusable');
+      assert.equal(t.first.focusCount, 1);
+      t.release();
+      assert.equal(t.dom.doc.activeElement, t.opener, 'and must be handed back on release');
+      assert.equal(t.opener.focusCount, 1);
+    });
+
+    it('cycles Tab from the last focusable back to the first', skip, () => {
+      const t = arm({});
+      t.last.focus();
+      const e = t.dom.press('Tab');
+      assert.equal(e.prevented, true, 'Tab at the end must be swallowed, not passed to the page');
+      assert.equal(t.dom.doc.activeElement, t.first);
+    });
+
+    it('cycles Shift+Tab from the first focusable back to the last', skip, () => {
+      const t = arm({});
+      t.first.focus();
+      const e = t.dom.press('Tab', { shiftKey: true });
+      assert.equal(e.prevented, true);
+      assert.equal(t.dom.doc.activeElement, t.last);
+    });
+
+    it('leaves Tab alone in the middle of the panel', skip, () => {
+      const t = arm({});
+      t.middle.focus();
+      const e = t.dom.press('Tab');
+      assert.equal(e.prevented, false, 'the browser must still move focus normally inside');
+      assert.equal(t.dom.doc.activeElement, t.middle);
+    });
+
+    it('Escape is opt-in: it fires a handler when given one', skip, () => {
+      let closed = 0;
+      const t = arm({ onEscape: () => { closed += 1; } });
+      t.dom.press('Escape');
+      assert.equal(closed, 1);
+    });
+
+    it('…and does nothing at all when no handler was passed', skip, () => {
+      // ⛔ IdleTimeout passes none on purpose — there is nothing to close, and a
+      // dismissable deadline warning would hide a session that still ends.
+      const t = arm({});
+      assert.doesNotThrow(() => t.dom.press('Escape'));
+      assert.equal(t.dom.doc.activeElement, t.first, 'Escape must not move focus by itself');
+    });
+
+    it('releases its listener, so a closed dialog cannot still swallow Tab', skip, () => {
+      const t = arm({});
+      assert.equal(t.dom.listeners(), 1);
+      t.release();
+      assert.equal(t.dom.listeners(), 0);
+    });
+  });
+
+  describe('⛔ confineOnly — mechanism 3 ALONE, for a caller that owns the other three', () => {
+    it('still cycles Tab in both directions', skip, () => {
+      const fwd = arm({ confineOnly: true });
+      fwd.last.focus();
+      const a = fwd.dom.press('Tab');
+      assert.equal(a.prevented, true, 'confinement is the whole point of this mode');
+      assert.equal(fwd.dom.doc.activeElement, fwd.first);
+
+      const back = arm({ confineOnly: true });
+      back.first.focus();
+      const b = back.dom.press('Tab', { shiftKey: true });
+      assert.equal(b.prevented, true);
+      assert.equal(back.dom.doc.activeElement, back.last);
+    });
+
+    it('does NOT move focus into the panel', skip, () => {
+      // The evidence drawer focuses its close button from the provider's own
+      // effect. A second focus-in here would fight it for no benefit.
+      const t = arm({ confineOnly: true });
+      assert.equal(t.dom.doc.activeElement, t.opener, 'focus must be left exactly where it was');
+      assert.equal(t.first.focusCount, 0, 'the first focusable must not be touched');
+      assert.equal(t.panel.focusCount, 0, 'and neither must the panel');
+    });
+
+    it('does NOT restore focus on release — the caller owns that', skip, () => {
+      // ⛔ THIS IS THE RACE THE MODE EXISTS TO REMOVE. EvidenceProvider.close()
+      // focuses the mark that opened the drawer, synchronously, before React
+      // re-renders. If the trap ALSO restored, two restores would run on every
+      // close and the winner would depend on effect-cleanup order — unjudgeable
+      // without a browser, and silently wrong the day that order changes.
+      const t = arm({ confineOnly: true });
+      t.middle.focus();
+      t.release();
+      assert.equal(
+        t.dom.doc.activeElement, t.middle,
+        'release must not yank focus anywhere; the caller has already placed it'
+      );
+      assert.equal(t.opener.focusCount, 0, 'the opener must not be focused by the trap');
+    });
+
+    it('releases its listener like the default does', skip, () => {
+      const t = arm({ confineOnly: true });
+      assert.equal(t.dom.listeners(), 1);
+      t.release();
+      assert.equal(t.dom.listeners(), 0);
+    });
+  });
+
+  describe('⛔ and when it cannot measure a focusable at all', () => {
+    it('swallows Tab in a panel with nothing focusable, rather than letting it escape', skip, () => {
+      // The "we could not measure this" case for a focus trap: the panel is
+      // there, the dialog is open, and the trap can find nothing to cycle
+      // through. Letting Tab through would walk the user out into a page
+      // `aria-modal` has declared inert — so Tab is swallowed and focus is left
+      // on the panel itself. Both modes, because both make the same promise.
+      for (const opts of [{}, { confineOnly: true }]) {
+        const dom = makeDom();
+        const opener = dom.node('opener');
+        const outside = dom.node('outside');
+        const panel = dom.panel([]);
+        dom.doc.activeElement = opener;
+        const release = TRAP.installFocusTrap(() => panel, { win: dom.win, doc: dom.doc, ...opts });
+        const e = dom.press('Tab');
+        assert.equal(e.prevented, true, `Tab must be swallowed (confineOnly=${!!opts.confineOnly})`);
+        assert.equal(outside.focusCount, 0, 'nothing outside the dialog may be focused');
+        release();
+      }
+    });
+
+    it('a panel that has gone away does not throw and does not leak Tab', skip, () => {
+      const dom = makeDom();
+      const release = TRAP.installFocusTrap(() => null, { win: dom.win, doc: dom.doc });
+      assert.doesNotThrow(() => dom.press('Tab'));
+      assert.doesNotThrow(() => dom.press('Escape'));
+      release();
+      assert.equal(dom.listeners(), 0);
+    });
+
+    it('with no DOM at all it arms nothing and returns a release that is safe to call', skip, () => {
+      // A server render. A focus trap must never be able to break the render of
+      // the dialog it is protecting.
+      const release = TRAP.installFocusTrap(() => null);
+      assert.equal(typeof release, 'function');
+      assert.doesNotThrow(release);
+    });
+  });
+
+  it('the focusable set still excludes what the browser will not focus', skip, () => {
+    // Exported data, asserted as data — the one part the stand-in document
+    // cannot exercise.
+    assert.match(TRAP.FOCUSABLE_SELECTOR, /button:not\(\[disabled\]\)/);
+    assert.match(TRAP.FOCUSABLE_SELECTOR, /\[tabindex\]:not\(\[tabindex="-1"\]\)/);
+  });
+});
+
+describe('the evidence drawer is confined, and only while it is reachable', () => {
+  // ⛔ A SOURCE PIN, STATED AS ONE. There is no component render harness in this
+  // repo and no devDependencies to add one, so how Evidence.js WIRES the hook
+  // can only be read. What the hook then DOES is covered behaviourally above.
+  const src = () => readStripped(path.join(REPO, 'components/ui/Evidence.js'));
+
+  it('⛔ the trap is anchored on the .ev-drawer panel, not the scrim', () => {
+    const code = src();
+    const aside = code.match(/<aside\b[^>]*>/);
+    assert.ok(aside, 'the drawer panel must still be an <aside>');
+    assert.match(aside[0], /ref=\{panelRef\}/, 'the trap must be anchored on the panel');
+    assert.match(aside[0], /className="ev-drawer"/, 'and that panel is the drawer itself');
+    const scrim = code.match(/className="ev-scrim"[\s\S]{0,200}?\/>/);
+    assert.ok(scrim, 'the scrim must still be there');
+    assert.ok(
+      !/ref=\{panelRef\}/.test(scrim[0]),
+      'a trap on the backdrop would count the backdrop as part of the dialog'
+    );
+  });
+
+  it('⛔ it is armed by the SAME flag that hides the panel from the page', () => {
+    // The drawer is never unmounted. If `active` and `inert`/`aria-hidden` could
+    // disagree, a closed drawer would hold Tab hostage on every page in the
+    // product — a worse defect than the missing confinement this fixed.
+    const code = src();
+    assert.match(
+      code, /const open = !!payload;/,
+      'one flag decides whether the drawer is reachable'
+    );
+    // ⛔ Deliberately indifferent to what follows `open`, so this test fails for
+    // its OWN reason and not because some other option beside it moved.
+    assert.match(
+      code, /useFocusTrap\(\s*\{\s*active:\s*open\b/,
+      'the trap must be armed on `open`, never unconditionally'
+    );
+    assert.match(code, /aria-hidden=\{open \? undefined : 'true'\}/, 'same flag');
+    assert.match(code, /inert=\{open \? undefined : ''\}/, 'same flag');
+  });
+
+  it('⛔ the scrolling body is focusable, or confinement pins you in front of it', () => {
+    // ⛔ A CONSEQUENCE OF THE TRAP, NOT A SEPARATE TIDY-UP. `.ev-body` is the
+    // drawer's scroll container and the close button is outside it in
+    // `.ev-head`, so with focus where the provider puts it there is no
+    // scrollable ancestor for the browser to act on. Measured in Chromium
+    // against app/globals.css's real `.ev-*` rules — 2,268px of content in a
+    // 398px viewport — PageDown and ArrowDown both left scrollTop at 0, and
+    // "What could not be measured" was below the fold. Before the trap a
+    // keyboard user could at least Tab out; closing the loop without this would
+    // have shipped "pinned in front of content you cannot read". With the
+    // tabindex: scrollTop 0 -> 348 on one PageDown, and the body joins the
+    // confinement cycle so Tab moves Close <-> detail.
+    const code = src();
+    const body = code.match(/<div\s+className="ev-body"[\s\S]{0,160}?>/);
+    assert.ok(body, 'the drawer must still have its .ev-body scroll container');
+    assert.match(body[0], /tabIndex=\{0\}/, 'the scroll container must be keyboard-reachable');
+    assert.match(body[0], /role="region"/, 'and announced as a region…');
+    assert.match(body[0], /aria-label="[^"]+"/, '…which requires a name');
+  });
+
+  it('⛔ it takes confinement ONLY, and the other three stay in the provider', () => {
+    const code = src();
+    assert.match(
+      code, /useFocusTrap\(\s*\{[^}]*confineOnly:\s*true/,
+      'the panel must not install a second focus restore to race the provider'
+    );
+    // The three the provider owns. If one of these is ever moved or deleted,
+    // confineOnly becomes a dialog with no focus management at all and
+    // aria-modal goes back to being a lie — so they are named here.
+    assert.match(code, /openerRef\.current = opener \|\| null;/, 'provider remembers the opener');
+    assert.match(code, /if \(el && typeof el\.focus === 'function'\) el\.focus\(\);/,
+      'provider restores focus to the opener on close');
+    assert.match(code, /if \(e\.key === 'Escape'\) close\(\);/, 'provider closes on Escape');
+    assert.match(code, /if \(payload && closeRef\.current\) closeRef\.current\.focus\(\);/,
+      'provider moves focus into the panel on open');
   });
 });
 

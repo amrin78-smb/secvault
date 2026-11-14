@@ -498,7 +498,16 @@ describe('⛔ a group says WHY it needs review', () => {
   });
 
   it('⛔ every NotMeasured in the file carries a reason', () => {
-    for (const m of SRC.matchAll(/<NotMeasured\b([\s\S]*?)\/>/g)) {
+    // ⛔ CODE, NOT SRC — this scanned the RAW source, so a COMMENT containing
+    // the literal `<NotMeasured />` was read as a bare tag with no reason and
+    // the guard failed on correct code. Reported by the v2.228.12 design sweep,
+    // which reworded five files' comments around it rather than edit a test
+    // outside its partition. Prose read as code: the same defect as the
+    // device-scope check believing `notificationChannels.js` held no device
+    // data because a comment said so, and as `designSystemRamp.test.js`'s own
+    // `stripCssComments` note. ⛔ A guard that cries wolf gets waived, and then
+    // the check stops happening.
+    for (const m of CODE.matchAll(/<NotMeasured\b([\s\S]*?)\/>/g)) {
       assert.match(m[1], /reason=/, 'a bare em-dash with no tooltip hides the gap it exists to announce');
     }
   });

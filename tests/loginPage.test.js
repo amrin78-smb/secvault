@@ -428,9 +428,50 @@ describe('⛔ the page keeps SecVault’s palette, not the suite’s', () => {
     // mean danger and nothing else. The brand panel this replaced still glowed
     // rgba(200,16,46,0.14) — a decorative red wash on the first screen anyone
     // sees, which is the dilution that change existed to remove.
+    //
+    // ⛔ THIS ASSERTION WAS RIGHT AND ITS SCOPE WAS THE BUG (v2.228.12). It
+    // watched two files, so the retired hex survived everywhere else with the
+    // rule written down AND a test for it in the repo:
+    // components/layout/UserMenu.js drew the account avatar
+    // `background: 'var(--primary)'` (teal) with
+    // `boxShadow: '0 2px 6px rgba(200,16,46,0.4)'` — a teal circle in a red
+    // halo on every authenticated page, because the fill was migrated and the
+    // shadow tuned to the old value was not.
+    //
+    // The repo-wide guard now lives in tests/designSystemRamp.test.js ("the
+    // RETIRED suite red #C8102E appears nowhere in live source, repo-wide"),
+    // which is where the palette rules are pinned and which already carries the
+    // comment-stripping that scan needs — globals.css names the hex twice in
+    // prose explaining why it is retired. This narrow pair is KEPT rather than
+    // deleted: the login page is the first screen anyone sees and the only one
+    // reachable unauthenticated, so it is worth failing twice over.
     for (const src of [code, backdropCode]) {
       assert.doesNotMatch(src, /#C8102E|200\s*,\s*16\s*,\s*46/i, 'suite red reached the login page');
     }
+  });
+
+  it('⛔ the repo-wide retired-hex guard it delegates to still exists', () => {
+    // ⛔ WITHOUT THIS, "we widened the guard" is a claim in a comment. A
+    // cross-reference to a test that has been renamed or deleted is worse than
+    // no cross-reference: this file reads as though the whole repo is covered
+    // while only two files are, which is precisely the state that let
+    // UserMenu.js through. It asserts the guard is PRESENT and that it scans
+    // repo-wide, never that it currently passes — that is its own job.
+    const ramp = fs.readFileSync(path.join(ROOT, 'tests', 'designSystemRamp.test.js'), 'utf8');
+    assert.match(
+      ramp, /const RETIRED_BRAND = /,
+      'tests/designSystemRamp.test.js no longer defines RETIRED_BRAND, so the comment '
+      + 'above points at a guard that does not exist and this file is the only coverage'
+    );
+    assert.match(
+      ramp, /appears nowhere in live source, repo-wide/,
+      'the repo-wide retired-hex test has been renamed or removed'
+    );
+    assert.match(
+      ramp, /for \(const file of sourceFiles\(\)\) \{\s*const code = stripComments/,
+      'the repo-wide test no longer walks sourceFiles(), so its scope has narrowed back '
+      + 'towards the one this file already covers'
+    );
   });
 
   it('the page still carries the /login smoke marker verbatim', () => {

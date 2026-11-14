@@ -475,3 +475,129 @@ describe('DeviceActions.js polls instead of blocking', () => {
     assert.doesNotMatch(body, /function [A-Z][A-Za-z0-9]*\s*\(/);
   });
 });
+
+// ── ⛔ THE REAPER ASKED THE WRONG QUESTION (roadmap row 39) ───────────────
+//
+// `reapStaleJobs` selected `WHERE status = 'running' AND started_at < now() -
+// 30 min` and never looked at progress. So a job that was working perfectly
+// and reporting every batch was declared FAILED on a fixed clock from the
+// moment it began — and the threshold was then guaranteed to be crossed:
+// `unlinkSyslogEvents` runs `eventBatchSize: 20000` with `eventPauseMs: 200`,
+// which on production's busiest firewall (TUM(TUTH1), measured 2026-11-15 at
+// **1,127,384,476** events = **56,370 batches**) is ~3.1 HOURS of pure sleep.
+//
+// Once reaped, THREE further things went wrong, and all three are pinned here:
+//   * `reportProgress`'s `AND status = 'running'` silently discarded every
+//     later update, so the UI froze on a `failed` row while the work carried on;
+//   * `finishJob` had no terminal-status guard, so a later `succeeded`
+//     overwrote the reaped verdict with NO record it was ever reaped — erasing
+//     the only trace that the reaper had fired wrongly;
+//   * the operator was told the worker stopped and to re-run.
+
+describe('⛔ reapStaleJobs keys on LAST PROGRESS, not on start time', () => {
+  it('asks COALESCE(progress_at, started_at), never started_at alone', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    await reapStaleJobs(pool, 30);
+    const sql = stripComments(pool.calls[0].sql).replace(/\s+/g, ' ');
+    assert.match(sql, /COALESCE\(progress_at, started_at\) <\s*now\(\)/,
+      'the reaper must measure from the last sign of life');
+    // The old predicate must be gone, not merely accompanied.
+    assert.doesNotMatch(sql, /AND started_at <\s*now\(\)/,
+      'a bare started_at cutoff would reap a job that is reporting progress');
+  });
+
+  it('falls back to started_at for a job that has NOT reported yet', async () => {
+    // ⛔ The one case where the start IS the last sign of life. COALESCE is what
+    // keeps an abandoned job reapable — defaulting progress_at to now() would
+    // make a dead job look alive for ever, which is the failure this reaper
+    // exists to prevent.
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    await reapStaleJobs(pool, 30);
+    assert.match(stripComments(pool.calls[0].sql), /COALESCE\(progress_at, started_at\)/);
+  });
+
+  it('still reaps to failed with a reason, never to succeeded', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    await reapStaleJobs(pool, 30);
+    const sql = stripComments(pool.calls[0].sql);
+    assert.match(sql, /status = 'failed'/);
+    assert.doesNotMatch(sql, /status = 'succeeded'/);
+    // and it now says what actually stopped
+    assert.match(sql, /stopped reporting progress/);
+  });
+
+  it('reports what it reaped, including the progress it had made', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    await reapStaleJobs(pool, 30);
+    assert.match(stripComments(pool.calls[0].sql), /RETURNING[\s\S]*progress_current/);
+  });
+});
+
+describe('⛔ reportProgress stamps the heartbeat and does not swallow a lost write', () => {
+  it('sets progress_at, or the reaper above has nothing to read', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 1 }));
+    await reportProgress(pool, 'job-1', { current: 5, total: 10 });
+    assert.match(stripComments(pool.calls[0].sql), /progress_at\s*=\s*now\(\)/);
+  });
+
+  it('⛔ returns applied:false when the job is no longer running', async () => {
+    // The guard is correct — nothing should resurrect a terminal row by writing
+    // progress to it — but a write that did not land must not report success.
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    const r = await reportProgress(pool, 'job-1', { current: 5, total: 10 });
+    assert.deepEqual(r, { applied: false });
+  });
+
+  it('returns applied:true when it did land', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 1 }));
+    const r = await reportProgress(pool, 'job-1', { current: 5, total: 10 });
+    assert.deepEqual(r, { applied: true });
+  });
+
+  it('an unknown total is still kept unknown', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 1 }));
+    await reportProgress(pool, 'job-1', { current: 5, total: null });
+    assert.equal(pool.calls[0].params[2], null, 'NULL total means size unknown, never 0');
+  });
+});
+
+describe('⛔ finishJob keeps the record that a job had been reaped', () => {
+  it('captures the previous status in the SAME statement, not check-then-act', async () => {
+    const pool = stubPool(() => ({ rows: [{ ...JOB_ROW, status: 'succeeded' }], rowCount: 1 }));
+    await finishJob(pool, 'job-1', 'succeeded', { detail: 'Collected 120 rules.' });
+    const sql = stripComments(pool.calls[0].sql).replace(/\s+/g, ' ');
+    assert.match(sql, /WITH prev AS \(\s*SELECT id, status AS old_status/,
+      'the old status must be read in the same statement as the write');
+    assert.match(sql, /FOR UPDATE/, 'the reaper may be writing the same row');
+    assert.match(sql, /RETURNING j\.\*, p\.old_status AS previous_status/);
+  });
+
+  it('⛔ the result still WINS over the reap — refusing would be the worse bug', async () => {
+    // The reap says "whether the work completed is unknown — re-run it to be
+    // sure". A worker reporting a real result IS the evidence the reap lacked,
+    // so the status is written. What may not happen is that being silent.
+    const sql = stripComments(
+      fs.readFileSync(path.join(__dirname, '..', 'lib', 'engines', 'backgroundJobs.js'), 'utf8')
+    );
+    assert.match(sql, /SET status = \$2, finished_at = now\(\)/,
+      'finishJob must still write the status it was given');
+    assert.match(sql, /had already been recorded as/,
+      'and must append the earlier verdict rather than erase it');
+  });
+
+  it('a normal finish from running adds no note', async () => {
+    const pool = stubPool(() => ({ rows: [JOB_ROW], rowCount: 1 }));
+    await finishJob(pool, 'job-1', 'succeeded', { detail: 'Collected 120 rules.' });
+    const sql = stripComments(pool.calls[0].sql).replace(/\s+/g, ' ');
+    // The note is conditional on the OLD status being terminal, so an ordinary
+    // completion is untouched — a note on every job would be noise.
+    assert.match(sql, /WHEN p\.old_status IN \('succeeded', 'failed', 'cancelled'\)/);
+    assert.match(sql, /ELSE COALESCE\(\$4, j\.detail\)/);
+  });
+
+  it('a non-terminal status is still refused outright', async () => {
+    const pool = stubPool(() => ({ rows: [], rowCount: 0 }));
+    await assert.rejects(() => finishJob(pool, 'job-1', 'running'), /Not a terminal status/);
+    assert.equal(pool.calls.length, 0, 'it must not reach the database');
+  });
+});

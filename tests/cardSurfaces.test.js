@@ -196,3 +196,128 @@ test('⛔ .answer-header carries no box', () => {
     '.answer-header has regained a border'
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ⛔ THE CSS RULE WAS GUARDED FROM BOTH ENDS AND NOTHING ASKED WHETHER A
+// CALLER COULD ARM IT (v2.228.12)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// The two tests above pin the dashed `[data-unmeasured]` border and the
+// `:not([data-unmeasured])` exclusion that keeps the flatten rule from
+// clearing it. Both were green, and both would have stayed green if NO TILE IN
+// THE PRODUCT had ever set the attribute — a rule nothing triggers, which is
+// this repo's guard-that-cannot-fire pattern aimed at the one signal v2.200.0
+// added because grey alone was judged insufficient (--unmeasured and
+// --text-muted are four hex digits apart and indistinguishable on screen).
+//
+// Two call sites were in exactly that state, both already rendering
+// a NotMeasured em-dash AS THE TILE'S VALUE:
+//
+//   ConformanceBoard.js  passed `textColor` and no `color`
+//   VpnDetections.js     passed NEITHER `color` nor `textColor`
+//
+// StatCard's only signal was `color === 'var(--unmeasured)'`, so the em-dash
+// said "not measured" inside a tile drawn exactly like the measured ones
+// beside it. The fix is an explicit `unmeasured` prop; these tests are the half
+// that was missing.
+
+const STATCARD = fs.readFileSync(
+  path.join(__dirname, '..', 'components', 'ui', 'StatCard.js'), 'utf8'
+);
+
+test('⛔ StatCard accepts an EXPLICIT `unmeasured` prop, not only a colour string', () => {
+  const { stripComments } = require('./stripComments');
+  const src = stripComments(STATCARD, { keepLines: true });
+  assert.match(
+    src, /unmeasured:\s*unmeasuredProp/,
+    'StatCard no longer destructures an `unmeasured` prop. "Was this measured" and '
+    + '"what colour is the number" are different facts, and inferring one from the '
+    + 'other is what lost the signal on two call sites: a caller that did not spell '
+    + 'the fact as the hue var(--unmeasured) got a tile that looked measured'
+  );
+  assert.match(
+    src, /data-unmeasured=\{unmeasured\}/,
+    'the resolved flag no longer reaches the DOM attribute the stylesheet keys on'
+  );
+});
+
+test('⛔ the legacy colour inference is KEPT, and an explicit value overrides it', () => {
+  const { stripComments } = require('./stripComments');
+  const src = stripComments(STATCARD, { keepLines: true });
+  // ⛔ ADDITIVE, DELIBERATELY. ~40 call sites arm this through
+  // `color: 'var(--unmeasured)'` — ConsolidationTab.js passes exactly that —
+  // so dropping the inference would trade two missing borders for forty.
+  assert.match(
+    src, /color === 'var\(--unmeasured\)'/,
+    'the colour inference was removed, which silently unarms every existing call '
+    + 'site that states the fact that way'
+  );
+  // ⛔ AND THE "WE COULD NOT MEASURE THIS" CASE IS THE THIRD STATE, NOT A
+  // BOOLEAN. `undefined` means the caller said nothing and the inference
+  // decides; `false` means the caller stated the value IS measured. Collapsing
+  // them to `Boolean(prop) || inference` would make an explicit `false`
+  // unexpressible, so a tile with a deliberately hueless MEASURED number could
+  // never stop being dashed.
+  assert.match(
+    src, /unmeasuredProp === undefined\s*\?/,
+    'the three-way resolution is gone: an explicit `false` must beat the colour '
+    + 'inference, or "the caller said nothing" and "the caller said no" are the same'
+  );
+});
+
+test('⛔ at least one tile in the product can actually set data-unmeasured', () => {
+  // The guard the two CSS tests above could not be: a scan for a real caller.
+  // Named files, not a count — six other call sites adopting the prop while
+  // these regressed would satisfy a count, which is the both-ends reasoning
+  // tests/deviceScopeCoverage.test.js applies to its aware floor and its names.
+  const { stripComments } = require('./stripComments');
+  const CALLERS = {
+    // The two the roadmap row named, each keyed on the SAME condition its own
+    // value renderer uses, so the border and the em-dash cannot disagree.
+    'components/analysis/ConformanceBoard.js': /unmeasured=\{tile\.value === null\}/,
+    'components/vpn/VpnDetections.js': /unmeasured=\{f\.current === null \|\| f\.current === undefined\}/,
+    // A third, found while fixing them: `value === null` renders NotMeasured
+    // here too and left `color` on --border, so a figure that could not be
+    // computed sat in a solid-bordered tile.
+    'components/analysis/ConsolidationTab.js': /unmeasured=\{Boolean\(f\.unmeasured\) \|\| f\.value === null\}/,
+  };
+  const missing = [];
+  for (const [rel, re] of Object.entries(CALLERS)) {
+    const src = stripComments(
+      fs.readFileSync(path.join(__dirname, '..', rel), 'utf8'), { keepLines: true }
+    );
+    if (!re.test(src)) missing.push(rel);
+  }
+  assert.deepEqual(
+    missing, [],
+    'these tiles render a NotMeasured em-dash as their value and no longer tell StatCard '
+    + 'so, '
+    + 'which puts an em-dash meaning "we could not measure this" inside a tile drawn '
+    + 'identically to a measured one:\n  ' + missing.join('\n  ')
+  );
+});
+
+test('⛔ a tile keyed on a TONE rather than on the value is refused', () => {
+  // ⛔ THE TWO FACTS DIVERGE AND THIS IS WHERE. ConformanceBoard's
+  // "Firewalls not compared" tile is TONED --unmeasured because it COUNTS
+  // firewalls nothing could be said about — the count itself is a real
+  // measurement, and dashing that tile would claim SecVault could not read the
+  // number it is printing. So `tone === 'unmeasured'` is the WRONG key, and the
+  // obvious one-line fix for this row would have been exactly that.
+  const { stripComments } = require('./stripComments');
+  const src = stripComments(
+    fs.readFileSync(path.join(__dirname, '..', 'components/analysis/ConformanceBoard.js'), 'utf8'),
+    { keepLines: true }
+  );
+  assert.equal(
+    /unmeasured=\{[^}]*tone/.test(src), false,
+    'the dashed border is keyed on the tile TONE. A tile toned --unmeasured because it '
+    + 'COUNTS unmeasured firewalls holds a measured count; dashing it says SecVault '
+    + 'could not read a number it is displaying. Key on the value, which is what '
+    + 'statValue() turns into the em-dash.'
+  );
+  // And the tone really is set on tiles whose value is measured, so the
+  // distinction above is live rather than hypothetical.
+  assert.match(src, /tone: 'unmeasured'/, 'no tile is toned unmeasured any more, so the '
+    + 'divergence this test protects can no longer be exercised — re-derive it');
+});

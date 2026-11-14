@@ -1190,6 +1190,55 @@ never printed. It degrades toward unknown, never toward a grade.
 `compliance_exceptions` follows. A test walks every firewall asserting the only `%` printed is the
 headline score.
 
+### ⛔ THE FLEET `overall` IS A COUNT OF (device, check) PAIRS, COUNTED ONCE (v2.228.12)
+
+`computeFleetComplianceScores`' `overall` built itself by summing the five per-standard buckets,
+which got the unit wrong in both directions at once — this file's own "TWO UNITS, KEPT APART" rule,
+one grain below where v2.163.0 and v2.225.0 found it.
+
+⛔ **A check mapped to five frameworks counted FIVE TIMES.** Measured against the live 74-check
+library the expansion is **2.642×** (197 mappings over 74 checks), and it is **not uniform** — 4
+checks carry 1 standard, 38 carry 2, 6 carry 5 — so the skew does not cancel. On a 16-device fleet
+built from the real mapping, **51% standard-expanded against 45% per finding**. On the reference
+fleet the two happen to sit ONE point apart (479/1016 = 47% against 175/365 = 48%), which is exactly
+why nothing looked wrong: **the skew is a function of how many frameworks CURATION maps a check to,
+so it moves when the library changes and not when the fleet does** — and it feeds
+`computeSecurityScore`'s 30%-weighted compliance component and every `fleet_dashboard_snapshots` row.
+
+⛔ **AND A CHECK MAPPED TO NO SCORED STANDARD WAS DISCARDED ENTIRELY, which is the worse half,
+because a real measurement was thrown away.** `audit_checks.standards` is `TEXT[] NOT NULL` — which
+permits `'{}'` — and `schema.sql` names `'CUSTOM'` as a legitimate value outside the five scored
+frameworks. Either made the finding contribute to zero buckets and vanish. Measured on the old code:
+one `pass` mapped to PCI_DSS beside one **`fail`** mapped to `{CUSTOM}` reported **`overall = 100%`**.
+Latent in today's seed (0 of 74) and **structural in the schema**, so it was fixed rather than
+waited for.
+
+⛔ **THE FIX IS THE PER-DEVICE PAGE'S OWN ARITHMETIC, LIFTED — NOT A THIRD DEFINITION.** One
+increment per finding ROW, taken BEFORE `standards` is read. Duplicate (device, check) pairs are NOT
+deduped, because `audit_findings` carries no `UNIQUE(device_id, check_id)` and the page counts rows.
+`na` is tallied and excluded from the denominator; an unrecognised status enters no bucket and above
+all is never a `fail`. **`scorePct`'s arithmetic and operand order are carried through verbatim** —
+only the denominator's UNIT moved, and no weight or polarity changed.
+
+⛔ **THE PER-STANDARD FIGURES KEEP THE STANDARD-EXPANDED COUNTING AND MUST NOT BE "SIMPLIFIED" WITH
+IT.** There it is correct by construction: a check mapped to PCI_DSS and NIST is evidence about both.
+A test pins it and the flattening mutation is RED.
+
+⛔ **TWO CALLERS RE-DERIVED THE OLD DEFINITION AND WERE FIXED IN THE SAME COMMIT, because one of
+them contradicted itself on screen.** `lib/evidence.js`'s `complianceScoreEvidence` sums whatever
+counts map it is handed — deliberately, so "the arithmetic in the drawer matches the arithmetic that
+produced the number" — so after the unit moved it would have rendered `479 ÷ 1016` and then `→ 48%`
+in the one place an operator opens to check where a figure came from. `fleetHeadline.js` now hands it
+the pair-unit counts wrapped in a one-key object, so that function is UNCHANGED and its
+null-not-zero discipline (an empty object is not three zeros) is untouched. And
+`complianceReport.js`'s `summaryFromPerDevice` reproduced the old sum **on purpose**, arguing that "a
+score that changes meaning with the scope it was asked at is worse than one with a debatable
+definition" — the principle is right and is precisely why it had to change, since the fleet PDF and
+the device PDF would otherwise print `overall` in different units. ⛔ It also already disagreed with
+the device PAGE, which has always counted once; that was pre-existing and is closed too. ⛔ **An
+absent pair tally yields `overall: null`, never a fallback to the per-standard sum** — a fallback
+would answer silently in the other unit, which is the whole defect.
+
 ### ⛔ The compliance history was written nightly and never read (v2.227.0)
 
 `lib/engines/complianceTrend.js` + `components/compliance/ComplianceTrendChart.js`, on
@@ -1254,6 +1303,39 @@ midnight in UTC-5 is 05:00Z on the same day — so a suite built from UTC and a 
 the broken code. `tests/complianceTrendZone.test.js` forces the zone per child process and
 includes `Asia/Bangkok` and `Pacific/Kiritimati` (UTC+14); mutation-verified, and the mutation
 goes red in exactly those two.
+
+### ⛔ A SURFACE THAT ASSERTS CALM FROM A READ IT NEVER CONSULTED (v2.228.12)
+
+⛔ **ONE OF THE FOUR THREAT WIDGETS AWAITED `getThreatCoverage()` AND NEVER REFERENCED IT**,
+rendering a flat `No named threats in the last 24 hours.` where its three siblings rendered
+`<ThreatEmpty coverage={…}/>` — the exact string `lib/syslog/threatStats.js` names as what the
+coverage read exists to prevent, and which it records as "the live state for the first minutes after
+the rollup shipped". Production today is 24 of 24 hours swept, so the sentence is not live now; it
+fires after a collector restart or a rollup deploy.
+
+⛔ **AND `DeviceThreatTable` NEVER FETCHED COVERAGE AT ALL**, although `getDeviceThreatSummary()`'s
+own comment delegates the no-coverage case to *"the widget, not … a NULL here"* — so over an unswept
+rollup every device showed a dash under a fleet-wide `No device reported any threat events in this
+window.` **A guard delegated in a comment to a caller that never implemented it is the
+guard-that-cannot-fire pattern with the delegation written down.**
+
+⛔ **BOTH COMPONENTS TAKE `evaluable === true`, NEVER TRUTHY, AND BOTH ARE EXPORTED.** The dangerous
+input is an ABSENT coverage object — a caller that forgot the read — which no widget can be made to
+produce, so direct render is the only way to assert that arm; a `coverage ? … : true` mutation
+survives every test that goes through a widget.
+
+⛔ **AND THE FIRST TAB OPENED FOR A FIREWALL CARRIED NO COVERAGE DENOMINATOR.**
+`OverviewComplianceCard.js` drew a 96px blended donut plus six per-standard donuts calling neither
+`buildDeviceCoverage()` nor `deviceCoverageEvidence()` — the machinery v2.225.0 added for exactly
+this, live one route over. Measured on the six-vendor mock fleet: `MOCK-SANGFOR-Branch-06` scores on
+**9 gradeable checks of 19 applicable and is the fleet's highest score**, and clicking through showed
+the same assessment WITH a `thin` grade — two screens disagreeing about what the number was worth.
+⛔ **The strip is handed the BLENDED average, not the device-wide pass rate**: those differ by **9
+points** on that firewall (87 vs 78), so the device-wide figure would have been a SECOND compliance
+percentage beside the headline donut, which this file forbids. The residual — that
+`deviceCoverageEvidence()`'s formula line then under-describes a blended headline, and that
+`scorePct: null` is unusable as "no single figure" because the engine reads it as "nothing
+gradeable" — is `.ai-codex/roadmap.md` row 62, not a defect in the engine.
 
 ### ⛔ One control, every firewall's answer (`/compliance/controls/[slug]`, v2.227.0)
 
@@ -3327,6 +3409,41 @@ PostgreSQL also evaluates in that same local zone — the tick and the date agre
 one ALONE — add a `timezone` to the cron, or move the database to UTC — and every `snapshot_date`
 shifts by a day while nothing errors and nothing looks broken. If you touch one, touch both.
 
+### ⛔ A JOB REAPER MUST MEASURE FROM THE LAST SIGN OF LIFE (v2.228.12)
+
+`reapStaleJobs` selected `WHERE status = 'running' AND started_at < now() - 30 min` and never looked
+at progress, so **a job that was working perfectly and reporting every batch was declared FAILED on
+a fixed clock from the moment it began** — and the threshold was guaranteed to be crossed:
+`unlinkSyslogEvents` runs 20,000-row batches with a 200 ms pause, which on production's busiest
+firewall (**TUM(TUTH1), measured 2026-11-15 at 1,127,384,476 events = 56,370 batches**) is ~3.1
+HOURS of pure sleep. `background_jobs` gained `progress_at`, `reportProgress` stamps it, and the
+reaper keys on `COALESCE(progress_at, started_at)` — the fallback being the one case where the start
+IS the last sign of life. ⛔ Never defaulted to `now()`, which would make an abandoned job look
+alive for ever.
+
+⛔ **THREE THINGS THEN WENT WRONG AFTER A WRONG REAP, AND ALL THREE ARE FIXED.** `reportProgress`'s
+`AND status = 'running'` silently discarded every later update, so the UI froze on a `failed` row
+while the work carried on — the guard is right and a write that did not land must not report
+success, so it now returns `{applied}`. `finishJob` had **no terminal-status guard**, so a later
+`succeeded` overwrote the reaped verdict with nothing to say the row had ever been declared dead,
+erasing the only trace that the reaper fired wrongly. ⛔ **It still writes the new status, and
+refusing would be the worse bug**: the reap says the outcome is unknown, and a worker reporting a
+real result IS the evidence it lacked — so the result wins and the earlier verdict is appended to
+`detail`, captured in the same statement by a CTE so there is no check-then-act window.
+
+⛔ **THE BATCH CAP WAS 336× TOO SMALL AND THE THROW WAS A CORRECT GUARD ON AN INCORRECT BOUND.**
+`maxBatchesPerTable` was 5,000, justified in its own comment as "Generous: 3.35M events / 20k = 168
+iterations" — 3.35M being the busiest device in 2026-09. At 5,000 the loop threw after 8.9% of the
+work on **four live firewalls** (TUM 1.127B, ITC-SK 1.008B, SMT 935M, OKF(F2) 509M). Re-derived to
+2.7× the busiest measured device. ⛔ **A cap is a backstop against a loop that is not progressing,
+not a budget** — what ends a healthy loop is the short-batch early return. ⛔ **`eventBatchSize` and
+`eventPauseMs` were deliberately NOT touched**: both trade directly against the collector's disk —
+the pause exists so its inserts and the rollup sweep get it to themselves — and that trade cannot be
+measured without rewriting a billion live rows. ⛔ The unlink itself is unavoidable by design:
+`syslog_events.device_id` is `ON DELETE SET NULL`, so the batching exists to pay that cost in small
+committed transactions instead of one catastrophic cascade inside the delete transaction. Do not
+"optimise" it away by relying on the FK.
+
 ### Reliability Rules (learned from LogVault collector)
 
 - Each job runs in `try/catch` — **one failed job must never crash the service**. Log start/end/duration/error to `C:\Apps\SecVault\logs\engine.log`.
@@ -3959,6 +4076,68 @@ indistinguishable on screen, so once the tile border went neutral (below) the on
 `data-unmeasured` and `app/globals.css` dashes it — hueless by construction, because a gap in OUR
 evidence is not a severity and must never be ranked on the severity ramp.
 
+### ⛔ "WAS THIS MEASURED" IS NOT "WHAT COLOUR IS THE NUMBER" (v2.228.12)
+
+`StatCard` armed its dashed `[data-unmeasured]` border **only** from `color === 'var(--unmeasured)'`
+— the fact encoded in a colour string — so a caller that stated it any other way got a tile that
+looked measured. Three did, each already rendering a `NotMeasured` em-dash **as the tile's value**:
+`ConformanceBoard` passed `textColor` and no `color`, `VpnDetections` passed **neither**, and
+`ConsolidationTab` armed it only from a standing declaration so a `value === null` tile drew the
+em-dash inside a SOLID border. The em-dash said "not measured" inside a tile drawn exactly like the
+measured ones beside it — on the component v2.200.0 added that border to *because grey alone was
+judged insufficient*.
+
+⛔ **`tests/cardSurfaces.test.js` PINNED THE CSS RULE FROM BOTH ENDS AND NEVER ASKED WHETHER A CALLER
+COULD ARM IT**, so it stayed green and would have stayed green with zero tiles setting the attribute.
+
+⛔ **THE FIX IS AN EXPLICIT `unmeasured` PROP, AND KEYING IT ON THE TONE — THE OBVIOUS ONE-LINER —
+WOULD HAVE BEEN WRONG.** `ConformanceBoard`'s "Firewalls not compared" tile is *toned* `--unmeasured`
+because it COUNTS unmeasured firewalls; that count is a real measurement, and dashing it would claim
+SecVault could not read the number it is printing. Its real condition is `value === null`. No colour
+string carries both readings. ⛔ Additive and THREE-state: `undefined` keeps the legacy colour
+inference that ~40 sites rely on, explicit `true`/`false` is the caller's word — removing the
+inference would have traded two missing borders for forty.
+
+### ⛔ A SCORE BAND IS NEVER THE BRAND HUE, AND NEVER A SECOND OPINION (v2.228.12)
+
+`ComplianceStandardsBreakdown.toneFor` returned `var(--accent-teal)` for 75–89, and
+`--accent-teal: var(--primary)` **byte-identically in both themes** (#098294 / #22C1D6), so an 82%
+score was drawn in the colour reserved for "this is interactive" — the same hue as the
+"Compare devices" link on the same card.
+
+⛔ **THE DEEPER FAULT WAS THE LOCAL COPY.** `ComplianceMatrix.scoreColor` is the canonical banding
+(`>80` / `>=60`), exported "so the per-device page can reuse the same bands instead of re-deriving
+the cut points", and used by the matrix, the donut, the compliance PDF, the print page **and
+`ComplianceScoreWidget` — which `app/(dashboard)/page.js` renders as a SIBLING OF THIS CARD IN ONE
+GRID, over the same five standards.** So **55% was a RED badge in one widget and a YELLOW bar in the
+other, side by side on one screen.** That file's own header already forbade this one function up
+("STANDARDS is imported… never redeclared. A local copy is how the matrix ended up with 7 `<col>`
+elements for 8 columns").
+
+⛔ **A FILL AND A LABEL HAVE DIFFERENT FLOORS.** `toneFor` drove both the bar and a **16px/700
+number**, and `--yellow` measures **3.64:1** on `--bg-card` in the default light theme — 16px bold is
+not large text. Split: raw ramp on the fill (1.4.11, 3:1), `--tint-*-fg` on the text (1.4.3, 4.5:1).
+⛔ **That failure slipped past v2.228.7's own ramp-on-text guard**, which matches the tokens as
+LITERALS and so cannot see `color: toneFor(pct)` — recorded as roadmap row 63 rather than left
+implying coverage the guard does not have.
+
+⛔ **THE EVIDENCE AXIS BORROWS NO SEVERITY HUE.** `VpnDetections.STATUS_BADGE.measured` was
+`'success'` — badge green, the ramp's good end — on a chip saying only that SecVault had enough
+baseline to LOOK, rendered immediately **left** of a `danger` findings count, so a credential-spray
+panel opened with a green chip read first. ⛔ Violet was REFUSED: `--evidence`/`.ev-*` own it and
+nothing else in the app may be violet, and this chip opens no drawer. All three statuses are hueless;
+the **labels** and the hatched panel carry the distinction, which was already doing the work — the two
+gap states shared `muted`, so the chip had two appearances for three states and spent its colour on
+the one needing it least.
+
+⛔ **THE RETIRED SUITE RED IS NOW GUARDED REPO-WIDE.** `UserMenu.js` drew the avatar
+`background: 'var(--primary)'` with `boxShadow: 'rgba(200,16,46,0.4)'` — #C8102E, the red `--primary`
+used to be — so a teal circle sat in a red halo on **every authenticated page**.
+`tests/loginPage.test.js` has asserted that exact literal since v2.87.0 and its scope was the login
+page, so a half-done migration (fill moved, shadow left) passed **with the rule written down AND a
+test for it in the repo**. The generalisation is the fix; the narrow pair is kept, and a test asserts
+the repo-wide guard still exists and still walks every source file.
+
 ### ⛔ A STAT TILE'S BORDER IS NEUTRAL ON ALL FOUR SIDES (v2.200.0)
 
 The 4px coloured left edge every `.kpi-card`/`.kpi-card-compact` carried is gone. It was this
@@ -3998,6 +4177,41 @@ close, the dialog reports a server-side expiry it does not own, and dismissing i
 warning while the session still ended. A dialog with no dismissal is the right shape for a deadline.
 ⛔ **The role and `aria-modal` moved to the PANEL**, with the trap anchored there — they were on the
 backdrop, which declared the backdrop part of the dialog and gave a trap the wrong subtree.
+
+⛔ **`aria-modal` NEEDS FOUR MECHANISMS, AND ONE DIALOG LEGITIMATELY OWNS ONLY THREE (v2.228.12).**
+`components/ui/useFocusTrap.js` gained `confineOnly`, an opt-in taking **Tab confinement alone**. Its
+one caller is the evidence drawer, which already had the other three — in `EvidenceProvider`, not the
+panel, because the provider owns the open/close state and the identity of the mark that opened it
+across every page. Dropping the full hook into the panel would have left **two focus restores on
+every close** (the hook's captured `document.activeElement` against the provider's `openerRef`), with
+the winner decided by effect-cleanup order — a question only a browser can answer, and one that
+changes silently when React changes that order. Confine-only removes the race **by construction**
+rather than reasoning about it. ⛔ **The default is unchanged and a test pins both other call sites**:
+`Modal` and `IdleTimeout` implement none of the other three themselves, so confinement alone there
+would leave `aria-modal` promising an inert page with focus still outside the dialog.
+
+⛔ **THE SHARPEST HAZARD WAS THE CLOSED DRAWER, NOT THE OPEN ONE.** The drawer is never unmounted —
+it is pushed off-screen with a transform plus `aria-hidden`/`inert` — so a trap armed while closed
+would swallow Tab on all 30 dashboard pages, strictly worse than the defect being fixed. It is safe
+on four pieces of evidence, not one: `open = !!payload` is the ONLY gate and drives `active`,
+`data-open`, `aria-hidden` and `inert` alike; the effect bails before installing any listener while
+inactive; and both `active: true` and deleting that bail go red under mutation.
+
+⛔ **THE TRAP IS NOW EXERCISED, NOT READ.** `installFocusTrap(getPanel, {win, doc})` is the imperative
+half with no React in it, driven against a stand-in document with real key events; what stood there
+before was five regexes over the hook's own source — the shape of guard this repo has twice seen
+satisfied by a mention. `getPanel` stays a GETTER so the live re-read of the panel on every key is
+preserved.
+
+⛔ **AND CONFINEMENT MADE A PRE-EXISTING GAP INTOLERABLE.** `.ev-body` is the drawer's scroll
+container while the close button sits outside it in `.ev-head`, so with focus where the provider puts
+it there was **no scrollable ancestor for the browser to act on**: measured in Chromium against the
+real stylesheet, **PageDown and ArrowDown both left `scrollTop` at 0 with 1,870px of evidence below
+the fold, including "What could not be measured"**. Before the trap a keyboard user could at least
+Tab out; shipping confinement alone would have pinned them in front of unreadable content. Fixed with
+`tabIndex={0}` + `role="region"` (scrollTop 0 → 348 on one PageDown). ⛔ Only `.ev-*` was swept —
+other `overflow-y: auto` containers whose focusable controls sit outside the scroller are roadmap
+row 64.
 
 ⛔ **A NAVIGATION IS A LINK.** `NotificationBell` rendered every notification row as a bare
 `<div onClick>` with no role, no `tabIndex` and no key handler, so the per-alert deep links were
@@ -5158,6 +5372,26 @@ none of these carry Critical-Rules-level footguns.
   ⛔ **NO CHART, DELIBERATELY.** A sparkline per row would invite the reader to trace a direction in
   exactly the eight series the engine refuses to assert one for. The condition for revisiting it is
   recorded in the component: plot the fitted interval, not the raw daily series.
+- ⛔ **A CHART'S CAPTION IS ITS DENOMINATOR, SO IT IS PART OF THE CHART'S HEIGHT (v2.228.12).** All
+  three chart helpers in `lib/reports/chassis.js` reserved space for their ink and drew the caption
+  afterwards, OUTSIDE the reservation — so the sentence stating what a percentage is a share OF could
+  be orphaned onto the next page or torn in half, in documents that leave the building as audit
+  evidence. Reserved for now in `drawBarChart`, `drawDonut` AND `drawTimeSeries` (the third had the
+  same defect and was not in the roadmap row — leaving one of three wrong is the trap this file's own
+  header is about). ⛔ **Measured through `pdfSafe`**, because `installPdfSafeText` wraps `doc.text`
+  and NOT `heightOfString`: a `⚠` measures **0 width** raw and prints as `'!'`, so a raw measurement
+  measures a string nobody draws. That guard is load-bearing on the donut (exact reservation) and
+  belt-and-braces on the bar chart, whose 10px of slack absorbs one line — measured, so the test
+  lives on the donut rather than being a guard that cannot fire.
+- ⛔ **`ensureSpace` CAN ONLY ADD ONE PAGE, AND IT USED TO RETURN NOTHING.** A block taller than a
+  page got a break, still did not fit, and was shredded one fragment at a time with nothing saying
+  so: measured, **45 bar rows produced 17 pages — 38 bars on one, then one bar per page fourteen
+  times, caption on page 16 of 17**. It now returns `{broke, fits, measured, needed, available,
+  pageAvailable}`, and **`fits` is TRI-STATE: `null` means the need could not be measured, never
+  `false`**, because a caller must not drop content on the strength of a number nobody read. ⛔ Its
+  own test caught `Number(null) === 0` reporting a null height as "fits, needs no space" — the
+  `maxDevices` trap this file already records, reproduced in page layout. A chart that bounds itself
+  **discloses the count** and never silently shortens.
 - **Rule cleanup loop** (`lib/engines/ruleChangeRequests.js`, `/devices/[id]/analysis?tab=cleanup`,
   v2.93.0): select evidence-backed `unused`/`redundant`/`shadow` rules → a change request → CSV/PDF
   for whoever edits the firewall → **SecVault verifies against the re-collected ruleset whether they
@@ -5393,6 +5627,18 @@ FAILS LOUDLY instead and lives behind its own script. `Update-SecVault.ps1` runs
 verify, **non-fatally** — a broken page is not a reason to roll a deploy back (the rollback there
 restores a TLS entry point, which would not fix it) — but it sets `hadFailure`, so the closing
 banner cannot say "completed successfully" over a page that did not render.
+
+⛔ **A TEST THAT READS A FILE'S TEXT IS NOT TESTING THE STATEMENT THAT RUNS.**
+`tests/fixedVersionFromRanges.test.js` section 3 regex-matched the call-site spelling of the Fortinet
+downgrade guard and was **measured inert** (2026-11-15) against `THEN advisories.…` →
+`THEN EXCLUDED.…` and `AND NOT` → `AND NOT NOT`: one token each, valid SQL each, and each PERFORMS
+the strict downgrade that on 2026-09-25 cost 80 hub-repaired rows nine seconds after they were
+written. The same assertions **FAILED on hoisting two expression strings into constants**, which
+changed not one byte of the emitted SQL — so it both could not fire and cried wolf. **Where a
+decision lives in SQL that `npm test` cannot execute, get the statement by calling the real exported
+function with a stub pool, strip SQL comments FIRST, and assert a predicate GENERATED from the
+shared definition — never the source's spelling of the call.** The fourth direction a source-shape
+test has failed on correct code in this repo, and the second time one passed over an inverted guard.
 
 **What a test here is FOR.** Nearly every bug these cover is one class: a failed read recorded as
 an affirmative value (`hit_count` defaulting to 0, `getRules()` returning `[]`, an unanswerable
