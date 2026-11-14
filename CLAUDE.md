@@ -3905,6 +3905,66 @@ which clears WCAG 1.4.11's 3:1 for a graphic and **fails** 1.4.3's 4.5:1 for tex
 every deliberate call site, because an inline style wins. Three files set it; all three were fixed
 together. If a fourth ever appears, it must be fixed in the same commit.
 
+### ⛔ THE RAMP ON `color:` IS ALWAYS TEXT, AND 24 SITES FAILED 1.4.3 (v2.228.7)
+
+`color` is the one CSS property that paints text and nothing else, so a raw ramp token on `color:`
+is small body text in a hue that measures **3.29–3.64:1 in the DEFAULT light theme**. `fill`,
+`stroke` and `background` are graphical objects, where 1.4.11's 3:1 applies and the same tokens
+pass — which is why `RuleHygieneDonut`'s segments and swatches, `VulnerabilityTrendChart`'s strokes
+and `ServerHealthWidgets`' `STATE_COLOR` dot are all correctly out of scope, and why `StatCard`'s
+`color=` **prop** is too (it already remaps through `TEXT_SAFE_VALUE`).
+
+⛔ **THE RECORDED FIGURES WERE THE BEST CASE.** The roadmap row quoted `--orange` 3.63 and
+`--yellow` 3.64 on WHITE. On `--bg-primary` they are **3.45/3.44** and on `--surface-subtle`
+**3.30/3.29** — and most of these sites sit inside a card on one of those.
+
+⛔ **TWO MAPPINGS, AND WHICH ONE APPLIES IS A QUESTION ABOUT THE SENTENCE, NOT THE HUE.**
+- A genuine warning takes the contrast-safe counterpart `StatCard` already maps to:
+  `--yellow`/`--sev-med` → **`--tint-warn-fg`** (5.26–5.80:1), `--orange`/`--sev-high` →
+  **`--tint-orange-fg`** (4.88–5.39:1). 13 sites, including the four `cvssStyle()` helpers.
+- A sentence saying SecVault **could not measure or verify something** takes **`--unmeasured`**
+  (4.62–5.09:1), which is hueless by construction. 11 sites.
+
+⛔ **THE SECOND GROUP IS THE REAL DEFECT AND THE CONTRAST MISS WAS THE SMALLER HALF OF IT.**
+`components/ui/NotMeasured.js` states the rule in its own header — *"NEVER give this a colour from
+the severity ramp"* — and `ServerHealthWidgets.js` broke it **seven times in one file**, printing
+`These figures are NOT MEASURED, not zero` in amber while the panels those sentences explain used
+`--unmeasured` for their values. The mark was unlearnable: the same card used two vocabularies for
+one state. `devices/[id]/page.js` printed *"The size of this delete could not be measured"* in
+`--sev-high` **on the irreversible delete confirmation**. ⛔ Going hueless makes these MORE legible,
+not less — 3.63 → 5.09 on a card — so there is no trade here to weigh.
+
+⛔ **A GUARD, NOT A SWEEP, BECAUSE THE FIRST ENUMERATION MISSED TWO BY GREPPING FOR A LITERAL.**
+`color: 'var(--yellow)'` does not find
+`color: h.ingest.backlog > 0 ? 'var(--yellow)' : undefined`, which is the same failure behind a
+ternary. `tests/designSystemRamp.test.js` case 7 reads the whole value expression and the enclosing
+object, so a hue reached by any branch counts. ⛔ It is scoped to **a CSS-shaped object**, not a
+`style={{...}}` attribute: the four `cvssStyle()` helpers RETURN `{ color, fontWeight }` and are
+applied as `style={cvssStyle(x)}`, so an attribute-scoped scan finds none of them — and they paint
+the CVSS score for the whole **7.0–8.9 HIGH band**, where the band boundary IS a contrast boundary
+because `>= 9` gets the passing `--red`. A config row (`{ key, label, color }`) carries no CSS
+property and is skipped, which separates legend data from styles mechanically rather than by a
+filename list. Large text keeps the raw hue at 3:1 (`UpdatePanel`'s 40px ⚠ glyph).
+
+⛔ **THE REPLACEMENT TOKENS ARE NOW PINNED ON A PLAIN SURFACE, WHICH NOTHING CHECKED.** The existing
+pair test measures each `--tint-*-fg` on its own `--tint-*` WASH — the tinted chip. These 24 sites
+put those tokens on an ordinary card or page ground with no wash behind them, so the property the
+fix depends on was unguarded: lightening `--tint-warn-fg` to suit its wash would have dropped every
+one of these sentences back under 4.5:1 with the pair test still green.
+
+⛔ **VERIFIED BY RENDERING, NOT ONLY BY THE SOURCE SCAN** — the real `globals.css`, computed
+`color`, and the composited background walked up the ancestor chain. All 10 representative sites
+pass in BOTH themes; worst case **4.62:1 light** (`--unmeasured` on `--surface-subtle`) and
+**5.52:1 dark**. ⛔ The first render pass reported two dark-theme FAILURES at 3.16 and 1.59 and both
+were artefacts of the harness, not the product: it set no `body` background and did not composite
+alpha, and `--surface-subtle` is `rgba(255,255,255,0.045)` in dark — translucent over a ground the
+harness never painted. A measurement whose preconditions are wrong is not a measurement, which is
+this file's own rule about the VPN probe, met again in a stylesheet.
+
+⛔ **`--text-muted` ALSO FAILS (4.27 on `--bg-primary`, 4.08 on `--surface-subtle`) AND IS
+DELIBERATELY NOT IN SCOPE.** It is already ratcheted by its own test with a palette decision
+outstanding — darkening it collides with `--unmeasured` (#666F7B). Do not fold the two together.
+
 ⛔ **`font-weight: 800` ON `.stat-value` HAD NO FONT FILE.** Only 400/500/600/700 are vendored in
 `public/fonts/`, so the browser was synthesising or snapping to 700 — the number never rendered at
 the weight the rule asked for. It is 600 now, which is a real face.

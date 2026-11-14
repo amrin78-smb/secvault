@@ -80,7 +80,7 @@ function vendorCell(row) {
       <td style={{ ...CELL, color: 'var(--text-muted)' }}>
         Unknown
         {row.vendor_conflict ? (
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--yellow)' }}>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--tint-warn-fg)' }}>
             more than one vendor seen — may be a log relay
           </div>
         ) : null}
@@ -91,7 +91,7 @@ function vendorCell(row) {
     <td style={CELL}>
       {vendorLabel(row.observed_vendor)}
       {row.vendor_conflict ? (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--yellow)' }}>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--tint-warn-fg)' }}>
           more than one vendor seen — may be a log relay
         </div>
       ) : null}

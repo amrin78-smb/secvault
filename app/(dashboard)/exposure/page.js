@@ -541,7 +541,9 @@ export default async function ExposurePage({ searchParams }) {
                               <div
                                 style={{
                                   fontSize: 'var(--text-xs)',
-                                  color: 'var(--yellow)',
+                                  // ⛔ hueless: both captions say a check could NOT be
+                                  // made, which is this file's own point above.
+                                  color: 'var(--unmeasured)',
                                   marginTop: 4,
                                 }}
                               >
@@ -558,7 +560,9 @@ export default async function ExposurePage({ searchParams }) {
                               <div
                                 style={{
                                   fontSize: 'var(--text-xs)',
-                                  color: 'var(--yellow)',
+                                  // ⛔ hueless: both captions say a check could NOT be
+                                  // made, which is this file's own point above.
+                                  color: 'var(--unmeasured)',
                                   marginTop: 4,
                                 }}
                                 title={

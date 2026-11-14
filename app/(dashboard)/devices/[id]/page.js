@@ -1221,10 +1221,16 @@ export default async function DeviceDetailPage({ params, searchParams }) {
             {/* ⛔ The scale, stated before the operator commits. This is
                 irreversible and one device on this fleet carried 3.35M syslog
                 events; "are you sure?" without a number is not informed consent. */}
+            {/* ⛔ THE FALLBACK IS --unmeasured, NOT THE SEVERITY RAMP. That sentence
+                says SecVault FAILED TO READ something, and a gap in our evidence is not
+                a severity of the customer's — the rule components/ui/NotMeasured.js
+                states, broken here on the one screen where a delete cannot be undone.
+                It is also more legible, not less: --sev-high measures 3.63:1 on a card
+                in the default light theme against --unmeasured's 5.09:1. */}
             {deleteImpact ? (
               deleteImpactLines(deleteImpact)
             ) : (
-              <p style={{ fontSize: 'var(--text-base)', color: 'var(--sev-high)' }}>
+              <p style={{ fontSize: 'var(--text-base)', color: 'var(--unmeasured)' }}>
                 The size of this delete could not be measured. Proceed only if you are sure — it may
                 affect a large amount of syslog history.
               </p>

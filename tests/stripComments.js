@@ -46,15 +46,26 @@
  * Strip JS comments for a source scan.
  *
  * @param {string} src
- * @param {{sql?: boolean}} [opts] also strip SQL `--` line comments, for files
- *   that embed SQL in template literals.
+ * @param {{sql?: boolean, keepLines?: boolean}} [opts]
+ *   `sql` also strips SQL `--` line comments, for files that embed SQL in
+ *   template literals.
+ *   `keepLines` replaces a BLOCK comment with its own newlines instead of
+ *   removing them, so line numbers in the result still match the original file.
+ *   ⛔ Without it a scan that REPORTS a line number reports the wrong one: the
+ *   line-comment pass keeps its newline (`.*$` under /m does not match it), but
+ *   the block pass removes every newline inside the comment. Measured on
+ *   app/(dashboard)/devices/[id]/page.js — a real offender on line 1227 was
+ *   reported as 1149, i.e. 78 lines adrift, which sends a reader to unrelated
+ *   code. An OPTION here rather than a second stripper in the caller, because a
+ *   caller rolling its own is what tests/stripOrder.test.js exists to prevent.
  */
 function stripComments(src, opts = {}) {
+  const blank = (m) => m.replace(/[^\n]/g, '');
   let out = String(src == null ? '' : src)
     // ⛔ FIRST. The `[^:]` guard keeps `https://` from eating the rest of a URL
     // line, which would be harmless here but makes the residue confusing to read.
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
+    .replace(/\/\*[\s\S]*?\*\//g, opts.keepLines ? blank : '');
   if (opts.sql) out = out.replace(/^\s*--.*$/gm, '');
   return out;
 }

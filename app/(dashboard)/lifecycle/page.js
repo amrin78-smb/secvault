@@ -885,7 +885,7 @@ export default async function LifecyclePage({ searchParams }) {
                               <div
                                 style={{
                                   fontSize: 'var(--text-xs)',
-                                  color: cell.st.status === 'stale' ? 'var(--yellow)' : 'var(--text-muted)',
+                                  color: cell.st.status === 'stale' ? 'var(--tint-warn-fg)' : 'var(--text-muted)',
                                 }}
                               >
                                 {ageLabel}

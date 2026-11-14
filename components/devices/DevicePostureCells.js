@@ -98,7 +98,7 @@ export function SupportCell({ expiredCount, soonestFutureExpiry, unknownCount })
     const soon = days <= 90;
     return (
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <span style={{ color: soon ? 'var(--yellow)' : 'var(--text-primary)' }}>
+        <span style={{ color: soon ? 'var(--tint-warn-fg)' : 'var(--text-primary)' }}>
           {date.toISOString().slice(0, 10)}
         </span>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>

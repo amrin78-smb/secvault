@@ -765,7 +765,7 @@ export default async function VpnUserTraffic({
                     </td>
                     <td style={NUM}>
                       {u.denied > 0 ? (
-                        <span style={{ color: 'var(--sev-high)' }}>{formatCount(u.denied)}</span>
+                        <span style={{ color: 'var(--tint-orange-fg)' }}>{formatCount(u.denied)}</span>
                       ) : (
                         formatCount(u.denied)
                       )}

@@ -410,7 +410,7 @@ export async function IngestHealthWidget() {
               <span>{h.received?.toLocaleString()} received · {h.stored?.toLocaleString()} stored (last {h.windowMinutes}m)</span>
               <span>batch {h.avgMs}ms avg / {h.maxMs}ms peak · spool backlog {h.maxBacklog}</span>
               {h.unknownSource > 0 && (
-                <span style={{ color: 'var(--yellow)' }}>
+                <span style={{ color: 'var(--tint-warn-fg)' }}>
                   {h.unknownSource.toLocaleString()} from senders not in the device inventory
                 </span>
               )}

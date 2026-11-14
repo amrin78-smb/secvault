@@ -656,3 +656,150 @@ test('--text-muted is legible where captions actually sit, and never gets worse'
     }
   }
 });
+
+// ── 7. ⛔ THE RAMP ON `color:` IS ALWAYS TEXT, AND 1.4.3 WANTS 4.5:1 ──────
+//
+// Case 6 above asks what a hue MEANS on a metric tile. This asks something
+// narrower and purely mechanical: `color` is the one CSS property that paints
+// text and nothing else, so a raw ramp token on `color:` is small body text in
+// a hue measured at 3.29-3.64:1 in the DEFAULT light theme. `fill`, `stroke`
+// and `background` are graphical objects, where 1.4.11's 3:1 applies and the
+// same tokens pass — which is why the donut's segments, the trend chart's
+// strokes and the hygiene legend's swatches are all correctly out of scope.
+//
+// ⛔ MEASURED 2026-11-14 ON 22 SITES ACROSS 11 FILES, and the enumeration is
+// the interesting part. The row that raised this (roadmap 44) quoted
+// "--orange 3.63:1 and --yellow 3.64:1" on WHITE. Those are the BEST cases:
+// the same tokens measure 3.45/3.44 on --bg-primary and 3.30/3.29 on
+// --surface-subtle, and most of these sites sit inside a card on one of those.
+//
+// ⛔ AND THE FIRST ENUMERATION MISSED TWO, BECAUSE IT GREPPED FOR A LITERAL.
+// `color: 'var(--yellow)'` finds the unconditional form and not
+// `color: h.ingest.backlog > 0 ? 'var(--yellow)' : undefined`, which is the
+// same failure behind a ternary — ServerHealthWidgets.js:240 and :266. This
+// guard reads the whole value expression, so a hue reached by any branch
+// counts. That is also why it is a guard and not a one-off sweep.
+//
+// ⛔ A CSS-SHAPED OBJECT, NOT A `style={{...}}` ATTRIBUTE, and the scope had to
+// be this to see the worst offenders. The four `cvssStyle()` helpers RETURN
+// `{ color: 'var(--yellow)', fontWeight: 600 }` and are applied as
+// `style={cvssStyle(x)}`, so an attribute-scoped scan finds none of them —
+// and they paint the CVSS score for the whole 7.0-8.9 HIGH band, where the
+// band boundary IS a contrast boundary because >= 9 gets the passing --red.
+// A config row like `{ key: 'shadow', label: 'Shadow Rules', color: ... }`
+// carries no CSS property and is skipped; requiring a CSS sibling separates
+// the two mechanically rather than by a filename list.
+const RAMP_ON_TEXT = /var\(--(?:yellow|orange|sev-med|sev-high|teal)\)/;
+
+// Any CSS property that would only ever appear in a style object. `color` is
+// deliberately NOT in this list — an object whose ONLY key is `color` still
+// counts, and including it would make every config row match.
+const CSS_SIBLING =
+  /\b(?:fontSize|fontWeight|fontFamily|lineHeight|letterSpacing|textAlign|textDecoration|textTransform|margin|marginTop|marginBottom|marginLeft|marginRight|padding|paddingTop|paddingBottom|paddingLeft|paddingRight|display|flex|gap|whiteSpace|fontVariantNumeric|opacity|border|borderRadius|width|height)\s*:/;
+
+// WCAG 1.4.3 exempts large text at 3:1 — 24px, or 18.66px bold. A style object
+// declaring one of those is allowed the raw hue: components/settings/
+// UpdatePanel.js paints a 40px ⚠ glyph, which is large text by any reading.
+const LARGE_PX = /\bfontSize:\s*(\d+)/;
+const LARGE_TOKEN = /\bfontSize:\s*'var\(--text-(?:2xl|3xl)\)'/;
+
+// ⛔ NAMED EXEMPTIONS WITH A REASON EACH, never a silent skip — the convention
+// deviceScopeCoverage.js's TRANSITIVE_ALLOWED follows. Empty today: every site
+// the first run found was fixed rather than exempted.
+const RAMP_TEXT_ALLOWED = Object.freeze({});
+
+// Every `color:` property in a file, with the value expression and the object
+// it sits in. Brace-depth aware so a nested object does not leak siblings.
+function colorDeclarations(code) {
+  const out = [];
+  const re = /\bcolor:\s*/g;
+  let m;
+  while ((m = re.exec(code)) !== null) {
+    // The value runs to the next comma or closing brace at depth 0.
+    let i = m.index + m[0].length;
+    let depth = 0;
+    let quote = null;
+    const start = i;
+    for (; i < code.length; i += 1) {
+      const c = code[i];
+      if (quote) { if (c === quote && code[i - 1] !== '\\') quote = null; continue; }
+      if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+      if (c === '(' || c === '{' || c === '[') { depth += 1; continue; }
+      if (c === ')' || c === ']') { depth -= 1; continue; }
+      if (c === '}') { if (depth === 0) break; depth -= 1; continue; }
+      if (c === ',' && depth === 0) break;
+    }
+    const value = code.slice(start, i);
+    // The enclosing object: back out to the nearest unmatched '{'.
+    let j = m.index;
+    let up = 0;
+    for (; j >= 0; j -= 1) {
+      if (code[j] === '}') up += 1;
+      else if (code[j] === '{') { if (up === 0) break; up -= 1; }
+    }
+    const objEnd = code.indexOf('}', i) === -1 ? code.length : i;
+    const object = code.slice(Math.max(0, j), Math.max(objEnd, i) + 1);
+    out.push({ value, object, line: code.slice(0, m.index).split('\n').length });
+  }
+  return out;
+}
+
+test('a severity-ramp hue is never the `color` of small body text', () => {
+  const { stripComments } = require('./stripComments');
+  const offenders = [];
+
+  for (const file of sourceFiles()) {
+    const rel = path.relative(REPO, file);
+    if (RAMP_TEXT_ALLOWED[rel]) continue;
+    // keepLines so the reported line number matches the real file — see the
+    // note on stripComments itself for the 78-line drift that prompted it.
+    const code = stripComments(fs.readFileSync(file, 'utf8'), { keepLines: true });
+    for (const d of colorDeclarations(code)) {
+      if (!RAMP_ON_TEXT.test(d.value)) continue;
+      // A config row (no CSS sibling and more than just `color`) is not a style.
+      const onlyColor = !/\b(?:key|label|value|id|name|slug)\s*:/.test(d.object);
+      if (!CSS_SIBLING.test(d.object) && !onlyColor) continue;
+      // Large text is allowed the raw hue at 3:1.
+      const px = LARGE_PX.exec(d.object);
+      if ((px && Number(px[1]) >= 24) || LARGE_TOKEN.test(d.object)) continue;
+      offenders.push(`${rel}:${d.line}  ${RAMP_ON_TEXT.exec(d.value)[0]}`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders, [],
+    'these paint small body text in the raw severity ramp, which measures '
+    + '3.29-3.64:1 in the DEFAULT light theme and fails WCAG 1.4.3 (4.5:1). Use the '
+    + 'contrast-safe counterpart StatCard already maps to — var(--yellow)/var(--sev-med) '
+    + '-> var(--tint-warn-fg), var(--orange)/var(--sev-high) -> var(--tint-orange-fg) — or, '
+    + 'if the sentence says SecVault COULD NOT MEASURE something, var(--unmeasured), which '
+    + 'is hueless by construction and is what components/ui/NotMeasured.js requires:\n  '
+    + offenders.join('\n  ')
+  );
+});
+
+// ⛔ AND THE REPLACEMENT TOKENS ARE PINNED ON A PLAIN SURFACE, WHICH IS NOT
+// WHAT THE PAIR TEST ABOVE MEASURES. That one puts each --tint-*-fg on its own
+// --tint-* WASH — the tinted chip. The 24 sites fixed in v2.228.7 put these
+// tokens on an ordinary card or page ground with no wash behind them, so the
+// property the fix actually depends on was unguarded: if --tint-warn-fg were
+// ever lightened to suit its wash, every one of those sentences would quietly
+// drop back under 4.5:1 while the pair test stayed green.
+test('the contrast-safe ramp counterparts are readable as plain text, BOTH themes', () => {
+  const { light, dark } = tokens();
+  for (const [theme, t] of [['light', light], ['dark', dark]]) {
+    for (const name of ['warn', 'orange', 'danger']) {
+      const fg = t[`--tint-${name}-fg`];
+      for (const surface of ['--bg-card', '--bg-primary', '--surface-subtle']) {
+        const ratio = contrast(fg, surfaceHex(t, surface));
+        assert.ok(
+          ratio >= 4.5,
+          `--tint-${name}-fg (${fg}) on ${surface} is ${ratio.toFixed(2)}:1 in ${theme} theme, `
+          + 'below WCAG 1.4.3’s 4.5:1. This is the token the severity ramp is remapped to for '
+          + 'TEXT — by StatCard’s TEXT_SAFE_VALUE and by 13 pages and components directly — so '
+          + 'if it stops clearing the bar on a plain surface, every one of those silently does.'
+        );
+      }
+    }
+  }
+});

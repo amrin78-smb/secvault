@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.7': [
+    'Fixed: 24 places across 13 pages and panels printed small text in a severity colour that is too faint to read reliably against a light background \u2014 about 3.3 to 3.6 to 1 where the accessibility standard asks for 4.5. The worst of them were the CVSS score for the whole 7.0\u20138.9 band, the notice that a log search was abandoned rather than finding nothing, and the banner naming which traffic sources could not be read.',
+    'Eleven of those were sentences saying SecVault could NOT measure something \u2014 seven of them on the server health page alone, and one on the confirmation for deleting a firewall, which cannot be undone. Those now use the product\u2019s neutral \u201cnot measured\u201d colour: a gap in our own evidence is not a severity of yours, and the same page was already using two different colours for one meaning.',
+    'They are also easier to read than before, not harder \u2014 the replacement colours measure 4.6 to 5.8 against 3.6, so nothing was traded away for correctness.',
+    'The remaining places where these colours appear are unchanged and correct: chart lines, donut segments and status dots are graphics, which the standard holds to a lower bar that they already clear.',
+    'A new build-time check reads the whole colour expression rather than matching fixed text, so the same mistake written behind a condition is caught too \u2014 two of the twenty-four were, and an earlier hand count had missed them both.',
+  ],
   '2.228.6': [
     'Fixed: the feed status indicator in the header could read a green FEEDS OK over a feed whose state SecVault did not recognise \u2014 including when that was the only feed. It is the product\u2019s one standing statement about whether its advisory data is complete, and every CVE count, priority band and security score below it is computed from that data.',
     'The ranking that was supposed to prevent this was correct all along: an unrecognised state was already ranked worse than a hard failure. Nothing then acted on that ranking, so the indicator simply fell through to the healthy wording. A test covering the ranking passed throughout \u2014 the part being checked was right and the answer it was protecting was wrong.',

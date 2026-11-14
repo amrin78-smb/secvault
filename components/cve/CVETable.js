@@ -9,7 +9,7 @@ function cvssStyle(score) {
   const n = Number(score);
   if (Number.isNaN(n)) return { color: 'var(--text-muted)' };
   if (n >= 9) return { color: 'var(--red)', fontWeight: 600 };
-  if (n >= 7) return { color: 'var(--yellow)', fontWeight: 600 };
+  if (n >= 7) return { color: 'var(--tint-warn-fg)', fontWeight: 600 };
   if (n >= 4) return { color: 'var(--text-primary)' };
   return { color: 'var(--text-muted)' };
 }

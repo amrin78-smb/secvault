@@ -274,7 +274,9 @@ export default async function DeviceTrafficTab({ deviceId, deviceName, canSearch
            broken one look identical, and the empty one reads as "no traffic". */
         <Card>
           <CardBody>
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--yellow)' }}>
+            {/* ⛔ hueless — the banner's own words are NOT MEASURED, and it sat in the
+                severity ramp while the panels it explains used --unmeasured. */}
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
               <strong>{failures.length} traffic source(s) could not be read</strong>, so those panels
               are NOT MEASURED rather than empty:
               <ul style={{ margin: '6px 0 0 18px' }}>

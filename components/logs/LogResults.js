@@ -157,7 +157,7 @@ export default function LogResults({ result, deviceNames, searchParams, exportEr
       <Card>
         <CardBody>
           <div style={{ fontSize: 'var(--text-base)', lineHeight: 1.7 }}>
-            <strong style={{ color: 'var(--yellow)' }}>Search stopped — it was too expensive to finish.</strong>
+            <strong style={{ color: 'var(--tint-warn-fg)' }}>Search stopped — it was too expensive to finish.</strong>
             <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>{result.reason}</div>
             <div style={{ color: 'var(--text-muted)', marginTop: 6, fontSize: 'var(--text-sm)' }}>
               This is not a result. No conclusion about whether such traffic exists can be drawn from it.

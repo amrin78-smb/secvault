@@ -123,7 +123,7 @@ export default async function ServerHealthWidgets() {
               )}
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 3 }}>
                 {d.error ? (
-                  <span style={{ color: 'var(--yellow)' }}>not measured — {d.error}</span>
+                  <span style={{ color: 'var(--unmeasured)' }}>not measured — {d.error}</span>
                 ) : (
                   <>{d.usedPct}% used · {d.roles.join(', ')}</>
                 )}
@@ -148,12 +148,12 @@ export default async function ServerHealthWidgets() {
           {gb(h.database.totalBytes)}
         </div>
         {h.database.error ? (
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)' }}>
             not measured — {h.database.error}
           </div>
         ) : null}
         {h.database.tablesError ? (
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)' }}>
             Largest relations not measured — {h.database.tablesError}
           </div>
         ) : null}
@@ -165,7 +165,7 @@ export default async function ServerHealthWidgets() {
             permission-denied pg_stat_user_tables was pixel-identical to "no table
             has significant dead tuples". */}
         {h.database.deadTuplesError ? (
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
             Dead-tuple pressure not measured — {h.database.deadTuplesError}
           </div>
         ) : null}
@@ -190,7 +190,7 @@ export default async function ServerHealthWidgets() {
 
       <Panel title="Raw syslog retention">
         {h.retention.error ? (
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
             Partition catalogue not measured — {h.retention.error}
           </div>
         ) : null}
@@ -218,7 +218,7 @@ export default async function ServerHealthWidgets() {
             (undefined === 0 is false) — so a database failure produced five
             em-dashes and no explanation whatsoever. */}
         {h.ingest.error ? (
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginBottom: 'var(--s3)' }}>
             Ingest statistics could not be read — {h.ingest.error}. These figures are NOT MEASURED,
             not zero.
           </div>
@@ -237,7 +237,7 @@ export default async function ServerHealthWidgets() {
         <Row
           label="Spool backlog"
           value={
-            <span style={{ color: h.ingest.backlog > 0 ? 'var(--yellow)' : undefined }}>
+            <span style={{ color: h.ingest.backlog > 0 ? 'var(--tint-warn-fg)' : undefined }}>
               {num(h.ingest.backlog)}
             </span>
           }
@@ -263,7 +263,7 @@ export default async function ServerHealthWidgets() {
                 not measured ({h.ingest.lastGap.reason})
               </span>
             ) : (
-              <span style={{ color: h.ingest.lastGap.gapSeconds >= 60 ? 'var(--yellow)' : undefined }}>
+              <span style={{ color: h.ingest.lastGap.gapSeconds >= 60 ? 'var(--tint-warn-fg)' : undefined }}>
                 {h.ingest.lastGap.gapSeconds}s
               </span>
             )
@@ -289,7 +289,7 @@ export default async function ServerHealthWidgets() {
           /* ⛔ NO FLUSHES IS NOT ZERO DROPS. An absent collector would otherwise
              render as a clean ingest — the most reassuring possible way to show
              that nothing is being collected at all. */
-          <div style={{ color: 'var(--yellow)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
+          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
             The collector recorded no flushes in this window, so these figures are NOT MEASURED
             rather than zero. Check that SecVault-Collector is running.
           </div>
