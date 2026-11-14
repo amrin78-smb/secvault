@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.6': [
+    'Fixed: the feed status indicator in the header could read a green FEEDS OK over a feed whose state SecVault did not recognise \u2014 including when that was the only feed. It is the product\u2019s one standing statement about whether its advisory data is complete, and every CVE count, priority band and security score below it is computed from that data.',
+    'The ranking that was supposed to prevent this was correct all along: an unrecognised state was already ranked worse than a hard failure. Nothing then acted on that ranking, so the indicator simply fell through to the healthy wording. A test covering the ranking passed throughout \u2014 the part being checked was right and the answer it was protecting was wrong.',
+    'Fixed: when some advisory feeds were refused by their publisher and others were deliberately skipped, the indicator reported that SecVault had chosen not to collect from all of them, and named only the skipped ones. On a test cycle with four refusals and three skips, the four refusals were neither counted nor named anywhere on screen.',
+    'Those two causes are now reported separately and never added together. A publisher refusing us is not something SecVault can retry its way out of; a skip is a recorded decision with a reason. They need different responses, so a single combined count would hide which one you have.',
+    'No change to any feed, any advisory, or any score \u2014 both faults were in what the indicator said about them. Neither was reachable on today\u2019s server, so nothing on this fleet was reported wrongly; they were waiting for the next feed or state to be added.',
+  ],
   '2.228.5': [
     'Fixed: a segmentation boundary you declared could be breached, show on the Work queue as Act now, and never reach Slack, Teams, email or a webhook. The background check that sends those alerts was the one caller that did not compute the segmentation result, and the queue reported that as “nothing outstanding” rather than as something it had not looked at.',
     'Measured on the reference server before and after, against the same data: the segmentation source went from reporting 0 items to reporting 1. Both of the safety checks that exist to refuse an incomplete queue passed it, because a source that reports success while having checked nothing is exactly what they cannot detect.',

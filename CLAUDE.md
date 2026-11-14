@@ -2882,7 +2882,37 @@ SecVault DECIDED not to run it**. Collapsing the two would claim we chose not to
 ⛔ **Excluded from the pill's verdict, never from its evidence**: every title NAMES the blocked feed
 and says its advisories come from the other feeds. ⛔ **Every feed blocked still reports
 `FEEDS BLOCKED`, never green** — excluding it from the reduction must not let a fleet collecting
-nothing read as an all-clear. ⛔ **Narrow and SELF-CLEARING** (`isPublisherBlocked`): true only when
+nothing read as an all-clear.
+
+⛔ **SOME REFUSED AND SOME SKIPPED IS A THIRD STATE, AND IT USED TO REPORT THE SKIP CAUSE FOR BOTH
+(fixed v2.228.6).** The all-blocked branch was gated `blockedFeeds.length > 0 &&
+skippedFeeds.length === 0`, so ONE skipped feed beside any number of refused ones fell through to
+the skip sentence — *"Every advisory feed was deliberately skipped on its most recent cycle (…)"* —
+which **claims SecVault chose not to collect**, the one thing the paragraph above exists to prevent,
+and names only the skipped feeds. Measured on a synthetic full-coverage cycle (4 blocked, 3
+skipped): `FEEDS SKIPPED`, the three skips named, **the four publisher refusals neither counted nor
+named anywhere on screen.** `uncollected` (`NO ADVISORIES`, hueless like either half alone) names
+both groups in separate sentences. ⛔ **The two causes are never summed** — a refusal is not ours to
+fix and cannot be retried, a skip is a decision with a recorded reason, and they send an operator to
+different places; the same call `capacityForecast.js` makes between `bytes_not_summable` and
+`no_log_coverage`. ⛔ Reachable only when EVERY known feed is missing, skipped or blocked; one rated
+feed still outranks both.
+
+⛔ **AND A FEED STATE THE BUILD CANNOT INTERPRET REPORTED `FEEDS OK` (fixed v2.228.6).**
+`severityOf()` ranks an unlisted state at **-1, worse than `error`**, and `lib/feedStatus.js`'s own
+comment claimed that meant "the pill goes loud instead of green". It did not. The unlisted state won
+the reduce, matched no `worst === ...` branch, and control arrived at the final `return` —
+`{state:'ok', ok:true, label:'FEEDS OK'}`. Measured by injecting one synthetic state into
+`feedState()` and calling the real function: green beside a clean feed, and green when the unlisted
+feed was the **only** one. ⛔ **The test that existed asserted `severityOf()` and passed** — the
+mechanism was correct and the verdict it was supposed to protect was wrong, one function apart,
+which is why "verify the outcome, not the mechanism" is a rule here. The guard is now a terminal
+`if (worst !== 'ok')` → state `unknown`, so the green return is unreachable for anything but a
+literal `ok`, and it enumerates no state names, so it cannot drift out of step with `feedState()`
+the way `STATE_SEVERITY` and the `rated` filter did. ⛔ **The verdict logic was split into the pure
+`summarisePill(feeds)` to make either defect testable at all**: no `feed_sync_log.status` string can
+produce an unhandled state, because `feedStatusRank` funnels every unrecognised status into rank 1
+and so into `degraded` — a test that cannot construct the input cannot pin the outcome. ⛔ **Narrow and SELF-CLEARING** (`isPublisherBlocked`): true only when
 every advisory-page failure was the challenge, NOTHING resolved, no upsert failed and the RSS
 itself worked. One resolved page or one upsert error takes the feed straight back out, so no code
 change is needed the day the challenge lifts.

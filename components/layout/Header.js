@@ -138,6 +138,19 @@ PILL_TONE.skipped = PILL_TONE.running;
 // and not red (SecVault is not broken). The pill title names it; see feedStatus.js
 // for why this is only the right call while another feed covers the same vendor.
 PILL_TONE.blocked = PILL_TONE.running;
+// ⛔ SOME FEEDS REFUSED AND SOME SKIPPED IS ITS OWN STATE, and it keeps the same
+// hueless treatment as either half alone: nothing was collected (so not green),
+// one half is nothing anybody can fix (so not amber) and SecVault is not broken
+// (so not red). The pill TITLE is what separates the two causes, in words, and
+// it names both groups — see lib/feedStatus.js for why they are never summed.
+PILL_TONE.uncollected = PILL_TONE.running;
+// ⛔ A FEED STATE THIS BUILD CANNOT INTERPRET KEEPS THE ALARMING TREATMENT. It
+// would resolve to PILL_TONE.none through the `||` fallback below in any case;
+// it is listed explicitly so that it is a DECISION rather than a side effect of
+// a missing key, which is the thing the skipped/blocked comments above record
+// going wrong. Not knowing whether the advisory set is complete is a gap, and
+// every gap in this product's own evidence reads loud, never green.
+PILL_TONE.unknown = PILL_TONE.error;
 
 export default async function Header({ session }) {
   let syncStatus = {
