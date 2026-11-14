@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import useFocusTrap from '../ui/useFocusTrap';
 import { signOut } from 'next-auth/react';
 
 // components/layout/IdleTimeout.js
@@ -209,13 +210,15 @@ export default function IdleTimeout() {
     };
   }, []);
 
+  // ⛔ `active` tracks whether the dialog is RENDERED, so the trap arms and
+  // disarms with it; the hook is called unconditionally, above the early
+  // return, because a hook cannot sit behind one.
+  const panelRef = useFocusTrap({ active: remaining !== null });
+
   if (remaining === null) return null;
 
   return (
     <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="idle-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -227,7 +230,20 @@ export default function IdleTimeout() {
         padding: 'var(--s4)',
       }}
     >
-      <div style={{
+      {/* ⛔ THE ROLE AND aria-modal SIT ON THE PANEL, NOT THE BACKDROP, and the
+          focus trap is anchored here for the same reason: the panel IS the
+          dialog. They were on the overlay, which declared the backdrop part of
+          the dialog and gave the trap the wrong subtree to confine Tab inside.
+          ⛔ `alertdialog`, not `dialog`: this interrupts to demand a response
+          within a deadline, which is exactly the distinction the two roles draw.
+          ⛔ No onEscape — there is nothing to close. See ../ui/useFocusTrap. */}
+      <div
+        ref={panelRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="idle-title"
+        tabIndex={-1}
+        style={{
         background: 'var(--bg-card)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius-lg)',
@@ -236,7 +252,8 @@ export default function IdleTimeout() {
         maxWidth: 420,
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
         textAlign: 'center',
-      }}>
+        }}
+      >
         <div style={{
           width: 52, height: 52, borderRadius: '50%',
           background: 'var(--tint-warn)', color: 'var(--tint-warn-fg)',

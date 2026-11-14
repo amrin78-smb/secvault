@@ -350,8 +350,18 @@ export default function ConditionsManager({ cveId, initialConditions, devices, c
               </h3>
 
               <div>
-                <label style={FIELD_LABEL_STYLE}>Description</label>
+                {/* ⛔ htmlFor/id on all three: the labels were siblings with
+                    nothing bound, so every field in the condition editor
+                    announced as unnamed. These conditions decide CVE
+                    applicability — a curated `unknown` here is what keeps a
+                    KEV-listed advisory from being silently downgraded — so an
+                    unnamed "Predicate config (JSON)" box is a poor place to be
+                    guessing which field you are in. Found by the guard written
+                    for roadmap row 45(d), not by the row, which named only the
+                    LDAP and Users panels. */}
+                <label htmlFor="cond_description" style={FIELD_LABEL_STYLE}>Description</label>
                 <input
+                  id="cond_description"
                   type="text"
                   value={form.description}
                   onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
@@ -361,8 +371,9 @@ export default function ConditionsManager({ cveId, initialConditions, devices, c
               </div>
 
               <div>
-                <label style={FIELD_LABEL_STYLE}>Predicate type</label>
+                <label htmlFor="cond_predicate_type" style={FIELD_LABEL_STYLE}>Predicate type</label>
                 <select
+                  id="cond_predicate_type"
                   value={form.predicateType}
                   onChange={(e) => setForm((f) => ({ ...f, predicateType: e.target.value }))}
                   className="input"
@@ -376,8 +387,9 @@ export default function ConditionsManager({ cveId, initialConditions, devices, c
               </div>
 
               <div>
-                <label style={FIELD_LABEL_STYLE}>Predicate config (JSON)</label>
+                <label htmlFor="cond_config" style={FIELD_LABEL_STYLE}>Predicate config (JSON)</label>
                 <textarea
+                  id="cond_config"
                   value={form.configText}
                   onChange={(e) => setForm((f) => ({ ...f, configText: e.target.value }))}
                   rows={5}

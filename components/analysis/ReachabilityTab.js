@@ -3,6 +3,13 @@ const { computeZoneReachability } = require('../../lib/engines/reachabilityMatri
 const { getZoneRoleMap } = require('../../lib/engines/zoneClassification');
 import Table from '../ui/Table';
 import Badge from '../ui/Badge';
+
+// ⛔ The risk tier IN WORDS, so the matrix does not signal it by outline colour
+// alone. Short because it sits in a matrix cell: these are the two tiers
+// riskTier() can return besides 'none', and the full sentence is in the cell's
+// `title`. Keyed on the tier rather than built from the zone names so the label
+// cannot disagree with the outline it accompanies.
+const RISK_MARK = { high: 'Ext\u2192Int', medium: 'DMZ\u2192Int' };
 import EmptyState from '../ui/EmptyState';
 
 // Rule Analysis Dashboard -- "Reachability" tab. A single-device, config-only
@@ -81,7 +88,8 @@ export default async function ReachabilityTab({ deviceId }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: 0 }}>
         Zone-to-zone paths from this device&apos;s own ruleset only; &quot;—&quot; means no explicit rule found (check
-        default policy). Red/amber outlines flag Allows into a classified Internal zone; set roles on{' '}
+        default policy). An Allow into a classified Internal zone is flagged in the cell
+        (&#9888; Ext&#8594;Int or &#9888; DMZ&#8594;Int) as well as by a red or amber outline; set roles on{' '}
         <a href={`/devices/${deviceId}?tab=manage`} style={{ color: 'var(--primary)' }}>
           this device&apos;s Manage tab
         </a>
@@ -152,6 +160,38 @@ export default async function ReachabilityTab({ deviceId }) {
                 return (
                   <td key={dstZone} title={title} style={outline ? { outline, outlineOffset: '-2px' } : undefined}>
                     <Badge color={VERDICT_BADGE_COLOR[cell.verdict]}>{VERDICT_LABEL[cell.verdict]}</Badge>
+                    {/* ⛔ THE RISK TIER WAS CARRIED BY THE OUTLINE COLOUR AND
+                        NOTHING ELSE (WCAG 1.4.1). The Badge reads "Allow" on a
+                        flagged cell and on a perfectly ordinary one, so with the
+                        hue removed — colour-blindness, a greyscale print of the
+                        audit evidence, a high-contrast mode that drops outlines —
+                        the two are indistinguishable, and the flagged one is an
+                        External zone reaching Internal directly.
+                        ⛔ The reason was ALSO only in the `title`, on a <td> that
+                        is not focusable: hover-only, so keyboard and touch never
+                        reached it. Putting it in the cell's CONTENT fixes both at
+                        once — it is visible, it is in the accessibility tree, and
+                        the title stays as the longer sentence on hover.
+                        ⛔ The glyph is aria-hidden and the WORDS carry the meaning;
+                        a bare ⚠ announced as "warning" says no more than the
+                        colour did. Pairing amber with a glyph is this repo's
+                        existing convention. */}
+                    {RISK_MARK[tier] ? (
+                      <span
+                        style={{
+                          display: 'block',
+                          marginTop: 2,
+                          fontSize: 'var(--text-xs)',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          // contrast-safe counterparts, not the raw ramp — the
+                          // rule v2.228.7 swept 24 other sites for.
+                          color: tier === 'high' ? 'var(--tint-danger-fg)' : 'var(--tint-warn-fg)',
+                        }}
+                      >
+                        <span aria-hidden="true">&#9888; </span>{RISK_MARK[tier]}
+                      </span>
+                    ) : null}
                   </td>
                 );
               })}

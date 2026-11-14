@@ -12,6 +12,19 @@ an icon LIBRARY; a new nav destination gets a new hand-rolled path here, because
 must keep a distinct glyph. Latest: `IconApplications` (a three-quarter box, v2.124.0) — the near
 candidates `IconGrid`/`IconDevices`/`IconTopology` were all taken and all confusable at 16px.
 
+## ui/useFocusTrap.js (v2.228.8)
+
+`useFocusTrap({ active, onEscape? })` -> a ref for the dialog PANEL. The ONE focus trap in the
+product: remembers what had focus, moves focus in, confines Tab/Shift+Tab, restores on close.
+⛔ Extracted from `Modal.js`'s private copy because `components/layout/IdleTimeout.js` had NONE —
+it declared `role="alertdialog" aria-modal="true"` with `grep -c focus` === 0, so "Stay signed in",
+the only control that saves the session, was unreachable by keyboard while the countdown ran.
+⛔ **`onEscape` is OPT-IN.** `Modal` passes `onClose`; `IdleTimeout` deliberately passes nothing —
+there is nothing to close, and dismissing it would hide the warning while the session still ends.
+⛔ Anchor the ref on the PANEL, never the backdrop. `tests/accessibleControls.test.js` fails the
+build on any file declaring `aria-modal` that does not IMPORT AND CALL this hook, with
+`components/ui/Evidence.js` a named, reasoned exemption (3 of 4 mechanisms; see roadmap row 58).
+
 ## ui/CoverageBar.js
 
 (v2.114.0) One stacked bar answering "how much of this fleet does the number above cover?" —

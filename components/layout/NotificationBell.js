@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { IconBell } from '../icons';
 
 const POLL_MS = 60000;
@@ -23,7 +23,6 @@ const TYPE_DOT_COLOR = {
 // config_diffs), polled every 60s. Rule-level findings are deliberately not
 // counted here — see app/api/events/route.js's removal comment.
 export default function NotificationBell() {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   // ⛔ `null`, NOT a fabricated `{total: 0}`. The initial state used to be a
   // zero summary, and a failed first load left it in place — so a DB error on
@@ -81,12 +80,21 @@ export default function NotificationBell() {
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
+      {/* ⛔ aria-expanded AND aria-haspopup, which were both absent (confirmed
+          live in the DOM). Without them this announces as a plain button and a
+          screen-reader user is never told it opens a panel, nor whether the
+          panel is currently open — so the only way to find out is to press it
+          and listen for what changed. components/layout/JobCentre.js, the
+          button immediately beside it in the same header, has had both since it
+          shipped; this is house convention, not a judgement call. */}
       <button
         type="button"
         className={`sv-icon-btn${open ? ' open' : ''}`}
         onClick={() => setOpen((o) => !o)}
         title="Notifications"
         aria-label="Notifications"
+        aria-expanded={open}
+        aria-haspopup="true"
       >
         <IconBell width={18} height={18} />
         {total > 0 && (
@@ -116,6 +124,8 @@ export default function NotificationBell() {
 
       {open && (
         <div
+          role="dialog"
+          aria-label="Notifications"
           style={{
             position: 'absolute',
             top: 'calc(100% + 8px)',
@@ -145,14 +155,25 @@ export default function NotificationBell() {
             </div>
           ) : summary.items && summary.items.length > 0 ? (
             <div style={{ maxHeight: 320, overflow: 'auto' }}>
+              {/* ⛔ A LINK, NOT A `<div onClick>`. Every row navigates to
+                  item.href, and as a bare div with no role, no tabIndex and no
+                  key handler these per-alert deep links were MOUSE-ONLY (WCAG
+                  2.1.1, Level A) on all 30 dashboard pages — the bell is in the
+                  shared header.
+                  ⛔ The fix is the right ELEMENT rather than role="button" plus
+                  tabIndex plus an onKeyDown, because this is a navigation: an
+                  anchor brings keyboard activation, a focus ring, the correct
+                  announced role, the href in the status bar and middle-click /
+                  open-in-new-tab with nothing to maintain. Bolting three
+                  attributes onto a div reimplements half of that and still
+                  cannot be opened in a new tab. JobCentre's rows next door are
+                  already <Link>. */}
               {summary.items.map((item, i) => (
-                <div
+                <Link
                   key={`${item.type}-${i}`}
-                  onClick={() => {
-                    setOpen(false);
-                    router.push(item.href);
-                  }}
-                  style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-light)', cursor: 'pointer', display: 'flex', gap: 10 }}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-light)', display: 'flex', gap: 10, textDecoration: 'none', color: 'inherit' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card)')}
                 >
@@ -161,7 +182,7 @@ export default function NotificationBell() {
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)', lineHeight: 1.4 }}>{item.label}</div>
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>{formatWhen(item.occurredAt)}</div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
@@ -169,18 +190,20 @@ export default function NotificationBell() {
               Nothing needs attention
             </div>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              router.push('/alerts');
-            }}
-            style={{ width: '100%', padding: '11px 16px', background: 'var(--bg-card)', border: 'none', borderTop: '1px solid var(--border-light)', cursor: 'pointer', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--primary)', textAlign: 'center' }}
+          {/* Also a navigation, so also a Link. It was a <button> calling
+              router.push, which IS keyboard-reachable — so unlike the rows above
+              this was not an access failure — but it announced as a button, could
+              not be opened in a new tab, and was the last thing keeping useRouter
+              in this file. One mechanism for every navigation in the panel. */}
+          <Link
+            href="/alerts"
+            onClick={() => setOpen(false)}
+            style={{ display: 'block', width: '100%', padding: '11px 16px', background: 'var(--bg-card)', borderTop: '1px solid var(--border-light)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--primary)', textAlign: 'center', textDecoration: 'none' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-subtle)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--bg-card)')}
           >
             View All Alerts &rarr;
-          </button>
+          </Link>
         </div>
       )}
     </div>

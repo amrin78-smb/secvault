@@ -3905,6 +3905,72 @@ which clears WCAG 1.4.11's 3:1 for a graphic and **fails** 1.4.3's 4.5:1 for tex
 every deliberate call site, because an inline style wins. Three files set it; all three were fixed
 together. If a fourth ever appears, it must be fixed in the same commit.
 
+### ⛔ FOUR CONTROLS THAT WERE THE ONLY WAY TO DO SOMETHING (v2.228.8)
+
+Not cosmetic accessibility debt — in each case there was no second route to the thing.
+
+⛔ **`aria-modal` IS A PROMISE, AND `IdleTimeout` MADE IT WITH NOTHING BEHIND IT.** It set
+`role="alertdialog" aria-modal="true"` and `grep -c focus` returned **0** — no focus moved in, no
+Tab confinement, no restore. `aria-modal` tells assistive technology that everything outside the
+dialog is inert, so declaring it without managing focus is worse than not declaring it: the user's
+focus point is still out in a page the screen reader has been told to ignore, and **"Stay signed
+in" — the only control that saves the session — was unreachable while the countdown ran.**
+`components/ui/Modal.js` had all four mechanisms and documented them.
+
+⛔ **ONE TRAP, EXTRACTED RATHER THAN COPIED** (`components/ui/useFocusTrap.js`), for the reason this
+file gives every time it reuses an evaluator: two implementations of one question eventually
+disagree, and here the disagreement is somebody signed out of a firewall console mid-sentence.
+⛔ **`onEscape` IS OPT-IN AND THE ASYMMETRY IS THE POINT.** `Modal` closes on Escape because its
+dialogs are things you opened and may abandon. `IdleTimeout` passes NO handler: there is nothing to
+close, the dialog reports a server-side expiry it does not own, and dismissing it would hide the
+warning while the session still ended. A dialog with no dismissal is the right shape for a deadline.
+⛔ **The role and `aria-modal` moved to the PANEL**, with the trap anchored there — they were on the
+backdrop, which declared the backdrop part of the dialog and gave a trap the wrong subtree.
+
+⛔ **A NAVIGATION IS A LINK.** `NotificationBell` rendered every notification row as a bare
+`<div onClick>` with no role, no `tabIndex` and no key handler, so the per-alert deep links were
+**MOUSE-ONLY (WCAG 2.1.1, Level A) on all 30 dashboard pages** — the bell is in the shared header.
+The trigger also had no `aria-expanded`/`aria-haspopup`, so it announced as a plain button that gave
+no hint it opened anything. ⛔ **The fix is the right ELEMENT, not `role="button"` + `tabIndex` +
+`onKeyDown`**: an anchor brings keyboard activation, a focus ring, the announced role, the href in
+the status bar and open-in-new-tab with nothing to maintain, and three attributes on a div
+reimplement half of that and still cannot be opened in a new tab. `JobCentre`, the button beside it
+in the same header, was already correct — house convention, not a judgement call.
+
+⛔ **A FLAGGED SEGMENTATION CELL MUST NOT RELY ON COLOUR (WCAG 1.4.1).** `ReachabilityTab` signalled
+its risk tier with the cell OUTLINE COLOUR alone and put the reason in a `title` on a
+**non-focusable `<td>`** — hover-only, so keyboard and touch never reached it. The `Badge` inside
+reads "Allow" on a flagged cell and an ordinary one alike, so with the hue gone they are identical,
+and the flagged one is an External zone reaching Internal directly. The tier is now in the cell's
+CONTENT (`⚠ Ext→Int` / `⚠ DMZ→Int`), which fixes both halves at once: visible, in the accessibility
+tree, and the `title` stays as the longer sentence. ⛔ The glyph is `aria-hidden` and the WORDS carry
+the meaning — a bare ⚠ announced as "warning" says no more than the colour did.
+
+⛔ **A VISIBLE LABEL THAT IS MERELY ADJACENT NAMES NOTHING.** `LdapRolesPanel`'s three fields had
+labels as siblings with no `htmlFor`/`id`, so each announced as "edit text, blank" — **including the
+group-DN box that decides which directory group becomes an Administrator.** `UsersPanel`'s per-row
+role `<select>` had no accessible name at all, on the one control that grants or revokes
+`manage_users`. ⛔ Its `aria-label` names the **USER**, not just "Role": the same two words on every
+row tell a screen-reader user nothing about whose privileges they are changing, and there is no
+undo. A `<th>Role</th>` is not a substitute — a column header scopes a cell for a table reader, it
+does not name a control inside it. `EntraRolesPanel`, written later over the same route, does it
+correctly, so the older panel simply predates the convention.
+
+⛔ **THE GUARDS FOUND FOUR MORE INSTANCES THAN THE ROADMAP ROW LISTED** — `Evidence.js` plus three
+fields in `ConditionsManager.js`. The row was compiled by reading; a scan reads every file. That is
+the argument for writing the guard BEFORE the fix. ⛔ **`Evidence.js` is a named, reasoned exemption
+rather than a waiver** (roadmap row 58): it has 3 of the 4 mechanisms and is missing only Tab
+confinement, and its other three live in the PROVIDER rather than the panel, so dropping the
+panel-level hook in would leave two focus restores racing — unjudgeable without rendering the drawer.
+
+⛔ **AND TWO OF THE FIRST-DRAFT GUARDS WERE SATISFIED BY A MENTION, WHICH MUTATION TESTING CAUGHT.**
+`!/useFocusTrap/` stayed green when `IdleTimeout`'s IMPORT was deleted, because the identifier still
+appeared in the call below it and in a comment; it now requires an import AND a call.
+`/RISK_MARK\[tier\]/` stayed green when the conditional render was disabled, because the same
+identifier appears again as the marker's own text. **Prose read as code, inside the suite written to
+catch guards that cannot fire** — the same defect as the device-scope check believing
+`notificationChannels.js` held no device data because a comment said so.
+
 ### ⛔ THE RAMP ON `color:` IS ALWAYS TEXT, AND 24 SITES FAILED 1.4.3 (v2.228.7)
 
 `color` is the one CSS property that paints text and nothing else, so a raw ramp token on `color:`

@@ -234,10 +234,24 @@ export default function LdapRolesPanel() {
       <Card>
         <CardHeader><CardTitle>Add a mapping</CardTitle></CardHeader>
         <CardBody>
-          <label style={{ display: 'block', fontSize: 'var(--text-sm)', marginBottom: 'var(--s2)' }}>
+          {/* ⛔ htmlFor/id, NOT a sibling <label> with nothing bound to it. All
+              three fields here had a visible label that was merely ADJACENT, so
+              every one of them had NO ACCESSIBLE NAME — a screen reader
+              announces "edit text, blank". This is the box that decides which
+              directory group becomes an Administrator of a firewall-management
+              platform. components/settings/EntraRolesPanel.js, written later
+              over the same API route, pairs htmlFor/id correctly throughout, so
+              this is house convention and this panel predates it.
+              ⛔ A bound label also makes the TEXT a click target for the field,
+              which is the half an aria-label would not have given back. */}
+          <label
+            htmlFor="ldap_group_dn"
+            style={{ display: 'block', fontSize: 'var(--text-sm)', marginBottom: 'var(--s2)' }}
+          >
             Group distinguished name
           </label>
           <input
+            id="ldap_group_dn"
             type="text"
             value={groupDn}
             onChange={(e) => setGroupDn(e.target.value)}
@@ -255,10 +269,14 @@ export default function LdapRolesPanel() {
             commas do not matter.
           </div>
 
-          <label style={{ display: 'block', fontSize: 'var(--text-sm)', margin: 'var(--s4) 0 var(--s2)' }}>
+          <label
+            htmlFor="ldap_role"
+            style={{ display: 'block', fontSize: 'var(--text-sm)', margin: 'var(--s4) 0 var(--s2)' }}
+          >
             Role
           </label>
           <select
+            id="ldap_role"
             value={role}
             onChange={(e) => setRole(e.target.value)}
             disabled={busy}
@@ -274,10 +292,14 @@ export default function LdapRolesPanel() {
             {(ROLES.find((r) => r.value === role) || {}).hint}
           </div>
 
-          <label style={{ display: 'block', fontSize: 'var(--text-sm)', margin: 'var(--s4) 0 var(--s2)' }}>
+          <label
+            htmlFor="ldap_description"
+            style={{ display: 'block', fontSize: 'var(--text-sm)', margin: 'var(--s4) 0 var(--s2)' }}
+          >
             Note <span style={{ color: 'var(--text-muted)' }}>(optional)</span>
           </label>
           <input
+            id="ldap_description"
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}

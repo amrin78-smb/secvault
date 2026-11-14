@@ -232,8 +232,21 @@ export default function UsersPanel() {
                   <Button variant="secondary" onClick={() => setScopeFor(u)}>
                     Firewalls
                   </Button>
+                  {/* ⛔ aria-label, because this control had NO ACCESSIBLE NAME
+                      AT ALL — a screen reader announces it as an unnamed combo
+                      box, on the one control in the product that grants or
+                      revokes `manage_users`.
+                      ⛔ It names the USER, not just "Role". A label of "Role"
+                      would announce identically on every row, so a
+                      screen-reader user tabbing down the table would hear the
+                      same two words N times with no way to tell whose
+                      privileges they were about to change — and the Actions
+                      column offers no undo. The <th>Role</th> above is not a
+                      substitute: a column header scopes a cell for a table
+                      reader, it does not name a control inside it. */}
                   <select
                     className="select"
+                    aria-label={`Role for ${u.username}`}
                     value={u.role}
                     onChange={(e) => handleRoleChange(u.id, e.target.value)}
                     style={{ width: 'auto' }}
