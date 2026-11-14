@@ -2069,10 +2069,14 @@ fleet-wide VPN history.
 
 ## Work Queue (`/work`, Phase 3, v2.115.0)
 
-ONE ranked list of outstanding work, gathered from TEN sources at READ time (the tenth,
-`application`, landed with the application view in v2.124.0). `lib/engines/workQueue.js`
-is pure (banding + ranking, no pool); `lib/engines/workQueueData.js` is the ten gathers. No table, no
-cron job — a stored queue goes stale against the data it indexes, and people WORK a stale to-do list.
+ONE ranked list of outstanding work, gathered from **ELEVEN** sources at READ time (the tenth,
+`application`, landed with the application view in v2.124.0; the eleventh, `coverage`, with the
+blind-spot register in v2.188.0). ⛔ **This said TEN, and "the ten gathers", for forty versions after
+the eleventh shipped** — corrected v2.228.5 along with the same stale count in `.ai-codex/lib.md`.
+Count them in `gatherWorkQueue`'s own `Promise.all`, which is the only place that cannot drift.
+`lib/engines/workQueue.js` is pure (banding + ranking, no pool);
+`lib/engines/workQueueData.js` holds the gathers. No table, no cron job — a stored queue goes stale
+against the data it indexes, and people WORK a stale to-do list.
 
 ⛔ **AN ITEM IS A DECISION, NOT A FINDING.** 1,132 rule-analysis findings exist on this fleet. They
 appear as ONE item per firewall, with the count travelling alongside, linking to the tab where that
@@ -2176,9 +2180,58 @@ all-clear is not.
 
 ⛔ **ONE DEVICE OR NONE.** An item spanning three firewalls names no `device_id` rather than the
 first — the same fabricated-attribution rule `fetchOpenIngestDrop` follows. `affects` states who is
-involved in words. ⛔ Called with **no opts**, so `segmentation` and `application` (the two expensive
-sources) stay cheap: a 15-minute background poll must not pay a cost the page pays because a person
-is waiting.
+involved in words.
+
+⛔ **IT IS CALLED WITH NO PRECOMPUTED RESULTS, AND FOR `segmentation` THAT USED TO MEAN THE SOURCE
+SILENTLY CONTRIBUTED NOTHING — A LIVE HOLE IN THIS ALERT TYPE (fixed v2.228.5).** This line read
+"Called with **no opts**, so `segmentation` and `application` (the two expensive sources) stay cheap:
+a 15-minute background poll must not pay a cost the page pays because a person is waiting." The cost
+argument was right about `application`, which has always put a COUNT on `application_flows` in front
+of the fleet load and then evaluated. It was **wrong about `segmentation`**, which opened with
+`if (!segmentationResult) return []` — so the one source whose subject is a DECLARED SECURITY
+BOUNDARY reported `{ok: true, count: 0}` on every single poll. ⛔ **Both guards above passed it,
+because an incomplete source that claims to be complete is exactly what they cannot see**: `ok` was
+true and `truncatedFrom` was unset. Measured on the reference deployment 2026-11-14, same data, same
+dispatch options: **`segmentation ok=true count=0` before, `count=1` after.** `violation_active` is
+the ONLY segmentation verdict that reaches `act_now` (it is `urgency: 'now'` + `evidence: 'measured'`;
+`violation_permitted` is `scheduled`, the other two are `unmeasured` and land in `verify`), so the
+most urgent item this type can carry could sit on `/work` as Act now indefinitely and reach no
+channel.
+
+⛔ **NEITHER OF THE TWO OBVIOUS FIXES WAS AVAILABLE, AND THAT IS WHY IT HAD TO EVALUATE.** Adding it
+to `omitSources` is structurally refused — the reconcile step clears any `natural_key` absent from
+the returned list, so omitting a source that CAN produce an `act_now` item clears real work as
+resolved, which is why `NEVER_ACT_NOW_SOURCES` holds `coverage` alone. And making the gather THROW
+without a precomputed result would fire the incompleteness guard on EVERY poll, permanently silencing
+all `work_act_now` alerting — the same structural dead end the coverage source produced above ~50
+firewalls. A guard that can only ever fire is as useless as one that can never fire.
+
+⛔ **THE FIX MIRRORS `gatherApplications` EXACTLY**: an already-computed result is used as-is,
+otherwise one COUNT on `segmentation_intents` decides whether to evaluate, and that probe **fails
+open** (an unreadable count is not "no boundary is declared"). With nothing declared a poll costs
+two counts.
+
+⛔ **THE COST WAS MIS-MEASURED FIRST, AND THE CORRECTED FIGURE IS MUCH SMALLER.** The first number
+recorded here was "the dispatch gather goes from 3.8s to 10.3s", from one run before the fix and
+one after — but those two runs had DIFFERENT PostgreSQL cache states, so the 6.5s was mostly a
+cold read, not the fix. Re-measured properly in ONE process, alternating the two paths three times
+over the same warm pool (a precomputed empty result makes the source free, which is the pre-fix
+cost): **median 2,906ms free vs 3,018ms self-evaluating — a marginal cost of ~112ms.** ⛔ The
+reason it is nearly free is structural: `gatherWorkQueue` runs its eleven sources under one
+`Promise.all`, so segmentation's ~20 queries OVERLAP with the other ten sources and rarely decide
+the wall clock. A cold standalone `evaluateSegmentation()` is **9.8s over 1,803 rules, 16
+firewalls and a 65-day evidence window** — that is what `/work` pays on a cold render, not what
+the poll adds. Both figures were taken from the dev box over the VPN, so each of the ~65 queries
+carries a round trip the server itself does not pay. And the cost could not have been avoided
+anyway, because the verdict that
+matters is the expensive one: `violation_active` is DEFINED by a measured non-zero hit count on a
+permitting rule, so the per-device traffic evidence IS the answer and a rules-only pass could never
+produce it.
+
+⛔ **A result handed in without an `intents` array now THROWS** rather than returning `[]` — a
+malformed result is not a fleet with no violations — and `/work`'s own duplicate error channel for
+this source was REMOVED in the same commit, because once the gather retries, overriding its verdict
+from the page could mark a source failed on a render where the retry succeeded.
 
 ## Segmentation Intent (`/segmentation`, Phase 3, v2.113.0)
 

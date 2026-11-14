@@ -205,6 +205,86 @@ describe('the dispatcher shape', () => {
 // register's 2+N queries and a 720-hour aggregate every 15 minutes for items
 // guaranteed to be discarded.
 
+describe('⛔ the segmentation source reaches a channel at all (v2.228.5)', () => {
+  // ⛔ FOR MOST OF THIS ALERT TYPE'S LIFE IT COULD NOT. This fetcher passes no
+  // precomputed results, and gatherSegmentation() used to return `[]` for a
+  // caller that handed it none — reported as `{ok: true, count: 0}`, so BOTH
+  // guards above passed it: an incomplete source claiming to be complete is
+  // exactly what they cannot see. `violation_active` is the only segmentation
+  // verdict that reaches act_now, and it is the most urgent thing this type
+  // carries. The gather now evaluates for itself behind a COUNT on
+  // `segmentation_intents`; these pin the mapping on this side of it.
+
+  const seg = (over = {}) => item({
+    type: 'segmentation',
+    key: 'seg:guest->server',
+    title: 'guest → server is permitted but declared off-limits',
+    severity: 'critical',
+    urgency: 'now',
+    evidence: 'measured',
+    why: '2 rules permit this path and traffic has used it.',
+    affects: ['FW-1', 'FW-2'],
+    action: 'Find out what is using this path before removing the rule.',
+    href: '/segmentation',
+    deviceIds: ['d1', 'd2'],
+    ...over,
+  });
+
+  it('a measured violation_active is dispatched, keyed on the intent', async () => {
+    await withGather(
+      ok([seg()], [{ key: 'segmentation', ok: true, count: 1 }]),
+      async (mod) => {
+        const out = await mod.OPEN_ITEM_FETCHERS.work_act_now({});
+        assert.equal(out.length, 1, 'a declared boundary in breach must reach a channel');
+        assert.equal(out[0].naturalKey, 'work:seg:guest->server');
+        assert.equal(out[0].path, '/segmentation');
+        assert.match(out[0].summary, /traffic has used it/);
+        assert.match(out[0].summary, /before removing the rule/);
+      }
+    );
+  });
+
+  it('⛔ it spans two firewalls, so it names NEITHER rather than the first', async () => {
+    // The fabricated-attribution rule fetchOpenIngestDrop follows for a full
+    // buffer with no culprit device. `affects` says who is involved, in words.
+    await withGather(
+      ok([seg()], [{ key: 'segmentation', ok: true, count: 1 }]),
+      async (mod) => {
+        const out = await mod.OPEN_ITEM_FETCHERS.work_act_now({});
+        assert.equal(out[0].deviceId, null);
+        assert.equal(out[0].deviceName, null);
+      }
+    );
+  });
+
+  it('the three non-active violation verdicts stay OFF the wire', async () => {
+    // violation_permitted is `soon` → scheduled; violation_unverified and
+    // unknown are `unmeasured` → verify. Only the measured, live one is urgent,
+    // and that is the whole reason the expensive traffic evidence is paid for.
+    await withGather(
+      ok(
+        [
+          seg({ key: 'seg:a', urgency: 'soon', evidence: 'measured' }),
+          seg({ key: 'seg:b', urgency: 'now', evidence: 'unmeasured' }),
+          seg({ key: 'seg:c', urgency: 'soon', evidence: 'unmeasured' }),
+        ],
+        [{ key: 'segmentation', ok: true, count: 3 }]
+      ),
+      async (mod) => {
+        assert.deepEqual(await mod.OPEN_ITEM_FETCHERS.work_act_now({}), []);
+      }
+    );
+  });
+
+  it('⛔ segmentation is NOT omittable, because it CAN produce an act_now item', async () => {
+    const { NEVER_ACT_NOW_SOURCES } = require('../lib/engines/workQueueData');
+    assert.ok(
+      !NEVER_ACT_NOW_SOURCES.includes('segmentation'),
+      'omitting it would make the reconcile clear every open violation as resolved'
+    );
+  });
+});
+
 describe('⛔ a source that can never reach act_now is omitted, not merely discarded', () => {
   const { NEVER_ACT_NOW_SOURCES } = require('../lib/engines/workQueueData');
 

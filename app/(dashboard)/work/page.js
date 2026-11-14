@@ -19,22 +19,37 @@ export const dynamic = 'force-dynamic';
 // page. Here it matters more than usual, because this page IS the headline —
 // there is nothing else on it to read while a fetch resolves.
 //
-// ⛔ Segmentation is computed HERE and passed in, rather than being gathered
-// inside workQueueData.js, because evaluateSegmentation() loads the whole
-// fleet's rules with traffic evidence — far and away the most expensive source
-// — and doing it behind the queue's own abstraction would hide that cost from
-// anyone reading the gather list. Its failure is caught here and reported as a
-// failed source, exactly like the eight query-backed ones.
+// ⛔ Segmentation is computed HERE and passed in, rather than being left to
+// workQueueData.js, because evaluateSegmentation() loads the whole fleet's
+// rules with traffic evidence — far and away the most expensive single source,
+// measured against the reference deployment 2026-11-14 at 9.8s cold over 1,803
+// rules, 16 firewalls and a 65-day window — and doing it only behind the
+// queue's own abstraction would hide that cost from anyone reading the gather
+// list. (That 9.8s is a COLD STANDALONE figure, i.e. roughly what this render
+// pays. It is not what the background poll adds: inside gatherWorkQueue the
+// eleven sources run under one Promise.all, where the measured marginal cost is
+// ~112ms — see gatherSegmentation().)
+//
+// ⛔ IT IS NO LONGER THE ONLY WAY THAT SOURCE CAN RUN, AND THAT MATTERS HERE
+// (v2.228.5). gatherSegmentation() now evaluates for itself when handed
+// nothing, behind a COUNT on `segmentation_intents` — it had to, or the
+// 15-minute dispatch poll would go on contributing a silent zero for a
+// declared security boundary. Passing the result keeps the work happening
+// exactly once on this render, and keeps the cost where a reader can see it.
 
 export default async function WorkQueuePage({ searchParams }) {
+  // ⛔ A FAILURE HERE IS LEFT TO THE GATHER TO REPORT, AND THE SECOND ERROR
+  // CHANNEL THAT USED TO LIVE HERE IS NOW GONE. While gatherSegmentation() only
+  // read what it was handed, recording the message was the only way the page
+  // could say the band was missing. Now the gather RETRIES, so overriding its
+  // verdict from here would mark the source failed on a page where the retry
+  // actually succeeded — a worse lie than the cost of retrying, and precisely
+  // the reasoning the application source below has carried all along.
   let segmentation = null;
-  let segmentationError = null;
   try {
     segmentation = await evaluateSegmentation(pool);
-  } catch (err) {
-    // ⛔ Recorded, not swallowed. It becomes a failed source below, so the page
-    // says the queue is incomplete rather than quietly omitting the band.
-    segmentationError = err.message;
+  } catch (_err) {
+    // Left null on purpose: the gather re-attempts and runSource() banners it.
   }
 
   // ⛔ THE APPLICATION VIEW IS COMPUTED HERE FOR THE SAME REASON AS SEGMENTATION
@@ -49,13 +64,11 @@ export default async function WorkQueuePage({ searchParams }) {
   // a cheap COUNT in front of the load and skips it entirely while nothing is
   // declared. Passing it here means the work that IS needed happens exactly once.
   //
-  // ⛔ AND THERE IS DELIBERATELY NO SECOND ERROR CHANNEL HERE, unlike
-  // segmentation above. gatherSegmentation() only ever reads what it is handed,
-  // so a failure on this page would vanish without that variable. This source
-  // does its own evaluation when handed nothing, and runSource() banners
-  // whatever that throws — so recording the error here as well could mark the
-  // source failed on a page where the retry actually succeeded, which is a
-  // worse lie than the cost of retrying.
+  // ⛔ NO SECOND ERROR CHANNEL HERE EITHER, FOR THE REASON STATED ABOVE — and
+  // as of v2.228.5 the two sources finally handle this the same way. This one
+  // always did its own evaluation when handed nothing, and runSource() banners
+  // whatever that throws, so recording the error here as well could mark the
+  // source failed on a page where the retry actually succeeded.
   let applications = null;
   try {
     applications = await evaluateAllApplications(pool);
@@ -94,13 +107,7 @@ export default async function WorkQueuePage({ searchParams }) {
     );
   }
 
-  const sources = gathered.sources.slice();
-  if (segmentationError) {
-    const i = sources.findIndex((s) => s.key === 'segmentation');
-    const entry = { key: 'segmentation', ok: false, count: 0, error: segmentationError };
-    if (i >= 0) sources[i] = entry;
-    else sources.push(entry);
-  }
+  const sources = gathered.sources;
 
   const items = rankItems(gathered.items);
 

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.5': [
+    'Fixed: a segmentation boundary you declared could be breached, show on the Work queue as Act now, and never reach Slack, Teams, email or a webhook. The background check that sends those alerts was the one caller that did not compute the segmentation result, and the queue reported that as “nothing outstanding” rather than as something it had not looked at.',
+    'Measured on the reference server before and after, against the same data: the segmentation source went from reporting 0 items to reporting 1. Both of the safety checks that exist to refuse an incomplete queue passed it, because a source that reports success while having checked nothing is exactly what they cannot detect.',
+    'The check now works out the answer for itself when nobody hands it one. With no boundary declared that costs a single row count; with one declared it adds about a tenth of a second to a check that already runs every fifteen minutes, because it shares that work with the ten other things being gathered at the same time.',
+    'A malformed result is now reported as a failure instead of as an empty list. “We could not read this” and “there is nothing here” are different answers, and only one of them is reassuring.',
+    'Note on today’s fleet: the one declared boundary is currently crossed by a rule that no traffic has used, which is ranked for scheduling rather than for an immediate alert. Nothing was missed to date — the gap was one measured packet away from mattering.',
+  ],
   '2.228.4': [
     'Fixed: the console address field accepted an address and then saved a DIFFERENT one. Typing 192.168.010.1 stored 192.168.8.1 \u2014 a leading zero makes the browser\u2019s URL parser read that part of the address as octal \u2014 with nothing on screen saying it had changed. This is the address sign-in is built from, so a wrong value locks you out of the console you would use to correct it. Any address that would be silently rewritten is now refused and both versions are shown.',
     'Fixed: the two traffic anomaly detectors each carry a measured \u201chow often should this alert\u201d figure, and nothing ever re-checked it. Both were wrong, in opposite directions: the \u201cfirewall stopped logging\u201d detector is firing about eight times more often than recorded, and the \u201cdenied traffic above normal\u201d detector had almost stopped firing \u2014 two alerts where twenty-eight were expected.',

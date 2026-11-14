@@ -835,10 +835,91 @@ describe('⛔ the segmentation source — four verdicts, not two', () => {
     assert.equal(out.truncatedFrom, 55);
   });
 
-  it('a missing or malformed segmentation result is an empty list, not a throw', async () => {
-    assert.deepEqual(await gatherSegmentation(null, null), []);
-    assert.deepEqual(await gatherSegmentation(null, {}), []);
-    assert.deepEqual(await gatherSegmentation(null, { intents: [null, { verdict: 'nonsense' }] }), []);
+  // ── the hole this source had in outbound alerting ──────────────────
+  //
+  // ⛔ THIS BLOCK REPLACES A TEST THAT PINNED THE BUG AS THE CONTRACT. It read
+  // "a missing or malformed segmentation result is an empty list, not a throw"
+  // and asserted `gatherSegmentation(null, null)` was `[]`. That is what the
+  // 15-minute dispatch poll gets — `fetchOpenWorkQueue` passes no precomputed
+  // results — so the source reported `{ok: true, count: 0}` on every cycle and
+  // a `violation_active`, the only segmentation verdict reaching `act_now`,
+  // could never leave the page. Fixed v2.228.5.
+
+  it('⛔ WITH NO PRECOMPUTED RESULT IT EVALUATES, rather than reporting a silent zero', async () => {
+    // The regression guard: restore `if (!segmentationResult) return []` and
+    // this goes red, because the evaluation is never reached.
+    const pool = {
+      sql: [],
+      async query(text) {
+        this.sql.push(text);
+        if (this.sql.length === 1) return { rows: [{ n: 1 }] };
+        throw new Error('the evaluation was reached');
+      },
+    };
+    await assert.rejects(() => gatherSegmentation(pool), /the evaluation was reached/);
+    assert.match(pool.sql[0], /count\(\*\)[^]*segmentation_intents/);
+  });
+
+  it('⛔ nothing declared costs ONE count, not a whole-fleet rule load', async () => {
+    // evaluateSegmentation() loads every active device's rules AND the
+    // per-device traffic evidence behind them — 9.8s cold against the reference
+    // deployment 2026-11-14, over 1,803 rules and 16 firewalls. With no
+    // declared boundary there is nothing to evaluate, and zero is the one
+    // honest empty this source has. (Its marginal cost inside gatherWorkQueue
+    // is ~112ms, because the eleven sources run concurrently — but this probe
+    // is what keeps even that off a fleet that has declared nothing.)
+    const pool = stubPool([[{ n: 0 }]]);
+    const out = await gatherSegmentation(pool);
+    assert.deepEqual(out, []);
+    assert.equal(pool.sql.length, 1, 'no fleet load');
+    assert.match(pool.sql[0].text, /count\(\*\)[^]*segmentation_intents/);
+  });
+
+  it('⛔ the probe FAILS OPEN — an unreadable count is not "no boundary is declared"', async () => {
+    const pool = {
+      sql: [],
+      async query(text) {
+        this.sql.push(text);
+        if (this.sql.length === 1) return { rows: [{ n: null }] };
+        throw new Error('the evaluation was reached');
+      },
+    };
+    await assert.rejects(() => gatherSegmentation(pool), /the evaluation was reached/);
+  });
+
+  it('⛔ THE TWO EXPENSIVE SOURCES NOW BEHAVE ALIKE, which is what was missing', async () => {
+    // The asymmetry WAS the bug: gatherApplications had always evaluated for
+    // itself behind a COUNT, and gatherSegmentation had not. Pinned side by
+    // side so one cannot regress without the comparison failing.
+    const zero = () => stubPool([[{ n: 0 }]]);
+    const [seg, app] = [zero(), zero()];
+    assert.deepEqual(await gatherSegmentation(seg), []);
+    assert.deepEqual(await gatherApplications(app), []);
+    assert.equal(seg.sql.length, 1);
+    assert.equal(app.sql.length, 1);
+  });
+
+  it('⛔ a result handed in WITHOUT an `intents` array throws; it used to be []', async () => {
+    // evaluateSegmentation always returns one, so this shape is a broken
+    // result — and "broken" reported as "nothing outstanding" is the same
+    // substitution, one layer in. runSource() banners it instead.
+    await assert.rejects(() => gatherSegmentation(null, {}), /not a fleet with no violations/);
+    await assert.rejects(
+      () => gatherSegmentation(null, { intents: 'nope' }),
+      /carried no `intents` array/
+    );
+    const reported = await runSource('segmentation', () => gatherSegmentation(null, {}));
+    assert.equal(reported.ok, false, 'a failed source, never a quiet empty one');
+  });
+
+  it('an intents array holding nothing actionable is a REAL empty list', async () => {
+    // The distinction the throw above exists to preserve: intents were read,
+    // and none of them is a violation.
+    assert.deepEqual(
+      await gatherSegmentation(null, { intents: [null, { verdict: 'nonsense' }] }),
+      []
+    );
+    assert.deepEqual(await gatherSegmentation(null, { intents: [] }), []);
   });
 });
 

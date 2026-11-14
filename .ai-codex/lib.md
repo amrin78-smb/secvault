@@ -898,8 +898,10 @@ refreshes destroys the one thing a queue is for. ⛔ `summarise` reports `source
 
 ## lib/engines/workQueueData.js
 
-(v2.115.0, tenth gather v2.124.0) TEN gathers, each isolated in `runSource` so a throw reports `{ok:false,error}` rather
-than contributing zero items. ⛔ The ack join in `gatherRuleCleanup` MUST go through
+(v2.115.0, tenth gather v2.124.0, eleventh v2.188.0) **ELEVEN** gathers, each isolated in
+`runSource` so a throw reports `{ok:false,error}` rather than contributing zero items. ⛔ This line
+said TEN until v2.228.5, after `coverage` had been added — count them in `gatherWorkQueue`'s
+`Promise.all`, not here. ⛔ The ack join in `gatherRuleCleanup` MUST go through
 `firewall_rules` — `rule_analysis_results.rule_id` is a UUID FK, `finding_acknowledgements.
 rule_id_vendor` is the vendor text id; joining them directly is `text = uuid` and Postgres
 refuses it. ⛔ `groupBy` collapses CVE and compliance to ONE ITEM PER PROBLEM (not per device) — devices survive
@@ -915,11 +917,23 @@ Work states are `violation`/`broken`/`partial`/`invalid`; `unspecified` and `ok_
 deliberately EXCLUDED (not confirmed work), and the orphan COVERAGE figure is never an item.
 ⛔ ONE unverified flow makes the whole item `unmeasured` -> `verify`; a fully-verified violation is
 `reported` AT MOST, never `measured` — SecVault read the rulebase, it did not observe a packet.
-⛔ It is the only gather that RUNS AN ENGINE rather than a query, so its cost is guarded twice: an
-already-computed `opts.applications` is used as-is (the `opts.segmentation` pattern), otherwise a
+⛔ Its cost is guarded twice: an already-computed `opts.applications` is used as-is, otherwise a
 single COUNT on `application_flows` decides whether the whole-fleet load happens at all. ⛔ That
 probe FAILS OPEN — an unreadable count falls through to the evaluation, because "we could not read
 the count" is not "nothing is declared".
+
+⛔ **`gatherSegmentation` IS THE SECOND GATHER THAT RUNS AN ENGINE, AND THIS LINE USED TO SAY
+`gatherApplications` WAS THE ONLY ONE (v2.228.5).** It was — and that asymmetry was a live hole in
+outbound alerting: `gatherSegmentation` opened with `if (!segmentationResult) return []`, so the
+15-minute `notification-dispatch` poll (which passes no precomputed results) got a silent empty list
+reported as `{ok:true, count:0}`, and `violation_active` — the only segmentation verdict that reaches
+the `act_now` band — could never leave `/work`. Measured before and after on production 2026-11-14,
+same data and same dispatch options: `segmentation ok=true count=0` → `count=1`. It now carries the
+identical two guards (handed-in result, else one COUNT on `segmentation_intents`, probe FAILS OPEN),
+and a handed-in result with no `intents` array THROWS rather than returning `[]`. ⛔ The marginal
+cost is **~112ms**, not the ~6s first claimed from two runs at different cache states: the eleven
+sources run under one `Promise.all`, so these queries overlap the rest. A cold standalone
+`evaluateSegmentation()` is 9.8s over 1,803 rules and 16 firewalls, which is what `/work` pays.
 
 ## lib/sessionOwner.js (v2.223.0)
 
