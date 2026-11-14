@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.11': [
+    'Documentation: the per-row storage cost was re-measured directly against real event counts and is ~368 bytes (311 of data, 57 of indexes), not the ~415 recorded since September. Every capacity figure multiplies by it.',
+    'It had been invisible because a second error cancelled it: the fleet\u2019s event rate was recorded 10% low while the row cost was 13% high, so the two multiplied out to within 1.2% of the truth. The build-time consistency check was green the whole time and correctly so \u2014 the table agreed with itself. Only measuring each input separately found it.',
+    'Recorded: the reference server holds 52 days of raw syslog, not the 30 every sizing figure is computed over, because its retention is set higher in its own configuration file. The database arithmetic closes exactly on that \u2014 1,232 GB of raw plus 8 of permanent rollups plus 0.75 of records equals the 1,241 GB measured.',
+    'Consequence worth knowing: at that server\u2019s actual settings the footprint is about 1.45 TiB, so the \u201cprovision 1.5 TB\u201d guidance is too tight for how it is really configured, though it remains correct for the 30-day default.',
+    'The permanent rollups have grown 4.2x in two months, to 8.0 GiB. They never expire, so they are the one component that grows without bound and the one to re-measure on a schedule.',
+  ],
   '2.228.10': [
     'Fixed: a firewall that stopped sending syslog before SecVault\u2019s 28-day evidence window began was reported with a silence that got SHORTER every hour. The start of the outage was being taken from the edge of the window, which moves forward hourly, so an outage that was not ending looked like one that was improving \u2014 and that duration is the only number the alert gives you.',
     'The same cause also made the alert repeat: every hour the outage was given a new identity, so the previous one was marked resolved and a fresh alert raised \u2014 about 24 false pairs a day for as long as the outage straddled the boundary. It affected the denied-traffic detector in exactly the same way.',

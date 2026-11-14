@@ -94,7 +94,10 @@ describe('the sizing table agrees with its own arithmetic', () => {
   it('⛔ the provisioning recommendation still covers the derived total', () => {
     // The one figure that must never be too SMALL. Everything else being wrong
     // is embarrassing; this being wrong under-provisions a customer.
-    const tb = /\*\*Provision ([\d.]+) TB for a fleet this size\*\*/.exec(src);
+    // Matches the figure inside the bold run rather than requiring the run to
+    // END there — it now qualifies which retention the figure is for, and a
+    // guard that fails on a clarification is a guard that gets waived.
+    const tb = /Provision ([\d.]+) TB for a fleet this size/.exec(src);
     assert.ok(tb, 'the provisioning recommendation is gone from the document');
     const needed = rawWindow + archWindow;
     assert.ok(

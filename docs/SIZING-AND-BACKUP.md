@@ -50,21 +50,56 @@ Fleet total, **re-measured 2026-11-14 over 14 days and all 24 hours** (`syslog_r
 
 | quantity | value | kind |
 |---|--:|---|
-| Fleet rate | **810/sec · 70.0M/day** | measured 2026-11-14, 14 days |
-| Row cost, heap + index | **~415 bytes** (340 heap + 75 index) | measured 2026-09-16 |
-| Raw syslog per day | **~27 GiB** | derived: 70.0M × 415 B |
-| Raw syslog, 30-day window | **~810 GiB** | derived |
+| Fleet rate | **903/sec · 78.0M/day** | measured 2026-11-15, 5 complete busy days |
+| Row cost, heap + index | **~368 bytes** (311 heap + 57 index) | measured 2026-11-15 |
+| Raw syslog per day | **~27 GiB** | derived: 78.0M × 368 B |
+| Raw syslog, 30-day window | **~800 GiB** | derived |
 | Compressed archive per day | **~5.5 GiB** | measured 2026-11-14 |
 | Compressed archive, 45-day retention | **~245 GiB** | derived |
-| Syslog rollups (permanent) | 1.9 GB | measured 2026-09-16 — ⛔ grows forever, re-measure |
-| System of record | ~900 MB, growing slowly | measured 2026-09-16 |
+| Syslog rollups (permanent) | **8.0 GiB** | measured 2026-11-15 — ⛔ ×4.2 in two months |
+| System of record | **750 MB** | measured 2026-11-15 |
+| Live database, as configured | **1,241 GB** | measured 2026-11-15 — ⛔ see the retention note |
 
 **Rule of thumb:** `events/sec × 86,400 × 415 bytes × SYSLOG_RETENTION_DAYS`, then add **~20%**
 for the compressed archive if `SYSLOG_ARCHIVE_ENABLED=true`.
 
-At 810 events/sec that is ~810 GiB of live database plus ~245 GiB of archive, about **1.05 TiB**
-all told. **Provision 1.5 TB for a fleet this size** — unchanged, and now with ~45% headroom
-rather than the ~15% the old figures implied. Scale linearly with events/sec.
+At 903 events/sec that is ~800 GiB of live database plus ~245 GiB of archive, about **1.03 TiB**
+all told. **Provision 1.5 TB for a fleet this size at the DEFAULT 30-day retention** — ~45%
+headroom. ⛔ **The reference deployment is not running that default, and at its real settings
+1.5 TB would be too tight** — see below.
+
+### ⛔ THE REFERENCE DEPLOYMENT HOLDS 52 DAYS OF RAW SYSLOG, NOT 30 (measured 2026-11-15)
+
+`syslog_events` has **52 daily partitions, 2026-09-25 to 2026-11-15, totalling 1,232 GiB** — so
+`SYSLOG_RETENTION_DAYS` on that box is set well above the `30` this document sizes against, in its
+own `.env.local`. ⛔ **The same trap `SYSLOG_ARCHIVE_RETENTION_DAYS` already carries** (the code
+default is 60, the box runs 45): a figure in the environment file beats the default, and a reader
+checking the default learns what this installation is *not* doing.
+
+The arithmetic closes exactly, which is how we know nothing else is going on:
+`1,232 raw + 8.0 rollups + 0.75 record = 1,241 GB`, the measured database size.
+
+| at | raw | archive | +rollups/record | total |
+|---|--:|--:|--:|--:|
+| the documented 30-day default | 800 GiB | 245 GiB | 9 GiB | **1.03 TiB** — 1.5 TB is fine |
+| **this box's real settings (52d / 45d)** | **1,232 GiB** | 246 GiB | 9 GiB | **1.45 TiB** — ⛔ 1.5 TB is too tight |
+
+⛔ **So the 30-day window in the table above has still never been observed here** — the box has
+always held more. Read it as the figure for the setting, not as a measurement of this fleet.
+
+### ⛔ TWO WRONG INPUTS CANCELLED, AND THE ARITHMETIC CHECK COULD NOT SEE IT
+
+Worth reading before trusting any derived figure, including the corrected ones above. Until
+2026-11-15 this table said **810/sec** and **415 bytes/row**. Both were wrong, in opposite
+directions — the rate 10% low, the row cost 13% high — and their PRODUCT was
+`27.0 GiB/day` against a measured truth of `26.7`, **1.2% apart**.
+
+⛔ `tests/sizingConsistency.test.js` checks that raw GiB/day equals events/day × bytes/row. It was
+green throughout, correctly: the table was *self-consistent*. A consistency check can only catch a
+derivation that disagrees with its inputs; it cannot catch inputs that are both wrong in a way that
+multiplies out. **Only measuring each input separately found this**, which is why every row above
+carries the date it was taken. ⛔ The index half was the worse of the two (75 → 57 bytes, 24% out),
+and nothing in the product would have shown it.
 
 ### ⛔ What was wrong here until 2026-11-14, and in which direction
 
@@ -110,7 +145,7 @@ That setting drops the raw log line for ordinary allowed traffic (~89% of rows) 
 threat / VPN / UTM / denied events. It is what took a row from ~1,000 bytes to ~340.
 
 Set `SYSLOG_RAW_MESSAGE=all` and **the raw window roughly triples** — ~2.4 TiB at this fleet's
-measured rate (3 × 810 GiB), which no longer fits the 1.5 TB this document tells you to
+measured rate (3 × 800 GiB), which no longer fits the 1.5 TB this document tells you to
 provision. ⛔ This said ~2.7 TB, tripled off the superseded 920 GB window. Do that deliberately
 or not at all, and re-provision first.
 
@@ -128,7 +163,7 @@ directory before raising `SYSLOG_RETENTION_DAYS`.**
 
 1. `SYSLOG_RETENTION_DAYS` — linear, and the rollups keep answering historical questions after
    the raw rows are gone.
-2. `SYSLOG_ARCHIVE_RETENTION_DAYS` — **~23% of total footprint** (245 of ~1,060 GiB). ⛔ This
+2. `SYSLOG_ARCHIVE_RETENTION_DAYS` — **~23% of total footprint** (245 of ~1,055 GiB at the 30-day default). ⛔ This
    said ~35%, a FOURTH figure derived from the old 8.4 GB/day archive rate; cutting the archive
    window therefore buys about two thirds of what this list used to promise.
 3. `SYSLOG_RAW_MESSAGE=security` — already the default; confirm it has not been raised to `all`.

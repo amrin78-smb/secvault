@@ -1796,8 +1796,19 @@ the same partition, either side of the `SYSLOG_RAW_MESSAGE=security` deploy:
 | | before | after |
 |---|---|---|
 | rows keeping `message` | 100% | 11% |
-| heap bytes/row | ~1,000 | **~340** |
-| index bytes/row | ~75 | ~75 |
+| heap bytes/row | ~1,000 | **~311** |
+| index bytes/row | ~75 | **~57** |
+
+⛔ **RE-MEASURED 2026-11-15 AND BOTH COLUMNS WERE OFF: ~311 heap + ~57 index = ~368 bytes/row, not
+415.** Taken exactly against real event counts (`pg_total_relation_size` / the day's
+`syslog_rollup_hourly` sum) on five complete busy partitions, which agree to within 1%: 367.1,
+367.9, 368.0, 369.4, 367.3. The index half was the worse estimate (75 → 57, 24% out). ⛔ **AND THE
+ERROR WAS INVISIBLE BECAUSE IT CANCELLED ANOTHER ONE**: the fleet rate was recorded 10% LOW
+(810/sec against a measured 903) while this was 13% HIGH, so the product — which is what every
+capacity figure uses — came out 27.0 GiB/day against a true 26.7, **1.2% apart**.
+`tests/sizingConsistency.test.js` was green throughout and correctly so: it checks that the derived
+figure matches its inputs, and the table WAS self-consistent. A consistency check cannot catch two
+inputs that are both wrong in a way that multiplies out — only measuring each separately does.
 
 ⛔ **A partition average mixes both eras and is NOT the steady-state figure.** The
 `syslog_events_20260908` partition reads ~941 heap bytes/row, which is neither the old nor the
@@ -1823,6 +1834,19 @@ events/day while `SIZING-AND-BACKUP.md` said 55.2M two lines above a raw cost of
 could have been caught with no new measurement at all. Full before/after table and the direction of
 each error are in that file; the archive errors were over-cautious (nobody was under-provisioned),
 the fleet rate was understated, which is the direction that matters.
+
+⛔ **AND THE REFERENCE DEPLOYMENT HOLDS 52 DAYS OF RAW SYSLOG, NOT 30 (measured 2026-11-15).**
+`syslog_events` has **52 daily partitions, 2026-09-25 to 2026-11-15, totalling 1,232 GiB**, so
+`SYSLOG_RETENTION_DAYS` is set well above the code default of 30 in that box's own `.env.local` —
+the same trap `SYSLOG_ARCHIVE_RETENTION_DAYS` already carries (default 60, box runs 45). The
+arithmetic closes exactly, which is how we know nothing else is happening:
+`1,232 raw + 8.0 rollups + 0.75 record = 1,241 GB`, the measured database size. ⛔ **So the 30-day
+window every sizing figure in this file is computed over has NEVER been observed here** — read it as
+the figure for the setting, not as a measurement of this fleet. ⛔ **At the box's real settings the
+footprint is ~1.45 TiB, so `docs/SIZING-AND-BACKUP.md`'s "Provision 1.5 TB" is too tight for how
+this installation is actually configured** (it is correct for the 30-day default, at ~1.03 TiB).
+⛔ **The permanent rollups are now 8.0 GiB, ×4.2 since 2026-09-16** — they never expire, so they are
+the one component that grows without bound and the one worth re-measuring on a schedule.
 
 ⛔ **This only fits because PostgreSQL lives on `E:`.** The data directory is
 `E:PostgreSQLdata` (2 TB volume, 1,629 GB free at time of writing) and the archive is
