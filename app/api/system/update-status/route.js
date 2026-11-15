@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.14': [
+    'The syslog spool and the compressed log archive are now restricted to SYSTEM and Administrators, on every update rather than only at install. On a server where SecVault\u2019s data lives on a drive other than C:, both directories inherited read access for every local user account \u2014 measured on the reference deployment, confirmed on an actual archive file.',
+    'That archive is the only remaining copy of the raw log line for most events, so this was the fleet\u2019s security telemetry \u2014 usernames, internal addresses, URLs \u2014 readable by any local account.',
+    'The spool was also WRITABLE, which matters more: the collector replays any queued file it finds there when it starts, so a local user could have inserted fabricated log events into the evidence behind CVE reachability and rule-usage findings.',
+    'It warns and continues rather than failing a deploy: stopping the collector would lose syslog outright, and dropped datagrams cannot be recovered later.',
+  ],
   '2.228.13': [
     'The central CVE feed now watches TWO signals, because neither can see the other\u2019s failure. It already reported when the hub stopped collecting; it now also reports when the hub keeps collecting but stops publishing anything new \u2014 a state this deployment was actually in for three weeks, reporting the feed as healthy while no newly published CVE had reached it.',
     'A frozen corpus is reported, never refused: the advisories already held did not become wrong, so they are still applied. What changes is that the feed stops counting as having supplied this cycle, so local CVE discovery runs again instead of being suppressed.',

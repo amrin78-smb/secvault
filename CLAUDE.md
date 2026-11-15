@@ -3648,6 +3648,78 @@ so the closing banner cannot report success and the scheduled task shows non-zer
 `tests/backupScripts.test.js` (brace-depth assertion for the unconditional property, ordering
 assertions against the dump and the key copy; six mutations verified).
 
+⛔ **AND THAT FIX REACHED ONE OF THREE SECVAULT-CREATED DATA DIRECTORIES, SO THE SENTENCE ABOVE
+BECAME TRUE AGAIN FOR THE OTHER TWO (v2.228.14).** After v2.225.3, `icacls` appeared in exactly one
+installer script. The **syslog spool** and the **compressed archive** are created with a bare
+`New-Item` and had never been restricted at all. Measured read-only on production 2026-11-15,
+before anything was changed:
+
+| path | state |
+|---|---|
+| `E:\` (volume root) | `BUILTIN\Users:(OI)(CI)(RX)` + `(CI)(AD)` + `(CI)(WD)`, `Everyone:(RX)` |
+| `E:\SecVaultBackup` | inheritance broken — v2.225.3 — **OK** |
+| `E:\SecVault_Backups` | inheritance broken — **OK** (so row 20's original claim is STALE) |
+| `E:\PostgreSQL\16\data` | inheritance broken by the PostgreSQL installer — **OK** |
+| `E:\SecVaultArchive` | `BUILTIN\Users:(I)(OI)(CI)(RX)` — **EXPOSED** |
+| `E:\SecVaultSpool` | the same, **plus `(AD)`/`(WD)`** — **EXPOSED AND WRITABLE** |
+
+Confirmed on a real file rather than the container:
+`E:\SecVaultArchive\syslog-20261001.log.gz` → `BUILTIN\Users:(I)(RX)`.
+
+⛔ **THE ARCHIVE IS NOT A CACHE, IT IS THE ONLY COPY.** At `SYSLOG_RAW_MESSAGE=security` the
+database keeps the raw line for ~11% of rows, so the archive is the sole remaining copy of the
+rest — the threat/vpn/utm/denied events specifically, i.e. the ones carrying usernames, internal
+addresses and URLs. ~211 GB of the fleet's security telemetry, readable by every local non-admin.
+
+⛔ **AND THE SPOOL IS A WRITE VECTOR, WHICH IS WORSE THAN A READ.** The root's `(CI)(AD)`/`(CI)(WD)`
+reach it, and `services/collector.js` REPLAYS any `.ready` file it finds there at startup — so a
+non-admin could inject arbitrary rows into `syslog_events`, and therefore into `log_hit` (decision
+rule **2** of the CVE priority tree, which sits ABOVE CVSS 9.0), `hit_count`, and every rule-usage
+finding. **Fabricated evidence is a worse outcome than leaked evidence**, and this is the only
+instance of this class in the product that can produce it.
+
+⛔ **IT IS THE WINDOWS DEFAULT FOR A NON-SYSTEM VOLUME ROOT, WHICH IS PRECISELY WHY IT NEEDS CODE.**
+Nothing misconfigured that server: `New-Item` on `E:\` inherits that ACL and SecVault never narrowed
+it. The same will happen on every customer volume that is not `C:`. ⛔ `C:` would have hidden this
+entirely — the system volume's root is not permissive — so the one deployment that exposed it is the
+one that followed CLAUDE.md's own advice about not putting the data directory on `C:`.
+
+⛔ **`installer/SecVault-Acl.ps1` IS ONE DEFINITION, DOT-SOURCED BY BOTH INSTALLERS**, same contract
+as `SecVault-Tls.ps1`. ⛔ **The call site that matters is `Update-SecVault.ps1`, not the installer**:
+every deployed server already HAS these directories, so hardening only at creation reaches fresh
+installs only — the `CREATE TABLE IF NOT EXISTS` trap. The backup directory got away with a
+create-time fix because a nightly job re-applies it; these two have no such job, so the update IS
+their repair vehicle. ⛔ **Non-fatal, deliberately**: refusing would stop the collector, and while it
+is down datagrams are GONE rather than queued.
+
+⛔ **`/inheritance:r` DOES THE WORK AND `/grant:r` DOES NOT, AND THE DIFFERENCE IS A REAL LIMIT.**
+`/grant:r` only replaces grants for the principals it names, so a non-admin ACE set DIRECTLY on the
+directory survives both. Production's exposure is entirely inherited, which this fixes; an explicit
+grant is **reported with the principal named and the `icacls /remove:g` remedy, never stripped** —
+removing every unrecognised principal would be determinate but could silently cut off a customer's
+backup agent. ⛔ **Found by EXERCISING the function on Windows, not by reading it**: the first draft
+of its test granted `BUILTIN\Users` explicitly, the lockdown reported FAIL, and the verify step was
+the only reason that was visible.
+
+⛔ **VERIFIED BEHAVIOURALLY ON THE AUTHORITATIVE PLATFORM** (staging, PowerShell **5.1.26100.9818**):
+18 assertions — the production-faithful INHERITED case, that an already-present file loses the ACE
+too, that **SYSTEM can still write afterwards** (the property the collector depends on), idempotency,
+that a missing path is reported and **not created** (creating one would make a wrong
+`SYSLOG_SPOOL_DIR` look healthy), and that an explicit ACE fails closed. Plus the real
+`[Parser]::ParseFile` gate over all three scripts: 0 errors, 0 keywords-parsed-as-commands.
+⛔ `tests/dataDirAcl.test.js` is the durable guard and is TEXT-BASED, which is a stated limitation
+rather than an oversight — it cannot execute PowerShell off Windows, so what it pins is that the
+call sites do not quietly disappear. **Every code-shaped assertion reads comment-stripped source**,
+because its own first draft asserted `/New-Item/` and `'/inheritance:r'` against the raw text and
+was satisfiable by the helper's own prose — the third time that trap appeared in one day's work.
+
+⛔ **`Backup-SecVault.ps1` KEEPS ITS INLINE COPY, DELIBERATELY, AND THE DUPLICATION IS NAMED RATHER
+THAN HIDDEN.** `tests/backupScripts.test.js` pins that block by TEXT — `'/inheritance:r'` as a
+literal, `$aclCheck = Invoke-Native`, and its ORDER relative to the `pg_dump` and the
+`CREDENTIAL_KEY` copy. Routing it through the shared helper breaks those assertions, and weakening
+a guard that protects `CREDENTIAL_KEY` to accommodate a refactor is the wrong trade. Unifying it
+means converting that guard to a behavioural one first — `.ai-codex/roadmap.md` row 68.
+
 ⛔ **A BACKUP VERIFIES ITSELF WHILE A GOOD COPY STILL EXISTS.** Free space is checked before the
 dump (a dump that fills its volume leaves a TRUNCATED file that looks complete); the finished
 archive is read back with `pg_restore --list`; an archive with fewer than 20 entries is rejected

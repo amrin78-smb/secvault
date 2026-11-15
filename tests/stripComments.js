@@ -46,7 +46,25 @@
  * Strip JS comments for a source scan.
  *
  * @param {string} src
- * @param {{sql?: boolean, keepLines?: boolean}} [opts]
+ * @param {{sql?: boolean, keepLines?: boolean, ps?: boolean}} [opts]
+ *   `ps` strips POWERSHELL comments instead of JS ones, for the tests that scan
+ *   `installer/*.ps1`.
+ *   ⛔ AND IT IS DELIBERATELY THE OPPOSITE ORDER — BLOCK FIRST, THEN LINE — FOR
+ *   A REASON SPECIFIC TO THE LANGUAGE, NOT OUT OF CARELESSNESS. PowerShell's
+ *   block terminator is `#>`, which ITSELF BEGINS WITH `#`. A line-comment pass
+ *   run first matches `^\s*#` against a line holding only `#>` and deletes the
+ *   terminator; the block pass then finds an opener with no closer and eats
+ *   forward to the next `#>` anywhere in the file — exactly the failure the JS
+ *   order exists to prevent, arrived at from the other side. The JS hazard
+ *   (`/*` inside a `//` line) has no PowerShell equivalent, because `<#` inside
+ *   a `#` line comment is removed with that line either way.
+ *   ⛔ THREE TESTS PREDATE THIS AND ROLL IT THEMSELVES — `backupScripts.test.js`,
+ *   `packageLauncher.test.js` and `installerNativeCalls.test.js` — all in the
+ *   same block-then-line order, and all invisible to `stripOrder.test.js`
+ *   because they use `split('\n')` rather than the `.*$` form it looks for.
+ *   They are not migrated here only because `backupScripts.test.js`'s
+ *   assertions are pinned to the text its stripper produces and that guard
+ *   protects `CREDENTIAL_KEY`; new PS scans must use this option.
  *   `sql` also strips SQL `--` line comments, for files that embed SQL in
  *   template literals.
  *   `keepLines` replaces a BLOCK comment with its own newlines instead of
@@ -61,6 +79,16 @@
  */
 function stripComments(src, opts = {}) {
   const blank = (m) => m.replace(/[^\n]/g, '');
+  if (opts.ps) {
+    // See the `ps` note above: BLOCK first here, and that is load-bearing.
+    const noBlocks = String(src == null ? '' : src)
+      .replace(/\r\n/g, '\n')
+      .replace(/<#[\s\S]*?#>/g, opts.keepLines ? blank : '');
+    return noBlocks
+      .split('\n')
+      .map((line) => line.replace(/^\s*#.*$/, ''))
+      .join('\n');
+  }
   let out = String(src == null ? '' : src)
     // ⛔ FIRST. The `[^:]` guard keeps `https://` from eating the rest of a URL
     // line, which would be harmless here but makes the residue confusing to read.

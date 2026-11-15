@@ -113,7 +113,10 @@ describe('⛔ every native 2>&1 in an installer script is inside Invoke-Native',
     // deliberately does not define its own copy (CLAUDE.md: one copy, two
     // callers, so they cannot drift). It is therefore exempt from this
     // assertion and NOT from the routing one above.
-    const DOT_SOURCED = new Set(['SecVault-Tls.ps1']);
+    // ⛔ SecVault-Acl.ps1 joins it on the same contract (v2.228.14): one copy
+    // of "restrict this data directory", dot-sourced by BOTH installer
+    // scripts, so it must not define a rival Invoke-Native either.
+    const DOT_SOURCED = new Set(['SecVault-Tls.ps1', 'SecVault-Acl.ps1']);
     for (const { file, text } of scriptsWithNativeRedirects()) {
       if (!text.includes('Invoke-Native') || DOT_SOURCED.has(file)) continue;
       assert.match(text, /function\s+Invoke-Native/,

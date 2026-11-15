@@ -1634,6 +1634,49 @@ if (-not (Test-Path $SpoolDir)) {
 }
 Write-Step "Spool directory ready at $SpoolDir"
 
+# ⛔ AND RESTRICTED, BECAUSE `New-Item` ON A NON-SYSTEM VOLUME INHERITS A
+# PERMISSIVE ROOT. Measured on production 2026-11-15: `E:\` grants
+# `BUILTIN\Users:(OI)(CI)(RX)` plus `(CI)(AD)`/`(CI)(WD)`, so the spool was
+# readable AND WRITABLE by every local non-admin -- and the collector REPLAYS
+# any `.ready` file it finds here at startup, which makes it an injection path
+# into `syslog_events` and therefore into `log_hit`, `hit_count` and every
+# rule-usage finding. Full reasoning and the measurements in SecVault-Acl.ps1.
+# ⛔ Non-fatal: a failure here must never stop the collector coming up, because
+# while it is down the datagrams are gone rather than queued.
+$aclHelpers = Join-Path $PSScriptRoot 'SecVault-Acl.ps1'
+if (Test-Path $aclHelpers) {
+    . $aclHelpers
+    $null = Protect-SecVaultDirectory -Path $SpoolDir -Label 'Syslog spool' `
+                -Logger { param($m) Write-Step $m }
+    # ⛔ RESOLVED THE WAY THE COLLECTOR RESOLVES IT, not guessed: this installer
+    # never writes SYSLOG_ARCHIVE_DIR, so a value only exists if an operator set
+    # one (the reference deployment runs E:\SecVaultArchive), and otherwise the
+    # code default is <install root>\archive.
+    $archiveDir = Join-Path $InstallRoot 'archive'
+    $envLocalForAcl = Join-Path $InstallRoot '.env.local'
+    if (Test-Path $envLocalForAcl) {
+        # -Encoding UTF8 is MANDATORY: Get-Content decodes with the ANSI
+        # codepage, which is the round-trip bug CLAUDE.md records as a
+        # production outage.
+        foreach ($line in (Get-Content -LiteralPath $envLocalForAcl -Encoding UTF8)) {
+            if ($line -match '^\s*SYSLOG_ARCHIVE_DIR\s*=\s*(.+)$') {
+                $v = $Matches[1]
+                $hash = $v.IndexOf('#')
+                if ($hash -ge 0) { $v = $v.Substring(0, $hash) }
+                $v = $v.Trim().Trim('"').Trim("'")
+                if ($v) { $archiveDir = $v }
+            }
+        }
+    }
+    # The archive is created by the collector on its first flush, so on a fresh
+    # install this usually reports "does not exist yet" and the UPDATE path is
+    # what restricts it. Attempted here anyway for a re-run over a live server.
+    $null = Protect-SecVaultDirectory -Path $archiveDir -Label 'Syslog archive' `
+                -Logger { param($m) Write-Step $m }
+} else {
+    Write-Step '[WARN] installer\SecVault-Acl.ps1 not found -- the spool and archive directories were NOT restricted. On a non-system volume they inherit read (and create) access for every local user.'
+}
+
 Write-Step 'Configuring firewall...'
 $ruleName = "SecVault Port $AppPort"
 if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {

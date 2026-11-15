@@ -477,6 +477,72 @@ Invoke-Step 'Collector prerequisites (service registration + firewall)' {
     } catch {
         Write-Log "  [WARN] Could not verify syslog firewall rules: $($_.Exception.Message)"
     }
+
+    # ── ⛔ RESTRICT THE SPOOL AND THE ARCHIVE, ON EVERY DEPLOY ─────────────
+    #
+    # ⛔ THIS IS THE CALL SITE THAT MATTERS, AND THE INSTALLER'S IS NOT. Every
+    # deployed server ALREADY HAS these directories, so hardening them only at
+    # creation reaches fresh installs only -- the `CREATE TABLE IF NOT EXISTS`
+    # trap, where the diff looks correct and nothing in the field is repaired.
+    # v2.225.3 got away with a create-time-ish fix for the BACKUP directory
+    # because a nightly job re-applies it; the spool and archive have no such
+    # job, so the update IS their repair vehicle. icacls is idempotent, so the
+    # healthy case is two cheap calls.
+    #
+    # ⛔ MEASURED ON PRODUCTION 2026-11-15 (read-only, before any change):
+    # `E:\` still grants `BUILTIN\Users:(OI)(CI)(RX)` plus `(CI)(AD)`/`(CI)(WD)`,
+    # and both directories inherited it -- confirmed on a real file,
+    # `E:\SecVaultArchive\syslog-20261001.log.gz` -> `BUILTIN\Users:(I)(RX)`.
+    # The archive is the ONLY copy of the raw line for the ~89% of rows the
+    # database strips, and the spool is WRITABLE, which makes it an injection
+    # path into `syslog_events` via the collector's startup replay.
+    # Full reasoning in SecVault-Acl.ps1.
+    #
+    # ⛔ NON-FATAL, DELIBERATELY. Refusing here would stop the deploy and
+    # therefore the collector, and while it is down datagrams are gone rather
+    # than queued. It is recorded on the banner instead.
+    try {
+        $aclHelpers = Join-Path $PSScriptRoot 'SecVault-Acl.ps1'
+        if (-not (Test-Path $aclHelpers)) {
+            Write-Log '  [WARN] installer\SecVault-Acl.ps1 not found -- the spool and archive were NOT restricted (not fatal).'
+        } else {
+            . $aclHelpers
+            $spoolDirCfg = ''
+            $archiveDirCfg = Join-Path $repoRoot 'archive'
+            $envLocalPath = Join-Path $repoRoot '.env.local'
+            if (Test-Path $envLocalPath) {
+                # -Encoding UTF8 is MANDATORY here: Get-Content decodes with the
+                # ANSI codepage, the round-trip bug CLAUDE.md records as an outage.
+                foreach ($line in (Get-Content -LiteralPath $envLocalPath -Encoding UTF8)) {
+                    if ($line -match '^\s*SYSLOG_(SPOOL|ARCHIVE)_DIR\s*=\s*(.+)$') {
+                        $which = $Matches[1]
+                        $v = $Matches[2]
+                        $hash = $v.IndexOf('#')
+                        if ($hash -ge 0) { $v = $v.Substring(0, $hash) }
+                        $v = $v.Trim().Trim('"').Trim("'")
+                        if ($v) {
+                            if ($which -eq 'SPOOL') { $spoolDirCfg = $v } else { $archiveDirCfg = $v }
+                        }
+                    }
+                }
+            }
+            if (-not $spoolDirCfg) { $spoolDirCfg = Join-Path $repoRoot 'spool' }
+            $spoolOk = Protect-SecVaultDirectory -Path $spoolDirCfg -Label 'Syslog spool' `
+                           -Logger { param($m) Write-Log $m }
+            $archiveOk = Protect-SecVaultDirectory -Path $archiveDirCfg -Label 'Syslog archive' `
+                             -Logger { param($m) Write-Log $m }
+            # ⛔ A directory that does not exist yet returns $false and is NOT a
+            # failure -- it is the normal fresh-install state. Only an actual
+            # icacls failure or a surviving non-admin ACE is reported, and both
+            # already logged [FAIL] above, so the banner reads the log rather
+            # than re-deriving a verdict from a boolean that conflates the two.
+            if ((-not $spoolOk) -or (-not $archiveOk)) {
+                Write-Log '  Note: one or both syslog data directories were not restricted this run -- see the lines above for which and why.'
+            }
+        }
+    } catch {
+        Write-Log "  [WARN] Could not restrict the syslog data directories: $($_.Exception.Message)"
+    }
 }
 
 # -----------------------------------------------------------------------
