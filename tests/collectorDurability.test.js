@@ -289,8 +289,20 @@ describe('archive: records are filed by their own receivedAt', () => {
   });
 
   it('⛔ the collector passes records, not lines plus new Date()', () => {
-    assert.match(COLLECTOR, /archive\.appendRecords\(ARCHIVE_DIR, records\)/);
+    // ⛔ THE INVARIANT IS "EACH RECORD CARRIES ITS OWN receivedAt", not the
+    // name of the variable holding them. This assertion used to pin the
+    // literal `appendRecords(ARCHIVE_DIR, records)` and failed on correct code
+    // in v2.228.16, when the argument became `fresh` — the subset not already
+    // archived, which is what stops a stranded file appending the same gzip
+    // member ~900 times (roadmap row 34). Same objects, same stamps, narrower
+    // list. A test that pins a spelling blocks the fix and proves nothing
+    // about the rule; this repo has now watched that happen four times.
+    assert.match(COLLECTOR_CODE, /archive\.appendRecords\(ARCHIVE_DIR, (records|fresh)\)/);
+    // And `fresh` must be the records themselves, filtered — never rebuilt.
+    assert.match(COLLECTOR_CODE, /const fresh = records\.filter\(/);
     assert.doesNotMatch(COLLECTOR, /appendBatch\([^)]*new Date\(\)\)/);
+    // The archive call may never be handed a clock in place of a stamp.
+    assert.doesNotMatch(COLLECTOR_CODE, /appendRecords\([^)]*new Date\(\)/);
   });
 });
 

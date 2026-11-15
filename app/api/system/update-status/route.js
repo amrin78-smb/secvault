@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.16': [
+    'Fixed: when the database briefly refused one batch of syslog events, the collector re-sent the ENTIRE spool file every two seconds for up to thirty minutes \u2014 about 900 times \u2014 re-storing the events that had already been saved, and writing a duplicate copy of the same raw lines into the compressed archive each pass. It now keeps only what is still owed, and archives each line exactly once.',
+    'Fixed: nothing ever checked that the syslog listener actually started. If the port was already in use the collector stayed running, reported itself healthy and received nothing \u2014 indistinguishable, from every screen in SecVault, from a quiet network. It now verifies each listener, says so on the dashboard, and retries one that could not start.',
+    'Measured on Windows and Linux: a second process could silently take over the syslog port and the datagrams would go to the wrong one. That socket option has been removed, so a port conflict is now reported instead of being silent.',
+    'The spool backlog figure can now say \u201ccould not be read\u201d. Previously an unreadable spool directory was recorded as an empty queue \u2014 a confident zero where there was no measurement.',
+  ],
   '2.228.15': [
     'Fixed: an advisory could silently lose its upgrade target. Three of the four advisory feeds would overwrite the list of fixed versions with an empty one, so a vendor record that simply does not state a fixed release erased the only thing telling you what to upgrade to.',
     'An empty list is the ordinary case for Fortinet\u2019s feed, not an unusual one \u2014 it records the \u201cupgrade to\u201d instruction as optional \u2014 so this was reachable on every sync, not a corner case.',

@@ -241,7 +241,47 @@ export default async function ServerHealthWidgets() {
               {num(h.ingest.backlog)}
             </span>
           }
-          sub="files written but not yet inserted"
+          /* ⛔ A BACKLOG READ FROM A DIRECTORY WE COULD NOT LIST IS NOT ZERO.
+             The column was NOT NULL DEFAULT 0, so an unreadable spool recorded
+             a confident empty queue while the retry mechanism behind it was
+             dead. It is nullable now, max() skips the NULLs — so one readable
+             flush still reports a real number — and this says how many of the
+             window's flushes were blind, because otherwise the reader cannot
+             tell a measured backlog from a mostly-guessed one. */
+          sub={
+            h.ingest.backlogUnknownFlushes > 0
+              ? `files written but not yet inserted — ${h.ingest.backlogUnknownFlushes} flush(es) in this window could not list the spool directory at all`
+              : 'files written but not yet inserted'
+          }
+        />
+        {/* ⛔ IS IT LISTENING? Everything above counts what REACHED the
+            process. Nothing here could ever say whether a socket was bound,
+            and a collector that bound none produces byte-identical evidence to
+            a fleet that went quiet. */}
+        <Row
+          label="Listening on"
+          value={
+            h.ingest.listeners === null || h.ingest.listeners === undefined ? (
+              <span style={{ color: 'var(--unmeasured)' }}>—</span>
+            ) : h.ingest.listeners.state === 'listening' ? (
+              <>{h.ingest.listeners.bound.join(', ')}</>
+            ) : h.ingest.listeners.state === 'partial' ? (
+              <span style={{ color: 'var(--tint-warn-fg)' }}>
+                {h.ingest.listeners.bound.join(', ')}
+              </span>
+            ) : h.ingest.listeners.state === 'deaf' ? (
+              <span style={{ color: 'var(--red)' }}>nothing</span>
+            ) : (
+              <span style={{ color: 'var(--unmeasured)' }}>could not be determined</span>
+            )
+          }
+          sub={
+            h.ingest.listeners === null || h.ingest.listeners === undefined
+              ? 'no listener state has been recorded — this collector predates the check, or has not restarted since'
+              : h.ingest.listeners.failed.length > 0
+                ? `did not bind: ${h.ingest.listeners.failed.join('; ')}`
+                : 'recorded by the collector when it bound, not inferred'
+          }
         />
         <Row label="Flushes in window" value={num(h.ingest.flushes)} />
         {/* ⛔ THE LOSS `Dropped` ABOVE CANNOT SEE. That counter is honest about
@@ -288,11 +328,27 @@ export default async function ServerHealthWidgets() {
         {h.ingest.flushes === 0 ? (
           /* ⛔ NO FLUSHES IS NOT ZERO DROPS. An absent collector would otherwise
              render as a clean ingest — the most reassuring possible way to show
-             that nothing is being collected at all. */
-          <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
-            The collector recorded no flushes in this window, so these figures are NOT MEASURED
-            rather than zero. Check that SecVault-Collector is running.
-          </div>
+             that nothing is being collected at all.
+             ⛔ AND "CHECK THAT IT IS RUNNING" WAS THE WRONG FIRST STEP FOR THE
+             WORST CAUSE. A collector that bound no socket IS running: the
+             service reports healthy, the process is up, and the one instruction
+             on screen is the one thing already true. The listener state makes
+             the two causes separable, so each gets its own sentence. */
+          h.ingest.listeners && h.ingest.listeners.state === 'deaf' ? (
+            <div style={{ color: 'var(--red)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
+              The collector is RUNNING but bound no syslog listener, so nothing can reach it:{' '}
+              {h.ingest.listeners.failed.join('; ') || 'no valid syslog port is configured'}.
+              Datagrams sent to it are discarded by the operating system and are counted nowhere.
+            </div>
+          ) : (
+            <div style={{ color: 'var(--unmeasured)', fontSize: 'var(--text-sm)', marginTop: 'var(--s3)' }}>
+              The collector recorded no flushes in this window, so these figures are NOT MEASURED
+              rather than zero.{' '}
+              {h.ingest.listeners && h.ingest.listeners.state === 'listening'
+                ? `It is listening on ${h.ingest.listeners.bound.join(', ')}, so this is a silent fleet rather than a stopped collector.`
+                : 'Check that SecVault-Collector is running.'}
+            </div>
+          )
         ) : null}
       </Panel>
 

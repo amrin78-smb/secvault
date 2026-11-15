@@ -1974,6 +1974,98 @@ not manage still produces evidence; dropping it would make the fleet look quiete
 The IP→device map is refreshed every 5 minutes and a failed refresh KEEPS the previous map
 rather than blanking it, so a DB blip cannot orphan every event.
 
+### ⛔ A REJECTED CHUNK RE-INSERTED THE WHOLE SPOOL FILE ~900 TIMES (v2.228.16)
+
+`insertEvents()` reported only an AGGREGATE `{stored, failedChunks}` with no record of WHICH
+500-row chunks landed, so `processSpoolFile()` could do nothing but keep the WHOLE file and
+re-insert every chunk next cycle — **including the ones that had already committed**. Quarantine
+needs BOTH `MIN_SPOOL_ATTEMPTS` (5) AND `SPOOL_RETRY_MS` (30 min), which at a 2s flush is ~900
+retries; the PK is `(received_at, id)` with `id BIGSERIAL`, so nothing dedupes them. The
+time-based budget correctly fixed a ten-second stranding bug and multiplied this by ~180x.
+
+⛔ **AND THE ARCHIVE AMPLIFIED IDENTICALLY, WHICH IS THE HALF THAT COSTS MOST.**
+`archive.appendRecords()` runs BEFORE the insert, so each retry appended another full gzip member
+of the same lines. At `SYSLOG_RAW_MESSAGE=security` that archive is the ONLY copy of the raw line
+for ~89% of the fleet's traffic — the duplication lands in the one store that cannot be rebuilt.
+
+⛔ **SHRINKING THE FILE DOES NOT FIX THE ARCHIVE, AND THE COMMON CASE IS WHY.** The ordinary
+failure is the database being briefly away, where EVERY chunk fails and the surviving set IS the
+whole file: nothing shrinks, and the ~900 appends would have continued. So a record carries an
+`archived` marker once it is safely in a member, and a replay appends only what is not yet there.
+⛔ **The marker is written ONLY after a successful append**, so the failure direction is a
+duplicate (harmless) and never a gap (permanent).
+
+⛔ **AN UNATTRIBUTABLE FAILURE KEEPS THE WHOLE FILE.** If the insert cannot say which records
+failed, replaying all of them is the only safe answer: the amplification is a COST, dropping a
+record the database never accepted is a LOSS. It degrades toward the old behaviour, never toward a
+smaller file. ⛔ The rewrite is write-then-rename, so a throw leaves the original intact and
+complete; and `rewrite` is false when the bytes would not change, so a stranded file costs no
+write per cycle.
+
+⛔ **THE DECISION MOVED INTO `lib/syslog/spoolFile.js` SO IT COULD BE EXERCISED.**
+`services/collector.js` binds sockets at module load — `tests/moduleLoad.test.js` lists it
+parse-only — so every durability guard left inside it can only be asserted against its SOURCE
+TEXT, and this repo has twice watched that shape of assertion pass over an inverted guard. The
+spool file is the one place where a wrong decision destroys evidence held nowhere else.
+
+### ⛔ NOTHING EVER CHECKED THAT A LISTENER BOUND, AND `reuseAddr` MADE THE CHECK IMPOSSIBLE (v2.228.16)
+
+`sock.bind`/`server.listen` reported failure only through an `'error'` handler that logged and
+returned; `main()` never inspected the outcome and printed `collector ready.` regardless. A
+process that bound NOTHING stayed alive looking healthy — and the only liveness signal in the
+product, `max(recorded_at) FROM syslog_ingest_stats`, is written by `doFlush()` ONLY when there IS
+a batch. **A deaf collector and a quiet fleet produced byte-identical evidence**, which is exactly
+the pair `lib/syslog/collectorConfig.js`'s own header names: *"'we are listening and receiving
+nothing' and 'we are not listening where they are sending' look identical from the inside"*. That
+guard was built for the CONFIG half and had no counterpart for the BIND half.
+
+⛔ **`reuseAddr: true` IS GONE, AND THE ROADMAP'S "UNCONFIRMED WINDOWS SUSPICION" WAS NEITHER
+UNCONFIRMED NOR WINDOWS-ONLY.** Measured 2026-11-15 with two real processes on an unused port:
+
+| | second process binds? | datagrams it receives |
+|---|---|---|
+| Windows 11 / Node 24 | **yes** | **0 of 10** (the FIRST holder kept them) |
+| Linux / Node 22 | **yes** | **10 of 10** (it TOOK them; libuv maps `reuseAddr` to `SO_REUSEPORT`) |
+
+Either way the bind SUCCEEDS and the datagrams silently go elsewhere, so **a bind check over a
+`reuseAddr` socket certifies a collector that is deaf.** 514 is LogVault's collector port on the
+shared staging box, so this is a live configuration. Without the flag the same probe returns
+`EADDRINUSE` on both platforms. ⛔ **Removing it costs nothing, also measured**: close and
+immediately rebind the same port succeeds on both (UDP has no TIME_WAIT), so a deploy is
+unaffected. ⛔ **It does NOT stop somebody else hijacking our port** — a third party setting
+`SO_REUSEADDR` can still bind on top of us, and from inside this process that is indistinguishable
+from a quiet network. What changed is that WE can no longer be the silent second binder.
+
+⛔ **FOUR STATES, AND `unknown` IS NOT `deaf`.** A bind reporting neither success nor failure
+within its timeout is UNKNOWN: calling it deaf sends an operator to restart a service that may be
+working, and calling it listening is the failed-read-as-a-fact bug inside the signal built to
+prevent it. `deaf` requires that EVERY listener be a confirmed failure — **or that there be no
+configured port at all**, since `parsePortList` can reject every entry and an empty set satisfies
+"did everything bind?" vacuously.
+
+⛔ **A BIND FAILURE AND A RUNTIME FAULT NEED OPPOSITE HANDLING, and getting that wrong would have
+caused the outage this detects.** A socket emits `'error'` for both. A failed bind must release
+the port or the retry can never take it; a fault on a LIVE listener must only be logged, exactly
+as before. Closing there would answer one bad packet by going deaf. `bindTracker().failed()`
+RETURNS that decision so it can be tested — its first draft was a bare `settleOnce()` whose
+missing-latch mutation stayed GREEN, because a native promise already ignores a second resolve.
+
+⛔ **A LOG LINE IS NOT A HEALTH SIGNAL**, so the verdict is recorded in `syslog_listener_state` and
+read by `lib/serverHealth.js`. The ingest panel's empty-window banner used to say *"Check that
+SecVault-Collector is running"* — the wrong first step for the worst cause, because a deaf
+collector **is** running.
+
+⛔ **IT RETRIES RATHER THAN EXITING.** The usual cause is a port held by something transient, so
+the recoverable outcome is to keep trying; exiting so NSSM restarts the process would crash-loop
+at the service throttle and write a health row per attempt. The timer stops itself once nothing is
+pending, so a healthy collector pays nothing.
+
+⛔ **`spool_backlog` IS NULLABLE NOW, WITH THE DEFAULT DROPPED.** It was `INTEGER NOT NULL DEFAULT
+0`, so an unreadable spool directory was recorded as a CONFIRMED EMPTY QUEUE while the whole retry
+mechanism was dead. `max()` skips NULLs, so one readable flush still reports a real number, and
+`getIngestHealth` returns `backlogUnknownFlushes` beside it — without that count a reader cannot
+tell a measured backlog from a mostly-guessed one.
+
 ### Storage (see `.ai-codex/schema.md` for the columns)
 
 | table | lifetime | why |

@@ -336,6 +336,22 @@ One row per flush: received / parsed / stored / **dropped** / unknown_vendor / u
 spool_backlog / batch_ms. ⛔ `dropped` is the number that matters — a collector silently losing
 datagrams under load looks exactly like a quiet network.
 
+⛔ **`spool_backlog` IS NULLABLE SINCE v2.228.16, AND THE NULL MEANS "COULD NOT BE READ"**
+(roadmap row 36). It was `INTEGER NOT NULL DEFAULT 0`, so when the collector's `readdir` on the
+spool directory failed — a permission change, a remounted volume — there was no value available to
+mean *unknown*, and the failure was recorded as a **confirmed empty queue** in the one durable
+record of collector health, while the retry mechanism behind it was dead. The failed-read-as-a-fact
+rule, inside the table that exists to make ingest loss visible. ⛔ The DEFAULT was dropped with the
+NOT NULL: left in place, a writer that OMITS the column would still get a confident 0.
+⛔ **`max(spool_backlog)` skips NULLs**, so a window holding one real reading still reports it and a
+window holding none reports NULL — which both consumers (`lib/serverHealth.js`,
+`lib/syslog/trafficStats.js`) already render as not-measured. `getIngestHealth` additionally returns
+`backlogUnknownFlushes`, because without it a reader cannot tell a measured backlog from a
+mostly-guessed one.
+⛔ **The CREATE reaches fresh installs only**, so the change is restated as two idempotent
+`ALTER TABLE … ALTER COLUMN` statements — the `CREATE TABLE IF NOT EXISTS` trap this file's own
+header names.
+
 ### syslog_ingest_gaps   (added 2026-10-19, permanent)
 ```
 id            BIGSERIAL PK
@@ -367,6 +383,48 @@ first-ever start is not an outage. Surfaced on the dashboard Server tab beside `
 Written by `recordIngestGap()` in `services/collector.js` AFTER connectivity and BEFORE the
 listeners bind, so it reads the PREVIOUS process's last flush rather than racing this one's.
 
+
+### syslog_listener_state   (added 2026-11-15, permanent)
+```
+id          BIGSERIAL PK
+recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+state       TEXT NOT NULL          -- listening | partial | deaf | unknown
+bound       TEXT[] NOT NULL '{}'   -- {'udp/514','tcp/514'}
+failed      TEXT[] NOT NULL '{}'   -- {'udp/514: bind EADDRINUSE 0.0.0.0:514'}
+detail      TEXT                   -- 'startup' | 'rebound'
+```
+Indexes: `idx_syslog_listener_state_time`. One row per OBSERVATION — a start writes one, and a
+later rebind writes another — so the newest row is the current state. Written by
+`services/collector.js`, read by `lib/serverHealth.js`'s `getListenerState()`.
+
+⛔ **IS THE COLLECTOR ACTUALLY LISTENING? Nothing in this product could answer that**
+(roadmap row 36). `sock.bind`/`server.listen` reported failure only through an `'error'` handler
+that logged and returned; `main()` never inspected the outcome and printed `collector ready.`
+regardless. A process that bound NOTHING stayed alive looking healthy — and the only liveness
+signal in the product, `max(recorded_at) FROM syslog_ingest_stats`, is written by `doFlush()` ONLY
+when there IS a batch. **A deaf collector and a quiet fleet produced byte-identical evidence**,
+which is the pair `lib/syslog/collectorConfig.js`'s own header names as looking "identical from the
+inside"; its guard was built for the CONFIG half and had no counterpart for the BIND half.
+
+⛔ **A LOG LINE IS NOT A HEALTH SIGNAL**, which is why this is a table. `engine.log` is not a
+product surface, and the operator who needs this is on the dashboard after a deploy. The ingest
+panel's banner used to say *"Check that SecVault-Collector is running"* — the wrong first step for
+the worst cause, because a deaf collector **is** running.
+
+⛔ **FOUR STATES, AND `unknown` IS NOT `deaf`.** A bind reporting neither success nor failure
+within its timeout is UNKNOWN: calling it deaf sends an operator to restart a service that may be
+working, and calling it listening is the failed-read-as-a-fact bug inside the signal built to
+prevent it. `deaf` requires that EVERY listener be a confirmed failure — **or that there be no
+configured port at all**, since an empty set satisfies "did everything bind?" vacuously.
+
+⛔ **An unrecognised `state` reads as `unknown`, never as listening** — the column has no CHECK
+constraint, and "listening" is the one verdict that may never be manufactured here.
+
+⛔ **`bound` and `failed` are never summed.** They are different facts with different first steps,
+and the failure string carries the reason (`udp/514: bind EADDRINUSE 0.0.0.0:514`) that names what
+to go and look at.
+
+⛔ **No retention.** Restarts are a handful per year, so this stays in the low hundreds of rows.
 ### config_backups
 ```
 id                UUID PK DEFAULT gen_random_uuid()

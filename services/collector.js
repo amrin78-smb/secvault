@@ -81,6 +81,17 @@ const { parseVendorPayload } = require('../lib/syslog/vendorParsers');
 const { buildEvent } = require('../lib/syslog/eventShape');
 const { buildDeviceMap } = require('../lib/syslog/deviceMap');
 const archive = require('../lib/syslog/archive');
+const spoolFile = require('../lib/syslog/spoolFile');
+const {
+  bindTracker, awaitBind: awaitBindRaw, listenerVerdict, fmtListener, fmtListenerError,
+} = require('../lib/syslog/listenerState');
+// How long a listener gets to say whether it bound, and how often an unbound
+// one is retried. Both are constants rather than env vars: they are not a
+// tuning surface, and a deployment that could set the bind timeout to zero
+// could switch the check off without meaning to.
+const BIND_TIMEOUT_MS = 10000;
+const LISTENER_RETRY_MS = 60000;
+const awaitBind = (ready, protocol, port) => awaitBindRaw(ready, protocol, port, BIND_TIMEOUT_MS);
 const store = require('../lib/syslog/eventStore');
 const { parsePortList } = require('../lib/syslog/collectorConfig');
 const {
@@ -332,52 +343,25 @@ function ensureSpoolDir() {
 
 // Written as .tmp then renamed to .ready, so a crash mid-write can never leave
 // a half-line that the replay would treat as a real event. rename() is atomic.
+//
+// ⛔ THE BYTES AND THE RETRY DECISION LIVE IN lib/syslog/spoolFile.js, NOT
+// HERE. This file binds sockets at module load, so nothing in it can be
+// required by a test and every guard it carries is asserted against its SOURCE
+// TEXT — which this repo has twice watched pass over an inverted guard. The
+// spool file is the one place where a wrong decision destroys evidence held
+// nowhere else, so its contract is exercised for real against a temp directory
+// in tests/spoolFile.test.js and this stays a wrapper.
 function writeSpool(records) {
   // Self-heal a spool directory that vanished after startup (a removed or
   // remounted volume); without this every subsequent flush fails identically.
   ensureSpoolDir();
-  const stamp = `${Date.now()}_${process.pid}_${Math.floor(Math.random() * 1e6)}`;
-  const tmp = path.join(SPOOL_DIR, `${stamp}.tmp`);
-  const ready = path.join(SPOOL_DIR, `${stamp}.ready`);
-  const payload = records
-    .map((r) => JSON.stringify({ l: r.line, s: r.sourceIp, t: r.receivedAt.toISOString() }))
-    .join('\n');
-  const fd = fs.openSync(tmp, 'w');
-  try {
-    fs.writeFileSync(fd, payload);
-    fs.fsyncSync(fd);            // the whole point: on disk before the DB
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, ready);
-  return ready;
+  return spoolFile.writeSpoolFile(SPOOL_DIR, records);
 }
 
 function readSpool(file) {
-  const out = [];
-  const text = fs.readFileSync(file, 'utf8');
-  for (const line of text.split('\n')) {
-    if (!line) continue;
-    try {
-      const o = JSON.parse(line);
-      const t = new Date(o.t);
-      // ⛔ Do NOT substitute `new Date()`. received_at is the partition key and
-      // is documented as "when WE observed it"; stamping a replayed record
-      // with the restart time silently moves it into the wrong daily partition
-      // and misdates every "last N hours" query. A record whose own timestamp
-      // is unreadable is skipped and counted, not invented -- the same rule as
-      // never defaulting a missing timestamp to now at parse time.
-      if (Number.isNaN(t.getTime())) {
-        spoolCorrupt++;
-        continue;
-      }
-      out.push({ line: o.l, sourceIp: o.s, receivedAt: t });
-    } catch (_e) {
-      // A single unparseable spool line is skipped, not allowed to poison the
-      // whole file — the rest of the batch is still real evidence.
-    }
-  }
-  return out;
+  const { records, corrupt } = spoolFile.parseRecords(fs.readFileSync(file, 'utf8'));
+  spoolCorrupt += corrupt;
+  return records;
 }
 
 async function processSpoolFile(file) {
@@ -396,24 +380,60 @@ async function processSpoolFile(file) {
   // crosses UTC midnight. This archive is the only copy of the raw line for
   // the ~89% of traffic SYSLOG_RAW_MESSAGE=security drops from the database,
   // so a `zgrep` of the right day would silently come back short.
+  //
+  // ⛔ AND A REPLAY APPENDS ONLY WHAT IS NOT ALREADY THERE. Every record this
+  // pass archives successfully is marked in the spool file itself, so a file
+  // stranded by a database outage — retried every 2s for the full 30-minute
+  // budget, ~900 times — contributes exactly ONE gzip member rather than ~900.
+  // The mark is written only after a SUCCESSFUL append, so the failure
+  // direction is a duplicate, never a gap.
+  let archivedNow = false;
   if (ARCHIVE_ENABLED) {
-    const a = archive.appendRecords(ARCHIVE_DIR, records);
-    if (!a.ok) {
-      archiveFailures += 1;
-      log(`WARN archive append failed (${archiveFailures} so far): ${a.error}`);
+    const fresh = records.filter((r) => r.archived !== true);
+    if (fresh.length === 0) {
+      archivedNow = true;        // nothing new to append; they are already in
     } else {
-      archiveRaw += a.bytesRaw;
-      archiveGz += a.bytesCompressed;
+      const a = archive.appendRecords(ARCHIVE_DIR, fresh);
+      if (!a.ok) {
+        archiveFailures += 1;
+        log(`WARN archive append failed (${archiveFailures} so far): ${a.error}`);
+      } else {
+        archivedNow = true;
+        archiveRaw += a.bytesRaw;
+        archiveGz += a.bytesCompressed;
+      }
     }
   }
 
   const events = records.map(toEvent);
-  const { stored, failedChunks } = await store.insertEvents(pool, events);
+  const { stored, failedChunks, failedIndexes } = await store.insertEvents(pool, events);
 
   if (failedChunks === 0) {
     fs.unlinkSync(file);          // ONLY on full success
   } else {
-    log(`WARN ${path.basename(file)} kept for replay - ${failedChunks} chunk(s) failed`);
+    // ⛔ KEEP ONLY WHAT IS STILL OWED. The committed chunks are in the database;
+    // replaying them inserts them AGAIN, and the primary key is
+    // (received_at, id) with id BIGSERIAL, so nothing dedupes them. Before this
+    // the whole file went round again every flush until the retry budget
+    // expired — roadmap row 34.
+    const plan = spoolFile.planRetry(records, failedIndexes, { archivedNow });
+    let kept = records.length;
+    if (plan.rewrite && plan.remaining.length > 0) {
+      try {
+        spoolFile.rewriteSpoolFile(file, plan.remaining);
+        kept = plan.remaining.length;
+      } catch (err) {
+        // ⛔ The ORIGINAL file is untouched by a failed rewrite (write-then-
+        // rename), so this degrades to replaying all of it — the behaviour
+        // that existed before — rather than risking a truncated one.
+        log(`WARN could not rewrite ${path.basename(file)}: ${err.message} - keeping all ${records.length} record(s)`);
+      }
+    }
+    log(
+      `WARN ${path.basename(file)} kept for replay - ${failedChunks} chunk(s) failed, ` +
+      `${stored} record(s) committed, ${kept} still owed` +
+      (plan.reason === 'unattributable' ? ' (chunk attribution unavailable - whole file retried)' : '')
+    );
   }
   return {
     stored,
@@ -662,12 +682,22 @@ async function doFlush() {
 
 // Cheap and failure-tolerant: a broken spool directory must not turn a flush
 // error into a second, masking error.
+//
+// ⛔ AN UNREADABLE DIRECTORY RETURNS null, NOT 0 (roadmap row 36). It returned
+// 0, and `syslog_ingest_stats.spool_backlog` was `INTEGER NOT NULL DEFAULT 0`,
+// so there was not even a value available to mean "unknown": a permission
+// change or a remounted volume was recorded as a CONFIRMED EMPTY QUEUE in the
+// collector's only durable health record, while the whole retry mechanism was
+// dead. The column is nullable now and this is what fills it. Every consumer
+// already maps NULL to "not measured" — `max()` skips NULLs, so a window with
+// one real reading still reports that reading, and a window with none reports
+// nothing rather than zero.
 function countReadyFiles() {
   try {
     return fs.readdirSync(SPOOL_DIR).filter((f) => f.endsWith('.ready')).length;
   } catch (err) {
     noteSpoolUnreadable('countReadyFiles', err);
-    return 0;
+    return null;
   }
 }
 
@@ -941,8 +971,46 @@ async function rollupCycle(wide) {
 }
 
 // --- listeners -------------------------------------------------------------
+//
+// ⛔ NOTHING EVER CHECKED THAT A LISTENER ACTUALLY BOUND (roadmap row 36).
+// `sock.bind` / `server.listen` reported failure only through an 'error'
+// handler that logged and returned; `main()` never inspected the outcome and
+// then printed `collector ready.` regardless. If every port failed the process
+// stayed alive with no socket — and `lib/serverHealth.js` derives collector
+// liveness from `max(recorded_at) FROM syslog_ingest_stats`, which `doFlush()`
+// writes only when there IS a batch. So a deaf collector was indistinguishable
+// from a quiet fleet, which is the exact pair `lib/syslog/collectorConfig.js`'s
+// header names: "'we are listening and receiving nothing' and 'we are not
+// listening where they are sending' look identical from the inside".
+//
+// ⛔ `reuseAddr: true` IS GONE, AND THAT IS WHAT MAKES THE CHECK MEAN
+// ANYTHING. Measured 2026-11-15 on BOTH platforms with two real processes on
+// an unused port, because the roadmap row recorded this as an unconfirmed
+// Windows suspicion and it is neither unconfirmed nor Windows-only:
+//
+//   Windows 11 / Node 24  second process bound OK, received 0 of 10 datagrams
+//                         (the FIRST holder kept them all)
+//   Linux / Node 22       second process bound OK, received 10 of 10
+//                         (the SECOND holder TOOK them all — libuv maps
+//                          reuseAddr to SO_REUSEPORT there)
+//
+// Either way the bind SUCCEEDS and the datagrams silently go somewhere else,
+// so a bind check over a reuseAddr socket certifies a collector that is deaf.
+// 514 is LogVault's collector port on the shared staging box, so this is a
+// live configuration, not a hypothetical. With the flag removed, the same
+// probe returns EADDRINUSE on both platforms — a failure the check can see.
+//
+// ⛔ AND REMOVING IT COSTS NOTHING, WHICH WAS ALSO MEASURED RATHER THAN
+// ASSUMED: closing the socket and immediately rebinding the same port without
+// the flag succeeds on both platforms (UDP has no TIME_WAIT), so a restart —
+// every deploy — is unaffected.
+//
+// ⛔ IT DOES NOT STOP SOMEBODY ELSE HIJACKING OUR PORT. A third party setting
+// SO_REUSEADDR can still bind on top of us, and from inside this process that
+// is indistinguishable from a quiet network. What changed is that WE can no
+// longer be the silent second binder.
 function startUdp(port) {
-  const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  const sock = dgram.createSocket({ type: 'udp4' });
   sock.on('message', (msg, rinfo) => {
     // Firewalls can pack several lines into one datagram.
     const text = msg.toString('utf8');
@@ -950,11 +1018,27 @@ function startUdp(port) {
       if (line.trim().length > 0) accept(line, rinfo.address);
     }
   });
-  // !! A bind failure on ONE port must not take the others down. Report it
-  // loudly and keep the rest listening.
-  sock.on('error', (err) => log(`ERROR udp/${port}: ${err.message}`));
-  sock.bind(port, () => log(`listening udp/${port}`));
-  return sock;
+  const ready = new Promise((resolve) => {
+    const track = bindTracker(resolve);
+    // !! A bind failure on ONE port must not take the others down. Report it
+    // loudly, resolve this one as failed, and keep the rest listening.
+    sock.on('error', (err) => {
+      log(`ERROR udp/${port}: ${err.message}`);
+      // ⛔ CLOSE ONLY A SOCKET THAT NEVER BOUND. A failed bind must release the
+      // port or the retry cannot take it; a runtime fault on a LIVE listener
+      // must only be logged, exactly as before this check existed — closing
+      // there would answer one bad packet by going deaf.
+      if (track.failed({ protocol: 'udp', port, ok: false, error: err.message })) {
+        // An unbound dgram socket throws on close.
+        try { sock.close(); } catch (_e) {}
+      }
+    });
+    sock.bind(port, () => {
+      log(`listening udp/${port}`);
+      track.listening({ protocol: 'udp', port, ok: true, error: null });
+    });
+  });
+  return { socket: sock, ready };
 }
 
 // A syslog line far longer than this is a framing failure, not a log line.
@@ -1003,9 +1087,45 @@ function startTcp(port) {
   });
   // Bounded so a connection flood cannot exhaust file descriptors.
   server.maxConnections = 2048;
-  server.on('error', (err) => log(`ERROR tcp/${port}: ${err.message}`));
-  server.listen(port, () => log(`listening tcp/${port}`));
-  return server;
+  const ready = new Promise((resolve) => {
+    const track = bindTracker(resolve);
+    server.on('error', (err) => {
+      log(`ERROR tcp/${port}: ${err.message}`);
+      // Same asymmetry as the UDP path: release a port we never got, never
+      // tear down a listener that is working.
+      if (track.failed({ protocol: 'tcp', port, ok: false, error: err.message })) {
+        try { server.close(); } catch (_e) {}
+      }
+    });
+    server.listen(port, () => {
+      log(`listening tcp/${port}`);
+      track.listening({ protocol: 'tcp', port, ok: true, error: null });
+    });
+  });
+  return { socket: server, ready };
+}
+
+/**
+ * Record what bound, durably.
+ *
+ * ⛔ A LOG LINE IS NOT A HEALTH SIGNAL. The whole defect is that a deaf
+ * collector looks like a quiet fleet to every surface in the product, and
+ * `engine.log` is not a surface. One row per OBSERVATION — the start, and each
+ * later transition — so the newest row is the current state.
+ *
+ * ⛔ NEVER THROWS. A failure to record must not stop the collector listening;
+ * that would turn an accounting problem into the outage it exists to report.
+ */
+async function recordListenerState(v, detail) {
+  try {
+    await pool.query(
+      `INSERT INTO syslog_listener_state (state, bound, failed, detail)
+       VALUES ($1, $2::text[], $3::text[], $4)`,
+      [v.state, v.bound.map(fmtListener), [...v.failed, ...v.unknown].map(fmtListenerError), detail || null]
+    );
+  } catch (err) {
+    log(`WARN could not record listener state: ${err.message}`);
+  }
 }
 
 // --- lifecycle -------------------------------------------------------------
@@ -1175,11 +1295,40 @@ async function main() {
   // runs inside doFlush() and is therefore genuinely serialised by the
   // `flushing` mutex, which the old fire-and-forget replayBacklog() only
   // claimed to be. See rearmFailedSpool().
-  const udpSockets = UDP_PORTS.ports.map((p) => startUdp(p));
-  const tcpServers = TCP_PORTS.ports.map((p) => startTcp(p));
+  const udpSockets = [];
+  const tcpServers = [];
+  const starts = [
+    ...UDP_PORTS.ports.map((p) => { const h = startUdp(p); udpSockets.push(h.socket); return awaitBind(h.ready, 'udp', p); }),
+    ...TCP_PORTS.ports.map((p) => { const h = startTcp(p); tcpServers.push(h.socket); return awaitBind(h.ready, 'tcp', p); }),
+  ];
+  // ⛔ AWAITED, AND THAT IS THE WHOLE POINT. The sockets are already created
+  // and already receiving by the time this resolves — binding is not delayed
+  // by waiting for its result — but the timers below, the banner, and the
+  // durable health row all now depend on an ANSWER rather than on an
+  // assumption. `awaitBind` is bounded, so a listener that never reports
+  // cannot hold the flush timer hostage.
+  let verdict = listenerVerdict(await Promise.all(starts));
+  await recordListenerState(verdict, 'startup');
+  const pending = [...verdict.failed, ...verdict.unknown];
+  if (verdict.state === 'deaf') {
+    log(
+      'ERROR NOTHING IS LISTENING. This collector is running and DEAF: ' +
+      (verdict.failed.length === 0 && verdict.unknown.length === 0
+        ? 'no valid syslog port is configured (check SYSLOG_UDP_PORT / SYSLOG_TCP_PORT).'
+        : `every listener failed to bind - ${[...verdict.failed, ...verdict.unknown].map(fmtListenerError).join('; ')}.`) +
+      ' Datagrams are being discarded by the OS and are counted nowhere.'
+    );
+  } else if (verdict.state !== 'listening') {
+    log(
+      `WARN listening on ${verdict.bound.map(fmtListener).join(', ')} but ` +
+      `${pending.length} listener(s) did not bind - ${pending.map(fmtListenerError).join('; ')}`
+    );
+  }
 
   const startupBacklog = countReadyFiles();
-  if (startupBacklog > 0) {
+  if (startupBacklog === null) {
+    log('WARN spool: the spool directory could not be listed at startup - the backlog is UNKNOWN, not empty');
+  } else if (startupBacklog > 0) {
     log(
       `spool: ${startupBacklog} file(s) waiting` +
       (rearmed > 0 ? ` (including ${rearmed} re-armed)` : '') +
@@ -1273,11 +1422,43 @@ async function main() {
   // until the first timer fires.
   rollupCycle(true);
 
+  // ⛔ A FAILED LISTENER IS RETRIED, NOT MOURNED. The usual cause is a port
+  // held by something that is itself transient (a sibling service restarting,
+  // a deploy overlapping), so the recoverable outcome is to keep trying — and
+  // the alternative, exiting so NSSM restarts the process, would crash-loop at
+  // the service throttle and write a health row per attempt. The timer stops
+  // itself once nothing is pending, so a healthy collector pays nothing.
+  let listenerRetrying = false;
+  const listenerRetryTimer = setInterval(async () => {
+    if (listenerRetrying || shuttingDown || pending.length === 0) return;
+    listenerRetrying = true;
+    try {
+      const retried = await Promise.all(pending.map((r) => {
+        const h = r.protocol === 'udp' ? startUdp(r.port) : startTcp(r.port);
+        if (r.protocol === 'udp') udpSockets.push(h.socket); else tcpServers.push(h.socket);
+        return awaitBind(h.ready, r.protocol, r.port);
+      }));
+      const recovered = retried.filter((r) => r.ok === true);
+      if (recovered.length > 0) {
+        pending.length = 0;
+        for (const r of retried) if (r.ok !== true) pending.push(r);
+        verdict = listenerVerdict([...verdict.bound, ...retried]);
+        log(`listener recovered: now bound on ${verdict.bound.map(fmtListener).join(', ')}`);
+        await recordListenerState(verdict, 'rebound');
+      }
+    } catch (err) {
+      log(`WARN listener retry failed: ${err.message}`);
+    } finally {
+      listenerRetrying = false;
+    }
+  }, LISTENER_RETRY_MS);
+
   async function shutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
     log(`${signal} received - draining.`);
     clearInterval(flushTimer);
+    clearInterval(listenerRetryTimer);
     clearInterval(mapTimer);
     clearInterval(maintTimer);
     clearInterval(threatTimer);
@@ -1299,7 +1480,20 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  log('collector ready.');
+  // ⛔ `collector ready.` USED TO PRINT UNCONDITIONALLY, INCLUDING OVER A
+  // COLLECTOR THAT HAD BOUND NOTHING. The closing line of the banner is the
+  // one an operator reads after a deploy; it may not claim a state nobody
+  // checked.
+  if (verdict.state === 'listening') {
+    log(`collector ready - listening on ${verdict.bound.map(fmtListener).join(', ')}.`);
+  } else if (verdict.state === 'deaf') {
+    log('collector started but is NOT LISTENING - see the ERROR above. Ingest is dead.');
+  } else {
+    log(
+      `collector ready on ${verdict.bound.map(fmtListener).join(', ') || 'no port'} ` +
+      `(${pending.length} listener(s) still unbound, retried every ${LISTENER_RETRY_MS / 1000}s).`
+    );
+  }
 }
 
 main().catch((err) => {

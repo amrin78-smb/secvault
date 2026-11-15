@@ -2212,10 +2212,31 @@ CREATE TABLE IF NOT EXISTS syslog_ingest_stats (
   dropped        BIGINT NOT NULL DEFAULT 0,
   unknown_vendor BIGINT NOT NULL DEFAULT 0,
   unknown_source BIGINT NOT NULL DEFAULT 0,
-  spool_backlog  INTEGER NOT NULL DEFAULT 0,
+  -- ⛔ NULLABLE, AND THE NULL MEANS "COULD NOT BE READ". It was
+  -- `INTEGER NOT NULL DEFAULT 0`, so when the collector's readdir on the spool
+  -- directory failed -- a permission change, a remounted volume -- there was
+  -- no value available to mean "unknown" and the failure was recorded as a
+  -- CONFIRMED EMPTY QUEUE, in the one durable record of collector health,
+  -- while the retry mechanism behind it was dead. The failed-read-as-a-fact
+  -- rule, inside the table that exists to make ingest loss visible.
+  -- ⛔ `max(spool_backlog)` SKIPS NULLS, so a window holding one real reading
+  -- still reports it and a window holding none reports NULL -- which both
+  -- consumers (lib/serverHealth.js, lib/syslog/trafficStats.js) already render
+  -- as "not measured" rather than zero.
+  spool_backlog  INTEGER,
   batch_ms       INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_ingest_stats_time ON syslog_ingest_stats (recorded_at DESC);
+-- ⛔ THE CREATE ABOVE REACHES FRESH INSTALLS ONLY. Every deployed server
+-- already HAS this table, so the nullability change has to be stated again as
+-- an ALTER or the reference fleet keeps `NOT NULL DEFAULT 0` for ever and goes
+-- on recording an unreadable spool directory as an empty one. The exact trap
+-- this file's own header names. Both statements are idempotent.
+ALTER TABLE syslog_ingest_stats ALTER COLUMN spool_backlog DROP NOT NULL;
+-- ⛔ AND THE DEFAULT GOES WITH IT. Left in place, a writer that OMITS the
+-- column would get a confident 0 -- the same fabricated measurement by a
+-- different route. An omitted column must now yield NULL.
+ALTER TABLE syslog_ingest_stats ALTER COLUMN spool_backlog DROP DEFAULT;
 
 -- ⛔ THE ONE KIND OF LOSS syslog_ingest_stats CANNOT SEE (added 2026-10-19).
 -- `dropped` counts buffer overflow honestly, but it can only count datagrams
@@ -2255,6 +2276,47 @@ CREATE TABLE IF NOT EXISTS syslog_ingest_gaps (
   reason       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_syslog_ingest_gaps_time ON syslog_ingest_gaps (detected_at DESC);
+
+-- ⛔ IS THE COLLECTOR ACTUALLY LISTENING? Nothing could answer that (roadmap
+-- row 36). `sock.bind`/`server.listen` reported a failure only through an
+-- 'error' handler that logged and returned; `main()` never inspected the
+-- outcome and printed `collector ready.` regardless. A process that bound
+-- NOTHING therefore stayed alive looking healthy, and the only liveness signal
+-- in the product -- `max(recorded_at) FROM syslog_ingest_stats` -- is written
+-- by `doFlush()` ONLY when there is a batch. So a deaf collector and a quiet
+-- fleet produced byte-identical evidence, which is the pair
+-- `lib/syslog/collectorConfig.js`'s header already names as the thing that
+-- "look[s] identical from the inside".
+--
+-- ⛔ A LOG LINE IS NOT A HEALTH SIGNAL, which is why this is a table.
+-- `engine.log` is not a product surface, and the operator who needs this is
+-- looking at the dashboard after a deploy.
+--
+-- ⛔ ONE ROW PER OBSERVATION, NOT PER COLLECTOR. The newest row is the current
+-- state: a start writes one, and a later rebind (a port released by whatever
+-- was holding it) writes another. Restarts are rare -- a handful per year --
+-- so this table stays in the low hundreds of rows and needs no retention.
+--
+-- ⛔ FOUR STATES, AND `unknown` IS NOT `deaf`. A bind that reports neither
+-- success nor failure within its timeout is UNKNOWN; recording it as deaf
+-- would send an operator to restart a service that may be working perfectly,
+-- and recording it as listening is the failed-read-as-a-fact bug in the one
+-- signal built to prevent it. `deaf` requires that EVERY listener be a
+-- confirmed failure -- or that there be no configured port at all, which is
+-- its own way of hearing nothing.
+--
+-- ⛔ `bound` AND `failed` ARE NEVER SUMMED INTO A COUNT. They are different
+-- facts with different first steps, and the failure text carries the reason
+-- ('udp/514: bind EADDRINUSE 0.0.0.0:514') that names what to go and look at.
+CREATE TABLE IF NOT EXISTS syslog_listener_state (
+  id          BIGSERIAL PRIMARY KEY,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  state       TEXT NOT NULL,                      -- listening | partial | deaf | unknown
+  bound       TEXT[] NOT NULL DEFAULT '{}',       -- {'udp/514','tcp/514'}
+  failed      TEXT[] NOT NULL DEFAULT '{}',       -- {'udp/514: bind EADDRINUSE ...'}
+  detail      TEXT                                -- 'startup' | 'rebound'
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_listener_state_time ON syslog_listener_state (recorded_at DESC);
 
 -- ⛔ log_class: the event's kind, computed ONCE at ingest instead of being
 -- re-derived by every query. Added 2026-09-08 after measuring the alternative:

@@ -210,6 +210,8 @@ GRANT SELECT ON TABLE syslog_ingest_stats TO claude_readonly;
 GRANT SELECT ON TABLE syslog_ingest_stats TO nocvault_readonly;
 GRANT SELECT ON TABLE syslog_ingest_gaps TO claude_readonly;
 GRANT SELECT ON TABLE syslog_ingest_gaps TO nocvault_readonly;
+GRANT SELECT ON TABLE syslog_listener_state TO claude_readonly;
+GRANT SELECT ON TABLE syslog_listener_state TO nocvault_readonly;
 GRANT SELECT ON TABLE syslog_talker_hourly TO claude_readonly;
 GRANT SELECT ON TABLE syslog_talker_hourly TO nocvault_readonly;
 GRANT SELECT ON TABLE syslog_app_hourly TO claude_readonly;
