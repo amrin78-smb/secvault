@@ -3354,6 +3354,44 @@ here because `hubDelivered` turns on `errors.length === 0`, so one lost line wou
 the blind spot *and* re-suppress local discovery, with every signal green. The composition is now
 the pure, exported `syncErrors()`, and dropping either contributor goes red.
 
+### ⛔ AND `fixed_in_versions` HAD THE SAME HOLE, IN THREE WRITERS (v2.228.15)
+
+The column beside it — the one that names what to UPGRADE TO — was guarded in `cveHub.js` **alone**.
+`fortinet.js` protected it only behind `$17::boolean` (`degraded`); `paloalto.js` and `nvd.js` did not
+protect it at all. So any record that simply does not state a fixed release erased an advisory's only
+remediation target.
+
+⛔ **AND `[]` IS THE ORDINARY OUTCOME, NOT AN EDGE CASE** — `fortinet.js` records the CSAF
+"Upgrade to X.Y.Z" instruction as "a bonus (not required)", so a perfectly healthy NON-degraded
+`advisory_page` record routinely carries an empty list and fell straight through to `ELSE EXCLUDED`.
+Reachable on every sync.
+
+⛔ **PROVEN BY EXECUTING THE REAL STATEMENT, WITH THE PRE-FIX ARM AS A NEGATIVE CONTROL** (extracted
+from the shipping source, `PREPARE`d, run against a live `advisories` table):
+
+| | non-degraded record carrying `[]` | record naming a release |
+|---|---|---|
+| old (`degraded`-only gate) | `["7.4.11"]` → **`[]`** | `["7.4.12"]` |
+| new | **`["7.4.11"]` held** | `["7.4.12"]` |
+
+One direction only, so a vendor keeps authority wherever it has the better data.
+
+⛔ **ONE PREDICATE, `hasFixedVersionsSql`, SHARED BY ALL FOUR WRITERS** — `cveHub.js`'s inline copy
+was migrated too, so "names a real release" cannot mean two things in two files. It WALKS the array
+rather than trusting `jsonb_array_length > 0`, because a list of empty strings names no release
+either; that is the reasoning `max: null` already carries for a boundary. ⛔ **SQL-only, deliberately**:
+the boundary predicate needs a JS half because `hubIsBetter()` decides in JS and the UPDATE restates
+it in SQL — two halves that were once found disagreeing. Nothing decides `fixed_in_versions` in JS, so
+a JS twin would be an unused definition free to drift from the one that runs.
+
+⛔ **THE GUARD FOR THE NEXT WRITER WAS SATISFIED BY A MENTION ON ITS FIRST DRAFT.**
+`tests/fixBoundary.test.js` scans every `lib/feeds/*.js` setting this column — but
+`code.includes('hasFixedVersionsSql')` is satisfied by the IMPORT LINE, so deleting the guard from
+`paloalto.js`'s CASE left the suite GREEN (verified by mutation). It now requires the predicate inside
+the `fixed_in_versions = CASE ... END` arm, with a companion assertion that at least four writers are
+found so the scan cannot go vacuous. Same defect as a `useFocusTrap` check passing on a file that
+imports it and never calls it.
+
 ### ⛔ `nvd.js` WAS THE LAST FEED WRITER THAT COULD TRADE A FIX BOUNDARY FOR NONE (v2.228.13)
 
 Three of the four advisory writers refuse a fix-boundary downgrade through the shared

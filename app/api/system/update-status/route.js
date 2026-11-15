@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.15': [
+    'Fixed: an advisory could silently lose its upgrade target. Three of the four advisory feeds would overwrite the list of fixed versions with an empty one, so a vendor record that simply does not state a fixed release erased the only thing telling you what to upgrade to.',
+    'An empty list is the ordinary case for Fortinet\u2019s feed, not an unusual one \u2014 it records the \u201cupgrade to\u201d instruction as optional \u2014 so this was reachable on every sync, not a corner case.',
+    'The protection now applies to every feed and runs in one direction only: a record that DOES name a fixed release still wins, so a vendor keeps authority wherever it has better data.',
+    'Verified against a live database with the previous behaviour as a control: the old code erased the list, the new code keeps it.',
+  ],
   '2.228.14': [
     'The syslog spool and the compressed log archive are now restricted to SYSTEM and Administrators, on every update rather than only at install. On a server where SecVault\u2019s data lives on a drive other than C:, both directories inherited read access for every local user account \u2014 measured on the reference deployment, confirmed on an actual archive file.',
     'That archive is the only remaining copy of the raw log line for most events, so this was the fleet\u2019s security telemetry \u2014 usernames, internal addresses, URLs \u2014 readable by any local account.',

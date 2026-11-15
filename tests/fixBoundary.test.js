@@ -189,3 +189,82 @@ describe('⛔ the SQL half is GENERATED, so it cannot drift from the JS half', (
       'and the refusal must keep the local value');
   });
 });
+
+// ── hasFixedVersionsSql: the same question one column over ───────────────────
+//
+// ⛔ `affected_version_ranges` has refused a downgrade since v2.186.2.
+// `fixed_in_versions` sitting beside it was guarded in cveHub.js ALONE.
+// Measured 2026-11-15 by EXECUTING the real fortinet upsert against a live
+// `advisories` table, with the pre-fix arm as a negative control:
+//
+//   old (gated on `degraded` only)  ["7.4.11"] -> []          ERASED
+//   new                             ["7.4.11"] -> ["7.4.11"]  held
+//   both, incoming names a release  ->          ["7.4.12"]    incoming wins
+//
+// ⛔ And `[]` is the ORDINARY outcome, not an edge case: fortinet.js records the
+// CSAF "Upgrade to X.Y.Z" instruction as a bonus rather than a requirement, so a
+// perfectly healthy NON-degraded record routinely carries it.
+describe('⛔ a fixed_in_versions list must name a real release', () => {
+  const { hasFixedVersionsSql } = require('../lib/feeds/fixBoundary');
+
+  it('walks the array rather than trusting jsonb_array_length', () => {
+    // A list of empty strings has length > 0 and names nothing — the same
+    // reasoning `max: null` already carries for a boundary.
+    const sql = hasFixedVersionsSql('x');
+    assert.match(sql, /jsonb_array_elements_text/);
+    assert.match(sql, /btrim/);
+    assert.ok(!/jsonb_array_length/.test(sql),
+      'length alone would accept a list of empty strings');
+  });
+
+  it('is applied to the expression it is given, both sides', () => {
+    assert.match(hasFixedVersionsSql('advisories.fixed_in_versions'),
+      /advisories\.fixed_in_versions/);
+    assert.match(hasFixedVersionsSql('EXCLUDED.fixed_in_versions'),
+      /EXCLUDED\.fixed_in_versions/);
+  });
+
+  it('⛔ EVERY feed writer that sets fixed_in_versions uses the SHARED predicate', () => {
+    // ⛔ THE GUARD FOR THE NEXT WRITER. Three of four could erase a list when
+    // this was found; a fifth feed added later must not reintroduce it. Scanned
+    // with comments stripped, because the prose above names the very pattern it
+    // forbids — the trap this repo keeps re-finding.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const { stripComments } = require('./stripComments');
+    const dir = path.join(__dirname, '..', 'lib', 'feeds');
+    const offenders = [];
+    for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.js'))) {
+      const code = stripComments(fs.readFileSync(path.join(dir, f), 'utf8'));
+      const at = code.search(/fixed_in_versions\s*=\s*CASE/);
+      if (at === -1) continue;
+      // ⛔ THE PREDICATE MUST BE USED IN THE ARM, NOT MERELY IMPORTED. The first
+      // draft asked `code.includes('hasFixedVersionsSql')`, which the IMPORT
+      // LINE satisfies — so deleting the guard from paloalto's CASE left this
+      // test GREEN (verified by mutation). Same defect as a `useFocusTrap`
+      // check passing on a file that imports it and never calls it.
+      const end = code.indexOf('END,', at);
+      const arm = end === -1 ? code.slice(at) : code.slice(at, end);
+      if (!arm.includes('hasFixedVersionsSql')) offenders.push(f);
+    }
+    assert.deepEqual(offenders, [],
+      'these set fixed_in_versions in an ON CONFLICT arm without the shared '
+      + 'downgrade guard, so a record carrying no fixed versions can erase an '
+      + `advisory's only remediation target:\n  ${offenders.join('\n  ')}`);
+  });
+
+  it('⛔ and at least four writers are actually covered, so the scan is not vacuous', () => {
+    // A scan that matches nothing passes. cveHub, fortinet, paloalto and nvd all
+    // set this column today; if that count drops, the scan above stopped looking.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const { stripComments } = require('./stripComments');
+    const dir = path.join(__dirname, '..', 'lib', 'feeds');
+    const covered = fs.readdirSync(dir)
+      .filter((n) => n.endsWith('.js'))
+      .filter((f) => /fixed_in_versions\s*=\s*CASE/
+        .test(stripComments(fs.readFileSync(path.join(dir, f), 'utf8'))));
+    assert.ok(covered.length >= 4,
+      `expected at least 4 writers of fixed_in_versions, found ${covered.length}: ${covered}`);
+  });
+});
