@@ -513,3 +513,158 @@ test('repairTrend: too little history to judge is unknown, not a clean bill', ()
   assert.equal(repairTrend([], 20).state, 'unknown');
   assert.ok(REPAIR_CONVERGENCE_RUNS >= 3, 'fewer than three runs cannot show a trend');
 });
+
+// ── corpusAdvance: a live INGEST hid a dead CORPUS for three weeks ───────────
+//
+// ⛔ MEASURED ON THE LIVE HUB 2026-11-15, which is why these exist. generated_at
+// 2026-10-02, checked_at 2026-10-23, newest CVE publication date in the corpus
+// 2026-09-22 — so between 10-02 and 10-23 `checked_at` advanced hourly, this
+// consumer reported `fresh`, and no CVE published after 09-22 had ever arrived.
+const {
+  corpusAdvance, corpusAdvanceErrors, NOT_ADVANCING_AFTER_MS,
+} = require('../lib/feeds/cveHub');
+const daysAgo = (d) => new Date(NOW_MS - d * 86400000).toISOString();
+
+test('corpusAdvance: a recently published corpus is advancing', () => {
+  const a = corpusAdvance(daysAgo(3), 'fresh', NOW_MS);
+  assert.equal(a.state, 'advancing');
+  assert.equal(a.reason, '');
+});
+
+test('corpusAdvance: THE MEASURED CASE — ingest fresh, corpus 44 days old', () => {
+  // The exact live shape. `fresh` is what checked_at said while this was true.
+  const a = corpusAdvance(daysAgo(44), 'fresh', NOW_MS);
+  assert.equal(a.state, 'not_advancing');
+  assert.match(a.reason, /44 days/);
+  assert.match(a.reason, /CVE DISCOVERY/, 'must name what is actually lost');
+  assert.match(a.reason, /still ingesting/i, 'and must distinguish it from a stale ingest');
+  assert.equal(a.ageMs, 44 * 86400000);
+});
+
+test('corpusAdvance: just inside and just outside the threshold', () => {
+  assert.equal(corpusAdvance(daysAgo(13), 'fresh', NOW_MS).state, 'advancing');
+  assert.equal(corpusAdvance(daysAgo(15), 'fresh', NOW_MS).state, 'not_advancing');
+  assert.equal(
+    NOT_ADVANCING_AFTER_MS, 14 * 86400000,
+    'a stated cadence: the hub converges on a corpus that changes a few times a week'
+  );
+});
+
+test('corpusAdvance: a BAD freshness verdict supersedes it — never two errors for one fault', () => {
+  // ⛔ The ordering is enforced here, not left to the caller to remember. A
+  // stale ingest is the more specific fault and owns the sentence.
+  for (const state of ['stale', 'unknown']) {
+    const a = corpusAdvance(daysAgo(44), state, NOW_MS);
+    assert.equal(a.state, 'superseded', `${state} freshness must supersede`);
+    assert.deepEqual(corpusAdvanceErrors(a), [], 'and must contribute no second error');
+  }
+});
+
+test('corpusAdvance: MISSING generated_at is unknown, never advancing', () => {
+  // ⛔ THE CASE THAT REGRESSES SILENTLY — the same arm feedFreshness needed.
+  for (const v of [null, undefined, '', '   ', 42, {}]) {
+    const a = corpusAdvance(v, 'fresh', NOW_MS);
+    assert.equal(a.state, 'unknown', `${JSON.stringify(v)} must be unknown`);
+    assert.notEqual(a.state, 'advancing');
+    assert.match(a.reason, /no generated_at/i);
+  }
+});
+
+test('corpusAdvance: unparseable, no-timezone and FUTURE are each unknown', () => {
+  assert.equal(corpusAdvance('last Tuesday', 'fresh', NOW_MS).state, 'unknown');
+  const noTz = corpusAdvance('2026-10-02T14:45:15', 'fresh', NOW_MS);
+  assert.equal(noTz.state, 'unknown');
+  assert.match(noTz.reason, /timezone/i);
+  const future = corpusAdvance(new Date(NOW_MS + 3 * 3600000).toISOString(), 'fresh', NOW_MS);
+  assert.equal(future.state, 'unknown');
+  assert.match(future.reason, /FUTURE/);
+  assert.match(future.reason, /not a measurement/i);
+});
+
+test('corpusAdvance: small forward skew is tolerated, exactly as freshness tolerates it', () => {
+  // ⛔ ONE DEFINITION. A bare `ageMs < 0` would make a one-second clock
+  // difference contribute an error and switch off the hub-delivered skip while
+  // the hub was perfectly healthy. Pinned against the SIBLING's behaviour so
+  // the two cannot drift apart.
+  const skewed = new Date(NOW_MS + 60000).toISOString();
+  assert.equal(corpusAdvance(skewed, 'fresh', NOW_MS).state, 'advancing');
+  assert.equal(feedFreshness(skewed, NOW_MS).state, 'fresh');
+});
+
+test('corpusAdvanceErrors: advancing contributes nothing; frozen and unknown both do', () => {
+  assert.deepEqual(corpusAdvanceErrors({ state: 'advancing', reason: '' }), []);
+  const frozen = corpusAdvanceErrors({ state: 'not_advancing', reason: 'because reasons' });
+  assert.equal(frozen.length, 1);
+  assert.equal(frozen[0].cve_id, null);
+  assert.match(frozen[0].message, /corpus frozen/);
+  assert.match(frozen[0].message, /because reasons/);
+  assert.equal(corpusAdvanceErrors({ state: 'unknown', reason: 'x' }).length, 1);
+});
+
+test('corpusAdvanceErrors: an ABSENT verdict contributes an error, never a pass', () => {
+  // ⛔ The defensive branch is where "default it to fine" survives review.
+  const errs = corpusAdvanceErrors(undefined);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0].message, /unestablished/i);
+});
+
+// ── syncErrors: the WIRING, which was the unguarded part ────────────────────
+//
+// ⛔ MEASURED 2026-11-15: with this composition inline in
+// `fetchAndUpsertHubAdvisories`, deleting the `...corpusAdvanceErrors(advance)`
+// line left all 44 tests above GREEN. Every arm of the verdict was pinned and
+// nothing asserted that anybody consulted it. `hubDelivered` turns on
+// `errors.length === 0`, so that one line is what makes a frozen corpus visible
+// AND what stops the doomed local NVD sync being re-suppressed.
+const { syncErrors } = require('../lib/feeds/cveHub');
+const CLEAN = {
+  stats: { errors: [] },
+  freshness: { state: 'fresh', reason: '' },
+  advance: { state: 'advancing', reason: '' },
+  trend: { state: 'converging', reason: '' },
+};
+
+test('syncErrors: a wholly healthy run contributes nothing', () => {
+  assert.deepEqual(syncErrors(CLEAN), []);
+});
+
+test('syncErrors: a FROZEN CORPUS reaches the errors array', () => {
+  // The line whose deletion nothing caught.
+  const errs = syncErrors({
+    ...CLEAN,
+    advance: { state: 'not_advancing', reason: 'not published for 44 days' },
+  });
+  assert.equal(errs.length, 1, 'a frozen corpus must make the sync partial');
+  assert.match(errs[0].message, /corpus frozen/);
+  assert.match(errs[0].message, /44 days/);
+});
+
+test('syncErrors: a stale ingest reaches it, and the corpus verdict does NOT double up', () => {
+  const errs = syncErrors({
+    ...CLEAN,
+    freshness: { state: 'stale', reason: 'last ingested 551h ago' },
+    advance: { state: 'superseded', reason: '' },
+  });
+  assert.equal(errs.length, 1, 'one fault, one error — never two');
+  assert.match(errs[0].message, /stale/);
+});
+
+test('syncErrors: stats errors, freshness, corpus and trend all compose', () => {
+  const errs = syncErrors({
+    stats: { errors: [{ cve_id: 'CVE-2026-1', message: 'row blew up' }] },
+    freshness: { state: 'unknown', reason: 'no checked_at' },
+    advance: { state: 'unknown', reason: 'no generated_at' },
+    trend: { state: 'not_converging', reason: '58, 58, 58' },
+  });
+  assert.equal(errs.length, 4);
+  assert.match(errs.map((e) => e.message).join(' | '), /row blew up/);
+  assert.match(errs.map((e) => e.message).join(' | '), /not converging/);
+  assert.match(errs.map((e) => e.message).join(' | '), /58, 58, 58/);
+});
+
+test('syncErrors: an ABSENT stats/verdict object is unknown, never clean', () => {
+  // ⛔ Called with nothing at all, the two verdict branches must still speak up.
+  const errs = syncErrors();
+  assert.ok(errs.length >= 2, 'missing verdicts must not compose into a clean run');
+  assert.ok(errs.every((e) => e.cve_id === null));
+});

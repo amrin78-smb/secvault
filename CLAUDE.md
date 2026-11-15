@@ -3289,6 +3289,105 @@ verified — including one that initially ESCAPED because the test asserted the
 `errors.push` LINE existed rather than that it ran; the logic was extracted into
 `freshnessErrors()` so it could be tested by behaviour instead of by shape).
 
+### ⛔ `checked_at` CANNOT CARRY CONTENT — a live INGEST hid a dead CORPUS for three weeks (v2.228.13)
+
+The section above is right that `generated_at` cannot carry LIVENESS, and it says so in
+`feedFreshness`' own docblock: an idempotent republish leaves that field still on a quiet week, so
+a dead hub and a healthy one are indistinguishable by it. **The converse is just as true and was
+never guarded.** `checked_at` says the hub is still ingesting; it says nothing about whether the
+corpus is still GROWING, and this consumer read a hub in that state as `fresh`.
+
+⛔ **MEASURED ON THE LIVE HUB, 2026-11-15, from its own public pointer and its own Neon database**
+(`nocvault-eol.netlify.app/api/v1/cve-feed/latest`, project `square-leaf-46669543`):
+
+| field | value | age |
+|---|---|---|
+| `generated_at` (last publish) | `2026-10-02T14:45:15Z` | 44 days |
+| `checked_at` (last successful ingest) | `2026-10-23T15:10:27Z` | 23 days |
+| newest CVE **publication date** in the corpus | `2026-09-22` | **54 days** |
+
+So for the three weeks between 10-02 and 10-23 the hub ingested on schedule, `checked_at` advanced
+hourly, this feed reported FRESH — and **no CVE published after 2026-09-22 had ever reached it.**
+A green signal over a corpus that stopped moving, which is the exact sentence the v2.139.0 guard
+was written to prevent, one field across.
+
+⛔ **THE HUB WAS NEVER UNREACHABLE, AND "FROZEN" WAS THE WRONG WORD FOR IT.** It answers 200 on its
+pointer and its pubkey and a correct 401 on the feed without a licence key; its hourly ingest runs
+on schedule. What failed is narrower: **all 32 ingest targets erroring, 16 of them on NVD's
+`HTTP 404` — which is what NVD returns for an INVALID API KEY, not 401 and not 403.** Serving,
+ingesting and publishing are three different things and only the middle one broke. ⛔ The publish
+side shows no fault at all: 5 feed versions ever and none since 10-02 is exactly what an idempotent
+publish does over a corpus whose content stopped changing. **Do not read a still `generated_at` as
+a broken publisher.**
+
+⛔ **`corpusAdvance()` IS THE SECOND SIGNAL, AND IT READS THE SIGNED BODY.** `generated_at` travels
+inside the Ed25519-signed payload (`checked_at` is a header), so it cannot be set independently of
+the feed it describes. Threshold **14 days**, and that is **a STATED CADENCE, not a derivation** —
+labelled as such for the same reason A6's `reviewOverdue` is: the hub's own design note says it
+"converges on a corpus that changes a few times a week", so a fortnight with no new version is
+outside what that design anticipates and a week is not. Deliberately far looser than
+`STALE_AFTER_MS`, because a publish gap is normal and an ingest gap never is.
+
+⛔ **`superseded` IS NOT A PASS, AND THE FUNCTION ENFORCES THE ORDERING RATHER THAN DOCUMENTING
+IT.** When freshness is already `stale`/`unknown`, the corpus verdict returns `superseded` and
+contributes nothing: a stale ingest is the more specific fault and owns the sentence. Two errors for
+one cause would send an operator to two places — the call `capacityForecast.js` makes between
+`no_log_coverage` and `bytes_not_summable`, and the one `feedStatus` makes between a publisher
+refusal and a deliberate skip. A caller must not have to remember that ordering.
+
+⛔ **IT REPORTS AND NEVER REFUSES**, like the staleness guard: the advisories already held did not
+become wrong. But it DOES push into `errors`, which makes `hubDelivered` false and therefore
+re-enables the local NVD sync — deliberately, and for a stronger reason than the stale branch has:
+if the central corpus has stopped gaining CVEs, local discovery is the only remaining chance of
+finding one, however poor its odds on a site that cannot reach NVD.
+
+⛔ **ONE SKEW TOLERANCE, SHARED.** `feedFreshness` carried a bare `-5 * 60 * 1000`; both age checks
+now read `CLOCK_SKEW_TOLERANCE_MS`. A bare `ageMs < 0` would make a one-second clock difference
+contribute an error and switch the hub-delivered skip off while the hub was perfectly healthy — and
+a guard that cries wolf gets waived.
+
+⛔ **THE WIRING WAS THE UNGUARDED PART, AND THAT WAS MEASURED RATHER THAN ASSUMED.** With the error
+list composed inline, deleting the `...corpusAdvanceErrors(advance)` line left **all 44 tests
+GREEN**: every arm of the verdict was pinned and nothing asserted that anybody consulted it — the
+same shape as `getThreatCoverage` awaited into a variable a widget never referenced. It matters more
+here because `hubDelivered` turns on `errors.length === 0`, so one lost line would silently restore
+the blind spot *and* re-suppress local discovery, with every signal green. The composition is now
+the pure, exported `syncErrors()`, and dropping either contributor goes red.
+
+### ⛔ `nvd.js` WAS THE LAST FEED WRITER THAT COULD TRADE A FIX BOUNDARY FOR NONE (v2.228.13)
+
+Three of the four advisory writers refuse a fix-boundary downgrade through the shared
+`lib/feeds/fixBoundary.js` — `cveHub.js`, `fortinet.js` and `paloalto.js`. **`nvd.js` did not import
+that module at all**, and its arm was a bare
+`CASE WHEN advisories.vendor = EXCLUDED.vendor THEN EXCLUDED.affected_version_ranges`. So an NVD or
+CIRCL record whose ranges name no first-fixed release could erase a remediation target the hub had
+just supplied.
+
+⛔ **THE SAME DEFECT, FOUND FOR THE THIRD TIME.** `paloalto.js` got this guard on 2026-09-27 after
+`cve_hub` logged `updated=20` on **twelve consecutive runs** while not one advisory row carried an
+`updated_at` inside a hub window — that feed runs ~8 seconds after the hub and reverted every repair
+in the same cycle, for ever. ⛔ **And this writer is the one a STALE HUB TURNS BACK ON**, so the two
+faults compose: the hub reports stale, `hubDelivered` goes false, `runNvdSync` resumes, and the
+repairs it undoes are the only usable version ranges on a site that cannot reach NVD.
+
+⛔ **VERIFIED BY EXECUTION AGAINST A REAL POSTGRES, WITH A NEGATIVE CONTROL** — the statement text
+extracted from the shipping source and `PREPARE`d, then both arms run against a live `advisories`
+table. Old code: an incoming rangeset with no boundary moved `max` **7.4.11 → 7.4.10** and cleared
+`exclude_fixed`. New code: `7.4.11` held. Both: an incoming rangeset carrying a **better** boundary
+still wins (`7.4.12`), so NVD keeps authority wherever it has the better data and only the strict
+downgrade is refused.
+
+⛔ **THIS IS A STRONGLY SUPPORTED HYPOTHESIS FOR ROADMAP ROW 57, NOT A CONFIRMED CAUSE.** Production
+logs `[central CVE feed repairs not converging] … (58, 58, 58)`, and `stats.repaired` is a true
+`rowCount` delta, so those are 58 real writes per cycle. Whether these are the rows being reverted
+needs `feed_sync_log`'s `repairedCves` compared across runs against `advisories.updated_at` — a
+single query, pending the VPN. The guard is correct on its own merits either way.
+
+⛔ **NOT touched: `fixed_in_versions` in `nvd.js` and `paloalto.js`**, which remain unguarded. That
+is roadmap row 61's territory (`fortinet.js`'s own `fixed_in_versions` arm is gated on the
+`degraded` flag, so a non-degraded record carrying `[]` erases a real list) and was left out
+deliberately rather than widened mid-change.
+
 ⛔ **NOT CONFIGURED IS NOT AN ERROR.** Without `CVE_HUB_LICENSE_KEY` the feed returns
 `notRun` and is logged `skipped` **with a reason** — a feed that simply stops
 appearing is indistinguishable from one that silently broke.

@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.228.13': [
+    'The central CVE feed now watches TWO signals, because neither can see the other\u2019s failure. It already reported when the hub stopped collecting; it now also reports when the hub keeps collecting but stops publishing anything new \u2014 a state this deployment was actually in for three weeks, reporting the feed as healthy while no newly published CVE had reached it.',
+    'A frozen corpus is reported, never refused: the advisories already held did not become wrong, so they are still applied. What changes is that the feed stops counting as having supplied this cycle, so local CVE discovery runs again instead of being suppressed.',
+    'Fixed: the NVD feed could overwrite an advisory\u2019s upgrade target with a version range that names none \u2014 so a CVE that had a release to upgrade to could silently lose it. Verified against a live database: the old code dropped the boundary, the new code keeps it, and a feed carrying a BETTER boundary still wins.',
+    'This was the last of the four advisory feeds to adopt the shared rule; the same defect had already been found and fixed twice, in the Fortinet and Palo Alto feeds.',
+  ],
   '2.228.12': [
     'Eleven backlog items cleared in one pass. The ones you may notice: a compliance score that counted a check once for every framework it maps to (so a check mapped to five frameworks counted five times, and one mapped to none was discarded entirely \u2014 which could erase a failure and report 100%); and a firewall\u2019s first tab showing a compliance percentage with no indication of how many checks it rests on, while clicking through showed the same score WITH that caveat.',
     'Fixed: a threat widget that said \u201cno named threats in the last 24 hours\u201d without consulting the read that tells it whether the last 24 hours were actually searched \u2014 and a device threat table that never fetched that read at all, so an unprocessed window showed an all-clear across the whole fleet.',
