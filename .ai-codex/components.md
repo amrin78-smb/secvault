@@ -834,6 +834,12 @@ applicationsAnswer.js  — `rollUp`, `buildApplicationsAnswer`, `applicationsEvi
 
 ## work/WorkQueueBoard.js
 
+(v2.230.0) ⛔ **The `TYPE_LABEL` map moved to `components/work/workItemTypes.js` and is SHARED with
+`WorkQueueFilters`.** The two copies had already drifted — the board was missing three emitted
+types and the filter dropdown was missing nine while offering four that no source produces. Both
+fell through to the raw snake_case type on a miss. `tests/workQueueTypeLabels.test.js` now fails
+the build in both directions; see `.ai-codex/lib.md` for the detail. Do not re-declare it locally.
+
 (v2.115.2) Each item is a native `<details>` (`.wq-item` in globals.css) so the board stays a SERVER
 component — no client JS. ⛔ COLLAPSED, NOT TRUNCATED: a top-N view was rejected because it hides the
 remainder behind nothing, which is the truncation lie without the disclosure. The collapsed row keeps

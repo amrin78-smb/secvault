@@ -1138,6 +1138,7 @@ const REGISTRY = [
   // suit the tool.
   { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadReportingGrid', args: () => [{ days: 2 }], spec: { map: true, valueKeys: ['name', 'hours'] } },
   { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadDeniedSeries', args: () => [{ days: 2 }], spec: { map: true, valueKeys: ['name', 'series'] } },
+  { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'loadLastReported', args: () => [], spec: { map: true } },
   { mod: 'lib/engines/anomalyDetectionsData.js', fn: 'gatherAnomalies', args: () => [{ days: 2 }], spec: { object: ['findings', 'states'] } },
   { mod: 'lib/engines/segmentationData.js', fn: 'listFleetZones', args: () => [], spec: RAW },
   { mod: 'lib/engines/segmentationData.js', fn: 'listIntents', args: () => [], spec: RAW },

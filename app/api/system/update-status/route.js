@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.230.0': [
+    'Fixed: a firewall that stopped sending syslog for longer than four weeks raised NO alert at all \u2014 the warning went quiet exactly as the silence became total. Twenty-seven days dark was reported; twenty-nine days dark was read as "this firewall has never sent us anything" and said nothing. It is now reported with the date it last reported, measured from records that are never aged out.',
+    'The same alert no longer clears itself and raises itself again on the day a silence passes four weeks, so one outage stays one alert from start to finish.',
+    'Fixed: a password hash or other secret could be written into the stored record of a configuration CHANGE in readable form, when an old change record was reprocessed. Change records are readable by the reporting accounts, unlike stored credentials, and the reprocessing ran on every update.',
+    'Fixed: if SecVault could not read a firewall\u2019s version string, that firewall was quietly assessed as NOT vulnerable to everything \u2014 it read as the healthiest device on the fleet. It is now reported as not assessed, naming the version string it could not read, and its previous findings are left untouched rather than cleared.',
+    'Fixed: five kinds of work-queue item showed an internal identifier instead of a name, and the queue\u2019s type filter offered four choices that could never match anything. Both lists now come from one place, and the build fails if they ever disagree again.',
+  ],
   '2.229.0': [
     'New: SecVault now knows whether the OS branch each firewall runs is still one its vendor supports. It already knew the running version and matched advisories against it; it could not say that the branch that version belongs to left support years ago, which means no patch is coming for it and the fix is an upgrade.',
     'The Lifecycle page gains an OS Branch Support section, and the work queue raises one item per firewall that is both affected by an open patch-now advisory and on a branch past vendor support — the combination that was previously invisible.',

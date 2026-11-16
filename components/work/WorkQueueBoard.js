@@ -12,6 +12,9 @@ import EmptyState from '../ui/EmptyState';
 // System note in CLAUDE.md — dropping blue out of severity is what makes the
 // whole separation hold). Never re-declare this locally.
 import { SEVERITY_BADGE_COLOR } from '../analysis/severityRamp';
+// ⛔ ONE MAP, SHARED WITH THE FILTER BAR. Two copies had already drifted —
+// see workItemTypes.js for what each was missing and for the guard.
+import { workTypeLabel } from './workItemTypes';
 import WorkQueueFilters from './WorkQueueFilters';
 
 // THE WORK QUEUE, drawn. One ranked list across every engine in the product.
@@ -57,24 +60,6 @@ const BANDS = [
   },
 ];
 
-const TYPE_LABEL = {
-  cve: 'Vulnerability',
-  compliance: 'Compliance',
-  config_diff: 'Config change',
-  licence: 'Licence',
-  licence_unknown: 'Licence',
-  rule_cleanup: 'Rule hygiene',
-  tunnel: 'VPN tunnel',
-  collection_gap: 'Collection',
-  segmentation: 'Segmentation',
-  ingest_drop: 'Log ingest',
-  // Fell through to the raw key ('application_flow') until 2026-09-25 — the
-  // fallback renders the type verbatim, so a missing entry shows a snake_case
-  // identifier in the UI rather than failing visibly.
-  application_flow: 'Application',
-  coverage_gap: 'Coverage',
-  os_lifecycle: 'OS lifecycle',
-};
 
 
 const LABEL = {
@@ -143,7 +128,7 @@ function WorkItem({ item }) {
     >
       <summary>
         <Badge color={SEVERITY_BADGE_COLOR[item.severity] || 'neutral'}>
-          {TYPE_LABEL[item.type] || item.type}
+          {workTypeLabel(item.type)}
         </Badge>
         {item.count > 1 ? (
           <span style={{ ...LABEL, color: 'var(--text-secondary)', flex: 'none' }}>×{item.count}</span>

@@ -2,6 +2,11 @@
 
 import { useSearchParams } from 'next/navigation';
 import FilterBar, { FilterSelect, FilterSearch, useFilterNav } from '../ui/FilterBar';
+// ⛔ ONE MAP, SHARED WITH THE BOARD. This file's copy offered four options
+// (`application`, `ingest`, `device`, `conformance`) that NO source emits,
+// against its own header rule that an option which can only ever return
+// nothing is indistinguishable from a broken filter.
+import { WORK_TYPE_LABEL } from './workItemTypes';
 
 // The work queue's triage controls.
 //
@@ -37,19 +42,6 @@ const EVIDENCE_LABEL = {
   unmeasured: 'Not measurable',
 };
 
-const TYPE_LABEL = {
-  cve: 'Vulnerability',
-  compliance: 'Compliance',
-  config_diff: 'Config change',
-  rule_cleanup: 'Rule hygiene',
-  licence: 'Licence',
-  segmentation: 'Segmentation',
-  application: 'Application',
-  ingest: 'Log ingest',
-  device: 'Firewall',
-  conformance: 'Conformance',
-  os_lifecycle: 'OS lifecycle',
-};
 
 const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -71,7 +63,7 @@ export default function WorkQueueFilters({ options, shown, total }) {
 
   const bandOpts = opt(options.bands, BAND_LABEL);
   const sevOpts = opt(options.severities);
-  const typeOpts = opt(options.types, TYPE_LABEL);
+  const typeOpts = opt(options.types, WORK_TYPE_LABEL);
   const evOpts = opt(options.evidences, EVIDENCE_LABEL);
   const devOpts = opt(options.devices);
 

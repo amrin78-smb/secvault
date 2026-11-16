@@ -4386,3 +4386,52 @@ render cannot straddle a support-end boundary. ⛔ **A firewall with no assessme
 `loadOpenAdvisoryCounts`**, and `loadUnfixableAdvisories` reports `openPatchNow: null` for it, never
 0 — "nothing affects this firewall" and "this firewall has never been assessed" are different
 statements.
+
+## `lib/engines/anomalyDetectionsData.js` — `loadLastReported` added v2.230.0
+
+⛔ **THE A6 DETECTOR PAIR (`anomalyDetections.js` + `anomalyDetectionsData.js`) IS NOT OTHERWISE
+INDEXED HERE** — it is described in `.ai-codex/analytics-proposal.md` and in CLAUDE.md's A6
+paragraph. Noted rather than left to be discovered: a reader looking for it in this file will not
+find it.
+
+`loadLastReported(pool)` → `Map<deviceId, Date>`: the last hour each device produced ANY
+`syslog_rollup_hourly` row, **UNBOUNDED by the evidence window**.
+
+⛔ **IT IS THE ONLY READ IN THAT FILE THAT IGNORES THE WINDOW, AND THAT IS ITS WHOLE PURPOSE.**
+`loadReportingGrid` can only report what is inside 28 days, so a firewall dark for 29 produced a
+grid byte-identical to one that never existed — and `detectSilence` called it "this device has
+never reported", so the most completely silent firewall on the fleet was the one the detector said
+nothing about. ⛔ **Widening the grid cannot fix it**, it only moves the boundary; the fact lives
+outside the window at every length.
+
+⛔ **PERMANENT ROLLUPS, NEVER `syslog_events`** — one grouped `MAX` over the low-cardinality table,
+the same refusal `logSearch.js` and the VPN attribution both record. A test asserts the SQL names
+`syslog_rollup_hourly` and carries no `now() -` bound.
+
+⛔ **A DEVICE MISSING FROM THE MAP HAS NEVER REPORTED, and the caller passes that on as an EXPLICIT
+`null`.** `detectSilence` reads three answers, not two: a Date (it reported then), `null` (it never
+has), and **undefined — nobody asked**, which is reported as its own reason and never collapsed
+into either verdict. The read is issued unconditionally, so the wiring cannot be true only on the
+happy path.
+
+## `components/work/workItemTypes.js` — one label map, added v2.230.0
+
+`WORK_TYPE_LABEL` + `workTypeLabel(type)`, shared by `WorkQueueBoard` and `WorkQueueFilters`.
+
+⛔ **IT WAS TWO MAPS AND THEY HAD ALREADY DRIFTED.** Measured 2026-11-16 against the sixteen types
+`workQueueData.js` emits: the board was missing three (`ingest_silent`, `tunnel_stale`,
+`tunnel_unknown`) and the filter dropdown was missing NINE while offering four options —
+`application`, `ingest`, `device`, `conformance` — that no source has ever produced, against that
+file's own rule that an option which can only ever return nothing is indistinguishable from a
+broken filter. Both maps fell through to the RAW TYPE on a miss, so the failure renders a
+snake_case identifier rather than failing visibly.
+
+⛔ **A TYPE IS NOT A SOURCE.** `source('tunnel', …)` emits three types; `source('ingest', …)` emits
+two. The twelve SOURCE keys are pinned separately in `tests/workQueue.test.js`.
+
+⛔ **THE GUARD IS THE FIX.** `tests/workQueueTypeLabels.test.js` derives the emitted types from the
+producer's source (comments stripped first) and fails the build BOTH ways — a type with no label,
+and a label for a type nothing emits. One-ended it would have passed over half the defect.
+⛔ `workTypeLabel` still falls back to the raw type: a renderer that threw would take the whole
+queue down over a cosmetic gap, on the page whose job is saying what is outstanding. The BUILD is
+what refuses to ship one.

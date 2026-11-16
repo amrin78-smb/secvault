@@ -105,15 +105,30 @@ WAS a key built from a moving boundary. The sentence says **AT LEAST N hours …
 SecVault's evidence window**, and the finding carries `truncated` + `hoursAreLowerBound` so no
 consumer can render either as exact.
 
-⛔ **AND THE DETECTOR GOES SILENT WHEN THE SILENCE BECOMES TOTAL — STILL OPEN, roadmap row 59.** A
-device dark for LONGER than the window hits `detectSilence`'s `NO_DATA` branch and
-`gatherAnomalies`' `if (r.state !== MEASURED) continue`, so 27 days dark raises an alert and 29 days
-dark raises nothing. The branch is right for the case it was written for — "a device that has NEVER
-reported is NOT silent, it is uncollected" — and its predicate is "did not report IN THIS WINDOW",
-which collapses *never started* with *stopped, maximally*. ⛔ The device is NOT invisible
-(`coverageRegister.js` says "This firewall sends no syslog to SecVault"), so what is lost is the
-OUTBOUND path; the two surfaces disagree about the same firewall. The fix is one unbounded
-`MAX(bucket_hour)` on the permanent rollups, and the key already exists.
+⛔ **AND THE DETECTOR WENT SILENT WHEN THE SILENCE BECAME TOTAL — FIXED v2.230.0 (row 59).** A
+device dark for LONGER than the window hit `detectSilence`'s `NO_DATA` branch and
+`gatherAnomalies`' `if (r.state !== MEASURED) continue`, so 27 days dark raised an alert and 29 days
+dark raised nothing. The branch was right for the case it was written for — "a device that has NEVER
+reported is NOT silent, it is uncollected" — but its predicate is "did not report IN THIS WINDOW",
+which collapses *never started* with *stopped, maximally*. ⛔ The device was NOT invisible
+(`coverageRegister.js` says "This firewall sends no syslog to SecVault"), so what was lost is the
+OUTBOUND path — the surface wired to alerting — and the two surfaces disagreed about one firewall.
+⛔ **THE WINDOW CANNOT ANSWER THIS AT ANY LENGTH, WHICH IS WHY THE FIX IS NOT A BIGGER NUMBER.**
+Widening the grid only moves the boundary; the fact lives outside it. `loadLastReported` is one
+unbounded `MAX(bucket_hour)` over the PERMANENT `syslog_rollup_hourly` — never `syslog_events` —
+and `detectSilence` now takes that date: a Date means it reported then, an explicit `null` means it
+never has, and **OMITTING it is a third answer** that reports neither rather than guessing.
+⛔ **`stopped_before_window` IS A NEW STATE, NOT `measured`,** because `hours` is unknowable from a
+grid holding nothing but absence — it stays **null** and the real span travels beside it as
+`silentDays`, measured from the permanent table. A grid-derived `hours` would be the window's own
+length wearing a measurement's clothes, which is the fabricated-edge defect `truncated` exists for.
+⛔ **The natural key is the SAME `start-before-window` sentinel** v2.228.10 added, so a run that
+crosses the edge and then falls entirely outside it keeps ONE key: the dispatcher does not resolve
+and re-raise the alert on the day the firewall becomes MOST silent. ⛔ It is counted as JUDGED in
+the panel's coverage line, never as a gap. ⛔ **Measured on production 2026-11-16: not reachable
+today and on a clock.** 15 of 16 firewalls are current, PAKFood has never reported (correctly
+`no_data`), and **TFM-RN last reported 2026-11-08 — 8 days dark, so it crosses the 28-day boundary
+on 2026-12-06**, which is the day the old code would have stopped reporting it.
 
 ⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
   and both are still refused, for reasons now recorded with dates in that file's own header.
@@ -944,7 +959,7 @@ five funnel through `parseForcepointVersion`'s single `Number.isNaN`) rather tha
 that could disagree with the thing that actually parses. ⛔ It does `console.warn`, so it is not
 literally silent — but a log line is not a contract and the RETURN VALUE is what callers act on.
 
-⛔ **`isInRange` IS THE ONE CONVERTED CALL SITE, BECAUSE IT IS WHERE A FABRICATED ZERO BECOMES A
+⛔ **`isInRange` WAS THE FIRST CONVERTED CALL SITE, BECAUSE IT IS WHERE A FABRICATED ZERO BECOMES A
 VULNERABILITY VERDICT.** An unreadable bound is now IGNORED rather than compared, which is this
 file's own Critical Rule — *widen an uncertain bound, never narrow it*. **The two bounds failed in
 OPPOSITE directions and only one was dangerous:** an unreadable MIN never excluded anything, while
@@ -963,6 +978,32 @@ fields** (`vsx_ng_with_application_intelligence`, `gold`, `ng`, `next_generation
 assessments because no Check Point firewall is deployed. 0 ranges have the mixed
 readable-min/unreadable-max shape, so **zero live assessments changed** — seven silent
 not-affecteds became counted gaps. Remaining call sites are tracked in `.ai-codex/roadmap.md`.
+
+⛔ **AND `isInRange` CHECKED THE BOUNDS WHILE NOTHING CHECKED THE CANDIDATE — CLOSED v2.230.0
+(row 51).** The device's OWN version was parsed at `versionMatcher.js` and handed straight in, so
+an unreadable version string became `[0,0,0,0]`: **below every real `min`, which is a silent
+fleet-wide NOT AFFECTED on the one firewall nobody could read**, and below every `max` on a
+max-only range, which is a false positive. Both directions reproduced by calling the real
+functions — `isInRange('fortinet', [0,0,0,0], '7.0.0', '7.4.4', …)` is **false** and
+`isInRange('fortinet', [0,0,0,0], null, '7.4.4', …)` is **true**. The under-report is the
+dangerous half and it is the shape this file names most often.
+⛔ **THE DEVICE IS SKIPPED AND RECORDED, exactly as one with no `device_versions` row already
+was.** Assessing it anyway and flagging it would still have to pick a tuple and there is no honest
+one to pick. The `continue` runs BEFORE the reconciliation `DELETE`, so a firewall that becomes
+unreadable KEEPS the assessments it already had rather than having them cleared by a run that
+learned nothing about it — and the error names the offending string, because the fix is in a
+parser and somebody needs to see what to parse.
+⛔ **ONE OTHER SITE WAS MADE EXPLICIT RATHER THAN CHANGED**: an unreadable `fixed_in` candidate
+was already dropped, but **by arithmetic, not by a decision** — `[0,0,0,0]` simply never won the
+`> 0` comparison, which holds only while the device tuple is non-zero. That is a guard nobody wrote
+and nothing protects, so it now says so.
+⛔ **STILL OPEN AND DELIBERATELY SO: the seven adapter `version_tuple` sites.** Measured
+2026-11-14 — the only read of a `version_tuple` column outside `lib/adapters/` is against a
+DIFFERENT table (`vendor_recommended_releases`), and the matcher re-parses `version_string` and
+ignores the stored tuple. They are hygiene, not exposure, and converting them is a breaking
+contract change across four feeds. ⛔ **Latent on this fleet, fixed anyway**: 16 of 16 active
+devices parse readably and no live row yields a zero-only tuple. It needs one vendor to ship one
+unexpected string.
 
 ### Priority Decision Tree (strict order — do not reorder)
 

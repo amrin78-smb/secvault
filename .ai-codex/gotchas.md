@@ -1248,6 +1248,26 @@ Every field/pattern that MUST be stripped or masked before it reaches `device_co
 product — `device_configs`/`config_backups`/`config_diffs` are `GRANT SELECT`'d to
 `claude_readonly`/`nocvault_readonly`, so anything NOT redacted here is readable by those roles.
 
+⛔ **EVERY PATH THAT PERSISTS `diffValue()` OUTPUT MUST REDACT IT — ONE DID NOT, FIXED v2.230.0
+(roadmap row 38).** `collapseObjectArrayIdentityCascades` re-diffs two whole stored objects and
+splices the result into a diff that `collapseHistoricalArrayShiftCascades` UPDATEs straight back
+into `config_diffs`. It was the only composing call site without a `redactSecretEntries` pass.
+⛔ **THE MECHANISM IS PROMOTION, WHICH IS WHY A PATH-LEVEL REDACTOR DOES NOT COVER IT.** A secret
+sitting inside an opaque WHOLE-ELEMENT entry (`mgt-config.users.entry[3]`, value `{…, phash: …}`)
+is redacted at write time only by the deep walk; a historical row written before that walk existed
+carries it intact. The re-diff then PROMOTES it into its own named top-level leaf
+(`mgt-config.users.entry[3].phash`) — and without the pass it lands there in plaintext.
+Reproduced by calling the real function: pre-fix output was
+`[{path:'mgt-config.users.entry[3].phash', old:'LEAKED_OLD', new:'LEAKED_NEW'}]`.
+⛔ **IT RE-RUNS ON EVERY DEPLOY** — this pass is NOT ledger-gated — so the exposure would be
+recreated rather than being a one-off. ⛔ **The pass-through entries are redacted too**, not only
+the derived ones: `redactSecretEntries` is idempotent (`'<redacted>'` redacts to itself) and fails
+CLOSED, so a legacy row is REPAIRED by the one code path that was already rewriting it.
+⛔ `filterDiffForCurrentRules` performs the structurally identical re-decomposition and has always
+redacted, which is what made this one findable — and `tests/configDiffCollapseRedaction.test.js`
+now scans every function that composes `{added, removed, modified}` from `diffValue()` output, so a
+third collapse pass cannot repeat it.
+
 **Universal keyword pattern** (independently duplicated per adapter/file — NOT a shared module, by
 this codebase's own convention; keep every copy in step if you widen one):
 `secret | password | passwd | psk | pre[-_]?shared | private[-_]?key | phash | community | credential | token | api[-_]?key | keytab`

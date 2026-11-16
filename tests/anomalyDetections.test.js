@@ -80,7 +80,9 @@ describe('⛔ device silent — absence is the signal', () => {
     // "Stopped logging" about a firewall that never started sends someone to
     // look for an outage that never happened. It is an uncollected device,
     // which is a different fact with a different owner.
-    const r = a.detectSilence(H(48, false));
+    // ⛔ `null` is the caller SAYING SO, from an unbounded MAX over the
+    // permanent rollups. Omitting it is a different answer — see below.
+    const r = a.detectSilence(H(48, false), { lastReportedAt: null });
     assert.equal(r.state, 'no_data');
     assert.deepEqual(r.runs, []);
     assert.match(r.reason, /never reported/);
@@ -588,5 +590,193 @@ describe('⛔ a silence run truncated by the evidence window', () => {
     // Both findings — silence and spike.
     assert.equal((src.match(/hoursAreLowerBound: !!run\.truncated/g) || []).length, 2);
     assert.equal((src.match(/run\.startAt, run\.truncated\)/g) || []).length, 2);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Roadmap row 59 — the detector went QUIET exactly as the silence became TOTAL
+// ---------------------------------------------------------------------------
+//
+// ⛔ A device dark for 27 days raised an alert and one dark for 29 raised
+// NOTHING, because an all-silent grid was read as "this device has never
+// reported". The window cannot tell the two apart at ANY length — widening it
+// only moves the boundary — so the answer comes from an unbounded MAX over the
+// permanent rollups instead.
+
+const ALL_SILENT = H(24 * 28, false);
+const NOW = new Date(Date.UTC(2026, 9, 29, 12));
+
+describe('⛔ a firewall silent for LONGER than the whole window', () => {
+  it('⛔ THE DEFECT: the grid alone cannot tell it from a device that never existed', () => {
+    // Both of these are the SAME 28 days of nothing. Only the fact from
+    // outside the window separates them, which is why this read exists.
+    const never = a.detectSilence(ALL_SILENT, { lastReportedAt: null });
+    const stopped = a.detectSilence(ALL_SILENT, {
+      lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)), now: NOW,
+    });
+    assert.equal(never.state, 'no_data');
+    assert.equal(never.runs.length, 0);
+    assert.equal(stopped.state, 'stopped_before_window');
+    assert.equal(stopped.runs.length, 1, 'the most completely silent firewall must produce a finding');
+  });
+
+  it('⛔ OMITTING the fact is its own answer, never either verdict', () => {
+    // The dangerous direction would be guessing. It degrades to today's
+    // behaviour — no finding — but it must not ASSERT something false about
+    // the device while doing so.
+    const r = a.detectSilence(ALL_SILENT);
+    assert.equal(r.state, 'no_data');
+    assert.doesNotMatch(r.reason, /never reported/,
+      'claiming "never reported" with nothing to support it IS the bug');
+    assert.match(r.reason, /cannot be told apart|no last-reported/i);
+  });
+
+  it('a string, or an Invalid Date, is not a measurement', () => {
+    for (const bad of ['2026-09-01', new Date('nope'), 0, {}]) {
+      const r = a.detectSilence(ALL_SILENT, { lastReportedAt: bad });
+      assert.equal(r.state, 'no_data', `${String(bad)} must not arm the detector`);
+    }
+  });
+
+  it('⛔ `hours` STAYS NULL and the measured span travels under its own name', () => {
+    const [run] = a.detectSilence(ALL_SILENT, {
+      lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)), now: NOW,
+    }).runs;
+    // The window is 28 days of silence, so `hours` could trivially be set to
+    // 672 — and that would be the window's length wearing a measurement's
+    // clothes, exactly the fabricated-edge defect `truncated` was added for.
+    assert.equal(run.hours, null);
+    assert.equal(run.startAt, null, 'the start is outside the evidence');
+    assert.equal(run.truncated, true);
+    assert.equal(run.silentDays, 58, 'measured from the permanent rollups: 09-01 to 10-29');
+    assert.ok(run.lastReportedAt instanceof Date);
+  });
+
+  it('with no clock the span is unknown, never zero', () => {
+    const [run] = a.detectSilence(ALL_SILENT, {
+      lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)),
+    }).runs;
+    assert.equal(run.silentDays, null);
+    const sentence = a.describeSilence(run, 'TFM-RN');
+    assert.doesNotMatch(sentence, /\b0 days\b/, 'a missing clock must never read as "silent 0 days"');
+  });
+
+  it('⛔ the sentence states a MEASURED span, not a lower bound', () => {
+    const [run] = a.detectSilence(ALL_SILENT, {
+      lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)), now: NOW,
+    }).runs;
+    const sentence = a.describeSilence(run, 'TFM-RN');
+    assert.match(sentence, /no syslog for 58 days/);
+    assert.match(sentence, /permanent rollups/);
+    // ⛔ NOT the truncated wording: that one is honestly a lower bound because
+    // its evidence is the grid. This one's evidence is a permanent table, and
+    // calling it "AT LEAST" would under-state the worst case on the fleet.
+    assert.doesNotMatch(sentence, /AT LEAST/);
+    // and never the no-data claim
+    assert.doesNotMatch(sentence, /never/i);
+    // the standing consequence is still said
+    assert.match(sentence, /reads as healthy everywhere else/);
+  });
+
+  it('⛔ THE KEY DOES NOT CHURN WHEN A TRUNCATED RUN BECOMES A TOTAL ONE', () => {
+    // A silence crosses the window edge first (truncated), then falls entirely
+    // outside it (stopped_before_window). Those are the same ongoing event, so
+    // a different key would make the dispatcher resolve the alert and raise it
+    // again on the day the firewall became MOST silent.
+    const edge = a.detectSilence(
+      [...H(6, false), ...H(18, true, 6)], { lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)) }
+    ).runs[0];
+    const total = a.detectSilence(ALL_SILENT, {
+      lastReportedAt: new Date(Date.UTC(2026, 8, 1, 7)), now: NOW,
+    }).runs[0];
+    const key = (r) => anomalyData.naturalKey('anomaly_device_silent', 'dev-1', r.startAt, r.truncated);
+    assert.equal(key(edge), key(total));
+    assert.match(key(total), /start-before-window$/);
+    assert.doesNotMatch(key(total), /\d{4}-\d{2}-\d{2}T/);
+    assert.doesNotMatch(key(total), /null/, 'a null start must not become part of the key');
+  });
+});
+
+describe('⛔ row 59 — the WIRING, which is the part that goes untested', () => {
+  // The whole defect was one `continue`. Pinning detectSilence alone would
+  // have left it live.
+  const DEV = '11111111-1111-4111-8111-111111111111';
+  function stubPool({ lastAt, gridReported = false }) {
+    const seen = [];
+    return {
+      seen,
+      query: async (sql) => {
+        seen.push(sql);
+        if (/max\(bucket_hour\) AS last_at/.test(sql)) {
+          return { rows: lastAt ? [{ device_id: DEV, last_at: lastAt }] : [] };
+        }
+        if (/generate_series/.test(sql)) {
+          return {
+            rows: Array.from({ length: 24 * 28 }, (_, i) => ({
+              device_id: DEV, device_name: 'TFM-RN',
+              at: new Date(Date.UTC(2026, 9, 1, i)), reported: gridReported,
+            })),
+          };
+        }
+        return { rows: [] };
+      },
+    };
+  }
+
+  it('⛔ gatherAnomalies REPORTS a firewall dark for longer than the window', async () => {
+    const pool = stubPool({ lastAt: new Date(Date.UTC(2026, 7, 20, 5)) });
+    const { findings, states } = await anomalyData.gatherAnomalies(pool, { now: NOW });
+    const silent = findings.filter((f) => f.detector === 'device_silent');
+    assert.equal(silent.length, 1, 'this is the finding that did not exist');
+    assert.equal(silent[0].stoppedBeforeWindow, true);
+    assert.equal(silent[0].hours, null);
+    assert.equal(silent[0].silentDays, 70);
+    assert.ok(silent[0].lastReportedAt instanceof Date);
+    assert.match(silent[0].naturalKey, /start-before-window$/);
+    assert.equal(states.device_silent.stopped_before_window, 1);
+    assert.equal(states.device_silent.no_data, 0, 'it is JUDGED, not a coverage gap');
+  });
+
+  it('a device the rollups have never seen still yields nothing', async () => {
+    const pool = stubPool({ lastAt: null });
+    const { findings, states } = await anomalyData.gatherAnomalies(pool, { now: NOW });
+    assert.equal(findings.filter((f) => f.detector === 'device_silent').length, 0);
+    assert.equal(states.device_silent.no_data, 1);
+    assert.equal(states.device_silent.stopped_before_window, 0);
+  });
+
+  it('⛔ the unbounded read happens even when the grid is empty', async () => {
+    // Otherwise the wiring is true only on the happy path, and a future
+    // short-circuit would restore the blind spot with every test still green.
+    const pool = {
+      queries: [],
+      query: async (sql) => { pool.queries.push(sql); return { rows: [] }; },
+    };
+    await anomalyData.gatherAnomalies(pool, { now: NOW });
+    assert.ok(
+      pool.queries.some((q) => /max\(bucket_hour\) AS last_at/.test(q)),
+      'loadLastReported must be called unconditionally'
+    );
+  });
+
+  it('⛔ it reads the PERMANENT rollups and is never bounded by the window', async () => {
+    const pool = { query: async () => ({ rows: [] }) };
+    let sql = '';
+    await anomalyData.loadLastReported({ query: async (q) => { sql = q; return { rows: [] }; } });
+    assert.match(sql, /FROM syslog_rollup_hourly/);
+    assert.doesNotMatch(sql, /syslog_events/, 'an event scan is refused product-wide');
+    assert.doesNotMatch(sql, /days'\)::interval|now\(\) -/,
+      'a window bound here would reintroduce the boundary this read exists to escape');
+    assert.ok(pool);
+  });
+
+  it('⛔ the coverage line counts it as JUDGED, not as a gap', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'components', 'alerts', 'AnomalyPanel.js'), 'utf8'
+    );
+    // A firewall this detector DID judge must not be reported as one it could
+    // not reach — that sentence is the panel's denominator.
+    assert.match(src, /const measured = \(Number\(s\.measured\) \|\| 0\) \+ \(Number\(s\.stopped_before_window\) \|\| 0\)/);
   });
 });

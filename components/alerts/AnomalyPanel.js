@@ -95,7 +95,11 @@ const UNMEASURED_PANEL = {
 /** One detector's coverage line. Returns null only when there is nothing to say. */
 function Coverage({ detector, state }) {
   const s = state || {};
-  const measured = Number(s.measured) || 0;
+  // ⛔ `stopped_before_window` IS JUDGED, NOT UNJUDGED. A firewall dark for
+  // longer than the whole window produces a finding like any other; counting it
+  // here as a coverage gap would say the detector could not reach the one
+  // device it has the most to say about.
+  const measured = (Number(s.measured) || 0) + (Number(s.stopped_before_window) || 0);
   const insufficient = Number(s.insufficient_baseline) || 0;
   const noData = Number(s.no_data) || 0;
   const unjudged = insufficient + noData;
