@@ -3413,6 +3413,17 @@ side shows no fault at all: 5 feed versions ever and none since 10-02 is exactly
 publish does over a corpus whose content stopped changing. **Do not read a still `generated_at` as
 a broken publisher.**
 
+⛔ **AND IT RECOVERED ON 2026-11-16, WHICH IS RECORDED HERE BECAUSE THE DIAGNOSIS ABOVE WOULD
+OTHERWISE READ AS THE CURRENT STATE.** A corrected NVD API key on the hub cleared it: **32 of 32
+targets now carry `last_error IS NULL` with `consecutive_failures = 0`**, `last_success_at` moved
+2026-10-23 → 2026-11-15T22:10:42Z, and the publisher followed — `feed_version`
+**2026-10-02.1 → 2026-11-15.4**, 955 → **960** rows, newest CVE `published_at`
+2026-09-22 → **2026-10-28**. Production's `cve_hub` went `partial` → **`success`** on the
+next two cycles. ⛔ **The two guards are what made the recovery legible rather than invisible**:
+the staleness error named the fault for three weeks, and `corpusAdvance()` is what would have
+caught it had the ingest stayed alive. ⛔ Both remain armed; a corpus 19 days behind the
+calendar is a backlog being worked off, not a second fault.
+
 ⛔ **`corpusAdvance()` IS THE SECOND SIGNAL, AND IT READS THE SIGNED BODY.** `generated_at` travels
 inside the Ed25519-signed payload (`checked_at` is a header), so it cannot be set independently of
 the feed it describes. Threshold **14 days**, and that is **a STATED CADENCE, not a derivation** —
@@ -3508,11 +3519,22 @@ table. Old code: an incoming rangeset with no boundary moved `max` **7.4.11 → 
 still wins (`7.4.12`), so NVD keeps authority wherever it has the better data and only the strict
 downgrade is refused.
 
-⛔ **THIS IS A STRONGLY SUPPORTED HYPOTHESIS FOR ROADMAP ROW 57, NOT A CONFIRMED CAUSE.** Production
-logs `[central CVE feed repairs not converging] … (58, 58, 58)`, and `stats.repaired` is a true
-`rowCount` delta, so those are 58 real writes per cycle. Whether these are the rows being reverted
-needs `feed_sync_log`'s `repairedCves` compared across runs against `advisories.updated_at` — a
-single query, pending the VPN. The guard is correct on its own merits either way.
+⛔ **THE REVERT LOOP WAS CONFIRMED ON 2026-11-16 — BY WATCHING `nvd`, NOT BY READING IT — AND
+IT HAD TWO STAGES, WHICH IS WHY IT NEVER CONVERGED.** Production logged
+`[central CVE feed repairs not converging] … (58, 58, 58)`, and `stats.repaired` is a true
+`rowCount` delta, so those were 58 real writes per cycle. The overwriter now names itself: while the
+hub was stale, `runNvdSync` ran every cycle at **`partial, updated 437`**; the moment the hub
+recovered it reports **`skipped` — "central CVE feed supplied the corpus this cycle"** and
+`cve_hub` fell to **`success, repaired 0`**. ⛔ **The second stage is the one worth remembering:
+`hubDelivered` turns on `errors.length === 0`, so the not-converging error KEPT ITSELF TRUE** — it
+forced the local NVD path to run, which produced the reverts that produced the error. A guard that
+reports a fault can perpetuate it when a skip decision reads the same error list.
+⛔ **ATTRIBUTION STOPS SHORT OF THIS GUARD, DELIBERATELY.** It was deployed at 00:09:47 +07 and the
+00:10 `nvd` run under it still updated 437 rows; the next `cve_hub` run repaired 0, which is strong
+evidence it held — but the hub also published a fresh corpus at 05:45 +07 in the same window, so
+the two cannot be separated from this data. The guard is correct on its own merits either way, and a
+healthy hub suppressing `runNvdSync` is a CONDITION, not a fix: it is what stands between the next
+stale hub and the same loop.
 
 ⛔ **NOT touched: `fixed_in_versions` in `nvd.js` and `paloalto.js`**, which remain unguarded. That
 is roadmap row 61's territory (`fortinet.js`'s own `fixed_in_versions` arm is gated on the
