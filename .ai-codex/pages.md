@@ -365,3 +365,13 @@ deleted, not left in place.
 ⛔ `clientSafe()` is applied ONCE here, at the list, not per call site. A catalogue entry carries a
 lazy `builder` FUNCTION and React refuses to send a function to a client component — in a production
 build that failure is a bare digest on a blank page, which is exactly how v2.120.0 shipped.
+
+## `/lifecycle` — OS Branch Support section (v2.229.0)
+
+A fifth section between Support & Licence Renewals and High Availability, rendered by
+`components/lifecycle/OsBranchSupport.js` from `loadDeviceBranchSupport()`. One row per active
+firewall: branch, four-state support verdict, standard and extended end dates kept in SEPARATE
+columns, and whether the date is the vendor's or an aggregator's. ⛔ Its read has its OWN try/catch
+outside `getLifecycleData()`'s `Promise.all`, so a server mid-deploy without `os_branch_cycles`
+loses the section rather than the page — and the failure is RENDERED, never swallowed into an empty
+table.

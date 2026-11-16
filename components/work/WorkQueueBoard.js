@@ -73,6 +73,7 @@ const TYPE_LABEL = {
   // identifier in the UI rather than failing visibly.
   application_flow: 'Application',
   coverage_gap: 'Coverage',
+  os_lifecycle: 'OS lifecycle',
 };
 
 

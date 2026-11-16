@@ -14,6 +14,8 @@ import Pagination from '../../../components/ui/Pagination';
 import { paginateArray } from '../../../lib/pagination';
 import { licenseStatus, signatureStatus, haStatus } from '../../../lib/engines/deviceHealth';
 import { titleCase } from '../../../lib/formatDisplay';
+import OsBranchSupport from '../../../components/lifecycle/OsBranchSupport';
+import { loadDeviceBranchSupport } from '../../../lib/osBranchData';
 
 export const dynamic = 'force-dynamic';
 
@@ -358,6 +360,41 @@ const SECTION_NOTE_STYLE = { margin: '8px 0 14px', fontSize: 'var(--text-sm)', c
 export default async function LifecyclePage({ searchParams }) {
   const { devices, licenses, haRows, content } = await getLifecycleData();
   const now = new Date();
+  // ⛔ ITS OWN try/catch, OUTSIDE getLifecycleData's Promise.all. On a server
+  // mid-deploy `os_branch_cycles` may not exist yet, and a section that did not
+  // survive the migration must cost that section rather than the whole page --
+  // the same call `lib/serverHealth.js`'s getListenerState() makes. The error is
+  // PASSED DOWN, never swallowed: an empty table here would read as a fleet with
+  // nothing on a dead branch.
+  let branchSupport;
+  try {
+    const s = await loadDeviceBranchSupport(pool, { now });
+    // ⛔ THE `corpus` OBJECT CARRIES A `lookup` FUNCTION, AND A FUNCTION MUST
+    // NEVER BE HANDED TO A COMPONENT. `OsBranchSupport` is a server component
+    // today, so nothing is serialised and this works either way — which is
+    // exactly how v2.120.0 shipped a BLANK /reports page: a `builder` function
+    // passed from a server component to a client one, 2,399 tests green, the
+    // build clean, and a production build withholding the message. The
+    // projection below is one line and makes the hazard unreachable the day
+    // somebody adds 'use client' to that file for a sort control.
+    branchSupport = {
+      asOf: s.asOf,
+      devices: s.devices,
+      summary: s.summary,
+      corpus: {
+        total: s.corpus.total,
+        neverSynced: s.corpus.neverSynced,
+        unmatchable: s.corpus.unmatchable,
+        feedVersion: s.corpus.feedVersion,
+        byProduct: s.corpus.byProduct,
+      },
+    };
+  } catch (err) {
+    branchSupport = {
+      devices: [], corpus: {}, summary: { counts: {}, unknownByReason: {} },
+      readError: err && err.message ? err.message : String(err),
+    };
+  }
   const deviceById = new Map(devices.map((d) => [d.id, d]));
 
   // ── Section 1: Support & Licence Expiry ────────────────────────────────
@@ -664,6 +701,8 @@ export default async function LifecyclePage({ searchParams }) {
           )}
         </CardBody>
       </Card>
+
+      <OsBranchSupport support={branchSupport} />
 
       {/* High Availability — collapsed, with a one-line summary always visible. */}
       <Card>

@@ -1385,6 +1385,35 @@ describe('⛔ the coverage source can never contribute an act_now alert', () => 
     assert.ok(NEVER_ACT_NOW_SOURCES.includes('coverage'));
   });
 
+  it('⛔ EVERY declared source reaches the queue — the wiring, not the gather', async () => {
+    // ⛔ FOUND BY MUTATION, AND IT SURVIVED EVERYTHING ELSE. Deleting one
+    // `source(...)` line from gatherWorkQueue's Promise.all left the whole
+    // suite GREEN: each gather is tested directly, and nothing asserted that
+    // anybody CALLS it. That is the same shape CLAUDE.md records twice — the
+    // `corpusAdvanceErrors` contributor that could be dropped with 44 tests
+    // passing, and `getThreatCoverage` awaited into a variable a widget never
+    // referenced. A source silently unwired contributes zero items for ever,
+    // and the queue looks CLEANER for it.
+    //
+    // ⛔ THE LIST IS WRITTEN OUT, NOT DERIVED FROM THE RESULT. Deriving it
+    // would make this assertion true by construction — the defect wearing the
+    // guard's clothes. Adding a source means adding it here, deliberately.
+    const DECLARED = [
+      'cve', 'compliance', 'config_diff', 'licence', 'rule_cleanup', 'tunnel',
+      'collection_gap', 'segmentation', 'ingest', 'application', 'coverage',
+      'os_lifecycle',
+    ];
+    const angry = { async query() { throw new Error('nope'); } };
+    const { sources } = await gatherWorkQueue(angry);
+    const keys = sources.map((s) => s.key);
+    for (const key of DECLARED) {
+      assert.ok(keys.includes(key), `source "${key}" is not wired into gatherWorkQueue`);
+    }
+    // And nothing undeclared appeared, which would mean this list went stale
+    // in the other direction.
+    assert.deepEqual([...keys].sort(), [...DECLARED].sort());
+  });
+
   it('⛔ an omitted source is REPORTED as omitted, never simply absent', async () => {
     // A source that stops appearing is indistinguishable from one that silently
     // broke. Every other source here fails (the stub throws), which is what

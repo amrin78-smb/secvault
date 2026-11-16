@@ -1595,3 +1595,44 @@ deletion with a foreign-key error naming an internal table); the guard is
 `scopesEmptiedByDeviceDeletion()` at BOTH deletion points -- `app/api/devices/[id]/route.js` and
 the delete Server Action in `app/(dashboard)/devices/page.js`. A THIRD delete path needs the same
 call, and `tests/deviceScopeEnforcement.test.js` asserts both existing ones make it.
+
+## os_branch_cycles (v2.229.0)
+
+WHICH BRANCH OF A VENDOR OS IS STILL SUPPORTED. Written only by `lib/feeds/osHub.js` from the hub's
+third signed feed; read by `lib/osBranchData.js`. 54 rows today (PAN-OS 27, Cisco IOS-XE 19,
+FortiOS 8).
+
+| column | notes |
+|---|---|
+| `vendor` | ⛔ the FEED's display name (`'Palo Alto'`), NOT a SecVault slug (`'paloalto'`). This is the publisher's corpus stored as published; `lib/osBranch.js`'s `PRODUCT_FOR_VENDOR` owns the single translation. |
+| `product` | `'PAN-OS'` / `'FortiOS'` / `'Cisco IOS-XE'` |
+| `cycle` | the branch key, `'11.1'` — what `branchOf()` returns for a running version |
+| `release_date` / `support_end_date` / `extended_end_date` | all NULLABLE `date` |
+| `latest_version` | the vendor's named latest release on that branch, usually NULL |
+| `lts` | ⛔ TRI-STATE. NULL for every PAN-OS row, because Palo Alto's table does not state it. A `NOT NULL DEFAULT false` would assert "this is not a long-term-support branch" from a field nobody published — the `hit_count DEFAULT 0` bug in a column nobody would check. |
+| `confidence` | `NOT NULL`. `high` = the vendor's own published table (PAN-OS); `low` = endoflife.date, an aggregator (FortiOS, Cisco IOS-XE). |
+| `source` / `vendor_link` | the URL the row came from, and the official page an aggregator row cites |
+| `feed_version` | the corpus version each row was last applied from |
+
+⛔ **UNIQUE (vendor, product, cycle) — ALL THREE.** `'7.4'` is a FortiOS branch and also a PAN-OS
+branch, with different support dates; keying on the cycle alone would let one vendor's lifecycle
+answer for another's firewall. The same mistake `advisories.cve_id` made by carrying one vendor,
+which CLAUDE.md records as permanent once made. The unique INDEX is the upsert's `ON CONFLICT`
+target, so a plain index would not serve it.
+
+⛔ **`extended_end_date` IS A SEPARATE COLUMN, NOT A LONGER `support_end_date`.** PAN-OS 10.1 is
+standard-supported to 2024-12-01 and extended to 2026-03-31. One column tells a customer with no
+extended contract that their branch lives 16 months longer than it does, and one who holds the
+contract that it is already dead. Four states, never three — see `branchState()`.
+
+⛔ **FULLY REGENERATED, NOT ACCUMULATED.** Rows absent from a verified, non-empty feed are DELETED,
+because a retained row would go on telling an operator that a long-dead branch is the vendor's
+current statement. That is safe only because the signature must verify and an empty corpus is
+refused.
+
+⛔ **NOT per-device and NOT partitioned.** It holds the PUBLISHER's corpus; the join to a firewall is
+computed at read time in JS (`branchOf` on the collected version) because the key cannot be expressed
+in SQL without re-implementing the matching contract a second time.
+
+Granted `SELECT` to `claude_readonly` and `nocvault_readonly` — public vendor lifecycle dates, no
+secret, no device data.

@@ -4283,3 +4283,106 @@ off the Settings page.
 Recent jobs fleet-wide, newest first, live ones first, in ONE query. Backs
 `GET /api/jobs` and the header job panel. ⛔ The device name is LEFT-joined: a
 finished delete has no device.
+
+## `lib/feeds/hubFeed.js` (v2.229.0) — the TRUST ANCHOR shared by every hub feed
+
+`FEED_PUBLIC_KEY_SPKI_B64` · `CLOCK_SKEW_TOLERANCE_MS` · `hubUrl()` · `publicKey()` ·
+`fetchWithTimeout(url, headers, timeoutMs)` · `verifyFeedBytes({body, signature, expectedSha, label})`
+· `stampAge(raw, nowMs)`.
+
+⛔ **IT EXISTS BECAUSE THERE ARE NOW TWO CONSUMERS OF ONE SIGNING KEY.** A second copy of "is this
+feed genuine" is the one duplication this product cannot afford: two implementations drift, and the
+one that drifts LOOSE imports unverified data into the tables behind the priority decision tree.
+`cveHub.js` no longer declares the key — it imports it, and `tests/hubFeed.test.js` asserts the
+source does not re-declare one.
+
+⛔ **`verifyFeedBytes` VERIFIES THE EXACT BYTES AND FAILS CLOSED.** The sha256 header is NOT a
+second check and is never read as one — it is published by the same party as the body, so it catches
+a truncated download and nothing else; the signature is the only thing an attacker cannot also
+produce, which is why it is never conditional on the header's presence. A tampered body whose sha
+header was updated to match is still refused, and that case is a test.
+
+⛔ **WHAT IS DELIBERATELY NOT SHARED: freshness.** `cveHub.feedFreshness` and `osHub.feedFreshness`
+read the same header and reach opposite thresholds (24 hours against 7 days) because they describe
+different machines — an hourly automated ingest against a daily watch over a human-curated corpus.
+Sharing a threshold would force one of the two to be wrong.
+
+⛔ **`stampAge` HAS FOUR OUTCOMES AND ONLY ONE IS A NUMBER** — missing, unparseable, OFFSETLESS and
+in-the-future each return `{ageMs: null}` with a distinct `problem`. An offsetless stamp is refused
+rather than guessed: `Date.parse('2026-11-16 06:00:00')` is read in the READER's zone, so on the
+reference deployment (UTC+7) a stamp meaning 06:00Z reads 7 hours younger — enough to hide a day of
+silence either side of a threshold.
+
+## `lib/feeds/osHub.js` (v2.229.0) — OS/firmware branch lifecycle feed consumer
+
+`fetchAndUpsertOsCycles(pool)` · `fetchSignedOsFeed` · `applyOsFeed` · `feedFreshness` ·
+`syncErrors` · `checkCycleRow` · `STALE_AFTER_MS`.
+
+Mirrors `cveHub.js`: same host, same signature scheme, same `x-license-key`, same env vars. **Two
+health signals are deliberately INVERTED relative to the CVE feed**, and copying it unchanged would
+have made this feed permanently amber for a hub working as designed:
+
+1. **No corpus-advance check.** `generated_at` standing still is the RESTING STATE here — the corpus
+   is refreshed by a person against vendor EOL pages that change a few times a year.
+2. **A missing `checked_at` is `unknown` and contributes NO error.** It is the hub's known present
+   state (its daily source watch has not had a first run), so a `partial` for it would be a chip
+   nobody can clear. It is never read as healthy — the state is `unknown` and never claims freshness.
+   Once ANY stamp exists, ageing works and a stopped watch reports `stale`.
+
+⛔ **ROWS ABSENT FROM A VERIFIED, NON-EMPTY FEED ARE DELETED.** Safe only because of the two
+refusals above it; a retained row would go on telling an operator that a long-dead branch is the
+vendor's current statement. ⛔ **A REFUSED ROW IS ALSO DROPPED** — degrade toward "we do not know",
+never toward a date the publisher has just contradicted — and the refusal is pushed into `errors`,
+so the run reads `partial` rather than quietly losing coverage. ⛔ **AN ALL-REFUSED CORPUS THROWS
+AND CHANGES NOTHING**: applying it would empty the table on the strength of a disagreement between
+two validators.
+
+## `lib/osBranch.js` (v2.229.0) — is this firewall's OS branch still supported?
+
+PURE. `branchOf` · `branchState` · `classifyBranch` · `branchSentence` · `cycleIsMatchable` ·
+`normaliseConfidence` · `isVendorConfirmed` · `summariseBranchStates` · `todayLocal` ·
+`BRANCH_CLAIM` · `EXTENDED_CLAIM` · `PRODUCT_FOR_VENDOR` · `UNKNOWN_REASONS` · `OS_BRANCH_VERSION`.
+
+⛔ **`branchOf` IS A MATCHING CONTRACT THAT LIVES ON BOTH SIDES OF A NETWORK.** The hub keys its
+corpus on its own `branchOf`; this reduces the version SecVault collected. Disagree by one character
+and the join MISSES SILENTLY — every firewall reads "branch unknown" and nothing errors. Leading
+zeros are stripped because Cisco writes both `17.9.1` and `17.09.01a` for one branch. An unreadable
+version is `null`, never a fabricated `0.0`. `OS_BRANCH_VERSION` (1) tracks the hub's own pin.
+
+⛔ **FOUR STATES.** `extended_end_date` is a SEPARATE date, so `extended_only` is its own state:
+reported as supported it hides a contract the customer may not hold, reported as eol it is wrong for
+the customers who do. The support-end comparison is INCLUSIVE (the vendor publishes the last
+supported day). A row with neither date is `unknown`, never `eol`.
+
+⛔ **FIVE WAYS OF BEING UNKNOWN, NEVER SUMMED**: `no_version`, `unreadable_version`,
+`product_not_covered`, `branch_absent`, `cycle_unreadable`. Each sends an operator somewhere
+different. An unknown verdict carries NO date and NO confidence.
+
+⛔ **`PRODUCT_FOR_VENDOR` MAPS `paloalto` AND `fortinet` ONLY.** `cisco_asa` is deliberately absent:
+an ASA runs ASA Software and Cisco IOS-XE is the Catalyst/ISR OS. The two version spaces happen not
+to overlap today, which makes the refusal look cosmetic — it is the only thing standing between this
+feature and a confident lifecycle verdict for the wrong operating system.
+
+⛔ **CONFIDENCE IS SURFACED IN THE SENTENCE, NOT ONLY IN A FIELD.** An unrecognised confidence is the
+WEAKEST, never the strongest. PAN-OS is `high` (Palo Alto's own table); FortiOS and Cisco IOS-XE are
+`low` (endoflife.date).
+
+⛔ **TWO CLAIMS, AND THE SECOND EXISTS BECAUSE THE FIRST WAS AN OVERCLAIM FOR `extended_only`.**
+`BRANCH_CLAIM` says a branch past support "no longer carries a vendor commitment to fixes" — never
+"no fix will ever ship", which a vendor can still do under enough pressure. `EXTENDED_CLAIM` says
+extended support still receives fixes FOR A CONTRACT HOLDER. A test rejects *never*, *guarantee*,
+*unpatchable*, *impossible* and *cannot be fixed* in either.
+
+## `lib/osBranchData.js` (v2.229.0) — the reads behind that judgement
+
+`loadOsBranchCorpus` · `loadDeviceBranchSupport` · `loadOpenAdvisoryCounts` ·
+`loadUnfixableAdvisories`.
+
+⛔ **A FAILED CORPUS READ THROWS; AN EMPTY TABLE IS `neverSynced`.** Empty is legitimate — before the
+feed's first sync, and on every site with no licence key — and a failed read producing the same empty
+map would render the identical screen while the corpus sat there intact. ⛔ **Dates come back as TEXT
+via `to_char`**, never as a pg `Date`. ⛔ **One `asOf` for the whole fleet**, so two firewalls in one
+render cannot straddle a support-end boundary. ⛔ **A firewall with no assessment rows is ABSENT from
+`loadOpenAdvisoryCounts`**, and `loadUnfixableAdvisories` reports `openPatchNow: null` for it, never
+0 — "nothing affects this firewall" and "this firewall has never been assessed" are different
+statements.

@@ -3067,6 +3067,7 @@ customer must read off the server to buy or renew anything.
 | FIRST EPSS | `epss.empiricalsecurity.com/epss_scores-current.csv.gz` | 6h, last | **ENRICHMENT-ONLY**, never inserts. Bulk CSV; `api.first.org` fallback. |
 
 | Cloud catalogue | M365 `endpoints.office.com` · AWS `ip-ranges.json` · Google `cloud.json` · Cloudflare `ips-v4` | 6h, LAST | **NOT a CVE feed.** Published cloud address space, so a rule referencing `outlook.office365.com` is readable. Live: 11,766 rows in 2.1s. |
+| **OS branch lifecycle** | `nocvault-eol` `/api/v1/os-feed` | 6h, **LAST of all** | **NOT a CVE feed.** Which BRANCH of a vendor OS is still supported, so an advisory can be read against a branch that will never get a fix. Signed with the SAME Ed25519 key as the CVE feed and metered by the SAME `CVE_HUB_LICENSE_KEY`. Live: 54 cycles, ~23 KB. See its own section below. |
 
 ⛔ **The cloud catalogue names a PROVIDER, never an application.** An address inside AWS's ranges is
 AWS — not Salesforce or anything else a customer runs there. Only some feeds publish a service
@@ -3525,6 +3526,154 @@ appearing is indistinguishable from one that silently broke.
 ⛔ **`accept-encoding: gzip` IS SENT EXPLICITLY** — node's `fetch` does not negotiate
 compression. Measured: 3.3 MB raw, **173 KB gzipped (5%)**. Omitting it costs a 20x
 download on a link this product often shares with a syslog stream.
+
+## OS branch lifecycle (`os_hub`, v2.229.0) — `lib/feeds/osHub.js` + `lib/osBranch.js`
+
+⛔ **WHAT IT ADDS, AND WHY THE CVE PIPELINE COULD NOT SAY IT.** SecVault already knows every
+firewall's running version and already matches advisories against it, so it can say "this firewall
+is affected by CVE-X". It could not say that the BRANCH that version belongs to left vendor support
+in 2022 — so the advisory's own `fixed_in` instruction names a release on a branch the vendor no
+longer commits to, and the real remediation is a branch upgrade: a different size of job with a
+different approval path. **A chassis under hardware support until 2029 running an OS branch that
+died in 2022 is the combination nothing in this suite could see.**
+
+⛔ **NO NEW CLIENT AND NO NEW ENVIRONMENT VARIABLES.** `lib/feeds/hubFeed.js` holds the pinned key,
+the verifier and the transport for BOTH hub feeds; `cveHub.js` no longer declares a key of its own
+and a test asserts it does not. A second copy of "is this feed genuine" is the one duplication this
+product cannot afford: two implementations drift, and the one that drifts LOOSE writes unverified
+data into the tables behind the priority decision tree.
+
+⛔ **ONE KEY SIGNS BOTH FEEDS, AND THAT WAS MEASURED RATHER THAN ASSUMED (2026-11-16).** The OS
+feed's REAL published signature over its real 23,538-byte body verifies against the constant already
+pinned in SecVault's source, and a one-bit flip of that body is rejected. Before that check it was a
+claim; a wrong key would have made every pull refuse with a correct-looking error.
+`tests/fixtures/osFeedSigned.js` keeps the proof offline and permanent — an Ed25519 signature over
+those exact bytes stays valid for as long as the key does, so the fixture does not go stale in the
+way that matters.
+
+### ⛔ `extended_end_date` IS A SEPARATE DATE — FOUR STATES, NEVER THREE
+
+`supported` / `extended_only` / `eol` / `unknown`. PAN-OS 10.1 is standard-supported to 2024-12-01
+and extended to 2026-03-31. Reporting extended-only as "supported" hides that the customer needs a
+contract they may not hold; reporting it as "eol" is wrong for the customers who do. The support-end
+comparison is INCLUSIVE — the vendor publishes the last supported day, and an exclusive test calls a
+branch dead a day early, which on this axis is the whole answer on exactly the day somebody checks.
+
+⛔ **AND IT NEEDS ITS OWN CLAIM, NOT A MILDER VERSION OF THE OTHER ONE.** `BRANCH_CLAIM` says a
+branch past support "no longer carries a vendor commitment to fixes" — never "no fix will ever
+ship", which a vendor can still do under enough pressure, and an overclaim an operator catches us in
+once is how they stop trusting the honest statements beside it. `EXTENDED_CLAIM` says extended
+support still receives fixes FOR A CONTRACT HOLDER. **The first draft used the end-of-life wording
+for both and titled an extended-support firewall "cannot be fixed on PAN-OS 10.1"; a test caught
+it.** A test rejects *never*, *guarantee*, *unpatchable*, *impossible* and *cannot be fixed* in
+either string.
+
+### ⛔ CONFIDENCE IS SURFACED EVERYWHERE THE DATE IS, AND IT DECIDES THE BAND
+
+PAN-OS is `high` — Palo Alto's own end-of-life summary table. **Every FortiOS and every Cisco IOS-XE
+row in the live corpus is `low`** — endoflife.date, an aggregator. Rendering an aggregator's date as
+though the vendor had confirmed it is this codebase's signature bug wearing a lifecycle hat: a
+confident, plausible, possibly wrong date, on the strength of which somebody schedules or defers an
+upgrade. The sentence carries the qualifier, the table carries the word "Aggregator" and a link to
+the official page the row cites, and an unrecognised confidence is read as the WEAKEST, never the
+strongest.
+
+⛔ **SO THE WORK-QUEUE BAND TURNS ON THE DATE'S SOURCE, NOT ON HOW BAD THE FINDING LOOKS.** A
+vendor-confirmed dead branch with an open `patch_now` advisory is `reported` and reaches `act_now`;
+an aggregator-dated one is `unmeasured` and lands in `verify`, however many KEV-listed advisories
+sit on it. That is not timidity — `act_now` is a claim about EVIDENCE, and an upgrade scheduled or
+deferred on an aggregator's date needs a human to confirm the date first. The same call
+`gatherLicences` makes between a vendor-reported expiry and one that would not parse.
+
+### ⛔ IT CHANGES NO PRIORITY BAND
+
+The branch state is a SECOND AXIS beside `device_cve_assessments.priority_band` — the shape
+`approval_state` takes beside `rule_change_requests.status` — and nothing in this feature writes to
+an assessment. The priority decision tree is documented-before-changed by contract and was not
+touched; what is added is the statement that a patch on this branch is not the remediation. A test
+asserts the source issues no write at all.
+
+⛔ **BOTH HALVES ARE REQUIRED FOR URGENCY.** A branch that died last week on a firewall with nothing
+outstanding is a planning item, and ranking it urgent would put the fleet's whole upgrade backlog in
+`act_now` on the day this shipped.
+
+### ⛔ A BRANCH ABSENT FROM THE FEED IS UNKNOWN — NOT SUPPORTED AND NOT EOL
+
+Only PAN-OS, FortiOS and Cisco IOS-XE are covered, because those are the platforms with a
+machine-readable source — the same bar `vendorPsirt.js` sets before registering a vendor feed.
+⛔ **`cisco_asa` IS DELIBERATELY NOT MAPPED TO Cisco IOS-XE, AND DOING SO WOULD BE WRONG RATHER THAN
+APPROXIMATE.** An ASA runs ASA Software (`9.18(4)15`); IOS-XE is the Catalyst/ISR operating system
+and its cycles run 16.12–17.18. The corpus covers IOS-XE because the hub found a source for it, not
+because it covers the firewall this product manages. Today the two version spaces happen not to
+overlap, so the refusal looks cosmetic — it is the only thing standing between this feature and a
+confident lifecycle verdict for the wrong operating system the day either side ships a colliding
+branch number.
+
+⛔ **FIVE WAYS OF BEING UNKNOWN, COUNTED SEPARATELY AND NEVER SUMMED**: `no_version`,
+`unreadable_version`, `product_not_covered`, `branch_absent`, `cycle_unreadable`. Fix collection,
+fix the parser, accept that a vendor is not covered, ask the publisher for a branch, or look at a
+corpus row that cannot be read — four different next steps. An unknown verdict carries NO date and
+NO confidence, because a date beside "unknown" is a date for nothing.
+
+### ⛔ THE MATCHING CONTRACT LIVES ON BOTH SIDES OF A NETWORK
+
+`branchOf()` reduces a running version to its branch (`10.1.2-h3` → `10.1`) and the hub keys its
+corpus on its own copy of the same function. Disagree by one character and the join MISSES
+SILENTLY: every firewall reads "branch unknown", a whole feature degrading to nothing with no error
+anywhere. **Leading zeros are stripped on purpose** — Cisco writes both `17.9.1` and `17.09.01a` for
+ONE branch. An unreadable version is `null`, never a fabricated `0.0` (which is what
+`parseVersion()` returns, and CLAUDE.md records what that cost on the CVE path). `OS_BRANCH_VERSION`
+tracks the hub's own pin: **if the hub ever bumps it, this must change in the same breath.**
+
+⛔ **The join is on (vendor, product, cycle) — ALL THREE.** `7.4` is a FortiOS branch and also a
+PAN-OS branch with different dates.
+
+### ⛔ TWO OF cveHub's HEALTH SIGNALS ARE INVERTED HERE, DELIBERATELY
+
+Copying them unchanged would make this feed permanently amber for a hub working exactly as designed
+— which this file already records as the thing that teaches an operator to ignore the chip that
+matters.
+
+1. **No corpus-advance check.** `cveHub` reports `not_advancing` after 14 days without a new
+   version, because its corpus is machine-ingested hourly. THIS corpus is refreshed by a person
+   against vendor EOL pages that change a few times a YEAR, so a still `generated_at` is the resting
+   state. Its absence is a decision, recorded, not an omission.
+2. **A missing `checked_at` is `unknown` and contributes NO error.** On the CVE feed an absent header
+   means an old hub build and is pushed into `errors`. Here it is the KNOWN CURRENT STATE — the
+   hub's daily source watch has not had a first run, so `/latest` reports `"checked_at": null`
+   (verified 2026-11-16). ⛔ It is NOT read as healthy either: the state is `unknown`, it is carried
+   in the result and the log summary, and it never claims freshness. The blind spot it leaves is
+   narrow and named — a watch that has NEVER produced a stamp is indistinguishable from one about to
+   — and once ANY stamp exists, ageing works and a stopped watch reports `stale`. Threshold 7 days
+   (seven missed runs of a daily watch), a STATED CADENCE rather than a derivation.
+
+### ⛔ ROWS ABSENT FROM A VERIFIED, NON-EMPTY FEED ARE DELETED
+
+The publisher fully regenerates the corpus every time, so a branch that disappears upstream must
+disappear here; a retained row would go on telling an operator that a long-dead branch is the
+vendor's current statement. That is safe ONLY because the signature must verify and a
+verified-but-empty corpus is refused — otherwise a publisher bug emitting zero rows would be a
+correctly-signed instruction to empty the table, reported as a clean success.
+
+⛔ **A ROW WE CANNOT READ IS ALSO DROPPED, AND THE ALTERNATIVE WAS CONSIDERED.** Keeping our previous
+copy would preserve a statement that was valid when stored — but we would then be rendering a date
+the publisher has just contradicted, with nothing on screen saying so. Dropping it degrades that
+branch to `unknown`, a stated gap, and the refusal is pushed into `errors` so the feed reads
+`partial` rather than quietly losing coverage. **Degrade toward "we do not know", never toward a
+confident answer nobody stands behind.** ⛔ **AN ALL-REFUSED CORPUS THROWS AND CHANGES NOTHING**:
+applying it would delete every row on the strength of a disagreement between two validators, taking
+the feature down with no vendor data having changed.
+
+⛔ **`lts` IS TRI-STATE.** It is NULL for every PAN-OS row because Palo Alto's table does not state
+it; coercing that to `false` would assert "this is not a long-term-support branch" from a field
+nobody published — the `hit_count DEFAULT 0` bug in a column nobody would think to check.
+
+### ⛔ THE PILL'S SCOPE WIDENED, AND THAT IS THE RIGHT SCOPE
+
+`os_hub` is in `KNOWN_FEEDS`, so the header pill now means "is the vulnerability picture current"
+rather than only "is the advisory corpus current". A dead lifecycle feed does not make a CVE wrong;
+it makes the REMEDIATION wrong, which is the half an operator acts on. ⛔ `cloud_apps` is still
+deliberately absent: it names published cloud address space and nothing about a vulnerability.
 
 ---
 
@@ -4205,6 +4354,17 @@ CVE_HUB_URL=                               # blank = the built-in nocvault-eol e
 CVE_HUB_PUBLIC_KEY=                        # ⛔ overrides the key PINNED IN SOURCE. Only for a
                                            # customer running their own hub: fetching the key
                                            # from the feed's own host would verify nothing.
+# ⛔ ALL THREE OF THE ABOVE GOVERN **TWO** FEEDS SINCE v2.229.0 — the central
+# CVE corpus and the OS BRANCH LIFECYCLE corpus. There is deliberately no
+# OS_HUB_* trio: they describe ONE publisher, one host and one commercial
+# relationship (the hub meters both corpora off the same key list), so a second
+# set would be three more things to configure before a customer can pull, with
+# the same answer in all three. ⛔ The consequence is that CVE_HUB_LICENSE_KEY
+# now gates both: unset it and BOTH feeds log `skipped` with a reason, and every
+# firewall reads "branch unknown".
+# ⛔ And CVE_HUB_PUBLIC_KEY is the ONLY key override. A deployment trusting two
+# different publishers for two feeds from one host is a configuration nobody
+# could reason about.
 VPN_POLL_INTERVAL_MINUTES=30               # 5-59
 SNMP_POLL_INTERVAL_MINUTES=15              # 5-59
 SNMP_VPN_RETENTION_DAYS=180                # vpn_session_snapshots + snmp_metric_snapshots cleanup

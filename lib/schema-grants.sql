@@ -315,6 +315,12 @@ GRANT SELECT ON TABLE report_delivery_log TO nocvault_readonly;
 GRANT SELECT ON TABLE custom_reports TO claude_readonly;
 GRANT SELECT ON TABLE custom_reports TO nocvault_readonly;
 
+-- OS branch lifecycle corpus (v2.229.0). Public vendor end-of-life dates
+-- pulled from the signed hub feed -- no secret, no device data and no personal
+-- data, so it is granted read-only for diagnostics like its neighbours above.
+GRANT SELECT ON TABLE os_branch_cycles TO claude_readonly;
+GRANT SELECT ON TABLE os_branch_cycles TO nocvault_readonly;
+
 -- ⛔ Drop the readonly password out of the session. It was set with
 -- is_local=false so it would survive to the DO block above; without this it
 -- would stay readable via current_setting() for the rest of the connection.

@@ -1158,6 +1158,18 @@ const REGISTRY = [
   // each source, so harvestSwallowedErrors is what actually reads the verdict.
   { mod: 'lib/engines/workQueueData.js', fn: 'gatherWorkQueue', args: () => [], spec: { object: ['items', 'sources'] } },
 
+  // ── OS branch lifecycle (v2.229.0) ──────────────────────────────────────
+  //
+  // ⛔ REGISTERED SEPARATELY ALTHOUGH gatherWorkQueue ALREADY REACHES THEM.
+  // That path swallows a per-source failure into {ok:false}, which
+  // harvestSwallowedErrors does read — but it cannot say WHICH of the three
+  // reads broke, and `os_branch_cycles` is a table that will not exist on a
+  // server one deploy behind. A direct entry names the statement.
+  { mod: 'lib/osBranchData.js', fn: 'loadOsBranchCorpus', args: () => [], spec: { object: ['rows', 'total'] } },
+  { mod: 'lib/osBranchData.js', fn: 'loadDeviceBranchSupport', args: () => [], spec: { object: ['devices', 'summary'] } },
+  { mod: 'lib/osBranchData.js', fn: 'loadOpenAdvisoryCounts', args: () => [], spec: { object: ['byDevice'] } },
+  { mod: 'lib/osBranchData.js', fn: 'loadUnfixableAdvisories', args: () => [], spec: { object: ['items', 'summary'] } },
+
   // ── scheduled report delivery ───────────────────────────────────────────
   //
   // ⛔ ONLY THE READ HALF IS REGISTERED, and that is a limit of this gate

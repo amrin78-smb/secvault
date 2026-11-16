@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.229.0': [
+    'New: SecVault now knows whether the OS branch each firewall runs is still one its vendor supports. It already knew the running version and matched advisories against it; it could not say that the branch that version belongs to left support years ago, which means no patch is coming for it and the fix is an upgrade.',
+    'The Lifecycle page gains an OS Branch Support section, and the work queue raises one item per firewall that is both affected by an open patch-now advisory and on a branch past vendor support — the combination that was previously invisible.',
+    'Four states, not three: a branch on EXTENDED support only is reported as its own state, because reading it as supported hides that you need a contract, and reading it as end-of-life is wrong if you have one.',
+    'Where a date comes from is shown beside it. Palo Alto’s dates are its own published table; the FortiOS and Cisco figures come from a third-party aggregator and are labelled as such, with a link to the vendor page to check — and an item resting on an aggregator date is never ranked “act now”.',
+    'A firewall running an OS the feed does not cover reads “branch unknown”, which is neither supported nor end-of-life. The five different reasons for “unknown” are counted separately, because they send you to five different places.',
+    'No CVE priority or score changes: the branch state sits alongside the existing assessment rather than altering it.',
+  ],
   '2.228.16': [
     'Fixed: when the database briefly refused one batch of syslog events, the collector re-sent the ENTIRE spool file every two seconds for up to thirty minutes \u2014 about 900 times \u2014 re-storing the events that had already been saved, and writing a duplicate copy of the same raw lines into the compressed archive each pass. It now keeps only what is still owed, and archives each line exactly once.',
     'Fixed: nothing ever checked that the syslog listener actually started. If the port was already in use the collector stayed running, reported itself healthy and received nothing \u2014 indistinguishable, from every screen in SecVault, from a quiet network. It now verifies each listener, says so on the dashboard, and retries one that could not start.',

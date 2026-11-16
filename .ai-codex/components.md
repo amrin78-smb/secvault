@@ -1287,3 +1287,32 @@ both repeated one fact up to 167 times and read as the per-rule claim
 `exposureCorrelation.js` explicitly disclaims. ⛔ The three empty states and the
 unmeasured-CVSS treatment are unchanged. The overview grid now uses
 `align-items: start`.
+
+## `components/lifecycle/OsBranchSupport.js` (v2.229.0)
+
+The OS Branch Support section on `/lifecycle`. Props: `{ support }` — the projection
+`loadDeviceBranchSupport()` returns, plus an optional `readError`.
+
+⛔ **PRESENTATION ONLY.** Every verdict, date and sentence comes from `lib/osBranch.js`; it
+re-derives nothing, which is what stops it drifting from the `os_lifecycle` work-queue item built
+from the same verdicts.
+
+⛔ **FOUR STATES GET FOUR TREATMENTS AND `unknown` IS HUELESS** (`--unmeasured`), never the severity
+ramp and never a reassuring grey — a gap in OUR reach is not a severity of the customer's. The BADGE
+WORD carries the state; the tint never carries it alone.
+
+⛔ **AN AGGREGATOR DATE SAYS SO IN WORDS ON EVERY ROW**, with a link to the official page it cites.
+A `low`-confidence date rendered like a vendor-confirmed one is this codebase's signature bug with an
+upgrade budget attached.
+
+⛔ **THE FIVE UNKNOWN CAUSES ARE NAMED AND NEVER SUMMED**, and the corpus states its own reach
+("Corpus: 54 branches (feed 2026-11-16.1) — PAN-OS 27, …") so a reader can tell "nothing is
+end-of-life" from "nothing has been checked".
+
+⛔ **A FAILED READ RENDERS AN EmptyState SAYING SO**, never an empty table — the page's other four
+sections share one `Promise.all` that would fail the page, so this one is isolated and a
+pre-migration deploy costs the section rather than the page.
+
+⛔ **THE PAGE PASSES A PLAIN PROJECTION, NOT THE LOADER'S `corpus` OBJECT**, which carries a `lookup`
+FUNCTION. This is a server component so nothing is serialised today — which is exactly how v2.120.0
+shipped a blank `/reports`.

@@ -48,6 +48,7 @@ const TYPE_LABEL = {
   ingest: 'Log ingest',
   device: 'Firewall',
   conformance: 'Conformance',
+  os_lifecycle: 'OS lifecycle',
 };
 
 const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
