@@ -3731,6 +3731,24 @@ the feature down with no vendor data having changed.
 it; coercing that to `false` would assert "this is not a long-term-support branch" from a field
 nobody published — the `hit_count DEFAULT 0` bug in a column nobody would think to check.
 
+⛔ **MEASURED ON PRODUCTION 2026-11-17, WHICH IS WHAT CLOSED THE ONE STEP v2.229.0 SHIPPED
+UNVERIFIED.** Everything either side of it had been exercised offline — the signature against the
+real published body, the apply path against a real Postgres — but the AUTHENTICATED HTTP PULL from
+the deployed server, using that box's own `CVE_HUB_LICENSE_KEY`, had never once run. It does:
+**four consecutive `os_hub` cycles, all `success`** (22:10:10 on the deploy itself, then 00:02,
+06:01 and 12:02), each `stored 54 · refused 0 · removed 0` in 1.3-3.1s, with `os_branch_cycles`
+holding **54 rows at `feed_version 2026-11-16.1`** — 27 PAN-OS `high`, 19 Cisco IOS-XE and 8
+FortiOS `low`, 20 carrying an `extended_end_date`, and **26 with `lts` NULL**, so the tri-state
+above survived a real round trip instead of being flattened by the writer. `npm run dbcheck` over
+the VPN went **123 ok / 4 failed → 127 ok / 0 failed / 0 grant problems**, those four having been
+nothing but the absent table.
+
+⛔ **`inserted 54, updated 0` ON EVERY CYCLE IS THE FULL RE-APPLY, NOT 54 NEW BRANCHES — AND NOT A
+STALLED FEED EITHER.** The publisher regenerates the whole corpus, so each pull re-applies all 54
+rows; `feed_version` is unchanged because the vendor dates have not moved since 2026-11-16.1, which
+on a corpus a person refreshes a few times a YEAR is the resting state this feed deliberately does
+not report as `not_advancing`. Read `feed_version` for liveness here, never the row count.
+
 ### ⛔ THE PILL'S SCOPE WIDENED, AND THAT IS THE RIGHT SCOPE
 
 `os_hub` is in `KNOWN_FEEDS`, so the header pill now means "is the vulnerability picture current"
