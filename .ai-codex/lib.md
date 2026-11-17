@@ -902,9 +902,10 @@ refreshes destroys the one thing a queue is for. ⛔ `summarise` reports `source
 
 ## lib/engines/workQueueData.js
 
-(v2.115.0, tenth gather v2.124.0, eleventh v2.188.0) **ELEVEN** gathers, each isolated in
-`runSource` so a throw reports `{ok:false,error}` rather than contributing zero items. ⛔ This line
-said TEN until v2.228.5, after `coverage` had been added — count them in `gatherWorkQueue`'s
+(v2.115.0, tenth gather v2.124.0, eleventh v2.188.0, twelfth `os_lifecycle` v2.229.0) **TWELVE**
+gathers, each isolated in `runSource` so a throw reports `{ok:false,error}` rather than contributing
+zero items. ⛔ This line said TEN until v2.228.5 and ELEVEN until v2.230.0 — twice stale, the
+second time within one release of being corrected — so count them in `gatherWorkQueue`'s
 `Promise.all`, not here. ⛔ The ack join in `gatherRuleCleanup` MUST go through
 `firewall_rules` — `rule_analysis_results.rule_id` is a UUID FK, `finding_acknowledgements.
 rule_id_vendor` is the vendor text id; joining them directly is `text = uuid` and Postgres
@@ -935,7 +936,7 @@ the `act_now` band — could never leave `/work`. Measured before and after on p
 same data and same dispatch options: `segmentation ok=true count=0` → `count=1`. It now carries the
 identical two guards (handed-in result, else one COUNT on `segmentation_intents`, probe FAILS OPEN),
 and a handed-in result with no `intents` array THROWS rather than returning `[]`. ⛔ The marginal
-cost is **~112ms**, not the ~6s first claimed from two runs at different cache states: the eleven
+cost is **~112ms**, not the ~6s first claimed from two runs at different cache states: the twelve
 sources run under one `Promise.all`, so these queries overlap the rest. A cold standalone
 `evaluateSegmentation()` is 9.8s over 1,803 rules and 16 firewalls, which is what `/work` pays.
 

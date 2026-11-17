@@ -1141,7 +1141,7 @@ keyword pattern (and its per-file duplication convention), and the database-leve
 `.ai-codex/gotchas.md`'s Redaction rules section — read that before touching any adapter's config
 retrieval or `configDiff.js`.
 
-Rule analysis (10 finding types), the risk-scoring dashboard, cleanup/optimization/reorder tabs, risk trend history, and config-diff classification/redaction internals are documented in `.ai-codex/cve-pipeline.md` / `lib.md` / `gotchas.md` — read those before touching `lib/engines/ruleAnalysis.js`, `riskScore.js`, or `configDiff.js`.
+Rule analysis (**12** finding types — this said 10; count the distinct `finding_type` literals in `ruleAnalysis.js`), the risk-scoring dashboard, cleanup/optimization/reorder tabs, risk trend history, and config-diff classification/redaction internals are documented in `.ai-codex/cve-pipeline.md` / `lib.md` / `gotchas.md` — read those before touching `lib/engines/ruleAnalysis.js`, `riskScore.js`, or `configDiff.js`.
 
 ---
 
@@ -2349,10 +2349,13 @@ fleet-wide VPN history.
 
 ## Work Queue (`/work`, Phase 3, v2.115.0)
 
-ONE ranked list of outstanding work, gathered from **ELEVEN** sources at READ time (the tenth,
+ONE ranked list of outstanding work, gathered from **TWELVE** sources at READ time (the tenth,
 `application`, landed with the application view in v2.124.0; the eleventh, `coverage`, with the
-blind-spot register in v2.188.0). ⛔ **This said TEN, and "the ten gathers", for forty versions after
-the eleventh shipped** — corrected v2.228.5 along with the same stale count in `.ai-codex/lib.md`.
+blind-spot register in v2.188.0; the twelfth, `os_lifecycle`, with the OS branch feed in v2.229.0).
+⛔ **This said TEN for forty versions, was corrected to ELEVEN in v2.228.5 — and was stale again
+ONE RELEASE LATER**, because v2.229.0 added a gather and did not touch the sentence counting them.
+A number in prose cannot be made to agree with an array by resolving to be careful: count them in
+`gatherWorkQueue`'s own `Promise.all`, and if a thirteenth is ever added, this is the sentence.
 Count them in `gatherWorkQueue`'s own `Promise.all`, which is the only place that cannot drift.
 `lib/engines/workQueue.js` is pure (banding + ranking, no pool);
 `lib/engines/workQueueData.js` holds the gathers. No table, no cron job — a stored queue goes stale
