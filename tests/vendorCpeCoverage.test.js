@@ -38,7 +38,7 @@ describe('the table is well-formed', () => {
   it('covers every supported vendor slug', () => {
     assert.deepEqual(
       Object.keys(CPES).sort(),
-      ['checkpoint', 'cisco_asa', 'forcepoint', 'fortinet', 'paloalto', 'sangfor']
+      ['checkpoint', 'cisco_asa', 'forcepoint', 'fortinet', 'paloalto', 'sangfor', 'sophos']
     );
   });
 
@@ -100,6 +100,38 @@ describe('⛔ NEVER a vendor-level wildcard', () => {
         assert.ok(
           !product.includes(banned),
           c + ' queries "' + banned + '", which is not the firewall'
+        );
+      }
+    }
+  });
+
+  it('⛔ no Sophos product from ANOTHER product line is queried', () => {
+    // ⛔ Sophos sells several real firewall-adjacent products that are NOT the
+    // appliance this adapter manages, and the CPE dictionary is dense with
+    // them — `a:sophos:web_appliance` alone has 140 entries, more than every
+    // SFOS string combined. Two in particular are tempting and wrong:
+    //
+    //   cyberoam* — an ACQUIRED, separate OS lineage. SFOS descends from it
+    //     historically, but a CyberoamOS 10.x advisory is not an SFOS 22.x one,
+    //     and "it is the ancestor" is not the same argument as the rename
+    //     lineage that justifies xg_firewall_firmware.
+    //   astaro_* / unified_threat_management — the SG/UTM line, which Sophos
+    //     sold ALONGSIDE XG rather than as an earlier name for it.
+    //
+    // Probed live against the NVD CPE dictionary 2026-11-19.
+    const NOT_THIS_FIREWALL = [
+      'cyberoam', 'astaro', 'unified_threat_management', 'united_threat_management',
+      'web_appliance', 'email_appliance', 'secure_web_gateway', 'anti-virus',
+      'intercept_x', 'safeguard', 'hitmanpro', 'endpoint_protection', 'puremessage',
+      'mobile', 'disk_encryption', 'taegis', 'cloud_optix', 'ipsec_client',
+      'ssl_vpn_client', 'enterprise_console', 'iview',
+    ];
+    for (const c of CPES.sophos) {
+      const product = c.split(':')[4];
+      for (const banned of NOT_THIS_FIREWALL) {
+        assert.ok(
+          !product.includes(banned),
+          c + ' queries "' + banned + '", which is a different Sophos product line'
         );
       }
     }

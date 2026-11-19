@@ -50,6 +50,7 @@ const VENDOR_SLUGS = [
   'checkpoint',
   'cisco_asa',
   'sangfor',
+  'sophos',
 ];
 
 // The five standards this library scores against. CLAUDE.md forbids
@@ -98,6 +99,11 @@ const VENDOR_FLOORS = {
   // Honestly zero — see the header. The protection for Sangfor is
   // NOT_EVALUABLE_BY_VENDOR below, not this number.
   sangfor: { total: 9, gradeable: 0 },
+  // ⛔ Sophos's seven gradeable checks are REAL predicates, each resolved
+  // against a config captured from a live appliance before it was written —
+  // and two of them already answer `no` on that appliance, which is how we
+  // know they measure something rather than passing vacuously.
+  sophos: { total: 11, gradeable: 7 },
 };
 
 // Named, not merely counted. A future edit that demotes one of these to
@@ -108,6 +114,15 @@ const GRADEABLE_BY_VENDOR = {
   checkpoint: ['checkpoint-admin-access-untrusted-zone'],
   forcepoint: ['forcepoint-admin-access-untrusted-zone'],
   sangfor: [],
+  sophos: [
+    'sophos-password-complexity-enabled',
+    'sophos-password-min-length-enforced',
+    'sophos-admin-login-blocking-enabled',
+    'sophos-admin-idle-logout-enabled',
+    'sophos-login-disclaimer-enabled',
+    'sophos-antivirus-service-running',
+    'sophos-dns-configured',
+  ],
 };
 
 // Sangfor's nine manual-verification items, named so they cannot be quietly
@@ -115,6 +130,24 @@ const GRADEABLE_BY_VENDOR = {
 // exists to close; converting one into a REAL predicate is an improvement and
 // is handled by the gradeable floor above, not here.
 const NOT_EVALUABLE_BY_VENDOR = {
+  // ⛔ Sophos's four, each refused for a DIFFERENT and stated reason — two of
+  // which are facts about SecVault rather than about the firewall:
+  //   ips-signature-database-current  the fact lives in a response ATTRIBUTE
+  //     (IPS_CAT_VER), not in config_parsed — and the service reporting RUNNING
+  //     while that attribute was "0" is exactly why a service-state check here
+  //     would be worse than none
+  //   admin-access-untrusted-zone     zones arrive as an unordered ARRAY and
+  //     this engine supports only a fixed literal index
+  //   ntp-configured                  the collected Time entity carries no NTP
+  //     server list to assert against
+  //   snmp-community-not-default      OUR OWN redaction blanks `Community`
+  //     before the config is stored
+  sophos: [
+    'sophos-ips-signature-database-current',
+    'sophos-admin-access-untrusted-zone',
+    'sophos-ntp-configured',
+    'sophos-snmp-community-not-default',
+  ],
   sangfor: [
     'sangfor-admin-access-untrusted-zone',
     'sangfor-dns-configured',

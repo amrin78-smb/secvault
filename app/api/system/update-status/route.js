@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.233.0': [
+    'Sophos firewalls are now a fully supported vendor. They can be added from the Add Device form, collected on the normal schedule, matched against vulnerability advisories, and graded for compliance like any other firewall.',
+    'SecVault now asks the vulnerability databases about Sophos under six different product names, because NVD files this appliance inconsistently across four of its own categories. Each name was checked against the live database before being added — a first attempt in this work discarded a name that was in fact correct, on the strength of it returning only a few results.',
+    'Several real Sophos products are deliberately NOT asked about: the Cyberoam and Astaro/UTM lines, and the web and email appliances. They are different products that do not run on this firewall, and including them would invent urgent work that is not real.',
+    'Seven new compliance checks for Sophos — password complexity and length, login blocking, idle logout, login banner, antivirus service and DNS. Every one was tested against a configuration captured from a real appliance before it was written, and two of them already fail on a factory-default Sophos, which is how we know they measure something.',
+    'Four more Sophos checks are listed as needing manual verification rather than being graded, each saying why. Two of those reasons are about SecVault rather than the firewall: one fact is not in the data we collect, and another is deliberately redacted by us before it is stored.',
+    'A Sophos firewall is reported as having no OS branch-support data rather than being matched to a vendor it is not. Sophos version numbers genuinely collide with Cisco branch numbers, so a wrong match would print a confident end-of-support date for the wrong operating system.',
+  ],
   '2.232.0': [
     'New: SecVault can now collect from Sophos firewalls — the rulebase, the configuration, address and service objects, interfaces, zones, HA state, disk usage and the firmware version.',
     'Sophos splits this across two connections and neither can do the other’s job: its management API cannot report a firmware version at all, and its console cannot list rules. SecVault uses both. A firewall with no console access still collects its rules and configuration — it is then reported as NOT ASSESSED for vulnerabilities rather than quietly appearing to have none.',

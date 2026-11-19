@@ -23,7 +23,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  OS_BRANCH_VERSION, BRANCH_STATES, UNKNOWN_REASONS, PRODUCT_FOR_VENDOR, BRANCH_CLAIM,
+  OS_BRANCH_VERSION, BRANCH_STATES, UNKNOWN_REASONS, PRODUCT_FOR_VENDOR, UNCOVERED_VENDORS,
+  BRANCH_CLAIM,
   branchOf, branchState, classifyBranch, cycleIsMatchable, normaliseConfidence,
   isVendorConfirmed, summariseBranchStates, todayLocal,
 } = require('../lib/osBranch');
@@ -423,5 +424,173 @@ describe('todayLocal', () => {
 
   it('defaults to now and returns a YYYY-MM-DD key', () => {
     assert.match(todayLocal(), /^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('⛔ sophos — a vendor the corpus does not cover', () => {
+  // Real historical Sophos Firewall major.minor branches. SFOS 22.0.3 is the
+  // release the adapter was verified against; the older lines matter because a
+  // fleet does not upgrade all at once.
+  const SFOS_BRANCHES = ['17.0', '17.1', '17.5', '18.0', '18.5', '19.0', '19.5', '20.0', '21.0', '22.0'];
+  // The device's own string, stored verbatim by adapters/sophos/console.js.
+  const SFOS_VERSION = 'SFOS 22.0.3 MR-3-Build576';
+  const COVERED_PRODUCTS = ['PAN-OS', 'FortiOS', 'Cisco IOS-XE'];
+
+  it('⛔ the corpus premise: exactly three products, and SFOS is not one of them', () => {
+    // The measured fact the refusal rests on. If this ever fails because the
+    // hub ADDED Sophos, the refusal has stopped applying and the fix is a
+    // deliberate PRODUCT_FOR_VENDOR entry plus a re-derivation of branchOf
+    // against SFOS's own version grammar — NOT a relaxed assertion here.
+    const products = [...new Set(CORPUS.map((c) => c.product))].sort();
+    assert.deepEqual(products, [...COVERED_PRODUCTS].sort(),
+      'the corpus covers three products; if this changed, revisit the sophos refusal');
+    assert.equal(CORPUS.filter((c) => /sophos|sfos/i.test(`${c.vendor} ${c.product}`)).length, 0,
+      'the hub now publishes Sophos cycles — map the vendor deliberately');
+  });
+
+  it('⛔ sophos is NOT mapped, and is never resolved to a covered product', () => {
+    assert.equal(PRODUCT_FOR_VENDOR.sophos, undefined, 'sophos must not be in the product map');
+    // ⛔ THE INVARIANT IS ATTRIBUTION, NOT MENTION. The reason string names the
+    // three covered products deliberately — "the corpus covers X, Y and Z only"
+    // is the useful half of the sentence. What must never happen is the
+    // firewall being ATTRIBUTED to one of them, so the assertions below are the
+    // three verdict forms `branchSentence` can emit plus the
+    // "<product> <branch>" adjacency that is the mis-attribution shape itself.
+    // A blanket "must not mention PAN-OS" passed on nothing useful and failed
+    // on correct code — it was a proxy for this, and the wrong one.
+    const VERDICT_FORMS = [/is supported until/, /left standard support on/, /left vendor support on/];
+    for (const branch of SFOS_BRANCHES) {
+      const v = classifyBranch({ vendor: 'sophos', version: `${branch}.3`, lookup, asOf: '2026-11-19' });
+      assert.equal(v.state, 'unknown', `SFOS ${branch} must not get a support verdict`);
+      assert.equal(v.product, null, `SFOS ${branch} must not be attributed to a product`);
+      assert.ok(!COVERED_PRODUCTS.includes(v.product));
+      for (const form of VERDICT_FORMS) {
+        assert.ok(!form.test(v.sentence), `SFOS ${branch}: sentence must not assert ${form}`);
+      }
+      for (const p of COVERED_PRODUCTS) {
+        assert.ok(!v.sentence.includes(`${p} ${branch}`),
+          `the sentence must never read "${p} ${branch}" — that is the wrong-OS verdict`);
+      }
+    }
+  });
+
+  it('⛔ the cisco_asa trap is ALREADY SPRUNG for sophos — SFOS 17.1/17.5 hit real IOS-XE rows', () => {
+    // For an ASA the refusal can honestly say the version spaces "happen not to
+    // overlap" (9.18 matches no IOS-XE cycle). For Sophos that luck has already
+    // run out: these are real Sophos branches AND real Cisco IOS-XE cycles, so
+    // a mapping would mis-report TODAY, not on some future release.
+    const collisions = SFOS_BRANCHES
+      .map((b) => ({ b, row: lookup({ vendor: 'Cisco', product: 'Cisco IOS-XE', cycle: b }) }))
+      .filter((x) => x.row);
+    assert.ok(collisions.length >= 2,
+      'SFOS 17.1 and 17.5 collide with IOS-XE rows in the live corpus');
+    assert.deepEqual(collisions.map((x) => x.b).sort(), ['17.1', '17.5']);
+    // And the colliding rows carry a real, actionable-looking end date, which
+    // is exactly what makes a wrong mapping dangerous rather than merely untidy.
+    for (const { b, row } of collisions) {
+      assert.ok(row.support_end_date, `IOS-XE ${b} states an end date`);
+      // Despite the collision, the refusal holds.
+      const v = classifyBranch({ vendor: 'sophos', version: `${b}.3`, lookup, asOf: '2026-11-19' });
+      assert.equal(v.state, 'unknown');
+      assert.equal(v.supportEnd, null, `SFOS ${b} must not inherit IOS-XE ${b}'s date`);
+      assert.notEqual(v.supportEnd, row.support_end_date);
+    }
+  });
+
+  it('⛔ the reason is exactly product_not_covered, and it is a DECLARED reason', () => {
+    const v = classifyBranch({ vendor: 'sophos', version: SFOS_VERSION, lookup, asOf: '2026-11-19' });
+    assert.equal(v.state, 'unknown');
+    assert.equal(v.reason, 'product_not_covered');
+    assert.ok(UNKNOWN_REASONS.includes(v.reason), 'must be one of the five named states');
+    // ⛔ Never a fabricated verdict. These are the two answers that would send
+    // an operator to schedule or defer an upgrade on no evidence at all.
+    assert.notEqual(v.state, 'supported');
+    assert.notEqual(v.state, 'eol');
+    assert.notEqual(v.state, 'extended_only');
+  });
+
+  it('⛔ it is a COVERAGE reason, not a parse reason, although the version is unparseable', () => {
+    // branchOf cannot read SFOS's own string, so if sophos were mapped the
+    // reason would be `unreadable_version` — pointing an operator at the parser
+    // instead of at the coverage gap. The product check running FIRST is what
+    // keeps the reason honest.
+    assert.equal(branchOf(SFOS_VERSION), null, 'the real SFOS string yields no branch');
+    const v = classifyBranch({ vendor: 'sophos', version: SFOS_VERSION, lookup, asOf: '2026-11-19' });
+    assert.equal(v.reason, 'product_not_covered');
+    assert.notEqual(v.reason, 'unreadable_version');
+    // ...and it is not reported as a collection gap either.
+    assert.notEqual(v.reason, 'no_version');
+  });
+
+  it('⛔ the verdict NEVER consults the corpus, so it is structural and not luck', () => {
+    // A lookup that hits on everything, and one that throws. Both must be
+    // unreachable: the refusal cannot depend on what the corpus happens to hold.
+    const greedy = () => ({ support_end_date: '2020-01-01', extended_end_date: '2021-01-01', confidence: 'high' });
+    const hostile = () => { throw new Error('lookup must never be called for an uncovered vendor'); };
+    for (const fn of [greedy, hostile]) {
+      const v = classifyBranch({ vendor: 'sophos', version: SFOS_VERSION, lookup: fn, asOf: '2026-11-19' });
+      assert.equal(v.state, 'unknown');
+      assert.equal(v.reason, 'product_not_covered');
+      assert.equal(v.supportEnd, null);
+    }
+  });
+
+  it('⛔ an unknown verdict carries NO date and NO confidence', () => {
+    // A date beside "unknown" is a date for nothing, and a confidence beside it
+    // grades a judgement that was never made.
+    for (const version of [SFOS_VERSION, '22.0.3', '17.5.1', null, '']) {
+      const v = classifyBranch({ vendor: 'sophos', version, lookup, asOf: '2026-11-19' });
+      assert.equal(v.state, 'unknown');
+      assert.equal(v.supportEnd, null, 'no support date');
+      assert.equal(v.extendedEnd, null, 'no extended date');
+      assert.equal(v.confidence, null, 'no confidence');
+      assert.equal(v.vendorConfirmed, false);
+      assert.equal(v.vendorLink, null);
+      assert.equal(v.source, null);
+      assert.equal(v.lts, null, 'lts is tri-state and must stay null, never false');
+      assert.equal(v.branch, null);
+      // The sentence must not carry a date the fields refuse to carry.
+      assert.ok(!/\d{4}-\d{2}-\d{2}/.test(v.sentence), 'the sentence states no date');
+    }
+  });
+
+  it('⛔ it counts as product_not_covered in the fleet summary, never as a gap it is not', () => {
+    const v = classifyBranch({ vendor: 'sophos', version: SFOS_VERSION, lookup, asOf: '2026-11-19' });
+    const s = summariseBranchStates([v]);
+    assert.equal(s.counts.unknown, 1);
+    assert.equal(s.unknownByReason.product_not_covered, 1);
+    assert.equal(s.unknownByReason.unreadable_version, 0, 'not a parser problem');
+    assert.equal(s.unknownByReason.branch_absent, 0, 'not a missing-branch problem');
+    assert.equal(s.counts.supported + s.counts.extended_only + s.counts.eol, 0);
+  });
+
+  it('⛔ the sentence explains WHY, rather than restating the generic fallback', () => {
+    const v = classifyBranch({ vendor: 'sophos', version: SFOS_VERSION, lookup, asOf: '2026-11-19' });
+    assert.ok(UNCOVERED_VENDORS.sophos, 'sophos has an explicit reason');
+    assert.match(v.sentence, /SFOS/, 'it names the operating system the operator runs');
+    assert.notEqual(
+      v.sentence,
+      'Branch support is unknown — this vendor is not in the branch lifecycle corpus.',
+      'an entry that merely restates the fallback would not earn its place'
+    );
+  });
+
+  it('⛔ the reason does not claim no Sophos lifecycle source EXISTS — nobody measured that', () => {
+    // The checkpoint/forcepoint/sangfor entries make that claim because it was
+    // established for them. Borrowing it here would be a failed read recorded
+    // as a fact, in the sentence an operator reads to decide whether to ask the
+    // publisher for this product.
+    assert.ok(!/no machine-readable/i.test(UNCOVERED_VENDORS.sophos));
+    assert.ok(!/does not (exist|publish)/i.test(UNCOVERED_VENDORS.sophos));
+    // What it says instead is a statement about OUR corpus.
+    assert.match(UNCOVERED_VENDORS.sophos, /corpus/i);
+  });
+
+  it('the slug is still trimmed and matched case-insensitively', () => {
+    for (const spelling of ['sophos', 'Sophos', ' SOPHOS ']) {
+      const v = classifyBranch({ vendor: spelling, version: SFOS_VERSION, lookup, asOf: '2026-11-19' });
+      assert.equal(v.reason, 'product_not_covered');
+      assert.match(v.sentence, /SFOS/, `${JSON.stringify(spelling)} must reach the explicit reason`);
+    }
   });
 });

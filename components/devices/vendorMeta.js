@@ -132,6 +132,36 @@ export const VENDOR_META = {
       },
     },
   },
+  sophos: {
+    label: 'Sophos Firewall (SFOS)',
+    connection: 'mgmt',
+    defaultAccessMethod: 'api',
+    // ⛔ ONE access method, although the adapter speaks TWO protocols.
+    // connectors.md 13b: the XML API has no version/licence/HA surface and the
+    // SSH console cannot dump a rulebase, so the adapter uses SSH internally
+    // for getVersion/getHaStatus/getDiskUsage. SSH is NOT a standalone way to
+    // manage this device — it cannot list rules — so there is deliberately no
+    // `ssh` entry here: a method an operator can pick must be able to collect a
+    // policy. The adapter falls back to this `rest_api` credential for its SSH
+    // connection when no separate `ssh` credential is stored.
+    accessMethods: {
+      api: {
+        label: 'XML API (HTTPS)',
+        // ⛔ 4444, NOT 443 — the SFOS web-admin port, verified live against
+        // SFOS 22.0.3 MR-3-Build576 (connectors.md 13b). 443 is the user portal
+        // on this appliance, not the API.
+        defaultPort: 4444,
+        credentialType: 'rest_api',
+        // ⛔ 'userpass', NOT 'apikey_or_userpass'. Palo Alto and Check Point use
+        // the latter because PAN-OS mints an API key from username+password via
+        // ?type=keygen. SFOS has NO API-key auth mode at all — the XML API
+        // carries a <Login><Username>/<Password> block inside the body of EVERY
+        // request. An api-key field here would render a credential input that
+        // cannot work, and no secretLabel is declared for the same reason.
+        credentialShape: 'userpass',
+      },
+    },
+  },
 };
 
 export const VENDOR_SLUGS = Object.keys(VENDOR_META);
@@ -145,6 +175,7 @@ export const VENDOR_SHORT_LABEL = {
   checkpoint: 'Check Point',
   cisco_asa: 'Cisco ASA',
   sangfor: 'Sangfor',
+  sophos: 'Sophos',
 };
 
 /**

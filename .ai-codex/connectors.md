@@ -1003,10 +1003,12 @@ unattributed**, rule-hit correlation populated for every one, each rule showing 
 
 ## 13. Sophos SFOS — syslog (v2.231.0). Verified on a live appliance, 2026-11-19
 
-⛔ **PARSER ONLY. There is no Sophos ADAPTER yet** — no `lib/adapters/sophos/`, no `ADAPTERS` entry,
-no `VENDOR_META`, no `VENDOR_CPES`. `detectVendor` returns the slug `sophos` and `syslog_events`
-will carry it, which is harmless because no `devices` row can hold that vendor yet. When the adapter
-lands, this line is the one that has to stop saying "parser only".
+⛔ **FULLY WIRED as of v2.233.0.** This line said "PARSER ONLY. There is no Sophos ADAPTER yet"
+through v2.231.x and "the registry wiring is what remains" through v2.232.0 — both are now done:
+`lib/adapters/sophos/`, `ADAPTERS`/`DEFAULT_METHOD`, `VENDOR_META`, `VENDOR_PARSERS`, `VENDOR_CPES`,
+`auditChecksSeed`, `osBranch`. **What genuinely remains is the hub side**: the nocvault-eol
+`cve_ingest_state` has no Sophos ingest targets, so on a site that cannot reach NVD directly (which
+CLAUDE.md records as the reference deployment's actual state) `VENDOR_CPES` alone yields nothing.
 
 Verified against SFOS **22.0.3 MR-3-Build576** in a lab (`secvault-lab/`), 6,621 captured lines.
 ⛔ **BOTH FORMATS WERE CAPTURED SIMULTANEOUSLY FROM THE SAME EVENTS** via two syslog servers on one

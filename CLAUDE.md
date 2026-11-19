@@ -880,7 +880,7 @@ a claim nobody measured.
 
 ## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch
 
-Six vendors implemented. The slug is load-bearing: it must match across `devices.vendor`,
+SEVEN vendors implemented (`sophos` added v2.233.0). The slug is load-bearing: it must match across `devices.vendor`,
 `VENDOR_PARSERS` (`lib/engines/versionComparator.js`), `ADAPTERS` (`lib/adapters/index.js`),
 `VENDOR_CPES` (`lib/feeds/nvd.js`), and `VENDOR_META` (`components/devices/vendorMeta.js`). Never
 invent a new spelling.
@@ -896,6 +896,7 @@ operator in the Add Device form — dispatch is `(vendor, mgmt_method) → adapt
 | `checkpoint` | `api` | Mgmt API (mgmt server, **not** gateway) | `mgmt_ip`+`mgmt_port` | `rest_api` |
 | `cisco_asa` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` (+`enable_password`?) |
 | `sangfor` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` |
+| `sophos` | `api` | XML API :4444 | `mgmt_ip`+`mgmt_port` | `rest_api` (username+password — **SFOS has NO api-key mode**) |
 
 Forcepoint is SMC-only **by design** — never SSH to Forcepoint engines (see the SMC section below).
 Credential plaintext is built by `buildCredentialPlaintext()` (vendorMeta.js) and read by
@@ -948,6 +949,7 @@ without updating this file first.
 | `cisco_asa` | `9.18(4)15` | `[9, 18, 4, 15]` (interim = 4th segment) |
 | `checkpoint` | `R81.20 Take 41` | `[81, 20, 41, 0]` (R stripped, Take = 3rd segment) |
 | `sangfor` | `8.0.85` | `[8, 0, 85]` (plain dot-split) |
+| `sophos` | `SFOS 22.0.3 MR-3-Build576` | `[22, 0, 3, 576]` (⛔ **Build is the 4th segment, NOT the MR number** — `MR-n` tracks the patch digit and carries nothing it does not) |
 
 ⛔ **`parseVersion` RETURNS A FABRICATED ZERO FOR A VERSION IT CANNOT READ, AND IT IS LEFT THAT WAY
 ON PURPOSE (v2.226.0).** `parseVersion('fortinet','nope')` is `[0,0,0,0]`, which every conceivable
@@ -955,7 +957,9 @@ target compares "at or above" — this codebase's signature bug living in a vers
 path. Changing the function to return `null` is a breaking change across `versionMatcher.js`,
 `feeds/nvd.js`, `feeds/paloalto.js` and every adapter's `version_tuple`, so what exists instead is
 an ADDITIVE **`parseVersionReadable()` / `isVersionReadable()`**, built from the SAME parsers (all
-five funnel through `parseForcepointVersion`'s single `Number.isNaN`) rather than a second regex
+EVERY one funnels through `parseForcepointVersion`'s single `Number.isNaN` —
+⛔ this said FIVE and there are now seven slugs over six parser functions; the count is
+deliberately not restated as a number, because it has already gone stale once) rather than a second regex
 that could disagree with the thing that actually parses. ⛔ It does `console.warn`, so it is not
 literally silent — but a log line is not a contract and the RETURN VALUE is what callers act on.
 
@@ -1153,7 +1157,7 @@ drift without updating this file first.
 
 Reuses `applicability.js`'s predicate evaluator (`evaluatePredicate`/`hasUsableConfig`) — compliance checks and CVE-applicability conditions both "evaluate a predicate against `device_configs.config_parsed`," for different purposes. `evaluatePredicate()` only returns `yes`/`no`/`unknown` — a compliance check needs a fourth state (`pass`/`fail`/`warning`/`na`), and different checks need **opposite polarity** (a `feature_enabled` check on `logging.enabled` wants `yes`=PASS; `admin_access_from_zone` on the WAN zone wants `yes`=FAIL). Resolved via each check's `pass_when: 'yes'|'no'`: predicate `unknown` → `warning`; result `=== pass_when` → `pass`, else `fail`; no usable config at all → `na`; **`pass_when` missing or not exactly `yes`/`no`** → `warning`, never a silent default polarity (a curated-data bug, not a device problem).
 
-A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **74 checks** (v2.225.0, was 45) — recount via `grep -c "checkId:"` if you touch that file, it has drifted before. Vendor-scoped: `fortinet` 18 / `paloalto` 14 / `checkpoint` 10 / `forcepoint` 10 / `sangfor` 9 / `cisco_asa` 3, plus 10 vendor-null. ⛔ **TOTAL IS NOT GRADEABLE.** Of the 29 added in v2.225.0, **27 are `not_evaluable_from_config`** — gradeable by vendor is `fortinet` 17 / `paloalto` 13 / `cisco_asa` 2 / `checkpoint` **1** / `forcepoint` **1** / `sangfor` **0**, plus the 10 vendor-null. A bigger library did not make those three vendors measurable; it made the gap VISIBLE and named, which is the honest outcome and the one `na` exists for.
+A third predicate type, `ruleset_property` (**3 checks**, not 2 — see compliance-pipeline.md), is a positive existence question evaluated directly against `firewall_rules`, not one fixed config path. Check-library seed (`lib/auditChecksSeed.js`) is currently **85 checks** (v2.233.0, was 74 at v2.225.0, 45 before that) — recount via `grep -c "checkId:"` if you touch that file, it has drifted before. Vendor-scoped: `fortinet` 18 / `paloalto` 14 / `sophos` 11 / `checkpoint` 10 / `forcepoint` 10 / `sangfor` 9 / `cisco_asa` 3, plus 10 vendor-null. ⛔ **TOTAL IS NOT GRADEABLE.** Of the 29 added in v2.225.0, **27 are `not_evaluable_from_config`** — gradeable by vendor is `fortinet` 17 / `paloalto` 13 / `sophos` **7** / `cisco_asa` 2 / `checkpoint` **1** / `forcepoint` **1** / `sangfor` **0**, plus the 10 vendor-null. ⛔ Sophos's seven are REAL predicates — each path was resolved against a config captured from a live appliance BEFORE the check was written, and two already answer `no` on it, which is how we know they measure rather than pass vacuously. Its other four are refused for four DIFFERENT stated reasons, two of which are facts about SecVault rather than the firewall: the IPS signature version lives in a response ATTRIBUTE and not in `config_parsed`, and the SNMP community is blanked by our OWN redaction before the config is stored. A bigger library did not make those three vendors measurable; it made the gap VISIBLE and named, which is the honest outcome and the one `na` exists for.
 
 `scorePct = round(100 * pass / (pass + fail + warning))`, **excluding `na` from the denominator**; `null` (rendered "—"), not `0`/`NaN`, when nothing is measurable.
 
@@ -1208,7 +1212,7 @@ least-measured firewalls on the fleet "moderately evidenced" — **the defect we
 clothes**. `DEVICE_GRADE_THIN_MAX` is therefore **13**, which is not a taste: it is `cisco_asa`'s
 FULL applicable count (3 vendor checks + 10 shared), i.e. the most the library can ever put to a
 firewall of the vendor it covers least, so a device at or below it cannot have been broadly measured
-by construction. That derivation survived the library going 45 → 74 checks, which is why the REASON
+by construction. That derivation survived the library going 45 → 74 → **85** checks — re-measured at v2.233.0 when Sophos landed: its applicable ceiling is **21** (11 vendor + 10 shared), so `cisco_asa`'s 13 is STILL the lowest and the band did not move. ⛔ That is a measurement, not an assumption; the next vendor may not be so convenient. This is why the REASON
 is recorded rather than the number.
 
 ⛔ **`broad` STAYS AT 20 AND IS DELIBERATELY UNREACHABLE FOR TWO VENDORS.** Raising it to 25 would
