@@ -4460,3 +4460,22 @@ holds verbatim captured lines for 25 legacy and 24 standard log_ids. The load-be
 CROSS-FORMAT AGREEMENT test — both formats were captured simultaneously from the same events, so a
 mapping wrong in one format shows up as a disagreement between two renderings of one packet. It
 found two real bugs that reading either format alone did not.
+
+
+## lib/adapters/sophos/ (v2.232.0)
+
+`api.js` (XML API transport + response interpretation), `parser.js` (pure XML ->
+NormalizedRule/zones/interfaces/objects + config redaction), `console.js` (SSH
+device-console transport + its parsers), `index.js` (the SophosAdapter class).
+
+⛔ **Two transports in one adapter**, forced by the device: the XML API has no
+version/licence/HA surface and the SSH console cannot list rules.
+⛔ **`getLicenses()` is ABSENT, not stubbed** — that is how the optional-capability
+contract in `lib/adapters/interface.js` says an adapter declares what it cannot do.
+⛔ **`api.interpretResponse()` is a PURE exported function** so the
+error-vs-empty-vs-data decision can be exercised; it is the boundary that decides
+whether `getRules()` throws or returns `[]`, and `collectAndStore` DELETEs a
+device's rules before reinserting.
+
+Full per-decision detail, including every measured count behind it:
+`.ai-codex/connectors.md` sections 13 and 13b.

@@ -7,9 +7,17 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.232.0': [
+    'New: SecVault can now collect from Sophos firewalls — the rulebase, the configuration, address and service objects, interfaces, zones, HA state, disk usage and the firmware version.',
+    'Sophos splits this across two connections and neither can do the other’s job: its management API cannot report a firmware version at all, and its console cannot list rules. SecVault uses both. A firewall with no console access still collects its rules and configuration — it is then reported as NOT ASSESSED for vulnerabilities rather than quietly appearing to have none.',
+    'Sophos does not publish its licence or subscription state over either connection. SecVault reports that as something it cannot collect, instead of showing a firewall with no renewals due.',
+    'A Sophos firewall states its rule ORDER as a chain of "this one comes after that one", with no rule numbers anywhere. SecVault rebuilds the order from that chain and REFUSES to collect if the chain does not add up, because rule order decides every reachability answer and a guessed order is a confident wrong one.',
+    'Stored Sophos configurations are redacted before they are saved. The redaction is deliberately exact rather than keyword-based: a looser rule would have blanked the password-POLICY settings an audit check reads, while claiming to protect something.',
+  ],
   '2.231.1': [
     'Sophos: confirmed by experiment which field in a Sophos log line identifies the firewall. The appliance was renamed and the logs re-read — the value follows the HOSTNAME. Sophos sends no serial number in its logs at all, so SecVault reads one over SSH instead rather than recording a name as though it were a serial.',
     'Sophos: the model string a firewall reports in its logs was observed CHANGING across a reboot, with nothing changed on the firewall. Nothing in SecVault keys on it, and the build now fails if anything starts to — keying on it would have split one firewall into two the next time it restarted.',
+    'Both findings are pinned to log lines captured from the appliance before and after the rename, so they rest on what the firewall actually sent rather than on a note someone wrote down.',
   ],
   '2.231.0': [
     'New: SecVault can now read syslog from Sophos firewalls. It understands BOTH of the formats a Sophos firewall can send — the long-standing one, which Sophos has marked legacy and warns will stop gaining new fields, and its replacement — so a firewall can be switched between them without SecVault losing track of it.',

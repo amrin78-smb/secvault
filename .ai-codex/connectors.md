@@ -1109,3 +1109,95 @@ alone**, which is the argument for keeping that test.
   **zero** rows: the lab appliance has no IPS signature database (`IPS_CAT_VER="0"`), and eleven
   attack patterns plus a 17-port version sweep produced nothing. ⛔ Those classes are **UNVERIFIED,
   not absent**, and `classifySophos` returns null for them rather than mapping from documentation.
+
+### 13b. Sophos SFOS — the ADAPTER (v2.232.0)
+
+`lib/adapters/sophos/{api,parser,console,index}.js`. ⛔ Section 13 above said
+"PARSER ONLY. There is no Sophos ADAPTER yet" — that is no longer true; the
+registry wiring (`ADAPTERS`, `VENDOR_META`, `VENDOR_PARSERS`, `VENDOR_CPES`,
+`auditChecksSeed`, `osBranch`, the hub's ingest targets) is what remains.
+
+⛔ **TWO TRANSPORTS IN ONE ADAPTER, forced by the device.** The XML API has no
+version, licence or HA surface — nine candidate entity names all return 529 and
+`APIVersion="2200.1"` does not track the patch level — while the SSH console has
+no command that dumps a rulebase. Neither can do the other's job.
+
+| capability | transport | notes |
+|---|---|---|
+| `getRules` / `getConfig` / `getObjects` / `getInterfaces` / `getRoutingTable` | XML API | |
+| `getVersion` (+`contentVersions`) / `getHaStatus` / `getDiskUsage` / `getPerformanceMetrics` | SSH console | |
+| `getLicenses` | — | **method ABSENT, not stubbed** |
+
+⛔ **A DEVICE WITH NO SSH CREDENTIAL STILL COLLECTS.** `getVersion()` throws;
+`collectAndStore` isolates that into `result.errors` and carries on. The cost is
+stated: no version means no CVE assessment, and v2.230.0's guard reports such a
+firewall as NOT ASSESSED rather than silently not-affected. The SSH connection
+falls back to the API credential when no separate `ssh` one is stored — it is the
+same admin account on the same appliance, and demanding it twice loses
+`getVersion()` whenever an operator does not.
+
+⛔ **`getLicenses` IS ABSENT BY MEASUREMENT.** Nine XML names return 529;
+`system license show` and `system diagnostics show subscription-info` both return
+`Unknown Parameter`; the full `system diagnostics show` list contains nothing
+licence-shaped. The optional-capability contract says an absent method is how an
+adapter declares what it cannot do, so `/lifecycle` shows Sophos as not
+collectable rather than as "no renewals due" — which would make the one vendor we
+cannot read look like the healthiest on the fleet.
+
+⛔ **THREE RESPONSE SHAPES AND ONLY ONE IS AN ERROR**, discriminated by the
+PRESENCE OF A `code` ATTRIBUTE: `<Status code="529">` is a failure,
+`<Status>No. of records Zero.</Status>` is a measured empty collection, anything
+else is data. All three arrive as **HTTP 200**. `interpretResponse()` is extracted
+as a PURE function precisely so this can be exercised — mutating it to treat an
+error as empty goes red.
+
+⛔ **RULE ORDER IS A LINKED LIST** (`Position: Top` / `After` + `<After><Name>`),
+with no sequence number anywhere. `orderRules()` walks the chain and THROWS on an
+unhandled Position value, a cycle, zero or multiple Tops, a duplicate name, or an
+unreachable rule — naming what it saw. A guessed order is a confident wrong answer
+about reachability.
+
+⛔ **AN OMITTED ELEMENT MEANS ANY.** The `Lab` rule permits any source,
+destination and service and carries none of those three elements; the auto-added
+MTA rule carries no zones at all. Mapped to `['any']`, never `[]`.
+
+⛔ **`hit_count` IS ALWAYS NULL** — the XML API reports no hit counts across any
+of the 24 readable entities. `unused` findings must never be derived from it;
+rule usage comes from syslog correlation, which works because the log rows carry
+the rule NAME. ⛔ Consequently **`rule_id_vendor` IS THE RULE NAME** — the API
+offers no numeric id and no UUID — so RENAMING A RULE BREAKS ITS HISTORY.
+
+⛔ **CONFIG REDACTION IS AN EXACT TAG LIST, NOT A KEYWORD PATTERN.** SFOS's
+AdminSettings carries `PasswordComplexityCheck`, `MinimumPasswordLength` and
+`MinimumPasswordLengthValue` — the fields an audit check grades. A `/pass/i`
+matcher would blank all three while claiming to protect something. The matcher is
+`paloalto/parser.js`'s `TAG_OPEN_ATTRS` form, which requires whitespace or `>`
+after the tag name. ⛔ The list is NECESSARILY INCOMPLETE: the verifying appliance
+had no directory server, no VPN and no users, so the secret-bearing schema could
+not be enumerated. Re-enumerate against a configured appliance; a missing name is
+a plaintext secret in a readonly-readable table.
+
+⛔ **THE CONFIG SNAPSHOT IS A BOUNDED ENTITY LIST.** `ApplicationFilterPolicy`
+measured **305 KB** and `WebFilterPolicy` 40 KB on an appliance with NOTHING
+configured, and `device_configs` stores a row per pull — a table CLAUDE.md records
+reaching 449 MB of a 529 MB database. A vendor signature catalogue is not
+configuration.
+
+⛔ **`cpuPercent` IS ALWAYS NULL from the SSH transport.** `system diagnostics
+show cpu` returns /proc/cpuinfo — a processor model name and core count, no load
+figure. CPU utilisation for this vendor arrives in the syslog System Health class.
+⛔ `memoryPercent` uses `(MemTotal - MemAvailable) / MemTotal` and the formula is
+carried in `raw`, because three different "used %" are derivable from that output
+and the SFOS console prints a third one — the gap has to be explainable rather
+than read as SecVault being wrong.
+
+⛔ **THE REBOOT HAZARD IS STRUCTURAL, NOT CAREFUL.** The login menu's option 7 is
+*Shutdown/Reboot Device* and takes a bare digit; the console opens with `system
+restart` and `system shutdown`. Every command is a module constant, `'4'` is the
+only keystroke ever sent to the menu, and `sshClient.runCommands` writes nothing
+until it has observed `promptRegex`. A test asserts no command in this module's
+vocabulary matches `restart|shutdown|reboot|halt|reset|factory`.
+
+Tests: `tests/sophosAdapter.test.js` (52 cases) against
+`tests/fixtures/sophosApi.js`. Four guards mutation-verified red: error-as-empty,
+guessed rule order, any-as-empty, and an over-broad redaction matcher.
