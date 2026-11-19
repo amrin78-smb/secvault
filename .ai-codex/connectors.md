@@ -1203,3 +1203,73 @@ vocabulary matches `restart|shutdown|reboot|halt|reset|factory`.
 Tests: `tests/sophosAdapter.test.js` (52 cases) against
 `tests/fixtures/sophosApi.js`. Four guards mutation-verified red: error-as-empty,
 guessed rule order, any-as-empty, and an over-broad redaction matcher.
+
+---
+
+## 14. Juniper Junos / SRX — syslog ONLY (v2.234.0). NO ADAPTER.
+
+`lib/syslog/junos.js` (the grammar) + `parseJuniper`/`classifyJunos`/`junosAction` in
+`lib/syslog/vendorParsers.js` (the mapping). 53 tests in `tests/juniperSyslog.test.js`,
+105-line fixture in `tests/fixtures/juniperSyslog.js`. Full field analysis:
+`secvault-lab/findings/JUNIPER-SYSLOG.md`.
+
+⛔ **THERE IS NO JUNIPER ADAPTER, AND `juniper` IS DELIBERATELY ABSENT FROM `VENDOR_META`,
+`ADAPTERS`, `VENDOR_CPES`, `VENDOR_PARSERS`, `auditChecksSeed` AND `osBranch`.** This is a
+parser-only landing, the same state the Sophos parser shipped in at v2.231.0, two releases ahead of
+its adapter. `tests/vendorRegistryParity.test.js` iterates `VENDOR_META`, so it CANNOT see a
+syslog-only slug and does not fail — that asymmetry is recorded by a test of its own in
+`juniperSyslog.test.js` section 11 rather than left to be rediscovered.
+
+⛔ **THE EVIDENCE IS A THIRD-PARTY ANONYMISED CORPUS, NOT A LIVE APPLIANCE** — Elastic's own SRX
+integration fixtures, 105 lines, 43 MSGIDs, 145 distinct structured-data keys. That is a long way
+above documentation and it is NOT what every other parser in this file was built from. The
+anonymisation destroyed the `junos@` enterprise id in four incompatible spellings, two containing
+letters, which is why **detection never anchors on the SD-ID** — it anchors on the APP-NAME/MSGID
+vocabulary, and 5 real flow lines omit the SD-ID entirely anyway.
+
+### The traps, each measured
+
+| trap | what it costs if missed |
+|---|---|
+| **RT_FLOW has NO `action` field** (0 of 24 lines) | the busiest family gets a null action; `log_hit` — decision rule 2, above CVSS 9.0 — can never fire for this vendor. The MSGID is the only source. |
+| `url` is a hostname on WEBFILTER and a **MALWARE NAME** on `AV_VIRUS_DETECTED_MT` | a malware name in `url_hostname`, indexed as a site somebody visited |
+| `category` means three things; a URL category **only on WEBFILTER** | threat-feed names (`secintel`) filed into the web-filtering dimension |
+| two zone spellings (`source-zone-name` / `source-zone` on RT_UTM) | the zone drops from whichever family uses the other — 6 lines or 61 |
+| two session-id spellings (`session-id-32` / `session-id`) | the id drops on whichever half of the fleet runs the other release — the Sophos `connid`/`con_id` split again |
+| three protocol keys over two value domains (`protocol-id` numeric, `protocol-name`/`protocol` words) | null protocol on two families |
+| **byte counters are CUMULATIVE** | summing over-counts by **2.55×**. `bytesSummable` is hard `false`. |
+| `threat-severity` is a WORD on RT_IDP and a NUMBER on RT_SECINTEL | two scales conflated into one ramp |
+| `rule-name` is an **IDP rule** on RT_IDP and not RT_FLOW's concept | an IDP rule number stored as a firewall policy id |
+| escaped `\]` inside an SD value | a first-`]` scan truncates a VPN event and drops every key after it |
+| `0 0` ports on `FW:` packet-filter lines mean N/A | phantom port-0 traffic in every per-port rollup |
+| `unknown-user` | a fake account name in user-attribution views (stripped **locally**, not by widening the shared `NOT_AVAILABLE` set) |
+
+### What Junos simply does not carry
+
+**No serial, chassis-id, model or platform on ANY of the 145 keys** — `deviceSerial` is null by
+measurement, and a serial must come from an adapter. **No country, geo, region or city** — any
+country for a Juniper event is OURS, derived by GeoIP downstream. **No rule UUID.**
+
+### Time
+
+A **zoned header wins**, then `epoch-time`, then a zoneless header. The findings document says to
+prefer `epoch-time` on RT_IDP; that is right about the REASON (zoneless stamps cluster there) and
+applying it unconditionally **discards sub-second precision** — `…03.193Z` came back `…03.000Z`.
+12 of 105 stamps are zoneless, 4 carry an epoch, and the remaining **8 reach the local-zone
+assumption, which is RECORDED on the row as `fields.$eventAtZoneless`** rather than being
+indistinguishable from a stamp the device zoned.
+
+### Brief format — a NAMED GAP, never silence
+
+`structured-data` is **not** the Junos default. An SRX without it emits RFC 3164, which has five
+whitespace fields after the PRI just as RFC 5424 does — so the header regex **"succeeds" on it**
+and would report `timestamp=Nov`, `hostname=19`, `appName=09:37:51`. Confident garbage, nothing
+errors. `parseJuniper` guards on `looksJunosBrief` FIRST and returns a field-free row carrying
+`$formatGap: 'junos_brief'` and the exact command to fix it. Only the RFC 3164 hostname is taken,
+because its position is the RFC's and not a Junos field mapping.
+
+### ⛔ The seam this opened — see gotchas.md
+
+A syslog-only vendor made `DeviceForm`'s `VENDOR_META[vendor] || VENDOR_META.forcepoint` fallback
+REACHABLE for the first time. `components/devices/DiscoveredDeviceActions.js` now drops an
+unmanageable vendor from the Add Device prefill and says so on screen.

@@ -2352,3 +2352,37 @@ Pick a value that cannot become valid. `ZZ`, `QQ` and `XK` are unassigned in ISO
 assertion outlives the fix it is meant to survive. The same instinct applies to any "this is the
 unhandled case" fixture: if the codebase could reasonably start handling it, it is the wrong
 exemplar.
+
+## ⛔ A SYSLOG-ONLY VENDOR MADE A DEAD `|| VENDOR_META.forcepoint` FALLBACK REACHABLE (v2.234.0)
+
+`components/devices/DeviceForm.js` has always resolved its vendor as
+`VENDOR_META[vendor] || VENDOR_META.forcepoint`. That was harmless for the product's whole life for
+one reason nobody had written down: **every slug `detectVendor` could return also existed in
+`VENDOR_META`**, so the fallback was unreachable from any link the product itself offered.
+
+v2.234.0 added `juniper` to `detectVendor` with **no adapter and no `VENDOR_META` entry** — a
+legitimate state (the Sophos parser shipped two releases ahead of its adapter). `/devices/discovered`
+then offered "Add to inventory" on a detected Juniper, linking to
+`/devices/new?vendor=juniper&mgmt_ip=…&name=…` — which rendered the **FORCEPOINT form with the
+Juniper's address and hostname already filled in**, with nothing on screen saying the vendor had
+been substituted. Three fields from creating a Forcepoint device pointing at an SRX.
+
+⛔ **NOTHING FAILED, WHICH IS THE WHOLE PROBLEM.** No error, no empty field, no 404 — a complete,
+plausible, wrong form. `tests/vendorRegistryParity.test.js` could not see it either: it iterates
+`VENDOR_META`, so a slug that exists only in the syslog layer is invisible to every assertion in it.
+
+⛔ **THE FIX IS AT THE LINK, NOT THE DETECTION.** `DiscoveredDeviceActions.js` tests
+`hasOwnProperty.call(VENDOR_META, vendor)` and drops an unmanageable vendor from the prefill, with a
+HUELESS note naming the vendor and stating that **its logs are still being collected** — otherwise a
+silently missing prefill reads as a bug in the detection, and an operator assumes they are losing
+the events by not adding the device.
+
+⛔ **`DeviceForm`'s FALLBACK IS STILL THERE** and a hand-typed `/devices/new?vendor=juniper` still
+renders the Forcepoint form. That residual is NAMED by a test in `tests/juniperSyslog.test.js`
+which asserts the fallback still exists — **delete that test in the same commit that makes
+DeviceForm refuse an unknown vendor outright**, because a test asserting a defect still exists must
+not outlive the defect.
+
+⛔ **The general rule: adding a vendor to ONE registry is a change to every surface that assumed the
+registries agreed.** The seven touchpoints in CLAUDE.md are the ones that must be updated together
+for a MANAGED vendor; this is the failure mode for a vendor that is deliberately in only one of them.

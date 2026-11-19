@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.234.0': [
+    'SecVault now reads syslog from Juniper SRX firewalls. Traffic, threat, UTM, VPN and system events are parsed into the same shape as every other vendor, so a Juniper firewall appears in the traffic, threat and denied-traffic views alongside the rest of the fleet.',
+    'An SRX that has not been told to send structured logs is RECOGNISED AS A JUNIPER and reported as a configuration gap naming the setting to turn on, rather than being silently stored as an unidentified device. A firewall sending logs we cannot read must never look the same as one sending nothing.',
+    'Juniper does not put a serial number, a country or a rule identifier in any of its log messages. Those are reported as absent rather than being filled in from somewhere else — a country shown against a Juniper event would be our own guess wearing the device\u2019s name.',
+    'Juniper byte counters are cumulative, so the same traffic is reported several times as a session progresses. SecVault marks them as not addable rather than summing them, which would have over-counted this vendor\u2019s traffic by about two and a half times.',
+    'Several Juniper fields mean different things on different event types — the same "url" field holds a web address on a web-filtering event and a MALWARE NAME on a virus detection. SecVault reads each one only where it means what it says.',
+    'Adding a Juniper firewall found an older problem: the Add Device form quietly fell back to Forcepoint for any vendor it did not recognise. Adding a detected firewall of an unsupported vendor would have created a Forcepoint device pointing at it, with nothing on screen saying so. The button now says what SecVault can and cannot do with that firewall.',
+  ],
   '2.233.0': [
     'Sophos firewalls are now a fully supported vendor. They can be added from the Add Device form, collected on the normal schedule, matched against vulnerability advisories, and graded for compliance like any other firewall.',
     'SecVault now asks the vulnerability databases about Sophos under six different product names, because NVD files this appliance inconsistently across four of its own categories. Each name was checked against the live database before being added — a first attempt in this work discarded a name that was in fact correct, on the strength of it returning only a few results.',

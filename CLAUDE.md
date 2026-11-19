@@ -1984,6 +1984,34 @@ it. Check the data directory before changing `SYSLOG_RETENTION_DAYS` upward.
 
 ### Landed so far — the pure parsers only
 
+⛔ **AND A SEVENTH VENDOR'S SYSLOG LANDED WITHOUT AN ADAPTER (v2.234.0): `juniper`.**
+`lib/syslog/junos.js` + `parseJuniper`. **It is deliberately absent from `VENDOR_META`, `ADAPTERS`,
+`VENDOR_CPES`, `VENDOR_PARSERS`, `auditChecksSeed.js` and `osBranch.js`** — a parser-only landing,
+exactly the state the Sophos parser shipped in at v2.231.0, two releases ahead of its adapter.
+⛔ **`tests/vendorRegistryParity.test.js` CANNOT SEE THIS**, because it iterates `VENDOR_META`; the
+asymmetry is pinned by its own test instead of being left to be rediscovered.
+⛔ **THE EVIDENCE IS A THIRD-PARTY ANONYMISED CORPUS, NOT A LIVE APPLIANCE** (Elastic's SRX
+integration fixtures — 105 lines, 43 MSGIDs, 145 structured-data keys), which is the one place this
+vendor differs from every other parser in this repo. It is far above documentation and it is not a
+live capture, so where the corpus could not settle a question the answer is null and the gap is
+named. A live SRX remains the thing to verify against before an adapter is written.
+⛔ **THE TRAP THAT MATTERS MOST: RT_FLOW CARRIES NO `action` FIELD AT ALL** (0 of 24 lines), so the
+MSGID is the only source of the verdict for this vendor's busiest family — a parser reading the
+field and stopping leaves every traffic row null, and `log_hit` (decision rule 2, ABOVE CVSS 9.0)
+could never fire for Juniper. Full trap table in `.ai-codex/connectors.md` section 14.
+⛔ **BRIEF-FORMAT JUNOS IS CLAIMED AND NAMED, NEVER SILENTLY DROPPED.** `structured-data` is not the
+Junos default, and RFC 3164 has five whitespace fields after the PRI exactly as RFC 5424 does — so
+the 5424 header regex SUCCEEDS on a brief line and reports `hostname=19`. The guard runs first and
+returns a field-free row saying which command to run.
+⛔ **ADDING IT MADE A DEAD FALLBACK REACHABLE, AND THAT IS THE DURABLE LESSON.**
+`DeviceForm` resolves `VENDOR_META[vendor] || VENDOR_META.forcepoint`, harmless for the product's
+whole life only because every slug `detectVendor` could return also existed in `VENDOR_META`. With a
+syslog-only vendor, "Add to inventory" on a detected Juniper rendered the **Forcepoint form with the
+SRX's address prefilled**, nothing on screen saying so. Fixed at the LINK
+(`DiscoveredDeviceActions.js` drops an unmanageable vendor and says why); the `DeviceForm` residual
+is named by a test. **Adding a vendor to ONE registry is a change to every surface that assumed the
+registries agreed.**
+
 `lib/syslog/syslogParser.js` (RFC 3164/5424 frames) and `lib/syslog/vendorParsers.js` (Fortinet
 key=value, Palo Alto positional CSV). Both pure, both unit-tested, neither wired to anything yet.
 

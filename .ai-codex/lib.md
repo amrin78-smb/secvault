@@ -4479,3 +4479,39 @@ device's rules before reinserting.
 
 Full per-decision detail, including every measured count behind it:
 `.ai-codex/connectors.md` sections 13 and 13b.
+
+## lib/syslog/junos.js (v2.234.0)
+
+The Junos RFC 5424 + STRUCTURED-DATA grammar, kept out of `vendorParsers.js` for the same reason
+`cef.js` is: a distinct, mostly self-describing frame rather than another key=value dialect.
+
+Exports `HEADER_RE`, `JUNOS_APPS`, `JUNOS_MSGID_RE`, `JUNOS_BRIEF_RE`, `JUNOS_FW_FILTER_RE`,
+`looksJunosStructured`, `looksJunosBrief`, `parseStructuredData`, `parseJunosFrame`.
+
+- `parseJunosFrame(message)` → `{pri, severity, facility, version, timestamp, hostname, appName,
+  procId, msgId, sd, sdIds, text}` or `null`. ⛔ **`severity` is `PRI % 8`**, not the raw PRI —
+  Elastic stores the raw composite (165) in `event.severity`, which is a facility+severity pair read
+  as a severity. ⛔ **The VERSION digit is optional** (11 of 105 corpus lines omit it).
+- `parseStructuredData(rest)` → `{sd, sdIds, text}`. ⛔ **`sd: null` means NO structured data was
+  present at all** (19 of 105 lines) and is a different fact from an empty map; a caller testing
+  `sd && …` takes the wrong branch if they are collapsed. ⛔ Handles RFC 5424 escaping (`\]`, `\"`,
+  `\\`) — scanning to the first `]` truncates a VPN event mid-value and silently drops every key
+  after it. ⛔ Accepts typographic quotes U+201C/U+201D as delimiters and **strips** them; Elastic's
+  own pipeline leaves them inside the value, producing `'”st0.0”'` as an interface name in an index.
+  ⛔ A present-but-EMPTY value is `null`, not `''`.
+- `looksJunosStructured` anchors on the APP-NAME/MSGID vocabulary and the `FW:` interface grammar,
+  **never on the SD-ID** — see `connectors.md` section 14. It deliberately DECLINES 9 of 105 corpus
+  lines (free-prose daemon messages carrying no mapped field), one of which is a generic kernel
+  message any Linux host emits.
+- `looksJunosBrief` recognises the RFC 3164 default format so a misconfigured SRX becomes a named,
+  actionable gap instead of an unattributed line.
+
+## lib/syslog/vendorParsers.js — Juniper (v2.234.0)
+
+`parseJuniper`, `classifyJunos(appName, msgId, isFwFilter)`, `junosAction(msgId, sd)`,
+`junosAuthOutcome(msgId)`. ⛔ `classifyJunos` takes `isFwFilter` from the CALLER because the
+packet-filter lines have no APP-NAME and no MSGID — computing the class before matching the `FW:`
+tail left three fully-populated 5-tuples with `logClass: null`, i.e. real traffic evidence that
+every traffic rollup filters out while looking perfectly parsed. ⛔ `junosAction` reads the **MSGID
+first and the `action` field second**: `action` names what the security service did, the MSGID names
+what the policy did, and the other order lets an IDP drop overwrite a session the policy permitted.
