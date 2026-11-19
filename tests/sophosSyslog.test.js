@@ -26,7 +26,7 @@ const {
   sophosZoneOffset,
 } = require('../lib/syslog/vendorParsers');
 const { classifyAction } = require('../lib/syslog/actions');
-const { LEGACY, STANDARD } = require('./fixtures/sophosSyslog');
+const { LEGACY, STANDARD, RENAMED } = require('./fixtures/sophosSyslog');
 
 const legacyLines = Object.values(LEGACY);
 const standardLines = Object.values(STANDARD);
@@ -115,6 +115,35 @@ describe('Sophos — device identity inverts between the formats', () => {
     assert.equal(l.deviceName, s.deviceName);
     assert.notEqual(l.deviceName, 'SF01V', 'legacy device_name is the MODEL, not the appliance');
     assert.equal(parseKeyValueSpanning(LEGACY['010101600001']).device_name, 'SF01V');
+  });
+
+  // ⛔ RESOLVED BY EXPERIMENT. SFOS defaults the hostname to the serial, so the
+  // appliance reported one string for both and reading the capture could not
+  // separate them. It was renamed and re-captured; the value followed the
+  // hostname in BOTH formats. That is why deviceSerial is null by measurement
+  // rather than by caution — SFOS syslog carries no serial at all, and one has
+  // to come from the SSH transport.
+  it('reports the HOSTNAME, proven by renaming the appliance', () => {
+    for (const fmt of ['legacy', 'standard']) {
+      const e = parseSophos(RENAMED[fmt]);
+      assert.equal(e.deviceName, 'V01001C6CT6BFD5-test', `${fmt} did not follow the rename`);
+      assert.equal(e.deviceSerial, null);
+    }
+  });
+
+  // ⛔ The same appliance reported SF01V for the first 76 minutes of capture and
+  // SFVH thereafter, across a reboot, with no model change made. Nothing may
+  // key on it, which is why it is left in `fields` and never promoted.
+  it('does not promote the unstable model string to a normalized field', () => {
+    const early = parseKeyValueSpanning(LEGACY['010101600001']).device_name;
+    const late = parseKeyValueSpanning(RENAMED.legacy).device_name;
+    assert.notEqual(early, late, 'the capture should show the model changing');
+    const e = parseSophos(RENAMED.legacy);
+    for (const [k, v] of Object.entries(e)) {
+      if (k === 'fields') continue;
+      assert.notEqual(v, early, `${k} carries the model string`);
+      assert.notEqual(v, late, `${k} carries the model string`);
+    }
   });
 
   // ⛔ The fields actually NAMED for a serial carry the literal string NULL on

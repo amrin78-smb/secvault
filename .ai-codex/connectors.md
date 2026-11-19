@@ -1040,10 +1040,18 @@ A parser keyed on `device_name` returns the model on one and the appliance on th
 plausible strings and neither errors. The FORMAT decides this, never the key name.
 ⛔ The fields actually NAMED for a serial — `device_id` / `device_serial_id` — carry the literal
 string `NULL` on 100% of all 6,621 lines. `meaningful()` gained `null` for this.
-⛔ **UNRESOLVED: whether that identity is a hostname or a serial.** SFOS defaults the hostname to
-the serial, so the verified box cannot separate them. Reported as `deviceName`; `deviceSerial` is
-left NULL rather than claiming a serial. The experiment that settles it: rename the appliance and
-re-capture.
+⛔ **RESOLVED BY EXPERIMENT (2026-11-19): IT IS THE HOSTNAME.** SFOS defaults the hostname to the
+serial, so the appliance reported one string for both and reading the capture could not separate
+them. It was RENAMED to `V01001C6CT6BFD5-test` and re-captured: the value followed the hostname in
+BOTH formats. **So SFOS syslog carries no serial at all** — `deviceSerial` is NULL by measurement,
+not by caution, and a Sophos serial must come from SSH (`system diagnostics show version-info`).
+Fixtures: `RENAMED` in `tests/fixtures/sophosSyslog.js`.
+
+⛔ **AND THE MODEL STRING IS NOT STABLE.** The same appliance reported `device_name="SF01V"`
+(legacy) / `device_model="SF01V"` from 06:39 to 07:55 and **`SFVH`** from 08:09 onward — across a
+reboot, with no model change made. The SSH banner and the Control center said `SFVH` throughout.
+Nothing may key on it; it stays in `fields` and is deliberately never promoted to a normalized
+column. A test asserts no normalized field carries either value.
 
 ### ⛔ THE GRAMMAR IS NOT FortiOS's — `parseKeyValueSpanning`, not `parseKeyValue`
 

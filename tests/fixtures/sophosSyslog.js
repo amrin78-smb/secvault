@@ -126,4 +126,21 @@ const STANDARD = {
   "128526618031": "<30>device_name=\"V01001C6CT6BFD5\" timestamp=\"2026-11-19T06:41:22+0000\" device_model=\"SF01V\" device_serial_id=\"NULL\" log_id=\"128526618031\" log_type=\"System Health\" log_component=\"SSL\" log_subtype=\"Usage\" log_version=1 severity=\"Information\" non_ssl_count=0 ssl_count=0 decrypted_count=0",
 };
 
-module.exports = { LEGACY, STANDARD };
+// ⛔ THE SAME APPLIANCE AFTER A RENAME, captured 2026-11-19 09:20:45.
+//
+// The appliance hostname was changed from V01001C6CT6BFD5 (which SFOS defaults
+// to the serial) to V01001C6CT6BFD5-test, and these are the next lines it sent.
+// This is the EXPERIMENT that settles what the identity field carries: the
+// value FOLLOWED the hostname, so legacy `device=` and standard
+// `device_name=` are the HOSTNAME, not the serial. SFOS syslog carries no
+// serial at all — the fields named for one hold the literal string NULL.
+//
+// ⛔ These lines also show the MODEL STRING HAS CHANGED, from SF01V in the
+// earlier capture to SFVH, across a reboot and with no model change made. Do
+// not key anything on it.
+const RENAMED = {
+  legacy: "<30>device=\"V01001C6CT6BFD5-test\" date=2026-11-19 time=09:20:45 timezone=\"GMT\" device_name=\"SFVH\" device_id=V01001C6CT6BFD5 log_id=\"062009617502\" log_type=\"Event\" log_component=\"GUI\" log_subtype=\"Admin\" status=\"Successful\" priority=Information user_name=\"admin\" src_ip=172.16.16.2 message=\"Hostname were changed by 'admin' from '172.16.16.2' using 'GUI'\" cm_audit_id=\"\" cm_audit_service=\"\" cm_email=\"\"",
+  standard: "<30>device_name=\"V01001C6CT6BFD5-test\" timestamp=\"2026-11-19T09:20:45+0000\" device_model=\"SFVH\" device_serial_id=\"V01001C6CT6BFD5\" log_id=\"062009617502\" log_type=\"Event\" log_component=\"GUI\" log_subtype=\"Admin\" status=\"Successful\" severity=\"Information\" log_version=1 user_name=\"admin\" src_ip=\"172.16.16.2\" message=\"Hostname were changed by 'admin' from '172.16.16.2' using 'GUI'\"",
+};
+
+module.exports = { LEGACY, STANDARD, RENAMED };

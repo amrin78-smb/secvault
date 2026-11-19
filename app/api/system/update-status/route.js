@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.231.1': [
+    'Sophos: confirmed by experiment which field in a Sophos log line identifies the firewall. The appliance was renamed and the logs re-read — the value follows the HOSTNAME. Sophos sends no serial number in its logs at all, so SecVault reads one over SSH instead rather than recording a name as though it were a serial.',
+    'Sophos: the model string a firewall reports in its logs was observed CHANGING across a reboot, with nothing changed on the firewall. Nothing in SecVault keys on it, and the build now fails if anything starts to — keying on it would have split one firewall into two the next time it restarted.',
+  ],
   '2.231.0': [
     'New: SecVault can now read syslog from Sophos firewalls. It understands BOTH of the formats a Sophos firewall can send — the long-standing one, which Sophos has marked legacy and warns will stop gaining new fields, and its replacement — so a firewall can be switched between them without SecVault losing track of it.',
     'Every field mapping was read off a live Sophos appliance rather than from Sophos documentation, with both formats recorded side by side from the same traffic. That comparison found two cases where the same information is filed under different names in the two formats, either of which would have silently emptied a column.',
