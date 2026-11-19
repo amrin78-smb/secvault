@@ -4515,3 +4515,36 @@ tail left three fully-populated 5-tuples with `logClass: null`, i.e. real traffi
 every traffic rollup filters out while looking perfectly parsed. ⛔ `junosAction` reads the **MSGID
 first and the `action` field second**: `action` names what the security service did, the MSGID names
 what the policy did, and the other order lets an IDP drop overwrite a session the policy permitted.
+
+## lib/syslog/sonicos.js + sonicosCatalogue.js (v2.235.0)
+
+The SonicOS Enhanced Syslog grammar and its `m=` dispatch, split out of `vendorParsers.js` because
+the tokenizer is NOT the loose key=value grammar the other vendors share.
+
+**`sonicos.js`** — `sonicosBody`, `parseSonicosKv`, `splitSonicosAddress`, `splitSonicosNat`,
+`validIpv4`, `validPort`.
+- ⛔ `sonicosBody` anchors on the first `id=` **at a token boundary and never on its VALUE**: four
+  header shapes exist (`<PRI>` 154, RFC 3164 54, bare host 8, none 4), a `<PRI>` and an RFC 3164
+  header NEVER co-occur, and 3 lines carry `id=YYYYYY` because an anonymiser replaced the constant.
+- ⛔ `parseSonicosKv` handles **single AND double quotes** (`appName='General UDP'` is the only
+  single-quoted key), `\s+` separators (multi-space occurs), and records a **duplicate key** under
+  `$dup:<key>` with FIRST WINS rather than dropping it.
+- ⛔ `splitSonicosAddress` implements the four validations that make a positional `split(':')` safe
+  by construction rather than by luck, and **REFUSES** rather than guessing. The decisive one is the
+  interface pattern — `::1` splits to `['','','1']` and only `^[A-Za-z]` stops part[2] being read as
+  an interface named "1". Verified against Elastic's independent implementation on **1,724 address
+  facets over 220 events, zero mismatches**.
+- ⛔ `splitSonicosNat` is a SEPARATE grammar: `ip:port` or a bare `ip`, no interface or hostname
+  slot, and the `*V6` variants BRACKET an address carrying a port.
+
+**`sonicosCatalogue.js`** — `classOf(m, gcat)` returns `{logClass, logSubtype, group, source}`.
+- ⛔ **`source` is part of the contract**: `vendor` (349 ids from SonicWall's published reference),
+  `derived` (21 ids read off a message STRING by us), or `gcat` (inferred from a coarse group).
+  Collapsing them is how a guess gets quoted as a vendor fact. A test asserts no derived entry is
+  shadowed by a vendor one — `m=713` was, and would have misreported its own provenance.
+- ⛔ `c=` is NEVER the class source although it is on 219/220 lines: `c=32` covers Users/Auth,
+  Security Services/IPS, Security Services/Attacks AND Firewall Settings/Flood Protection at once.
+- ⛔ `gcat=` resolves a class only for groups mapping to exactly ONE class. **Three are deliberately
+  omitted**: Security Services (threat/utm, no majority), Firewall Settings (system except Flood
+  Protection), and Log — whose catalogued content is all `config` yet which is **observed on 5 web
+  site hits**, so mapping it would file browsing as configuration changes.

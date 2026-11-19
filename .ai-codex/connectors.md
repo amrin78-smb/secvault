@@ -1296,3 +1296,87 @@ because its position is the RFC's and not a Junos field mapping.
 A syslog-only vendor made `DeviceForm`'s `VENDOR_META[vendor] || VENDOR_META.forcepoint` fallback
 REACHABLE for the first time. `components/devices/DiscoveredDeviceActions.js` now drops an
 unmanageable vendor from the Add Device prefill and says so on screen.
+
+---
+
+## 15. SonicWall SonicOS "Enhanced Syslog" — syslog ONLY (v2.235.0). NO ADAPTER.
+
+`lib/syslog/sonicos.js` (grammar) + `lib/syslog/sonicosCatalogue.js` (the `m=` dispatch, 349 vendor
+ids + 21 derived) + `parseSonicwall` in `vendorParsers.js`. 60 tests in
+`tests/sonicwallSyslog.test.js`, 220-line fixture. Analysis:
+`secvault-lab/findings/SONICWALL-SYSLOG.md` (1,083 lines).
+
+⛔ **NO ADAPTER, and `sonicwall` is deliberately absent from `VENDOR_META`, `ADAPTERS`,
+`VENDOR_CPES`, `VENDOR_PARSERS`, `auditChecksSeed` and `osBranch`** — the same parser-only landing
+Juniper took at v2.234.0 and Sophos at v2.231.0. See gotchas.md on the `DeviceForm` seam that a
+syslog-only vendor opens; `DiscoveredDeviceActions` already refuses to prefill an unmanageable
+vendor, so this slug inherits that guard.
+
+⛔ **THIRD-PARTY ANONYMISED CORPUS** — Elastic's integration fixtures, 220 lines, 55 keys, 44
+message ids. The SYNTAX is settled unusually well: **our address splitter and Elastic's independent
+implementation agree on all 1,724 address facets across 220 events with zero mismatches.** What a
+key MEANS on an unseen firmware is not settled by that.
+
+### ⛔ THE BYTE COUNTERS — the sharpest trap, and worse than Sophos's
+
+`sent=`/`rcvd=` appear on connection-OPEN (`m=98`), on TCP abort (`m=713`), on web-management
+(`m=526`) and on web hits (`m=97`) — carrying **real, small, plausible numbers**: 52/60/64 (TCP SYN
+sizes) and 46 (an RST). **Not one counter anywhere in the corpus is literally `0`**, so unlike
+Sophos's session-start zeros there is no sentinel to notice. It is a partial count wearing a
+total's clothes.
+
+⛔ **IT IS A THREE-WAY COUNT**: one socket reports `m=98 sent=52`, then `m=1235 sent=52`, then
+`m=537 sent=334` — the SYN twice before the total. Measured over one corpus file, naive `SUM(sent)`
+gives **91,066 against 86,898 real: +4.8%, and NOT a constant** — it scales with short connections
+and with how many RSTs the device emits.
+
+**So bytes are read on `m=537` ONLY** (`bytesSummable := m === '537'`). ⛔ And `m=537` only fires
+when a connection CLOSES, so a SonicWall byte rollup is complete only for connections that ended in
+the window — a permanent vendor limitation that must be stated beside any figure.
+
+### ⛔ `fw_action` IS `NA` ON THE TWO EVENTS THAT MATTER MOST
+
+Measured: `m=537` is `NA` on 37 of 45 and `m=98` on 31 of 42. Reading the field and stopping leaves
+every SonicWall connection with a null action and **`log_hit` — decision rule 2, ABOVE CVSS 9.0 —
+could never fire for this vendor.** `NA` means the field does not apply, not that nothing was
+decided. SonicOS opens and closes only connections it PERMITTED, so those two ids supply the
+verdict, exactly the call CLAUDE.md already records for Fortinet's `close`. ⛔ **Only those two**:
+`m=97` and `m=1382` also carry `NA` and neither is a traffic decision. ⛔ `mgmt` names a PLANE, not
+a verdict, and is nulled. ⛔ `forward` was added to `ALLOWED_ACTIONS`.
+
+### The other traps
+
+| trap | cost if missed |
+|---|---|
+| `src=`/`dst=` are COMPOUND, 8 shapes, with an empty IP slot AND an empty port slot | a naive split stores `fe80` as an IP; an empty port stored as `0` lands in every per-port rollup |
+| a compressed IPv6 `::1` splits to `['','','1']` | part[2] reads as an interface named "1" — **only the `^[A-Za-z]` interface pattern refuses it** |
+| IPv6 arrives in parallel `srcV6=`/`dstV6=` keys, never in `src=` | the address is simply lost |
+| **`m=713`: the SOURCE is the firewall itself** (53 lines, 24%) | a top-talkers rollup credits a quarter of the device's events to the firewall. Stored as reported, flagged `$replyDirection` — **never swapped**, or the row disagrees with the raw line |
+| `code=` is a URL-category id on `m=14`/`m=97` and an **ICMP code** on `m=38` | both are small integers and indistinguishable without `m=`; it is never promoted |
+| `dstname=` is a hostname on web events and an **email attachment name** on anti-virus events | gated on `arg=` being present, which is Elastic's own behaviour |
+| `app=` is a NUMERIC id, `appid=` a different number, `appName=` the only name | falling back to `app=` put a bare integer in `application` on 161 of 220 events |
+| `appName='General UDP'` is a NON-identification | every unidentified flow looks identified |
+| `proto=`'s tail is a service name OR a port, and does not track `dstPort` | a port stored as a service name |
+| `time=` is zoneless on 204/220 and **one appliance emitted both forms 7h03m apart** | a per-device zone decision gets one batch wrong by the local offset — the suffix is honoured PER LINE |
+| `usr="Unknown (SSO failed)"`, `ipscat="N/A"` | a fake username and a fake threat name |
+| `n=` is a LOG MESSAGE COUNTER, `sess=` an admin session TYPE | mapping either to `sessionId` makes every event its own session |
+
+### ⛔ What SonicOS does not carry
+
+**No device name** — `id=` is the constant `firewall`, `fw=` is the IP of the interface the EVENT
+CONCERNS and **varies within one serial** (keying on it splits one firewall in two), and the RFC
+3164 header is a third address matching neither. Elastic has none either. **No country. No session
+id. No vdom.** `deviceSerial` ← `sn=`, and ⛔ **its shape is never validated** — the corpus's values
+are anonymiser output (`000SERIAL`, `XXXX`, `123456789`), so a rule built from them would reject
+real appliances.
+
+### ⛔ SEGMENTATION IS NOT SUPPORTED FOR THIS VENDOR, AND THE BLOCKER IS VOCABULARY
+
+Zones exist (`srcZone=`/`dstZone=` on 120/220) but there are **THREE disagreeing vocabularies**: the
+zone keys carry a SECURITY TYPE for built-in zones (`Trusted`/`Untrusted`) and a NAME for custom
+ones (`TEST`), while `rule=` embeds a third pair — a rule filed `LAN->WAN` sits beside
+`srcZone=Trusted`, and `157 (SSLVPN->SERVER)` beside `TEST`/`Trusted`. **Three names for two
+zones.** Which string matches the appliance's own `show zone` cannot be settled from this corpus.
+`$ruleZonePair` is preserved in `fields` and nothing is promoted. ⛔ **Do not claim SonicWall
+segmentation support** — the failure mode is safe (`unknown`, not `ok_blocked`) but the feature
+would be silently inert. ⛔ `m=98` NEVER carries a zone, and `m=537` only 69% of the time.

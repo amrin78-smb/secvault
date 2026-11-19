@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.235.0': [
+    'SecVault now reads syslog from SonicWall firewalls. Traffic, threat, web-filtering, VPN and administrative events are parsed into the same shape as every other vendor, so a SonicWall appears in the traffic, threat and denied-traffic views alongside the rest of the fleet.',
+    'SonicWall reports the same traffic several times as a connection progresses \u2014 once when it opens, sometimes again mid-flight, and once when it closes. SecVault counts only the closing figure. Adding them all up, which is what the obvious reading does, over-reports this vendor\u2019s traffic by about 5%, and by more on firewalls handling many short connections.',
+    'The numbers on those earlier reports are real and small \u2014 52 or 64 bytes \u2014 rather than zero, so there is no obvious sign that they are a single packet rather than a total. That is why they are left out deliberately rather than filtered.',
+    'A quarter of the events a SonicWall sends describe a packet the firewall itself sent to end a connection, so the "source" of those events is the firewall. SecVault records them exactly as the device reported them and marks them, instead of silently swapping them round, so traffic reports can leave them out rather than crediting a quarter of the activity to the firewall.',
+    'Several SonicWall fields mean different things on different event types \u2014 one small number is a web-category id on one event and an ICMP code on another, and the same field holds a web address on one event and an email attachment name on another. SecVault reads each one only where it means what it says.',
+    'Where SecVault cannot tell what kind of event something is, it says so rather than guessing. SonicWall has around 1,700 event types; the published reference covers 349 of them, and events outside it are either classified from a coarser field the device supplies or reported as unclassified.',
+  ],
   '2.234.0': [
     'SecVault now reads syslog from Juniper SRX firewalls. Traffic, threat, UTM, VPN and system events are parsed into the same shape as every other vendor, so a Juniper firewall appears in the traffic, threat and denied-traffic views alongside the rest of the fleet.',
     'An SRX that has not been told to send structured logs is RECOGNISED AS A JUNIPER and reported as a configuration gap naming the setting to turn on, rather than being silently stored as an unidentified device. A firewall sending logs we cannot read must never look the same as one sending nothing.',

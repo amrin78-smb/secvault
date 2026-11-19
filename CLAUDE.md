@@ -1984,6 +1984,22 @@ it. Check the data directory before changing `SYSLOG_RETENTION_DAYS` upward.
 
 ### Landed so far — the pure parsers only
 
+⛔ **AND AN EIGHTH, `sonicwall` (v2.235.0), ON THE SAME TERMS** — `lib/syslog/sonicos.js` +
+`sonicosCatalogue.js` + `parseSonicwall`, absent from all six managed-vendor registries, built from
+Elastic's 220-line anonymised corpus. ⛔ **ITS SYNTAX IS UNUSUALLY WELL SETTLED**: our compound
+address splitter and Elastic's independent implementation agree on **1,724 address facets across
+220 events with zero mismatches**. ⛔ **TWO FINDINGS THAT MATTER BEYOND THIS VENDOR.** First,
+SonicOS puts **real, small, plausible byte counts on connection-OPEN events** — 52/64, TCP SYN
+sizes — so unlike Sophos's session-start zeros there is NO sentinel to notice, and the same socket
+is counted THREE times across three message ids; a naive sum over-reports by **+4.8%, and not by a
+constant**. Bytes are read on `m=537` only. Second, `fw_action=` is **`NA` on 37 of 45 Connection
+Closed and 31 of 42 Connection Opened events**, so reading the enforcement field and stopping leaves
+every SonicWall connection with a null action and `log_hit` could never fire for the vendor — the
+message id supplies the verdict, exactly as Fortinet's `close` does. ⛔ **SEGMENTATION IS NOT
+SUPPORTED HERE AND MUST NOT BE CLAIMED**: three zone vocabularies disagree on the same line, and
+which matches the appliance's own `show zone` cannot be settled from a corpus. Full detail:
+`.ai-codex/connectors.md` section 15.
+
 ⛔ **AND A SEVENTH VENDOR'S SYSLOG LANDED WITHOUT AN ADAPTER (v2.234.0): `juniper`.**
 `lib/syslog/junos.js` + `parseJuniper`. **It is deliberately absent from `VENDOR_META`, `ADAPTERS`,
 `VENDOR_CPES`, `VENDOR_PARSERS`, `auditChecksSeed.js` and `osBranch.js`** — a parser-only landing,
