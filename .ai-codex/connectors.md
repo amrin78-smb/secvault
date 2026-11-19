@@ -1220,6 +1220,21 @@ its adapter. `tests/vendorRegistryParity.test.js` iterates `VENDOR_META`, so it 
 syslog-only slug and does not fail — that asymmetry is recorded by a test of its own in
 `juniperSyslog.test.js` section 11 rather than left to be rediscovered.
 
+⛔ **AND THERE IS NO LONGER A vSRX DOWNLOAD TRIAL TO VERIFY IT AGAINST — MEASURED 2026-11-19.**
+Both `juniper.net/{us,gb}/en/dm/download-next-gen-vsrx-firewall-trial.html` now answer `301` to the
+**HPE home page** (not an HPE trial page — the corporate homepage), the self-serve funnel having
+gone with the acquisition; it was restricted to existing Juniper customers before that anyway.
+⛔ **`vJunos-labs` IS FREE AND DOES NOT HELP**: it ships vJunos-router/switch/Evolved and **no
+vSRX**, so it has no security policies and emits no `RT_FLOW`, `RT_IDP` or `RT_UTM` — every family
+this mapping is about. The live path that remains is **Juniper vLabs** (`jlabs.juniper.net/vlabs`,
+free, browser-based, carries a vSRX). ⛔ A sandbox has no network path to a collector, which looked
+disqualifying and is not: **`structured-data` is valid at `[edit system syslog file <name>]`**, not
+only under `host` (Junos 8.3+, RFC 5424), so the device writes the exact bytes to a local file and
+`show log` prints them. `secvault-lab/verify-junos-capture.js` turns such a capture into a
+CONFIRMED / CONTRADICTED / **NOT EXERCISED** verdict per frozen claim — the third state existing
+because a capture with no RT_UTM line cannot confirm the `url` trap and must not look as though it
+did. Runbook: `secvault-lab/RUNBOOK-JUNIPER.md`.
+
 ⛔ **THE EVIDENCE IS A THIRD-PARTY ANONYMISED CORPUS, NOT A LIVE APPLIANCE** — Elastic's own SRX
 integration fixtures, 105 lines, 43 MSGIDs, 145 distinct structured-data keys. That is a long way
 above documentation and it is NOT what every other parser in this file was built from. The
