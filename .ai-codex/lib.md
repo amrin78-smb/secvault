@@ -4436,3 +4436,27 @@ and a label for a type nothing emits. One-ended it would have passed over half t
 ⛔ `workTypeLabel` still falls back to the raw type: a renderer that threw would take the whole
 queue down over a cosmetic gap, on the page whose job is saying what is outstanding. The BUILD is
 what refuses to ship one.
+
+
+## lib/syslog/vendorParsers.js — Sophos SFOS (v2.231.0)
+
+New exports: `parseSophos`, `classifySophos`, `parseKeyValueSpanning`, `sophosZoneOffset`,
+`looksSophos`. `detectVendor` can now return the slug `sophos`, and `parseVendorPayload`
+dispatches to `parseSophos`.
+
+⛔ **`parseKeyValueSpanning` is NOT a replacement for `parseKeyValue`.** Two grammars because the
+two devices genuinely differ: SFOS legacy emits unquoted values containing a space
+(`ether_type=IPv4 (0x0800)`) which the Fortinet grammar truncates, AND bare orphan tokens with no
+key which a naive spanning grammar would absorb into the previous value. See
+`.ai-codex/connectors.md` section 13 for the measured counts behind both.
+
+⛔ **Two SHARED vocabularies were extended, not forked**: `NOT_AVAILABLE` in this file gained
+`null` (SFOS writes the literal four characters in a field named for a serial, on 100% of captured
+lines), and `lib/syslog/actions.js` ALLOWED_ACTIONS gained `allowed`. Both carry the Sophos
+evidence inline.
+
+Tests: `tests/sophosSyslog.test.js` (32 cases) against `tests/fixtures/sophosSyslog.js`, which
+holds verbatim captured lines for 25 legacy and 24 standard log_ids. The load-bearing case is the
+CROSS-FORMAT AGREEMENT test — both formats were captured simultaneously from the same events, so a
+mapping wrong in one format shows up as a disagreement between two renderings of one packet. It
+found two real bugs that reading either format alone did not.

@@ -998,3 +998,106 @@ a shared `snmp_host` and had simply never been exercised.
 
 **Verified live on the mock fleet:** 6,000 events, **all five parseable vendors attributed, zero
 unattributed**, rule-hit correlation populated for every one, each rule showing only its own intent.
+
+---
+
+## 13. Sophos SFOS — syslog (v2.231.0). Verified on a live appliance, 2026-11-19
+
+⛔ **PARSER ONLY. There is no Sophos ADAPTER yet** — no `lib/adapters/sophos/`, no `ADAPTERS` entry,
+no `VENDOR_META`, no `VENDOR_CPES`. `detectVendor` returns the slug `sophos` and `syslog_events`
+will carry it, which is harmless because no `devices` row can hold that vendor yet. When the adapter
+lands, this line is the one that has to stop saying "parser only".
+
+Verified against SFOS **22.0.3 MR-3-Build576** in a lab (`secvault-lab/`), 6,621 captured lines.
+⛔ **BOTH FORMATS WERE CAPTURED SIMULTANEOUSLY FROM THE SAME EVENTS** via two syslog servers on one
+host, so every mapping is a same-event comparison. Full analysis:
+`secvault-lab/findings/FIELD-MAPPING.md`. Fixtures: `tests/fixtures/sophosSyslog.js`.
+
+### ⛔ TWO FORMATS, AND NEITHER DOMINATES
+
+SFOS 22 labels the key=value format that every published Sophos field reference documents as
+**`Device standard format (legacy)`** and warns in its own UI that it "won't support the new
+firewall features in future versions". Measured over 3,092 paired events:
+
+| | legacy | standard |
+|---|---|---|
+| zone on Anti-Virus / Content Filtering rows | **absent** | present (857 rows) |
+| src/dst country on those rows | **absent** | present (856 rows) |
+| a MEASURED zero byte counter | stated (`recv_bytes=0`) | **field omitted** (91 rows) |
+| orphan tokens with no key | 2,161 | **0** |
+| bytes for one identical event | 1407 B | 614 B |
+
+Standard is the better default — a lost zone breaks segmentation attribution outright, while a lost
+zero is a weaker claim about bytes that already sum correctly. But it IS a trade with a named cost,
+not a clean win, and anything needing "received exactly zero" must read the legacy format.
+
+### ⛔ `device_name` NAMES DIFFERENT FACTS IN THE TWO FORMATS
+
+    legacy    device="V01001C6CT6BFD5"       device_name="SF01V"   <- the MODEL
+    standard  device_name="V01001C6CT6BFD5"  device_model="SF01V"
+
+A parser keyed on `device_name` returns the model on one and the appliance on the other. Both are
+plausible strings and neither errors. The FORMAT decides this, never the key name.
+⛔ The fields actually NAMED for a serial — `device_id` / `device_serial_id` — carry the literal
+string `NULL` on 100% of all 6,621 lines. `meaningful()` gained `null` for this.
+⛔ **UNRESOLVED: whether that identity is a hostname or a serial.** SFOS defaults the hostname to
+the serial, so the verified box cannot separate them. Reported as `deviceName`; `deviceSerial` is
+left NULL rather than claiming a serial. The experiment that settles it: rename the appliance and
+re-capture.
+
+### ⛔ THE GRAMMAR IS NOT FortiOS's — `parseKeyValueSpanning`, not `parseKeyValue`
+
+Legacy emits **unquoted values containing a space**: `ether_type=IPv4 (0x0800)`, on 2,118 lines.
+`parseKeyValue`'s bare-value branch is `[^\s]*` and drops `(0x0800)` on the floor.
+⛔ **But spanning naively is WORSE**: legacy also emits bare orphan tokens with NO KEY
+(`src_ip=172.16.16.2 N/A message="..."`, 43 lines), and absorbing them produced
+`srcIp = "172.16.16.2 N/A"` — a fabricated address. A bare value therefore continues ONLY into a
+**parenthesised** token, which is the only multi-word unquoted shape this device emits; everything
+else is recorded under `$unparsed` — counted, never merged and never dropped.
+⛔ Fortinet was deliberately NOT repointed at the looser grammar: that would change a live-verified
+parser on a 16-firewall fleet to fix a problem Fortinet's evidence does not show.
+
+### ⛔ THE TRAFFIC VERDICT IS IN `log_subtype`, NEVER `status`
+
+Legacy `status` carries Allow=2063/Deny=39. **Standard's `status` carries only Successful and
+Renew** — the verdict is not in that field at all. Keying on `status` leaves every standard-format
+row with a null action, and `log_hit` (decision rule **2** of the CVE priority tree, ABOVE CVSS 9.0)
+could never fire for this vendor. `actions.js` gained `allowed`; `denied` was already there, and
+that asymmetry is why it mattered — blocks would have classified while allows answered `unknown`.
+
+### ⛔ A SESSION EMITS TWO ROWS AND THE FIRST ONE'S COUNTERS ARE NOT A MEASUREMENT
+
+Same `con_id`, `connevent` Start then Stop. Of 1,031 legacy Start rows **ALL** carry
+`sent_bytes=0`; of 1,033 standard Start rows **NOT ONE** carries a bytes field. Legacy's zeros are
+the `hit_count DEFAULT 0` bug arriving over syslog. A third state exists — `Interim`, a running
+mid-session counter — so **only `Stop` is summable**. Sophos is therefore a THIRD sizing category
+beside paloalto (summable) and fortinet (cumulative, never summable).
+
+### ⛔ THE LEGACY FORMAT IS INCONSISTENT WITH ITSELF
+
+Its Firewall rows spell the session id `connid`; its **Content Filtering rows spell it `con_id`**,
+the standard format's spelling. Reading only `connid` dropped the id from 856 of 3,092 paired
+events. Likewise `category` is `http_category` in standard — a rename in the OPPOSITE direction to
+the zones. **Both bugs were found by the cross-format agreement test, not by reading either format
+alone**, which is the argument for keeping that test.
+
+### Other verified facts
+
+- **`log_id` is a BIJECTIVE dispatch key**: 25 distinct ids, none mapping to more than one
+  `(log_type / log_component / log_subtype)` triple.
+- **PRI encodes severity usably**: `<26>` critical, `<29>` notice, `<30>` info (facility 3 daemon).
+- **Neither format carries a syslog header** — `<PRI>` is followed immediately by `device…`. No
+  RFC 3164 timestamp/host/tag, and "Standard syslog protocol" is **not** RFC 5424 (no version digit).
+- **`timezone=` is a zone NAME, not an offset** (`"GMT"`), and legacy splits the time across
+  date/time/timezone. Only GMT/UTC/Z and explicit ±HHMM are resolved; an ambiguous abbreviation
+  (IST is Irish, Indian AND Israeli) leaves `eventAt` NULL rather than anchoring it somewhere
+  invented. Standard's `timestamp="…+0000"` is self-describing.
+- **`R1` is not an ISO country code** — it is Sophos's code for reserved/private space. Kept
+  verbatim, following the precedent `meaningful()` sets for FortiOS's "Reserved", so this column is
+  NOT ISO-only.
+- **App-ID works on UNDECRYPTED TLS**: `app_name="GitHub"` on an https request with
+  `DecryptHTTPS` disabled — SNI-derived.
+- **12 log classes verified.** IDP (IPS), ATP, VPN, authentication and SSL/TLS inspection produced
+  **zero** rows: the lab appliance has no IPS signature database (`IPS_CAT_VER="0"`), and eleven
+  attack patterns plus a 17-port version sweep produced nothing. ⛔ Those classes are **UNVERIFIED,
+  not absent**, and `classifySophos` returns null for them rather than mapping from documentation.

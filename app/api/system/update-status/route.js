@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.231.0': [
+    'New: SecVault can now read syslog from Sophos firewalls. It understands BOTH of the formats a Sophos firewall can send — the long-standing one, which Sophos has marked legacy and warns will stop gaining new fields, and its replacement — so a firewall can be switched between them without SecVault losing track of it.',
+    'Every field mapping was read off a live Sophos appliance rather than from Sophos documentation, with both formats recorded side by side from the same traffic. That comparison found two cases where the same information is filed under different names in the two formats, either of which would have silently emptied a column.',
+    'Neither format is complete on its own, and SecVault now records which facts each one cannot carry: the legacy format omits the network zone on web-filtering and antivirus events, and the newer one cannot distinguish a measured zero from a figure it never counted.',
+    'A Sophos firewall logs the start of a session before it has counted anything, with every counter written as zero. Those zeros are recorded as NOT MEASURED rather than as traffic, so a session is counted once, at the end, with its real figures.',
+  ],
   '2.230.0': [
     'Fixed: a firewall that stopped sending syslog for longer than four weeks raised NO alert at all \u2014 the warning went quiet exactly as the silence became total. Twenty-seven days dark was reported; twenty-nine days dark was read as "this firewall has never sent us anything" and said nothing. It is now reported with the date it last reported, measured from records that are never aged out.',
     'The same alert no longer clears itself and raises itself again on the day a silence passes four weeks, so one outage stays one alert from start to finish.',
