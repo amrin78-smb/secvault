@@ -1226,9 +1226,17 @@ Both `juniper.net/{us,gb}/en/dm/download-next-gen-vsrx-firewall-trial.html` now 
 gone with the acquisition; it was restricted to existing Juniper customers before that anyway.
 ⛔ **`vJunos-labs` IS FREE AND DOES NOT HELP**: it ships vJunos-router/switch/Evolved and **no
 vSRX**, so it has no security policies and emits no `RT_FLOW`, `RT_IDP` or `RT_UTM` — every family
-this mapping is about. The live path that remains is **Juniper vLabs** (`jlabs.juniper.net/vlabs`,
-free, browser-based, carries a vSRX). ⛔ A sandbox has no network path to a collector, which looked
-disqualifying and is not: **`structured-data` is valid at `[edit system syslog file <name>]`**, not
+this mapping is about. ⛔ **AND NEITHER DOES vLabs — IT WAS RETIRED ON 2026-10-31**, which an automated read of its page
+reported as "likely still operating" while a red retirement banner sat at the top of it; the banner
+then advertised three replacement trials whose own links are among the dead URLs above. `juniper.net/try`
+redirects to **hpe.com/contact-hpe**, and `hpedemos.com` carries Aruba Central and Mist AI only, no
+SRX. **There is no free self-serve vSRX left.** What remains is the AWS/Azure Marketplace listing —
+software free for 30 days, EC2 billed separately (~$0.09/hr on the recommended `c5.large`), and
+⛔ **it converts to a paid subscription at $0.65/hr unless cancelled**. ⛔ A page that cannot confirm
+its own status is UNCONFIRMED, not live; where the decision turns on whether a service still exists,
+look at the rendered page rather than a summary of its text.
+⛔ Whichever device is eventually used, the capture needs no egress: **`structured-data` is valid at
+`[edit system syslog file <name>]`**, not
 only under `host` (Junos 8.3+, RFC 5424), so the device writes the exact bytes to a local file and
 `show log` prints them. `secvault-lab/verify-junos-capture.js` turns such a capture into a
 CONFIRMED / CONTRADICTED / **NOT EXERCISED** verdict per frozen claim — the third state existing
