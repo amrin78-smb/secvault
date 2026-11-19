@@ -1400,8 +1400,8 @@ describe('⛔ the coverage source can never contribute an act_now alert', () => 
     // guard's clothes. Adding a source means adding it here, deliberately.
     const DECLARED = [
       'cve', 'compliance', 'config_diff', 'licence', 'rule_cleanup', 'tunnel',
-      'collection_gap', 'segmentation', 'ingest', 'application', 'coverage',
-      'os_lifecycle',
+      'collection_gap', 'monitoring_only', 'segmentation', 'ingest',
+      'application', 'coverage', 'os_lifecycle',
     ];
     const angry = { async query() { throw new Error('nope'); } };
     const { sources } = await gatherWorkQueue(angry);

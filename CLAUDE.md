@@ -880,7 +880,8 @@ a claim nobody measured.
 
 ## Supported Vendors (Tier 1) — Slugs, Credentials, Dispatch
 
-SEVEN vendors implemented (`sophos` added v2.233.0). The slug is load-bearing: it must match across `devices.vendor`,
+SEVEN MANAGED vendors (`sophos` added v2.233.0), plus **TWO MONITORING-ONLY** (`juniper` and
+`sonicwall`, v2.236.0) — in `VENDOR_META` and deliberately **NOT** in `ADAPTERS`. The slug is load-bearing: it must match across `devices.vendor`,
 `VENDOR_PARSERS` (`lib/engines/versionComparator.js`), `ADAPTERS` (`lib/adapters/index.js`),
 `VENDOR_CPES` (`lib/feeds/nvd.js`), and `VENDOR_META` (`components/devices/vendorMeta.js`). Never
 invent a new spelling.
@@ -897,6 +898,42 @@ operator in the Add Device form — dispatch is `(vendor, mgmt_method) → adapt
 | `cisco_asa` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` (+`enable_password`?) |
 | `sangfor` | `ssh` | SSH | `mgmt_ip`+`mgmt_port` | `ssh` |
 | `sophos` | `api` | XML API :4444 | `mgmt_ip`+`mgmt_port` | `rest_api` (username+password — **SFOS has NO api-key mode**) |
+| `juniper` | `syslog` | ⛔ **NONE — logs only** | `mgmt_ip` (the address its syslog arrives from) | ⛔ **none** |
+| `sonicwall` | `syslog` | ⛔ **NONE — logs only** | `mgmt_ip` (ditto) | ⛔ **none** |
+
+### ⛔ The monitoring-only device kind (v2.236.0) — `lib/monitoringOnly.js`
+
+SecVault parses syslog from more vendors than it can manage. Before this, such a firewall **could
+not be added at all** — `POST /api/devices` rejects any vendor outside `VENDOR_META` — so its events
+were stored with `device_id NULL`, it appeared only on `/devices/discovered`, and `evidenceWindow`,
+`capacityForecast` and `changeOutcome` each excluded it by their deliberate `device_id IS NOT NULL`
+filters. A firewall the product could read and could not name.
+
+⛔ **THE EASY HALF IS LETTING IT BE ADDED. THE DANGEROUS HALF IS EVERYTHING AFTER.**
+`workQueueData.js` states it: a firewall that has not been collected from "produces NO CVEs, NO
+compliance failures and NO rule findings — it is silently the cleanest device on the fleet." A
+monitoring-only firewall has that property **by construction and for ever**, so it is the one device
+that can top a security score having never been assessed. It is therefore never hidden, never
+dropped from a count, and carries its own work-queue item (`monitoring_only`, the THIRTEENTH source)
+saying what was not run and how to change that. ⛔ `unmeasured` → the `verify` band; it can never
+reach `act_now`.
+
+⛔ **IT IS A METHOD (`mgmt_method = 'syslog'`), NOT A VENDOR FLAG** — untrue otherwise the day
+somebody owns a Fortinet they have no credentials for, which is the common case this unlocks next.
+⛔ **`collectAndStore` SKIPS, it does not fail**: every pull would otherwise throw and the device
+would look BROKEN rather than deliberately log-only — the same `skipped`-vs-`error` distinction
+`feedStatus.js` draws, for the same reason. ⛔ `last_collected_at` **stays NULL for ever**, which is
+TRUE; stamping it would make it read as freshly collected everywhere.
+
+⛔ **"WE CANNOT REACH IT" AND "WE WERE NEVER GOING TO TRY" ARE DIFFERENT FACTS** with different
+first steps, so `collection_gap` excludes it and `monitoring_only` reports it. ⛔ **AND THE
+OWNERSHIP SET IS THE UNION, NOT THE SAME PREDICATE — the first draft of v2.236.0 got this wrong.**
+`gatherCoverageGaps` asks "is some other source already reporting this firewall's first step?",
+which since v2.236.0 is TWO sources. Reusing `collection_gap`'s list predicate there excluded
+monitoring-only devices from the ownership set, so `coverage_gap` listed them AGAIN beside
+`monitoring_only` and told the operator to collect a ruleset from a firewall with no credentials.
+Too wide and the firewall is dropped by BOTH and appears in neither. Three query sites, two
+different questions — `.ai-codex/schema.md` and `tests/monitoringOnly.test.js` pin which is which.
 
 Forcepoint is SMC-only **by design** — never SSH to Forcepoint engines (see the SMC section below).
 Credential plaintext is built by `buildCredentialPlaintext()` (vendorMeta.js) and read by
@@ -2397,13 +2434,16 @@ fleet-wide VPN history.
 
 ## Work Queue (`/work`, Phase 3, v2.115.0)
 
-ONE ranked list of outstanding work, gathered from **TWELVE** sources at READ time (the tenth,
+ONE ranked list of outstanding work, gathered from **THIRTEEN** sources at READ time (the tenth,
 `application`, landed with the application view in v2.124.0; the eleventh, `coverage`, with the
 blind-spot register in v2.188.0; the twelfth, `os_lifecycle`, with the OS branch feed in v2.229.0).
-⛔ **This said TEN for forty versions, was corrected to ELEVEN in v2.228.5 — and was stale again
-ONE RELEASE LATER**, because v2.229.0 added a gather and did not touch the sentence counting them.
-A number in prose cannot be made to agree with an array by resolving to be careful: count them in
-`gatherWorkQueue`'s own `Promise.all`, and if a thirteenth is ever added, this is the sentence.
+⛔ **This said TEN for forty versions, was corrected to ELEVEN in v2.228.5, was stale again ONE
+RELEASE LATER at v2.229.0, and the correction then WROTE DOWN what to do about a thirteenth** —
+which v2.236.0 added (`monitoring_only`) and which is why this sentence now says THIRTEEN. The
+prose only kept up because `tests/workQueue.test.js` pins the list of source keys and FAILED THE
+BUILD on the new one; a number in prose cannot be made to agree with an array by resolving to be
+careful. Count them in `gatherWorkQueue`'s own `Promise.all`, and if a fourteenth is ever added,
+this is the sentence.
 Count them in `gatherWorkQueue`'s own `Promise.all`, which is the only place that cannot drift.
 `lib/engines/workQueue.js` is pure (banding + ranking, no pool);
 `lib/engines/workQueueData.js` holds the gathers. No table, no cron job — a stored queue goes stale

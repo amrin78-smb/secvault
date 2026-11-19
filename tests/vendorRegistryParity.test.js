@@ -45,20 +45,59 @@ const {
   VENDOR_SHORT_LABEL,
   ACCESS_METHODS,
   CREDENTIAL_TYPES,
+  buildCredentialPlaintext,
 } = require('../components/devices/vendorMeta');
+const { MONITORING_ONLY_METHOD } = require('../lib/monitoringOnly');
 
 const sorted = (o) => Object.keys(o).sort();
+
+// ⛔ THE PARTITION, DERIVED FROM VENDOR_META RATHER THAN LISTED. A hardcoded
+// list of monitoring-only slugs would be a third registry to keep in step with
+// the two this file exists to compare, and it would go stale the moment a
+// vendor is promoted to managed — silently, because the promoted vendor would
+// keep being checked against the weaker rules.
+const MANAGED_SLUGS = Object.keys(VENDOR_META)
+  .filter((s) => !VENDOR_META[s].monitoringOnly).sort();
+const MONITORING_SLUGS = Object.keys(VENDOR_META)
+  .filter((s) => VENDOR_META[s].monitoringOnly).sort();
 
 describe('the two vendor registries agree', () => {
   it('⛔ the slug sets are identical', () => {
     // Deliberately not a subset check in either direction: a slug missing from
     // either side is a bug, and they are different bugs (see the header).
+    // ⛔ MANAGED vendors only. A MONITORING-ONLY vendor is in VENDOR_META and
+    // deliberately NOT in ADAPTERS — it is in the inventory for its LOGS and
+    // SecVault never opens a management connection to it. That asymmetry is
+    // asserted from BOTH ends below rather than waived here: a managed vendor
+    // may not silently lose its adapter, and a monitoring-only one may not
+    // silently gain one without being promoted on purpose.
     assert.deepEqual(
       sorted(ADAPTERS),
-      sorted(VENDOR_META),
-      'ADAPTERS (lib/adapters/index.js) and VENDOR_META (components/devices/vendorMeta.js) ' +
-        'list different vendor slugs'
+      MANAGED_SLUGS,
+      'ADAPTERS (lib/adapters/index.js) and the MANAGED half of VENDOR_META ' +
+        '(components/devices/vendorMeta.js) list different vendor slugs'
     );
+  });
+
+  it('⛔ a monitoring-only vendor has NO adapter and NO default method', () => {
+    // ⛔ THE OTHER END OF THE ASYMMETRY. Without this, deleting an adapter
+    // would be "fixed" by marking its vendor monitoring-only and the build
+    // would stay green while the fleet silently stopped being collected from.
+    assert.ok(MONITORING_SLUGS.length > 0, 'the partition must not be vacuous');
+    for (const slug of MONITORING_SLUGS) {
+      assert.equal(ADAPTERS[slug], undefined, slug + ' must have no adapter');
+      assert.equal(DEFAULT_METHOD[slug], undefined, slug + ' must have no DEFAULT_METHOD');
+      const meta = VENDOR_META[slug];
+      assert.deepEqual(Object.keys(meta.accessMethods), [MONITORING_ONLY_METHOD],
+        slug + ' must offer exactly the syslog method and nothing else');
+      assert.equal(meta.defaultAccessMethod, MONITORING_ONLY_METHOD);
+      // ⛔ `credentialShape: 'none'` or buildCredentialPlaintext falls through
+      // to its userpass branch and stores an EMPTY credential.
+      assert.equal(meta.accessMethods[MONITORING_ONLY_METHOD].credentialShape, 'none');
+      assert.equal(buildCredentialPlaintext(slug, MONITORING_ONLY_METHOD,
+        { username: 'a', password: 'b' }), null,
+        slug + ' must never build a credential');
+    }
   });
 
   it('⛔ DEFAULT_METHOD covers exactly the same slugs', () => {
@@ -77,7 +116,7 @@ describe('the two vendor registries agree', () => {
   // One test per vendor rather than a loop inside one test: a failure then
   // NAMES the vendor in the TAP output instead of reporting "the registries
   // disagree" and leaving the reader to find which one.
-  for (const slug of Object.keys(VENDOR_META)) {
+  for (const slug of MANAGED_SLUGS) {
     describe(slug, () => {
       it('⛔ the access-method keys match on both sides', () => {
         const meta = VENDOR_META[slug];

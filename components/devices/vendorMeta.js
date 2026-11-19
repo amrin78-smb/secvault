@@ -32,6 +32,24 @@
 //   secretLabel      → UI label for the single-secret / api-key input
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ⛔ ONE access-method config, shared by every monitoring-only vendor, so two
+// of them cannot drift into describing the same state differently.
+//
+// ⛔ `credentialShape: 'none'` IS LOAD-BEARING. Without it
+// `buildCredentialPlaintext` falls through to its userpass branch and returns
+// `{"username":"","password":""}` — an EMPTY CREDENTIAL stored in
+// `device_credentials`, which reads as "credentials were supplied and are
+// blank" rather than "this device has none by design", and would send a future
+// adapter off to authenticate with it.
+const SYSLOG_ONLY_METHOD = {
+  label: 'Syslog only (no management connection)',
+  // ⛔ No defaultPort. A port here would be written to `mgmt_port` and would
+  // claim SecVault talks to something on it.
+  defaultPort: null,
+  credentialType: null,
+  credentialShape: 'none',
+};
+
 export const VENDOR_META = {
   forcepoint: {
     label: 'Forcepoint (SMC)',
@@ -162,6 +180,34 @@ export const VENDOR_META = {
       },
     },
   },
+  // ⛔ MONITORING-ONLY VENDORS. SecVault parses their syslog (verified against
+  // real corpora — see .ai-codex/connectors.md sections 14 and 15) and has NO
+  // ADAPTER for either, so `syslog` is their ONLY access method. Before this
+  // they could not be added at all, and their events were stored unattributed.
+  //
+  // ⛔ `connection: 'mgmt'` AND `mgmt_ip` IS REQUIRED, which is not a leftover:
+  // the collector's IP->device map is vendor-agnostic and matches on
+  // `mgmt_ip`/`snmp_host`/`smc_host` plus `device_syslog_sources`, so for a
+  // log-only firewall `mgmt_ip` IS the address its syslog arrives from. It is
+  // the one field that makes attribution work.
+  juniper: {
+    label: 'Juniper SRX (logs only)',
+    connection: 'mgmt',
+    defaultAccessMethod: 'syslog',
+    monitoringOnly: true,
+    accessMethods: {
+      syslog: SYSLOG_ONLY_METHOD,
+    },
+  },
+  sonicwall: {
+    label: 'SonicWall SonicOS (logs only)',
+    connection: 'mgmt',
+    defaultAccessMethod: 'syslog',
+    monitoringOnly: true,
+    accessMethods: {
+      syslog: SYSLOG_ONLY_METHOD,
+    },
+  },
 };
 
 export const VENDOR_SLUGS = Object.keys(VENDOR_META);
@@ -176,6 +222,12 @@ export const VENDOR_SHORT_LABEL = {
   cisco_asa: 'Cisco ASA',
   sangfor: 'Sangfor',
   sophos: 'Sophos',
+  // ⛔ The short label carries NO "(logs only)" qualifier, deliberately. It is
+  // used in narrow fleet-table columns beside managed firewalls, and a
+  // parenthetical there would be truncated to noise. The monitoring-only state
+  // is carried by a STATE marker on the row, never by the vendor's name.
+  juniper: 'Juniper',
+  sonicwall: 'SonicWall',
 };
 
 /**
@@ -267,6 +319,11 @@ export function buildCredentialPlaintext(
   const resolved = resolveAccessMethod(vendorSlug, accessMethod);
   if (!resolved) return null;
   const { credentialShape } = resolved.config;
+
+  // ⛔ NULL, NEVER AN EMPTY OBJECT. A monitoring-only device has no credential
+  // by design; the fall-through below would build `{"username":"","password":""}`
+  // and store it, which is a different claim entirely.
+  if (credentialShape === 'none') return null;
 
   if (credentialShape === 'secret') {
     return secret || '';

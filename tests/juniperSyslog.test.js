@@ -512,13 +512,25 @@ test('no other vendor parser claims a Junos line', () => {
 // 11. The seam a syslog-only vendor opens
 // ---------------------------------------------------------------------------
 
-test('a parsed vendor slug may be absent from VENDOR_META, and that is legal', () => {
-  // ⛔ `juniper` is read from syslog and has no adapter yet — the same state
-  // the Sophos parser shipped in, two releases ahead of its adapter. This test
-  // RECORDS that asymmetry rather than forbidding it, so the next reader knows
-  // the two registries are allowed to differ and why.
+test('juniper is addable as a MONITORING-ONLY vendor, with no adapter', () => {
+  // ⛔ THIS TEST REPLACES ONE THAT ASSERTED THE OPPOSITE, and the replacement
+  // is the point rather than an edit. v2.234.0 shipped a verified Juniper
+  // parser and `juniper` was deliberately absent from VENDOR_META, so the
+  // firewall could not be ADDED AT ALL: its events were stored with
+  // `device_id NULL`, it appeared only on /devices/discovered, and
+  // evidenceWindow, capacityForecast and changeOutcome each excluded it by
+  // their deliberate `device_id IS NOT NULL` filters. A firewall the product
+  // could read and could not name. v2.236.0 closed that with a monitoring-only
+  // device kind; a test asserting the gap still exists must not outlive it.
   const { VENDOR_META } = require('../components/devices/vendorMeta.js');
-  assert.equal(Object.prototype.hasOwnProperty.call(VENDOR_META, 'juniper'), false);
+  const { ADAPTERS } = require('../lib/adapters');
+  const { MONITORING_ONLY_METHOD } = require('../lib/monitoringOnly');
+  assert.ok(VENDOR_META.juniper, 'juniper must be addable');
+  assert.equal(VENDOR_META.juniper.monitoringOnly, true);
+  // ⛔ AND STILL NO ADAPTER. Being addable must not come to mean being
+  // collectable — the whole safety argument rests on that staying true.
+  assert.equal(ADAPTERS.juniper, undefined);
+  assert.deepEqual(Object.keys(VENDOR_META.juniper.accessMethods), [MONITORING_ONLY_METHOD]);
   assert.equal(detectVendor(find(/RT_FLOW_SESSION_CREATE \[/)), 'juniper');
 });
 

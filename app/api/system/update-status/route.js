@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.236.0': [
+    'Firewalls SecVault can read logs from but cannot connect to \u2014 Juniper SRX and SonicWall today \u2014 can now be added to the inventory. Until now they could not be added at all, so their logs arrived unattributed to any firewall and they appeared only on the Discovered page.',
+    'Adding one asks for a name and an address and no credentials, because SecVault will not connect to it. Its logs are then attributed to it like any other firewall, and it appears in traffic and threat views by name.',
+    'A firewall like this is reported as NEVER ASSESSED \u2014 not as passing. It has no vulnerability assessment, no compliance result and no rule analysis, and because of that it would otherwise sit at the top of every score as the cleanest device on the fleet. It appears in the work queue under "Logs only" with the reason, and leaves that list only when it is given a management connection.',
+    'That is kept separate from "we cannot reach this firewall", which is a different problem with a different first step. A log-only firewall is not listed as a failed collection, and SecVault no longer suggests checking credentials it was never given.',
+    'If a log-only firewall also stops sending logs, that is reported separately \u2014 at that point it is contributing nothing at all, and sending logs is the only reason it was added.',
+    'Existing firewalls are unaffected. This adds a new kind of entry rather than changing how any managed firewall is collected from or assessed.',
+  ],
   '2.235.0': [
     'SecVault now reads syslog from SonicWall firewalls. Traffic, threat, web-filtering, VPN and administrative events are parsed into the same shape as every other vendor, so a SonicWall appears in the traffic, threat and denied-traffic views alongside the rest of the fleet.',
     'SonicWall reports the same traffic several times as a connection progresses \u2014 once when it opens, sometimes again mid-flight, and once when it closes. SecVault counts only the closing figure. Adding them all up, which is what the obvious reading does, over-reports this vendor\u2019s traffic by about 5%, and by more on firewalls handling many short connections.',

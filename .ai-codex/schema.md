@@ -1636,3 +1636,29 @@ in SQL without re-implementing the matching contract a second time.
 
 Granted `SELECT` to `claude_readonly` and `nocvault_readonly` — public vendor lifecycle dates, no
 secret, no device data.
+
+## `devices.mgmt_method = 'syslog'` — the monitoring-only device kind (v2.236.0)
+
+Not a new table or column: a new VALUE of the existing `devices.mgmt_method`, meaning **SecVault
+reads this firewall's logs and never opens a management connection to it**. `lib/monitoringOnly.js`
+is the single definition (pure CJS, like `lib/rbac.js`, because the CJS adapter registry and the ESM
+`vendorMeta.js` both need it and neither may own it).
+
+⛔ **IT IS A METHOD, NOT A VENDOR FLAG.** Modelling it per-vendor would be untrue the day somebody
+owns a Fortinet they have no credentials for — the common case this unlocks next, and strictly
+better than leaving that firewall out of the inventory so its syslog lands unattributed.
+
+⛔ **`last_collected_at` STAYS NULL FOR EVER AND THAT IS CORRECT.** `collectAndStore` returns
+`{skipped: true, skippedReason: 'monitoring_only'}` before touching the database. Stamping it would
+make the device read as freshly collected on every dashboard — the failed-read-as-a-fact rule aimed
+at the one field that decides whether anybody looks at it again. `last_connectivity_ok` is left
+alone rather than set false: we did not try.
+
+⛔ **`mgmt_ip` IS REQUIRED and is not a leftover from the managed vendors.** The collector's
+IP→device map is vendor-agnostic (`SELECT id, mgmt_ip, snmp_host, smc_host FROM devices WHERE
+active = true`, plus `device_syslog_sources`), so for a log-only firewall `mgmt_ip` IS the address
+its syslog arrives from. It is the one field that makes attribution work.
+
+⛔ **NO CREDENTIAL ROW IS EVER WRITTEN.** `credentialShape: 'none'` makes
+`buildCredentialPlaintext` return null; without it the function falls through to its userpass branch
+and stores `{"username":"","password":""}`, which reads as "credentials were supplied and are blank".

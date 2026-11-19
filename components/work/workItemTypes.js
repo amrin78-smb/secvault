@@ -36,6 +36,11 @@ export const WORK_TYPE_LABEL = {
   tunnel_stale: 'VPN tunnel',
   tunnel_unknown: 'VPN tunnel',
   collection_gap: 'Collection',
+  // ⛔ NOT 'Collection'. `collection_gap` means "we cannot reach this firewall"
+  // and this means "we were never going to try" — sharing a label would put
+  // both under one filter option and lose the distinction the two sources
+  // exist to draw.
+  monitoring_only: 'Logs only',
   segmentation: 'Segmentation',
   ingest_drop: 'Log ingest',
   ingest_silent: 'Log ingest',

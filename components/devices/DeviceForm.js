@@ -144,6 +144,14 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
   const isSecretShape = shape === 'secret';
   const isApiKeyOrUserPass = shape === 'apikey_or_userpass';
   const hasEnable = shape === 'userpass_enable';
+  // ⛔ A MONITORING-ONLY VENDOR HAS NO CREDENTIAL AND MUST SHOW NO CREDENTIAL
+  // UI. Without this the form falls through to the Username/Password branch
+  // below — the else arm, reached by anything that is not a `secret` or
+  // `apikey_or_userpass` shape — and asks for credentials for a firewall
+  // SecVault is never going to connect to. The operator would supply them,
+  // `buildCredentialPlaintext` returns null for this shape so nothing is
+  // stored, and they would be left believing a management connection exists.
+  const needsCredential = shape !== 'none';
   // A single secret input is shown for 'secret', and for 'apikey_or_userpass'
   // while the operator has the API-key mode selected.
   const showSecretInput = isSecretShape || (isApiKeyOrUserPass && authMode === 'apikey');
@@ -436,7 +444,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </>
       )}
 
-      {!isSmc && !isEdit && (
+      {!isSmc && !isEdit && needsCredential && (
         <div className="form-field">
           <label htmlFor="device-cred-profile">Use Saved Profile</label>
           <select
@@ -459,7 +467,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         </div>
       )}
 
-      {!isEdit && !selectedProfileId && isApiKeyOrUserPass && (
+      {!isEdit && !selectedProfileId && needsCredential && isApiKeyOrUserPass && (
         <div className="form-field">
           <label htmlFor="device-auth-mode">Authentication</label>
           <select
@@ -489,7 +497,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           entirely (see the header comment): rotation lives in CredentialForm
           ("Rotate Credentials" on the Manage tab), so this modal stays
           metadata-only and its handleSubmit never sends a credential. */}
-      {!isEdit && !selectedProfileId &&
+      {!isEdit && !selectedProfileId && needsCredential &&
         (showSecretInput ? (
           <div className="form-field">
             <label htmlFor="device-secret">{config.secretLabel}</label>
@@ -556,7 +564,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           </>
         ))}
 
-      {!isEdit && !selectedProfileId && (
+      {!isEdit && !selectedProfileId && needsCredential && (
         <div className="form-field" style={FULL_WIDTH}>
           <label
             style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-base)', color: 'var(--text-secondary)' }}
