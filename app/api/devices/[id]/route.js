@@ -213,6 +213,23 @@ export async function PUT(request, { params }) {
   // credential_profile_id applies a saved lib/credentialProfiles.js profile
   // (checked first); credential + credential_type is the generic manual-entry
   // path; smc_api_key is the original Forcepoint-only field.
+  // ⛔ THE SAME REFUSAL AS POST, FOR THE SAME TWO REASONS. `smc_api_key`
+  // hardcodes its credential type instead of deriving it from `config`, and
+  // the generic `credential` path derives a NULL one — so without this an
+  // operator could convert a device to monitoring-only and attach a credential
+  // to it in the same call, or hit a NOT NULL violation after the row had
+  // already been updated.
+  if (config.credentialShape === 'none'
+      && (credential || smc_api_key || credential_profile_id)) {
+    return NextResponse.json(
+      {
+        error: `vendor '${effectiveVendor}' over '${method}' is monitoring-only: SecVault reads `
+          + 'its logs and never connects to it, so it takes no credential.',
+      },
+      { status: 400 }
+    );
+  }
+
   let credPlaintext = null;
   let credType = null;
   let usedExistingProfile = false;
@@ -298,12 +315,29 @@ export async function PUT(request, { params }) {
   let credentialCleared = false;
   if (methodChanged || (rest.vendor !== undefined && rest.vendor !== existing.vendor)) {
     try {
-      await pool.query(
-        'DELETE FROM device_credentials WHERE device_id = $1 AND credential_type <> $2',
-        [params.id, config.credentialType]
-      );
+      // ⛔ `credential_type <> NULL` IS NULL, NOT TRUE, SO THIS DELETED NOTHING
+      // FOR A MONITORING-ONLY TARGET — measured against a real database:
+      // `DELETE 0`, with the previous vendor's encrypted SSH credential left
+      // intact on a device now defined as having none. That is the SAME
+      // staleness class the 2026-07-18 comment above this block records as
+      // fixed, re-opened by `credentialType: null`.
+      //
+      // ⛔ For a monitoring-only target EVERY credential is stale, because the
+      // new state has no credential type at all — so the predicate is dropped
+      // rather than compared against NULL.
+      const del = config.credentialType === null
+        ? await pool.query(
+          'DELETE FROM device_credentials WHERE device_id = $1', [params.id])
+        : await pool.query(
+          'DELETE FROM device_credentials WHERE device_id = $1 AND credential_type <> $2',
+          [params.id, config.credentialType]);
+      // ⛔ FROM THE ROWCOUNT, NOT FROM "we did not supply a replacement". This
+      // flag drives a response warning that says the stored credential "was
+      // removed"; asserting that after a DELETE 0 told the operator a thing
+      // that had not happened, on the same call where the credential in fact
+      // survived — both halves false at once.
       if (!credPlaintext) {
-        credentialCleared = true;
+        credentialCleared = del.rowCount > 0;
       }
     } catch (err) {
       return NextResponse.json(

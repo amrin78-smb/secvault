@@ -304,7 +304,12 @@ test('port 0 on a packet-filter line is NOT APPLICABLE, never port zero', () => 
 test('protocol resolves across three key names and two value domains', () => {
   assert.equal(ev(/RT_FLOW_SESSION_CREATE \[/).protocol, 'icmp'); // protocol-id="1"
   assert.equal(ev(/IDP_ATTACK_LOG_EVENT/).protocol, 'tcp');       // protocol-name="TCP"
-  assert.equal(ev(/CONTENT_FILTERING_BLOCKED/).protocol, 'http'); // protocol="http"
+  // ⛔ THIS LINE USED TO ASSERT `protocol === 'http'` — it PINNED A DEFECT the
+  // findings document forbids by name: `protocol` (the bare key) is an
+  // APPLICATION protocol and putting it here gives every per-protocol rollup
+  // an `http` bucket beside `tcp`. It belongs in `service`.
+  assert.equal(ev(/CONTENT_FILTERING_BLOCKED/).protocol, null);
+  assert.equal(ev(/CONTENT_FILTERING_BLOCKED/).service, 'http');
 });
 
 test('zones resolve across BOTH key spellings', () => {
@@ -458,15 +463,28 @@ test('a ZONED header wins over epoch-time, keeping sub-second precision', () => 
 test('epoch-time rescues a zoneless header, and no zone is then assumed', () => {
   const e = ev(/IDP_APPDDOS_APP_ATTACK_EVENT \[/);
   assert.equal(e.eventAt.getTime(), 1319419711 * 1000);
-  assert.ok(!e.fields.$eventAtZoneless, 'no zone was assumed, so nothing to flag');
+  assert.equal(e.tzAssumed, false, 'no zone was assumed, so nothing to flag');
+  // ⛔ AND THE EPOCH IS SCALE-BOUNDED. The field states no unit, so a
+  // millisecond value multiplied by 1000 gave the year 52139.
+  const ms = parseJuniper('<165>1 2011-10-23T16:28:31.696 h RT_IDP - IDP_ATTACK_LOG_EVENT '
+    + '[junos@1 epoch-time="1583190783193"]');
+  assert.ok(ms.eventAt === null || ms.eventAt.getUTCFullYear() < 2100);
 });
 
 test('an assumed zone is RECORDED, on exactly the 8 lines that need it', () => {
   // ⛔ Otherwise an assumption is indistinguishable from a stamp the device
   // actually zoned.
-  const flagged = claimed().filter((l) => parseJuniper(l).fields.$eventAtZoneless === true);
+  // ⛔ THE REAL COLUMN, NOT A `fields` KEY. `buildEvent` reads `p.tzAssumed`;
+  // `$eventAtZoneless` was read by nothing, so `syslog_events.tz_assumed` was
+  // written FALSE on every row whose zone we had in fact assumed.
+  const flagged = claimed().filter((l) => parseJuniper(l).tzAssumed === true);
   assert.equal(flagged.length, 8);
   for (const l of flagged) assert.equal(/(?:Z|[+-]\d{2}:?\d{2})\s/.test(l), false);
+  // ⛔ And it is never set without an instant to qualify: a malformed stamp
+  // that DID carry a zone must not come back flagged zone-assumed.
+  const bad = parseJuniper('<14>1 2020-13-45T99:99:99Z h RT_FLOW - RT_FLOW_SESSION_CREATE [junos@1 a="1"]');
+  assert.equal(bad.eventAt, null);
+  assert.equal(bad.tzAssumed, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -564,4 +582,96 @@ test('DeviceForm still carries the silent fallback this guard compensates for', 
     require('node:path').join(__dirname, '../components/devices/DeviceForm.js'), 'utf8'
   );
   assert.match(src, /VENDOR_META\[vendor\] \|\| VENDOR_META\.forcepoint/);
+});
+
+// ---------------------------------------------------------------------------
+// 12. Regressions found in the v2.236.0 bug sweep
+// ---------------------------------------------------------------------------
+
+test('⛔ the SD-ID is OPTIONAL — an absent one must not eat the first pair', () => {
+  // ⛔ THE MOST SEVERE DEFECT THIS PARSER HAD. The SD-ID scanner consumed the
+  // leading token unconditionally, so on a line with no `junos@...` id the
+  // FIRST key=value pair was swallowed. Measured: `source-address` lost on
+  // RT_FLOW_SESSION_CREATE and APPTRACK_SESSION_VOL_UPDATE, and on CLOSE the
+  // scan stopped at the space INSIDE `reason="TCP CLIENT RST"`.
+  //
+  // ⛔ ON A MODERN vSRX THAT IS EVERY TRAFFIC ROW, not 5 of 105 — the id is a
+  // 2010s artefact. A traffic row with no source IP cannot feed log_hit (CVE
+  // priority rule 2), segmentation, or any talker rollup.
+  const modern = '<14>1 2023-01-31T12:40:28.259Z vSRX RT_FLOW - RT_FLOW_SESSION_CREATE '
+    + '[source-address="10.1.1.100" source-port="38128" destination-address="8.8.8.8"]';
+  const e = parseJuniper(modern);
+  assert.equal(e.srcIp, '10.1.1.100');
+  assert.equal(e.srcPort, 38128);
+  assert.equal(e.dstIp, '8.8.8.8');
+  // A real SD-ID is still consumed and reported.
+  const withId = parseJunosFrame(find(/RT_FLOW_SESSION_CREATE \[junos@/));
+  assert.ok(withId.sdIds[0].startsWith('junos@'));
+  // And every SD-ID-less corpus line keeps its source address.
+  const noId = F.ALL.filter((l) => !/\[junos@/.test(l) && /\[source-address=/.test(l));
+  assert.ok(noId.length >= 2);
+  for (const l of noId) assert.ok(parseJuniper(l).srcIp, `srcIp lost on ${l.slice(0, 70)}`);
+});
+
+test('⛔ generic daemon app-names must not claim another vendor\'s syslog', () => {
+  // ⛔ `sshd` and `snmpd` were in JUNOS_APPS, so ANY Linux host's RFC 5424
+  // syslog was attributed to Juniper — that web server then appeared on
+  // /devices/discovered as a Juniper candidate with the vendor prefilled.
+  // This file declines a generic `kernel` line for exactly this reason.
+  assert.equal(detectVendor('<38>1 2026-11-19T10:00:00.000Z web01 sshd 1234 - - '
+    + 'Failed password for root from 10.0.0.9'), null);
+  assert.equal(detectVendor('<30>1 2026-11-19T10:00:00Z nms01 snmpd 991 - - '
+    + 'Connection from UDP: [10.0.0.5]:161'), null);
+  // ⛔ AND REMOVING THEM COST NOTHING: the real Junos events carrying those
+  // app-names are claimed by the MSGID vocabulary instead.
+  assert.equal(detectVendor(find(/SSHD_LOGIN_FAILED/)), 'juniper');
+  assert.equal(detectVendor(find(/SNMPD_AUTH_FAILURE/)), 'juniper');
+  assert.equal(claimed().length, 96);
+});
+
+test('⛔ RT_IDP byte counters are NOT MEASURED, never a stored zero', () => {
+  // ⛔ All 5 IDP_ATTACK_LOG_EVENT lines carry inbound/outbound-bytes="0". An
+  // IPS attack log fires on DETECTION, so these are "not populated" rather
+  // than a measured zero — and the corpus cannot tell them apart, which under
+  // the tri-state rule means NULL. Storing 0 reproduces exactly the behaviour
+  // the findings document names as an Elastic defect.
+  const idp = F.ALL.filter((l) => /RT_IDP/.test(l)).map(parseJuniper);
+  assert.ok(idp.length >= 5);
+  for (const e of idp) {
+    assert.equal(e.bytesSent, null);
+    assert.equal(e.bytesReceived, null);
+  }
+  // ⛔ A zero on RT_FLOW IS real and is kept.
+  const flow = F.ALL.map(parseJuniper).filter((e) => e && e.fields
+    && e.logType === 'RT_FLOW' && e.bytesSent !== null);
+  assert.ok(flow.length > 0, 'RT_FLOW byte counters still read');
+});
+
+test('⛔ a FW: tail that is not a 5-tuple is refused, not fabricated', () => {
+  // ⛔ Detection used the Junos interface grammar; the PARSE was five bare
+  // (\S+) groups with no validation, so any claimed SD-less line whose free
+  // text contained `FW:` plus five tokens invented a 5-tuple and entered every
+  // traffic rollup.
+  const prose = '<158>1 2023-05-04T15:21:01.102+10:00 fw01 kernel - - - '
+    + 'IKE negotiation failed FW: foo bar baz qux quux';
+  const e = parseJuniper(prose);
+  assert.equal(e.srcIp, null);
+  assert.equal(e.dstIp, null);
+  assert.equal(e.logClass, null, 'and it is not filed as traffic');
+  // The real packet-filter lines still parse.
+  assert.equal(ev(/FW:\s+gr-0\/0\/0\.14/).srcIp, '127.0.0.1');
+});
+
+test('⛔ tz_assumed is the real column, not a fields key nothing reads', () => {
+  // ⛔ `buildEvent` reads `p.tzAssumed`. The first draft set
+  // `fields.$eventAtZoneless`, which NOTHING in the product reads — so
+  // `syslog_events.tz_assumed` was written FALSE on every row whose zone had
+  // in fact been assumed, and logExport wrote `event_time_zone_assumed,no`
+  // into the forensic CSV.
+  const flagged = claimed().filter((l) => parseJuniper(l).tzAssumed === true);
+  assert.equal(flagged.length, 8);
+  for (const l of claimed()) {
+    assert.equal(parseJuniper(l).fields.$eventAtZoneless, undefined,
+      'the dead fields key must not come back');
+  }
 });

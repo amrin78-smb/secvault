@@ -906,3 +906,45 @@ become legitimate; if it is the same two vendors, this stays blocked. Checking i
 the production box.
 | 69 | ⛔ **THE OS/FIRMWARE BRANCH LIFECYCLE FEED — BUILT v2.229.0.** SecVault knew every firewall's running version and matched advisories against it, so it could say "this firewall is affected by CVE-X"; it could not say that the BRANCH that version belongs to left vendor support in 2022, which makes the advisory's own "upgrade to 10.0.12" instruction name a release on a branch the vendor no longer commits to. The hub's third signed corpus (`/api/v1/os-feed`, 54 cycles: PAN-OS 27, Cisco IOS-XE 19, FortiOS 8) closes it. ⛔ **NO NEW CLIENT AND NO NEW ENV VARS** — `lib/feeds/hubFeed.js` now holds the pinned key, the verifier and the transport for BOTH hub feeds, and `CVE_HUB_URL`/`CVE_HUB_LICENSE_KEY`/`CVE_HUB_PUBLIC_KEY` govern both because they describe one publisher. ⛔ **THE SHARED KEY WAS MEASURED, NOT ASSUMED**: the OS feed's REAL published signature over its real 23,538-byte body verifies against the key already pinned in SecVault's source, and a one-bit flip is rejected — the fixture `tests/fixtures/osFeedSigned.js` keeps that proof offline and permanent. ⛔ **FOUR STATES, NEVER THREE**: `extended_end_date` is a separate date, so `extended_only` is its own state with its own claim (`EXTENDED_CLAIM`) — the first draft said "cannot be fixed on this branch" of an extended-support firewall and a test caught it. ⛔ **CONFIDENCE DECIDES THE BAND**: PAN-OS is the vendor's own table (`high` → `reported` → may reach `act_now`); every FortiOS and Cisco IOS-XE row is endoflife.date (`low` → `unmeasured` → `verify`), however bad it looks. ⛔ **`cisco_asa` IS NOT MAPPED TO IOS-XE** — an ASA runs ASA Software; the corpus covers IOS-XE because a machine-readable source existed, not because it covers this product's firewall. ⛔ **FIVE UNKNOWN CAUSES, NEVER SUMMED.** ⛔ **NO PRIORITY-BAND CHANGE**: the branch state is a second axis beside `priority_band`, like `approval_state` beside `rule_change_requests.status`. 143 tests, **20 mutations verified red**, and the whole path exercised against real Postgres (54 stored, idempotent re-apply, a PAN-OS 10.0 device classifying `eol`). ⛔ **AND THE LAST UNVERIFIED STEP IS NOW MEASURED (2026-11-17): the authenticated HTTP pull from production runs** — four consecutive `os_hub` cycles `success`, `stored 54 / refused 0 / removed 0`, `os_branch_cycles` at 54 rows / `feed_version 2026-11-16.1` with 26 `lts` NULL preserved, and dbcheck 123 ok/4 failed → **127 ok / 0 failed**, the four failures having been only the undeployed table. | [x] v2.229.0 |
 | 70 | **The work queue has TWO `TYPE_LABEL` maps and they were already out of step before this release.** Found 2026-11-16 while adding `os_lifecycle`. `components/work/WorkQueueBoard.js` and `components/work/WorkQueueFilters.js` each carry their own map and each falls through to the RAW TYPE on a miss, so a missing entry renders a snake_case identifier in the UI rather than failing visibly — which `WorkQueueBoard`'s own comment already records happening to `application_flow` for a release. ⛔ Measured today: the Board map covers 12 types; the Filters map covers 10, of which **`device` and `conformance` are not types any gather emits**, while `tunnel`, `collection_gap`, `ingest_drop`, `coverage_gap` and `licence_unknown` are emitted and absent from it. So the filter dropdown shows raw identifiers for five real sources. ⛔ **Both maps got `os_lifecycle` in v2.229.0 and the drift was left**, deliberately: closing it means fixing ~6 existing labels, which is a user-visible change outside that commit's subject. ⛔ **Fix shape — a GUARD, not six edits**: assert that every `type` a gather can emit has an entry in BOTH maps, derived from the gathers rather than from a third hand-written list, and fail the build on a map entry naming a type nothing emits. That is what stops the next source shipping with a snake_case label. ⛔ **FIXED v2.230.0, AND THE DRIFT WAS WORSE THAN THIS ROW RECORDED.** Measured against the sixteen types `workQueueData.js` emits: the board was missing THREE (`ingest_silent`, `tunnel_stale`, `tunnel_unknown`) and the filter dropdown was missing NINE while offering four options — `application`, `ingest`, `device`, `conformance` — that **no source has ever produced**, against `WorkQueueFilters`' own header rule that an option which can only ever return nothing is indistinguishable from a broken filter. ⛔ One shared `components/work/workItemTypes.js`, and the guard is the fix: `tests/workQueueTypeLabels.test.js` derives the types from the PRODUCER (comments stripped) and fails BOTH ways — a type with no label, and a label for a type nothing emits. One-ended it would have passed over half of this. ⛔ The fallback to the raw type STAYS: a renderer that threw would take the queue down over a cosmetic gap. | [x] v2.230.0 |
+
+## ⛔ Deferred from the v2.236.0 bug sweep (four reviewers, 2026-11-19)
+
+Fixed in v2.236.1: the SD-ID consumption bug, generic daemon app-names, RT_IDP byte zeros, the
+`FW:` free-prose 5-tuple, `protocol="http"`, the prototype read on the filter-action letter, the
+dead `CONTENT_FILTERING_BLOCKED` rule, `tenant-id` in `vdom`, the unbounded epoch, `tz_assumed`
+across three parsers, `pri=` severity, the SonicWall date roll-over and zone-suffix drop, the IPv6
+interface fabrication, lax `Number()`, the gcat=6 over-reach, the auth vocabulary, the CEF
+precedence regression, the credential holes in both device routes and `CredentialForm`, the
+engine-worker skip gate, Test Connectivity, `NEVER_ACT_NOW_SOURCES`, the compliance-controls
+denominator, the fleet-headline amber chip and the `syslog_rollup_hourly` seq scan.
+
+**Still open, deliberately — none blocks a deploy, all need a monitoring-only device to exist:**
+
+1. **No surface MARKS a device as monitoring-only.** `VENDOR_META.monitoringOnly` has zero
+   consumers outside the parity test, and `vendorMeta.js` justifies dropping "(logs only)" from the
+   short label by citing "a STATE marker on the row" that does not exist. On `/devices` it reads
+   "Juniper", indistinguishable from a managed firewall. `/work` is the only place the state is
+   stated. ⛔ The honest fix is a marker on the inventory row, not a longer label.
+2. **`coverageRegisterData.js` / `deviceInventory.js` / `deviceContext.js` do not project
+   `mgmt_method`**, so none can draw the blocked-vs-skipped distinction. Measured consequence: the
+   coverage register ranks a log-only firewall **#1 fleet-wide** above every genuinely broken
+   device, with cell text reading as collection failures, on a page whose job is ranking by
+   consequence.
+3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
+   "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
+   the same file handles the identical column correctly with a separate `Never probed` row.
+4. **Three `DiscoveredDeviceActions` guards in `tests/juniperSyslog.test.js` are source-text scans**
+   that stay green when the note is made unrenderable, and fail on a correct refactor. A
+   behavioural test is available with no new devDependency (`next/dist/build/swc` +
+   `react-dom/server`, the transform `tests/jsxSyntax.test.js` already loads). Same for
+   `tests/monitoringOnly.test.js`'s DeviceForm gate, which an agent proved stays green with the
+   gate removed by keeping the identifier count.
+5. **`$replyDirection` is written and nothing reads it** — the 53 `m=713` SonicWall rows still
+   attribute traffic to the firewall's own WAN address in `syslog_talker_hourly`.
+6. **`ACCESS_METHODS = ['smc','api','ssh']`** in `vendorMeta.js` is documented as "the only
+   `devices.mgmt_method` values that may be stored" and is now false.
+7. **Pre-existing, unrelated to this batch:** `AdvisoriesTab.js:389` and `CvePostureTab.js:325`
+   hardcode a six-vendor filter that **omits Sophos** — a supported vendor since v2.233.0, which
+   this deploy makes live on production for the first time. Same lines carry a `defaultValue`
+   against an option set lacking the value, so `?vendor=sophos` filters the SQL while the control
+   reads "All vendors".

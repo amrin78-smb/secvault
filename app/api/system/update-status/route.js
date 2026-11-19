@@ -7,6 +7,14 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.236.1': [
+    'Bug sweep before release. Juniper firewalls that do not send the optional vendor tag \u2014 which is most modern ones \u2014 were losing the source address from every traffic log line. Fixed; those lines were otherwise unusable for reachability, segmentation and vulnerability evidence.',
+    'Logs from ordinary Linux servers running SSH or SNMP were being attributed to Juniper, which could put a web server into the firewall discovery list. They are no longer claimed.',
+    'The flag that records "this timestamp had no time zone, so we assumed the server\u2019s" was being written to the wrong place for three vendors, so every log line said the zone was certain when it was not. It now reaches the column that reports it, including in forensic exports.',
+    'SonicWall severity is now read from the field the device always sends rather than the syslog header it often omits \u2014 previously about 30% of SonicWall events were stored with no severity at all.',
+    'A SonicWall timestamp with an impossible date (31 April, 30 February) was being silently corrected to a real date days away. It is now reported as unreadable instead, and a time zone written in any form other than exactly "UTC" no longer discards the timestamp entirely.',
+    'Several smaller fixes: a Check Point or Forcepoint log line could be mistaken for SonicWall; a firewall monitored by logs only could be offered a password box that silently discarded what was typed; and converting a firewall to logs-only left its old stored password in place while reporting that it had been removed.',
+  ],
   '2.236.0': [
     'Firewalls SecVault can read logs from but cannot connect to \u2014 Juniper SRX and SonicWall today \u2014 can now be added to the inventory. Until now they could not be added at all, so their logs arrived unattributed to any firewall and they appeared only on the Discovered page.',
     'Adding one asks for a name and an address and no credentials, because SecVault will not connect to it. Its logs are then attributed to it like any other firewall, and it appears in traffic and threat views by name.',

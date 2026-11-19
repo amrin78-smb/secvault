@@ -150,6 +150,36 @@ export async function POST(request) {
   //   credential_profile_id → apply a saved lib/credentialProfiles.js profile
   //   credential + credential_type → the generic manual-entry path
   //   smc_api_key → the original Forcepoint-only field, kept for backward compat
+  // ⛔ A MONITORING-ONLY DEVICE TAKES NO CREDENTIAL, AND THE REFUSAL IS HERE —
+  // BEFORE THE INSERT — FOR TWO MEASURED REASONS (found in the v2.236.0 bug
+  // sweep, both CONFIRMED by execution against a real database):
+  //
+  //   1. `smc_api_key` HARDCODES `credType = 'smc_api'` rather than deriving it
+  //      from `config`, so `POST {vendor:'juniper', smc_api_key:'…'}` returned
+  //      201 and wrote a real encrypted credential onto a device defined as
+  //      having none.
+  //   2. `credential` + `credential_type` set `credType = config.credentialType`,
+  //      which is NULL here, so `setCredential` hit `credential_type TEXT NOT
+  //      NULL` and threw 23502 — AFTER the device INSERT had already committed,
+  //      because there is no transaction. The operator saw "Failed to create
+  //      device", retried, and got a DUPLICATE (there is no unique index on
+  //      `devices.name`), having also consumed a licence slot.
+  //
+  // ⛔ IT REFUSES RATHER THAN IGNORING. Silently dropping a supplied credential
+  // would leave the operator believing a management connection exists — the
+  // exact belief `credentialShape: 'none'` was introduced to prevent.
+  if (config.credentialShape === 'none'
+      && (credential || smc_api_key || credential_profile_id)) {
+    return NextResponse.json(
+      {
+        error: `vendor '${vendorSlug}' over '${method}' is monitoring-only: SecVault reads its `
+          + 'logs and never connects to it, so it takes no credential. Remove the credential '
+          + 'from this request, or choose a vendor and access method SecVault can collect from.',
+      },
+      { status: 400 }
+    );
+  }
+
   let credPlaintext = null;
   let credType = null;
   let usedExistingProfile = false;

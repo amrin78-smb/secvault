@@ -173,9 +173,13 @@ describe('it is skipped, not failed', () => {
 });
 
 describe('it stays visible in the work queue', () => {
-  const row = {
-    device_id: 'd1', device_name: 'SRX-EDGE', vendor: 'juniper', last_log_at: new Date(),
-  };
+  const row = { device_id: 'd1', device_name: 'SRX-EDGE', vendor: 'juniper' };
+  // ⛔ THE LAST-LOG FACT COMES FROM A SEPARATE, BUCKET-BOUNDED AGGREGATE, not a
+  // per-device subquery. `syslog_rollup_hourly`'s only usable index leads with
+  // `bucket_hour`, so a correlated `WHERE device_id = $1` seq-scanned the 8 GiB
+  // permanent table — worst exactly for a device that had gone quiet, which is
+  // the branch the item text is written for.
+  const logged = [{ device_id: 'd1', last_log_at: new Date() }];
 
   it('⛔ it is EXCLUDED from collection_gap — all three query sites agree', async () => {
     // ⛔ THE SITE THAT MATTERS MOST IS THE THIRD. `gatherCoverageGaps` uses the
@@ -229,7 +233,7 @@ describe('it stays visible in the work queue', () => {
   });
 
   it('⛔ it IS listed by its own source, never merely hidden', async () => {
-    const pool = stubPool([[row], [{ n: 1 }]]);
+    const pool = stubPool([[row], logged, [{ n: 1 }]]);
     const items = itemsOf(await gatherMonitoringOnly(pool));
     assert.equal(items.length, 1);
     const item = items[0];
@@ -241,7 +245,7 @@ describe('it stays visible in the work queue', () => {
   it('⛔ it can NEVER reach act_now', async () => {
     // We are not asserting anything is wrong with the firewall; we are
     // asserting we cannot see it, which needs a person with credentials.
-    const pool = stubPool([[row], [{ n: 1 }]]);
+    const pool = stubPool([[row], logged, [{ n: 1 }]]);
     for (const item of itemsOf(await gatherMonitoringOnly(pool))) {
       assert.equal(item.evidence, 'unmeasured');
       assert.equal(bandFor(item), 'verify');
@@ -274,23 +278,38 @@ describe('it stays visible in the work queue', () => {
     // ⛔ Whether its LOGS arrive is a SEPARATE fact from whether it is
     // assessed. A log-only firewall that has also gone quiet is contributing
     // nothing at all, and that is the one thing it was added for.
-    const quiet = { ...row, last_log_at: null };
-    const pool = stubPool([[quiet], [{ n: 1 }]]);
+    // No row in the aggregate = nothing rolled up in the window.
+    const pool = stubPool([[row], [], [{ n: 1 }]]);
     const out = itemsOf(await gatherMonitoringOnly(pool));
     assert.match(out[0].why, /contributing nothing at all/);
-    const loud = stubPool([[row], [{ n: 1 }]]);
+    const loud = stubPool([[row], logged, [{ n: 1 }]]);
     const out2 = itemsOf(await gatherMonitoringOnly(loud));
     assert.equal(/contributing nothing at all/.test(out2[0].why), false);
+    // ⛔ And the aggregate is BOUNDED so it can use the bucket_hour index.
+    assert.match(pool.sql[1].text, /bucket_hour > now\(\) - interval/);
+    assert.match(pool.sql[1].text, /device_id = ANY/);
   });
 
   it('it is capped and the truncation is disclosed', async () => {
     const many = Array.from({ length: PER_SOURCE_CAP }, (_, i) => ({
-      device_id: `d${i}`, device_name: `FW-${i}`, vendor: 'juniper', last_log_at: new Date(),
+      device_id: `d${i}`, device_name: `FW-${i}`, vendor: 'juniper',
     }));
-    const pool = stubPool([many, [{ n: 77 }]]);
+    const pool = stubPool([many, [], [{ n: 77 }]]);
     const out = await gatherMonitoringOnly(pool);
     assert.equal(itemsOf(out).length, PER_SOURCE_CAP);
     assert.equal(out.truncatedFrom, 77, 'the cap must disclose the real total');
+  });
+
+  it('⛔ it is in NEVER_ACT_NOW_SOURCES, or it silences ALL outbound alerting', () => {
+    // ⛔ A LATENT TOTAL OUTAGE. Its items can never reach `act_now`, so it
+    // meets the criterion — but the dispatcher REFUSES to reconcile a
+    // truncated queue, so past PER_SOURCE_CAP log-only firewalls this source
+    // would report `truncatedFrom` on every 15-minute poll and permanently
+    // silence every `work_act_now` alert, with no recovery. The identical
+    // structural dead end this file already records as fixed once, for
+    // `coverage`.
+    const { NEVER_ACT_NOW_SOURCES } = require('../lib/engines/workQueueData');
+    assert.ok(NEVER_ACT_NOW_SOURCES.includes('monitoring_only'));
   });
 
   it('⛔ its label is NOT "Collection"', () => {

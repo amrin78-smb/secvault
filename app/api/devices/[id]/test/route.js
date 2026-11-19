@@ -1,4 +1,5 @@
 import { pool } from '../../../../../lib/db';
+import { isMonitoringOnly, MONITORING_ONLY_CLAIM } from '../../../../../lib/monitoringOnly';
 import { recordConnectivity } from '../../../../../lib/engines/connectivityHistory';
 import { getAdapter } from '../../../../../lib/adapters';
 import { isValidUuid } from '../../../../../lib/apiUtils';
@@ -30,6 +31,20 @@ export async function POST(request, { params }) {
   const device = deviceResult.rows[0];
 
   try {
+    // ⛔ NOTHING WAS PROBED, SO NOTHING IS RECORDED. Without this the new
+    // getAdapter throw landed in the catch below, which persists a
+    // `reachable: false` row to `device_connectivity_history` — and the button
+    // is unconditional on the device page and on every /devices row, so one
+    // click gave a log-only firewall a 0% poll-success rate. Poll health, not
+    // `last_connectivity_ok`, is what the reachability band reads.
+    if (isMonitoringOnly(device)) {
+      return NextResponse.json({
+        ok: false,
+        skipped: true,
+        error: MONITORING_ONLY_CLAIM,
+      });
+    }
+
     // testConnectivity() must always receive `pool` via the adapter constructor —
     // see CLAUDE.md's Pool Warning. Never construct an adapter without { pool }.
     const adapter = getAdapter(device, pool);

@@ -29,6 +29,21 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
   const { method, config } = resolved;
 
   const shape = config.credentialShape;
+  // ⛔ A MONITORING-ONLY DEVICE HAS NO CREDENTIAL TO ROTATE, AND THIS FORM USED
+  // TO OFFER ONE ANYWAY — the defect v2.236.0 fixed in DeviceForm and missed
+  // here, one of two forms. Measured end to end: `shape === 'none'` made
+  // `showSecretInput` false, which fell through to the SAME else arm and
+  // rendered Username + Password; `ready` became true as soon as both were
+  // typed; the PUT body was `{"credential":null,"credential_type":null}`; the
+  // server skipped its `else if (credential)` branch so NO UPDATE RAN AT ALL;
+  // and this component then displayed a green "Credentials updated." and
+  // cleared the fields.
+  //
+  // ⛔ THE SUCCESS MESSAGE IS WHAT MAKES IT WORSE THAN A MISSING GUARD. The
+  // operator does not merely waste a minute — they are told the credential was
+  // stored, which is precisely the belief `credentialShape: 'none'` exists to
+  // prevent, on the one screen whose job is managing credentials.
+  const monitoringOnly = shape === 'none';
   const isSecretShape = shape === 'secret';
   const isApiKeyOrUserPass = shape === 'apikey_or_userpass';
   const hasEnable = shape === 'userpass_enable';
@@ -155,6 +170,21 @@ export default function CredentialForm({ deviceId, vendor = 'forcepoint', mgmtMe
     } finally {
       setSaving(false);
     }
+  }
+
+
+  // ⛔ A STATEMENT, NOT AN EMPTY PANEL. The Manage tab mounts this
+  // unconditionally, so returning null would leave a blank area where every
+  // other device shows a control — indistinguishable from a rendering fault.
+  // It names the state and the remedy instead.
+  if (monitoringOnly) {
+    return (
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)' }}>
+        SecVault reads this firewall&rsquo;s logs and does not connect to it, so it has no
+        stored credential to rotate. Change its vendor or access method to one SecVault can
+        collect from to give it a management connection.
+      </div>
+    );
   }
 
   return (

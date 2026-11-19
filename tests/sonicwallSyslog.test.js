@@ -144,17 +144,27 @@ test('a compressed IPv6 is REFUSED — the interface pattern is what catches it'
   // ⛔ THE DECISIVE VALIDATION. `::1` splits to ['', '', '1'] — three parts,
   // empty ip, empty port, and a part[2] that would be read as an interface
   // named "1". Only `^[A-Za-z]` refuses it.
-  const r = splitSonicosAddress('::1');
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, 'bad_interface');
+  // ⛔ THE INTERFACE PATTERN ALONE WAS NOT ENOUGH, and this test used to assert
+  // only `::1`, which it does catch (part[2] is `1`). `::ffff:10.0.0.96` — the
+  // likeliest form a firewall emits — has a LETTER-LED third group, so it
+  // returned ok:true with **iface 'ffff'**, putting a non-existent interface
+  // into every interface rollup with no refusal recorded. An IPv6 literal is
+  // now refused outright, before the positional split.
+  assert.equal(splitSonicosAddress('::1').ok, false);
+  for (const v6 of ['::1', '::ffff:10.0.0.96', '::dead:beef', 'fe80::1']) {
+    const r = splitSonicosAddress(v6);
+    assert.equal(r.ok, false, `${v6} must be refused`);
+  }
+  // ⛔ And the grammar's own empty-IP forms, which are NOT addresses, still parse.
+  assert.equal(splitSonicosAddress('::LAN:DSTHOST').ok, true);
+  assert.equal(splitSonicosAddress(':28503:WAN:SOURCEHOST').ok, true);
 });
 
 test('a part[0] that is not IPv4 is REFUSED, never stored as an address', () => {
   // ⛔ `fe80::1` splits to ['fe80','','1']; storing 'fe80' as an IP is the bug.
-  const r = splitSonicosAddress('fe80::1');
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, 'bad_ip');
-  assert.equal(splitSonicosAddress('2a02:cf40:add:4002:91f2:a9b2:e09a:6fc6').reason, 'too_many_parts');
+  assert.equal(splitSonicosAddress('fe80::1').ok, false);
+  assert.equal(splitSonicosAddress('2a02:cf40:add:4002:91f2:a9b2:e09a:6fc6').ok, false);
+  assert.equal(splitSonicosAddress('notanip:80:X1').reason, 'bad_ip');
 });
 
 test('a refused address leaves the fields null and records the raw value', () => {
@@ -212,9 +222,21 @@ test('gcat rescues only groups that map to exactly ONE class', () => {
   // threat/utm with no majority; gcat=5 Firewall Settings is system except
   // Flood Protection; gcat=2 Log is `config` by content yet is observed on 5
   // WEB SITE HIT lines, so mapping it would file browsing as config changes.
-  assert.equal(classOf('999999', '6').logClass, 'traffic');
-  assert.equal(classOf('999999', '6').source, 'gcat');
-  for (const g of ['2', '3', '5']) {
+  // ⛔ `6` (Network) WAS MAPPED HERE AND IS NOT ANY MORE — this test asserted
+  // it resolved while its own title claims the opposite rule. Derived from
+  // VENDOR_PAIRS, Network spans THREE classes (traffic, utm via DNS Security,
+  // system via Interfaces), so it fails the stated condition exactly as 2/3/5
+  // do. Both high-volume ids that used to reach it (m=526, m=1235) carry an
+  // explicit DERIVED entry, so neither loses its class.
+  const spans = {};
+  for (const [group, , cls] of VENDOR_PAIRS) (spans[group] = spans[group] || new Set()).add(cls);
+  for (const [g] of GCAT_CLASS) {
+    const name = require('../lib/syslog/sonicosCatalogue.js').GCAT_GROUP.get(g);
+    if (!name || !spans[name]) continue;
+    assert.equal(spans[name].size, 1,
+      `gcat=${g} (${name}) maps to ${spans[name].size} classes and must not resolve one`);
+  }
+  for (const g of ['2', '3', '5', '6']) {
     assert.equal(classOf('999999', g).logClass, null, `gcat=${g} must refuse`);
     assert.equal(GCAT_CLASS.has(g), false);
   }
@@ -558,9 +580,25 @@ test('a UTC suffix is honoured PER LINE, not per device', () => {
   // offset.
   const utc = parseSonicwallTime('2022-05-16 08:19:02 UTC');
   assert.equal(utc.at.toISOString(), '2022-05-16T08:19:02.000Z');
-  assert.equal(utc.zoneless, false);
+  assert.equal(utc.zoneAssumed, false);
   const bare = parseSonicwallTime('2022-05-16 08:19:02');
-  assert.equal(bare.zoneless, true);
+  assert.equal(bare.zoneAssumed, true);
+  // ⛔ AN UNRECOGNISED SUFFIX IS ZONE-UNKNOWN, NOT A PARSE FAILURE. The match
+  // used to be an anchored case-sensitive `UTC`, so `utc`, `GMT` or `+07:00`
+  // returned NO TIMESTAMP AT ALL — event_at NULL on 100% of that appliance's
+  // events, with nothing on the row saying why.
+  for (const z of ['utc', 'GMT', '+07:00']) {
+    const r = parseSonicwallTime(`2022-05-16 08:19:02 ${z}`);
+    assert.ok(r.at instanceof Date, `${z} must keep the instant`);
+    if (z !== 'utc') assert.equal(r.zoneAssumed, true, `${z} must be flagged assumed`);
+  }
+  // ⛔ AND AN OUT-OF-RANGE FIELD IS NULL, NOT A ROLLED-OVER DATE. The regex
+  // validates the shape and `new Date()` rolls over, so `2022-02-30` was
+  // stored as a confident 2022-03-02 — two days out, with nothing flagging it.
+  for (const bad of ['2022-02-30 08:00:00', '2022-02-29 00:00:00',
+    '2022-04-31 12:00:00 UTC', '2022-05-16 24:00:00']) {
+    assert.equal(parseSonicwallTime(bad).at, null, `${bad} must not roll over`);
+  }
   const serials = new Set(F.ALL.filter((l) => / UTC"/.test(l)).map((l) => kvOf(l).sn));
   const bareSerials = new Set(F.ALL.filter((l) => !/ UTC"/.test(l)).map((l) => kvOf(l).sn));
   assert.ok([...serials].some((s) => bareSerials.has(s)),
@@ -570,10 +608,12 @@ test('a UTC suffix is honoured PER LINE, not per device', () => {
 test('an assumed zone is RECORDED on exactly the zoneless lines', () => {
   // ⛔ Otherwise an assumption is indistinguishable from a stamp the device
   // actually zoned.
-  const flagged = all().filter((e) => e.fields.$eventAtZoneless === true);
+  // ⛔ THE REAL COLUMN. This used to assert a `fields` key nothing reads, so
+  // `syslog_events.tz_assumed` was written FALSE on 204 of 220 rows and
+  // logExport wrote `event_time_zone_assumed,no` into the forensic CSV.
+  const flagged = all().filter((e) => e.tzAssumed === true);
   assert.equal(flagged.length, 204);
-  const zoned = all().filter((e) => e.fields.$eventAtZoneless === undefined);
-  assert.equal(zoned.length, 16);
+  assert.equal(all().filter((e) => e.tzAssumed === false).length, 16);
 });
 
 test('all four header shapes are accepted and none is required', () => {
@@ -620,7 +660,15 @@ test('an unparseable time is null, never now()', () => {
 test('auth outcome comes from the message id — no field states it', () => {
   assert.equal(ev(/ m=29 /).authOutcome, 'success');
   assert.equal(ev(/ m=30 /).authOutcome, 'failure');
-  assert.equal(ev(/ m=262 /).authOutcome, 'logout');
+  // ⛔ ONLY SUCCESS AND FAILURE. `logout` is not in the product vocabulary —
+  // `classifyAuthOutcome` returns success/failure/null and logSearch declares
+  // the field as an enum of exactly those two, so a `logout` row was stored
+  // and then UNFILTERABLE. And a session START or END is not an
+  // authentication result at all: filing m=994 as a success inflated every
+  // successful-authentication count for this vendor.
+  for (const m of [262, 994, 995, 998]) {
+    assert.equal(ev(new RegExp(` m=${m} `)).authOutcome, null, `m=${m} is not an auth outcome`);
+  }
   assert.equal(ev(/ m=98 /).authOutcome, null);
 });
 
@@ -644,4 +692,51 @@ test('the raw key=value set survives on fields', () => {
   // parsed generically.
   assert.match(e.fields.note, /^Source: /);
   assert.ok(e.fields.c !== undefined, 'the ambiguous legacy category mask is kept, not promoted');
+});
+
+// ---------------------------------------------------------------------------
+// 11. Regressions found in the v2.236.0 bug sweep
+// ---------------------------------------------------------------------------
+
+test('⛔ pri= reaches syslog_events.severity, not just the parser return', () => {
+  // ⛔ `eventShape.buildEvent` set severity from the syslog FRAME alone, and
+  // the `<PRI>` header is present on only 154 of 220 lines while `pri=` is on
+  // 220 — so 30% of this vendor's events stored a NULL severity and landed in
+  // a NULL bucket in `syslog_rollup_hourly`. The findings document says it
+  // outright: read severity from `pri=`, never from the PRI.
+  const { buildEvent } = require('../lib/syslog/eventShape.js');
+  const noPri = F.ALL.filter((l) => !/^<\d+>/.test(l));
+  assert.ok(noPri.length >= 60, `expected many <PRI>-less lines, got ${noPri.length}`);
+  for (const l of noPri.slice(0, 20)) {
+    const p = parseSonicwall(l);
+    const ev2 = buildEvent({ receivedAt: new Date(), sourceIp: '1.2.3.4' }, {}, p, null, 'none');
+    assert.equal(ev2.severity, p.level, 'the vendor severity must reach the row');
+    assert.ok(Number.isInteger(ev2.severity));
+  }
+  // ⛔ AND ONLY AN INTEGER 0-7 WINS. Sophos puts the WORD "Information" in
+  // `level`; it must fall through to the frame untouched.
+  const worded = buildEvent({ receivedAt: new Date(), sourceIp: '1.2.3.4' },
+    { severity: 3 }, { level: 'Information' }, null, 'none');
+  assert.equal(worded.severity, 3);
+});
+
+test('⛔ byte counters use the strict integer helper, not a bare Number()', () => {
+  // ⛔ `Number('  ')` is 0 — a MEASURED ZERO on an m=537, which is the exact
+  // thing this parser's own bytes comment forbids — and `Number()` also
+  // accepts 0x40 as 64, 1e3 as 1000 and -5 as a negative byte count.
+  const mk = (sent) => parseSonicwall(
+    `id=firewall sn=X fw=1.2.3.4 pri=6 m=537 time="2022-05-16 08:19:02" sent=${sent}`);
+  assert.equal(mk('  ').bytesSent, null);
+  assert.equal(mk('0x40').bytesSent, null);
+  assert.equal(mk('1e3').bytesSent, null);
+  assert.equal(mk('123').bytesSent, 123);
+  // ⛔ A genuine measured zero is still a measurement.
+  assert.equal(mk('0').bytesSent, 0);
+});
+
+test('⛔ tz_assumed is the real column, not a fields key nothing reads', () => {
+  assert.equal(all().filter((e) => e.tzAssumed === true).length, 204);
+  for (const e of all()) {
+    assert.equal(e.fields.$eventAtZoneless, undefined, 'the dead key must not come back');
+  }
 });

@@ -6,6 +6,9 @@
 'use strict';
 
 const fs = require('fs');
+const {
+  isMonitoringOnly, MONITORING_ONLY_CLAIM,
+} = require('../lib/monitoringOnly');
 const path = require('path');
 
 // ---------------------------------------------------------------------------
@@ -460,6 +463,15 @@ async function runFeedSyncAndMatchJob() {
 // this wrapper only guards against unknown vendors so the job loop logs a
 // warning instead of an error for them.
 async function collectForDevice(device) {
+  // ⛔ THE MONITORING-ONLY TEST COMES FIRST, OR collectAndStore's SKIP BRANCH
+  // IS UNREACHABLE. `SUPPORTED_VENDORS` holds the seven vendors with ADAPTERS,
+  // so a juniper or sonicwall device fell to the "unsupported vendor" warning
+  // below and the carefully-worded skip never ran — the feature's core promise
+  // (skipped, not failed) did not happen in production for either vendor it
+  // was written for.
+  if (isMonitoringOnly(device)) {
+    return collectAndStore(device, pool);
+  }
   if (SUPPORTED_VENDORS.includes(device.vendor)) {
     return collectAndStore(device, pool);
   }
@@ -1443,6 +1455,18 @@ async function runDeviceCollectJob(job) {
     return {
       status: 'failed',
       error: 'Device no longer exists — it may have been deleted while this collect was queued. Nothing was collected.',
+    };
+  }
+  // ⛔ A MONITORING-ONLY DEVICE IS NOT A FAILED JOB. "Collect Now" is rendered
+  // unconditionally on the device page and on every /devices row, so without
+  // this a log-only firewall answered with a RED job reading
+  // 'Unsupported vendor "juniper"' — precisely the "device looks BROKEN"
+  // outcome the guard in collectAndStore says it prevents, and the message
+  // getAdapter's comment says must never be shown for this state.
+  if (isMonitoringOnly(device)) {
+    return {
+      status: 'succeeded',
+      detail: MONITORING_ONLY_CLAIM,
     };
   }
   if (!SUPPORTED_VENDORS.includes(device.vendor)) {
