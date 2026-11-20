@@ -172,6 +172,15 @@
 
   --bg-primary:     #F7F9FB;
   --bg-card:        #FFFFFF;
+  /* ⛔ OPAQUE GROUND FOR A **STICKY** TABLE HEADING, AND IT HAS TO BE ITS OWN
+     TOKEN. A sticky th detaches and paints OVER the rows scrolling beneath it,
+     so it is the one heading that cannot be translucent -- and the plain `th`
+     background IS translucent in dark theme (rgba(255,255,255,0.03), a few
+     lines below), which made every sticky table in the product render its
+     heading and its first data row on top of each other. Light theme was
+     unaffected because its `th` ground is this same opaque value, which is why
+     the defect survived every check that was done in the default theme. */
+  --table-head-bg:  #F7F9FB;
   --border:         #DDE3EB;
   --border-light:   #EAEFF4;
   --text-primary:   #0D131C;
@@ -501,6 +510,13 @@
 
   --bg-primary:     #0B0F16;
   --bg-card:        #131A25;
+  /* 3% white over --bg-card, FLATTENED: the exact colour the translucent `th`
+     wash already composites to on a card, so a sticky heading and a static one
+     are pixel-identical there, and on the page ground it reads as the slightly
+     raised surface a detached heading should be. Opaque by construction --
+     never set this to --surface-subtle, which is rgba() in this theme and
+     would quietly reinstate the bug. */
+  --table-head-bg:  #1A212C;
   --border:         #2A3646;
   --border-light:   #212B3A;
   --text-primary:   #EDF2F8;
@@ -616,6 +632,10 @@ table.sticky-header thead th {
   position: sticky;
   top: 0;
   z-index: 2;
+  /* ⛔ MUST BE OPAQUE. This rule inherited the plain `th` background, which is
+     opaque in light and rgba(255,255,255,0.03) in DARK -- so the heading was
+     transparent exactly where it overlaps scrolled rows. */
+  background: var(--table-head-bg);
   box-shadow: inset 0 -1px 0 var(--border);
 }
 tbody tr { transition: background 0.1s; }
@@ -1726,7 +1746,9 @@ select.input {
 
 /* ── Data table (dense) ────────────────────────────────────── */
 .data-table { width: 100%; border-collapse: collapse; }
-.data-table thead th { position: sticky; top: 0; z-index: 2; }
+/* Same opacity requirement as table.sticky-header above -- fixed here too so
+   the first caller of .data-table does not rediscover it. */
+.data-table thead th { position: sticky; top: 0; z-index: 2; background: var(--table-head-bg); }
 .data-table td { padding: 9px 14px; font-size: var(--text-base); }
 .data-table tbody tr { cursor: default; }
 .data-table tbody tr.clickable { cursor: pointer; }

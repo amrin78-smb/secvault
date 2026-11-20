@@ -889,6 +889,20 @@ invent a new spelling.
 **A vendor can support more than one access method.** `devices.mgmt_method` is chosen by the
 operator in the Add Device form — dispatch is `(vendor, mgmt_method) → adapter class`.
 
+⛔ **A VENDOR LIST ON A SURFACE IS DERIVED FROM A REGISTRY, NEVER TYPED OUT.** `/vulnerability`'s
+Advisories and CVE Posture tabs each carried six hardcoded `<option>` elements and so silently
+omitted Sophos from v2.233.0 until it was reported from production after the v2.236.1 deploy —
+advisories collected, matched and counted, with no way to narrow the page to them. Both now map
+`MANAGED_VENDOR_SLUGS` (`vendorMeta.js`: `VENDOR_SLUGS` minus the monitoring-only partition) and
+label with `vendorLabel(slug, {short:true})`, the same call the Vendor column makes, so the filter
+and the rows it filters cannot name one vendor two ways. ⛔ **The monitoring-only vendors are
+EXCLUDED and must stay excluded**: with no adapter, no version parser and no `VENDOR_CPES` entry,
+no `advisories` row can ever carry their slug, so an option for them could only ever return "no
+results" — which reads as *this firewall has no vulnerabilities* rather than *this firewall was
+never assessed*, and the second is what `monitoring_only` already says in the work queue.
+`tests/cveVendorFilter.test.js` asserts the derived set equals `Object.keys(VENDOR_CPES)` — the
+registry in the OTHER module system, so it cannot pass merely by being self-consistent.
+
 | slug | mgmt_method | Access | Connection fields | credential_type |
 |---|---|---|---|---|
 | `forcepoint` | `smc` | SMC REST :8082 | `smc_host`+`smc_port` | `smc_api` (raw API key string, not JSON) |
@@ -5764,7 +5778,11 @@ Brand `--primary`/`--primary-dark`/`--primary-light`/`--focus-ring`/`--accent-te
 `--border-light` · text `--text-primary`/`--text-secondary`/`--text-muted` · status
 `--red`/`--orange`/`--yellow`/`--green`/`--blue`/`--purple`/`--teal` with semantic aliases
 `--sev-crit`/`--sev-high`/`--sev-med`/`--sev-low`/`--sev-ok` (prefer the aliases in new code) ·
-unmeasured `--unmeasured`/`--hatch` · tints `--tint-{info,success,warn,danger,purple,teal,orange}`
+unmeasured `--unmeasured`/`--hatch` · **sticky table heading `--table-head-bg`, OPAQUE in
+both themes** (a `position: sticky` th paints over the rows scrolling beneath it, and the plain `th`
+ground is `rgba(255,255,255,0.03)` in dark — never alias this onto `--surface-subtle`, which is
+also rgba there; `tests/stickyHeaderOpaque.test.js`, and the incident in `gotchas.md`) · tints
+`--tint-{info,success,warn,danger,purple,teal,orange}`
 and `-fg` · **space `--s1`(4px) … `--s9`(96px)** · radius `--radius-sm`/`--radius`/`--radius-lg`/
 `--radius-pill` · type `--text-xs` … `--text-3xl`, `--font-sans`, `--font-mono`.
 

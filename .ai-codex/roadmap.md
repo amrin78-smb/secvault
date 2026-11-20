@@ -943,8 +943,19 @@ denominator, the fleet-headline amber chip and the `syslog_rollup_hourly` seq sc
    attribute traffic to the firewall's own WAN address in `syslog_talker_hourly`.
 6. **`ACCESS_METHODS = ['smc','api','ssh']`** in `vendorMeta.js` is documented as "the only
    `devices.mgmt_method` values that may be stored" and is now false.
-7. **Pre-existing, unrelated to this batch:** `AdvisoriesTab.js:389` and `CvePostureTab.js:325`
-   hardcode a six-vendor filter that **omits Sophos** — a supported vendor since v2.233.0, which
-   this deploy makes live on production for the first time. Same lines carry a `defaultValue`
-   against an option set lacking the value, so `?vendor=sophos` filters the SQL while the control
-   reads "All vendors".
+7. ✅ **CLOSED v2.236.2** — `AdvisoriesTab.js` and `CvePostureTab.js` hardcoded a six-vendor
+   filter that **omitted Sophos**, a supported vendor since v2.233.0. Reported from production the
+   day after the v2.236.1 deploy made it live. The `defaultValue` residual closed with it: with
+   `sophos` now an option, `?vendor=sophos` no longer filters the SQL while the control reads
+   "All vendors".
+   ⛔ **THE LIST IS DERIVED, NOT EXTENDED.** `MANAGED_VENDOR_SLUGS` (vendorMeta.js) is
+   `VENDOR_SLUGS` minus the monitoring-only partition, and `tests/cveVendorFilter.test.js` asserts
+   it equals `Object.keys(VENDOR_CPES)` — the registry in the OTHER module system, so the check
+   cannot pass by being self-consistent. Adding Sophos as a seventh literal would have left the
+   eighth vendor to rediscover this.
+   ⛔ **JUNIPER AND SONICWALL ARE EXCLUDED ON PURPOSE** and a test pins that from both ends. They
+   carry no adapter, no version parser and no CPEs, so no `advisories` row can ever name them; an
+   option for them could only ever return "no results", which reads as *this firewall has no
+   vulnerabilities* — the failed-read-as-a-fact rule wearing a dropdown. They are reported as
+   never-assessed by the `monitoring_only` work-queue source instead, which is where that fact
+   belongs.

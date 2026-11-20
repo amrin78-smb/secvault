@@ -104,6 +104,56 @@ survive a real `flex-basis` and the decoration a large `flex-shrink` (240px / 20
 `min-width: 0` on a `white-space: nowrap` text run lets THAT item shrink but does not change what
 its PARENT reports as its own min-content, which is how a brand block floored a whole bar at 127px.
 
+## ⛔ A `position: sticky` HEADING MUST CARRY ITS OWN OPAQUE BACKGROUND (found 2026-11-20)
+
+Reported from production: on `/vulnerability` the CVE table's column headings and its first row of
+data were drawn **on top of each other**.
+
+```css
+table.sticky-header thead th {
+  position: sticky; top: 0; z-index: 2;
+  box-shadow: inset 0 -1px 0 var(--border);   /* ← and no background at all */
+}
+```
+
+It inherited the plain `th` ground, and 56 lines above it sits
+
+```css
+[data-theme="dark"] th { background: rgba(255,255,255,0.03); }
+```
+
+A static heading can be a 3% wash because nothing ever passes behind it. **A sticky one detaches
+and paints over the rows scrolling underneath, so it is the one heading in the product that cannot
+be translucent.** Every sticky table was affected — `CVETable`, `AdvisoriesTab`, `CleanupTab`,
+`ZoneClassificationPanel`.
+
+⛔ **IT WAS DARK-THEME ONLY, WHICH IS THE WHOLE REASON IT SURVIVED.** The same cascade hands `th`
+an opaque `#F7F9FB` in light, so the component renders perfectly in the DEFAULT theme — the theme
+`npm run smoke` loads and the theme every screenshot in review was taken in. A rule that is correct
+in one theme and broken in the other cannot be caught by a check that never says which theme it is
+in. ⛔ `tests/cardSurfaces.test.js` pins `[data-unmeasured]` tile borders "from both ends" and was
+green throughout, because it asks what the CSS says and not what the two themes resolve it to.
+
+⛔ **THE FIX IS A TOKEN, `--table-head-bg`, OPAQUE IN BOTH THEMES** — light `#F7F9FB` (byte-identical
+to the old value, so light did not move at all) and dark `#1A212C`, which is that 3% wash
+**flattened against `--bg-card`**. On a card the sticky heading is therefore pixel-identical to a
+static one, and on the page ground it reads as the slightly raised surface a detached heading
+should be. ⛔ Never alias it onto `--surface-subtle`, which is `rgba(255,255,255,0.045)` in dark and
+would reinstate the bug while every rule still reads as though it declares a background;
+`tests/stickyHeaderOpaque.test.js` rejects exactly that input.
+
+⛔ **VERIFIED BY RENDERING, AND THE HARNESS WAS PROVED RED FIRST.** The real `app/globals.css` was
+served to a headless browser with the real `Table` markup, the wrapper scrolled, and the heading
+screenshotted: the pre-fix stylesheet reproduces the user's screenshot exactly, the fixed one is
+clean, and light measures `rgb(247,249,251)` before and after. ⛔ The harness paints `body` —
+`globals.css` sets `background: var(--bg-primary)` there, and a harness that leaves it unpainted
+composites translucent tokens over nothing, which is the artefact that produced two bogus
+dark-theme contrast failures during the v2.228.7 sweep.
+
+⛔ `.data-table thead th` had the identical defect and **no call site** — fixed in the same commit
+rather than left for its first caller to rediscover. `.table-container table thead tr th` already
+declared `background: var(--bg-primary)` and was never affected.
+
 ## The shell is dark in BOTH themes, so `--tint-*-fg` is wrong on it (2026-09-09)
 
 The header and sidebar use `--navy` in light mode and in dark mode. Everything else in the app sits

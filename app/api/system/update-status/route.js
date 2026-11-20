@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.236.2': [
+    'The vendor filter on Vulnerabilities (both the Advisories and CVE Posture tabs) was missing Sophos. Sophos has been a fully supported vendor since v2.233.0, so its advisories were being collected, matched and counted while there was no way to narrow the page to them. It is now there, along with every future vendor \u2014 the list is built from the vendor registry instead of being typed out, which is why it went stale in the first place.',
+    'Juniper and SonicWall are deliberately NOT in that filter. SecVault reads their logs but never assesses them for vulnerabilities, so offering them would be a filter that can only ever return nothing \u2014 which reads as "this firewall has no vulnerabilities" rather than "this firewall was never checked".',
+    'In dark theme, any table with a heading that stays in place while you scroll \u2014 the CVE lists, advisories, rule cleanup \u2014 drew the heading and the first row of data on top of each other. The heading was transparent. It is now opaque. Light theme was never affected.',
+    'Testing connectivity to a log-only firewall crashed instead of reporting that nothing was probed, and the crash was then recorded as a failed connection \u2014 giving that firewall a 0% reachability score from a single click on a button it should never have run.',
+  ],
   '2.236.1': [
     'Bug sweep before release. Juniper firewalls that do not send the optional vendor tag \u2014 which is most modern ones \u2014 were losing the source address from every traffic log line. Fixed; those lines were otherwise unusable for reachability, segmentation and vulnerability evidence.',
     'Logs from ordinary Linux servers running SSH or SNMP were being attributed to Juniper, which could put a web server into the firewall discovery list. They are no longer claimed.',

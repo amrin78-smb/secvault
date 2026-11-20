@@ -38,7 +38,13 @@ export async function POST(request, { params }) {
     // click gave a log-only firewall a 0% poll-success rate. Poll health, not
     // `last_connectivity_ok`, is what the reachability band reads.
     if (isMonitoringOnly(device)) {
-      return NextResponse.json({
+      // ⛔ `Response.json`, NOT `NextResponse.json`. This file imports no
+      // NextResponse and every other return here is a bare Response — the
+      // v2.236.0 draft used NextResponse and threw a ReferenceError on exactly
+      // this branch, which the catch below then recorded as
+      // `reachable: false`. That is the precise outcome the comment above
+      // exists to prevent, produced BY the guard that prevents it.
+      return Response.json({
         ok: false,
         skipped: true,
         error: MONITORING_ONLY_CLAIM,

@@ -212,6 +212,26 @@ export const VENDOR_META = {
 
 export const VENDOR_SLUGS = Object.keys(VENDOR_META);
 
+// ⛔ THE VENDORS A CVE CAN EVER BE FILED AGAINST — DERIVED, NEVER LISTED.
+//
+// A managed vendor is registered in SEVEN places; `VENDOR_CPES` (lib/feeds/
+// nvd.js) and a `VENDOR_PARSERS` version scheme are two of them, and a
+// MONITORING-ONLY vendor is in none. So no `advisories` row and no
+// `device_cve_assessments` row can ever carry `juniper` or `sonicwall`, and a
+// vendor filter offering them would be a control that can only ever return
+// "no results" — which reads as "this firewall has no vulnerabilities" and is
+// this codebase's failed-read-as-a-fact rule wearing a dropdown.
+//
+// ⛔ DO NOT "COMPLETE" THE LIST by adding the monitoring-only slugs. The day
+// one of them gains an adapter it gains CPEs in the same commit and appears
+// here on its own — which is the whole reason this is a filter over the
+// registry and not six hardcoded <option> elements. Those six were how the
+// Advisories and CVE Posture filters silently omitted Sophos for three
+// releases after it shipped as the seventh managed vendor.
+export const MANAGED_VENDOR_SLUGS = VENDOR_SLUGS.filter(
+  (slug) => !VENDOR_META[slug].monitoringOnly
+);
+
 // Short forms for narrow table columns. The full `label` stays available for
 // the `title` attribute, so nothing is lost by using these.
 export const VENDOR_SHORT_LABEL = {
