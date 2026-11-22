@@ -124,3 +124,12 @@ archive/
 
 # Playwright MCP scratch output (screenshots, snapshots, console logs)
 .playwright-mcp/
+
+# Generated customer-facing documents, written into the working tree by the
+# docx/pptx skills and never part of the application. Root-anchored on purpose:
+# a real template committed under docs/ or installer/ must stay committable, and
+# a blanket *.docx would silently swallow it. Nothing in this repo has ever
+# tracked an Office file, so this ignores the generated ones without pretending
+# to be a policy about the format.
+/*.docx
+/*.pptx
