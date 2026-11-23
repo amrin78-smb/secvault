@@ -159,7 +159,22 @@ const PILL = {
  */
 export function describeAnomalies(findings, states, lookbackDays) {
   const list = Array.isArray(findings) ? findings : [];
-  const detectors = Object.keys(DETECTOR_LABEL);
+  // ⛔ THE REGISTERED DETECTORS **UNION WHATEVER THE DATA ACTUALLY CARRIES**.
+  // This was `Object.keys(DETECTOR_LABEL)` alone, so the loop below could only
+  // ever visit registered detectors — and `DETECTOR_PHRASE` has exactly the
+  // same two keys, which made the `${mine.length} ${detector}` fallback
+  // UNREACHABLE DEAD CODE and its comment ("name it rather than lose it")
+  // false. Measured: a finding from an unregistered detector rendered its rows
+  // INSIDE the disclosure with the raw slug as a badge, while the load-bearing
+  // closed bar said only "1 observation" — so a reader who never opens the
+  // section cannot tell a new class of anomaly from a silence. A6's harness
+  // exists to register new detectors, so this is on the next one's path, and
+  // the test that was supposed to cover it asserted only the count.
+  const detectors = [...new Set([
+    ...Object.keys(DETECTOR_LABEL),
+    ...list.map((f) => f && f.detector).filter(Boolean),
+    ...Object.keys(states || {}),
+  ])];
 
   const devicesKnown = list.every((f) => f && f.deviceId);
   const perDetector = [];
@@ -190,13 +205,49 @@ export function describeAnomalies(findings, states, lookbackDays) {
     return (Number(s.insufficient_baseline) || 0) > 0 || (Number(s.no_data) || 0) > 0;
   });
 
+  // ⛔ WAS ANYTHING JUDGED AT ALL? THE GATE ABOVE CANNOT ANSWER THIS, AND THAT
+  // WAS AN ALL-CLEAR OVER A FLEET NOBODY LOOKED AT (fixed v2.237.1).
+  //
+  // `anyUnjudged` reads only `insufficient_baseline` and `no_data` — the
+  // buckets for a firewall the detectors DID consider and could not judge. A
+  // firewall absent from the evidence entirely is in NEITHER:
+  // `loadReportingGrid` selects devices with `AND EXISTS (SELECT 1 FROM
+  // syslog_rollup_hourly …)`, so one that has never produced a rollup row is
+  // not in the grid, and `loadDeniedSeries`' `reporting` CTE is bounded to the
+  // window, so one dark for the whole window is absent from numerator AND
+  // denominator. Measured by calling this function: with EVERY bucket zero it
+  // returned `anyUnjudged: false`, `tone: 'none'`, `collapsible: false` and the
+  // flat sentence "No firewall stopped reporting and none exceeded its normal
+  // denied-traffic level in the last 28 days." — no coverage pill, no
+  // disclosure. Identical output for `states = {}`, which is the shape a FAILED
+  // READ produces.
+  //
+  // ⛔ THAT IS THE ONE SENTENCE `lib/evidence.js` FORBIDS PRODUCT-WIDE, and
+  // v2.236.4 made it worse three ways: this gate became the sole safety
+  // argument for collapsing the section, it also decides whether the disclosure
+  // EXISTS, and the all-clear became the only sentence on screen. Live in
+  // partial form — a monitoring-only firewall and PAKFood (which sends no
+  // syslog) are invisible to it, so 13-of-16 judged reads exactly like 16.
+  //
+  // ⛔ A BOOLEAN, NOT A SUM. `states` is per (device, detector), so adding
+  // `measured` across detectors tallies PAIRS — the unit trap stated ten lines
+  // up. "Did any detector judge any firewall" needs no arithmetic.
+  const anyJudged = detectors.some(
+    (d) => (Number(((states && states[d]) || {}).measured) || 0) > 0
+  );
+  // ⛔ A FINDING IS ITSELF PROOF SOMETHING WAS LOOKED AT, so a populated list
+  // can never be "nothing judged" even if `states` failed to read.
+  const nothingJudged = !anyJudged && list.length === 0;
+
   // ⛔ Only the silence detector tints, matching the row badges one function
   // down: a denied-traffic exceedance is an OBSERVATION whose margin is often a
   // few percent (measured: median 7%), and putting it on the severity ramp
   // would promise more than the measurement supports.
   const tone = list.some((f) => f && f.detector === 'device_silent')
     ? 'warn'
-    : list.length ? 'neutral' : anyUnjudged ? 'unmeasured' : 'none';
+    // ⛔ `nothingJudged` is hueless-unmeasured, never `none`: `none` is the
+    // earned all-clear and paints the panel as a finished, reassuring answer.
+    : list.length ? 'neutral' : (anyUnjudged || nothingJudged) ? 'unmeasured' : 'none';
 
   const parts = perDetector.map((p) => p.text);
   if (list.length) {
@@ -212,19 +263,36 @@ export function describeAnomalies(findings, states, lookbackDays) {
   // says what it measured, never what it cleared.
   const sentence = parts.length
     ? `${parts.join(' · ')}${window}`
-    : anyUnjudged
-      ? `Nothing found on the firewalls these checks could judge${window} — and they could not judge every firewall.`
-      : `No firewall stopped reporting and none exceeded its normal denied-traffic level${window}.`;
+    : nothingJudged
+      // ⛔ ITS OWN SENTENCE, ranked ABOVE the partial-coverage one. "could not
+      // judge every firewall" implies some were judged; here none were, and
+      // the two send an operator to different places — a thin baseline is
+      // waited out, no evidence at all is a collector or rollup fault.
+      ? `These checks could not judge any firewall${window}, so this is not an all-clear — no syslog evidence reached them.`
+      : anyUnjudged
+        ? `Nothing found on the firewalls these checks could judge${window} — and they could not judge every firewall.`
+        : `No firewall stopped reporting and none exceeded its normal denied-traffic level${window}.`;
 
   return {
     observations: list.length,
-    devices: devicesKnown ? new Set(list.map((f) => f.deviceId)).size : null,
+    // ⛔ NULL ON AN EMPTY LIST, never 0. `[].every(…)` is vacuously true, so
+    // `devicesKnown` was true and this returned `new Set([]).size` — a
+    // measured-looking zero for something nobody measured, contradicting this
+    // function's own docblock ("devices IS NULL, NEVER A FALLBACK COUNT"). The
+    // pill is gated on `observations > 0` so nothing rendered it, but this is
+    // an exported pure function and a future consumer would read "0 firewalls".
+    devices: list.length && devicesKnown
+      ? new Set(list.map((f) => f.deviceId)).size
+      : null,
     perDetector,
     anyUnjudged,
+    nothingJudged,
     tone,
     sentence,
     // Nothing to disclose and nothing to hide: an earned all-clear is one line.
-    collapsible: list.length > 0 || anyUnjudged,
+    // ⛔ `nothingJudged` IS collapsible — there is a coverage story to show, and
+    // it was the one state that rendered a bare card with no coverage panel.
+    collapsible: list.length > 0 || anyUnjudged || nothingJudged,
   };
 }
 

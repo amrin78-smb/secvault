@@ -276,12 +276,114 @@ describe('describeAnomalies — the sentence the collapse rests on', () => {
     // bar may not report an empty section over them.
     assert.equal(d.observations, 1);
     assert.equal(d.collapsible, true);
+    // ⛔ THIS TEST WAS VACUOUS AND THE BEHAVIOUR IT NAMES DID NOT EXIST. It
+    // asserted the count and never the NAME, while `describeAnomalies`
+    // iterated `Object.keys(DETECTOR_LABEL)` alone — so an unregistered
+    // detector contributed rows inside the disclosure while the load-bearing
+    // closed bar said only "1 observation", and the `${mine.length}
+    // ${detector}` fallback its comment points at was unreachable dead code.
+    // A reader who never opens the section could not tell a NEW CLASS of
+    // anomaly from a silence.
+    assert.match(d.sentence, /brand_new/,
+      'the bar does not name the unregistered detector: ' + d.sentence);
+    assert.ok(d.perDetector.some((x) => x.detector === 'brand_new'),
+      'the unregistered detector is absent from perDetector');
+  });
+
+  // ⛔ THE ALL-CLEAR REQUIRES SOMETHING TO HAVE BEEN JUDGED (v2.237.1).
+  //
+  // `anyUnjudged` reads `insufficient_baseline` and `no_data` — the buckets for
+  // a firewall the detectors CONSIDERED and could not judge. A firewall absent
+  // from the evidence entirely is in NEITHER, because `loadReportingGrid` only
+  // selects devices that already have a `syslog_rollup_hourly` row. So with
+  // every bucket zero this printed a flat, unqualified all-clear with no
+  // coverage pill and no disclosure — the one sentence `lib/evidence.js`
+  // forbids product-wide, and v2.236.4 made it the ONLY sentence on screen.
+  describe('⛔ it cannot assert an all-clear over a fleet it never looked at', () => {
+    const EMPTY_STATES = {
+      device_silent: { measured: 0, insufficient_baseline: 0, no_data: 0 },
+      denied_spike: { measured: 0, insufficient_baseline: 0, no_data: 0 },
+    };
+
+    it('⛔ zero firewalls judged is NOT an all-clear', () => {
+      const d = describeAnomalies([], EMPTY_STATES, LOOKBACK);
+      assert.equal(d.nothingJudged, true);
+      assert.equal(d.tone, 'unmeasured', 'a fleet nobody looked at must not be toned `none`');
+      assert.ok(!/No firewall stopped reporting/.test(d.sentence),
+        'it asserted an all-clear having judged nothing: ' + d.sentence);
+      assert.match(d.sentence, /not an all-clear/i);
+      assert.equal(d.collapsible, true,
+        'the coverage story must be openable — this state rendered a bare card');
+    });
+
+    it('⛔ a FAILED READ of `states` takes the same branch, never the all-clear', () => {
+      // `{}` is the shape a failed read produces, and it is indistinguishable
+      // from a genuinely empty fleet — so it must degrade the same way.
+      for (const states of [{}, undefined, null]) {
+        const d = describeAnomalies([], states, LOOKBACK);
+        assert.equal(d.nothingJudged, true, String(states));
+        assert.ok(!/No firewall stopped reporting/.test(d.sentence), String(states));
+      }
+    });
+
+    it('⛔ but an EARNED all-clear is unchanged — the gate must not fire on good data', () => {
+      const d = describeAnomalies([], CLEAN_STATES, LOOKBACK);
+      assert.equal(d.nothingJudged, false);
+      assert.equal(d.tone, 'none');
+      assert.match(d.sentence, /No firewall stopped reporting/);
+      assert.equal(d.collapsible, false, 'an earned all-clear is one line');
+    });
+
+    it('⛔ a FINDING proves something was looked at, even if `states` did not read', () => {
+      // Otherwise a real silence would be reported under "could not judge any
+      // firewall", which is worse than the bug being fixed.
+      const d = describeAnomalies(
+        [{ detector: 'device_silent', naturalKey: 'k', deviceId: 'd1', title: 't', summary: 's' }],
+        {}, LOOKBACK
+      );
+      assert.equal(d.nothingJudged, false);
+      assert.equal(d.tone, 'warn');
+      assert.match(d.sentence, /stopped sending syslog/);
+    });
+
+    it('⛔ partial coverage keeps its OWN sentence, ranked below this one', () => {
+      // "could not judge every firewall" implies some were judged; the two send
+      // an operator to different places — a thin baseline is waited out, no
+      // evidence at all is a collector or rollup fault.
+      const d = describeAnomalies([], {
+        device_silent: { measured: 13, insufficient_baseline: 2, no_data: 1 },
+        denied_spike: { measured: 16, insufficient_baseline: 0, no_data: 0 },
+      }, LOOKBACK);
+      assert.equal(d.nothingJudged, false);
+      assert.equal(d.anyUnjudged, true);
+      assert.match(d.sentence, /could not judge every firewall/);
+    });
+
+    it('⛔ `devices` is null on an empty list, never a measured-looking 0', () => {
+      // `[].every(...)` is vacuously true, so this returned `new Set([]).size`
+      // — contradicting the function's own docblock.
+      assert.equal(describeAnomalies([], CLEAN_STATES, LOOKBACK).devices, null);
+      assert.equal(describeAnomalies([], EMPTY_STATES, LOOKBACK).devices, null);
+    });
   });
 
   it('a non-array result is treated as nothing found, never as a throw', () => {
     const d = describeAnomalies(undefined, undefined, LOOKBACK);
     assert.equal(d.observations, 0);
-    assert.equal(d.collapsible, false);
-    assert.equal(d.tone, 'none');
+    // ⛔ THIS TEST USED TO ASSERT `collapsible: false` AND `tone: 'none'`, AND
+    // THOSE ASSERTIONS WERE PINNING THE DEFECT (corrected v2.237.1). Its NAME
+    // and its first assertion are about not throwing, which is right and
+    // unchanged. But `tone: 'none'` is the EARNED ALL-CLEAR, and the input here
+    // is a total absence of evidence — two undefined arguments, which is
+    // precisely the shape a failed read produces. So the suite was requiring
+    // that a failed read render as a finished, reassuring answer: this
+    // codebase's signature bug, written down as an expectation.
+    //
+    // ⛔ Degrading toward `unmeasured` is the whole point, and it is why the
+    // test had to change rather than the code being bent to keep it green.
+    assert.equal(d.nothingJudged, true);
+    assert.equal(d.tone, 'unmeasured');
+    assert.equal(d.collapsible, true, 'the coverage story must be openable');
+    assert.ok(!/No firewall stopped reporting/.test(d.sentence), d.sentence);
   });
 });

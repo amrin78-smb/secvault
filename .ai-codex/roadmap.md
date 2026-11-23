@@ -983,7 +983,8 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
 
 **Still open from that sweep, deliberately:**
 
-- **`/alerts` can print an unqualified all-clear over a fleet the detectors never looked at.**
+- ✅ **CLOSED v2.237.1** — `/alerts` could print an unqualified all-clear over a fleet the
+  detectors never looked at.
   `AnomalyPanel`'s `anyUnjudged` reads only `insufficient_baseline` and `no_data` and has **no fleet
   denominator**, while `loadReportingGrid` selects only devices that already have a
   `syslog_rollup_hourly` row — so a firewall that has never produced one is in NO bucket at all.
@@ -995,8 +996,11 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
   form — PAKFood sends no syslog, and every monitoring-only firewall is invisible to the gate, so
   13-of-16 judged renders identically to 16-of-16. `Coverage` also prints "judged 15 firewalls", a
   numerator with no denominator, under its own comment saying a reader "needs the denominator".
-- **An unregistered detector IS silently dropped from the closed bar**, and the comment, the
-  fallback branch and the test title all claim the opposite. `describeAnomalies` iterates
+- ✅ **CLOSED v2.237.1** — an unregistered detector was silently dropped from the closed bar while
+  the comment, the fallback branch and the test title all claimed the opposite. `detectors` is now
+  the registered set UNION whatever the findings and `states` actually carry, so the
+  `${mine.length} ${detector}` fallback is reachable and the test asserts the NAME rather than only
+  the count. ⛔ The old note, kept because the shape recurs: `describeAnomalies` iterates
   `Object.keys(DETECTOR_LABEL)`, so a detector outside the registry contributes rows INSIDE the
   disclosure while the load-bearing bar says only "1 observation"; the `${mine.length} ${detector}`
   fallback is unreachable dead code, and the test named "names an unregistered detector rather than

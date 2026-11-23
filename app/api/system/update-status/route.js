@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.1': [
+    'The traffic and reporting anomalies panel on Alerts could say "No firewall stopped reporting and none exceeded its normal denied-traffic level" when the checks had not actually been able to look at a single firewall. It now says so plainly instead: "These checks could not judge any firewall, so this is not an all-clear \u2014 no syslog evidence reached them."',
+    'The old wording appeared whenever no syslog evidence reached the detectors at all \u2014 after a collector outage, on a fresh install, or if the hourly rollup stopped \u2014 and it was indistinguishable from a genuine all-clear, with no coverage note and nothing to open. A firewall that has never sent a single log was invisible to the coverage check that was supposed to catch exactly this.',
+    'An all-clear that was genuinely earned is unchanged, and so is the existing "could not judge every firewall" wording for partial coverage. Those are three separate situations and they now read as three separate sentences, because they need three different things done about them.',
+    'A new kind of anomaly check is now named on the collapsed bar instead of being counted anonymously. Previously its findings appeared inside the section while the bar said only "1 observation", so anyone who did not open it could not tell a new class of problem from a firewall going quiet.',
+  ],
   '2.237.0': [
     'Any firewall can now be added as logs-only, not just Juniper and SonicWall. If SecVault can see a firewall sending syslog but you have no way to log into it \u2014 no credentials, another team owns it, a handover that never finished \u2014 you can now add it anyway: pick the vendor as normal and set Access Method to "Syslog only (no management connection)". Its logs stop arriving unattributed and start being counted against a named firewall.',
     'It asks for no credentials, no port and no certificate setting, because none of those describe anything SecVault will do with the device. The form says in plain words what you are getting: no vulnerability assessment, no compliance result and no rule analysis \u2014 not because the firewall passed them, but because they were never run.',
