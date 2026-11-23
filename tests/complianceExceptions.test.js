@@ -208,6 +208,20 @@ function poolForCreate(findingRows, insertResult) {
 const NOW = new Date('2026-09-22T00:00:00Z');
 const day = (n) => new Date(NOW.getTime() + n * 24 * 60 * 60 * 1000).toISOString();
 
+// ⛔ THE SAME HELPER AGAINST THE REAL CLOCK, FOR THE ROUTE TESTS ONLY — AND THE
+// DIFFERENCE IS NOT COSMETIC. The engine takes `now` as an argument, so a frozen
+// NOW is exactly right for it and is what makes those cases reproducible. The
+// ROUTE does not: `app/api/compliance/[deviceId]/exceptions/route.js` constructs
+// its own `new Date()` and hands that to `createException`, so a route test
+// feeding it an expiry measured from a frozen NOW is comparing two different
+// clocks. `day(60)` from 2026-09-22 is 2026-11-21, which stopped being in the
+// future on 2026-11-22 — from that morning three route tests failed with
+// `400 !== 201`, reporting the expiry refusal ("that expiry is not in the
+// future") as though the POST route had broken. Nothing had: the fixture had
+// simply aged past its own date. A test that passes until a particular morning
+// is a guard with an expiry, and the whole `npm test` gate goes red with it.
+const liveDay = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
+
 function row(over = {}) {
   return {
     id: EXC_ID,
@@ -605,7 +619,7 @@ describe('rule 5: accepted_by comes from the session', () => {
   const LEGITIMATE_FIELDS = {
     checkSlug: SLUG,
     reason: 'r',
-    expiresAt: day(60),
+    expiresAt: liveDay(60),
     compensatingControl: null,
   };
   const impostorBody = new Proxy(LEGITIMATE_FIELDS, {
@@ -654,7 +668,7 @@ describe('rule 5: accepted_by comes from the session', () => {
   it('the acceptor is TRIMMED, not stored with the session whitespace', async () => {
     const pool = poolForCreate([{ status: 'fail', check_name: 'x' }]);
     const { POST } = routeWith(POST_ROUTE, { session: sessionFor('operator', '  amrin  '), pool });
-    await POST(jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: day(60) }),
+    await POST(jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: liveDay(60) }),
       { params: { deviceId: DEVICE_ID } });
     const ins = pool.calls.find((c) => isInsert(c.sql));
     assert.ok(ins.params.includes('amrin'));
@@ -737,7 +751,7 @@ describe('rule 5: accepted_by comes from the session', () => {
   // the route what it DOES.
   const CALLS = {
     [POST_ROUTE]: (mod) => mod.POST(
-      jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: day(60) }),
+      jsonRequest({ checkSlug: SLUG, reason: 'r', expiresAt: liveDay(60) }),
       { params: { deviceId: DEVICE_ID } }
     ),
     [DELETE_ROUTE]: (mod) => mod.DELETE(
