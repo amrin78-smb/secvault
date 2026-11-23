@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getDiscoveredDevices } from '../../../lib/engines/deviceDiscovery';
 import { vendorLabel } from '../../../components/devices/vendorMeta';
+import MonitoringOnlyMark from '../../../components/devices/MonitoringOnlyMark';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth/next';
@@ -558,6 +559,16 @@ export default async function DevicesPage({ searchParams }) {
                         </Link>
                       </span>
                       <PollHealthNote band={d.pollBand} health={d.pollHealth} />
+                      {/* ⛔ IN THE NAME CELL, NOT THE VENDOR CELL, AND THAT IS
+                          NOT A TASTE. `vendor` is priority 3 and hideable from
+                          the ColumnChooser, so a marker there is defeated by a
+                          URL an operator can paste or a saved view; `name` is
+                          `required: true` and cannot be hidden. It also sits
+                          directly under PollHealthNote, which for one of these
+                          devices reads "No polls recorded" — true, and
+                          read as a fault without this line beside it saying we
+                          were never going to poll. */}
+                      <MonitoringOnlyMark monitoringOnly={d.monitoringOnly} block />
                     </span>
                   </td>
                 )}

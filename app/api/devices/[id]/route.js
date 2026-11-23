@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { loadScopeForSession, canSeeDevice, refusalMessage, scopesEmptiedByDeviceDeletion } from '../../../../lib/deviceScope';
 import { pool } from '../../../../lib/db';
 import { setCredential } from '../../../../lib/credStore';
+import {
+  MONITORING_ONLY_METHOD, refuseMonitoringOnlyConversion,
+} from '../../../../lib/monitoringOnly';
 import { getProfilePlaintext, createProfile } from '../../../../lib/credentialProfiles';
 import { isValidUuid } from '../../../../lib/apiUtils';
 import { getServerSession } from 'next-auth/next';
@@ -172,6 +175,52 @@ export async function PUT(request, { params }) {
     );
   }
 
+  // ⛔ CONVERTING AN ALREADY-COLLECTED FIREWALL TO LOGS-ONLY IS REFUSED, AND
+  // THE REFUSAL IS THE WHOLE REASON v2.237.0 IS SAFE.
+  //
+  // v2.237.0 added `syslog` to every managed vendor's accessMethods, which made
+  // this PUT reachable for the first time: before it, `mgmt_method: 'syslog'`
+  // was a 400 for all seven managed vendors because the key did not exist.
+  //
+  // ⛔ THIS ROUTE DELETES CREDENTIALS AND NOTHING ELSE. `device_versions`,
+  // `device_configs`, `firewall_rules`, `device_cve_assessments`,
+  // `audit_findings`, `rule_analysis_results`, `device_risk_history` and the
+  // four `last_*` stamps on `devices` all survive — and `collectAndStore` then
+  // skips the device FOR EVER, so none of it is ever refreshed. It is not
+  // stale, it is FROZEN, and every engine keeps asserting it:
+  //   • `versionMatcher.js` re-matches the frozen `device_versions` row on
+  //     every 6-hour feed sync and re-stamps `last_cve_assessed_at = now()`,
+  //     so the firewall reads "assessed 4 minutes ago" for ever;
+  //   • `gatherPatchNow` raises "Patch CVE-… on FW" at `urgency: 'now'` and
+  //     `work_act_now` MAILS it every 15 minutes, on the same page where
+  //     MONITORING_ONLY_CLAIM says the firewall was never assessed;
+  //   • `gatherComplianceFails` asserts `evidence: 'measured'` — the strongest
+  //     grade — about a config nobody will collect again.
+  // The firewall is upgraded six months later and SecVault still reports the
+  // old version's CVEs with full confidence. That is this codebase's signature
+  // bug with an alerting engine attached.
+  //
+  // ⛔ REFUSED RATHER THAN PURGED, for two reasons. A multi-table cascade
+  // delete does not belong in a metadata PUT, and the collected history is
+  // REAL — it was true when it was collected, and throwing it away to permit a
+  // one-field edit is destructive in the other direction. Deleting the device
+  // and re-adding it log-only is the honest path and already cascades.
+  //
+  // ⛔ IT IS THE PRECEDENT THIS FORM ALREADY SETS. The vendor dropdown is
+  // LOCKED in edit mode for the same class of reason ("forces a vendor change
+  // through device recreation instead"), and the asymmetry is the argument: a
+  // refusal is recoverable in one more step, while a fabricated `act_now` CVE
+  // alert about a frozen version cannot be unsent.
+  //
+  // ⛔ THE REVERSE IS ALLOWED AND MUST STAY ALLOWED. syslog -> a real transport
+  // is MONITORING_ONLY_REMEDY itself ("Add a management connection to assess
+  // this firewall"), and it strands nothing: a log-only device has no
+  // collected evidence to freeze.
+  const conversionRefusal = refuseMonitoringOnlyConversion(existing.mgmt_method, mgmt_method);
+  if (conversionRefusal) {
+    return NextResponse.json(conversionRefusal, { status: 409 });
+  }
+
   // Which method this device will be on after the update:
   //  - explicit mgmt_method wins (already validated above)
   //  - a vendor change re-resolves the stored method against the NEW vendor
@@ -223,8 +272,24 @@ export async function PUT(request, { params }) {
       && (credential || smc_api_key || credential_profile_id)) {
     return NextResponse.json(
       {
-        error: `vendor '${effectiveVendor}' over '${method}' is monitoring-only: SecVault reads `
-          + 'its logs and never connects to it, so it takes no credential.',
+        // ⛔ `effectiveMethod`, NOT `method`. This read `${method}`, which is
+        // declared NOWHERE in this handler — the PUT's binding is
+        // `effectiveMethod` — so the refusal threw `ReferenceError: method is
+        // not defined` from OUTSIDE any try block and became a 500. The
+        // operator got an unexplained Internal Server Error instead of the
+        // carefully-worded 400 beside it, on the branch whose entire job is to
+        // explain a refusal. Nothing was written either way (the throw precedes
+        // the cleanup DELETE and setCredential), so the invariant held and only
+        // the explanation was lost.
+        //
+        // ⛔ SAME SHAPE AS THE v2.236.0 `NextResponse` BUG ONE ROUTE OVER,
+        // which this file's sibling records: a monitoring-only guard that
+        // crashes on exactly the branch it exists to serve. It was latent
+        // because no UI sends a credential with this method, and v2.237.0 is
+        // what made it plausible — `fortinet api -> syslog` became a one-field
+        // edit. Found by review, reproduced by execution.
+        error: `vendor '${effectiveVendor}' over '${effectiveMethod}' is monitoring-only: `
+          + 'SecVault reads its logs and never connects to it, so it takes no credential.',
       },
       { status: 400 }
     );

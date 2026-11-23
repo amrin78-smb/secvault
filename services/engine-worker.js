@@ -656,6 +656,17 @@ async function runVpnSessionPollJob() {
 
     for (const device of devices) {
       if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
+      // ⛔ MONITORING-ONLY IS SKIPPED BEFORE getAdapter, NOT CAUGHT AFTER IT.
+      // The vendor gate above filtered juniper/sonicwall out silently, because
+      // neither is in SUPPORTED_VENDORS. A log-only FORTINET passes it, reaches
+      // getAdapter, and throws — caught and logged at WARN as "could not build
+      // adapter", which is the device-looks-BROKEN register that getAdapter's
+      // own comment and runDeviceCollectJob go to lengths to avoid for this
+      // state. At the shipped poll intervals that is ~150 warnings per log-only
+      // device per day in engine.log for a deliberate, correct configuration.
+      // Nothing wrong was recorded (the catch only warns and continues), but a
+      // log full of false faults is how a real one gets missed.
+      if (isMonitoringOnly(device)) continue;
 
       let adapter;
       try {
@@ -857,6 +868,17 @@ async function runSnmpPollJob() {
 
     for (const device of devices) {
       if (!SUPPORTED_VENDORS.includes(device.vendor)) continue;
+      // ⛔ MONITORING-ONLY IS SKIPPED BEFORE getAdapter, NOT CAUGHT AFTER IT.
+      // The vendor gate above filtered juniper/sonicwall out silently, because
+      // neither is in SUPPORTED_VENDORS. A log-only FORTINET passes it, reaches
+      // getAdapter, and throws — caught and logged at WARN as "could not build
+      // adapter", which is the device-looks-BROKEN register that getAdapter's
+      // own comment and runDeviceCollectJob go to lengths to avoid for this
+      // state. At the shipped poll intervals that is ~150 warnings per log-only
+      // device per day in engine.log for a deliberate, correct configuration.
+      // Nothing wrong was recorded (the catch only warns and continues), but a
+      // log full of false faults is how a real one gets missed.
+      if (isMonitoringOnly(device)) continue;
 
       let adapter;
       try {

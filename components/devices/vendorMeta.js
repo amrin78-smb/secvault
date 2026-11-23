@@ -32,8 +32,32 @@
 //   secretLabel      → UI label for the single-secret / api-key input
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ⛔ ONE access-method config, shared by every monitoring-only vendor, so two
-// of them cannot drift into describing the same state differently.
+// ⛔ ONE access-method config, shared by EVERY vendor that offers it, so two of
+// them cannot drift into describing the same state differently.
+//
+// ⛔ TWO LEVELS, AND COLLAPSING THEM IS THE WHOLE HAZARD (v2.237.0).
+//   `VENDOR_META[slug].monitoringOnly === true` is a fact about the VENDOR:
+//       SecVault has no adapter for it at all and never will until one is
+//       written (`juniper`, `sonicwall`). It is excluded from
+//       MANAGED_VENDOR_SLUGS, from VENDOR_CPES and from the CVE vendor filter.
+//   `device.mgmt_method === 'syslog'` is a fact about ONE DEVICE:
+//       nobody has a management connection to THIS firewall. The vendor may be
+//       fully managed, with an adapter, a version parser and CPEs.
+//
+// v2.236.0 built the second as a METHOD rather than a vendor flag for exactly
+// this case, and said so: "untrue otherwise the day somebody owns a Fortinet
+// they have no credentials for — which is the common case this unlocks next."
+// This is that day. A `fortinet` row with `mgmt_method = 'syslog'` is a real,
+// supported state; `fortinet` stays managed, because an `advisories` row CAN
+// name it and the firewall's absence of an assessment is a fact about the
+// DEVICE, reported by the `monitoring_only` work-queue source.
+//
+// ⛔ SO IT MUST NEVER BE A VENDOR'S `defaultAccessMethod`. DEFAULT_METHOD is
+// the fallback adapter dispatch uses when `devices.mgmt_method` is null or
+// unrecognised — i.e. for every row written before the selector existed — so a
+// managed vendor defaulting to `syslog` would silently convert its whole
+// legacy fleet to monitoring-only and stop collecting from it, with no error
+// anywhere. tests/vendorRegistryParity.test.js refuses it.
 //
 // ⛔ `credentialShape: 'none'` IS LOAD-BEARING. Without it
 // `buildCredentialPlaintext` falls through to its userpass branch and returns
@@ -65,6 +89,9 @@ export const VENDOR_META = {
         credentialShape: 'secret',
         secretLabel: 'SMC API Key',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — forcepoint stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   fortinet: {
@@ -85,6 +112,9 @@ export const VENDOR_META = {
         credentialType: 'ssh',
         credentialShape: 'userpass',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — fortinet stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   paloalto: {
@@ -107,6 +137,9 @@ export const VENDOR_META = {
         credentialType: 'ssh',
         credentialShape: 'userpass',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — paloalto stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   checkpoint: {
@@ -122,6 +155,9 @@ export const VENDOR_META = {
         credentialShape: 'apikey_or_userpass',
         secretLabel: 'API Key',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — checkpoint stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   cisco_asa: {
@@ -135,6 +171,9 @@ export const VENDOR_META = {
         credentialType: 'ssh',
         credentialShape: 'userpass_enable',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — cisco_asa stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   sangfor: {
@@ -148,6 +187,9 @@ export const VENDOR_META = {
         credentialType: 'ssh',
         credentialShape: 'userpass',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — sangfor stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
   sophos: {
@@ -178,12 +220,24 @@ export const VENDOR_META = {
         // cannot work, and no secretLabel is declared for the same reason.
         credentialShape: 'userpass',
       },
+      // ⛔ Added v2.237.0. See SYSLOG_ONLY_METHOD: this is a DEVICE-level
+      // state, not a claim about the vendor — sophos stays fully managed.
+      syslog: SYSLOG_ONLY_METHOD,
     },
   },
-  // ⛔ MONITORING-ONLY VENDORS. SecVault parses their syslog (verified against
-  // real corpora — see .ai-codex/connectors.md sections 14 and 15) and has NO
-  // ADAPTER for either, so `syslog` is their ONLY access method. Before this
-  // they could not be added at all, and their events were stored unattributed.
+  // ⛔ MONITORING-ONLY VENDORS — a VENDOR-level state, distinct from the
+  // DEVICE-level `mgmt_method = 'syslog'` every managed vendor now also offers
+  // (see SYSLOG_ONLY_METHOD above). SecVault parses their syslog (verified
+  // against real corpora — see .ai-codex/connectors.md sections 14 and 15) and
+  // has NO ADAPTER for either, so `syslog` is their ONLY access method and
+  // `monitoringOnly: true` keeps them out of MANAGED_VENDOR_SLUGS. Before
+  // v2.236.0 they could not be added at all and their events were unattributed.
+  //
+  // ⛔ THE FLAG IS NOT "this device is log-only" AND MUST NOT BE READ AS ONE.
+  // It answers "could SecVault ever manage this vendor". To ask whether a
+  // given firewall is log-only, call isMonitoringOnly(device)
+  // (lib/monitoringOnly.js) on its `mgmt_method` — the only correct test since
+  // v2.237.0, because a `fortinet` can now be log-only too.
   //
   // ⛔ `connection: 'mgmt'` AND `mgmt_ip` IS REQUIRED, which is not a leftover:
   // the collector's IP->device map is vendor-agnostic and matches on
@@ -292,7 +346,21 @@ export function vendorLabel(slug, opts) {
 export const CREDENTIAL_TYPES = ['smc_api', 'rest_api', 'ssh', 'snmp'];
 
 // The only devices.mgmt_method values that may be stored.
-export const ACCESS_METHODS = ['smc', 'api', 'ssh'];
+//
+// ⛔ 'syslog' WAS MISSING HERE FROM v2.236.0 TO v2.237.0, AND THE COMMENT ABOVE
+// MADE THAT A FALSE STATEMENT rather than a stale one: `juniper` and
+// `sonicwall` stored `mgmt_method = 'syslog'` from the day they shipped. It was
+// invisible because the only consumer is tests/vendorRegistryParity.test.js,
+// which looped over the MANAGED half of VENDOR_META and so never asked a
+// monitoring-only vendor's method about this list — a guard that could not fire
+// over the one value it did not know. That loop now covers every slug.
+//
+// ⛔ NOTHING AT RUNTIME READS THIS, and that is worth knowing before trusting
+// it: `POST /api/devices` validates against `VENDOR_META[vendor].accessMethods`
+// (the per-vendor map), never this flat list. So this constant is a CONTRACT
+// for the parity test to enforce, not a gate — do not "simplify" a route into
+// reading it, because a method legal for one vendor is not legal for another.
+export const ACCESS_METHODS = ['smc', 'api', 'ssh', 'syslog'];
 
 /**
  * Resolves the per-method config for a vendor, falling back to the vendor's

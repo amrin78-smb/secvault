@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { pool } from '../../../../../lib/db';
 import { setCredential } from '../../../../../lib/credStore';
+import { isMonitoringOnly } from '../../../../../lib/monitoringOnly';
 import { getProfilePlaintext } from '../../../../../lib/credentialProfiles';
 import { parseSnmpCredential } from '../../../../../lib/adapters/snmpCredential';
 import { isValidUuid } from '../../../../../lib/apiUtils';
@@ -241,6 +242,42 @@ export async function PUT(request, { params }) {
       parseSnmpCredential(credPlaintext);
     } catch (err) {
       return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+  }
+
+  // ⛔ THE THIRD `setCredential` CALLER, AND THE ONLY ONE WITH NO
+  // MONITORING-ONLY GUARD (found in review, v2.237.0). POST and PUT
+  // /api/devices both refuse a credential whose method declares
+  // `credentialShape: 'none'`; this route predates that and writes an
+  // AES-256-GCM row regardless.
+  //
+  // ⛔ IT WAS LATENT UNTIL v2.237.0 AND IS NOW THE LIKELY CASE. A log-only
+  // device used to be `juniper`/`sonicwall`, which fail `SUPPORTED_VENDORS`
+  // in the snmp-poll loop before anything is attempted and whose operators
+  // have no reason to expect SNMP. A log-only FORTINET passes that vendor
+  // gate, SNMP is genuinely independent of the management API (it hits
+  // `snmp_host` directly, which is why it is not in `accessMethods` at all),
+  // and the device page renders the SNMP card and a "Configure →" link
+  // unconditionally — so an operator has every reason to set it up, and the
+  // poll can then never run because `getAdapter` refuses the device.
+  //
+  // ⛔ 409, NOT 403: the caller holds the capability; this is a conflict with
+  // the state of this resource. The message names the remedy, because SNMP
+  // monitoring of this firewall IS achievable — by giving it a management
+  // connection, the same remedy everything else about this state names.
+  if (credPlaintext || enabled === true) {
+    const dev = await pool.query('SELECT mgmt_method FROM devices WHERE id = $1', [params.id]);
+    if (dev.rows.length && isMonitoringOnly(dev.rows[0])) {
+      return NextResponse.json(
+        {
+          error:
+            'This firewall is monitoring-only: SecVault reads its logs and never opens a '
+            + 'connection to it, so SNMP cannot be polled and no SNMP credential is stored. '
+            + 'Add a management connection to monitor it.',
+          code: 'monitoring_only',
+        },
+        { status: 409 }
+      );
     }
   }
 

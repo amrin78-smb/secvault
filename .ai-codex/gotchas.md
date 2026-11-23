@@ -51,6 +51,77 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   server-driven pattern every other tabbed page in this app uses — deliberate, copied from
   netvault's own Settings page. Don't "fix" this to match the other pages.
 
+## ⛔ A BACKTICK IN AN SQL COMMENT BREAKS THE TEMPLATE LITERAL AROUND IT (hit twice, 2026-11-23)
+
+Every multi-line query in `lib/` lives inside a `` ` ``-delimited template literal, and this repo's
+house style is to explain a column in a `--` comment *inside* that string. Writing a column or file
+name in backticks there — the convention used in every JS comment in the codebase — **terminates the
+template literal mid-query**. The failure is a parse error some lines later (`Expected ',', got
+'never_collected'`), which reads as a broken SELECT list rather than a broken comment.
+
+⛔ **`node --check` will not tell you**: it is a no-op on any file with a top-level `import`, and
+these are CommonJS so it does catch them — but the files that bit were reached through `npm test`'s
+`tests/jsxSyntax.test.js` (SWC), which is the real gate. It cost two debug cycles in one sitting,
+in `lib/engines/deviceInventory.js` and `lib/engines/fleetHeadline.js`.
+
+⛔ **Inside a query string, write column and file names bare.** Both offending comments now carry
+`-- (No backticks in here: this is inside a template literal.)` as a reminder to the next editor.
+
+## ⛔ A PREFILL THAT HAD NEVER RUN, AND THE GUARD DEFENDING IT (found 2026-11-23, fixed v2.237.0)
+
+`components/devices/DiscoveredDeviceActions.js` has linked to
+`/devices/new?mgmt_ip=…&name=…&vendor=…` since the discovered-senders list shipped.
+`app/(dashboard)/devices/new/page.js` rendered `<DeviceForm onSubmit={…} />` and **never called
+`useSearchParams()`**, and `DeviceForm` gated its only prefill path (`initialDevice`) on
+`mode === 'edit'`. So every "Add to inventory" click — on a firewall SecVault had just shown the
+operator sending syslog — opened a **blank Forcepoint form**. The operator retyped the address
+from the previous screen and picked the vendor again.
+
+⛔ **The comment is what kept anyone from looking.** That page says "This page needs no server-side
+data fetching (a blank 'add device' form has nothing to pre-load from the DB)" — TRUE about the
+database, and silent about the query string, which is where the prefill actually comes from. A
+true sentence that answers a question nobody asked.
+
+⛔ **AND IT MADE A CAREFULLY-REASONED GUARD UNFIREABLE.** `DiscoveredDeviceActions` argues at
+length for withholding the vendor when SecVault cannot manage it, because otherwise "an operator
+clicking Add to inventory on a detected Juniper would be three fields away from creating a
+Forcepoint device pointing at an SRX". The form was ALREADY always Forcepoint, with nothing
+prefilled — the guard was protecting against a prefill that did not happen. Prose defending a guard
+that cannot fire, which is the shape this file exists to record.
+
+⛔ **`useSearchParams()` NEEDS A SUSPENSE BOUNDARY** or `next build` fails the route (or silently
+prerenders it with empty params, reinstating the blank form). The fallback renders the form
+**without** prefill — never nothing, so a slow resolution cannot blank the page.
+
+⛔ **The URL is not trusted**: `?vendor=` is resolved against `VENDOR_META` and an unknown slug
+falls back to the default rather than rendering a form labelled for a vendor this build lacks —
+which is the REAL version of the hazard above, now that it can finally occur. And the address is
+routed to the field the vendor's CONNECTION SHAPE uses (`smc_host` vs `mgmt_ip`), or it would be
+written into a box the form does not render and vanish.
+
+## ⛔ MONITORING-ONLY IS TWO DIFFERENT FACTS WITH ONE NAME (v2.237.0)
+
+- `VENDOR_META[slug].monitoringOnly === true` — the **VENDOR** has no adapter at all (`juniper`,
+  `sonicwall`). Keeps it out of `MANAGED_VENDOR_SLUGS`, `VENDOR_CPES` and the CVE vendor filter.
+- `device.mgmt_method === 'syslog'` — **THIS DEVICE** has no management connection. The vendor may
+  be fully managed, with an adapter, a version parser and CPEs.
+
+`isMonitoringOnly(device)` (`lib/monitoringOnly.js`) reads **only `mgmt_method`** and is the one
+correct test for the device question. Collapsing the two breaks the product in opposite ways:
+reading the VENDOR flag as the device state leaves a log-only FortiGate looking fully assessed
+(i.e. the cleanest device on the fleet); reading the DEVICE state as the vendor flag drops
+`fortinet` out of `MANAGED_VENDOR_SLUGS`, so every managed FortiGate stops being CVE-assessed
+because ONE of them has no credentials.
+
+⛔ **`syslog` MUST NEVER BE A MANAGED VENDOR'S `defaultAccessMethod` / `DEFAULT_METHOD`.** That is
+the fallback `getAdapter()` uses when `mgmt_method` is null or unrecognised — i.e. every row
+written before the access-method selector existed — so a managed vendor defaulting to it would
+make `collectAndStore()` take its monitoring-only early return for that whole fleet: no adapter
+call, no error, `last_collected_at` NULL for ever. `tests/vendorRegistryParity.test.js` refuses it.
+
+⛔ **`mgmt_method` IS NULLABLE on legacy rows, so every SQL filter uses `IS DISTINCT FROM`.**
+`NULL <> 'syslog'` is NULL, not true, so a plain inequality silently drops every legacy device.
+
 ## ⛔ TWO CSS RULES CANCELLED EACH OTHER AND THE LOSER HAD NEVER APPLIED (found 2026-11-03)
 
 `.sv-nav-group-pinned { margin-top: auto; }` is what puts Settings at the bottom of the sidebar.

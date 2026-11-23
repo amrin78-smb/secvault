@@ -3,6 +3,8 @@ import Badge from '../ui/Badge';
 import TimeAgo from '../ui/TimeAgo';
 import { vendorLabel } from './vendorMeta';
 import { PollHealthDot, PollHealthNote } from './DevicePostureCells';
+import MonitoringOnlyMark from './MonitoringOnlyMark';
+import { isMonitoringOnly } from '../../lib/monitoringOnly';
 
 // THE PERSISTENT DEVICE CONTEXT HEADER. Rendered at the top of every
 // per-device page, so the asset, how fresh SecVault's view of it is, and what
@@ -153,6 +155,22 @@ export default function DeviceContextHeader({
           {vendor && (
             <Badge color="info" title={vendor}>{vendorLabel(vendor, { short: true })}</Badge>
           )}
+          {/* ⛔ BESIDE THE VENDOR, because that is the claim it qualifies. The
+              posture strip below is already correctly tri-state for one of
+              these firewalls — every figure reads "not measured" — but it says
+              why for NONE of them, and the badge to the left now reads
+              "FortiGate" on a device SecVault has never connected to. */}
+          {/* ⛔ FALLS BACK TO THE RAW ROW, NEVER TO `false`. `loadDeviceContext`
+              returns null on a failed aggregate BY DESIGN and the renderer
+              falls back to the identity it was handed — and `fallback` is a
+              `SELECT *`, so it carries `mgmt_method`. Reading `false` there
+              rendered the FortiGate badge beside no marker on a device
+              SecVault has never connected to, i.e. a failed read asserting
+              "this firewall is managed": the very defect the comment above
+              says this marker exists to prevent, inside the marker. */}
+          <MonitoringOnlyMark
+            monitoringOnly={c ? c.monitoringOnly : isMonitoringOnly(fallback)}
+          />
           {/* ⛔ Criticality is shown ONLY when it is above the default. Every
               device carries `medium` (the column default), so rendering it
               would put an identical chip on every firewall in the fleet and

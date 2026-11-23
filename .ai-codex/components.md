@@ -270,7 +270,7 @@ DevicePostureCells  — presentational cells for the Devices table: `SecuritySco
 
 (c) DeviceActions  deviceId — Collect Now / Test Connectivity buttons with pending state
 (c) DeviceRowActions  deviceId, sortKey, canWrite — devices-list row's View/Collect/Test/Delete, consolidated into one RowActionsMenu (2026-07-23, was 4 separate stacked links)
-(c) DeviceForm  onSubmit, mode, initialDevice — Add/Edit Device form; responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH. Credential inputs (secret/user/pass/saved-profile/save-as-profile/SMC test row) render in CREATE mode ONLY — edit mode is metadata-only, rotation lives in CredentialForm on the Manage tab (dedup, credential-only PUT never touches mgmt_method)
+(c) DeviceForm  onSubmit, mode, initialDevice, prefill — Add/Edit Device form; responsive 2-column grid (auto-fit minmax(220px,1fr)), prose/checkboxes/test-row/submit span full width via FULL_WIDTH. Credential inputs (secret/user/pass/saved-profile/save-as-profile/SMC test row) render in CREATE mode ONLY — edit mode is metadata-only, rotation lives in CredentialForm on the Manage tab (dedup, credential-only PUT never touches mgmt_method)
 (c) CredentialForm  deviceId, vendor="forcepoint", mgmtMethod=null — rotate an existing device's credential
 vendorMeta.js — no component; pure data/logic module (VENDOR_META table + credential-shape helpers)
 OverviewCveCard  deviceId — top CVEs needing attention card (Overview tab)
@@ -1198,6 +1198,31 @@ list while `result.summary` describes the WHOLE queue, and the all-clear is gate
 prepared to stand behind" over a thirty-item queue. "Filtered to nothing" has its own, differently
 worded empty state. ⛔ Nothing expands by default any more (three bands meant three expanded items
 on arrival).
+
+## MonitoringOnlyMark (`components/devices/MonitoringOnlyMark.js`) — v2.237.0
+
+`{ monitoringOnly, block }` → the one "◍ Logs only" marker, or `null`. Mounted by
+`app/(dashboard)/devices/page.js` (in the **name** cell) and `DeviceContextHeader`.
+
+⛔ **The caller passes `device.monitoringOnly`, derived from `mgmt_method` by
+`isMonitoringOnly()` — NEVER `VENDOR_META[vendor].monitoringOnly`.** Those answer different
+questions: the first is "is THIS firewall unmanaged", the second is "could SecVault ever manage
+this BRAND". Since v2.237.0 any vendor can be log-only, so the vendor flag both misses a log-only
+FortiGate and would mislabel a managed Juniper the day one gains an adapter.
+
+⛔ **It exists because such a device has no CVEs, no compliance result and no rule findings, so an
+unmarked row is indistinguishable from a firewall that was assessed and came back clean.** While
+only `juniper`/`sonicwall` could be log-only the vendor column was an accidental tell; v2.237.0
+removed that inference and so had to add the marker.
+
+⛔ **Hueless (`--unmeasured`), and the WORDS carry the meaning** (the glyph is `aria-hidden`): a
+gap in SecVault's reach is not a severity of the customer's, and a bare marker announced as
+"warning" would say no more than the colour. It renders **nothing** when false, because it is
+mounted unconditionally on every row and all six per-device pages. The `title` carries
+`MONITORING_ONLY_CLAIM` + `MONITORING_ONLY_REMEDY`, imported, so no surface words the state twice.
+
+⛔ **In the NAME cell on `/devices`, not the vendor cell** — `vendor` is priority 3 and hideable
+via the ColumnChooser, `name` is `required: true`.
 
 ## DeviceContextHeader (`components/devices/DeviceContextHeader.js`) — v2.219.0
 

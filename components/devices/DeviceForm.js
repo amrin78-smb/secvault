@@ -9,6 +9,14 @@ import {
   resolveAccessMethod,
   hasMultipleAccessMethods,
 } from './vendorMeta';
+// ⛔ ONE wording for this state, shared with the work-queue item, the device
+// routes and the inventory marker. A form that explained it in its own words
+// would be a fourth description of one fact.
+import {
+  MONITORING_ONLY_METHOD,
+  MONITORING_ONLY_CLAIM,
+  MONITORING_ONLY_REMEDY,
+} from '../../lib/monitoringOnly';
 
 const CRITICALITY_OPTIONS = [
   { value: 'low', label: 'Low' },
@@ -72,27 +80,79 @@ const FULL_WIDTH = { gridColumn: '1 / -1' };
 // mode, that's the caller's job (see app/(dashboard)/devices/new/page.js for
 // create, components/devices/EditDeviceModal.js for edit) — it only ever calls
 // `onSubmit(payload)`.
-export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = null }) {
+export default function DeviceForm({
+  onSubmit, mode = 'create', initialDevice = null, prefill = null,
+}) {
   const isEdit = Boolean(mode === 'edit' && initialDevice);
+
+  // ⛔ CREATE-MODE PREFILL, FROM THE URL — AND IT HAD NEVER WORKED (v2.237.0).
+  //
+  // `DiscoveredDeviceActions` has built `/devices/new?mgmt_ip=…&name=…&vendor=…`
+  // since the discovered list shipped, and `app/(dashboard)/devices/new/page.js`
+  // rendered `<DeviceForm onSubmit={…} />` and read no search params at all —
+  // its comment said "a blank add-device form has nothing to pre-load from the
+  // DB", which is true of the DATABASE and misses that the prefill comes from
+  // the URL. So every "Add to inventory" click opened a BLANK FORCEPOINT form:
+  // the operator had to retype the address they had just been shown and pick
+  // the vendor again.
+  //
+  // ⛔ AND IT MADE A CAREFULLY-REASONED GUARD UNFIREABLE. That file argues at
+  // length for withholding the vendor when SecVault cannot manage it, because
+  // otherwise "an operator clicking Add to inventory on a detected Juniper
+  // would be three fields away from creating a Forcepoint device pointing at
+  // an SRX". The form was ALREADY always Forcepoint — the guard was protecting
+  // against a prefill that did not happen. Prose defending a guard that cannot
+  // fire is the pattern CLAUDE.md names most often.
+  //
+  // ⛔ THE URL IS NOT TRUSTED. `vendor` is resolved against VENDOR_META and an
+  // unknown slug falls back to the default rather than rendering a form
+  // labelled for a vendor this build does not have — which is the real version
+  // of the hazard above, now that it can actually occur.
+  const seed = (() => {
+    if (isEdit || !prefill) return null;
+    const vendorOk = prefill.vendor
+      && Object.prototype.hasOwnProperty.call(VENDOR_META, prefill.vendor);
+    const slug = vendorOk ? prefill.vendor : 'forcepoint';
+    return {
+      name: prefill.name || '',
+      vendor: slug,
+      // ⛔ The address goes to the field the CONNECTION SHAPE uses. Prefilling
+      // mgmt_ip on an SMC vendor fills a box the form does not render, so the
+      // address would silently vanish.
+      smcHost: VENDOR_META[slug].connection === 'smc' ? (prefill.mgmt_ip || '') : '',
+      mgmtIp: VENDOR_META[slug].connection === 'smc' ? '' : (prefill.mgmt_ip || ''),
+    };
+  })();
 
   // Lazy initializers so pre-fill only ever runs once, on mount — this
   // component is remounted (via a `key` prop) by EditDeviceModal every time
   // the modal re-opens, rather than kept alive and re-synced, so there is no
   // need to react to `initialDevice` changing after mount.
-  const [name, setName] = useState(() => (isEdit ? initialDevice.name || '' : ''));
-  const [vendor, setVendor] = useState(() => (isEdit ? initialDevice.vendor : 'forcepoint'));
+  const [name, setName] = useState(() => (isEdit ? initialDevice.name || '' : (seed ? seed.name : '')));
+  const [vendor, setVendor] = useState(() =>
+    isEdit ? initialDevice.vendor : (seed ? seed.vendor : 'forcepoint'));
   const [accessMethod, setAccessMethod] = useState(() => {
     if (isEdit) {
       const resolved = resolveAccessMethod(initialDevice.vendor, initialDevice.mgmt_method);
       return resolved ? resolved.method : VENDOR_META.forcepoint.defaultAccessMethod;
     }
-    return VENDOR_META.forcepoint.defaultAccessMethod;
+    // ⛔ THE PREFILLED VENDOR'S OWN DEFAULT, never Forcepoint's. Seeding the
+    // vendor while leaving the method on `smc` would render an SMC form under
+    // a FortiGate heading. And ⛔ never the SYSLOG method: appearing in the
+    // discovered list means we have seen logs from the address, which says
+    // nothing about whether the operator holds credentials — defaulting to
+    // log-only would nudge them into an UNASSESSED firewall when a managed one
+    // was available. The selector offers it; the form does not choose it.
+    const slug = seed ? seed.vendor : 'forcepoint';
+    return VENDOR_META[slug].defaultAccessMethod;
   });
-  const [smcHost, setSmcHost] = useState(() => (isEdit ? initialDevice.smc_host || '' : ''));
+  const [smcHost, setSmcHost] = useState(() =>
+    isEdit ? initialDevice.smc_host || '' : (seed ? seed.smcHost : ''));
   const [smcPort, setSmcPort] = useState(() =>
     isEdit && initialDevice.smc_port != null ? String(initialDevice.smc_port) : ''
   );
-  const [mgmtIp, setMgmtIp] = useState(() => (isEdit ? initialDevice.mgmt_ip || '' : ''));
+  const [mgmtIp, setMgmtIp] = useState(() =>
+    isEdit ? initialDevice.mgmt_ip || '' : (seed ? seed.mgmtIp : ''));
   const [mgmtPort, setMgmtPort] = useState(() =>
     isEdit && initialDevice.mgmt_port != null ? String(initialDevice.mgmt_port) : ''
   );
@@ -138,7 +198,20 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
   const { method, config } = resolveAccessMethod(vendor, accessMethod) ||
     resolveAccessMethod('forcepoint', null);
 
+  // ⛔ THE VENDOR'S CONNECTION SHAPE, WHICH IS NOT THE SAME AS "THERE IS A
+  // CONNECTION". `isSmc` drives the SMC host/port fields AND the
+  // test-before-save gate, and `meta.connection` is a property of the VENDOR,
+  // so it stayed `'smc'` for Forcepoint even on the log-only method. Result
+  // (found in review, v2.237.0): a Forcepoint could be offered "Syslog only",
+  // be shown a paragraph saying SecVault will not connect to it, and then be
+  // refused a Save until it passed a connectivity test — using a secret the
+  // form no longer renders an input for, so the test could only ever fail.
+  // A permanent dead end, and the one house rule named in CLAUDE.md that this
+  // broke: the UI gate was STRICTER than the API, which accepts the device.
   const isSmc = meta.connection === 'smc';
+  // ⛔ Is SecVault going to open a connection to this device AT ALL? Keyed on
+  // the METHOD, so it is false for log-only on every vendor.
+  const willConnect = method !== MONITORING_ONLY_METHOD;
   const showMethodSelector = hasMultipleAccessMethods(vendor);
   const shape = config.credentialShape;
   const isSecretShape = shape === 'secret';
@@ -158,7 +231,13 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
   // "Allow Self-Signed SSL" only means anything for TLS transports. SSH does not
   // present an X.509 cert, so the toggle is hidden (and left at its default) for
   // ssh methods rather than implying it has an effect.
-  const showSslToggle = method !== 'ssh';
+  //
+  // ⛔ AND THE SYSLOG METHOD HAS NO TRANSPORT AT ALL (v2.237.0), so this file's
+  // own rule above covers it with more force: there is no connection, no
+  // handshake and no certificate to accept, and a rendered toggle would be a
+  // control that cannot do anything — on the one form whose job is to say what
+  // SecVault will and will not do with this firewall.
+  const showSslToggle = method !== 'ssh' && method !== MONITORING_ONLY_METHOD;
 
   // Recomputed on every render — cheap, and `profiles` only ever changes once
   // (the mount-time fetch), so there's no benefit to memoizing this.
@@ -207,6 +286,18 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
     // The previous method almost never exists on the new vendor; resolve to the
     // new vendor's default rather than leaving a value its accessMethods lack.
     const nextMeta = VENDOR_META[nextVendor];
+    // ⛔ CARRY THE ADDRESS ACROSS THE TWO FIELDS. The form renders `smc_host`
+    // OR `mgmt_ip` depending on the vendor's connection shape, and they are
+    // separate state. Switching vendor used to leave the typed address in the
+    // field that is no longer rendered — so it vanished from the screen while
+    // still sitting in unsubmitted state. Harmless while nothing prefilled
+    // those boxes; since v2.237.0 the discovered-senders link fills one of them
+    // with an address the operator was just shown, and changing a wrongly
+    // detected vendor silently lost it.
+    const nextIsSmc = nextMeta ? nextMeta.connection === 'smc' : true;
+    const address = (meta.connection === 'smc' ? smcHost : mgmtIp) || '';
+    if (nextIsSmc) { setSmcHost(address); setMgmtIp(''); }
+    else { setMgmtIp(address); setSmcHost(''); }
     setAccessMethod(nextMeta ? nextMeta.defaultAccessMethod : 'smc');
     resetPorts();
     resetCredentialInputs();
@@ -250,7 +341,9 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
   // Forcepoint keeps the test-before-save gate in CREATE mode only; other
   // vendors, and Forcepoint in EDIT mode, can save directly (see the header
   // comment for why edit mode skips this).
-  const saveBlocked = isSmc && mode === 'create' ? !testResult?.ok : false;
+  // ⛔ `&& willConnect`: there is nothing to test when SecVault will never dial
+  // the device, so requiring a passing test would block the save for ever.
+  const saveBlocked = isSmc && willConnect && mode === 'create' ? !testResult?.ok : false;
 
   const credentialProvided = showSecretInput ? Boolean(secret) : Boolean(username && password);
 
@@ -270,12 +363,17 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
         asset_criticality: assetCriticality,
       };
       // Connection fields key off the VENDOR (meta.connection), never the method.
+      // ⛔ The PORT keys off the METHOD, because a port is a claim that
+      // something is listening on it. `willConnect` is false for log-only, and
+      // an explicit null is sent rather than the field being omitted — the PUT
+      // route only resets a port it was handed, so omitting it would leave a
+      // stale port behind on an edit.
       if (isSmc) {
         payload.smc_host = smcHost;
-        payload.smc_port = Number(smcPort) || config.defaultPort;
+        payload.smc_port = willConnect ? (Number(smcPort) || config.defaultPort) : null;
       } else {
         payload.mgmt_ip = mgmtIp;
-        payload.mgmt_port = Number(mgmtPort) || config.defaultPort;
+        payload.mgmt_port = willConnect ? (Number(mgmtPort) || config.defaultPort) : null;
       }
       if (selectedProfileId) {
         // A saved profile's plaintext never reaches the browser — the server
@@ -375,13 +473,54 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
             onChange={(e) => handleAccessMethodChange(e.target.value)}
             className="input"
           >
-            {Object.entries(meta.accessMethods).map(([key, cfg]) => (
+            {/* ⛔ IN EDIT MODE, LOG-ONLY IS OFFERED ONLY TO A DEVICE ALREADY
+                ON IT. `PUT /api/devices/[id]` answers 409 for a managed →
+                log-only conversion, because this route deletes credentials and
+                NOTHING ELSE: the stored version, ruleset, config, CVE
+                assessment and compliance findings would survive while
+                `collectAndStore` skipped the device for ever, so they would be
+                reported as current indefinitely — including as urgent CVE
+                work. Offering a control that always errors is the mirror of
+                the rule about a UI gate being stricter than its API: here the
+                UI would be LOOSER, which costs the operator a destructive-
+                looking failure on a form that had already closed. Delete and
+                re-add is the honest path, and it is the precedent the locked
+                vendor dropdown above already sets. */}
+            {Object.entries(meta.accessMethods)
+              .filter(([key]) => !(
+                isEdit
+                && key === MONITORING_ONLY_METHOD
+                && (initialDevice || {}).mgmt_method !== MONITORING_ONLY_METHOD
+              ))
+              .map(([key, cfg]) => (
               <option key={key} value={key}>
                 {cfg.label}
               </option>
             ))}
           </select>
         </div>
+      )}
+
+      {/* ⛔ PICKING THIS IS A DECISION WITH A COST, AND THE FORM USED TO MAKE
+          IT IN SILENCE: the credential inputs simply vanished. An operator who
+          CHOOSES log-only when they do hold credentials gets a firewall that
+          produces no CVEs, no compliance result and no rule findings for ever
+          — which lib/monitoringOnly.js calls "silently the cleanest device on
+          the fleet" — and an operator who MUST choose it needs to know the log
+          collection is unaffected. Both read the same two sentences, imported,
+          so this form and the work-queue item cannot word the state
+          differently. */}
+      {!needsCredential && (
+        <p
+          // ⛔ FULL_WIDTH, like every other prose block in this file. The grid
+          // is `repeat(auto-fit, minmax(220px, 1fr))`, so without it a
+          // ~290-character sentence reflows into a 220px column about eleven
+          // lines tall, beside a single-line field and on a different grid row
+          // from the selector it explains.
+          style={{ ...FULL_WIDTH, fontSize: 'var(--text-xs)', color: 'var(--unmeasured)', margin: 0 }}
+        >
+          {MONITORING_ONLY_CLAIM} {MONITORING_ONLY_REMEDY}
+        </p>
       )}
 
       {isSmc ? (
@@ -401,6 +540,11 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
             />
           </div>
 
+          {/* ⛔ No port field when nothing will be dialled — and the
+              placeholder would read the literal string "null", since
+              `String(null)` is "null" and the log-only method declares no
+              defaultPort. */}
+          {willConnect && (
           <div className="form-field">
             <label htmlFor="device-smc-port">SMC Port</label>
             <input
@@ -415,6 +559,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
               className="input"
             />
           </div>
+          )}
         </>
       ) : (
         <>
@@ -430,6 +575,15 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
             />
           </div>
 
+          {/* ⛔ SAME REFUSAL AS THE SSL TOGGLE, AND IT ENFORCES A GUARANTEE
+              SOMEBODY ELSE WROTE DOWN. `SYSLOG_ONLY_METHOD` in vendorMeta.js
+              says "No defaultPort. A port here would be written to
+              `mgmt_port` and would claim SecVault talks to something on it" —
+              but a missing DEFAULT does not stop a TYPED value, and the field
+              was still rendered and still submitted, so an operator typing
+              443 out of habit stored exactly the assertion that comment
+              forbids. (It also showed the literal placeholder "null".) */}
+          {willConnect && (
           <div className="form-field">
             <label htmlFor="device-mgmt-port">Management Port</label>
             <input
@@ -441,6 +595,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
               className="input"
             />
           </div>
+          )}
         </>
       )}
 
@@ -636,7 +791,7 @@ export default function DeviceForm({ onSubmit, mode = 'create', initialDevice = 
           api-key typed above, which no longer exists in edit mode. Post-edit
           testing uses the page-level Test Connectivity in Device Actions, which
           runs against the STORED credential. */}
-      {isSmc && !isEdit && (
+      {isSmc && willConnect && !isEdit && (
         <div
           style={{
             ...FULL_WIDTH,

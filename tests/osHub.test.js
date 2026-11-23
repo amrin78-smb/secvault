@@ -391,7 +391,16 @@ describe('feedFreshness — liveness, not freshness', () => {
     // by a person against vendor pages that change a few times a year, so the
     // same check would be permanently amber for a hub working exactly as
     // designed. The feed is three months old in this case and reports nothing.
-    stubFetch({ checkedAt: '2026-11-16T06:00:00Z' });
+    //
+    // ⛔ RELATIVE TO THE REAL CLOCK, NEVER A LITERAL DATE. This read
+    // `'2026-11-16T06:00:00Z'` and went RED on 2026-11-23 — the day it aged
+    // past feedFreshness()'s own 7-day staleness threshold. The surrounding
+    // pure-function tests pin BOTH ends (they pass `now` explicitly), but
+    // fetchAndUpsertOsCycles() reads Date.now() internally, so a hardcoded
+    // stamp here is a fixture with an expiry date. Same defect as commit
+    // 9e8bb49; the assertion is about a STILL generated_at beside a HEALTHY
+    // checked_at, and "healthy" has to mean "recent", not "2026-11-16".
+    stubFetch({ checkedAt: new Date(Date.now() - 3600 * 1000).toISOString() });
     const r = await osHub.fetchAndUpsertOsCycles(stubPool());
     assert.equal(r.freshness, 'fresh');
     assert.deepEqual(r.errors, [], 'a still generated_at is the resting state here');

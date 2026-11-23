@@ -918,18 +918,118 @@ precedence regression, the credential holes in both device routes and `Credentia
 engine-worker skip gate, Test Connectivity, `NEVER_ACT_NOW_SOURCES`, the compliance-controls
 denominator, the fleet-headline amber chip and the `syslog_rollup_hourly` seq scan.
 
-**Still open, deliberately — none blocks a deploy, all need a monitoring-only device to exist:**
+⛔ **v2.237.0 WIDENED THE FEATURE AND CLOSED THE TWO ROWS THAT MADE IT UNSAFE TO WIDEN.** Every
+MANAGED vendor now offers `mgmt_method = 'syslog'` too, so a FortiGate nobody holds credentials for
+can be added log-only — which is what v2.236.0's own note predicted ("untrue otherwise the day
+somebody owns a Fortinet they have no credentials for — which is the common case this unlocks
+next"). ⛔ That is exactly what made rows 1 and 2 stop being cosmetic: while only `juniper` and
+`sonicwall` could be log-only, the vendor column was an ACCIDENTAL TELL, because neither has an
+adapter and a reader could infer the state. A log-only FortiGate offers no inference at all — its
+row is pixel-identical to a FortiGate that was assessed and came back clean.
 
-1. **No surface MARKS a device as monitoring-only.** `VENDOR_META.monitoringOnly` has zero
-   consumers outside the parity test, and `vendorMeta.js` justifies dropping "(logs only)" from the
-   short label by citing "a STATE marker on the row" that does not exist. On `/devices` it reads
-   "Juniper", indistinguishable from a managed firewall. `/work` is the only place the state is
-   stated. ⛔ The honest fix is a marker on the inventory row, not a longer label.
-2. **`coverageRegisterData.js` / `deviceInventory.js` / `deviceContext.js` do not project
-   `mgmt_method`**, so none can draw the blocked-vs-skipped distinction. Measured consequence: the
-   coverage register ranks a log-only firewall **#1 fleet-wide** above every genuinely broken
-   device, with cell text reading as collection failures, on a page whose job is ranking by
-   consequence.
+**Still open, deliberately — none blocks a deploy:**
+
+1. ✅ **CLOSED v2.237.0** — no surface MARKED a device as monitoring-only.
+   `components/devices/MonitoringOnlyMark.js` is the one marker (hueless `--unmeasured`, a WORD not
+   just a glyph), `deviceInventory.js` and `deviceContext.js` now project `mgmt_method` and derive
+   `monitoringOnly` from `isMonitoringOnly()`, and it renders on `/devices` and on all six
+   per-device pages. ⛔ **In the NAME cell, not the vendor cell**: `vendor` is priority 3 and
+   hideable from the ColumnChooser, so a marker there is defeated by a saved view or a pasted URL,
+   while `name` is `required: true`. ⛔ Derived from the METHOD, never from
+   `VENDOR_META.monitoringOnly`, which answers the different question "could SecVault ever manage
+   this brand" — a test pins both directions. ⛔ The projection itself is pinned by reading the SQL
+   the real function issues **with comments stripped**, because both queries carry a `--` comment
+   naming the column and a naive scan is satisfied by the prose justifying the thing it checks.
+   Verified live on the mock fleet: two log-only FortiGates marked, beside a genuinely-broken ASA
+   carrying the same em-dashes and no marker.
+2. **PARTIALLY CLOSED v2.237.0 — `coverageRegisterData.js` STILL does not project `mgmt_method`.**
+   `deviceInventory.js` and `deviceContext.js` now do (row 1). The coverage register does not, so it
+   still cannot draw the blocked-vs-skipped distinction and still ranks a log-only firewall
+   **#1 fleet-wide** above every genuinely broken device, with cell text reading as collection
+   failures. ⛔ **The blast radius grew with v2.237.0**: any vendor can now reach that #1 slot, not
+   only the two adapter-less ones. ⛔ It was left out deliberately rather than folded in — the fix
+   is not a projection but a RANKING SEMANTICS change on a page whose whole job is ranking by
+   consequence, and that deserves its own commit and its own measurement rather than riding along
+   with a capability change.
+⛔ **FOUND BY A FIVE-AGENT SWEEP OF v2.237.0 AND FIXED IN IT** (so they are recorded as closed
+rather than open): the PUT monitoring-only refusal threw `ReferenceError: method is not defined`
+and became a 500 — the same shape as the v2.236.0 `NextResponse` bug one route over, a guard
+crashing on the branch it exists to serve; `PUT {mgmt_method:'syslog'}` on an already-collected
+firewall stranded its version, ruleset, config, CVE assessments and compliance findings as FROZEN
+evidence that every engine kept asserting (measured: a converted FortiGate scores **97, band
+"excellent"**) and is now refused 409 via the testable `refuseMonitoringOnlyConversion()`;
+`PUT …/snmp` was the third `setCredential` caller and the only one with no monitoring-only guard;
+`POST /api/devices` stored a client-supplied `mgmt_port` for a method declaring `defaultPort: null`;
+Forcepoint-plus-syslog could never be saved because the SMC test-before-save gate keyed on the
+VENDOR's connection shape rather than on whether SecVault would connect at all; the port field
+rendered a literal `"null"` placeholder; the explanatory paragraph was not `FULL_WIDTH`; the
+prefilled address vanished on a vendor change; the per-device header dropped the marker on a failed
+context read while keeping the vendor badge; the discovered-list hint named an Access Method
+selector that is not rendered for `juniper`/`sonicwall`; and both minute-scale poll loops reached
+`getAdapter` for a log-only managed-vendor firewall, logging ~150 false "could not build adapter"
+warnings per device per day.
+
+⛔ **AND THE SWEEP FOUND THE TEST GUARDS WERE THE WEAKEST PART, WHICH IS THE DURABLE LESSON.**
+Sixteen mutations had been verified red before the review and the review still found five INERT
+assertions in the same file: the marker was rendered in isolation and **never asserted to be
+MOUNTED** (deleting both call sites left the suite green — the entire visible half of the release);
+`aria-hidden` was matched anywhere in the markup, so moving it to the OUTER span passed while
+removing the whole marker from the accessibility tree; "hueless" was an 8-token blocklist that
+missed the good half of the ramp, so a GREEN-tinted "Logs only" chip passed; the title asserted the
+claim and not the imported remedy; and the `securityScore === null` fixture pinned pre-existing
+never-assessed behaviour rather than anything to do with `mgmt_method`. All five are closed, plus a
+`/noPort/` scan that was satisfied by `const noPort = false;`. **A mutation round proves the
+mutations you thought of; it says nothing about the assertion you never wrote.**
+
+**Still open from that sweep, deliberately:**
+
+- **`/alerts` can print an unqualified all-clear over a fleet the detectors never looked at.**
+  `AnomalyPanel`'s `anyUnjudged` reads only `insufficient_baseline` and `no_data` and has **no fleet
+  denominator**, while `loadReportingGrid` selects only devices that already have a
+  `syslog_rollup_hourly` row — so a firewall that has never produced one is in NO bucket at all.
+  Measured: with **zero** firewalls judged the panel renders a plain card, no coverage pill, no
+  `<details>`, and the sentence "No firewall stopped reporting and none exceeded its normal
+  denied-traffic level in the last 28 days." ⛔ v2.236.4 made this worse in three ways: the gate is
+  now the sole safety argument for collapsing the section, it also decides whether the disclosure
+  exists at all, and the all-clear is now the only sentence on screen. ⛔ Live today in partial
+  form — PAKFood sends no syslog, and every monitoring-only firewall is invisible to the gate, so
+  13-of-16 judged renders identically to 16-of-16. `Coverage` also prints "judged 15 firewalls", a
+  numerator with no denominator, under its own comment saying a reader "needs the denominator".
+- **An unregistered detector IS silently dropped from the closed bar**, and the comment, the
+  fallback branch and the test title all claim the opposite. `describeAnomalies` iterates
+  `Object.keys(DETECTOR_LABEL)`, so a detector outside the registry contributes rows INSIDE the
+  disclosure while the load-bearing bar says only "1 observation"; the `${mine.length} ${detector}`
+  fallback is unreachable dead code, and the test named "names an unregistered detector rather than
+  dropping it" asserts only the observation count. A6 exists to register new detectors, so this is
+  on the next one's path.
+- **`<h2>` inside `<summary>`** (`AnomalyPanel`) is not a valid content model — `<summary>` takes
+  phrasing content or one heading element, and it is wrapped in a `<div>` with a `<p>`. Browsers
+  render it, but name-from-content flattening very likely drops the section from the document
+  outline. The cited precedent (`.wq-item`) contains **no heading**, so this is not the house
+  pattern it reads as.
+- **`/logs` for an Operator resolves `activeNavHref` to `null`**, so every sidebar row renders
+  inactive while `sectionIsActive` still lights Investigate — the row-grain version of "the sidebar
+  claiming you are nowhere" that v2.236.3 was written to prevent. Not a regression (the row was
+  never rendered for that role), but v2.236.3's new docblock asserts "nothing goes dark", and there
+  is no ancestor to fall through to because group items are flat.
+- **`executiveSummary`'s "Firewalls reachable"** keeps a log-only firewall in the denominator and
+  can never put it in the numerator, so the PDF that leaves the building shows a reachability
+  REGRESSION the month one is added, and `dashboardSnapshot` persists it into every future delta.
+  Same root as `lib/evidence.js`'s "Not reachable" drawer row. ⛔ Deliberately NOT changed here:
+  `monitoring_only` is now counted separately by `getDeviceCounts` so the partition is available,
+  but moving a published metric's denominator is the kind of change CLAUDE.md wants documented
+  before the code, not folded into a capability commit.
+- **`complianceControls`' numerator and denominator use different device sets.**
+  `VENDOR_SCOPE_SQL` excludes `mgmt_method IS DISTINCT FROM 'syslog'`; `FINDINGS_SQL` does not, and
+  `notEvaluated = Math.max(0, applicable - answered)` clamps the contradiction away instead of
+  reporting it `inconsistent` the way `complianceCoverage` does. Only reachable via a converted
+  device, which v2.237.0 now refuses — so it is latent rather than live, and it should still be
+  made consistent.
+- `vpnTunnelHealth.tunnelSupport(vendor, 'syslog')` classifies six vendors in one identical state
+  three different ways (`support_unknown` / `unsupported` / null). Every answer degrades toward
+  unclaimable, so nothing is over-claimed, but the honest bucket for all of them is "never connected
+  to" and no existing state says that.
+
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
    the same file handles the identical column correctly with a separate `Never probed` row.
@@ -941,8 +1041,16 @@ denominator, the fleet-headline amber chip and the `syslog_rollup_hourly` seq sc
    gate removed by keeping the identifier count.
 5. **`$replyDirection` is written and nothing reads it** — the 53 `m=713` SonicWall rows still
    attribute traffic to the firewall's own WAN address in `syslog_talker_hourly`.
-6. **`ACCESS_METHODS = ['smc','api','ssh']`** in `vendorMeta.js` is documented as "the only
-   `devices.mgmt_method` values that may be stored" and is now false.
+6. ✅ **CLOSED v2.237.0** — `ACCESS_METHODS` was `['smc','api','ssh']` while `juniper` and
+   `sonicwall` stored `'syslog'`, so its own comment ("the only `devices.mgmt_method` values that
+   may be stored") was FALSE rather than merely stale. ⛔ **It survived because the only consumer,
+   `tests/vendorRegistryParity.test.js`, looped over the MANAGED half of `VENDOR_META`** and so
+   never asked a monitoring-only vendor's method about the list — a guard that could not fire over
+   the single value it did not know. The loop now covers every slug and asserts the other direction
+   too (no entry that no vendor offers). ⛔ Recorded while closing it: **nothing at runtime reads
+   this constant** — `POST /api/devices` validates against the per-vendor `accessMethods` map — so
+   it is a contract for the test to enforce, not a gate, and a route must not be "simplified" into
+   reading it, because a method legal for one vendor is not legal for another.
 7. ✅ **CLOSED v2.236.2** — `AdvisoriesTab.js` and `CvePostureTab.js` hardcoded a six-vendor
    filter that **omitted Sophos**, a supported vendor since v2.233.0. Reported from production the
    day after the v2.236.1 deploy made it live. The `defaultValue` residual closed with it: with

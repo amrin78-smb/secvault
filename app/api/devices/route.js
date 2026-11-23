@@ -225,10 +225,19 @@ export async function POST(request) {
   // The per-method defaultPort applies when the client omits the port. Only the
   // port field matching the VENDOR's connection type gets a default; the other
   // stays null (a forcepoint row has no mgmt_port, an mgmt row has no smc_port).
-  const smcPortValue =
-    meta.connection === 'smc' ? coercePort(smc_port) ?? config.defaultPort : coercePort(smc_port);
-  const mgmtPortValue =
-    meta.connection === 'mgmt' ? coercePort(mgmt_port) ?? config.defaultPort : coercePort(mgmt_port);
+  //
+  // ⛔ AND A MONITORING-ONLY METHOD STORES NO PORT AT ALL, WHICH THE ABSENT
+  // `defaultPort` ALONE DID NOT ACHIEVE. `SYSLOG_ONLY_METHOD` declares
+  // `defaultPort: null` and says why — "A port here would be written to
+  // `mgmt_port` and would claim SecVault talks to something on it" — but that
+  // only governs the DEFAULT. A client-supplied `mgmt_port: 443` was coerced
+  // and stored verbatim on a firewall SecVault will never dial. Found in
+  // review (v2.237.0); the form never sent one, so this is the API half.
+  const noPort = config.credentialShape === 'none';
+  const smcPortValue = noPort ? null : (
+    meta.connection === 'smc' ? coercePort(smc_port) ?? config.defaultPort : coercePort(smc_port));
+  const mgmtPortValue = noPort ? null : (
+    meta.connection === 'mgmt' ? coercePort(mgmt_port) ?? config.defaultPort : coercePort(mgmt_port));
 
   try {
     const result = await pool.query(

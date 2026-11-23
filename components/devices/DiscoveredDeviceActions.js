@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Button from '../ui/Button';
-import { VENDOR_META } from './vendorMeta';
+import { VENDOR_META, hasMultipleAccessMethods } from './vendorMeta';
 import LoadingSpinner from '../ui/LoadingSpinner';
 
 // Per-row actions on /devices/discovered. Same fetch + pending + refresh
@@ -14,9 +14,34 @@ import LoadingSpinner from '../ui/LoadingSpinner';
 // safety property of the whole feature:
 //
 //   unmanaged  -> "Add to inventory", which goes to the normal Add Device form
-//                 with the OBSERVED fields prefilled. It cannot complete
-//                 without credentials, so nothing enters the fleet denominators
-//                 on the strength of an unauthenticated syslog packet.
+//                 with the OBSERVED fields prefilled.
+//
+//                 ⛔ THIS USED TO READ "It cannot complete without
+//                 credentials, so nothing enters the fleet denominators on the
+//                 strength of an unauthenticated syslog packet." THAT IS NO
+//                 LONGER TRUE and the correction matters, because the sentence
+//                 was being relied on as a safety property. Since v2.237.0
+//                 every vendor offers `mgmt_method = 'syslog'`, so a firewall
+//                 CAN now enter the inventory on the strength of its logs
+//                 alone — deliberately: the alternative was leaving a firewall
+//                 SecVault can read out of the fleet entirely, with its events
+//                 stored against `device_id NULL`.
+//
+//                 ⛔ What replaces the old property is not a credential gate
+//                 but a VISIBLE STATE: such a device carries the "Logs only"
+//                 marker on its inventory row and on all six of its own pages,
+//                 is counted as never-assessed rather than clean, has its own
+//                 `monitoring_only` work-queue item, and can never reach
+//                 `act_now`. See lib/monitoringOnly.js.
+//
+//                 ⛔ The link deliberately does NOT prefill `mgmt_method`.
+//                 Appearing in this list means we have seen SYSLOG from the
+//                 address, which says nothing about whether the operator has
+//                 credentials — most of the time they do and simply have not
+//                 added the device yet. Prefilling log-only would nudge them
+//                 into an UNASSESSED firewall when a fully managed one was
+//                 available, so the form's Access method selector owns the
+//                 choice and the note below names the option.
 //   ha-peer    -> "Link to <device>", which files the address against a device
 //                 that already exists. Offering Promote here would invite the
 //                 operator to duplicate a firewall they already manage.
@@ -140,6 +165,32 @@ export default function DiscoveredDeviceActions({
           )}
         </Button>
       </div>
+      {kind === 'unmanaged' && manageable && hasMultipleAccessMethods(vendor) ? (
+        // ⛔ THE OPTION HAS TO BE NAMED HERE, because this is where the
+        // operator meets the problem. Someone who cannot log into this
+        // firewall clicks "Add to inventory", lands on a form asking for
+        // credentials they do not have, and concludes the firewall cannot be
+        // added — which was TRUE before v2.237.0 and is the exact dead end
+        // this release removes. A capability nobody can find is not a
+        // capability.
+        //
+        // ⛔ Hueless: not having credentials is not a severity.
+        //
+        // ⛔ GATED, because it names a specific control and that control is not
+        // always there. `juniper`/`sonicwall` have ONE access method, so
+        // `hasMultipleAccessMethods` is false and DeviceForm renders no Access
+        // Method selector at all — the operator would hunt for a dropdown that
+        // does not exist, although the outcome is already correct (those
+        // vendors default to log-only). And for a vendor outside VENDOR_META
+        // the advice is impossible: `POST /api/devices` rejects the vendor
+        // outright, so the `!manageable` note below is the right answer and
+        // these two must never render together saying opposite things.
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--unmeasured)' }}>
+          {'No credentials for this firewall? Add it anyway and set Access '}
+          {'method to "Syslog only" — SecVault will keep attributing its logs '}
+          {'and will report it as never assessed rather than as clean.'}
+        </div>
+      ) : null}
       {kind === 'unmanaged' && vendor && !manageable ? (
         // ⛔ HUELESS, because this is a gap in SECVAULT'S REACH and not a
         // severity of the customer's — the same call the coverage register

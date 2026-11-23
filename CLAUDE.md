@@ -934,6 +934,27 @@ reach `act_now`.
 
 ⛔ **IT IS A METHOD (`mgmt_method = 'syslog'`), NOT A VENDOR FLAG** — untrue otherwise the day
 somebody owns a Fortinet they have no credentials for, which is the common case this unlocks next.
+⛔ **THAT DAY WAS v2.237.0, AND THE PREDICTION IS WHY IT COST ALMOST NOTHING.** Every managed
+vendor's `accessMethods` gained the shared log-only entry and the API, the dispatch guard, the
+credential refusal and the work-queue item all worked unchanged, because each of them already asked
+`isMonitoringOnly(device)` — which reads `mgmt_method` and never the vendor. **TWO LEVELS, AND
+COLLAPSING THEM IS THE WHOLE HAZARD:** `VENDOR_META[slug].monitoringOnly` says the BRAND is
+unmanageable (`juniper`, `sonicwall`, excluded from `MANAGED_VENDOR_SLUGS`/`VENDOR_CPES`/the CVE
+vendor filter); `mgmt_method === 'syslog'` says ONE DEVICE is unmanaged. Read the vendor flag as the
+device state and a log-only FortiGate looks fully assessed; read the device state as the vendor flag
+and `fortinet` leaves the managed set, so every managed FortiGate stops being assessed because one
+of them has no credentials. ⛔ **`syslog` may NEVER be a managed vendor's `defaultAccessMethod` /
+`DEFAULT_METHOD`** — that is the fallback for every row whose `mgmt_method` is null, so it would
+convert a legacy fleet to log-only with no adapter call and no error.
+⛔ **AND WIDENING IT FORCED THE VISIBLE HALF, WHICH HAD NEVER BEEN BUILT.** While only the two
+adapter-less vendors could be log-only, the vendor column was an ACCIDENTAL TELL. A log-only
+FortiGate offers no inference, so its row of empty scores and em-dashes is identical to a FortiGate
+assessed and found clean — the "silently the cleanest device on the fleet" property, on screen.
+`components/devices/MonitoringOnlyMark.js` is the one marker (hueless, a WORD not a glyph, the
+shared claim in its `title`), `deviceInventory.js`/`deviceContext.js` project `mgmt_method`, and it
+renders on `/devices` — in the **name** cell, because `vendor` is hideable from the ColumnChooser —
+and on all six per-device pages. ⛔ `coverageRegisterData.js` still does not project it; that is
+`.ai-codex/roadmap.md` row 2 and a RANKING decision, deliberately not folded into this change.
 ⛔ **`collectAndStore` SKIPS, it does not fail**: every pull would otherwise throw and the device
 would look BROKEN rather than deliberately log-only — the same `skipped`-vs-`error` distinction
 `feedStatus.js` draws, for the same reason. ⛔ `last_collected_at` **stays NULL for ever**, which is
@@ -948,6 +969,15 @@ monitoring-only devices from the ownership set, so `coverage_gap` listed them AG
 `monitoring_only` and told the operator to collect a ruleset from a firewall with no credentials.
 Too wide and the firewall is dropped by BOTH and appears in neither. Three query sites, two
 different questions — `.ai-codex/schema.md` and `tests/monitoringOnly.test.js` pin which is which.
+
+⛔ **AND SINCE v2.237.0 EVERY ROW IN THAT TABLE ALSO CARRIES `syslog`.** Each managed vendor's
+`accessMethods` gained the same shared log-only entry, so a FortiGate (or any brand) nobody holds
+credentials for can be added with `mgmt_method = 'syslog'`. **It is not listed per-row above
+because it is not a transport** — it takes no credential, no port and no certificate setting, and
+dispatches to nothing. ⛔ **The vendor stays MANAGED**: `fortinet` keeps its adapter, its version
+parser, its CPEs and its place in `MANAGED_VENDOR_SLUGS`, because an `advisories` row can still
+name it and the missing assessment is a fact about the DEVICE. See the monitoring-only section
+below for the two-level distinction, which is the thing to get right here.
 
 Forcepoint is SMC-only **by design** — never SSH to Forcepoint engines (see the SMC section below).
 Credential plaintext is built by `buildCredentialPlaintext()` (vendorMeta.js) and read by
