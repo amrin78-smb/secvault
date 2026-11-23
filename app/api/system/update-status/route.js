@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.236.3': [
+    'The sidebar highlighted two places at once. Opening Compliance \u2192 Controls or Compliance \u2192 Exceptions left "Scores" lit as well, so the "you are here" marker had two answers on the same screen. Only the page you are actually on is highlighted now.',
+    'It was not only those two rows: the sidebar used to ask each row separately whether it was the current page, and a group\u2019s own landing page matches every page inside that group. It now resolves one winner for the whole rail, so the same fault cannot appear in a future group.',
+    'A firewall\u2019s own compliance pages \u2014 its assessment, its checks, its standards, its print view \u2014 still light "Scores", and a control\u2019s detail page still lights "Controls". The obvious one-line fix would have left all of those highlighting nothing at all, which is worse: a sidebar claiming you are nowhere.',
+  ],
   '2.236.2': [
     'The vendor filter on Vulnerabilities (both the Advisories and CVE Posture tabs) was missing Sophos. Sophos has been a fully supported vendor since v2.233.0, so its advisories were being collected, matched and counted while there was no way to narrow the page to them. It is now there, along with every future vendor \u2014 the list is built from the vendor registry instead of being typed out, which is why it went stale in the first place.',
     'Juniper and SonicWall are deliberately NOT in that filter. SecVault reads their logs but never assesses them for vulnerabilities, so offering them would be a filter that can only ever return nothing \u2014 which reads as "this firewall has no vulnerabilities" rather than "this firewall was never checked".',

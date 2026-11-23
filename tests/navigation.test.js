@@ -49,6 +49,8 @@ const {
   NAV,
   visibleNavItems,
   isActive,
+  activeNavHref,
+  renderedNavEntries,
   sectionIsActive,
 } = require('../lib/navRegistry');
 const { SETTINGS_TABS } = require('../lib/settingsTabs');
@@ -357,11 +359,86 @@ describe('⛔ active state, including nested and device-specific routes', () => 
     }
   });
 
+  // ⛔ THE GUARD ABOVE IS AT SECTION GRAIN AND THE DEFECT WAS AT ITEM GRAIN.
+  // Reported from production: on /compliance/controls the sidebar highlighted
+  // BOTH "Scores" and "Controls", because `isActive` matches by prefix and
+  // `/compliance` — the group's own landing child — is a prefix of every other
+  // page in its group. "Exactly one SECTION is active" was green throughout:
+  // both lit rows live in the same section. These assert the row.
+  test('⛔ exactly one ENTRY is lit on any page you can stand on', () => {
+    const nested = [
+      '/compliance/controls/rule-no-any-any-allow',
+      '/compliance/abc-123',
+      '/compliance/abc-123/standards',
+      '/compliance/abc-123/checks/finding-1',
+      '/compliance/abc-123/print',
+      '/devices/abc-123/analysis',
+      '/vulnerability/advisories/CVE-2026-1',
+      '/applications',
+    ];
+    const rendered = renderedNavEntries(everyCapability);
+    for (const pathname of allItems().map((i) => i.href).concat(nested)) {
+      const lit = rendered.filter(
+        (e) => e.href === activeNavHref(pathname, everyCapability),
+      );
+      assert.equal(lit.length, 1, `${pathname} lights ${lit.length} entries`);
+      // And the predicate agrees that the winner is a legitimate claimant —
+      // the resolver may only ever narrow the matches, never invent one.
+      const w = lit[0];
+      assert.ok(isActive(pathname, w.href, w.exact, w.alsoActiveFor),
+        `${pathname} resolved to ${w.href}, which does not match it`);
+    }
+  });
+
+  test('⛔ the group landing child does NOT claim its siblings', () => {
+    // The reported bug, pinned by name.
+    assert.equal(activeNavHref('/compliance/controls', everyCapability),
+      '/compliance/controls');
+    assert.equal(activeNavHref('/compliance/exceptions', everyCapability),
+      '/compliance/exceptions');
+    assert.equal(activeNavHref('/compliance/controls/some-slug', everyCapability),
+      '/compliance/controls');
+  });
+
+  test('⛔ …and the landing child still owns everything else under it', () => {
+    // The obvious fix — `exact: true` on Scores — would black out all four
+    // /compliance/<deviceId> routes, and a sidebar claiming you are nowhere is
+    // worse than one claiming you are in two places. This fails if anyone
+    // reaches for it later.
+    const scores = allItems().find((i) => i.href === '/compliance');
+    assert.notEqual(scores.exact, true);
+    assert.equal(activeNavHref('/compliance/abc-123', everyCapability), '/compliance');
+    assert.equal(activeNavHref('/compliance/abc-123/standards', everyCapability),
+      '/compliance');
+  });
+
+  test('⛔ a hidden route cannot take a page off a visible entry', () => {
+    // /applications is navHidden, so Intent keeps it through alsoActiveFor.
+    // Ranking an unrendered row ahead of Intent would leave the rail dark on a
+    // page you can stand on.
+    assert.equal(activeNavHref('/applications', everyCapability), '/segmentation');
+    assert.equal(activeNavHref('/applications/anything', everyCapability),
+      '/segmentation');
+  });
+
+  test('⛔ the sidebar renders from the resolver, not the per-row predicate', () => {
+    // The wiring is the part a behaviour test cannot see: every arm of the
+    // resolver can be correct while nothing calls it. Deleting either line
+    // restores the two-highlight bug with the suite still green.
+    assert.match(sidebarSrc, /const activeHref = activeNavHref\(pathname, capabilities\)/);
+    assert.match(sidebarSrc, /active=\{item\.href === activeHref\}/);
+    assert.match(sidebarSrc, /active=\{section\.href === activeHref\}/);
+    assert.ok(!/active=\{isActive\(/.test(sidebarSrc),
+      'the sidebar asks each row separately again — that is the reported bug');
+  });
+
   test('a non-string pathname matches nothing rather than throwing', () => {
     // usePathname() is typed as a string, but a nav that throws takes the whole
     // shell down with it. Fails closed to "nowhere", which renders fine.
     assert.equal(isActive(undefined, '/devices'), false);
     assert.equal(isActive(null, '/', true), false);
+    assert.equal(activeNavHref(undefined, everyCapability), null);
+    assert.equal(activeNavHref(null, everyCapability), null);
   });
 });
 

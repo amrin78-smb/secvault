@@ -9,7 +9,7 @@ import {
   SETTINGS_ITEM,
   NAV,
   visibleNavItems,
-  isActive,
+  activeNavHref,
   sectionIsActive,
 } from '../../lib/navRegistry';
 import { useNavState } from './NavState';
@@ -187,7 +187,14 @@ export default function Sidebar({ version, capabilities }) {
   // takes over the screen has room for them.
   const showLabels = !railIsIcons || mode === 'drawer';
 
-  const settingsActive = isActive(pathname, SETTINGS_ITEM.href, false);
+  // ⛔ ONE RESOLUTION FOR THE WHOLE RAIL, NOT A PREDICATE PER ROW. Asking each
+  // entry "are you active" independently is what put Scores and Controls on at
+  // the same time on /compliance/controls: `isActive` matches by prefix, and a
+  // group's landing child is a prefix of its siblings. `activeNavHref` ranks
+  // the matches and returns the one winner. See its header for why `exact` on
+  // the landing child is the wrong fix.
+  const activeHref = activeNavHref(pathname, capabilities);
+  const settingsActive = SETTINGS_ITEM.href === activeHref;
 
   return (
     <>
@@ -215,11 +222,18 @@ export default function Sidebar({ version, capabilities }) {
           {NAV_SECTIONS.map((section) => {
             const active = sectionIsActive(pathname, section);
 
-            // ── A leaf: one row that navigates.
+            // ── A leaf: one row that navigates. It is a DESTINATION, so it
+            // takes the resolved winner; `active` above is the section-header
+            // question, which for a leaf happens to ask the same thing but is
+            // not exclusive and must not decide a row's highlight.
             if (!section.items) {
               return (
                 <div key={section.href} className="sv-nav-group">
-                  <NavLink item={section} active={active} showLabels={showLabels} />
+                  <NavLink
+                    item={section}
+                    active={section.href === activeHref}
+                    showLabels={showLabels}
+                  />
                 </div>
               );
             }
@@ -272,7 +286,7 @@ export default function Sidebar({ version, capabilities }) {
                     <NavLink
                       key={item.href}
                       item={item}
-                      active={isActive(pathname, item.href, item.exact, item.alsoActiveFor)}
+                      active={item.href === activeHref}
                       showLabels={showLabels}
                     />
                   ))}
