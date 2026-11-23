@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.236.4': [
+    'The traffic and reporting anomalies on Alerts are collapsed into a single bar. A fleet with 42 observations pushed the patch-now CVEs and config changes several screens down, so the page that exists to say what needs attention opened on something you had to scroll past.',
+    'The closed bar says what is inside it, in words: "3 firewalls stopped sending syslog \u00b7 1 firewall above normal denied traffic \u00b7 42 observations in the last 28 days". A disclosure labelled with nothing but a number is a number nobody opens.',
+    'Observations and firewalls are counted separately and always named. The same firewall going quiet on six occasions is six observations, not six firewalls, and the bar never prints one as the other.',
+    'Nothing is hidden or shortened \u2014 the whole list is one click away, and if a check could not be run on every firewall the bar says so before you open it. A failed check and an empty result are still two different panels, and neither is ever collapsed.',
+  ],
   '2.236.3': [
     'The sidebar highlighted two places at once. Opening Compliance \u2192 Controls or Compliance \u2192 Exceptions left "Scores" lit as well, so the "you are here" marker had two answers on the same screen. Only the page you are actually on is highlighted now.',
     'It was not only those two rows: the sidebar used to ask each row separately whether it was the current page, and a group\u2019s own landing page matches every page inside that group. It now resolves one winner for the whole rail, so the same fault cannot appear in a future group.',

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { IconChevronDown } from '../icons';
 import TimeAgo from '../ui/TimeAgo';
 
 // The ON-SCREEN surface for A6's anomaly detectors.
@@ -21,6 +22,35 @@ import TimeAgo from '../ui/TimeAgo';
 // function of the current window, and a stored one goes stale and is then read
 // as fact). Merging them would also put ~5 recurring observations into the one
 // feed `new_finding` was REMOVED from on 2026-07-20 for exactly that noise.
+//
+// ── COLLAPSED BY DEFAULT, AND THE CLOSED BAR CARRIES THE CONTENT (v2.236.4) ─
+// Reported from production: 42 observations pushed the acknowledgeable feed
+// below several screens of repeated prose, so the page whose job is "what needs
+// attention" opened on something nobody could get past. The list is NOT
+// truncated and nothing is dropped — the same distinction .wq-item records:
+// showing the top N hides the rest behind nothing, and an operator who reaches
+// the bottom of a short list believes they are finished.
+//
+// ⛔ IT COLLAPSES ONLY WHEN THE CLOSED BAR CAN SAY WHAT IS INSIDE. That is
+// Disclosure.js's own test applied to a whole section: if a reader who never
+// opens this would draw a WRONG CONCLUSION, the sentence is load-bearing and
+// belongs outside. So the bar states the breakdown in words ("3 firewalls
+// stopped sending syslog · 42 observations"), not a bare count — a disclosure
+// labelled only with a number is a number nobody opens.
+//
+// ⛔ TWO UNITS, KEPT APART. A finding is one RUN, and the same firewall going
+// quiet on six separate occasions is six findings. 42 observations is not 42
+// firewalls, and the production report is exactly a fleet where those two
+// numbers differ by an order of magnitude. Both are named, every time.
+//
+// ⛔ THE ERROR PANEL IS NEVER COLLAPSIBLE. "These checks could not run" put
+// behind a closed disclosure is the failed-read-as-a-fact rule with a chevron
+// on it. Nor is the earned all-clear, which is one line and has nothing to
+// disclose — a <details> there would be an affordance over an empty box.
+//
+// ⛔ A MARK, NEVER A TINTED BAR. v2.215.0: tone belongs on a mark, not on a
+// full-bleed ground. The closed bar's ground is --bg-card in every state and
+// the pill carries the tone.
 //
 // ⛔ COVERAGE IS RENDERED, NOT JUST FINDINGS. Each detector reports how many
 // devices it MEASURED versus could not judge, because "no findings" and "could
@@ -47,6 +77,21 @@ import TimeAgo from '../ui/TimeAgo';
 const DETECTOR_LABEL = {
   device_silent: 'Firewall stopped sending syslog',
   denied_spike: 'Denied traffic above normal',
+};
+
+// ⛔ The closed bar's own phrasing, SEPARATE from the badge label above, because
+// a badge names a kind and a sentence has to count something. Each takes the
+// count and the unit it is counting, so "3 firewalls" can never be printed over
+// a tally of observations.
+const DETECTOR_PHRASE = {
+  device_silent: {
+    devices: (n) => `${n} ${n === 1 ? 'firewall' : 'firewalls'} stopped sending syslog`,
+    observations: (n) => `${n} ${n === 1 ? 'silence' : 'silences'} observed`,
+  },
+  denied_spike: {
+    devices: (n) => `${n} ${n === 1 ? 'firewall' : 'firewalls'} above normal denied traffic`,
+    observations: (n) => `${n} denied-traffic ${n === 1 ? 'exceedance' : 'exceedances'}`,
+  },
 };
 
 // ⛔ The silence detector's own sentence, because it is the one whose ABSENCE is
@@ -92,6 +137,97 @@ const UNMEASURED_PANEL = {
   fontSize: 'var(--text-sm)',
 };
 
+const PILL = {
+  flex: 'none',
+  fontSize: 'var(--text-xs)',
+  fontWeight: 600,
+  padding: '2px 8px',
+  borderRadius: 'var(--radius-pill)',
+  whiteSpace: 'nowrap',
+};
+
+/**
+ * What the CLOSED bar says. Pure, exported, and tested directly — the whole
+ * safety of collapsing this section rests on this sentence being right, and a
+ * component that only renders cannot be asked what it would have said.
+ *
+ * ⛔ `devices` IS NULL, NEVER A FALLBACK COUNT, when any finding carries no
+ * device id. Keying such a finding on its natural key instead would count one
+ * firewall per observation and print "42 firewalls stopped sending syslog" over
+ * three. Unreachable today — every detector sets `deviceId` — which is exactly
+ * why the branch is written rather than assumed away.
+ */
+export function describeAnomalies(findings, states, lookbackDays) {
+  const list = Array.isArray(findings) ? findings : [];
+  const detectors = Object.keys(DETECTOR_LABEL);
+
+  const devicesKnown = list.every((f) => f && f.deviceId);
+  const perDetector = [];
+  for (const detector of detectors) {
+    const mine = list.filter((f) => f && f.detector === detector);
+    if (!mine.length) continue;
+    const phrase = DETECTOR_PHRASE[detector];
+    const devices = devicesKnown ? new Set(mine.map((f) => f.deviceId)).size : null;
+    perDetector.push({
+      detector,
+      devices,
+      observations: mine.length,
+      // An unregistered detector would otherwise be silently dropped from the
+      // bar while its rows were inside; name it rather than lose it.
+      text: phrase
+        ? (devicesKnown ? phrase.devices(devices) : phrase.observations(mine.length))
+        : `${mine.length} ${detector}`,
+    });
+  }
+
+  // ⛔ A COUNT IS DELIBERATELY NOT PRINTED FOR THE COVERAGE GAP. `states` is
+  // per (device, detector), so summing across detectors tallies PAIRS and a
+  // firewall unjudged by both would be counted twice — the unit trap this file
+  // already states for findings. The bar says "not measured on every firewall",
+  // which is the Coverage panel's own wording, and the real numbers are inside.
+  const anyUnjudged = detectors.some((d) => {
+    const s = (states && states[d]) || {};
+    return (Number(s.insufficient_baseline) || 0) > 0 || (Number(s.no_data) || 0) > 0;
+  });
+
+  // ⛔ Only the silence detector tints, matching the row badges one function
+  // down: a denied-traffic exceedance is an OBSERVATION whose margin is often a
+  // few percent (measured: median 7%), and putting it on the severity ramp
+  // would promise more than the measurement supports.
+  const tone = list.some((f) => f && f.detector === 'device_silent')
+    ? 'warn'
+    : list.length ? 'neutral' : anyUnjudged ? 'unmeasured' : 'none';
+
+  const parts = perDetector.map((p) => p.text);
+  if (list.length) {
+    parts.push(`${list.length} ${list.length === 1 ? 'observation' : 'observations'}`);
+  }
+  const window = Number(lookbackDays) > 0 ? ` in the last ${lookbackDays} days` : '';
+  // ⛔ THE ALL-CLEAR IS GATED ON COVERAGE, AND ITS FIRST DRAFT WAS NOT — the
+  // test caught the bar printing "No firewall stopped reporting and none
+  // exceeded its normal denied-traffic level" beside its own "not measured on
+  // every firewall" pill. That is the one sentence lib/evidence.js forbids
+  // product-wide, and collapsing the section is what would have made it the
+  // ONLY sentence most readers ever saw. An empty list over partial coverage
+  // says what it measured, never what it cleared.
+  const sentence = parts.length
+    ? `${parts.join(' · ')}${window}`
+    : anyUnjudged
+      ? `Nothing found on the firewalls these checks could judge${window} — and they could not judge every firewall.`
+      : `No firewall stopped reporting and none exceeded its normal denied-traffic level${window}.`;
+
+  return {
+    observations: list.length,
+    devices: devicesKnown ? new Set(list.map((f) => f.deviceId)).size : null,
+    perDetector,
+    anyUnjudged,
+    tone,
+    sentence,
+    // Nothing to disclose and nothing to hide: an earned all-clear is one line.
+    collapsible: list.length > 0 || anyUnjudged,
+  };
+}
+
 /** One detector's coverage line. Returns null only when there is nothing to say. */
 function Coverage({ detector, state }) {
   const s = state || {};
@@ -120,71 +256,36 @@ function Coverage({ detector, state }) {
   );
 }
 
-export default function AnomalyPanel({ result, error, lookbackDays }) {
-  // ⛔ FAILURE FIRST, AND IT IS NEVER AN EMPTY LIST.
-  if (error) {
-    return (
-      <div style={{ ...CARD, borderColor: 'var(--red)' }}>
-        <div style={HEAD}>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-            Traffic and reporting anomalies
-          </h2>
-        </div>
-        <div style={{ padding: 'var(--s4) var(--s5)', fontSize: 'var(--text-sm)', color: 'var(--red)' }}>
-          These checks could not run, so this section is <strong>not</strong> an all-clear
-          — nothing here has been ruled out. {error}
-        </div>
-      </div>
-    );
-  }
-
-  const findings = (result && result.findings) || [];
-  const states = (result && result.states) || {};
-  const detectors = Object.keys(DETECTOR_LABEL);
-
-  // An earned all-clear requires BOTH no findings AND nothing unjudged — the
-  // rule lib/evidence.js enforces product-wide: no green over partial coverage.
-  const unjudgedTotal = detectors.reduce((n, d) => {
-    const s = states[d] || {};
-    return n + (Number(s.insufficient_baseline) || 0) + (Number(s.no_data) || 0);
-  }, 0);
-
+/** The findings, the coverage panels and the mechanism note — the opened body. */
+// ⛔ NO VERDICT LINE IN HERE. The <summary> stays on screen while the section
+// is open, so the bar's sentence IS the verdict; repeating it a centimetre
+// lower gave an empty-but-uncovered fleet two near-identical sentences.
+function Body({ findings, states, detectors, lookbackDays }) {
   return (
-    <div style={CARD}>
-      <div style={HEAD}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-            Traffic and reporting anomalies
-          </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-            Measured against each firewall&rsquo;s own recent history
-            {lookbackDays ? ` (${lookbackDays} days)` : ''}. Computed when this page loads —
-            there is nothing to acknowledge, and an item disappears when the behaviour stops.
-          </p>
-        </div>
-        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-          {findings.length} {findings.length === 1 ? 'observation' : 'observations'}
-        </span>
-      </div>
-
-      {findings.length === 0 && (
-        <div style={{ padding: 'var(--s4) var(--s5)', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-          {unjudgedTotal === 0
-            ? 'No firewall stopped reporting and none exceeded its normal denied-traffic level.'
-            : 'Nothing was found on the firewalls these checks could judge — see below for the ones they could not.'}
-        </div>
-      )}
+    <>
+      <p
+        style={{
+          margin: 0,
+          padding: 'var(--s3) var(--s5)',
+          borderTop: '1px solid var(--border-light)',
+          fontSize: 'var(--text-sm)',
+          color: 'var(--text-secondary)',
+        }}
+      >
+        Measured against each firewall&rsquo;s own recent history
+        {lookbackDays ? ` (${lookbackDays} days)` : ''}. Computed when this page loads —
+        there is nothing to acknowledge, and an item disappears when the behaviour stops.
+        The same firewall appears once per occasion it did this, so there are normally
+        more observations than firewalls.
+      </p>
 
       {findings.map((f) => (
         <div key={f.naturalKey} style={ROW}>
           <span
             title={DETECTOR_NOTE[f.detector] || ''}
             style={{
+              ...PILL,
               flexShrink: 0,
-              fontSize: 'var(--text-xs)',
-              fontWeight: 600,
-              padding: '2px 8px',
-              borderRadius: 'var(--radius-pill)',
               // ⛔ Only the silence detector is tinted, and only warn: a firewall
               // that is not reporting is a genuine coverage gap. A denied-traffic
               // exceedance is an OBSERVATION whose margin is often a few percent
@@ -192,7 +293,6 @@ export default function AnomalyPanel({ result, error, lookbackDays }) {
               // promise more than the measurement supports.
               background: f.detector === 'device_silent' ? 'var(--tint-warn)' : 'var(--surface-subtle)',
               color: f.detector === 'device_silent' ? 'var(--tint-warn-fg)' : 'var(--text-secondary)',
-              whiteSpace: 'nowrap',
             }}
           >
             {DETECTOR_LABEL[f.detector] || f.detector}
@@ -226,6 +326,115 @@ export default function AnomalyPanel({ result, error, lookbackDays }) {
       ))}
 
       {detectors.map((d) => <Coverage key={d} detector={d} state={states[d]} />)}
-    </div>
+    </>
+  );
+}
+
+export default function AnomalyPanel({ result, error, lookbackDays }) {
+  // ⛔ FAILURE FIRST, AND IT IS NEVER AN EMPTY LIST — NOR A CLOSED ONE.
+  if (error) {
+    return (
+      <div style={{ ...CARD, borderColor: 'var(--red)' }}>
+        <div style={HEAD}>
+          <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+            Traffic and reporting anomalies
+          </h2>
+        </div>
+        <div style={{ padding: 'var(--s4) var(--s5)', fontSize: 'var(--text-sm)', color: 'var(--red)' }}>
+          These checks could not run, so this section is <strong>not</strong> an all-clear
+          — nothing here has been ruled out. {error}
+        </div>
+      </div>
+    );
+  }
+
+  const findings = (result && result.findings) || [];
+  const states = (result && result.states) || {};
+  const detectors = Object.keys(DETECTOR_LABEL);
+  const summary = describeAnomalies(findings, states, lookbackDays);
+
+  const title = (
+    <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>
+      Traffic and reporting anomalies
+    </h2>
+  );
+
+  // The mark. One pill, toned by what is actually inside — never a tinted bar.
+  const TONE_STYLE = {
+    warn: { background: 'var(--tint-warn)', color: 'var(--tint-warn-fg)' },
+    neutral: { background: 'var(--surface-subtle)', color: 'var(--text-secondary)' },
+    // ⛔ --surface-subtle, NOT --hatch, and that was a RENDERED finding rather
+    // than a judgement: --hatch is a repeating-linear-gradient, so the first
+    // draft put 12px text over diagonal stripes and the chip was illegible on
+    // screen. The hatch is for a BAR SEGMENT or a panel ground — the pill takes
+    // WorkQueueBoard's "not measurable" badge treatment, which is the house
+    // answer to this exact question. Still hueless either way.
+    unmeasured: { background: 'var(--surface-subtle)', color: 'var(--unmeasured)', border: '1px solid var(--border)' },
+  };
+  const countPill = summary.observations > 0 ? (
+    <span style={{ ...PILL, ...(TONE_STYLE[summary.tone] || TONE_STYLE.neutral) }}>
+      {summary.observations} {summary.observations === 1 ? 'observation' : 'observations'}
+      {summary.devices != null
+        ? ` on ${summary.devices} ${summary.devices === 1 ? 'firewall' : 'firewalls'}`
+        : ''}
+    </span>
+  ) : null;
+
+  // ⛔ Hueless, and it appears whether or not there are findings: "we could not
+  // look everywhere" qualifies an empty list exactly as hard as a full one.
+  const coveragePill = summary.anyUnjudged ? (
+    <span style={{ ...PILL, ...TONE_STYLE.unmeasured, fontWeight: 500 }}>
+      not measured on every firewall
+    </span>
+  ) : null;
+
+  // Nothing found and nothing unjudged: an earned all-clear, one line, no
+  // disclosure. A chevron over an empty box is an affordance that lies.
+  if (!summary.collapsible) {
+    return (
+      <div style={CARD}>
+        <div style={HEAD}>
+          <div>
+            {title}
+            <p style={{ margin: '4px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+              {summary.sentence}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <details className="anom-card" style={CARD}>
+      <summary>
+        {/* ⛔ A FLEX BASIS, NOT A MEDIA QUERY. At 390px the pills are `nowrap`
+            and were holding ~180px of the line, squeezing the heading into a
+            three-line column beside them. A basis wide enough to hold the
+            title means the line simply cannot fit both at drawer width and the
+            pills wrap to their own row — no threshold to pick, nothing to keep
+            in step with lib/navLayout.js's 1024/1280, and no second place the
+            viewport is measured. v2.223.1's rule, applied to one bar. */}
+        <div style={{ minWidth: 0, flex: '1 1 18rem' }}>
+          {title}
+          {/* ⛔ THE LOAD-BEARING LINE. A reader who never opens this must still
+              know what is in it, which is why the breakdown — not a bare count —
+              sits on the closed bar. */}
+          <p style={{ margin: '4px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+            {summary.sentence}
+          </p>
+        </div>
+        {countPill}
+        {coveragePill}
+        <IconChevronDown className="anom-chevron" width={16} height={16} aria-hidden="true" />
+      </summary>
+
+      <Body
+        findings={findings}
+        states={states}
+        detectors={detectors}
+        lookbackDays={lookbackDays}
+      />
+    </details>
   );
 }

@@ -3422,6 +3422,55 @@ tbody tr td { transition: background 0.12s ease; }
 .wq-item[open] > summary .wq-chevron { transform: rotate(180deg); }
 .wq-item[open] > summary { border-bottom: 1px solid var(--border-light); border-radius: var(--radius) var(--radius) 0 0; }
 
+/* ── Traffic and reporting anomalies (/alerts) ───────────────────────────────
+   The same <details> shape as .wq-item one block up, at SECTION grain rather
+   than row grain, and it is deliberately not that class: a work-queue row is a
+   row and this is a card with a heading, so sharing the selector would make a
+   padding change for one silently resize the other.
+
+   ⛔ COLLAPSED, NOT TRUNCATED. Nothing is dropped and no count is capped — the
+   whole list is one click away, and the closed bar states what is in it. See
+   components/alerts/AnomalyPanel.js for why the bar carries a breakdown rather
+   than a number.
+
+   ⛔ NO TINTED GROUND IN ANY STATE. v2.215.0: tone belongs on a mark. The pill
+   in the bar is the mark; this surface stays --bg-card whether a firewall has
+   been dark for a fortnight or nothing was found at all. */
+.anom-card > summary {
+  list-style: none;
+  cursor: pointer;
+  /* ⛔ BOTH axes from the density tokens, the half-density-aware bug .wq-item
+     records. The fallbacks are the card paddings this header used before it
+     became a summary, so the bar does not jump if a token is ever unset. */
+  padding: var(--row-pad-y, var(--s4)) var(--row-pad-x, var(--s5));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  border-radius: var(--radius);
+}
+.anom-card > summary::-webkit-details-marker { display: none; }
+.anom-card > summary:hover { background: var(--surface-subtle); }
+/* ⛔ --primary, not --focus-ring: the latter is a 22% wash and this rule
+   overrides the opaque global one. Same correction as .wq-item's. */
+.anom-card > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.anom-card[open] > summary { border-bottom: 1px solid var(--border-light); }
+
+/* The chevron is the only thing that moves — rotation only, no colour change,
+   so the marker never competes with the pill beside it. */
+/* ⛔ NO margin-left:auto HERE — the .wq-chevron lesson, arrived at from the
+   other side. An auto margin absorbs free space BEFORE flex-grow runs, so one
+   here would cancel the title block's flex:1 and leave the bar's sentence at
+   content width with the pills bunched against it. The title is the single
+   auto-sizing element; the pills and the chevron simply follow it. */
+.anom-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) { .anom-chevron { transition: none; } }
+.anom-card[open] > summary .anom-chevron { transform: rotate(180deg); }
+
 /* ── Reports workspace (/reports) ────────────────────────────────────────────
    ⛔ A RAIL PLUS A PANEL, NOT A LIST OF CARDS. The first version of this page
    stacked one card per report, each carrying a paragraph and a button. It was
