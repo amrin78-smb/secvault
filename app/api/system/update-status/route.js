@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.7': [
+    'Groundwork for a new check: a firewall whose log volume collapses without going fully silent. Nothing in SecVault could see that \u2014 the existing check asks only whether any event arrived in an hour, so a firewall that falls from millions of events a day to a few dozen keeps answering yes. One on this fleet did exactly that on 8 November and stayed that way.',
+    'The check is written and tested but deliberately NOT switched on. SecVault refuses to enable a detector until its alert rate and its detection rate have both been measured, and that measurement has not been run yet.',
+    'Its baseline is the firewall\u2019s own permanent history rather than a rolling recent window. A rolling baseline quietly re-learns the collapsed level as normal and the alert disappears while the firewall is still dark \u2014 measured on this fleet, a two-week baseline had already forgotten.',
+    'A day when SecVault itself was not collecting is excluded rather than counted as a quiet day, so a collector restart or a deploy cannot look like every firewall going quiet at once.',
+    'It will not report a firewall that has gone completely silent, or one that has never reported at all. Those are different findings with different first steps, and reporting them twice helps nobody.',
+  ],
   '2.237.6': [
     'The tool that measures a traffic-anomaly detector before it can be switched on was scoring it against too few test events to answer its own question. It judged whether a detector finds at least 90% of planted problems, using about 28 of them \u2014 and at that sample size even a perfect score could not have demonstrated 90%. The same detector scored 89% on 28 events and 94% on 375.',
     'Every sensitivity figure now carries a confidence interval and the number of events behind it, so a result can no longer be read as more precise than it is, and a threshold is never changed on one event\u2019s worth of evidence.',

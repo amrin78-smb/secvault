@@ -1073,6 +1073,27 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
    both left the suite green, because the tests drove the detector and the SQL and not the WIRING
    between them.
 
+2e. ◨ **IN PROGRESS v2.237.7 — a VOLUME-COLLAPSE detector.** `device_silent` asks only "did ANY
+   event arrive this hour", so a 99.999% fall that keeps dribbling is invisible to it: TFM-MH went
+   from ~5.9M events/day to ~30 on 2026-11-08 and was still dark 16 days later, with management
+   collection succeeding and every reachability signal green. ⛔ **`detectVolumeCollapse` is
+   written, tested (15 cases, 8 mutations red) and DELIBERATELY NOT REGISTERED** — no entry in
+   `DETECTORS`, no alert type, no `EVIDENCE` — because `assertRegisteredDetector` requires a
+   measured rate AND sensitivity and v2.237.6 is the argument for not guessing either. ⛔ **The
+   baseline is anchored in PERMANENT history, and that was measured rather than preferred**: swept
+   over 77 days, a 14-day trailing baseline had ALREADY cleared on TFM-MH while it was still dark,
+   and 28 days only defers the same failure to ~2026-12-06. ⛔ Thresholds swept on production: every
+   candidate catches TFM-MH on 11-09/10 at **0.03-0.04 alerts/day**, flagging only TFM-MH and
+   TFM-RN — the two real incidents — so the configurations are statistically indistinguishable on
+   two events and 99%/2-day/anchored was chosen on reasoning. ⛔ A day the FLEET was not collecting
+   is excluded, never zeroed, or a deploy gap flags all 17 firewalls. ⛔ Partitioned against
+   `device_silent`: a fully dark firewall is that detector's.
+   **REMAINING: plant synthetic collapses in `scripts/a6Harness.js`, measure rate + sensitivity,
+   register, wire the alert type, and add the operator CLOSE path** — decided 2026-11-24 with the
+   user: the finding is LONG-LIVED, cleared only by recovery, an explicit close, or the firewall
+   being removed. Modelled on `compliance_exceptions` (the measurement stays true and visible; the
+   operator records that it is expected), NOT a "mark as done", which `/work`'s own rule forbids.
+
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
    the same file handles the identical column correctly with a separate `Never probed` row.
