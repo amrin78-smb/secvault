@@ -209,13 +209,23 @@ export function describeAnomalies(findings, states, lookbackDays) {
   // WAS AN ALL-CLEAR OVER A FLEET NOBODY LOOKED AT (fixed v2.237.1).
   //
   // `anyUnjudged` reads only `insufficient_baseline` and `no_data` — the
-  // buckets for a firewall the detectors DID consider and could not judge. A
-  // firewall absent from the evidence entirely is in NEITHER:
-  // `loadReportingGrid` selects devices with `AND EXISTS (SELECT 1 FROM
-  // syslog_rollup_hourly …)`, so one that has never produced a rollup row is
-  // not in the grid, and `loadDeniedSeries`' `reporting` CTE is bounded to the
-  // window, so one dark for the whole window is absent from numerator AND
-  // denominator. Measured by calling this function: with EVERY bucket zero it
+  // buckets for a firewall the detectors DID consider and could not judge.
+  //
+  // ⛔ A FIREWALL ABSENT FROM THE EVIDENCE ENTIRELY USED TO BE IN NEITHER, AND
+  // THAT IS CLOSED UPSTREAM AS OF v2.237.3 — this paragraph is kept because the
+  // gate below still depends on the property, and a reader needs to know which
+  // half is enforced where. `loadReportingGrid` carried `AND EXISTS (SELECT 1
+  // FROM syslog_rollup_hourly …)` so a device that never produced a rollup row
+  // was not in the grid, and `loadDeniedSeries`' `reporting` CTE is bounded to
+  // the window so one dark for the whole window had no series. BOTH now count
+  // such a firewall as `no_data`: the grid selects every active device, and the
+  // denied loop iterates the grid rather than the series. So `anyUnjudged` DOES
+  // now see them, and the residual recorded here — "13-of-16 judged reads
+  // exactly like 16" — is gone. ⛔ The gate below stays regardless: it answers
+  // a different question (was ANYTHING judged) and is the only thing standing
+  // between a failed `states` read and an unqualified all-clear.
+  //
+  // Measured by calling this function: with EVERY bucket zero it
   // returned `anyUnjudged: false`, `tone: 'none'`, `collapsible: false` and the
   // flat sentence "No firewall stopped reporting and none exceeded its normal
   // denied-traffic level in the last 28 days." — no coverage pill, no
@@ -225,9 +235,7 @@ export function describeAnomalies(findings, states, lookbackDays) {
   // ⛔ THAT IS THE ONE SENTENCE `lib/evidence.js` FORBIDS PRODUCT-WIDE, and
   // v2.236.4 made it worse three ways: this gate became the sole safety
   // argument for collapsing the section, it also decides whether the disclosure
-  // EXISTS, and the all-clear became the only sentence on screen. Live in
-  // partial form — a monitoring-only firewall and PAKFood (which sends no
-  // syslog) are invisible to it, so 13-of-16 judged reads exactly like 16.
+  // EXISTS, and the all-clear became the only sentence on screen.
   //
   // ⛔ A BOOLEAN, NOT A SUM. `states` is per (device, detector), so adding
   // `measured` across detectors tallies PAIRS — the unit trap stated ten lines

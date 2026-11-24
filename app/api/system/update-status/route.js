@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.3': [
+    'A firewall added as logs-only was reported as "Failing \u2014 config collection 0% succeeding", with "Every poll in the last 3 days failed", minutes after it was created. SecVault never tries to connect to such a firewall, so there was no failed poll \u2014 the nightly collection loop was recording a skipped device as an unreachable one, which is the exact impression the skip exists to avoid.',
+    'It now records nothing for those firewalls, so they read as "not polled" rather than broken, and they no longer accrue one false failed poll and one warning in the engine log every day. Two of the three polling loops already skipped them; this was the third, and the only one that writes reachability.',
+    'Separately, a firewall that has never sent a single syslog event was invisible to both traffic anomaly checks \u2014 not judged, and not counted as a gap either, so "15 of 17 firewalls examined" was displayed exactly like "17 of 17". On this fleet that was two firewalls: one that sends no syslog at all, and the logs-only one added the same afternoon.',
+    'Both checks now count such a firewall as not-measured, and neither raises an alert about it: a firewall that never started sending is uncollected, not silent, and reporting it as "stopped sending syslog" would send someone looking for an outage that never happened.',
+    'Two statements inside SecVault\u2019s own engineering notes disagreed about this, one claiming the gap was handled and the other recording that it was not. Both have been corrected against a fresh measurement.',
+  ],
   '2.237.2': [
     'The Discovered senders list said nothing at all about the logs-only option on a firewall whose brand SecVault could not identify from its logs \u2014 which, on this fleet, is the only sender currently waiting for a decision. A detected FortiGate got the full "no credentials? add it anyway" note; an unidentified one got two bare buttons, so the capability v2.237.0 added was unreachable from the page that exists to offer it.',
     'That row now explains both halves: that no vendor is prefilled because its logs did not identify one, that you should pick the vendor yourself, and that if you have no credentials you can set Access Method to "Syslog only" and have it reported as never assessed rather than as clean.',

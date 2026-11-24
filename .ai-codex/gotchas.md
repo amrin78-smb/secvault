@@ -51,7 +51,7 @@ about to touch something listed here, go read the full CLAUDE.md section before 
   server-driven pattern every other tabbed page in this app uses — deliberate, copied from
   netvault's own Settings page. Don't "fix" this to match the other pages.
 
-## ⛔ A BACKTICK IN AN SQL COMMENT BREAKS THE TEMPLATE LITERAL AROUND IT (hit twice, 2026-11-23)
+## ⛔ A BACKTICK IN AN SQL COMMENT BREAKS THE TEMPLATE LITERAL AROUND IT (hit THREE times: twice 2026-11-23, again 2026-11-24)
 
 Every multi-line query in `lib/` lives inside a `` ` ``-delimited template literal, and this repo's
 house style is to explain a column in a `--` comment *inside* that string. Writing a column or file
@@ -64,8 +64,16 @@ these are CommonJS so it does catch them — but the files that bit were reached
 `tests/jsxSyntax.test.js` (SWC), which is the real gate. It cost two debug cycles in one sitting,
 in `lib/engines/deviceInventory.js` and `lib/engines/fleetHeadline.js`.
 
-⛔ **Inside a query string, write column and file names bare.** Both offending comments now carry
+⛔ **Inside a query string, write column and file names bare.** The offending comments now carry
 `-- (No backticks in here: this is inside a template literal.)` as a reminder to the next editor.
+
+⛔ **IT HAPPENED A THIRD TIME ON 2026-11-24**, in `lib/engines/anomalyDetectionsData.js`, writing a
+comment that explained a predicate being REMOVED — so the backticks came from quoting the old SQL.
+`node --check` reported `SyntaxError: missing ) after argument list`. ⛔ **The durable fix is not a
+sharper reminder, it is placement**: a long explanation does not belong inside the literal at all.
+That one was moved to the JSDoc block above the function, where backticks are safe, leaving a short
+bare-text note in the SQL pointing at it. Prefer that shape for anything longer than a line — a
+reminder that has now been read past three times is not working.
 
 ## ⛔ A PREFILL THAT HAD NEVER RUN, AND THE GUARD DEFENDING IT (found 2026-11-23, fixed v2.237.0)
 

@@ -543,6 +543,39 @@ async function runRuleVersionPullJob() {
     let anyConfigChanged = false;
 
     for (const device of devices) {
+      // ⛔ A LOG-ONLY FIREWALL IS NOT POLLED, SO IT MUST NOT BE RECORDED AS AN
+      // UNREACHABLE ONE. `collectAndStore` already skips it internally, so
+      // nothing was ever dialled — but this loop then ran
+      // `recordConnectivity({ reachable: collectedSomething })` unconditionally,
+      // and a skip produces no rules and no config, so it wrote a FAILED poll
+      // for a connection nobody attempted and logged `COLLECTED NOTHING` at
+      // warn.
+      //
+      // ⛔ MEASURED ON PRODUCTION 2026-11-24, on the fleet's first real
+      // logs-only device: one row in `device_connectivity_history` — source
+      // `collect`, `reachable = false`, message "nothing collected", written
+      // 13 minutes after the device was created. One failed poll of one gives
+      // `worstRate = 0`, which `pollHealthBand` reads as **failing**, so its
+      // header said "Failing — config collection 0% succeeding" and "Every poll
+      // in the last 3 days failed" about a firewall 20 minutes old that SecVault
+      // was never going to contact.
+      //
+      // ⛔ THAT IS THE EXACT OUTCOME THE SKIP EXISTS TO PREVENT. CLAUDE.md:
+      // "collectAndStore SKIPS, it does not fail — otherwise the device would
+      // look BROKEN rather than deliberately log-only", the same skipped-vs-
+      // error distinction `feedStatus.js` draws. The skip was implemented in
+      // the adapter layer and then defeated one function later, by the only
+      // one of the three poll loops that writes reachability. v2.237.0 guarded
+      // `vpn-session-poll` and `snmp-poll` and missed this one.
+      //
+      // ⛔ WRITING NO ROW IS THE POINT, not writing a passing one.
+      // `device_connectivity_history.reachable` is a BOOLEAN with no third
+      // state, so "we did not ask" cannot be expressed in it — recording
+      // `true` would be a fabricated success, which is worse. With no rows,
+      // `getDevicePollHealth` leaves `worstRate` null and `pollHealthBand`
+      // returns `unknown`, which `deviceContext.js` already defines as "a
+      // device we have not asked" and deliberately keeps OFF the severity list.
+      if (isMonitoringOnly(device)) continue;
       try {
         const collectResult = await collectForDevice(device);
         if (collectResult) {

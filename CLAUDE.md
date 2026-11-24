@@ -126,9 +126,25 @@ length wearing a measurement's clothes, which is the fabricated-edge defect `tru
 crosses the edge and then falls entirely outside it keeps ONE key: the dispatcher does not resolve
 and re-raise the alert on the day the firewall becomes MOST silent. ⛔ It is counted as JUDGED in
 the panel's coverage line, never as a gap. ⛔ **Measured on production 2026-11-16: not reachable
-today and on a clock.** 15 of 16 firewalls are current, PAKFood has never reported (correctly
-`no_data`), and **TFM-RN last reported 2026-11-08 — 8 days dark, so it crosses the 28-day boundary
-on 2026-12-06**, which is the day the old code would have stopped reporting it.
+today and on a clock.** 15 of 16 firewalls were current, PAKFood had never reported, and TFM-RN
+last reported 2026-11-08 — 8 days dark, due to cross the 28-day boundary on 2026-12-06.
+
+⛔ **BOTH HALVES OF THAT MEASUREMENT HAVE SINCE EXPIRED, AND ONE OF THEM WAS WRONG WHEN WRITTEN
+(re-measured 2026-11-24).** **TFM-RN recovered** — it reported at 14:00 on 2026-11-24, so the
+2026-12-06 prediction is void; what the window DID catch is that its outage ran to **236
+consecutive silent hours**. And **"PAKFood has never reported (correctly `no_data`)" was FALSE**:
+`no_data` was **0**, because `loadReportingGrid`'s `dev` CTE gated the device list on
+`EXISTS (… syslog_rollup_hourly …)`, so a firewall that has never produced a rollup row was not in
+the grid at all — it reached no detector and incremented no bucket, absent from the numerator AND
+the denominator. ⛔ **`components/alerts/AnomalyPanel.js` SAID SO AT THE TIME** ("a monitoring-only
+firewall and PAKFood … are invisible to it, so 13-of-16 judged reads exactly like 16"), so two
+files in this repository disagreed about one firewall for eight days and the measured one was
+right. ⛔ **Closed in v2.237.3**, in BOTH detectors — `loadDeniedSeries` had the same hole through
+its window-bounded `reporting` CTE, and fixing one of two is the trap this file already records
+from v2.228.10. Such a device is now counted `no_data` and still raises nothing: a firewall that
+never started is UNCOLLECTED, not silent. ⛔ **The durable lesson is that a dated measurement in
+prose is a liability with a fuse on it** — this one carried a prediction whose expiry date was
+printed inside it, and nothing was scheduled to go back.
 
 ⛔ **Measured-and-refused is a RESULT, not a gap** — re-measured 2026-11-12 on 2.3x the history
   and both are still refused, for reasons now recorded with dates in that file's own header.

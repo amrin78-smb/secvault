@@ -1034,6 +1034,26 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
   unclaimable, so nothing is over-claimed, but the honest bucket for all of them is "never connected
   to" and no existing state says that.
 
+2b. ✅ **CLOSED v2.237.3** — a firewall absent from the evidence ENTIRELY was neither judged nor
+   counted by either anomaly detector. `loadReportingGrid` gated its device list on
+   `EXISTS (… syslog_rollup_hourly …)` and `loadDeniedSeries` derived its devices from a
+   window-bounded `reporting` CTE, so a firewall that has never produced a rollup row (or is dark
+   for the whole window) was missing from the numerator AND the denominator. ⛔ **It was a RECORDED
+   residual of v2.237.1, not an unknown** — `AnomalyPanel.js` wrote it down ("13-of-16 judged reads
+   exactly like 16") and writing a gap down does not close it. ⛔ Measured on production
+   2026-11-24: 17 active, `measured` 15, `no_data` **0** — PAKFood and the newly-added logs-only
+   StarUnion. ⛔ Fixed in BOTH detectors, because one of two is the v2.228.10 trap. Counted, never
+   alerted: a firewall that never started is uncollected, not silent. 4 mutations verified red.
+
+2c. ✅ **CLOSED v2.237.3** — `runRuleVersionPullJob` wrote a FAILED `device_connectivity_history`
+   row for a logs-only firewall, so its header read "Failing — config collection 0% succeeding"
+   and "Every poll in the last 3 days failed" about a device 20 minutes old that SecVault never
+   contacts. `collectAndStore` skipped it correctly and the loop then recorded the skip as an
+   unreachable poll — the doctrine implemented in the adapter layer and defeated one function
+   later. v2.237.0 guarded `vpn-session-poll` and `snmp-poll` and missed the third loop, which is
+   the only one that writes reachability. ⛔ Found by the user testing the feature on production
+   the day it shipped.
+
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
    the same file handles the identical column correctly with a separate `Never probed` row.
