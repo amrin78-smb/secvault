@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.2': [
+    'The Discovered senders list said nothing at all about the logs-only option on a firewall whose brand SecVault could not identify from its logs \u2014 which, on this fleet, is the only sender currently waiting for a decision. A detected FortiGate got the full "no credentials? add it anyway" note; an unidentified one got two bare buttons, so the capability v2.237.0 added was unreachable from the page that exists to offer it.',
+    'That row now explains both halves: that no vendor is prefilled because its logs did not identify one, that you should pick the vendor yourself, and that if you have no credentials you can set Access Method to "Syslog only" and have it reported as never assessed rather than as clean.',
+    'It is the shape most likely to need that advice. Somebody who cannot log into a firewall often cannot read its brand off a console either, and the sender has no vendor recorded precisely because its syslog did not parse as one SecVault recognises. No brand is guessed in the note, and the prefill link still carries the address and hostname that were actually observed.',
+    'The three existing checks over this panel only read the source code, so they stayed green when a note was made invisible and failed on a harmless tidy-up. All of them are now checked by rendering the panel and reading the words it actually produces, for every shape a discovered sender can take \u2014 which is what found this gap: it was a hole between two notes, and no test of either note on its own could have seen it.',
+  ],
   '2.237.1': [
     'The traffic and reporting anomalies panel on Alerts could say "No firewall stopped reporting and none exceeded its normal denied-traffic level" when the checks had not actually been able to look at a single firewall. It now says so plainly instead: "These checks could not judge any firewall, so this is not an all-clear \u2014 no syslog evidence reached them."',
     'The old wording appeared whenever no syslog evidence reached the detectors at all \u2014 after a collector outage, on a fresh install, or if the hourly rollup stopped \u2014 and it was indistinguishable from a genuine all-clear, with no coverage note and nothing to open. A firewall that has never sent a single log was invisible to the coverage check that was supposed to catch exactly this.',

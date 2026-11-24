@@ -1037,12 +1037,24 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
    the same file handles the identical column correctly with a separate `Never probed` row.
-4. **Three `DiscoveredDeviceActions` guards in `tests/juniperSyslog.test.js` are source-text scans**
-   that stay green when the note is made unrenderable, and fail on a correct refactor. A
-   behavioural test is available with no new devDependency (`next/dist/build/swc` +
-   `react-dom/server`, the transform `tests/jsxSyntax.test.js` already loads). Same for
-   `tests/monitoringOnly.test.js`'s DeviceForm gate, which an agent proved stays green with the
-   gate removed by keeping the identifier count.
+4. ◨ **PARTLY CLOSED v2.237.2** — the `DiscoveredDeviceActions` half is done, and writing the
+   behavioural test is what found a live defect the source scans could not see.
+   `tests/discoveredDeviceNotes.test.js` mounts the component with `react-dom/server` (via
+   `next/dist/build/swc`, no devDependency) and reads the WORDS for every shape a discovered row
+   can take. ⛔ **The defect was a HOLE BETWEEN two notes, which no per-note assertion could have
+   found.** Both notes split on "is the detected vendor manageable", which assumes a vendor was
+   detected: `discovered_devices.observed_vendor` is NULLABLE ("NULL = never identified", its own
+   schema comment), so a third shape had `manageable` false *and* `vendor` falsy and rendered
+   NEITHER note. ⛔ Measured on production 2026-11-24 minutes after the v2.237.1 deploy: of seven
+   rows, the one still `new` and still sending (`10.248.40.254`, "StarUnion", 48 observed hours,
+   last seen an hour earlier) has `observed_vendor IS NULL` — **so the only row anybody was going
+   to click was the one the release said nothing on.** Fixed with a third hueless note naming the
+   vendor gap and the logs-only remedy; 8 mutations verified red, and the test asserts the
+   PARTITION (every shape yields exactly one note or a reasoned zero, with the vendor table derived
+   from `VENDOR_SLUGS` so a new vendor cannot be silently omitted the way `null` was).
+   ⛔ **STILL OPEN: `tests/monitoringOnly.test.js`'s DeviceForm gate**, which an agent proved stays
+   green with the gate removed by keeping the identifier count. `DeviceForm` is a much larger client
+   component with far more imports to stub, so it is its own sitting.
 5. **`$replyDirection` is written and nothing reads it** — the 53 `m=713` SonicWall rows still
    attribute traffic to the firewall's own WAN address in `syslog_talker_hourly`.
 6. ✅ **CLOSED v2.237.0** — `ACCESS_METHODS` was `['smc','api','ssh']` while `juniper` and

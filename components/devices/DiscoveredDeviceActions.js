@@ -191,6 +191,45 @@ export default function DiscoveredDeviceActions({
           {'and will report it as never assessed rather than as clean.'}
         </div>
       ) : null}
+      {kind === 'unmanaged' && !vendor ? (
+        // ⛔ THE THIRD STATE, AND ON THE REFERENCE FLEET IT IS THE ONLY LIVE
+        // ONE. The two notes around this one split on "is the detected vendor
+        // manageable", which silently assumes a vendor was detected at all.
+        // `discovered_devices.observed_vendor` is NULLABLE and its own comment
+        // says so ("NULL = never identified"), so a third shape reaches here:
+        // `manageable` is false because there is nothing to look up, and
+        // `vendor && !manageable` is false because `vendor` is falsy —
+        // **so NEITHER note rendered and the operator got two bare buttons.**
+        //
+        // ⛔ Measured on production 2026-11-24, immediately after the v2.237.1
+        // deploy: of seven `discovered_devices` rows the ONE still `new` and
+        // still sending (10.248.40.254, hostname "StarUnion", 48 observed
+        // hours, last seen an hour earlier) has `observed_vendor IS NULL`. The
+        // release that exists to let an un-loggable firewall into the
+        // inventory therefore said nothing at all on the only row anybody was
+        // going to click — while a detected FortiGate got the full hint.
+        //
+        // ⛔ AND THIS IS THE SHAPE MOST LIKELY TO NEED THE ADVICE, not least:
+        // an operator who cannot log into a firewall often cannot read its
+        // brand off a console either, and the row's vendor is NULL precisely
+        // because its syslog did not parse as one of the eight SecVault knows.
+        //
+        // ⛔ It names the vendor gap FIRST and the remedy second, because
+        // picking a vendor is the step that blocks the other one — and it does
+        // NOT guess a brand, which is the `VENDOR_META[vendor] ||
+        // VENDOR_META.forcepoint` trap one file over, reached from this very
+        // link.
+        //
+        // ⛔ Hueless: an unidentified brand is a gap in SECVAULT'S PARSERS, not
+        // a severity of the customer's — the same call the note below makes.
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--unmeasured)' }}>
+          {"SecVault could not identify this firewall's brand from its logs, so "}
+          {'no vendor is prefilled — pick it from the list. If you have no '}
+          {'credentials for it, set Access method to "Syslog only": SecVault '}
+          {'will keep attributing its logs and will report it as never assessed '}
+          {'rather than as clean.'}
+        </div>
+      ) : null}
       {kind === 'unmanaged' && vendor && !manageable ? (
         // ⛔ HUELESS, because this is a gap in SECVAULT'S REACH and not a
         // severity of the customer's — the same call the coverage register

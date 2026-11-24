@@ -955,6 +955,27 @@ shared claim in its `title`), `deviceInventory.js`/`deviceContext.js` project `m
 renders on `/devices` — in the **name** cell, because `vendor` is hideable from the ColumnChooser —
 and on all six per-device pages. ⛔ `coverageRegisterData.js` still does not project it; that is
 `.ai-codex/roadmap.md` row 2 and a RANKING decision, deliberately not folded into this change.
+⛔ **AND THE SENTENCE NAMING THE OPTION ON `/devices/discovered` HAD A THIRD STATE NOBODY GATED FOR
+(fixed v2.237.2).** `DiscoveredDeviceActions.js` split on "is the DETECTED vendor manageable", which
+assumes a vendor was detected at all — but `discovered_devices.observed_vendor` is NULLABLE and its
+own schema comment says so (*"NULL = never identified"*). So a third shape reached the render with
+`manageable` false (nothing to look up) **and** `vendor` falsy, and **NEITHER note rendered**: two
+bare buttons on the page that exists to offer this capability. ⛔ **Measured on production
+2026-11-24, minutes after the v2.237.1 deploy: of seven `discovered_devices` rows the ONE still
+`new` and still sending — `10.248.40.254`, hostname "StarUnion", 48 observed hours, last seen an
+hour earlier — has `observed_vendor IS NULL`.** A detected FortiGate got the full hint; the only row
+an operator was going to click got nothing. ⛔ **It is also the shape most likely to NEED the
+advice**: somebody who cannot log into a firewall frequently cannot read its brand off a console
+either, and the row's vendor is NULL precisely because its syslog did not parse as one of the eight
+SecVault knows. ⛔ The note names the vendor gap FIRST and the remedy second, and **guesses no
+brand** — naming one would be the `VENDOR_META[vendor] || VENDOR_META.forcepoint` trap reached from
+this very link. ⛔ **The durable lesson is about the TEST, not the component**: the three guards over
+this panel were SOURCE-TEXT SCANS, and the defect was a HOLE BETWEEN two notes — invisible to any
+assertion about either note on its own, and invisible to a scan either way, because every condition
+it looked for was present and correct. `tests/discoveredDeviceNotes.test.js` renders the component
+and asserts the PARTITION (every shape yields exactly one note or a reasoned zero, with the vendor
+table derived from `VENDOR_SLUGS` so a vendor added later cannot be silently omitted the way `null`
+was).
 ⛔ **`collectAndStore` SKIPS, it does not fail**: every pull would otherwise throw and the device
 would look BROKEN rather than deliberately log-only — the same `skipped`-vs-`error` distinction
 `feedStatus.js` draws, for the same reason. ⛔ `last_collected_at` **stays NULL for ever**, which is
