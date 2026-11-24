@@ -393,3 +393,76 @@ describe('⛔ gatherAnomalies carries the birth flag from the grid to the detect
       'undefined must mean "we do not know the start", not "the start is known"');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⛔ EACH DETECTOR IS SCORED OVER THE SPAN ITS FINDINGS COVER.
+//
+// `rateDrift` was handed `days` (28) for BOTH detectors. `device_silent` walks
+// the whole grid so that is right; `detectSpike` judges only the last
+// `DEFAULT_JUDGE_WINDOW_HOURS` (24) and trains on the rest, so its findings
+// span ONE DAY and dividing them by 28 understates the rate 28-fold.
+//
+// Measured on production 2026-11-24: 3 denied_spike findings reported as
+// "3 alert(s) in 28 days ... expected 28.00, p=2.8e-9, drifted_low" — a
+// detector flagged as having nearly stopped while producing ~3/day, which
+// scripts/a6Harness.js independently measures at 3.75/day for the shipped
+// configuration. The meta-check built to catch a stale rate was reporting a
+// fabricated one, and the whole suite was green over it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('⛔ rateDrift is given each detector\'s own observation window', () => {
+  const DEV = '44444444-4444-4444-8444-444444444444';
+  const HOURS = 24 * 28;
+
+  const pool = {
+    query: async (sql) => {
+      if (/max\(bucket_hour\) AS last_at/.test(sql)) {
+        return { rows: [{ device_id: DEV, last_at: new Date(Date.UTC(2026, 10, 24, 7)) }] };
+      }
+      if (/generate_series/.test(sql)) {
+        return {
+          rows: Array.from({ length: HOURS }, (_, i) => ({
+            device_id: DEV, device_name: 'FW', at: new Date(Date.UTC(2026, 9, 27, i)),
+            reported: true, grid_starts_at_birth: false,
+          })),
+        };
+      }
+      if (/FROM reporting/.test(sql) || /deny/i.test(sql)) {
+        return {
+          rows: Array.from({ length: HOURS }, (_, i) => ({
+            device_id: DEV, device_name: 'FW', at: new Date(Date.UTC(2026, 9, 27, i)),
+            value: 10,
+          })),
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  it('device_silent is scored over the GRID window', async () => {
+    const { rates } = await anomalyData.gatherAnomalies(pool, { now: NOW, days: 28 });
+    assert.equal(rates.device_silent.windowDays, 28,
+      'the silence detector walks the whole grid, so its findings span it');
+  });
+
+  it('⛔ denied_spike is scored over the JUDGE window, not the grid window', async () => {
+    const { rates } = await anomalyData.gatherAnomalies(pool, { now: NOW, days: 28 });
+    assert.equal(rates.denied_spike.windowDays, 1,
+      'detectSpike judges only the last 24h, so dividing its findings by the '
+      + '28-day grid understates the rate 28-fold — which is exactly how a '
+      + 'detector producing ~3/day was reported as drifted_low at p=2.8e-9');
+  });
+
+  it('⛔ the two windows are NOT the same number', async () => {
+    // The bug was one variable used twice. Pin the relation, not the values.
+    const { rates } = await anomalyData.gatherAnomalies(pool, { now: NOW, days: 28 });
+    assert.notEqual(rates.denied_spike.windowDays, rates.device_silent.windowDays,
+      'passing one window for both detectors is the defect');
+  });
+
+  it('the judge window is DERIVED, so overriding it moves the divisor', async () => {
+    const { rates } = await anomalyData.gatherAnomalies(pool,
+      { now: NOW, days: 28, judgeWindowHours: 48 });
+    assert.equal(rates.denied_spike.windowDays, 2,
+      'a hardcoded divisor would survive a changed judge window');
+  });
+});

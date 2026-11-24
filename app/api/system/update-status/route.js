@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.5': [
+    'SecVault\u2019s own check on whether its traffic-anomaly detectors are still behaving was reporting a fault that did not exist. It judged the denied-traffic detector over 28 days when that detector only ever examines the last 24 hours, so a detector firing about three times a day was reported as having almost stopped. Each detector is now scored over the period it actually looks at.',
+    'The same check correctly reports the other detector as firing far more often than recorded, and that one is real: two firewalls at the TFM site stopped sending syslog on 8 November. One resumed on the 18th; the other has sent roughly 30 events a day since, against about 5.9 million a day before.',
+    'The tool that certifies a detector before it can be switched on was not running that detector. It rebuilt the logic separately and left out two things the real one does, so the figure recorded as the expected alert rate described something that never ran. It now drives the real detector.',
+    'Re-measured over 77 days, the denied-traffic detector produces about 3.75 alerts a day rather than the 1 recorded, which is above its own noise ceiling. No threshold was changed on the strength of that \u2014 it is reported so the choice can be made deliberately.',
+    'That tool also could not complete a measurement over the 28-day window its own error message recommends, because the window is too short to build the baseline it requires. It needs 60 days or more.',
+  ],
   '2.237.4': [
     'Adding a firewall raised a false alert saying it had stopped sending syslog. Measured 48 minutes after one was added to this fleet: "StarUnion stopped sending syslog \u2014 AT LEAST 671 hours", about a firewall created that afternoon which was sending at the moment the alert was written.',
     'The silence check reads an hour-by-hour grid of when each firewall reported, and a firewall cannot have reported before it was added \u2014 so every hour before it existed looked like silence. Each firewall\u2019s grid now begins at the hour it was added.',

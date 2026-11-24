@@ -79,10 +79,31 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   v2.228.4.** `assertRegisteredDetector()` only ever checked that `alertsPerDay`, `measuredOn` and
   `method` EXIST, so a rate measured on 2026-10-06 stayed authoritative while the fleet moved
   underneath it. `rateDrift()` now compares each detector's OBSERVED count against its registered
-  rate on every run, and found BOTH shipped detectors wrong, in OPPOSITE directions: `device_silent`
-  at **17 alerts in 28 days against a registered 0.074/day (8.2x, p=9.6e-11)** and `denied_spike`
-  **drifted LOW — 2 where 28 were expected (p=2.9e-10)**, i.e. a detector registered as firing
-  daily that had nearly stopped and which nothing had noticed. ⛔ **A POISSON TAIL ON THE COUNT,
+  rate on every run, and found `device_silent` at **17 alerts in 28 days against a registered
+  0.074/day (8.2x, p=9.6e-11)** — re-measured 2026-11-24 at 39 in 28 days, and REAL: it is TFM-MH
+  (collapsed 2026-11-08, 5.9M/day -> ~30/day, still dark) and TFM-RN (a 236-hour outage, recovered).
+  ⛔ **IT ALSO REPORTED `denied_spike` AS "DRIFTED LOW", AND THAT WAS THE META-CHECK'S OWN BUG
+  RATHER THAN A FACT ABOUT THE FLEET (fixed v2.237.5).** It was handed ONE window for BOTH
+  detectors — `rateDrift(key, counts[key], days)` with `days` = 28. `device_silent` walks the whole
+  grid so 28 is right; **`detectSpike` judges only `DEFAULT_JUDGE_WINDOW_HOURS` (24) and trains on
+  the rest, so its findings span ONE DAY**, and dividing them by 28 understates the rate exactly
+  28-fold. Measured on production: *"3 alert(s) in 28 days … expected 28.00, p=2.8e-9"* about a
+  detector actually producing **3/day**; corrected, the same data reads
+  `3 over 1 day = 3.000/day, indistinguishable`. ⛔ **The guard built to catch a fabricated rate was
+  publishing one.** ⛔ **The cost of being right is that the check is now statistically WEAK for
+  `denied_spike`** — one day of evidence can almost never reject a Poisson null — so the HARNESS,
+  not this, measures that detector's rate. Stated in the code, not hidden.
+  ⛔ **AND `scripts/a6Harness.js` DID NOT RUN THE DETECTOR IT CERTIFIES (also v2.237.5).** It
+  re-implemented the pipeline from `seasonalBaseline` primitives, omitting `detectSpike`'s 5% margin
+  floor AND its per-device `selectGrain`, so `EVIDENCE.denied_spike.alertsPerDay = 1.0` described a
+  detector that does not ship. It now drives the real `detectSpike` one simulated day at a time and
+  dedupes by the dispatcher's natural key. ⛔ **Measured 2026-11-24, shipped config (q=0.90,
+  persist=3): 3.75 alerts/day at 89% sensitivity** — nearly 4x the registered figure, ABOVE the
+  harness's own <=3/day bar and BELOW its >=90% sensitivity bar, so **no configuration currently
+  passes both**. The registered value is deliberately NOT updated without that decision being taken.
+  ⛔ **At `--days 28` the harness cannot reach its own coverage bar at all** (its 70/30 split leaves
+  19 samples per hour-of-day bucket where q=0.90 needs 20), so the re-measure instruction in
+  `assertRegisteredDetector`'s error text fails at the window it implies. Use >= 60 days. ⛔ **A POISSON TAIL ON THE COUNT,
   never a ratio threshold**: 0.074/day came from TWO observed runs, so a 2x "deviation" is noise
   and counts 0-5 over 28 days all correctly read `indistinguishable`. ⛔ **IT REPORTS AND NEVER
   REFUSES** — disarming a detector for failing a meta-check is the guard-that-cannot-fire pattern

@@ -39,6 +39,8 @@
 // makes.
 
 const sb = require('../lib/engines/seasonalBaseline');
+// 26d4 The REAL detector, so the registrable rate measures what ships.
+const { detectSpike } = require('../lib/engines/anomalyDetections');
 
 const GRAINS = [sb.GRAINS.HOUR_OF_WEEK, sb.GRAINS.HOUR_OF_DAY_SPLIT, sb.GRAINS.HOUR_OF_DAY];
 const QUANTILES = [0.90, 0.95, 0.975, 0.99];
@@ -248,6 +250,73 @@ function evaluate(train, control, { grain, quantile, persistence }) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// ⛔ THE PASS THAT DRIVES THE REAL DETECTOR (added 2026-11-24)
+// ---------------------------------------------------------------------------
+//
+// ⛔ WHY: THE SWEEP ABOVE DOES NOT MEASURE THE DETECTOR THAT SHIPS, AND THE
+// REGISTERED RATE CAME FROM IT ANYWAY. `evaluate()` re-implements the pipeline
+// out of `seasonalBaseline` primitives. `detectSpike` does three things it does
+// not:
+//   1. it applies `SPIKE_MIN_MARGIN_PCT` (5%), a floor that removes 12 of 32
+//      live runs — the "0.0% above its ceiling" class;
+//   2. it CHOOSES the grain per device via `selectGrain`, so sweeping a fixed
+//      grain measures a model the product never runs;
+//   3. it judges only `DEFAULT_JUDGE_WINDOW_HOURS` (24) and trains on the rest,
+//      rather than a 70/30 split of the whole series.
+//
+// So `EVIDENCE.denied_spike.alertsPerDay = 1.0` describes an UNGATED detector,
+// while `rateDrift()` counts findings produced by the GATED one. Measured
+// 2026-11-24: that mismatch is what reported `denied_spike` as "drifted LOW,
+// 3 alerts against an expected 28, p=2.9e-9" — a comparison between two
+// different detectors, read as a fault in the fleet.
+//
+// ⛔ THIS IS THE NUMBER THAT MAY BE REGISTERED. The sweep above stays, because
+// choosing a quantile still needs the grain/threshold exploration — but it is
+// now labelled as exploration, and `assertRegisteredDetector`'s rate must come
+// from here.
+//
+// ⛔ IT SIMULATES OPERATION RATHER THAN SCORING A SPLIT. The detector runs
+// against a growing series and judges the most recent 24h, so the harness steps
+// a cursor one DAY at a time and calls it exactly as the engine would, then
+// dedupes runs by the natural key the dispatcher uses. Without the dedup a
+// sustained event counts once per day and the rate is inflated — which is
+// precisely why `DEFAULT_JUDGE_WINDOW_HOURS`' own comment says dedup "is a
+// large part of why the measured rate is bearable".
+//
+// ⛔ KNOWN AND STATED OVER-COUNT: stepping daily means a run straddling two
+// days can present two different `startAt` values and so two keys, where the
+// hourly engine would hold one. The error is in the SAFE direction (it
+// over-states the alert rate) and is recorded here rather than corrected,
+// because correcting it means simulating 24x the calls for a bound that is
+// already conservative.
+function detectorKey(deviceIdx, run) {
+  return `${deviceIdx}:${run.truncated ? 'start-before-window' : new Date(run.startAt).toISOString()}`;
+}
+
+/**
+ * Run the REAL detectSpike across a device series, one simulated day at a time.
+ * @returns {{keys:Set<string>, days:number, runs:Array, insufficient:number}}
+ */
+function runRealDetector(series, deviceIdx, { quantile, persistence, judgeWindowHours = 24, trainFrac }) {
+  const keys = new Set();
+  const runs = [];
+  let days = 0;
+  let insufficient = 0;
+  const firstCursor = Math.floor(series.length * trainFrac);
+  // Step a day at a time; each call judges the final `judgeWindowHours`.
+  for (let cursor = Math.max(firstCursor, judgeWindowHours + 1);
+    cursor <= series.length; cursor += 24) {
+    const r = detectSpike(series.slice(0, cursor), {
+      quantile, minHours: persistence, judgeWindowHours,
+    });
+    if (r.state !== 'measured') { insufficient += 1; continue; }
+    days += 1;
+    for (const run of r.runs) { keys.add(detectorKey(deviceIdx, run)); runs.push(run); }
+  }
+  return { keys, days, runs, insufficient };
+}
+
 /** Sweep every configuration against the live rollups. */
 async function realRun(opts) {
   const byDevice = await loadSeries(opts.metric, opts.days);
@@ -320,6 +389,67 @@ async function realRun(opts) {
   }
   console.log('\n  \u26d4 "alerts/day" is an ALERT RATE, not a false-positive rate — this data carries no');
   console.log('     labels, so some firings may be real. It is an UPPER BOUND on false positives.');
+  console.log('  ⛔ THE TABLE ABOVE IS EXPLORATION, NOT A REGISTRABLE RATE: it re-implements');
+  console.log('     the pipeline and omits detectSpike\'s 5% margin floor and its grain selection.');
+
+  // -------------------------------------------------------------------------
+  // The pass that drives the SHIPPING detector.
+  // -------------------------------------------------------------------------
+  console.log('\n  REAL DETECTOR — detectSpike as it ships (grain self-selected, 5% margin');
+  console.log('  floor, 24h judged per call, runs deduped by the dispatcher\'s natural key)\n');
+  const h2 = '  q      persist  alerts/day  found planted   device-days  insufficient';
+  console.log(h2);
+  console.log('  ' + '-'.repeat(h2.length - 2));
+  const real = [];
+  for (const q of QUANTILES) {
+    for (const p of PERSISTENCE) {
+      let alerts = 0; let deviceDays = 0; let insufficient = 0;
+      let plantedN = 0; let detected = 0;
+      for (let i = 0; i < devices.length; i += 1) {
+        const live = runRealDetector(devices[i], i,
+          { quantile: q, persistence: p, trainFrac: opts.train });
+        alerts += live.keys.size;
+        deviceDays += live.days;
+        insufficient += live.insufficient;
+
+        // Sensitivity against the SAME series with anomalies planted, scored
+        // by TIMESTAMP overlap -- the detector returns times, not indices.
+        const pc = planted[i].copy;
+        const cut = Math.floor(pc.length * opts.train);
+        const windows = planted[i].windows
+          .filter((w) => w.start >= cut)
+          .map((w) => ({
+            from: pc[w.start].at,
+            to: pc[Math.min(w.start + w.length - 1, pc.length - 1)].at,
+          }));
+        if (windows.length === 0) continue;
+        plantedN += windows.length;
+        const pr = runRealDetector(pc, i, { quantile: q, persistence: p, trainFrac: opts.train });
+        for (const w of windows) {
+          const from = new Date(w.from).getTime();
+          const to = new Date(w.to).getTime();
+          if (pr.runs.some((r) => r.startAt && r.endAt
+            && new Date(r.startAt).getTime() <= to
+            && new Date(r.endAt).getTime() >= from)) detected += 1;
+        }
+      }
+      const perDay = deviceDays ? alerts / (deviceDays / devices.length) : null;
+      real.push({ q, p, alerts, perDay, deviceDays, insufficient,
+        sens: plantedN ? detected / plantedN : null, plantedN, detected });
+    }
+  }
+  for (const r of real) {
+    console.log(`  ${String(r.q).padEnd(6)} ${String(r.p).padEnd(8)}`
+      + `${r.perDay === null ? '    n/a' : r.perDay.toFixed(2).padStart(11)}`
+      + `${r.sens === null ? '          n/a' : `${(r.sens * 100).toFixed(0)}% (${r.detected}/${r.plantedN})`.padStart(16)}`
+      + `${String(r.deviceDays).padStart(14)}${String(r.insufficient).padStart(14)}`);
+  }
+  const shipped = real.find((r) => r.q === 0.9 && r.p === 3);
+  if (shipped && shipped.perDay !== null) {
+    console.log(`\n  SHIPPED CONFIG (q=0.90, persist=3): ${shipped.perDay.toFixed(3)} alerts/day`
+      + `${shipped.sens === null ? '' : `, ${(shipped.sens * 100).toFixed(0)}% sensitivity`}`);
+    console.log('  ^ THIS is the figure EVIDENCE.denied_spike.alertsPerDay must carry.');
+  }
 }
 
 function main() {
