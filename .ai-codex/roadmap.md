@@ -1149,6 +1149,18 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
    operator records that it is expected), NOT a "mark as done", which `/work`'s own rule forbids.
    ⛔ Until that path lands a collapse finding clears ONLY on recovery, which is every other anomaly
    finding's behaviour — do not describe it as closeable before it is.
+   ⛔ **AND THE CASE FOR IT IS STRONGER THAN THIS ROW SAID, MEASURED ON PRODUCTION AFTER THE v2.237.8
+   DEPLOY.** The argument everywhere above is that `device_silent` CANNOT see a dribbling firewall.
+   `gatherAnomalies` against the live fleet says something worse: it CAN, **38 times**, and says the
+   wrong thing each time. Of 42 findings fleet-wide, **38 are `device_silent` on TFM-MH alone** —
+   it reports in only 8-20 hours of each day at 20-44 events, so every gap is a separate silence run
+   with its own natural key. Each one is titled *"TFM-MH stopped sending syslog"* about a firewall
+   that has not stopped sending syslog. ⛔ **This is also the whole of the `device_silent`
+   rate drift**: `drifted_high`, 39 alerts in 28 days against a registered 0.074/day (p=0), and 38
+   of the 39 are one firewall in a state this detector is the wrong one for. So the collapse
+   detector does not only ADD a finding — it REPLACES 38 wrong ones with one correct one, and the
+   drift notice resolves itself when it does. ⛔ Note the drift check behaved exactly as designed
+   here: it reported, it refused nothing, and the figure it published was true.
 
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
