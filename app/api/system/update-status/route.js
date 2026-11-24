@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.8': [
+    'Measured the volume-collapse detector against 78 days of the live fleet: one alert in 930 device-days.',
+    'Fixed a detector defect the measurement found — a firewall dark for nine days was reported as a volume collapse, with two alerts for one outage.',
+    'The collapse window moved from 2 days to 3, because 2 could not be shown to meet the sensitivity bar.',
+    'The anomaly harness can now measure the collapse detector, including specificity on a controlled series.',
+  ],
   '2.237.7': [
     'Groundwork for a new check: a firewall whose log volume collapses without going fully silent. Nothing in SecVault could see that \u2014 the existing check asks only whether any event arrived in an hour, so a firewall that falls from millions of events a day to a few dozen keeps answering yes. One on this fleet did exactly that on 8 November and stayed that way.',
     'The check is written and tested but deliberately NOT switched on. SecVault refuses to enable a detector until its alert rate and its detection rate have both been measured, and that measurement has not been run yet.',

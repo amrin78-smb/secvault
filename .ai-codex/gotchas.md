@@ -2515,3 +2515,35 @@ not outlive the defect.
 ⛔ **The general rule: adding a vendor to ONE registry is a change to every surface that assumed the
 registries agreed.** The seven touchpoints in CLAUDE.md are the ones that must be updated together
 for a MANAGED vendor; this is the failure mode for a vendor that is deliberately in only one of them.
+
+## A guard must test the same statistic its verdict does (2026-11-24, v2.237.8)
+
+`detectVolumeCollapse` hands a FULLY DARK firewall to `device_silent` — that partition is the whole
+reason the two detectors can coexist. The guard was
+`if (window.reduce((a, r) => a + r.events, 0) <= 0) return null;` while the verdict was
+`rec <= base * (1 - ratio)`, where `rec` is the window's **median**.
+
+⛔ **A SUM AND A MEDIAN DISAGREE EXACTLY AT THE BOUNDARY, WHICH IS THE ONLY PLACE THE QUESTION IS
+HARD.** Measured on production: TFM-RN reported nothing from 2026-11-09 to 11-17 (nine days, no
+rollup rows at all), so a 3-day window straddling the boundary is `[758646, 0, 0]` — it **sums to
+758,646** and **medians to 0**. The guard passed, the verdict fired, and the finding claimed
+`recent: 0 events/day`: `device_silent`'s exact claim, published by the detector written for the
+case where silence does NOT apply.
+
+⛔ **IT ALSO CHURNED, AND THAT IS THE EXPENSIVE HALF.** Walking back to the onset across a dark
+stretch produced TWO keys for ONE outage (onset 2026-11-08 found at one cursor, 2026-11-16 at
+another), so the dispatcher would have resolved and re-raised. One alert became two for a firewall
+that had a single incident.
+
+⛔ **THE FIX IS NOT "ALSO CHECK THE MEDIAN".** It is to delete the second statistic:
+`if (rec <= 0) return null;` strictly subsumes the sum test (a zero sum implies a zero median, never
+the reverse), so the detector narrowed and a class of finding disappeared rather than being traded
+for another. TFM-MH — the firewall this detector exists for — is unaffected, because it never reaches
+zero on any day.
+
+⛔ **THE SAME FILE CARRIED A SECOND INSTANCE OF THE SAME SHAPE, IN PROSE.**
+`COLLAPSE_SUSTAIN_DAYS`' comment said "consecutive judgeable days the drop must hold". Because the
+verdict is a median, only a MAJORITY of the window has to be down: at 3 days `[1M, 10, 10]` fires on
+two collapsed days. ⛔ Found because a test asserting *"two days is the declared sustain"* went on
+passing when the constant moved from 2 to 3 — **a test that passed for the wrong reason**, which is
+this repo's own "verify the outcome, not the mechanism" rule turned on an assertion message.

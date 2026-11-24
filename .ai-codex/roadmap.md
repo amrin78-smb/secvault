@@ -1082,17 +1082,73 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
    measured rate AND sensitivity and v2.237.6 is the argument for not guessing either. ⛔ **The
    baseline is anchored in PERMANENT history, and that was measured rather than preferred**: swept
    over 77 days, a 14-day trailing baseline had ALREADY cleared on TFM-MH while it was still dark,
-   and 28 days only defers the same failure to ~2026-12-06. ⛔ Thresholds swept on production: every
-   candidate catches TFM-MH on 11-09/10 at **0.03-0.04 alerts/day**, flagging only TFM-MH and
-   TFM-RN — the two real incidents — so the configurations are statistically indistinguishable on
-   two events and 99%/2-day/anchored was chosen on reasoning. ⛔ A day the FLEET was not collecting
+   and 28 days only defers the same failure to ~2026-12-06. ⛔ An early threshold sweep reported
+   **0.03-0.04 alerts/day flagging TFM-MH and TFM-RN**; both halves are superseded below — the rate
+   is 0.017/day and the TFM-RN firing was a defect in this detector. ⛔ A day the FLEET was not collecting
    is excluded, never zeroed, or a deploy gap flags all 17 firewalls. ⛔ Partitioned against
    `device_silent`: a fully dark firewall is that detector's.
-   **REMAINING: plant synthetic collapses in `scripts/a6Harness.js`, measure rate + sensitivity,
-   register, wire the alert type, and add the operator CLOSE path** — decided 2026-11-24 with the
-   user: the finding is LONG-LIVED, cleared only by recovery, an explicit close, or the firewall
-   being removed. Modelled on `compliance_exceptions` (the measurement stays true and visible; the
+
+   ⛔ **MEASURED v2.237.8, AND THE MEASUREMENT CHANGED A SHIPPED CONSTANT AND FOUND A REAL DEFECT.**
+   `scripts/a6Harness.js --detector collapse` drives the REAL detector over 78 days of live daily
+   rollups (16 devices, 930 device-days). ⛔ **The paragraph above said "0.03-0.04 alerts/day,
+   flagging TFM-MH and TFM-RN — the two real incidents"; that was wrong on both halves.** The rate
+   is **0.017/day — ONE alert in 930 device-days** — and TFM-RN was a DEFECT, not an incident this
+   detector should report.
+   ⛔ **THE DEFECT: THE FULLY-DARK HAND-OFF GUARD TESTED THE WINDOW'S SUM WHILE THE VERDICT TESTED
+   ITS MEDIAN.** TFM-RN reported NOTHING from 2026-11-09 to 11-17 (nine days, no rollup rows) and a
+   window straddling the boundary — `[758646, 0, 0]` — sums to 758,646 while its median is 0. So
+   the guard passed, the detector fired, and the finding claimed **`recent: 0 events/day`**:
+   `device_silent`'s exact claim, made by the detector built for the case where silence does NOT
+   apply. It also CHURNED, producing TWO onsets (11-08 and 11-16) for ONE outage, because the
+   walk-back crossed the dark stretch. Fixed to `rec <= 0`, which strictly subsumes the sum test;
+   TFM-RN now produces nothing and every configuration yields exactly one alert. ⛔ **The durable
+   lesson is narrower than "handle zeros": A GUARD MUST TEST THE SAME STATISTIC ITS VERDICT DOES** —
+   two statistics for one question disagree exactly at the boundary, which is the only place the
+   question is hard. In `gotchas.md`.
+   ⛔ **`COLLAPSE_SUSTAIN_DAYS` MOVED 2 → 3 ON THE INTERVAL'S LOWER BOUND.** At 2 days sensitivity
+   is 92% (840/915) with a 95% Wilson lower bound of **89.85%**, so it cannot be SHOWN to clear the
+   >=90% bar while its point estimate reads like a pass; at 3 days it is **93% (826/885, lower bound
+   91.5%)** at the same 0.017/day. 5 days scores identically and detects two days later. ⛔ Ranking
+   on the bare percentage picks 2 — the same error v2.237.6 corrected for `denied_spike`, met again
+   two releases later on a different detector, 0.15 points from passing.
+   ⛔ **`COLLAPSE_DROP_RATIO` IS A STATED JUDGEMENT AND IS LABELLED AS ONE.** 0.95, 0.99 and 0.999
+   produce the IDENTICAL alert, rate and sensitivity at every sustain, because the one real collapse
+   is a 99.999% fall that clears every bar and nothing else comes close — the fleet does not
+   discriminate it. 0.99 is kept on the argument that a hundred-fold fall is not a plausible traffic
+   change while a twenty-fold one is reachable by a branch closing. Same class as `reviewOverdue`'s
+   90 days, not a derivation dressed as a measurement.
+   ⛔ **SENSITIVITY MAGNITUDES ARE MULTIPLES OF THE BAR, NOT ABSOLUTE FRACTIONS — the first draft
+   got this wrong in a way that read as a 42% detector.** Planting a fixed `[0.001, 0.01, 0.05]`
+   against three bars put every cell where the planted remainder EQUALLED the bar's remainder
+   exactly on the threshold, and a threshold at its own boundary is a coin toss: those cells read
+   25-43% while every cell a factor of ten inside read 91-93%, for the same detector. Confirmed on a
+   flat synthetic canvas at **51% (486/944)** at the bar and **944/944** inside it.
+   ⛔ **SPECIFICITY IS MEASURED ON A FLAT SYNTHETIC CANVAS, AND READING THE REAL-SERIES ROWS AS A
+   FAILURE WAS THE SECOND DRAFT'S MISTAKE.** A plant lands ON TOP OF real variation, so a day whose
+   natural volume was already a tenth of the device's median (TFM-RN's 2026-10-26 was 98,374 against
+   ~1.6M, 6%) plus a ten-times-the-bar plant is a genuine hundred-fold fall — the detector is RIGHT
+   to fire, because the series it was handed really did collapse. ~9 of ~900 live device-days have
+   that shape. On the flat canvas a ten-times-outside plant fires **0 of 944 in every
+   configuration**, so the ratio guard is sound.
+   ⛔ **`COLLAPSE_SUSTAIN_DAYS` IS A WINDOW LENGTH, NOT A RUN, AND ITS OWN COMMENT SAID
+   "consecutive" UNTIL IT WAS EXERCISED.** The verdict is the window's median, so a MAJORITY must be
+   down: at 3 days `[1M, 10, 10]` fires on two collapsed days, and a recovery takes two days to
+   clear. The hysteresis is wanted; it is a weaker guarantee than "three consecutive days" and may
+   not be described as one. ⛔ Found because a test asserting *"two days is the declared sustain"*
+   went on passing when the constant moved to 3 — a test that passed for the wrong reason. Both
+   directions are now pinned against the constant rather than a literal.
+   **REMAINING: the LOADER plus the registration, in ONE commit** — `gatherAnomalies` drives each
+   detector with its own loader rather than iterating `DETECTORS`, so registering alone wires
+   nothing and would leave a registered detector that cannot fire. The loader needs the daily grid
+   `COLLAPSE_SQL` already proves (3.5s on production), and ⛔ **it must count a never-reporting
+   firewall in the denominator** — the harness's `devs` CTE reads `DISTINCT device_id FROM hourly`,
+   which omits PAKFood entirely; that is fine for a measurement and is exactly the v2.237.3 hole if
+   it reaches the engine. **Then the operator CLOSE path** — decided 2026-11-24 with the user: the
+   finding is LONG-LIVED, cleared only by recovery, an explicit close, or the firewall being
+   removed. Modelled on `compliance_exceptions` (the measurement stays true and visible; the
    operator records that it is expected), NOT a "mark as done", which `/work`'s own rule forbids.
+   ⛔ Until that path lands a collapse finding clears ONLY on recovery, which is every other anomaly
+   finding's behaviour — do not describe it as closeable before it is.
 
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in

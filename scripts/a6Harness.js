@@ -40,7 +40,7 @@
 
 const sb = require('../lib/engines/seasonalBaseline');
 // 26d4 The REAL detector, so the registrable rate measures what ships.
-const { detectSpike } = require('../lib/engines/anomalyDetections');
+const { detectSpike, detectVolumeCollapse } = require('../lib/engines/anomalyDetections');
 
 const GRAINS = [sb.GRAINS.HOUR_OF_WEEK, sb.GRAINS.HOUR_OF_DAY_SPLIT, sb.GRAINS.HOUR_OF_DAY];
 const QUANTILES = [0.90, 0.95, 0.975, 0.99];
@@ -142,7 +142,7 @@ async function loadSeries(metric, days) {
 
 function parseArgs(argv) {
   const o = { synthetic: false, days: 28, metric: 'events', devices: 16, seed: 42, train: 0.7,
-    plants: 6, magnitude: 6 };
+    plants: 6, magnitude: 6, detector: 'spike' };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--synthetic') { o.synthetic = true; continue; }
@@ -153,8 +153,12 @@ function parseArgs(argv) {
     else if (a === '--train') { o.train = Number(v); i += 1; }
     else if (a === '--plants') { o.plants = Number(v); i += 1; }
     else if (a === '--magnitude') { o.magnitude = Number(v); i += 1; }
+    else if (a === '--detector') { o.detector = v; i += 1; }
   }
   if (!Number.isFinite(o.days) || o.days <= 0) throw new Error(`--days must be positive (got ${JSON.stringify(o.days)})`);
+  if (!['spike', 'collapse'].includes(o.detector)) {
+    throw new Error(`--detector must be spike or collapse (got ${JSON.stringify(o.detector)})`);
+  }
   if (!(o.train > 0.5 && o.train < 1)) throw new Error(`--train must be between 0.5 and 1 (got ${JSON.stringify(o.train)})`);
   return o;
 }
@@ -550,8 +554,407 @@ async function realRun(opts) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// THE VOLUME-COLLAPSE PASS (added 2026-11-24)
+// ---------------------------------------------------------------------------
+//
+// detectVolumeCollapse cannot register without a measured alert rate AND a
+// measured sensitivity (assertRegisteredDetector), and v2.237.6 is the standing
+// argument for not guessing either: the same configuration of denied_spike read
+// 89% at a 28-plant sample and 94% at 375, and only the second supports a
+// decision.
+//
+// IT IS A DAILY DETECTOR, SO IT NEEDS ITS OWN LOADER. The spike metrics above
+// are per device-HOUR; a collapse is a change in a device's DAILY level, and
+// the question "has this firewall's volume fallen by 99% and stayed there" is
+// not askable of one hour.
+//
+// JUDGEABILITY IS A FLEET FACT, NOT A DEVICE FACT. A day SecVault was not
+// collecting must be excluded from every device, or a collector restart or a
+// deploy gap reads as a simultaneous collapse of the whole fleet at a 2-day
+// sustain. So a day is judgeable only when the FLEET covered all 24 hours of
+// it, which is independent of any one firewall's own volume. The first and last
+// day of the window are partial by construction and are therefore excluded --
+// the same call capacityForecast.js makes when it counts only days with 24
+// byte-bearing hours.
+//
+// A MISSING DEVICE-DAY IS A REAL ZERO AND MUST BE GRIDDED IN. A firewall that
+// reported nothing on a judgeable day has no rollup row, so without the
+// device x day cross join that day is absent rather than zero -- and absence is
+// exactly what this detector must not confuse with silence.
+//
+// DAYS ARE BUCKETED IN THE DATABASE SERVER'S OWN ZONE, formatted with to_char
+// IN SQL. Both halves are deliberate: CURRENT_DATE and every fixed-HH:MM cron
+// job in this product evaluate in that zone, and formatting a pg DATE in JS
+// with String()/toISOString() is the defect CLAUDE.md records twice -- once as
+// a whole chart drawn a day early, and once in this session as a sweep that
+// sorted "Fri Nov 06" alphabetically and reported nonsense.
+
+const COLLAPSE_DROPS = [0.95, 0.99, 0.999];
+const COLLAPSE_SUSTAINS = [2, 3, 5];
+const COLLAPSE_BASELINES = [14, 28];
+
+// MAGNITUDES ARE DEFINED RELATIVE TO THE BAR BEING TESTED, NOT AS ABSOLUTE
+// FRACTIONS, and the first version of this got it wrong in a way that read as a
+// detector fault. It planted a fixed [0.001, 0.01, 0.05] against each of three
+// drop ratios, so every cell where the planted remainder EQUALLED the bar's own
+// remainder sat exactly on the threshold -- and a threshold at its own boundary
+// is a coin toss. Measured: those cells read 25-43% while every cell a factor of
+// ten inside the bar read 91-93%, for the SAME detector. The 42% was the
+// measurement design, not a miss.
+//
+// So each plant is a multiple of the bar's remainder: a tenth of it is clearly
+// INSIDE and must be found; the remainder itself is AT the bar and is reported
+// with NO verdict, because no sensitivity bar can be read there; ten times it is
+// clearly OUTSIDE and must produce silence. The same lesson as the Wilson
+// interval one release ago -- a measurement has to be capable of answering the
+// question before its answer means anything.
+const PLANT_FACTORS = [
+  { name: 'inside', mult: 0.1, expect: 'fire' },
+  { name: 'at-bar', mult: 1, expect: 'boundary' },
+  { name: 'outside', mult: 10, expect: 'silent' },
+];
+
+const COLLAPSE_SQL = `
+  WITH hourly AS (
+    SELECT device_id,
+           bucket_hour,
+           to_char(bucket_hour, 'YYYY-MM-DD') AS day,
+           SUM(event_count)::bigint AS events
+      FROM syslog_rollup_hourly
+     WHERE device_id IS NOT NULL
+       AND bucket_hour >= date_trunc('day', now() - ($1 || ' days')::interval)
+     GROUP BY 1, 2, 3
+  ),
+  fleet AS (
+    SELECT day, COUNT(DISTINCT bucket_hour) AS fleet_hours
+      FROM hourly GROUP BY 1
+  ),
+  devs AS (SELECT DISTINCT device_id FROM hourly),
+  grid AS (
+    SELECT d.device_id, f.day, f.fleet_hours
+      FROM devs d CROSS JOIN fleet f
+  )
+  SELECT g.device_id::text AS device,
+         g.day AS day,
+         (g.fleet_hours >= 24) AS judgeable,
+         COALESCE(SUM(h.events), 0)::bigint AS events
+    FROM grid g
+    LEFT JOIN hourly h
+      ON h.device_id = g.device_id AND h.day = g.day
+   GROUP BY 1, 2, 3
+   ORDER BY 1, 2`;
+
+async function loadDailySeries(days) {
+  const { pool } = require('../lib/db');
+  const { rows } = await pool.query(COLLAPSE_SQL, [String(days)]);
+  const byDevice = new Map();
+  for (const r of rows) {
+    if (!byDevice.has(r.device)) byDevice.set(r.device, []);
+    byDevice.get(r.device).push({
+      day: r.day, events: Number(r.events), judgeable: r.judgeable !== false,
+    });
+  }
+  await pool.end();
+  return byDevice;
+}
+
+/**
+ * Step the REAL detector across a device's daily series one day at a time and
+ * return the distinct alerts it would have raised.
+ *
+ * Deduped by the natural key the dispatcher would use -- (device, onsetDay) --
+ * so a collapse that persists for a fortnight is ONE alert, which is the whole
+ * point of walking back to the onset. Counting one per day would inflate the
+ * rate by the duration of the outage.
+ */
+function runCollapseDetector(series, deviceIdx, cfg) {
+  const keys = new Set();
+  const firings = [];
+  let judged = 0;
+  let insufficient = 0;
+  const first = cfg.minBaselineDays + cfg.sustainDays;
+  for (let cursor = first; cursor <= series.length; cursor += 1) {
+    const r = detectVolumeCollapse(series.slice(0, cursor), cfg);
+    if (r.state !== 'measured') { insufficient += 1; continue; }
+    judged += 1;
+    if (!r.collapsed) continue;
+    const key = `${deviceIdx}:${r.onsetDay}`;
+    if (!keys.has(key)) firings.push({ cursor, onsetDay: r.onsetDay, baseline: r.baseline, recent: r.recent });
+    keys.add(key);
+  }
+  return { keys, firings, judged, insufficient };
+}
+
+/**
+ * A copy of `series` with every judgeable day from `onsetIdx` onward scaled to
+ * `remains` of its own value.
+ *
+ * FLOORED AT ONE EVENT, never zero. A device scaled to zero is FULLY DARK, and
+ * detectVolumeCollapse deliberately hands that case to device_silent -- so an
+ * unfloored plant would measure the hand-off rather than the collapse, and
+ * would depress sensitivity for a reason that is correct behaviour.
+ *
+ * AN UNJUDGEABLE DAY IS LEFT ALONE. It is excluded from the detector's view
+ * either way, and scaling it would quietly change the sample.
+ */
+function plantCollapse(series, onsetIdx, remains) {
+  return series.map((r, i) => {
+    if (i < onsetIdx || r.judgeable === false) return { ...r };
+    return { ...r, events: Math.max(1, Math.round(r.events * remains)) };
+  });
+}
+
+async function collapseRun(opts) {
+  const byDevice = await loadDailySeries(opts.days);
+  const devices = [...byDevice.entries()]
+    .map(([id, rows]) => ({ id, rows }))
+    .filter((d) => d.rows.filter((r) => r.judgeable).length >= 1);
+  console.log(`[a6Harness] VOLUME COLLAPSE — live daily rollups, last ${opts.days} days`);
+  if (devices.length === 0) {
+    console.log('  No device has a judgeable day. Nothing to measure.');
+    return;
+  }
+  const spanAll = devices[0].rows.length;
+  const judgeableDays = devices[0].rows.filter((r) => r.judgeable).length;
+  const excluded = spanAll - judgeableDays;
+  console.log(`            ${devices.length} device(s), ${spanAll} days in window, `
+    + `${judgeableDays} judgeable fleet-wide (${excluded} excluded: partial or not collecting)\n`);
+  if (excluded > 0) {
+    const bad = devices[0].rows.filter((r) => !r.judgeable).map((r) => r.day);
+    console.log(`  Excluded days: ${bad.join(', ')}`);
+    console.log('  ^ the FLEET did not cover all 24 hours. Counted as zero these would read');
+    console.log('    as every firewall collapsing at once.\n');
+  }
+
+  // -----------------------------------------------------------------------
+  // Alert rate on the UNMODIFIED fleet.
+  // -----------------------------------------------------------------------
+  //
+  // THIS FLEET CONTAINS A REAL COLLAPSE, so some of what follows is a TRUE
+  // positive and the rate is an UPPER BOUND on false positives -- stronger
+  // than the spike harness's version of the same disclaimer, because there we
+  // only suspected the firings might be real and here we have measured one.
+  // TFM-MH fell from ~5.9M/day to ~30/day on 2026-11-08 and is still down.
+  const header = '  drop     sustain  baseline   alerts  alerts/day  device-days  insufficient';
+  console.log(header);
+  console.log('  ' + '-'.repeat(header.length - 2));
+  const rates = [];
+  for (const drop of COLLAPSE_DROPS) {
+    for (const sustain of COLLAPSE_SUSTAINS) {
+      for (const minBaselineDays of COLLAPSE_BASELINES) {
+        const cfg = { dropRatio: drop, sustainDays: sustain, minBaselineDays };
+        let alerts = 0; let judged = 0; let insufficient = 0;
+        const who = [];
+        for (let i = 0; i < devices.length; i += 1) {
+          const run = runCollapseDetector(devices[i].rows, i, cfg);
+          alerts += run.keys.size;
+          judged += run.judged;
+          insufficient += run.insufficient;
+          for (const f of run.firings) who.push({ device: devices[i].id, ...f });
+        }
+        const perDay = judged ? (alerts / (judged / devices.length)) : null;
+        rates.push({ drop, sustain, minBaselineDays, alerts, perDay, judged, insufficient, who });
+      }
+    }
+  }
+  for (const r of rates) {
+    console.log(`  ${String(r.drop).padEnd(8)} ${String(r.sustain).padEnd(8)} ${String(r.minBaselineDays).padEnd(10)}`
+      + `${String(r.alerts).padStart(7)}`
+      + `${r.perDay === null ? '         n/a' : r.perDay.toFixed(3).padStart(12)}`
+      + `${String(r.judged).padStart(13)}${String(r.insufficient).padStart(14)}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Sensitivity, per planted magnitude.
+  // -----------------------------------------------------------------------
+  //
+  // ONE PLANT IS ONE (device, onset day) PAIR, and every onset lands in the
+  // JUDGED region -- a plant before `minBaseline + sustain` is never reached
+  // by the detector at all and would silently shrink the denominator.
+  //
+  // A DEVICE THAT HAS ALREADY COLLAPSED IS EXCLUDED FROM ITS OWN PLANTS. On
+  // this fleet that is TFM-MH, and scoring a plant there would credit the
+  // detector for finding the collapse that was already in the data -- a true
+  // positive counted as a measurement of the plant, which is the sample-purity
+  // version of the same error the spike harness made by scoring plants that
+  // fell in the training region.
+  console.log('\n  SENSITIVITY — synthetic collapses planted into each real series');
+  console.log('  (one plant per device per judged onset day; the detector is the one that ships)');
+  console.log('  Magnitudes are MULTIPLES OF THE BAR: inside = a tenth of the bar\'s remainder');
+  console.log('  (must be found), at-bar = exactly the bar (no verdict is readable there),');
+  console.log('  outside = ten times it (see the synthetic check below for why a few still fire).\n');
+  const h2 = '  magnitude  remains   drop     sustain  baseline   found planted (95% CI)        verdict';
+  console.log(h2);
+  console.log('  ' + '-'.repeat(h2.length - 2));
+  const sens = [];
+  for (const factor of PLANT_FACTORS) {
+    for (const drop of COLLAPSE_DROPS) {
+      for (const sustain of COLLAPSE_SUSTAINS) {
+        for (const minBaselineDays of COLLAPSE_BASELINES) {
+          const cfg = { dropRatio: drop, sustainDays: sustain, minBaselineDays };
+          const remains = (1 - drop) * factor.mult;
+          let planted = 0; let found = 0; let skipped = 0;
+          for (let i = 0; i < devices.length; i += 1) {
+            const rows = devices[i].rows;
+            // Already collapsed? Its own history is not a clean canvas.
+            if (detectVolumeCollapse(rows, cfg).collapsed) { skipped += 1; continue; }
+            const firstOnset = minBaselineDays + sustain;
+            for (let onset = firstOnset; onset <= rows.length - sustain; onset += 1) {
+              if (rows[onset] && rows[onset].judgeable === false) continue;
+              const copy = plantCollapse(rows, onset, remains);
+              const r = detectVolumeCollapse(copy.slice(0, onset + sustain), cfg);
+              planted += 1;
+              if (r.state === 'measured' && r.collapsed) found += 1;
+            }
+          }
+          const ci = planted ? wilson(found, planted) : null;
+          let verdict = 'n/a';
+          if (ci) {
+            if (factor.expect === 'fire') verdict = ci[0] >= 0.90 ? 'PASS >=90%' : 'BELOW BAR';
+            else if (factor.expect === 'silent') verdict = found === 0 ? 'silent' : `${found}x compounded with real variation`;
+            else verdict = 'at threshold — no verdict';
+          }
+          sens.push({ factor: factor.name, expect: factor.expect, remains, drop, sustain,
+            minBaselineDays, planted, found, ci, verdict, skipped });
+        }
+      }
+    }
+  }
+  for (const s2 of sens) {
+    console.log(`  ${s2.factor.padEnd(10)} ${s2.remains.toExponential(0).padEnd(9)} ${String(s2.drop).padEnd(8)} `
+      + `${String(s2.sustain).padEnd(8)} ${String(s2.minBaselineDays).padEnd(10)}`
+      + `${sensText(s2.found, s2.planted).padStart(28)}`
+      + `  ${s2.verdict}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // SPECIFICITY — the threshold, isolated on a FLAT canvas.
+  // -----------------------------------------------------------------------
+  //
+  // THE REAL-SERIES "outside" ROWS ABOVE CANNOT MEASURE THIS, AND READING THEM
+  // AS A FAILURE WAS THE FIRST DRAFT'S MISTAKE. A plant is applied ON TOP OF the
+  // device's own variation, so a day whose natural volume was already a tenth of
+  // the device's median -- TFM-RN's 2026-10-26 was 98,374 against ~1.6M, 6% --
+  // plus a ten-times-the-bar plant is a genuine hundred-fold fall. The detector
+  // firing there is CORRECT: the series it was handed really did collapse. ~9 of
+  // ~900 live device-days have that shape, which is the 1% in those rows.
+  //
+  // So the threshold is tested where nothing else moves: a flat synthetic level
+  // with modest multiplicative noise. A plant ten times OUTSIDE the bar must
+  // produce silence there, and if it does not, the ratio guard is wrong rather
+  // than the fleet being lumpy. The empirical answer on the real fleet is the
+  // ALERT RATE itself -- one alert in 930 device-days, and that one is real.
+  const synthDevices = 16;
+  const synthDays = 76;
+  const srand = rng(opts.seed);
+  const flat = [];
+  for (let d = 0; d < synthDevices; d += 1) {
+    const level = 1e6;
+    const rows = [];
+    for (let i = 0; i < synthDays; i += 1) {
+      // +/-20% day-to-day, which is wider than any healthy device here.
+      rows.push({ day: `synth-${String(i).padStart(3, '0')}`,
+        events: Math.round(level * (0.8 + 0.4 * srand())), judgeable: true });
+    }
+    flat.push(rows);
+  }
+  console.log('\n  SPECIFICITY — the same plants on a FLAT synthetic level (+/-20% noise),');
+  console.log('  where nothing but the plant can move the series\n');
+  const h3 = '  magnitude  drop     sustain  baseline   fired/planted        verdict';
+  console.log(h3);
+  console.log('  ' + '-'.repeat(h3.length - 2));
+  const spec = [];
+  for (const factor of PLANT_FACTORS) {
+    for (const drop of COLLAPSE_DROPS) {
+      for (const sustain of COLLAPSE_SUSTAINS) {
+        for (const minBaselineDays of COLLAPSE_BASELINES) {
+          const cfg = { dropRatio: drop, sustainDays: sustain, minBaselineDays };
+          const remains = (1 - drop) * factor.mult;
+          let planted = 0; let found = 0;
+          for (const rows of flat) {
+            for (let onset = minBaselineDays + sustain; onset <= rows.length - sustain; onset += 1) {
+              const copy = plantCollapse(rows, onset, remains);
+              const r = detectVolumeCollapse(copy.slice(0, onset + sustain), cfg);
+              planted += 1;
+              if (r.state === 'measured' && r.collapsed) found += 1;
+            }
+          }
+          let verdict = 'n/a';
+          if (factor.expect === 'silent') verdict = found === 0 ? 'correctly silent' : `FIRED ${found}x OUTSIDE BAR`;
+          else if (factor.expect === 'fire') verdict = found === planted ? 'all found' : `missed ${planted - found}`;
+          else verdict = 'at threshold — no verdict';
+          spec.push({ factor: factor.name, expect: factor.expect, drop, sustain, minBaselineDays, planted, found, verdict });
+        }
+      }
+    }
+  }
+  for (const x of spec) {
+    console.log(`  ${x.factor.padEnd(10)} ${String(x.drop).padEnd(8)} ${String(x.sustain).padEnd(8)} `
+      + `${String(x.minBaselineDays).padEnd(10)}${`${x.found}/${x.planted}`.padStart(13)}        ${x.verdict}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // The registrable answer.
+  // -----------------------------------------------------------------------
+  //
+  // THREE CONDITIONS, AND THE THIRD IS THE ONE A SENSITIVITY FIGURE ALONE
+  // HIDES. A detector that fires on everything scores 100% sensitivity, so a
+  // configuration must ALSO be silent at ten times the bar; without that the
+  // first two can be satisfied by a detector with no discrimination at all.
+  console.log('\n  REGISTRABLE CONFIGURATIONS (sensitivity LOWER BOUND >= 90% a tenth inside the');
+  console.log('  bar, <= 3 alerts/day on the real fleet, AND silent at ten times the bar on a');
+  console.log('  flat canvas):\n');
+  const viable = [];
+  for (const r of rates) {
+    const same = (x) => x.drop === r.drop && x.sustain === r.sustain
+      && x.minBaselineDays === r.minBaselineDays;
+    const inside = sens.find((x) => same(x) && x.factor === 'inside');
+    const outside = spec.find((x) => same(x) && x.factor === 'outside');
+    if (!inside || !inside.ci || !outside || r.perDay === null) continue;
+    if (inside.ci[0] >= 0.90 && r.perDay <= 3 && outside.found === 0) {
+      viable.push({ ...r, inside, outside });
+    }
+  }
+  viable.sort((a, b) => a.perDay - b.perDay);
+  if (viable.length === 0) {
+    console.log('    NONE on this data. That is an answer, not a reason to loosen the bar.');
+  } else {
+    for (const v of viable.slice(0, 8)) {
+      console.log(`    drop=${v.drop} sustain=${v.sustain} baseline=${v.minBaselineDays}`
+        + ` -> ${v.perDay.toFixed(3)} alerts/day, sensitivity ${sensText(v.inside.found, v.inside.planted)}`);
+    }
+    const best = viable[0];
+    console.log(`\n  ^ EVIDENCE.volume_collapse would carry alertsPerDay=${best.perDay.toFixed(3)},`
+      + ` sensitivity=${(best.inside.found / best.inside.planted).toFixed(2)}`);
+  }
+
+  // What actually fired on the real fleet, at the shipped defaults.
+  const shipped = rates.find((r) => r.drop === 0.99 && r.sustain === 2 && r.minBaselineDays === 14);
+  if (shipped) {
+    console.log(`\n  AT THE CURRENT DEFAULTS (drop=0.99, sustain=2, baseline=14): `
+      + `${shipped.alerts} alert(s) over ${shipped.judged} device-days`);
+    for (const f of shipped.who) {
+      console.log(`    ${f.device}  onset ${f.onsetDay}  ${Math.round(f.baseline).toLocaleString()}`
+        + ` -> ${Math.round(f.recent).toLocaleString()} events/day`);
+    }
+    if (shipped.who.length === 0) console.log('    (none)');
+  }
+
+  console.log('\n  "alerts/day" is an ALERT RATE, not a false-positive rate. This fleet contains');
+  console.log('     at least one REAL collapse (TFM-MH, 2026-11-08), so the figure is an upper');
+  console.log('     bound on false positives and is known to include a true positive.');
+}
+
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  // The collapse detector is daily and has its own loader; --synthetic is a
+  // spike-only mode, so asking for both is a contradiction rather than a default.
+  if (opts.detector === 'collapse') {
+    if (opts.synthetic) throw new Error('--synthetic is not implemented for --detector collapse');
+    return collapseRun(opts);
+  }
   if (!opts.synthetic) return realRun(opts);
 
   const hours = opts.days * 24;
@@ -655,4 +1058,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, syntheticSeries, plantAnomalies, split, evaluate, rng, METRICS,
+  plantCollapse, runCollapseDetector, COLLAPSE_SQL,
   wilson, sensText };

@@ -66,8 +66,44 @@ describe('⛔ a volume collapse is detected where silence is not', () => {
     rows.push({ day: day(40), events: 10 });
     assert.equal(detect(rows).collapsed, false,
       'a single-day outage must not alert; the sustain window exists for it');
-    rows.push({ day: day(41), events: 10 });
-    assert.equal(detect(rows).collapsed, true, 'two days is the declared sustain');
+  });
+
+  it('⛔ the window is a LENGTH, not a run — a MAJORITY of it must be down', () => {
+    // ⛔ THIS PINS WHAT THE CODE DOES, AFTER A TEST PASSED FOR THE WRONG REASON.
+    // The old version of this asserted "two days is the declared sustain" and
+    // went on passing when COLLAPSE_SUSTAIN_DAYS moved from 2 to 3 — because the
+    // verdict is the window's MEDIAN, so two down days out of three already
+    // carry it. The constant's own comment said "consecutive" and was wrong.
+    const base = () => {
+      const r = series(40, 1_000_000);
+      return r;
+    };
+    const n = a.COLLAPSE_SUSTAIN_DAYS;
+    assert.ok(n >= 3, 'this test is written for a window of at least 3 days');
+
+    // n-1 down days inside an n-day window: a majority, so it fires.
+    const majority = base();
+    for (let i = 0; i < n - 1; i += 1) majority.push({ day: day(40 + i), events: 10 });
+    assert.equal(detect(majority).collapsed, true,
+      `${n - 1} down days in a ${n}-day window is a majority and must fire`);
+
+    // Exactly half (rounded down) is NOT a majority, so it must not.
+    const minority = base();
+    for (let i = 0; i < Math.floor(n / 2); i += 1) minority.push({ day: day(40 + i), events: 10 });
+    assert.equal(detect(minority).collapsed, false,
+      `${Math.floor(n / 2)} down days in a ${n}-day window is not a majority`);
+  });
+
+  it('⛔ a recovery clears it, and takes a majority of the window to do so', () => {
+    // The other half of the hysteresis. Without this the majority test above
+    // would be satisfied by a detector that never clears.
+    const n = a.COLLAPSE_SUSTAIN_DAYS;
+    const rows = series(40, 1_000_000);
+    for (let i = 0; i < n; i += 1) rows.push({ day: day(40 + i), events: 10 });
+    assert.equal(detect(rows).collapsed, true, 'a full window down must fire');
+    for (let i = 0; i < n; i += 1) rows.push({ day: day(40 + n + i), events: 1_000_000 });
+    assert.equal(detect(rows).collapsed, false,
+      'a full window of recovered days must clear the finding');
   });
 });
 
@@ -106,6 +142,50 @@ describe('⛔ the states it refuses to judge', () => {
     const r = detect(rows, { sustainDays: 3 });
     assert.equal(r.collapsed, false,
       'a device whose own history medians to zero has no level to have fallen from');
+  });
+
+  it('⛔ A ZERO RECENT MEDIAN IS SILENCE, EVEN WHEN THE WINDOW SUM IS NOT ZERO', () => {
+    // ⛔ MEASURED ON PRODUCTION 2026-11-24, and this is the shape the first
+    // version of the detector got wrong. TFM-RN reported NOTHING from
+    // 2026-11-09 to 11-17 (nine days, no rollup rows at all) and recovered on
+    // 11-18. Its series therefore holds a window straddling the boundary:
+    // [758646, 0, 0]. The old guard asked whether the window SUM was zero --
+    // 758,646 is not -- while the verdict used the window MEDIAN, which is.
+    //
+    // So the guard passed, the detector fired, and the finding said
+    // `recent: 0 events/day`: device_silent's exact claim, from the detector
+    // built for the case where silence does NOT apply. It also CHURNED,
+    // producing two onsets (2026-11-08 and 2026-11-16) for one outage, because
+    // the walk-back crossed the dark stretch.
+    //
+    // The lesson is narrower than "handle zeros": A GUARD MUST TEST THE SAME
+    // STATISTIC ITS VERDICT DOES. Two statistics for one question disagree at
+    // the boundary, which is the only place the question is hard.
+    const rows = [];
+    for (let i = 0; i < 40; i += 1) rows.push({ day: day(i), events: 1_580_000 });
+    rows.push({ day: day(40), events: 758_646 });
+    rows.push({ day: day(41), events: 0 });
+    rows.push({ day: day(42), events: 0 });
+    const r = detect(rows, { sustainDays: 3 });
+    assert.equal(r.collapsed, false,
+      'a window whose MEDIAN is zero is a dark device — device_silent\'s finding, '
+      + 'not a collapse — however large the one surviving day in it was');
+  });
+
+  it('a device DRIBBLING through the window is still this detector\'s', () => {
+    // The converse, so the guard above cannot be satisfied by refusing
+    // everything: one dark day among two live ones leaves a non-zero median,
+    // and a firewall at 500/day against 1.58M has genuinely collapsed while
+    // still reporting in enough hours that device_silent cannot see it.
+    const rows = [];
+    for (let i = 0; i < 40; i += 1) rows.push({ day: day(i), events: 1_580_000 });
+    rows.push({ day: day(40), events: 0 });
+    rows.push({ day: day(41), events: 500 });
+    rows.push({ day: day(42), events: 600 });
+    const r = detect(rows, { sustainDays: 3 });
+    assert.equal(r.collapsed, true,
+      'a non-zero median over the window is a dribble, which is exactly what '
+      + 'this detector exists to catch');
   });
 
   it('⛔ a FULLY DARK firewall is device_silent\'s, not this detector\'s', () => {
