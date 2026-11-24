@@ -4388,6 +4388,47 @@ render cannot straddle a support-end boundary. ⛔ **A firewall with no assessme
 0 — "nothing affects this firewall" and "this firewall has never been assessed" are different
 statements.
 
+## `lib/engines/anomalyDetections.js` — `detectVolumeCollapse` REGISTERED v2.237.9
+
+New exports: `detectVolumeCollapse`, `describeCollapse`, `COLLAPSE_CLAIM`,
+`COLLAPSE_DROP_RATIO` / `COLLAPSE_SUSTAIN_DAYS` / `COLLAPSE_MIN_BASELINE_DAYS`.
+`DETECTORS` and `ANOMALY_ALERT_TYPES` gain a THIRD member (`volume_collapse` /
+`anomaly_volume_collapse`), so the four alert-type registries moved with it:
+`notificationDispatch.OPEN_ITEM_FETCHERS`, `notificationChannels.ALERT_TYPES`,
+`NotificationsPanel`'s own literal + label map, and `AnomalyPanel`'s
+`DETECTOR_LABEL` / `DETECTOR_PHRASE` / `DETECTOR_NOTE`.
+
+⛔ **IT SUBSUMES `device_silent` FINDINGS FOR A COLLAPSED DEVICE, AND THAT IS THE
+POINT.** A collapsed firewall reports in gaps, so the silence detector sees each
+gap as its own run with its own natural key — measured on production, 38 of 42
+fleet-wide findings were `device_silent` on one collapsed firewall. Those runs are
+counted and reported ON the collapse finding (`supersededSilenceRuns`, and in the
+sentence), never discarded. ⛔ The suppression hides the FINDING, never the
+MEASUREMENT: the device is still tallied `measured` in `states.device_silent`, so
+the panel's coverage denominator is untouched. ⛔ It fails toward MORE findings —
+an empty collapse map suppresses nothing.
+
+⛔ **`describeCollapse` MUST NOT BORROW `device_silent`'s SENTENCE.** "Stopped
+sending syslog" is that detector's claim and is FALSE here. `COLLAPSE_CLAIM`
+states a FALL IN VOLUME and refuses a cause: SecVault cannot tell a firewall that
+stopped GENERATING these events from one that stopped SENDING them. Pinned by
+`tests/volumeCollapse.test.js`.
+
+## `lib/engines/anomalyDetectionsData.js` — `loadDailyVolumes` added v2.237.9
+
+Per-device DAILY volume with a fleet-wide judgeability flag per day, over
+`COLLAPSE_LOOKBACK_DAYS` (**180**, deliberately NOT the 28-day `LOOKBACK_DAYS`
+every other read in that file uses — a 28-day trailing baseline makes a collapse
+clear itself while the firewall is still collapsed). Measured at **586ms** against
+the live fleet (17 devices, 1,991 grid rows).
+
+⛔ **EVERY ACTIVE FIREWALL, FROM `devices`** — not the set appearing in the
+rollups, which is the hole v2.237.3 closed in both other detectors. ⛔ Trimmed to
+each device's creation day, so a newly added firewall is not handed gridded zeros.
+⛔ **Judgeability is a FLEET fact**: a day SecVault did not cover all 24 hours of
+is excluded from every device, or a collector outage reads as the whole fleet
+collapsing at once. Today is always partial and so always excluded.
+
 ## `lib/engines/anomalyDetectionsData.js` — `loadLastReported` added v2.230.0
 
 ⛔ **THE A6 DETECTOR PAIR (`anomalyDetections.js` + `anomalyDetectionsData.js`) IS NOT OTHERWISE

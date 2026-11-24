@@ -57,7 +57,8 @@ describe('⛔ a detector cannot ship without a MEASUREMENT', () => {
     // instrument rather than a mistuned one. Both are results, not gaps.
     assert.ok(!a.DETECTORS.events_spike, 'total-events spike measured at 6.91/day must not ship');
     assert.ok(!a.DETECTORS.vpn_auth_burst, 'vpn auth burst measured at 3.32/day and trending must not ship');
-    assert.deepEqual(Object.keys(a.DETECTORS).sort(), ['denied_spike', 'device_silent']);
+    assert.deepEqual(Object.keys(a.DETECTORS).sort(),
+      ['denied_spike', 'device_silent', 'volume_collapse']);
   });
 
   it('the recorded alert rates are the ones actually measured', () => {
@@ -346,7 +347,8 @@ describe('⛔ the toggle gates DISPATCH, and both registries must agree', () => 
     // Separate types so muting a noisy detector cannot mute a firewall going
     // dark. Deliberately the OPPOSITE call from work_act_now, which collapses
     // twelve sources into one.
-    assert.deepEqual(a.ANOMALY_ALERT_TYPES.sort(), ['anomaly_denied_spike', 'anomaly_device_silent']);
+    assert.deepEqual(a.ANOMALY_ALERT_TYPES.sort(),
+      ['anomaly_denied_spike', 'anomaly_device_silent', 'anomaly_volume_collapse']);
     for (const t of a.ANOMALY_ALERT_TYPES) {
       assert.ok(dispatch.ALERT_TYPES.includes(t), `${t} is not dispatchable`);
     }

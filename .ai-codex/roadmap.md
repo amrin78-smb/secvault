@@ -1137,7 +1137,23 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
    not be described as one. ⛔ Found because a test asserting *"two days is the declared sustain"*
    went on passing when the constant moved to 3 — a test that passed for the wrong reason. Both
    directions are now pinned against the constant rather than a literal.
-   **REMAINING: the LOADER plus the registration, in ONE commit** — `gatherAnomalies` drives each
+   ⛔ **LOADER AND REGISTRATION LANDED v2.237.9, AND THE LIVE RESULT IS THE HEADLINE: 42 ANOMALY
+   FINDINGS BECAME 5.** `loadDailyVolumes` (180 days, 586ms, every ACTIVE firewall from `devices`),
+   the `gatherAnomalies` pass, `describeCollapse` + `COLLAPSE_CLAIM`, and all four alert-type
+   registries. **TFM-MH's 39 silence findings became ONE** collapse finding keyed
+   `anomaly_volume_collapse:<id>:2026-11-08`, reading *"has been sending since 2026-11-08 about 35
+   events a day, against 5,472,037 a day before that — a fall of 99.999%"* and naming the 39
+   absorbed runs as symptoms. ⛔ 6 outcome tests + 5 mutations verified red (suppression removed,
+   key on today, the `!collapsed` gate, the count zeroed, the NO_DATA reasons re-merged).
+   ⛔ **AND VERIFYING IT ON PRODUCTION FOUND ONE MORE FALSE SENTENCE.** `detectVolumeCollapse`'s
+   `NO_DATA` branch collapsed two facts — zero JUDGEABLE days, and judgeable days that are all
+   zero — and gave both *"this device has never reported"*. **StarUnion was added to the inventory
+   that day, so its only gridded day was TODAY**, always partial and therefore never judgeable: the
+   detector said a firewall that was actively sending syslog had never reported. Split, with the new
+   reason naming the recency. Both remain `NO_DATA` because neither can be judged; only one is a
+   statement about the firewall.
+   **REMAINING: the operator CLOSE path.** The loader and registration are done.
+   ⛔ **Superseded note — the original wording of this item:** — `gatherAnomalies` drives each
    detector with its own loader rather than iterating `DETECTORS`, so registering alone wires
    nothing and would leave a registered detector that cannot fire. The loader needs the daily grid
    `COLLAPSE_SQL` already proves (3.5s on production), and ⛔ **it must count a never-reporting

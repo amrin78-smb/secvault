@@ -38,7 +38,7 @@ const ALERT_TYPES = [
   // Detection always runs; this only decides whether a finding reaches a
   // channel. Separate types so muting a noisy one cannot mute a firewall going
   // dark — which is the highest-value detector of the two.
-  'anomaly_device_silent', 'anomaly_denied_spike',
+  'anomaly_device_silent', 'anomaly_denied_spike', 'anomaly_volume_collapse',
 ];
 const ALERT_TYPE_LABEL = {
   patch_now_cve: 'Patch Now CVEs',
@@ -65,6 +65,12 @@ const ALERT_TYPE_LABEL = {
   // planted events. The threshold is deliberately NOT adjustable here — a
   // tunable one invites tuning until quiet, which defeats the detector.
   anomaly_denied_spike: 'Denied-Traffic Spike',
+  // ⛔ NAMED FOR THE FACT AND DELIBERATELY NOT "stopped sending syslog", which is
+  // the type above it and is FALSE here — the firewall is still reporting, which
+  // is the whole reason this detector exists. Measured on the live fleet: one
+  // occurrence in 930 device-days, and it absorbed 38 silence findings that were
+  // all describing it.
+  anomaly_volume_collapse: 'Firewall Log Volume Collapsed',
 };
 // 'compliance_report' only ever means anything for an email channel (a PDF
 // attachment has no Slack/Teams/generic-webhook analog) — the checkbox

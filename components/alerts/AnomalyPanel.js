@@ -77,6 +77,7 @@ import TimeAgo from '../ui/TimeAgo';
 const DETECTOR_LABEL = {
   device_silent: 'Firewall stopped sending syslog',
   denied_spike: 'Denied traffic above normal',
+  volume_collapse: 'Log volume collapsed',
 };
 
 // ⛔ The closed bar's own phrasing, SEPARATE from the badge label above, because
@@ -92,6 +93,14 @@ const DETECTOR_PHRASE = {
     devices: (n) => `${n} ${n === 1 ? 'firewall' : 'firewalls'} above normal denied traffic`,
     observations: (n) => `${n} denied-traffic ${n === 1 ? 'exceedance' : 'exceedances'}`,
   },
+  volume_collapse: {
+    // ⛔ "COLLAPSED", never "stopped" — device_silent owns that word and it is
+    // false here. One finding per firewall by construction (the key is the onset
+    // day), so devices and observations agree; both are written anyway, because
+    // a renderer picking one must not fall through to undefined.
+    devices: (n) => `${n} ${n === 1 ? 'firewall' : 'firewalls'} collapsed in log volume`,
+    observations: (n) => `${n} volume ${n === 1 ? 'collapse' : 'collapses'} observed`,
+  },
 };
 
 // ⛔ The silence detector's own sentence, because it is the one whose ABSENCE is
@@ -101,6 +110,7 @@ const DETECTOR_PHRASE = {
 const DETECTOR_NOTE = {
   device_silent: 'Measured by generating the hour grid, so an hour with no rows is visible as absence rather than missing from the result.',
   denied_spike: 'Compared against this device’s own normal level for that hour of day. The baseline excludes the window being judged, so a sustained event cannot raise its own threshold.',
+  volume_collapse: 'Compared against this firewall’s own median daily volume over the preceding months, read from the permanent rollups rather than this detector’s window — a short baseline would forget the healthy level and clear the finding while the firewall was still collapsed. Days SecVault was not collecting are excluded rather than counted as zero.',
 };
 
 const CARD = {

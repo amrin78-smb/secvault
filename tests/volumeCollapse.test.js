@@ -113,6 +113,24 @@ describe('⛔ the states it refuses to judge', () => {
     assert.equal(r.state, S.NO_DATA);
     assert.equal(r.collapsed, false);
     assert.match(r.reason, /never reported/);
+    assert.equal(r.judgeableDays, 40, 'we DID look, on 40 days');
+  });
+
+  it('⛔ "no judgeable days yet" is NOT "never reported" — found on production', () => {
+    // ⛔ MEASURED 2026-11-24. StarUnion was added to the inventory that day, so
+    // its only gridded day was TODAY — always partial, therefore never
+    // judgeable — leaving zero judgeable days. The single NO_DATA branch said
+    // `this device has never reported` about a firewall that was actively
+    // sending syslog. Both are NO_DATA because neither can be judged, but only
+    // one is a statement about the firewall, and they send an operator to
+    // different places.
+    const r = detect([{ day: '2026-11-24', events: 900_000, judgeable: false }]);
+    assert.equal(r.state, S.NO_DATA);
+    assert.equal(r.collapsed, false);
+    assert.equal(r.judgeableDays, 0);
+    assert.ok(!/never reported/.test(r.reason),
+      'it is sending syslog; the only day in the grid is one we cannot judge yet');
+    assert.match(r.reason, /no judgeable days yet/);
   });
 
   it('too little history is insufficient_baseline, never a verdict', () => {
@@ -241,20 +259,76 @@ describe('⛔ the onset is reported so the alert cannot churn', () => {
   });
 });
 
-describe('⛔ it is NOT registered until it is measured', () => {
-  it('absent from DETECTORS', () => {
-    assert.ok(!a.DETECTORS.volume_collapse,
-      'registering before scripts/a6Harness.js has measured an alert rate AND a '
-      + 'sensitivity is the thing assertRegisteredDetector exists to prevent');
-    assert.deepEqual(Object.keys(a.DETECTORS).sort(), ['denied_spike', 'device_silent']);
+describe('⛔ it IS registered, and only because it was measured', () => {
+  // ⛔ THIS SUITE ASSERTED THE OPPOSITE UNTIL v2.237.9, AND THAT WAS CORRECT AT
+  // THE TIME. v2.237.7 shipped the detector deliberately unregistered because
+  // `assertRegisteredDetector` requires a measured alert rate AND sensitivity,
+  // and v2.237.6 is the standing argument for not guessing either. The harness
+  // has now measured both against 78 days of the live fleet, so the refusal is
+  // retired HERE, in the same commit that registers it — rather than left to
+  // rot into a sentence describing a product that no longer exists, which is
+  // what the five stale "PROPOSAL ONLY" entries at the top of CLAUDE.md record.
+  it('is in DETECTORS with measured evidence', () => {
+    const d = a.DETECTORS.volume_collapse;
+    assert.ok(d, 'registered');
+    assert.equal(typeof d.evidence.alertsPerDay, 'number');
+    assert.equal(d.evidence.alertsPerDay, 0.017, 'the measured rate: 1 alert in 930 device-days');
+    assert.equal(d.evidence.sensitivity, 0.93);
+    assert.equal(d.evidence.measuredOn, '2026-11-24');
   });
 
-  it('absent from the dispatched alert types', () => {
-    assert.ok(!a.ANOMALY_ALERT_TYPES.includes('anomaly_volume_collapse'),
-      'an unmeasured detector must not reach a notification channel');
+  it('⛔ the method records the SAMPLE and the INTERVAL, not a bare percentage', () => {
+    // The v2.237.6 lesson: a bare percentage cannot be read against a bar.
+    const m = a.DETECTORS.volume_collapse.evidence.method;
+    assert.match(m, /826/, 'the numerator');
+    assert.match(m, /885/, 'the denominator');
+    assert.match(m, /91-95%/, 'the interval is the half a bar is read against');
+    assert.match(m, /lower bound/i, 'and it must say so');
   });
 
-  it('has no EVIDENCE entry', () => {
-    assert.ok(!a.EVIDENCE.volume_collapse);
+  it('is dispatchable as its own alert type', () => {
+    assert.ok(a.ANOMALY_ALERT_TYPES.includes('anomaly_volume_collapse'));
+  });
+
+  it('⛔ its claim states a FALL, never a cause', () => {
+    // SecVault cannot tell a firewall that stopped GENERATING these events from
+    // one that stopped SENDING them, and guessing sends an operator to the
+    // wrong console.
+    assert.match(a.COLLAPSE_CLAIM, /cannot tell/i);
+    assert.ok(!/stopped sending syslog\.?$/i.test(a.COLLAPSE_CLAIM));
+  });
+
+  it('⛔ it must NOT borrow device_silent\'s sentence', () => {
+    // Measured on production: 38 of 42 anomaly findings were device_silent on
+    // one collapsed firewall, each titled "stopped sending syslog" about a
+    // device that had not stopped. Two detectors with one vocabulary cannot be
+    // told apart by the person reading them.
+    const text = a.describeCollapse(
+      { baseline: 5_573_086, recent: 36, onsetDay: '2026-11-09', judgeableDays: 70 },
+      'TFM-MH'
+    );
+    assert.ok(!/stopped sending syslog/i.test(text),
+      'that is device_silent\'s claim and is FALSE here — the firewall is still reporting');
+    assert.match(text, /still sending syslog/i);
+    assert.match(text, /2026-11-09/, 'the onset must be stated');
+    assert.match(text, /5,573,086/, 'the historical level must travel with the percentage');
+    assert.match(text, /36/, 'and so must the current one');
+  });
+
+  it('⛔ an unreadable level prints no percentage at all', () => {
+    const text = a.describeCollapse(
+      { baseline: null, recent: null, onsetDay: '2026-11-09' }, 'X'
+    );
+    assert.ok(!/%/.test(text), 'a percentage computed from nothing is a fabricated number');
+    assert.match(text, /could not quantify/i);
+  });
+
+  it('⛔ absorbed silence runs are COUNTED in the sentence, never dropped', () => {
+    const text = a.describeCollapse(
+      { baseline: 5_573_086, recent: 36, onsetDay: '2026-11-09' },
+      'TFM-MH', { supersededSilenceRuns: 38 }
+    );
+    assert.match(text, /38 separate silence runs/);
+    assert.match(text, /symptoms of this collapse/);
   });
 });

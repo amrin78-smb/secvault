@@ -72,9 +72,31 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   `ANOMALY_ALERT_TYPES`. ⛔ The cost is not cosmetic: a session reading only this line would rebuild
   a shipped alerting engine, and a deck built off it told a customer a competitor was ahead on
   threshold alerting when it is not. **A6** seasonal baselines + anomaly detectors (v2.196.0) —
-  TWO detectors measured and shipped (`device_silent`, `denied_spike`), TWO measured and REFUSED
+  **THREE** detectors measured and shipped (`device_silent`, `denied_spike`, and
+  `volume_collapse` since v2.237.9), TWO measured and REFUSED
   (`total-events spike`, `vpn auth burst`); a detector cannot register without a measured alert rate
   and sensitivity (`assertRegisteredDetector()`), and `scripts/a6Harness.js` is what produces them.
+  ⛔ **THIS SENTENCE SAID TWO, AND IT IS CORRECTED IN THE COMMIT THAT MADE IT THREE** — the entries
+  at the top of this list record what happens otherwise, five times over.
+  ⛔ **`volume_collapse` (v2.237.9) EXISTS BECAUSE `device_silent` WAS ANSWERING THE WRONG QUESTION
+  LOUDLY.** It asks only "did ANY event arrive this hour", so a firewall whose volume falls 99.999%
+  and keeps dribbling is not silent to it — it is 39 SEPARATE SILENCE RUNS. Measured on production
+  2026-11-24: of 42 anomaly findings fleet-wide, **38 were `device_silent` on ONE firewall**
+  (TFM-MH, 5.5M events/day → 28/day on 2026-11-08, management collection still succeeding and every
+  reachability signal green), each titled *"stopped sending syslog"* about a device that had not
+  stopped. ⛔ **So the detector REPLACES findings rather than adding one**: a collapsed firewall's
+  silence runs are COUNTED and reported on the collapse finding, and the fleet went **42 findings →
+  5** on the same data. ⛔ **The suppression fails toward MORE findings, never fewer** — an empty or
+  unavailable collapse verdict suppresses nothing and `device_silent` behaves exactly as before.
+  ⛔ **Its baseline reads 180 days of PERMANENT rollups, not the 28-day detector window**, because a
+  28-day trailing baseline makes a collapse clear itself once the pre-collapse days age out: TFM-MH
+  would have stopped being reported around 2026-12-06. ⛔ A longer window DEFERS that and does not
+  remove it (the median flips once collapsed days outnumber healthy ones — at 180 days, after ~90),
+  which is stated rather than hidden; only a stored pre-onset baseline fixes it. ⛔ **`drop=0.99` is
+  a STATED JUDGEMENT and is labelled as one**: 0.95, 0.99 and 0.999 give the identical alert, rate
+  and sensitivity on this fleet. ⛔ **`sustain=3` IS measured** — at 2 days the sensitivity point
+  estimate is 92% but the Wilson lower bound is 89.85%, so it cannot be SHOWN to clear the 90% bar.
+  Full measurement and the two harness-design errors behind it: `.ai-codex/roadmap.md` row 2e.
   ⛔ **BUT A REGISTERED RATE IS A CLAIM ABOUT ONE AFTERNOON, AND NOTHING RE-TESTED IT UNTIL
   v2.228.4.** `assertRegisteredDetector()` only ever checked that `alertsPerDay`, `measuredOn` and
   `method` EXIST, so a rate measured on 2026-10-06 stayed authoritative while the fleet moved

@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.9': [
+    'New check: a firewall whose log volume collapses without going fully silent. One on this fleet fell from 5.5 million events a day to about 35 on 8 November and is still there.',
+    'It REPLACES noise rather than adding to it. That firewall was raising 39 separate "stopped sending syslog" alerts — it reports in gaps — which were all describing the same collapse. Fleet-wide, 42 anomaly findings became 5.',
+    'The alert says what SecVault knows and no more: it names the fall and both volumes, and states that SecVault cannot tell whether the firewall stopped generating these events or stopped sending them.',
+    'Its baseline reads six months of history rather than the four weeks the other checks use, because a short baseline forgets the healthy level and quietly clears the alert while the firewall is still down.',
+    'Fixed a wrong message found while verifying this on the live fleet: a firewall added today was described as having "never reported", when the truth was that SecVault had not had a full day to look at it yet.',
+  ],
   '2.237.8': [
     'Measured the volume-collapse detector against 78 days of the live fleet: one alert in 930 device-days.',
     'Fixed a detector defect the measurement found — a firewall dark for nine days was reported as a volume collapse, with two alerts for one outage.',
