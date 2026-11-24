@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.4': [
+    'Adding a firewall raised a false alert saying it had stopped sending syslog. Measured 48 minutes after one was added to this fleet: "StarUnion stopped sending syslog \u2014 AT LEAST 671 hours", about a firewall created that afternoon which was sending at the moment the alert was written.',
+    'The silence check reads an hour-by-hour grid of when each firewall reported, and a firewall cannot have reported before it was added \u2014 so every hour before it existed looked like silence. Each firewall\u2019s grid now begins at the hour it was added.',
+    'This would have been emailed. The silence check is wired to outbound notifications, so on an installation with alert channels configured, onboarding a firewall would have sent an outage alert about it. This deployment has no channels, so it only ever appeared on screen.',
+    'A real silence that began before SecVault\u2019s 28-day evidence window is still reported as having an unknown start, which is correct and unchanged \u2014 only a run beginning at a firewall\u2019s own recorded creation time is now treated as having a known one.',
+    'A gap between adding a firewall and its first log arriving is still reported, deliberately: SecVault was listening and nothing came, which is worth seeing.',
+  ],
   '2.237.3': [
     'A firewall added as logs-only was reported as "Failing \u2014 config collection 0% succeeding", with "Every poll in the last 3 days failed", minutes after it was created. SecVault never tries to connect to such a firewall, so there was no failed poll \u2014 the nightly collection loop was recording a skipped device as an unreachable one, which is the exact impression the skip exists to avoid.',
     'It now records nothing for those firewalls, so they read as "not polled" rather than broken, and they no longer accrue one false failed poll and one warning in the engine log every day. Two of the three polling loops already skipped them; this was the third, and the only one that writes reachability.',

@@ -233,3 +233,163 @@ describe('⛔ the collect loop does not poll a logs-only firewall', () => {
       + 'two of three and the missing one was the one that writes reachability');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⛔ A FIREWALL CANNOT HAVE BEEN SILENT BEFORE SECVAULT KNEW IT EXISTED.
+//
+// `syslog_rollup_hourly.device_id` is stamped at INGEST, so a rollup row cannot
+// predate the device row. A newly-added firewall therefore has a grid that is
+// silent by construction for everything before its creation, and detectSilence
+// read that as one long silence run.
+//
+// Measured on production 2026-11-24, 48 minutes after the fleet's first
+// logs-only device was added: "StarUnion stopped sending syslog — AT LEAST 671
+// hours", about a firewall created at 14:28 that was sending at that moment.
+// `device_silent` is a dispatched alert type, so on an installation with
+// channels configured, ONBOARDING a firewall would email an outage alert.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('⛔ onboarding a firewall does not raise a silence alert', () => {
+  const { detectSilence } = require('../lib/engines/anomalyDetections');
+
+  const grid = (flags) => flags.map((reported, i) => ({
+    at: new Date(Date.UTC(2026, 10, 1, i)), reported,
+  }));
+
+  it('⛔ a run at index 0 of a BIRTH-TRIMMED grid has a KNOWN start', () => {
+    // Index 0 is the creation hour: a fixed, recorded timestamp.
+    const r = detectSilence(grid([false, false, false, true, true]), {
+      minHours: 2, lastReportedAt: new Date(Date.UTC(2026, 10, 1, 4)),
+      gridStartIsKnown: true,
+    });
+    assert.equal(r.state, 'measured');
+    assert.equal(r.runs.length, 1);
+    assert.equal(r.runs[0].truncated, false,
+      'a grid trimmed to the device\'s creation has a FIXED index 0, so the '
+      + 'start is the best-recorded fact about the run, not an unknown');
+  });
+
+  it('⛔ the window-edge case is UNCHANGED and still truncated', () => {
+    // The default must stay safe: a caller that says nothing gets `truncated`.
+    const r = detectSilence(grid([false, false, false, true, true]), {
+      minHours: 2, lastReportedAt: new Date(Date.UTC(2026, 10, 1, 4)),
+    });
+    assert.equal(r.runs[0].truncated, true,
+      'without the flag, index 0 is the window\'s MOVING left edge and the '
+      + 'start is genuinely unknown — v2.228.10');
+  });
+
+  it('a device added this hour and reporting raises nothing', async () => {
+    // The production shape: grid is just the hours since creation, all reported.
+    const r = detectSilence(grid([true, true]), {
+      minHours: 2, lastReportedAt: new Date(Date.UTC(2026, 10, 1, 1)),
+      gridStartIsKnown: true,
+    });
+    assert.equal(r.runs.length, 0, 'a firewall added an hour ago and sending '
+      + 'must not be reported as having stopped');
+  });
+
+  it('⛔ the grid query trims to the creation hour and says when it did', async () => {
+    let sql = '';
+    await anomalyData.loadReportingGrid({
+      query: async (q) => { sql = q; return { rows: [] }; },
+    });
+    const bare = stripSqlComments(sql);
+    assert.match(bare, /hours\.h\s*>=\s*dev\.born/,
+      'each device\'s grid must start at its own creation hour');
+    assert.match(bare, /LEAST\(\s*d\.created_at\s*,\s*now\(\)\s*\)/,
+      'a created_at in the future is a clock disagreement and must not yield '
+      + 'an EMPTY grid, which the all-silent branch reads as total silence');
+    assert.match(bare, /grid_starts_at_birth/,
+      'the caller cannot tell a fixed index 0 from a moving one without this');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⛔ THE WIRING, WHICH IS THE PART THAT GOES UNTESTED — AND DID.
+//
+// The tests above drive `detectSilence` directly and read the generated SQL.
+// Mutation testing proved that left the MIDDLE unguarded: hardcoding
+// `gridStartIsKnown: false` at the call site, and hardcoding
+// `gridStartsAtBirth: true` when reading the column, both left the suite GREEN.
+// Each would restore the false onboarding alert (or suppress a real
+// window-edge truncation) with every assertion still passing. Same shape as
+// `corpusAdvanceErrors` being composed inline and never consulted.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('⛔ gatherAnomalies carries the birth flag from the grid to the detector', () => {
+  const DEV = '33333333-3333-4333-8333-333333333333';
+  const HOURS = 24 * 28;
+
+  // A device silent from index 0 and reporting at the end: the shape a freshly
+  // added firewall produces. `lastReportedAt` is a Date, so this is NOT the
+  // never-reported arm — it is a measured run whose `truncated` flag is the
+  // whole question.
+  function poolWith(gridStartsAtBirth) {
+    return {
+      query: async (sql) => {
+        if (/max\(bucket_hour\) AS last_at/.test(sql)) {
+          return { rows: [{ device_id: DEV, last_at: new Date(Date.UTC(2026, 10, 24, 7)) }] };
+        }
+        if (/generate_series/.test(sql)) {
+          return {
+            rows: Array.from({ length: HOURS }, (_, i) => ({
+              device_id: DEV,
+              device_name: 'JUST-ADDED-FW',
+              at: new Date(Date.UTC(2026, 9, 27, i)),
+              reported: i >= HOURS - 2,
+              grid_starts_at_birth: gridStartsAtBirth,
+            })),
+          };
+        }
+        return { rows: [] };
+      },
+    };
+  }
+
+  it('⛔ a birth-trimmed grid yields a finding that is NOT truncated', async () => {
+    const { findings } = await anomalyData.gatherAnomalies(poolWith(true), { now: NOW });
+    const f = findings.find((x) => x.detector === 'device_silent');
+    assert.ok(f, 'expected a device_silent finding to assert against');
+    assert.equal(f.truncated, false,
+      'the call site dropped the flag: a run starting at the device\'s own '
+      + 'creation hour would be reported as having an unknown start');
+    assert.equal(f.hoursAreLowerBound, false);
+    assert.doesNotMatch(f.naturalKey, /start-before-window$/,
+      'a known start must not key on the moving-edge sentinel');
+  });
+
+  it('⛔ a window-edge grid still yields a TRUNCATED finding', async () => {
+    const { findings } = await anomalyData.gatherAnomalies(poolWith(false), { now: NOW });
+    const f = findings.find((x) => x.detector === 'device_silent');
+    assert.ok(f);
+    assert.equal(f.truncated, true,
+      'the flag was hardcoded true: a genuine window-edge run would claim a '
+      + 'start nobody measured, which is the v2.228.10 defect');
+    assert.equal(f.hoursAreLowerBound, true);
+    assert.match(f.naturalKey, /start-before-window$/);
+  });
+
+  it('⛔ an ABSENT column is read as false, never as truthy', async () => {
+    // A projection that forgets the column must degrade to the SAFE answer.
+    const pool = {
+      query: async (sql) => {
+        if (/max\(bucket_hour\) AS last_at/.test(sql)) {
+          return { rows: [{ device_id: DEV, last_at: new Date(Date.UTC(2026, 10, 24, 7)) }] };
+        }
+        if (/generate_series/.test(sql)) {
+          return {
+            rows: Array.from({ length: HOURS }, (_, i) => ({
+              device_id: DEV, device_name: 'NO-COLUMN-FW',
+              at: new Date(Date.UTC(2026, 9, 27, i)), reported: i >= HOURS - 2,
+            })),
+          };
+        }
+        return { rows: [] };
+      },
+    };
+    const { findings } = await anomalyData.gatherAnomalies(pool, { now: NOW });
+    const f = findings.find((x) => x.detector === 'device_silent');
+    assert.ok(f);
+    assert.equal(f.truncated, true,
+      'undefined must mean "we do not know the start", not "the start is known"');
+  });
+});

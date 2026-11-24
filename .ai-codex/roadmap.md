@@ -1054,6 +1054,25 @@ mutations you thought of; it says nothing about the assertion you never wrote.**
    the only one that writes reachability. ⛔ Found by the user testing the feature on production
    the day it shipped.
 
+2d. ✅ **CLOSED v2.237.4** — **onboarding a firewall raised a false silence alert.**
+   `syslog_rollup_hourly.device_id` is stamped at INGEST, so a rollup row cannot predate the
+   device row — every hour before a firewall was added is silent by construction, and
+   `detectSilence` read the lot as one run. Measured on production 2026-11-24, 48 minutes after
+   the fleet's first logs-only device was added: *"StarUnion stopped sending syslog — AT LEAST 671
+   hours"*, about a firewall created at 14:28 that was sending as the alert was generated.
+   ⛔ **It would have been DISPATCHED** — `device_silent`'s alert type is in
+   `notificationDispatch.js`'s ALERT_TYPES, so with channels configured, onboarding a firewall
+   emails an outage alert about it; this deployment has none. ⛔ **Not a regression from 2b** — the
+   device had rollup rows by then, so the old `EXISTS` admitted it too; it needed a firewall to be
+   ADDED to show itself, which had not happened here in months. ⛔ Each device's grid now starts at
+   `date_trunc('hour', LEAST(created_at, now()))`, and `gridStartsAtBirth` travels with it so a run
+   at index 0 is NOT flagged `truncated`: v2.228.10's moving window edge and a fixed recorded
+   creation time must not share an answer. ⛔ A gap between creation and the first log is still
+   reported — SecVault was listening and nothing came. 6 mutations verified red, **two of which
+   survived the first round**: hardcoding the flag at the call site and when reading the column
+   both left the suite green, because the tests drove the detector and the SQL and not the WIRING
+   between them.
+
 3. **`lib/evidence.js:135` `deviceCountEvidence`** reports a never-probed device as a measured
    "Not reachable" with an empty "what could not be measured" — while `deviceInventoryEvidence` in
    the same file handles the identical column correctly with a separate `Never probed` row.
