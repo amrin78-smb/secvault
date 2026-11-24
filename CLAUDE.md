@@ -97,10 +97,25 @@ Pre-built index files live in `.ai-codex/`. Read these BEFORE exploring:
   re-implemented the pipeline from `seasonalBaseline` primitives, omitting `detectSpike`'s 5% margin
   floor AND its per-device `selectGrain`, so `EVIDENCE.denied_spike.alertsPerDay = 1.0` described a
   detector that does not ship. It now drives the real `detectSpike` one simulated day at a time and
-  dedupes by the dispatcher's natural key. ⛔ **Measured 2026-11-24, shipped config (q=0.90,
-  persist=3): 3.75 alerts/day at 89% sensitivity** — nearly 4x the registered figure, ABOVE the
-  harness's own <=3/day bar and BELOW its >=90% sensitivity bar, so **no configuration currently
-  passes both**. The registered value is deliberately NOT updated without that decision being taken.
+  dedupes by the dispatcher's natural key.
+  ⛔ **THE FIRST RE-MEASUREMENT REPORTED 89% SENSITIVITY AND THAT WAS A SAMPLE-SIZE ARTEFACT, NOT A
+  RESULT — CORRECTED THE SAME DAY.** The harness scored only the plants that happened to fall in
+  the judged window, typically **28**, and at n=28 even a PERFECT 28/28 has a 95% Wilson lower
+  bound of **87.9%** — so the >=90% bar was NOT MEASURABLE AT THAT SAMPLE SIZE IN EITHER DIRECTION,
+  and the same configuration read **89% at n=28 and 94% at n=375**. A threshold change was nearly
+  made on one event's worth of evidence. ⛔ Plants are now confined to the judged region (scattered
+  over the whole series ~70% land in TRAINING, where they raise the very threshold the judged ones
+  are measured against, so growing the sample degraded the baseline at the same time), `--plants`
+  sets the count, and every sensitivity figure carries a **Wilson interval** — the normal
+  approximation runs past 100% at small n and understates the lower bound, which is the half a bar
+  is read against.
+  ⛔ **REGISTERED 2026-11-24 ON 375 PLANTS: q=0.90, persist=3 — 3.75 alerts/day, sensitivity 94%
+  (353/375, CI 91-96%).** It **CLEARS the >=90% sensitivity bar** and exceeds the <=3/day guideline
+  by 25%. The only configuration inside that ceiling (q=0.95, persist=3, 2.34/day) scores 91% with
+  a CI of **88-94%**, so its sensitivity cannot be SHOWN to clear the bar. **No configuration
+  satisfies both**, and trading proven detection for 1.4 fewer alerts a day was refused.
+  ⛔ **VIABILITY IS JUDGED ON THE INTERVAL'S LOWER BOUND, NEVER THE POINT ESTIMATE** — ranking
+  configurations on a bare percentage is what picked noise the first time.
   ⛔ **At `--days 28` the harness cannot reach its own coverage bar at all** (its 70/30 split leaves
   19 samples per hour-of-day bucket where q=0.90 needs 20), so the re-measure instruction in
   `assertRegisteredDetector`'s error text fails at the window it implies. Use >= 60 days. ⛔ **A POISSON TAIL ON THE COUNT,

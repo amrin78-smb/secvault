@@ -62,8 +62,30 @@ describe('⛔ a detector cannot ship without a MEASUREMENT', () => {
 
   it('the recorded alert rates are the ones actually measured', () => {
     assert.equal(a.EVIDENCE.device_silent.alertsPerDay, 0.074);
-    assert.equal(a.EVIDENCE.denied_spike.alertsPerDay, 1.0);
-    assert.equal(a.EVIDENCE.denied_spike.sensitivity, 1.0);
+    // ⛔ RE-MEASURED 2026-11-24 against the REAL detectSpike. The previous
+    // pair (1.0 / 1.0) came from a harness that re-implemented the pipeline
+    // and omitted detectSpike's 5% margin floor and its per-device grain
+    // selection, so it described a detector that does not ship.
+    assert.equal(a.EVIDENCE.denied_spike.alertsPerDay, 3.75);
+    assert.equal(a.EVIDENCE.denied_spike.sensitivity, 0.94);
+  });
+
+  it('⛔ a sensitivity figure is recorded with the SAMPLE it came from', () => {
+    // The lesson of 2026-11-24: the same configuration read 89% at n=28 and
+    // 94% at n=375, and at n=28 even a perfect score could not have cleared
+    // the 90% bar. A bare percentage with no denominator is not a measurement
+    // anyone can act on, so the method string has to carry the sample.
+    const m = a.EVIDENCE.denied_spike.method;
+    assert.match(m, /\b375\b/, 'the planted sample size must be recorded');
+    assert.match(m, /CI|confidence|interval/i, 'the interval must be recorded');
+  });
+
+  it('⛔ every registered detector states WHEN it was measured', () => {
+    // A rate with no date cannot be reviewed, and reviewOverdue cannot fire.
+    for (const [key, d] of Object.entries(a.DETECTORS)) {
+      assert.match(d.evidence.measuredOn, /^\d{4}-\d{2}-\d{2}$/,
+        `${key} has no usable measurement date`);
+    }
   });
 });
 

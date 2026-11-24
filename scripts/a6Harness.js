@@ -141,7 +141,8 @@ async function loadSeries(metric, days) {
 }
 
 function parseArgs(argv) {
-  const o = { synthetic: false, days: 28, metric: 'events', devices: 16, seed: 42, train: 0.7 };
+  const o = { synthetic: false, days: 28, metric: 'events', devices: 16, seed: 42, train: 0.7,
+    plants: 6, magnitude: 6 };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--synthetic') { o.synthetic = true; continue; }
@@ -150,6 +151,8 @@ function parseArgs(argv) {
     else if (a === '--metric') { o.metric = v; i += 1; }
     else if (a === '--devices') { o.devices = Number(v); i += 1; }
     else if (a === '--train') { o.train = Number(v); i += 1; }
+    else if (a === '--plants') { o.plants = Number(v); i += 1; }
+    else if (a === '--magnitude') { o.magnitude = Number(v); i += 1; }
   }
   if (!Number.isFinite(o.days) || o.days <= 0) throw new Error(`--days must be positive (got ${JSON.stringify(o.days)})`);
   if (!(o.train > 0.5 && o.train < 1)) throw new Error(`--train must be between 0.5 and 1 (got ${JSON.stringify(o.train)})`);
@@ -203,23 +206,78 @@ function syntheticSeries(hours, rand, { weekendDip = true } = {}) {
  * A real scan or outage adds load that is large relative to what the device
  * NORMALLY does, regardless of what that particular hour happened to carry.
  */
-function plantAnomalies(rows, rand, count = 6, lengthHours = 3, magnitude = 6) {
+// ⛔ `minIndex` CONFINES PLANTS TO A REGION, AND IT EXISTS FOR A MEASUREMENT
+// REASON RATHER THAN A TIDINESS ONE (added 2026-11-24). Plants scattered over
+// the WHOLE series land ~70% of the time in the TRAINING portion, where they
+// raise the very quantile threshold the judged plants are then measured
+// against -- so adding plants to grow the sample also degrades the baseline,
+// and sensitivity moves for a reason that has nothing to do with the detector.
+// Confining them to the judged region makes the scored sample equal to the
+// planted count, which is what lets the interval below mean anything.
+function plantAnomalies(rows, rand, count = 6, lengthHours = 3, magnitude = 6, minIndex = 0) {
   const planted = [];
   const usable = rows.length - lengthHours - 1;
   if (usable <= 0) return planted;
+  // ⛔ NOT CLAMPED TO `usable - 1`. Found by mutation testing 2026-11-24: an
+  // upper clamp puts EVERY plant on the final index when `minIndex` is past the
+  // end, so 25 plants become one stacked event and the harness still prints a
+  // confident sensitivity over a denominator of 25. Leaving `from` alone makes
+  // `span` non-positive, nothing is planted, and `sensText` reports `n/a` — a
+  // refusal to measure, which is the honest answer for a region that does not
+  // exist. The lower clamp stays: a negative index is a caller slip, not a
+  // region.
+  const from = Math.max(0, Math.trunc(minIndex) || 0);
+  const span = usable - from;
+  if (span <= 0) return planted;
   // The device's own normal level, used as the unit of "how big is this spike".
   const positives = rows.map((r) => r.value).filter((v) => v > 0).sort((a, b) => a - b);
   const reference = positives.length
     ? positives[Math.floor(positives.length * 0.5)]
     : 1;
   for (let i = 0; i < count; i += 1) {
-    const at = Math.floor(rand() * usable);
+    const at = from + Math.floor(rand() * span);
     for (let k = 0; k < lengthHours; k += 1) {
       rows[at + k].value = Math.round(rows[at + k].value + reference * magnitude);
     }
     planted.push({ start: at, length: lengthHours, reference, magnitude });
   }
   return planted;
+}
+
+// ⛔ A SENSITIVITY FIGURE WITHOUT AN INTERVAL IS A NUMBER NOBODY CAN ACT ON.
+// Measured 2026-11-24, the shipped config scored 25/28 = 89% against a >=90%
+// viability bar -- and a 95% Wilson interval on 25/28 runs 73%-96%, so the bar
+// sits INSIDE the noise and ONE event decides whether the detector passes. The
+// harness's whole reason for existing is that a robust-looking estimator was
+// already falsified once on this data (A7's modified Z-score); reporting a bare
+// percentage here would repeat that in the other direction.
+//
+// ⛔ WILSON, NOT THE NORMAL APPROXIMATION. At small n and p near 1 the
+// textbook p +/- z*sqrt(p(1-p)/n) runs past 100% and understates the lower
+// bound -- 25/28 gives an upper limit of 1.006, which is not a probability.
+function wilson(k, n, z = 1.96) {
+  // ⛔ k OUTSIDE [0, n] IS NOT A PROPORTION, so it is refused rather than
+  // clamped into one. The [0,1] clamp on the RETURN is belt-and-braces only:
+  // with a valid k the Wilson interval is bounded by construction, so no test
+  // can make that clamp fire — it is an EQUIVALENT MUTANT, recorded as such
+  // rather than presented as a working guard (the call CLAUDE.md already makes
+  // about isInRange's min-side check).
+  if (!Number.isFinite(k) || !Number.isFinite(n) || n <= 0) return null;
+  if (k < 0 || k > n) return null;
+  const p = k / n;
+  const d = 1 + (z * z) / n;
+  const centre = p + (z * z) / (2 * n);
+  const half = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+  return [Math.max(0, (centre - half) / d), Math.min(1, (centre + half) / d)];
+}
+
+/** "89% (25/28, 95% CI 72-96%)" -- never a bare percentage. */
+function sensText(k, n) {
+  if (!n) return 'n/a';
+  const ci = wilson(k, n);
+  const pct = ((k / n) * 100).toFixed(0);
+  if (!ci) return `${pct}% (${k}/${n})`;
+  return `${pct}% (${k}/${n}, CI ${(ci[0] * 100).toFixed(0)}-${(ci[1] * 100).toFixed(0)}%)`;
 }
 
 /** Split: first 70% trains the baseline, last 30% is the control window. */
@@ -330,9 +388,15 @@ async function realRun(opts) {
   }
 
   const rand = rng(opts.seed);
+  // ⛔ EVERY PLANT LANDS IN THE JUDGED REGION, so the scored sample is
+  // `plants x devices` rather than the ~30% that happened to fall there.
   const planted = devices.map((d) => {
     const copy = d.map((r) => ({ at: r.at, value: r.value }));
-    return { copy, windows: plantAnomalies(copy, rand) };
+    const cut = Math.floor(copy.length * opts.train);
+    return {
+      copy,
+      windows: plantAnomalies(copy, rand, opts.plants, 3, opts.magnitude, cut),
+    };
   });
 
   const header = '  grain                 q      persist  coverage  fired/bucket   alerts/day  found planted';
@@ -397,7 +461,7 @@ async function realRun(opts) {
   // -------------------------------------------------------------------------
   console.log('\n  REAL DETECTOR — detectSpike as it ships (grain self-selected, 5% margin');
   console.log('  floor, 24h judged per call, runs deduped by the dispatcher\'s natural key)\n');
-  const h2 = '  q      persist  alerts/day  found planted   device-days  insufficient';
+  const h2 = '  q      persist  alerts/day         found planted (95% CI)  device-days  insufficient';
   console.log(h2);
   console.log('  ' + '-'.repeat(h2.length - 2));
   const real = [];
@@ -441,14 +505,48 @@ async function realRun(opts) {
   for (const r of real) {
     console.log(`  ${String(r.q).padEnd(6)} ${String(r.p).padEnd(8)}`
       + `${r.perDay === null ? '    n/a' : r.perDay.toFixed(2).padStart(11)}`
-      + `${r.sens === null ? '          n/a' : `${(r.sens * 100).toFixed(0)}% (${r.detected}/${r.plantedN})`.padStart(16)}`
-      + `${String(r.deviceDays).padStart(14)}${String(r.insufficient).padStart(14)}`);
+      + `${sensText(r.detected, r.plantedN).padStart(30)}`
+      + `${String(r.deviceDays).padStart(13)}${String(r.insufficient).padStart(14)}`);
   }
   const shipped = real.find((r) => r.q === 0.9 && r.p === 3);
   if (shipped && shipped.perDay !== null) {
     console.log(`\n  SHIPPED CONFIG (q=0.90, persist=3): ${shipped.perDay.toFixed(3)} alerts/day`
-      + `${shipped.sens === null ? '' : `, ${(shipped.sens * 100).toFixed(0)}% sensitivity`}`);
+      + `, sensitivity ${sensText(shipped.detected, shipped.plantedN)}`);
     console.log('  ^ THIS is the figure EVIDENCE.denied_spike.alertsPerDay must carry.');
+  }
+
+  // ⛔ VIABILITY IS JUDGED ON THE INTERVAL'S LOWER BOUND, NOT THE POINT
+  // ESTIMATE. A bare 89% and a bare 93% are the same measurement at n=28 (the
+  // intervals overlap almost completely), so ranking configurations on the
+  // point estimate picks noise -- which it did: the shipped config read 89% at
+  // n=28 and 94% at n=375, and only the second can be acted on.
+  console.log('\n  VIABLE on the REAL detector (sensitivity LOWER BOUND >= 90% AND <= 3 alerts/day):');
+  const strict = real.filter((r) => {
+    if (r.perDay === null || r.plantedN === 0) return false;
+    const ci = wilson(r.detected, r.plantedN);
+    return ci && ci[0] >= 0.90 && r.perDay <= 3;
+  }).sort((a, b) => a.perDay - b.perDay);
+  if (strict.length === 0) {
+    console.log('    NONE on this data. That is an answer, not a reason to loosen the bar.');
+    const sensOk = real.filter((r) => {
+      const ci = r.plantedN ? wilson(r.detected, r.plantedN) : null;
+      return r.perDay !== null && ci && ci[0] >= 0.90;
+    }).sort((a, b) => a.perDay - b.perDay)[0];
+    const rateOk = real.filter((r) => r.perDay !== null && r.perDay <= 3)
+      .sort((a, b) => b.detected / (b.plantedN || 1) - a.detected / (a.plantedN || 1))[0];
+    if (sensOk) {
+      console.log(`    closest on RATE  (sensitivity proven): q=${sensOk.q} persist=${sensOk.p}`
+        + ` -> ${sensOk.perDay.toFixed(2)}/day, ${sensText(sensOk.detected, sensOk.plantedN)}`);
+    }
+    if (rateOk) {
+      console.log(`    closest on SENS  (rate within bar):    q=${rateOk.q} persist=${rateOk.p}`
+        + ` -> ${rateOk.perDay.toFixed(2)}/day, ${sensText(rateOk.detected, rateOk.plantedN)}`);
+    }
+  } else {
+    for (const r of strict.slice(0, 5)) {
+      console.log(`    q=${r.q} persist=${r.p} -> ${r.perDay.toFixed(2)} alerts/day, `
+        + sensText(r.detected, r.plantedN));
+    }
   }
 }
 
@@ -556,4 +654,5 @@ if (require.main === module) {
   try { main(); } catch (e) { console.error('[a6Harness]', e.message); process.exit(1); }
 }
 
-module.exports = { parseArgs, syntheticSeries, plantAnomalies, split, evaluate, rng, METRICS };
+module.exports = { parseArgs, syntheticSeries, plantAnomalies, split, evaluate, rng, METRICS,
+  wilson, sensText };

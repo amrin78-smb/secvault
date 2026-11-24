@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.6': [
+    'The tool that measures a traffic-anomaly detector before it can be switched on was scoring it against too few test events to answer its own question. It judged whether a detector finds at least 90% of planted problems, using about 28 of them \u2014 and at that sample size even a perfect score could not have demonstrated 90%. The same detector scored 89% on 28 events and 94% on 375.',
+    'Every sensitivity figure now carries a confidence interval and the number of events behind it, so a result can no longer be read as more precise than it is, and a threshold is never changed on one event\u2019s worth of evidence.',
+    'The denied-traffic detector\u2019s recorded evidence has been updated to what it actually does: 3.75 alerts a day, finding 94% of planted problems. Its previous entry described a detector that never ran.',
+    'Its configuration was kept rather than retuned. The quieter alternative sits inside the noise ceiling but cannot be shown to meet the detection bar, so the trade would have been proven detection for 1.4 fewer alerts a day.',
+    'Test events are now placed only in the period being judged. Scattered across the whole history they also landed in the training period, where they raised the very threshold they were then measured against.',
+  ],
   '2.237.5': [
     'SecVault\u2019s own check on whether its traffic-anomaly detectors are still behaving was reporting a fault that did not exist. It judged the denied-traffic detector over 28 days when that detector only ever examines the last 24 hours, so a detector firing about three times a day was reported as having almost stopped. Each detector is now scored over the period it actually looks at.',
     'The same check correctly reports the other detector as firing far more often than recorded, and that one is real: two firewalls at the TFM site stopped sending syslog on 8 November. One resumed on the 18th; the other has sent roughly 30 events a day since, against about 5.9 million a day before.',
