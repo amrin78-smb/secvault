@@ -7,6 +7,13 @@ export const dynamic = 'force-dynamic';
 // release notes live here only. Pattern copied from netvault's equivalent
 // route (see lib/updateCheck.js header comment).
 const releaseNotes = {
+  '2.237.10': [
+    'Fixed a sentence that stated a cause SecVault had never observed. A firewall with no traffic volume to show was told it "re-logs a session with a running cumulative byte counter" \u2014 a specific vendor behaviour \u2014 whatever the real reason was.',
+    'Reported on a Palo Alto that forwards only its internal audit log: it sends no byte counts at all and SecVault has never been able to read its log format, so the explanation was wrong on both counts.',
+    'The panel now separates three different facts: this firewall re-logs sessions so its counters cannot be added; it sent no log carrying a byte count; or SecVault cannot establish why. Where the reason is not known, it now says so instead of choosing the likeliest one.',
+    'The same wrong explanation was in the fleet coverage note and in the Traffic Activity PDF, which names the firewalls it applies to. Both now give the general reason without claiming it of each firewall listed.',
+    'No figure, chart or count changed \u2014 only what the panel says about firewalls whose volume could not be measured.',
+  ],
   '2.237.9': [
     'New check: a firewall whose log volume collapses without going fully silent. One on this fleet fell from 5.5 million events a day to about 35 on 8 November and is still there.',
     'It REPLACES noise rather than adding to it. That firewall was raising 39 separate "stopped sending syslog" alerts — it reports in gaps — which were all describing the same collapse. Fleet-wide, 42 anomaly findings became 5.',

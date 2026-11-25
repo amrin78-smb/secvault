@@ -129,6 +129,12 @@ export default function WebActivityPanel({ web, perDevice = false }) {
               // counting the same bytes repeatedly. "We may not sum this" and
               // "there was no traffic" are opposite facts and a blank panel
               // renders them the same way.
+              // ⛔ AND THERE IS A THIRD — "this firewall sent nothing a byte
+              // count could ride on" — which `noVolumeReason` reported as the
+              // first until 2026-11-25, naming a cumulative counter on a
+              // firewall whose log format SecVault cannot read. The sentence is
+              // chosen there from `coverage[].bytesReported`; this renders
+              // whichever it returns and must not re-derive a cause.
               <div style={{ fontSize: 'var(--text-sm)', color: 'var(--unmeasured)', lineHeight: 1.6 }}>
                 {noVolume}
               </div>

@@ -23,6 +23,7 @@ const assert = require('node:assert/strict');
 
 const {
   fmtBytes, volumeAttributionSentence, categoryCaveatSentence, coverageSentence, noVolumeReason,
+  RELOGGED_SESSION_VENDORS,
 } = require('../lib/syslog/webActivityText');
 const { isUnattributedApplication, isUnclassifiedCategory } = require('../lib/syslog/applications');
 
@@ -156,7 +157,9 @@ describe('⛔ coverage — a null naming rate is unknown, never zero', () => {
     // ⛔ THE LINE THAT MATTERS. PAKFood sent nothing; reporting it as 0% would
     // state our gap as a fact about their firewall.
     assert.match(s, /1 sent nothing to this rollup, so their rate is unknown rather than zero/);
-    assert.match(s, /Volume is summed over 10 firewalls; 5 re-log a session/);
+    assert.match(s, /Volume is summed over 10 firewalls; 5 reported no byte count that may be summed/);
+    // ⛔ The clause names a COUNT, so the cause is general, not per-firewall.
+    assert.doesNotMatch(s, /5 re-log/);
   });
 
   it('per-device: a firewall that sent nothing is unknown, in those words', () => {
@@ -173,14 +176,93 @@ describe('⛔ coverage — a null naming rate is unknown, never zero', () => {
 });
 
 describe('⛔ "we may not sum this" and "there was no traffic" are opposite facts', () => {
-  it('a Fortinet-only scope explains WHY volume is absent', () => {
-    // The real OKF(F2) shape: it logs plenty, and none of it is summable.
-    const s = noVolumeReason({ bytesCapable: 0 }, true);
-    assert.match(s, /running cumulative byte counter/);
+  // ⛔ AND SO IS "THIS FIREWALL SENT NOTHING A BYTE COUNT COULD RIDE ON",
+  // which is a THIRD fact that used to be reported as the first. These cases
+  // are asserted as a PARTITION over `coverage[].bytesReported` rather than one
+  // at a time, because the defect was a MISSING BRANCH: every per-device shape
+  // fell through to a confident vendor mechanism, and a test per known shape is
+  // exactly what cannot see that.
+  const dev = (row) => noVolumeReason(
+    row === undefined ? { bytesCapable: 0 } : { bytesCapable: 0, coverage: [row] },
+    true
+  );
+
+  it('a FortiGate that logs plenty and sums none of it explains WHY', () => {
+    // The real OKF(F2) shape: rows arrive, nothing is summable.
+    const s = dev({ name: 'OKF(F2)', vendor: 'fortinet', bytesReported: false });
+    assert.match(s, /re-logs one session repeatedly/);
     assert.match(s, /not a quiet link/);
+  });
+
+  it('⛔ a firewall that sent nothing to the rollup is NOT told its counters are cumulative', () => {
+    // The real StarUnion shape, measured 2026-11-25: ~476 PAN-OS `audit`
+    // records a day, no application, no protocol, no byte field, so no
+    // `syslog_app_hourly` row exists and `bytesReported` is NULL. The old code
+    // gated on `bytesCapable` alone and told this device it re-logs a session
+    // with a running cumulative byte counter.
+    const s = dev({ name: 'StarUnion', vendor: null, bytesReported: null });
+    assert.match(s, /sent nothing to the application rollup/);
+    assert.match(s, /not a measurement of zero traffic/);
+    // ⛔ THE NEGATIVE IS THE WHOLE TEST. A branch that merely adds a third
+    // sentence while still reaching the mechanism claim would pass the line
+    // above.
+    assert.doesNotMatch(s, /cumulative/i);
+    assert.doesNotMatch(s, /re-log/i);
+    assert.doesNotMatch(s, /byte counter/i);
+  });
+
+  it('⛔ an unsummable firewall of an unrecognised vendor states no mechanism', () => {
+    // PAN-OS gates `bytesSummable` on `isTraffic`, so a Palo Alto forwarding
+    // only threat logs reaches `bytesReported === false` with counters that are
+    // not cumulative. Naming the mechanism here is the same fabricated claim.
+    const s = dev({ name: 'ITC-SLY', vendor: 'paloalto', bytesReported: false });
+    assert.match(s, /carried a byte count that may be summed/);
+    assert.match(s, /not a quiet link/);
+    assert.doesNotMatch(s, /cumulative/i);
+    assert.doesNotMatch(s, /re-logs/i);
+  });
+
+  it('⛔ an absent coverage row degrades to "could not establish why", never to a cause', () => {
+    const s = dev(undefined);
+    assert.match(s, /could not establish why/);
+    assert.doesNotMatch(s, /cumulative/i);
+    assert.doesNotMatch(s, /sent nothing/i);
+  });
+
+  it('⛔ every per-device shape yields a sentence, and only a known one names a cause', () => {
+    // The partition, walked. A shape this function does not enumerate must
+    // still produce a sentence, and that sentence must not carry a mechanism.
+    const shapes = [
+      { vendor: 'fortinet', bytesReported: false },
+      { vendor: 'juniper', bytesReported: false },
+      { vendor: 'sophos', bytesReported: false },
+      { vendor: 'sonicwall', bytesReported: false },
+      { vendor: 'paloalto', bytesReported: false },
+      { vendor: null, bytesReported: false },
+      { vendor: undefined, bytesReported: false },
+      { vendor: 'paloalto', bytesReported: null },
+      { vendor: null, bytesReported: null },
+      { vendor: 'fortinet' },
+      {},
+    ];
+    for (const shape of shapes) {
+      const s = dev(shape);
+      assert.ok(typeof s === 'string' && s.length > 0, `no sentence for ${JSON.stringify(shape)}`);
+      if (!RELOGGED_SESSION_VENDORS.has(shape.vendor) || shape.bytesReported !== false) {
+        assert.doesNotMatch(s, /re-logs one session/,
+          `a cause was claimed for ${JSON.stringify(shape)}, which does not support one`);
+      }
+    }
   });
 
   it('and nothing is said when volume IS measurable', () => {
     assert.equal(noVolumeReason({ bytesCapable: 10 }, true), null);
+    assert.equal(noVolumeReason({ bytesCapable: 10 }, false), null);
+  });
+
+  it('the fleet sentence claims no mechanism of any single firewall', () => {
+    const s = noVolumeReason({ bytesCapable: 0 }, false);
+    assert.match(s, /No firewall in the fleet/);
+    assert.doesNotMatch(s, /cumulative/i);
   });
 });

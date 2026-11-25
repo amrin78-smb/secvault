@@ -461,14 +461,45 @@ vanish from every category figure while their traffic still counts everywhere el
 reads as though those sites are not being visited. A coverage hole that looks like good news. Both
 the PDF and the panel name the firewalls and lead with it.
 
-## lib/syslog/webActivityText.js (v2.157.0)
+## lib/syslog/webActivityText.js (v2.157.0, `noVolumeReason` rebuilt v2.237.10)
 
 Pure sentence builders for the web-activity panel: `fmtBytes`, `volumeAttributionSentence`,
-`categoryCaveatSentence`, `coverageSentence`, `noVolumeReason`. Separate from the component because
+`categoryCaveatSentence`, `coverageSentence`, `noVolumeReason`, plus the exported
+`RELOGGED_SESSION_VENDORS`. Separate from the component because
 JSX cannot be required by `node:test` (no transform in this repo, deliberately) and because **the
 sentences ARE the feature** — two bar charts are almost incapable of being wrong, the three claims
 beside them are where a plausible wrong answer renders perfectly. Pinned by `tests/webActivity.test.js`
-(16 cases, 5 mutations verified).
+(22 cases, 4 mutations verified).
+
+⛔ **`noVolumeReason` HAD TWO BRANCHES FOR THREE FACTS, AND REPORTED THE THIRD AS THE FIRST
+(fixed v2.237.10).** It gated on `bytesCapable > 0` alone, so every per-device case that fell
+through was told *"This firewall re-logs a session with a running cumulative byte counter"* — a
+VENDOR MECHANISM, asserted with nothing having read one — while the docblock directly above it
+stated the rule being broken (*"'WE MAY NOT SUM THIS' AND 'THERE WAS NO TRAFFIC' ARE OPPOSITE
+FACTS"*). ⛔ **Measured on production 2026-11-25: StarUnion (10.248.40.254)** sends ~476 events a
+day and every one is a PAN-OS `audit` record from a `log-critical-activity` profile with no
+application, no protocol and no byte field — so it produces **no `syslog_app_hourly` row at all**
+(`APP_INSERT` requires an application or a protocol), its `bytesReported` is NULL, and it is counted
+in neither `bytesCapable` nor `bytesIncapable`. Its vendor has never been identified by any parser
+either (`discovered_devices.observed_vendor` NULL since 2026-09-08 under a COALESCE that never
+erases), so the panel named a byte counter on a firewall whose log format SecVault cannot read.
+⛔ **THE TRI-STATE ALREADY EXISTED AND NOTHING CONSULTED IT** — `coverage[].bytesReported` is
+exactly this distinction and its SQL comment says why it is tri-state: `true` summable, `false` rows
+arrived with none summable, `null` nothing reached the rollup. ⛔ **IT DEGRADES TOWARD "WE DO NOT
+KNOW"**: an absent coverage row or any unenumerated shape says SecVault could not establish why
+rather than picking the likeliest cause.
+⛔ **THE MECHANISM IS VENDOR-GATED, NOT AN `else`.** `RELOGGED_SESSION_VENDORS` is
+`fortinet`/`juniper` (hard-coded `bytesSummable: false`, both measured — Junos over-counts 2.55x)
+plus `sophos` (session end only) and `sonicwall` (close only). **PAN-OS gates on `isTraffic`, so a
+Palo Alto forwarding only THREAT logs reaches `bytesReported === false` with counters that are NOT
+cumulative** — naming the mechanism for every unsummable firewall is the same fabricated claim one
+branch over.
+⛔ **THE SAME CLAIM WAS IN TWO SIBLING SENTENCES AND ALL THREE MOVED TOGETHER**, because fixing
+one of N is the trap this codebase records repeatedly. `coverageSentence`'s fleet clause asserted it
+of a COUNT of devices; `lib/reports/trafficActivity.js`'s `coverageSentence` asserted it of a **named
+list**, and that one reads `syslog_rollup_hourly` — which EVERY event reaches — so StarUnion is
+**named by the PDF** rather than falling into the panel's unknown bucket. Both now state the reason
+generally and claim it of no individual firewall.
 
 ## lib/syslog/trafficStats.js — getWebActivity (v2.157.0)
 
@@ -490,6 +521,13 @@ firewalls. FortiOS re-logs a session with a running cumulative counter; on this 
 ⛔ `namedRatio` IS TRI-STATE. A firewall that sent nothing to the rollup is `null`, never 0 — 0%
 would state our coverage gap as a fact about their device. Live: every PAN-OS names 100%, four of
 five FortiGates name under half, OKF(F2) names 3%.
+
+⛔ **`bytesReported` IS TRI-STATE TOO, AND THE THIRD STATE WENT UNREAD FOR ITS WHOLE LIFE.** The
+`FILTER (WHERE a.device_id IS NOT NULL)` is what makes it so, and only `noVolumeReason` (v2.237.10)
+ever consulted the distinction: `null` means nothing reached `syslog_app_hourly` — which a device
+sending no application AND no protocol cannot, since `APP_INSERT` requires one of them — so such a
+firewall is in neither `bytesCapable` nor `bytesIncapable`. ⛔ A device in that state is INVISIBLE
+to `bytesIncapable`, so any sentence built from that list alone cannot describe it.
 
 ## lib/reports/chassis.js — charts (v2.157.0)
 

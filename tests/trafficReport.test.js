@@ -109,8 +109,23 @@ describe('⛔ coverage is stated before the totals', () => {
 
   it('explains WHY some devices cannot be summed for volume', () => {
     const s = coverageSentence(base());
-    assert.match(s, /cumulative counter/);
+    assert.match(s, /carried a byte count that may be added/);
     assert.match(s, /OKF\(F2\)/);
+  });
+
+  it('⛔ names the firewalls but claims the mechanism of none of them', () => {
+    // It said `because those vendors re-log a session with a running cumulative
+    // counter` beside a list of NAMES. `bytesMeasured === false` means only
+    // that no rollup row carried a summable byte count, and this report reads
+    // `syslog_rollup_hourly` — which every event reaches — so a firewall with
+    // no byte field at all and no identified vendor is NAMED here. Measured
+    // 2026-11-25: StarUnion, ~476 PAN-OS `audit` records a day.
+    const s = coverageSentence(base({ bytesIncapable: ['StarUnion'] }));
+    assert.match(s, /StarUnion/);
+    assert.match(s, /carried a byte count that may be added/);
+    // The general reason may be given; `those vendors re-log` may not.
+    assert.doesNotMatch(s, /those vendors/);
+    assert.doesNotMatch(s, /cumulative/i);
   });
 
   it('says nothing about silence when every firewall logged', () => {
